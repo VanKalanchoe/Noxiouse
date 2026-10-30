@@ -17,7 +17,7 @@
 
 | # | Item |
 |---|---|
-| I1 | **glTF features not handled yet:** morph target *animation* (M2: glTF `weights` channels into clips, Animator, sequencer, script API), `KHR_materials_variants`, extras, multiple scenes, physics extensions. (Built: `EXT_mesh_gpu_instancing`, `KHR_node_visibility` 2026-10-20; **vertex colors** COLOR_0 2026-10-30, tested by the user (works); **morph targets M1** 2026-10-31, untested in the editor: import incl. sparse accessors, cooked format v6, GPU deformation before skinning, per-entity weights in the inspector -- `Engine_Architecture_Plan_2026.md` §5.8.2) |
+| I1 | **glTF features not handled yet:** `KHR_materials_variants`, extras, multiple scenes, physics extensions. (Built: `EXT_mesh_gpu_instancing`, `KHR_node_visibility` 2026-10-20; **vertex colors** COLOR_0 2026-10-30, tested by the user (works); **morph targets** 2026-10-31, M1 tested by the user, M2 (animated weights from glTF clips through the Animator and graphs, sequencer Morph Weight tracks, script `MeshComponent.SetMorphWeight`) untested in the editor -- `Engine_Architecture_Plan_2026.md` §5.8.2) |
 | I4 | Import Into Level of a file that also has a skeletal model: its animations are not placed (the skeletal asset owns those clips) |
 
 ### Characters and animation (plan: `Animation_Graph_Architecture_Plan_2026.md`)

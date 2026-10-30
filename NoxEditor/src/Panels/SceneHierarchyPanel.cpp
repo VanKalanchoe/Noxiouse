@@ -1325,28 +1325,7 @@ namespace Nox
                 changed |= ImGui::DragScalar("Submesh Count", ImGuiDataType_U32, &component.SubmeshCount, 0.1f, nullptr, nullptr, "%u");
 
                 // Morph targets of the mesh (by name, over its submeshes). The weights are read every frame: no re-registration.
-                std::vector<std::pair<std::string, float>> targets; // name, default weight
-                auto collect = [&](const auto* mesh)
-                {
-                    if (!mesh)
-                        return;
-                    for (const MeshHandle& submesh : mesh->GetSubMeshes())
-                    {
-                        if (!submesh.morphs)
-                            continue;
-                        for (size_t target = 0; target < submesh.morphs->Names.size(); ++target)
-                        {
-                            const std::string& name = submesh.morphs->Names[target];
-                            if (std::none_of(targets.begin(), targets.end(), [&](const auto& known) { return known.first == name; }))
-                                targets.emplace_back(name, submesh.morphs->DefaultWeights[target]);
-                        }
-                    }
-                };
-                const AssetType meshType = AssetManager::GetAssetType(component.Mesh);
-                if (meshType == AssetType::Mesh)
-                    collect(AssetManager::FindLoadedAsset<Mesh>(component.Mesh));
-                else if (meshType == AssetType::StaticMesh)
-                    collect(AssetManager::FindLoadedAsset<StaticMesh>(component.Mesh));
+                const std::vector<std::pair<std::string, float>> targets = GetMeshMorphTargets(component.Mesh); // name, default weight
                 if (!targets.empty() && ImGui::TreeNodeEx("Morph Targets", ImGuiTreeNodeFlags_DefaultOpen))
                 {
                     ImGui::PushID("MorphTargets");

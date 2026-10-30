@@ -1326,8 +1326,21 @@ namespace Nox
         // 6. This frame's morph target weights (the entity's, the meshes' defaults for the targets it does not name).
         for (entt::entity entity : m_MorphedMeshEntities)
         {
-            if (const MeshComponent* mesh = m_Registry.try_get<MeshComponent>(entity))
+            const MeshComponent* mesh = m_Registry.try_get<MeshComponent>(entity);
+            if (!mesh)
+                continue;
+            if (mesh->AnimatedMorphWeights.empty() && mesh->SequencerMorphWeights.empty())
+            {
                 m_renderer->SetMeshInstancesMorphWeights(m_MeshRegistrations.at(entity).Instances, mesh->MorphWeights);
+                continue;
+            }
+            // The mesh's defaults < animation < sequencer < set by hand or a script.
+            std::map<std::string, float> weights = mesh->AnimatedMorphWeights;
+            for (const auto& [target, weight] : mesh->SequencerMorphWeights)
+                weights[target] = weight;
+            for (const auto& [target, weight] : mesh->MorphWeights)
+                weights[target] = weight;
+            m_renderer->SetMeshInstancesMorphWeights(m_MeshRegistrations.at(entity).Instances, weights);
         }
     }
 
@@ -1550,6 +1563,10 @@ namespace Nox
                 if (target.HasComponent<CameraComponent>())
                     target.GetComponent<CameraComponent>().Camera.SetPerspectiveVerticalFOV(glm::radians(glm::clamp(value.x, 1.0f, 179.0f)));
                 break;
+            case TimelineProperty::MorphWeight:
+                if (target.HasComponent<MeshComponent>() && !track.Parameter.empty())
+                    target.GetComponent<MeshComponent>().SequencerMorphWeights[track.Parameter] = value.x;
+                break;
             default:
                 break;
             }
@@ -1651,6 +1668,7 @@ namespace Nox
         m_Registry.storage<DirtyTransformComponent>();
         m_Registry.storage<WorldTransformComponent>();
         m_Registry.storage<CharacterController3DComponent>();
+        m_Registry.storage<MeshComponent>();
 
         const float ts = m_FrameInput.Timestep;
         const uint32_t groupCount = static_cast<uint32_t>(m_AnimatorGroups.size() - 1);
@@ -1669,6 +1687,40 @@ namespace Nox
 
     void Scene::UpdateAnimator(entt::entity entity, AnimatorComponent& animatorComp, float ts)
     {
+        // The morph target weights an animation produced, to the meshes they belong to: a node animation's to the node whose mesh has
+        // the target (when that node's entity draws a mesh), anything else to this entity's (a skeletal mesh with its face shapes).
+        auto routeMorphWeights = [&](const std::vector<MorphWeightSample>& samples, bool byNode)
+        {
+            if (samples.empty())
+            {
+                // A clip without morph curves: this entity's mesh is no longer animated (node targets keep theirs: unknown here).
+                if (!byNode)
+                    if (auto* mesh = m_Registry.try_get<MeshComponent>(entity); mesh && !mesh->AnimatedMorphWeights.empty())
+                        mesh->AnimatedMorphWeights.clear();
+                return;
+            }
+            std::vector<std::pair<entt::entity, std::map<std::string, float>>> byEntity;
+            for (const MorphWeightSample& sample : samples)
+            {
+                entt::entity target = entity;
+                if (byNode && sample.TargetNodeIndex >= 0 && sample.TargetNodeIndex < static_cast<int32_t>(animatorComp.NodeEntities.size()))
+                {
+                    const auto found = m_EntityMap.find(animatorComp.NodeEntities[sample.TargetNodeIndex]);
+                    if (found != m_EntityMap.end() && m_Registry.valid(found->second) && m_Registry.all_of<MeshComponent>(found->second))
+                        target = found->second;
+                }
+                auto slot = std::find_if(byEntity.begin(), byEntity.end(), [&](const auto& known) { return known.first == target; });
+                if (slot == byEntity.end())
+                    slot = byEntity.insert(byEntity.end(), { target, {} });
+                slot->second[sample.Target] = sample.Weight;
+            }
+            for (auto& [target, weights] : byEntity)
+            {
+                if (auto* mesh = m_Registry.try_get<MeshComponent>(target))
+                    mesh->AnimatedMorphWeights = std::move(weights);
+            }
+        };
+
         std::vector<AssetHandle>& missingAssets = m_MissingAssets.Local();
 
         // 1. Sync Animation sequence from AssetHandle if assigned
@@ -1718,12 +1770,19 @@ namespace Nox
                 if (animatorComp.Graph != 0)
                 {
                     if (const AnimPose* pose = animatorComp.GraphInstance.Evaluate(ts, animatorComp.Playing, *skeleton))
+                    {
                         ApplyPoseToSkeleton(*pose, *skeleton, animatorComp.GraphFinalBoneTransforms, &animatorComp.GraphGlobalMatrices);
+                        routeMorphWeights(pose->Curves, false);
+                    }
                 }
-                else if (animatorComp.Playing)
-                    animatorComp.Animator.Update(ts, *skeleton);
                 else
-                    animatorComp.Animator.UpdateTransforms(*skeleton);
+                {
+                    if (animatorComp.Playing)
+                        animatorComp.Animator.Update(ts, *skeleton);
+                    else
+                        animatorComp.Animator.UpdateTransforms(*skeleton);
+                    routeMorphWeights(animatorComp.Animator.GetMorphWeights(), false);
+                }
             }
         }
 
@@ -1740,6 +1799,7 @@ namespace Nox
             {
                 if (const AnimPose* pose = animatorComp.GraphInstance.Evaluate(ts, animatorComp.Playing, *skeleton))
                 {
+                    routeMorphWeights(pose->Curves, true);
                     size_t nodeCount = std::min(animatorComp.NodeEntities.size(), pose->LocalTransforms.size());
                     for (size_t nodeIndex = 0; nodeIndex < nodeCount; nodeIndex++)
                     {
@@ -1826,6 +1886,7 @@ namespace Nox
                 }
 
                 animatorComp.Animator.UpdateNodeAnimation(ts, animation, nodeTransforms);
+                routeMorphWeights(animatorComp.Animator.GetMorphWeights(), true);
                 for (const auto& [nodeIndex, nodeEntity] : targets)
                 {
                     auto& transform = m_Registry.get<TransformComponent>(nodeEntity);

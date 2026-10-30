@@ -54,6 +54,9 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, void> Particles_Stop;
     private static delegate*<ulong, int, void> Particles_Emit;
     private static delegate*<ulong, uint> Particles_IsEmitting;
+    private static delegate*<ulong, NativeString, float, void> Mesh_SetMorphWeight;
+    private static delegate*<ulong, NativeString, float> Mesh_GetMorphWeight;
+    private static delegate*<ulong, NativeString, void> Mesh_ClearMorphWeight;
     private static delegate*<ulong, int> Particles_GetCount;
     private static delegate*<ulong, float, float, float, void> Character_SetMoveVelocity;
     private static delegate*<ulong, float, void> Character_Jump;
@@ -250,6 +253,25 @@ internal static unsafe class InternalCalls
     {
         using NativeString nativeSlot = new(slot);
         return Animator_IsMontagePlaying(entityID, nativeSlot) != 0;
+    }
+
+    internal static void SetMorphWeight(ulong entityID, string target, float weight)
+    {
+        using NativeString nativeTarget = new(target);
+        Mesh_SetMorphWeight(entityID, nativeTarget, weight);
+    }
+
+    internal static float GetMorphWeight(ulong entityID, string target)
+    {
+        using NativeString nativeTarget = new(target);
+        return Mesh_GetMorphWeight(entityID, nativeTarget);
+    }
+
+    // An empty target clears them all.
+    internal static void ClearMorphWeight(ulong entityID, string target)
+    {
+        using NativeString nativeTarget = new(target);
+        Mesh_ClearMorphWeight(entityID, nativeTarget);
     }
 
     internal static void PlayTimeline(ulong entityID, bool fromStart) => Timeline_Play(entityID, fromStart ? 1u : 0u);

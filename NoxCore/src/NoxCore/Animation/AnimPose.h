@@ -15,6 +15,9 @@ namespace Nox
     struct AnimPose
     {
         std::vector<Animator::NodeTransform> LocalTransforms;
+        // Morph target weights the pose carries besides its transforms (UE's animation curves), by target name. Blends treat a
+        // target one pose does not have as weight 0.
+        std::vector<MorphWeightSample> Curves;
 
         void ResetToRestPose(const Skeleton& skeleton);
     };
@@ -23,6 +26,8 @@ namespace Nox
     // exactly steps 1-2 of Animator::UpdateTransforms, factored out so the graph's Clip node and the plain
     // Animator share one sampling implementation.
     void SampleClipPose(const AnimationSequence& clip, float time, const Skeleton& skeleton, AnimPose& pose);
+    // A clip's morph target curves at `time` (replacing `out`).
+    void SampleMorphCurves(const AnimationSequence& clip, float time, std::vector<MorphWeightSample>& out);
 
     // Per-node lerp (translation/scale) + shortest-path slerp (rotation) of two same-skeleton poses. alpha is
     // clamped to [0, 1]; out may alias a or b.

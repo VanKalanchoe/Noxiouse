@@ -11,8 +11,49 @@
 
 namespace Nox
 {
+    namespace
+    {
+        // Curves blended by target name: sum over the inputs of weight x value (a target an input lacks counts as 0 from it).
+        std::vector<MorphWeightSample> WeightedCurves(const std::vector<std::pair<const std::vector<MorphWeightSample>*, float>>& inputs)
+        {
+            std::vector<MorphWeightSample> result;
+            for (const auto& [curves, weight] : inputs)
+            {
+                if (!curves)
+                    continue;
+                for (const MorphWeightSample& sample : *curves)
+                {
+                    auto found = std::find_if(result.begin(), result.end(), [&](const MorphWeightSample& known) { return known.Target == sample.Target; });
+                    if (found == result.end())
+                    {
+                        result.push_back({ sample.TargetNodeIndex, sample.Target, 0.0f });
+                        found = std::prev(result.end());
+                    }
+                    found->Weight += sample.Weight * weight;
+                }
+            }
+            return result;
+        }
+
+        float CurveWeight(const std::vector<MorphWeightSample>& curves, const std::string& target)
+        {
+            for (const MorphWeightSample& sample : curves)
+                if (sample.Target == target)
+                    return sample.Weight;
+            return 0.0f;
+        }
+    }
+
+    void SampleMorphCurves(const AnimationSequence& clip, float time, std::vector<MorphWeightSample>& out)
+    {
+        out.clear();
+        for (const MorphCurve& curve : clip.MorphCurves)
+            out.push_back({ curve.TargetNodeIndex, curve.Target, SampleMorphCurve(curve, time) });
+    }
+
     void AnimPose::ResetToRestPose(const Skeleton& skeleton)
     {
+        Curves.clear();
         LocalTransforms.assign(skeleton.AllNodes.size(), Animator::NodeTransform{});
         for (const Node* node : skeleton.AllNodes)
         {
@@ -44,6 +85,7 @@ namespace Nox
             if (!channel.ScaleKeys.empty())
                 t.Scale = Animator::InterpolateScale(time, channel);
         }
+        SampleMorphCurves(clip, time, pose.Curves);
     }
 
     void BlendPoses(const AnimPose& a, const AnimPose& b, float alpha, AnimPose& out)
@@ -66,6 +108,7 @@ namespace Nox
             blended[i].Rotation = glm::normalize(glm::slerp(qa, qb, alpha));
             blended[i].Scale = glm::mix(ta.Scale, tb.Scale, alpha);
         }
+        out.Curves = WeightedCurves({ { &a.Curves, 1.0f - alpha }, { &b.Curves, alpha } });
         out.LocalTransforms = std::move(blended); // built into a temporary so out may alias a or b
     }
 
@@ -85,8 +128,16 @@ namespace Nox
         if (!first)
         {
             out.LocalTransforms.clear();
+            out.Curves.clear();
             return;
         }
+        std::vector<std::pair<const std::vector<MorphWeightSample>*, float>> curveInputs;
+        for (size_t i = 0; i < poses.size() && i < weights.size(); ++i)
+        {
+            if (poses[i] && !poses[i]->LocalTransforms.empty() && weights[i] > 0.0f)
+                curveInputs.push_back({ &poses[i]->Curves, weights[i] / total });
+        }
+        std::vector<MorphWeightSample> curves = WeightedCurves(curveInputs);
 
         std::vector<Animator::NodeTransform> blended(count);
         for (size_t node = 0; node < count; ++node)
@@ -116,6 +167,7 @@ namespace Nox
             blended[node].Rotation = glm::length(rotation) > 1e-6f ? glm::normalize(rotation) : reference;
         }
         out.LocalTransforms = std::move(blended);
+        out.Curves = std::move(curves);
     }
 
     void BlendPosesPerNode(const AnimPose& base, const AnimPose& blend, const std::vector<float>& weights, AnimPose& out)
@@ -136,7 +188,18 @@ namespace Nox
             result[i].Rotation = glm::normalize(glm::slerp(ta.Rotation, qb, alpha));
             result[i].Scale = glm::mix(ta.Scale, tb.Scale, alpha);
         }
+        // Curves have no node: the blended pose's win where it has them (a face layer over a body), the base's elsewhere.
+        std::vector<MorphWeightSample> curves = base.Curves;
+        for (const MorphWeightSample& sample : blend.Curves)
+        {
+            auto found = std::find_if(curves.begin(), curves.end(), [&](const MorphWeightSample& known) { return known.Target == sample.Target; });
+            if (found != curves.end())
+                found->Weight = sample.Weight;
+            else
+                curves.push_back(sample);
+        }
         out.LocalTransforms = std::move(result);
+        out.Curves = std::move(curves);
     }
 
     void ApplyAdditivePose(const AnimPose& base, const AnimPose& additive, const AnimPose& reference, float alpha, AnimPose& out)
@@ -159,7 +222,19 @@ namespace Nox
             const glm::vec3 ratio = a.Scale / glm::max(glm::abs(r.Scale), glm::vec3(1e-6f)) * glm::sign(r.Scale + glm::vec3(1e-12f));
             result[i].Scale = b.Scale * glm::mix(glm::vec3(1.0f), ratio, alpha);
         }
+        // Curves: base + (additive - reference) x alpha, by target.
+        std::vector<MorphWeightSample> curves = base.Curves;
+        for (const MorphWeightSample& sample : additive.Curves)
+        {
+            const float delta = (sample.Weight - CurveWeight(reference.Curves, sample.Target)) * alpha;
+            auto found = std::find_if(curves.begin(), curves.end(), [&](const MorphWeightSample& known) { return known.Target == sample.Target; });
+            if (found != curves.end())
+                found->Weight += delta;
+            else
+                curves.push_back({ sample.TargetNodeIndex, sample.Target, delta });
+        }
         out.LocalTransforms = std::move(result);
+        out.Curves = std::move(curves);
     }
 
     void CollectCrossedNotifies(const AnimationSequence& clip, float from, float to, bool wrapped, std::vector<std::string>& out)

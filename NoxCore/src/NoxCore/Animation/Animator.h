@@ -54,6 +54,8 @@ namespace Nox
 
         // Returns final skinning matrices for the shader (GlobalPose * InvBindMatrix)
         const std::vector<glm::mat4>& GetFinalBoneTransforms() const { return m_FinalBoneTransforms; }
+        // The played clip's morph target weights at the playhead (UpdateTransforms / UpdateNodeAnimation).
+        const std::vector<MorphWeightSample>& GetMorphWeights() const { return m_MorphWeights; }
         
         // Returns unskinned global transforms for bone debug drawing
         // Every skeleton node's model-space matrix, by node Index (this animator's own pose).
@@ -79,5 +81,6 @@ namespace Nox
 
         std::vector<glm::mat4> m_GlobalBoneTransforms;
         std::vector<glm::mat4> m_FinalBoneTransforms;
+        std::vector<MorphWeightSample> m_MorphWeights;
     };
 }

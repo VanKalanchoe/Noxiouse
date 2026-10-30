@@ -1,4 +1,6 @@
 #include "Mesh.h"
+#include "NoxCore/Asset/AssetManager.h"
+#include <algorithm>
 
 #include "Renderer.h"
 
@@ -37,5 +39,32 @@ namespace Nox
                 Renderer::UnloadMesh(handle); // Static helper calling s_Instance->UnloadMeshGeometry(handle)
             }
         }
+    }
+
+    std::vector<std::pair<std::string, float>> GetMeshMorphTargets(AssetHandle mesh)
+    {
+        std::vector<std::pair<std::string, float>> targets;
+        auto collect = [&](const auto* asset)
+        {
+            if (!asset)
+                return;
+            for (const MeshHandle& submesh : asset->GetSubMeshes())
+            {
+                if (!submesh.morphs)
+                    continue;
+                for (size_t target = 0; target < submesh.morphs->Names.size(); ++target)
+                {
+                    const std::string& name = submesh.morphs->Names[target];
+                    if (std::none_of(targets.begin(), targets.end(), [&](const auto& known) { return known.first == name; }))
+                        targets.emplace_back(name, submesh.morphs->DefaultWeights[target]);
+                }
+            }
+        };
+        const AssetType type = AssetManager::GetAssetType(mesh);
+        if (type == AssetType::Mesh)
+            collect(AssetManager::FindLoadedAsset<Mesh>(mesh));
+        else if (type == AssetType::StaticMesh)
+            collect(AssetManager::FindLoadedAsset<StaticMesh>(mesh));
+        return targets;
     }
 }

@@ -227,10 +227,11 @@ namespace Nox
     class AnimationSerializer
     {
     public:
+        // Version 2 ("NAN2"): the clip's morph target curves after its channels. "NANM" clips read without them.
         static void Serialize(const std::filesystem::path& filepath, const AnimationSequence& anim)
         {
             std::ofstream stream(filepath, std::ios::binary | std::ios::trunc);
-            const char magic[5] = "NANM";
+            const char magic[5] = "NAN2";
             stream.write(magic, 4);
 
             SerializerUtils::WriteString(stream, anim.Name);
@@ -252,6 +253,18 @@ namespace Nox
                 SerializerUtils::WriteVector(stream, channel.RotationKeys);
                 SerializerUtils::WriteVector(stream, channel.ScaleKeys);
             }
+
+            const uint32_t curveCount = static_cast<uint32_t>(anim.MorphCurves.size());
+            stream.write(reinterpret_cast<const char*>(&curveCount), sizeof(uint32_t));
+            for (const MorphCurve& curve : anim.MorphCurves)
+            {
+                SerializerUtils::WriteString(stream, curve.NodeName);
+                stream.write(reinterpret_cast<const char*>(&curve.TargetNodeIndex), sizeof(int32_t));
+                SerializerUtils::WriteString(stream, curve.Target);
+                const uint8_t interp = static_cast<uint8_t>(curve.Interpolation);
+                stream.write(reinterpret_cast<const char*>(&interp), sizeof(uint8_t));
+                SerializerUtils::WriteVector(stream, curve.Keys);
+            }
         }
 
         static bool Deserialize(const std::filesystem::path& filepath, AnimationSequence& outAnim)
@@ -263,7 +276,8 @@ namespace Nox
 
             char magic[5] = { 0 };
             stream.read(magic, 4);
-            if (strcmp(magic, "NANM") != 0) return false;
+            const bool version2 = strcmp(magic, "NAN2") == 0;
+            if (!version2 && strcmp(magic, "NANM") != 0) return false;
 
             SerializerUtils::ReadString(stream, outAnim.Name);
             stream.read(reinterpret_cast<char*>(&outAnim.Duration), sizeof(float));
@@ -288,7 +302,25 @@ namespace Nox
                 SerializerUtils::ReadVector(stream, channel.ScaleKeys);
             }
 
-            return true;
+            outAnim.MorphCurves.clear();
+            if (version2)
+            {
+                uint32_t curveCount = 0;
+                stream.read(reinterpret_cast<char*>(&curveCount), sizeof(uint32_t));
+                outAnim.MorphCurves.resize(curveCount);
+                for (MorphCurve& curve : outAnim.MorphCurves)
+                {
+                    SerializerUtils::ReadString(stream, curve.NodeName);
+                    stream.read(reinterpret_cast<char*>(&curve.TargetNodeIndex), sizeof(int32_t));
+                    SerializerUtils::ReadString(stream, curve.Target);
+                    uint8_t interp = 0;
+                    stream.read(reinterpret_cast<char*>(&interp), sizeof(uint8_t));
+                    curve.Interpolation = static_cast<AnimationInterpolation>(interp);
+                    SerializerUtils::ReadVector(stream, curve.Keys);
+                }
+            }
+
+            return stream.good() || stream.eof();
         }
     };
 

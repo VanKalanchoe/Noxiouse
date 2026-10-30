@@ -15,6 +15,7 @@
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Math/Math.h"
 #include "NoxCore/Renderer/DynamicMesh.h"
+#include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Utils/PlatformUtils.h"
 #include "NoxCore/Scene/Entity.h"
@@ -474,6 +475,7 @@ namespace Nox
                 case 4: return entity.HasComponent<RigidBody3DComponent>();
                 case 5: return entity.HasComponent<TimelinePlayerComponent>();
                 case 6: return entity.HasComponent<ParticleEmitterComponent>();
+                case 7: return entity.HasComponent<MeshComponent>();
                 default: return false;
             }
         }
@@ -544,6 +546,47 @@ namespace Nox
         {
             AnimatorComponent* animator = FindAnimator(entityID);
             return animator && animator->GraphInstance.IsMontagePlaying(std::string(slot));
+        }
+
+        // Nox.MeshComponent's morph target weights (MeshComponent::MorphWeights: they win over animation and the sequencer).
+        MeshComponent* FindMesh(uint64_t entityID)
+        {
+            if (!s_Scene) return nullptr;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            return entity && entity.HasComponent<MeshComponent>() ? &entity.GetComponent<MeshComponent>() : nullptr;
+        }
+
+        void MeshSetMorphWeight(uint64_t entityID, Coral::String target, float weight)
+        {
+            if (MeshComponent* mesh = FindMesh(entityID))
+                mesh->MorphWeights[std::string(target)] = weight;
+        }
+
+        float MeshGetMorphWeight(uint64_t entityID, Coral::String target)
+        {
+            const MeshComponent* mesh = FindMesh(entityID);
+            if (!mesh)
+                return 0.0f;
+            const std::string name(target);
+            for (const std::map<std::string, float>* weights : { &mesh->MorphWeights, &mesh->SequencerMorphWeights, &mesh->AnimatedMorphWeights })
+                if (const auto found = weights->find(name); found != weights->end())
+                    return found->second;
+            for (const auto& [targetName, weight] : GetMeshMorphTargets(mesh->Mesh))
+                if (targetName == name)
+                    return weight;
+            return 0.0f;
+        }
+
+        void MeshClearMorphWeight(uint64_t entityID, Coral::String target)
+        {
+            if (MeshComponent* mesh = FindMesh(entityID))
+            {
+                const std::string name(target);
+                if (name.empty())
+                    mesh->MorphWeights.clear();
+                else
+                    mesh->MorphWeights.erase(name);
+            }
         }
 
         // The Timeline Player (Nox.TimelinePlayerComponent): the next update plays from Time (Scene::UpdateTimelines).
@@ -943,6 +986,9 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_Stop", reinterpret_cast<void*>(&ParticlesStop));
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_Emit", reinterpret_cast<void*>(&ParticlesEmit));
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_IsEmitting", reinterpret_cast<void*>(&ParticlesIsEmitting));
+        assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetMorphWeight", reinterpret_cast<void*>(&MeshSetMorphWeight));
+        assembly.AddInternalCall("Nox.InternalCalls", "Mesh_GetMorphWeight", reinterpret_cast<void*>(&MeshGetMorphWeight));
+        assembly.AddInternalCall("Nox.InternalCalls", "Mesh_ClearMorphWeight", reinterpret_cast<void*>(&MeshClearMorphWeight));
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_GetCount", reinterpret_cast<void*>(&ParticlesGetCount));
         assembly.AddInternalCall("Nox.InternalCalls", "Character_SetMoveVelocity", reinterpret_cast<void*>(&CharacterSetMoveVelocity));
         assembly.AddInternalCall("Nox.InternalCalls", "Character_Jump", reinterpret_cast<void*>(&CharacterJump));

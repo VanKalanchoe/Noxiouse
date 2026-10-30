@@ -65,6 +65,8 @@ namespace Nox
             out << YAML::BeginMap;
             out << YAML::Key << "Target" << YAML::Value << track.Target;
             out << YAML::Key << "Property" << YAML::Value << TimelineEvaluation::GetPropertyName(track.Property);
+            if (!track.Parameter.empty())
+                out << YAML::Key << "Parameter" << YAML::Value << track.Parameter;
             if (track.Muted)
                 out << YAML::Key << "Muted" << YAML::Value << true;
             out << YAML::Key << "Keys" << YAML::Value << YAML::BeginSeq;
@@ -124,6 +126,7 @@ namespace Nox
             track.Property = ParseProperty(trackNode["Property"] ? trackNode["Property"].as<std::string>() : std::string());
             if (track.Property == TimelineProperty::Count)
                 continue; // a property this version does not know
+            track.Parameter = trackNode["Parameter"] ? trackNode["Parameter"].as<std::string>() : std::string();
             track.Muted = trackNode["Muted"] && trackNode["Muted"].as<bool>();
             for (const YAML::Node& keyNode : trackNode["Keys"])
             {

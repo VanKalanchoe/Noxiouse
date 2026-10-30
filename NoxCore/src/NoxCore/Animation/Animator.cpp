@@ -107,6 +107,10 @@ namespace Nox
         }
 
         EvaluateSkeleton(skeleton, local, m_GlobalBoneTransforms, m_FinalBoneTransforms);
+        if (m_CurrentAnimation)
+            SampleMorphCurves(*m_CurrentAnimation, m_CurrentTime, m_MorphWeights);
+        else
+            m_MorphWeights.clear();
     }
 
     void Animator::UpdateNodeAnimation(float deltaTime, const Ref<AnimationSequence>& animation,
@@ -150,6 +154,7 @@ namespace Nox
             if (!channel.ScaleKeys.empty())
                 node.Scale = InterpolateScale(m_CurrentTime, channel);
         }
+        SampleMorphCurves(sequence, m_CurrentTime, m_MorphWeights);
     }
 
     template<typename KeyType>

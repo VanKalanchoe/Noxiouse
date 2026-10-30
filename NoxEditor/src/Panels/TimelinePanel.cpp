@@ -116,6 +116,8 @@ namespace Nox
             }
             if (target.HasComponent<CameraComponent>())
                 state.CameraFOV = target.GetComponent<CameraComponent>().Camera.GetPerspectiveVerticalFOV();
+            if (target.HasComponent<MeshComponent>())
+                state.SequencerMorphWeights = target.GetComponent<MeshComponent>().SequencerMorphWeights;
             snapshot.Targets.emplace(target.GetUUID(), state);
         }
         m_Snapshot = std::move(snapshot);
@@ -152,6 +154,8 @@ namespace Nox
                     restoreLight(target.GetComponent<SpotLightComponent>());
                 if (state.CameraFOV && target.HasComponent<CameraComponent>())
                     target.GetComponent<CameraComponent>().Camera.SetPerspectiveVerticalFOV(*state.CameraFOV);
+                if (state.SequencerMorphWeights && target.HasComponent<MeshComponent>())
+                    target.GetComponent<MeshComponent>().SequencerMorphWeights = *state.SequencerMorphWeights;
             }
         }
         m_Snapshot.reset();
@@ -185,6 +189,20 @@ namespace Nox
             return target.HasComponent<CameraComponent>()
                 ? std::optional(glm::vec4(glm::degrees(target.GetComponent<CameraComponent>().Camera.GetPerspectiveVerticalFOV())))
                 : std::nullopt;
+        case TimelineProperty::MorphWeight:
+        {
+            // What the mesh shows now for the target: set by hand, else the sequencer's, else the animation's, else the default.
+            if (!target.HasComponent<MeshComponent>())
+                return std::nullopt;
+            const MeshComponent& mesh = target.GetComponent<MeshComponent>();
+            for (const std::map<std::string, float>* weights : { &mesh.MorphWeights, &mesh.SequencerMorphWeights, &mesh.AnimatedMorphWeights })
+                if (const auto found = weights->find(track.Parameter); found != weights->end())
+                    return glm::vec4(found->second);
+            for (const auto& [name, weight] : GetMeshMorphTargets(mesh.Mesh))
+                if (name == track.Parameter)
+                    return glm::vec4(weight);
+            return glm::vec4(0.0f);
+        }
         default:
             return glm::vec4(0.0f);
         }
@@ -324,13 +342,14 @@ namespace Nox
             const std::string label = path.empty() ? player.GetName() + " (player)" : path;
             if (ImGui::BeginMenu(label.c_str()))
             {
-                auto propertyItem = [&](TimelineProperty property)
+                auto propertyItem = [&](TimelineProperty property, const std::string& parameter = {})
                 {
-                    if (ImGui::MenuItem(TimelineEvaluation::GetPropertyName(property)))
+                    if (ImGui::MenuItem(parameter.empty() ? TimelineEvaluation::GetPropertyName(property) : parameter.c_str()))
                     {
                         TimelineTrack track;
                         track.Target = path;
                         track.Property = property;
+                        track.Parameter = parameter;
                         timeline.Tracks.push_back(std::move(track));
                         m_SelectedTrack = static_cast<int>(timeline.Tracks.size()) - 1;
                         m_SelectedKey = -1;
@@ -348,6 +367,16 @@ namespace Nox
                 }
                 if (entity.HasComponent<CameraComponent>())
                     propertyItem(TimelineProperty::CameraFOV);
+                if (entity.HasComponent<MeshComponent>())
+                {
+                    const std::vector<std::pair<std::string, float>> targets = GetMeshMorphTargets(entity.GetComponent<MeshComponent>().Mesh);
+                    if (!targets.empty() && ImGui::BeginMenu(TimelineEvaluation::GetPropertyName(TimelineProperty::MorphWeight)))
+                    {
+                        for (const auto& [target, defaultWeight] : targets)
+                            propertyItem(TimelineProperty::MorphWeight, target);
+                        ImGui::EndMenu();
+                    }
+                }
                 if (path.empty())
                 {
                     propertyItem(TimelineProperty::Event);
@@ -429,7 +458,8 @@ namespace Nox
             ImGui::SetItemTooltip("Muted tracks do not play");
             ImGui::SameLine();
             const std::string targetName = track.Target.empty() ? (player ? player.GetName() : std::string("(player)")) : track.Target;
-            const std::string name = targetName + " : " + TimelineEvaluation::GetPropertyName(track.Property);
+            const std::string name = targetName + " : " + TimelineEvaluation::GetPropertyName(track.Property) +
+                                     (track.Parameter.empty() ? std::string() : " " + track.Parameter);
             ImGui::PushStyleColor(ImGuiCol_Text, trackSelected ? ImVec4(1.0f, 0.8f, 0.4f, 1.0f) : ImGui::GetStyle().Colors[ImGuiCol_Text]);
             ImGui::TextUnformatted(name.c_str());
             ImGui::PopStyleColor();

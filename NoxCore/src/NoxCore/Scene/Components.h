@@ -113,8 +113,13 @@ namespace Nox
         AssetHandle Mesh = 0;
         uint32_t SubmeshIndex = 0;
         uint32_t SubmeshCount = 1;
-        // Morph target weights by target name (Unreal's SetMorphTarget): a target not named here keeps the mesh's default weight.
+        // Morph target weights by target name (Unreal's SetMorphTarget): set by hand or by a script, they win over animation; a target
+        // named in neither keeps the mesh's default weight.
         std::map<std::string, float> MorphWeights;
+        // Runtime only: this frame's weights from animation (its own animator, or a node animation targeting its node), and the ones a
+        // sequencer's Morph Weight tracks set (over the animation's).
+        std::map<std::string, float> AnimatedMorphWeights;
+        std::map<std::string, float> SequencerMorphWeights;
         
         MeshComponent() = default;
         MeshComponent(const MeshComponent&) = default;

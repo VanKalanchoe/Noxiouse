@@ -23,6 +23,7 @@ namespace Nox
         CameraFOV,      // the target's camera, vertical, degrees
         Event,          // keys carry names: the player's scripts receive OnAnimationEvent(name) when the playhead passes them
         CameraCut,      // keys carry a camera's name path from the player: from the key on, that camera is the primary one (Play)
+        MorphWeight,    // the target's mesh: the weight of the morph target the track names (TimelineTrack::Parameter)
         Count
     };
 
@@ -45,6 +46,7 @@ namespace Nox
     {
         std::string Target; // entity name path from the player ("" = the player)
         TimelineProperty Property = TimelineProperty::Translation;
+        std::string Parameter; // MorphWeight: the morph target's name
         std::vector<TimelineKey> Keys; // sorted by time
         bool Muted = false;
     };

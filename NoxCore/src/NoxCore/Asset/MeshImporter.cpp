@@ -793,6 +793,16 @@ namespace Nox
         return values;
     }
 
+    // A morph target's name: the mesh's extras.targetNames (Blender's shape key names), else "Target <index>".
+    static std::string MorphTargetName(const tg3_mesh& mesh, uint32_t target)
+    {
+        const tg3_value* names = mesh.ext.extras ? FindMember(*mesh.ext.extras, "targetNames") : nullptr;
+        if (names && names->type == TG3_VALUE_ARRAY && target < names->array_count && names->array_data[target].type == TG3_VALUE_STRING &&
+            names->array_data[target].string_val.len > 0)
+            return std::string(names->array_data[target].string_val.data, names->array_data[target].string_val.len);
+        return "Target " + std::to_string(target);
+    }
+
     MeshImporter::GltfContent MeshImporter::InspectGltf(const std::filesystem::path& sourcePath)
     {
         GltfContent content;
@@ -1681,6 +1691,36 @@ namespace Nox
                 std::string nodeName = (targetNode.name.data && targetNode.name.len > 0)
                                            ? std::string(targetNode.name.data, targetNode.name.len)
                                            : ("Node_" + std::to_string(targetNodeIdx));
+
+                // Morph target weights (path "weights"): one value per target of the node's mesh at every key (three -- in tangent,
+                // value, out tangent -- with CUBICSPLINE), floats or normalized integers. A curve per target, by its name.
+                if (Tg3StrEquals(channel.target.path, "weights"))
+                {
+                    if (targetNode.mesh < 0 || targetNode.mesh >= static_cast<int32_t>(model.meshes_count))
+                        continue;
+                    const tg3_mesh& mesh = model.meshes[targetNode.mesh];
+                    const uint32_t targetCount = mesh.primitives_count > 0 ? mesh.primitives[0].targets_count : 0u;
+                    const std::vector<float> times = ReadAccessorFloats(model, sampler.input, 1);
+                    const std::vector<float> values = ReadAccessorFloats(model, sampler.output, 1);
+                    const bool cubic = Tg3StrEquals(sampler.interpolation, "CUBICSPLINE");
+                    const size_t perKey = size_t(targetCount) * (cubic ? 3 : 1);
+                    if (targetCount == 0 || times.empty() || values.size() < times.size() * perKey)
+                        continue;
+                    for (uint32_t target = 0; target < targetCount; ++target)
+                    {
+                        MorphCurve curve;
+                        curve.NodeName = nodeName;
+                        curve.TargetNodeIndex = targetNodeIdx;
+                        curve.Target = MorphTargetName(mesh, target);
+                        curve.Interpolation = Tg3StrEquals(sampler.interpolation, "STEP") ? AnimationInterpolation::Step
+                                            : cubic ? AnimationInterpolation::CubicSpline : AnimationInterpolation::Linear;
+                        for (size_t k = 0; k < times.size(); ++k)
+                            curve.Keys.push_back({ times[k], values[k * perKey + (cubic ? targetCount : 0) + target] });
+                        maxDuration = std::max(maxDuration, times.back());
+                        animSeq->MorphCurves.push_back(std::move(curve));
+                    }
+                    continue;
+                }
 
                 // Find by TargetNodeIndex instead of string name
                 auto channelIt = std::find_if(animSeq->Channels.begin(), animSeq->Channels.end(),
@@ -2856,15 +2896,10 @@ namespace Nox
                 // Morph targets (blend shapes): each target's POSITION and NORMAL deltas (its TANGENT deltas are left out: the tangent
                 // follows the base shape). Their names from the mesh's extras.targetNames (Blender's shape key names), their default
                 // weights from the mesh's weights.
-                const tg3_value* targetNames = mesh.ext.extras ? FindMember(*mesh.ext.extras, "targetNames") : nullptr;
                 for (uint32_t target = 0; target < primitive.targets_count; ++target)
                 {
                     MorphTarget morph;
-                    if (targetNames && targetNames->type == TG3_VALUE_ARRAY && target < targetNames->array_count &&
-                        targetNames->array_data[target].type == TG3_VALUE_STRING)
-                        morph.Name = std::string(targetNames->array_data[target].string_val.data, targetNames->array_data[target].string_val.len);
-                    if (morph.Name.empty())
-                        morph.Name = "Target " + std::to_string(target);
+                    morph.Name = MorphTargetName(mesh, target);
                     morph.DefaultWeight = target < mesh.weights_count ? static_cast<float>(mesh.weights[target]) : 0.0f;
                     morph.Positions.assign(primitiveVertexCount, glm::vec3(0.0f));
                     morph.Normals.assign(primitiveVertexCount, glm::vec3(0.0f));

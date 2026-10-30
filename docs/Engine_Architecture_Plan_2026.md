@@ -1107,7 +1107,7 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     - A page read alone, as the streamer reads it, holds the right color block.
     - A red/blue seam is crossed by none of 102,263 triangles over all LOD levels.
     - A v4 file still reads; a v3 file is refused.
-- **Morph targets (I1 M1, built 2026-10-31, UE's morph targets / Blender's shape keys):** glTF primitive targets (POSITION and NORMAL
+- **Morph targets (I1, M1 built 2026-10-31 and tested by the user; UE's morph targets / Blender's shape keys):** glTF primitive targets (POSITION and NORMAL
   deltas; TANGENT deltas are left out, the tangent follows the base shape).
   - **Import:** names come from the mesh's `extras.targetNames` and default weights from its `weights`. Sparse accessors, which
     exporters commonly use for targets, are now read as glTF specifies (`ReadAccessorFloats`).
@@ -1140,7 +1140,28 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     - Tangent-seam duplicates report the right origins.
     - v6 round-trips the deltas exactly; a v5 file still reads.
     - The GPU's per-vertex runs equal the dense weighted sum for random weights.
-  - **M2 (next):** animated weights (glTF `weights` animation channels into clips, the Animator, sequencer tracks) and a script API.
+  - **M2 (built 2026-10-31): animated weights.**
+    - **Clips:** glTF `weights` channels become `AnimationSequence::MorphCurves`, a curve per target named like the mesh's targets
+      (LINEAR, STEP; CUBICSPLINE keeps the values and drops the tangents; values may be normalized integers). `.nanim` gets a new
+      magic, `NAN2`, with the curves; old `NANM` files read without them.
+    - **Poses:** `AnimPose::Curves` (UE's animation curves) are sampled with the clip (`SampleClipPose`) and go through every blend:
+      lerp and weighted by name (a target missing from a pose counts as 0); Layered Blend per Bone, where the blended pose's
+      curves win; additive, as base + (additive − reference) × alpha. Graph nodes, blend spaces and montages carry them.
+    - **Animator:** single-clip mode and node animation sample the played clip's curves (`Animator::GetMorphWeights`).
+    - **Routing:** `Scene::UpdateAnimator` writes the weights to `MeshComponent::AnimatedMorphWeights` each frame. A node
+      animation's go to the channel's node entity when that entity has a mesh; everything else (a skeletal mesh's face shapes)
+      goes to the animator's own entity. A clip without curves clears the entity's animated weights.
+    - **Sequencer:** a Morph Weight track property, with the target name in `TimelineTrack::Parameter`. The add-track menu lists
+      a mesh's targets. Tracks write `SequencerMorphWeights`; preview snapshots and restores them.
+    - **Script API (version 11):** `Nox.MeshComponent` with `SetMorphWeight`, `GetMorphWeight` (the value shown now) and
+      `ClearMorphWeight(s)`.
+    - **Precedence per target:** the mesh's default < animation < sequencer < set by hand or a script (UE's `SetMorphTarget` wins
+      over the animation).
+    - **Offline test (scratchpad `gstest/morphanimtest`):**
+      - The importer's own `ParseAnimationsFromGltf`, on a hand-built glTF, makes a named curve per target, LINEAR as well as
+        CUBICSPLINE (values, not tangents).
+      - Sampling, the Animator's weights, and all four pose blends give the expected values.
+      - NAN2 round-trips; NANM reads without curves.
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much

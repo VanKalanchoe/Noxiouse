@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -79,6 +80,7 @@ namespace Nox
             std::optional<glm::vec3> LightColor;
             std::optional<float> LightIntensity;
             std::optional<float> CameraFOV; // radians
+            std::optional<std::map<std::string, float>> SequencerMorphWeights;
         };
         struct Snapshot
         {

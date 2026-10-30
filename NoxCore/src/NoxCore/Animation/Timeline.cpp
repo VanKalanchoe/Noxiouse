@@ -16,6 +16,7 @@ namespace Nox::TimelineEvaluation
         case TimelineProperty::CameraFOV: return "Camera FOV";
         case TimelineProperty::Event: return "Event";
         case TimelineProperty::CameraCut: return "Camera Cut";
+        case TimelineProperty::MorphWeight: return "Morph Weight";
         default: return "Unknown";
         }
     }
@@ -29,7 +30,8 @@ namespace Nox::TimelineEvaluation
         case TimelineProperty::Scale:
         case TimelineProperty::LightColor: return 3;
         case TimelineProperty::LightIntensity:
-        case TimelineProperty::CameraFOV: return 1;
+        case TimelineProperty::CameraFOV:
+        case TimelineProperty::MorphWeight: return 1;
         default: return 0;
         }
     }

@@ -137,4 +137,8 @@ namespace Nox
         std::vector<MeshNodeData> m_Nodes;
         std::vector<std::string> m_SubmeshNames;
     };
+
+    // The morph targets of a loaded mesh asset (skeletal or static) over its submeshes, by name, each once, with its default weight.
+    // Empty when it has none or is not loaded.
+    std::vector<std::pair<std::string, float>> GetMeshMorphTargets(AssetHandle mesh);
 }
