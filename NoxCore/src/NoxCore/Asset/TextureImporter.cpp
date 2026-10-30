@@ -142,6 +142,10 @@ namespace Nox
     {
         if (mode == VirtualTextureMode::Off || texture.ArrayLayers != 1 || texture.IsCubeMap || texture.DirectFormat != UINT32_MAX)
             return false;
+        // Power-of-two sides: every mip is exactly half the one before, so a tile's texels are exactly a quarter of the tile above
+        // (the page table maps a missing tile to its ancestor) and a mip's tiles end at its edge.
+        if (texture.Width == 0 || texture.Height == 0 || (texture.Width & (texture.Width - 1)) != 0 || (texture.Height & (texture.Height - 1)) != 0)
+            return false;
         if (mode == VirtualTextureMode::Auto && uint64_t(texture.Width) * texture.Height < uint64_t(VirtualTextureAutoSize) * VirtualTextureAutoSize)
             return false;
         VirtualTextureLayout layout;

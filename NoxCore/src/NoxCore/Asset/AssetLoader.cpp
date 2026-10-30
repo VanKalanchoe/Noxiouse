@@ -158,9 +158,12 @@ namespace Nox
                 }
                 case Stage::Staging:
                 {
-                    // Only the mip tail: the texture streams the rest in as it is wanted (TextureStreamer).
+                    // Only the mip tail: the texture streams the rest in as it is wanted (TextureStreamer). A virtual texture's tail is its
+                    // mips no larger than a tile; its tiles stream (VirtualTextureStreamer) -- unless virtual texturing is off, then it
+                    // streams by mip like any texture (its tiles put together into whole mips).
                     const uint32_t mipLevels = std::max(m_Cooked.Texture.MipLevels, 1u);
-                    m_FirstMip = TextureStreamer::TailFirstMip(m_Cooked.Texture);
+                    m_Virtual = m_Cooked.Virtual && renderer.IsVirtualTexturingEnabled();
+                    m_FirstMip = m_Virtual ? m_Cooked.Virtual->TiledMips : TextureStreamer::TailFirstMip(m_Cooked.Texture);
                     const uint64_t bytes = uploadBytes();
                     if (!fitsBudget(uploadBudget, bytes))
                         return false;
@@ -200,7 +203,11 @@ namespace Nox
                         return false;
                     renderer.PublishTexture(*m_Upload->Texture);
                     m_Result.Loaded = Ref<Asset>(m_Upload->Texture);
-                    if (m_FirstMip > 0)
+                    if (m_Virtual)
+                    {
+                        m_Result.Virtual = m_Cooked;
+                    }
+                    else if (m_FirstMip > 0)
                     {
                         m_Result.Streamed = m_Cooked;
                         m_Result.StreamedFirstMip = m_FirstMip;
@@ -254,6 +261,7 @@ namespace Nox
 
             std::filesystem::path m_AssetDirectory;
             uint32_t m_FirstMip = 0;
+            bool m_Virtual = false; // loaded as a virtual texture (its tail)
             Stage m_Stage = Stage::Header;
             TaskFuture<Header> m_Header;
             bool m_CookStarted = false;

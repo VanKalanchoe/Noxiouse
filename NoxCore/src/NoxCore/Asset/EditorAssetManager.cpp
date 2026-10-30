@@ -288,6 +288,8 @@ namespace Nox
             if (loaded.Streamed)
                 m_Streamer.Register(loaded.Handle, *loaded.Streamed, loaded.StreamedFirstMip,
                                     static_cast<Texture2D*>(loaded.Loaded.get())->GetDescriptorIndexSlot());
+            if (loaded.Virtual)
+                Application::Get().GetRenderer()->RegisterVirtualTexture(*static_cast<Texture2D*>(loaded.Loaded.get()), *loaded.Virtual);
 
             if (metadata.Type == AssetType::Mesh || metadata.Type == AssetType::StaticMesh || metadata.Type == AssetType::MeshSource)
             {
@@ -311,8 +313,9 @@ namespace Nox
         // new image's slot, the old image leaves once frames in flight are done with it.
         std::vector<std::pair<AssetHandle, Ref<Texture2D>>> streamed;
         m_Streamer.Update(*Application::Get().GetRenderer(), uploadBudget, streamed);
-        // Geometry pages (§5.7.2) within what the loads and textures left of the upload budget.
+        // Geometry pages (§5.7.2) and virtual texture tiles (§5.12.2) within what the loads and textures left of the upload budget.
         Application::Get().GetRenderer()->UpdateGeometryStreaming(uploadBudget);
+        Application::Get().GetRenderer()->UpdateVirtualTextures(uploadBudget);
         std::vector<uint32_t> replacedSlots;
         for (auto& [handle, texture] : streamed)
         {
@@ -351,6 +354,8 @@ namespace Nox
             return;
 
         m_Streamer.Unregister(handle);
+        if (auto* texture = dynamic_cast<Texture2D*>(m_LoadedAssets.at(handle).get()))
+            Application::Get().GetRenderer()->UnregisterVirtualTexture(texture->GetDescriptorIndexSlot());
 
         // The file watcher can fire on this source file even though its content never actually
         // changed -- e.g. our own cooker rewrites extracted embedded textures unconditionally on
@@ -1081,6 +1086,11 @@ namespace Nox
                 std::filesystem::remove(assetDirectory / metadata.SourceFilePath, error);
         }
 
+        if (auto loadedAsset = m_LoadedAssets.find(handle); loadedAsset != m_LoadedAssets.end())
+        {
+            if (auto* texture = dynamic_cast<Texture2D*>(loadedAsset->second.get()))
+                Application::Get().GetRenderer()->UnregisterVirtualTexture(texture->GetDescriptorIndexSlot());
+        }
         m_LoadedAssets.erase(handle);
         m_FailedAssets.erase(handle);
         for (auto it = m_HandleByPath.begin(); it != m_HandleByPath.end();)
@@ -1803,7 +1813,10 @@ namespace Nox
             if (asset->GetType() == AssetType::Texture2D)
             {
                 if (auto* texture = dynamic_cast<Texture2D*>(asset.get()))
+                {
                     unloadedTextureSlots.push_back(texture->GetDescriptorIndexSlot());
+                    Application::Get().GetRenderer()->UnregisterVirtualTexture(texture->GetDescriptorIndexSlot());
+                }
             }
             m_Streamer.Unregister(it->first);
             Renderer::DeferAssetRelease(asset);

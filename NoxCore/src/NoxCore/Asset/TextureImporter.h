@@ -88,7 +88,7 @@ namespace Nox
         // Any thread. One tile of a virtual texture's tiled mip into `destination` (VirtualTextureLayout::TileBytes).
         static bool ReadVirtualTextureTile(const CookedTextureHeader& header, uint32_t mip, uint32_t tileX, uint32_t tileY, uint8_t* destination);
         // Whether a texture with this header is cooked as a virtual texture under `mode`: one 2D layer of a format with a fixed
-        // block size, larger than a tile, with its mips down to a tile (Auto: from VirtualTextureAutoSize² texels).
+        // block size, power-of-two sides, larger than a tile, with its mips down to a tile (Auto: from VirtualTextureAutoSize² texels).
         static bool ResolveVirtualTexture(VirtualTextureMode mode, const TextureData& texture);
         // Any thread. Cooks a PNG / JPG / DDS / KTX2 source into the asset's .ntex (and its .hash); false for other
         // sources or when it fails.

@@ -295,6 +295,27 @@ namespace NRI
         cb.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &toGeneral });
     }
 
+    void TextureVK::recordRegionUploads(CommandBuffer& cmdBuffer, Buffer& stagingBuffer, std::span<const TextureRegionUpload> regions)
+    {
+        if (regions.empty())
+            return;
+        vk::raii::CommandBuffer& cb = static_cast<CommandBufferVK&>(cmdBuffer).getNativeBuffer(0);
+        const vk::raii::Buffer& source = static_cast<BufferVK&>(stagingBuffer).getNativeBuffer();
+
+        std::vector<vk::BufferImageCopy> copies;
+        copies.reserve(regions.size());
+        for (const TextureRegionUpload& region : regions)
+        {
+            copies.push_back(vk::BufferImageCopy{
+                .bufferOffset = region.stagingOffset,
+                .imageSubresource = { .aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
+                .imageOffset = { static_cast<int32_t>(region.x), static_cast<int32_t>(region.y), 0 },
+                .imageExtent = { region.width, region.height, 1 }
+            });
+        }
+        cb.copyBufferToImage(*source, *m_imageResource.image, vk::ImageLayout::eGeneral, copies);
+    }
+
     void TextureVK::uploadFromBuffer(CommandBuffer& cmdBuffer, Buffer& stagingBuffer, uint32_t width, uint32_t height, uint32_t mipLevels, const std::vector<size_t>& mipOffsets)
     {
         auto* cmdBufferVK = dynamic_cast<CommandBufferVK*>(&cmdBuffer);

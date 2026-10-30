@@ -289,12 +289,12 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     {
         const float2 ddxUV0 = ddx(vertIn.uv0), ddyUV0 = ddy(vertIn.uv0);
         const float2 ddxUV1 = ddx(vertIn.uv1), ddyUV1 = ddy(vertIn.uv1);
-        reportMipFeedback(ubo, instance.baseColorTextureIndex, instance.baseColorTextureSet == 0 ? ddxUV0 : ddxUV1, instance.baseColorTextureSet == 0 ? ddyUV0 : ddyUV1);
-        reportMipFeedback(ubo, instance.metallicRoughnessTextureIndex, instance.physicalDescriptorTextureSet == 0 ? ddxUV0 : ddxUV1, instance.physicalDescriptorTextureSet == 0 ? ddyUV0 : ddyUV1);
-        reportMipFeedback(ubo, instance.normalTextureIndex, instance.normalTextureSet == 0 ? ddxUV0 : ddxUV1, instance.normalTextureSet == 0 ? ddyUV0 : ddyUV1);
-        reportMipFeedback(ubo, instance.occlusionTextureIndex, instance.occlusionTextureSet == 0 ? ddxUV0 : ddxUV1, instance.occlusionTextureSet == 0 ? ddyUV0 : ddyUV1);
-        reportMipFeedback(ubo, instance.emissiveTextureIndex, instance.emissiveTextureSet == 0 ? ddxUV0 : ddxUV1, instance.emissiveTextureSet == 0 ? ddyUV0 : ddyUV1);
-        reportMipFeedback(ubo, instance.transmissionTextureIndex, instance.transmissionTextureSet == 0 ? ddxUV0 : ddxUV1, instance.transmissionTextureSet == 0 ? ddyUV0 : ddyUV1);
+        reportMipFeedback(ubo, instance.baseColorTextureIndex, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, instance.baseColorTextureSet == 0 ? ddxUV0 : ddxUV1, instance.baseColorTextureSet == 0 ? ddyUV0 : ddyUV1);
+        reportMipFeedback(ubo, instance.metallicRoughnessTextureIndex, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, instance.physicalDescriptorTextureSet == 0 ? ddxUV0 : ddxUV1, instance.physicalDescriptorTextureSet == 0 ? ddyUV0 : ddyUV1);
+        reportMipFeedback(ubo, instance.normalTextureIndex, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, instance.normalTextureSet == 0 ? ddxUV0 : ddxUV1, instance.normalTextureSet == 0 ? ddyUV0 : ddyUV1);
+        reportMipFeedback(ubo, instance.occlusionTextureIndex, instance.occlusionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, instance.occlusionTextureSet == 0 ? ddxUV0 : ddxUV1, instance.occlusionTextureSet == 0 ? ddyUV0 : ddyUV1);
+        reportMipFeedback(ubo, instance.emissiveTextureIndex, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, instance.emissiveTextureSet == 0 ? ddxUV0 : ddxUV1, instance.emissiveTextureSet == 0 ? ddyUV0 : ddyUV1);
+        reportMipFeedback(ubo, instance.transmissionTextureIndex, instance.transmissionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, instance.transmissionTextureSet == 0 ? ddxUV0 : ddxUV1, instance.transmissionTextureSet == 0 ? ddyUV0 : ddyUV1);
     }
 
     float perceptualRoughness = 1.0;

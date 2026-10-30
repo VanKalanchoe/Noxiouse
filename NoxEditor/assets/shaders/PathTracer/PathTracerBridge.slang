@@ -43,6 +43,7 @@ namespace Bridge
         float cosFace;
         // The ray cone's width in uv units here (texture LOD: times the texture's texels), for the path tracer's mip requests.
         float uvFootprint;
+        float2 uv; // the textures' coordinates here (virtual texture tile requests)
     };
 
     // RTXPT's stateless uniform generator advances with Hash32. Effect-specific seed construction is
@@ -226,6 +227,7 @@ namespace Bridge
         surface.cosFace = worldDoubleArea > 0.0 ? abs(dot(cross(edge1, edge2) / worldDoubleArea, rayDir)) : 0.0;
         float uvPerWorld = sqrt(abs(determinant) / max(worldDoubleArea, 1e-12));
         surface.uvFootprint = rayConeWidth * uvPerWorld;
+        surface.uv = uv;
         if (abs(determinant) > 1e-10)
         {
             float3 tangent = (edge1 * duv2.y - edge2 * duv1.y) / determinant;

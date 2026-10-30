@@ -923,7 +923,7 @@ and as the raster cut from random cameras. Full Detail draws the finest resident
 - Page load:
   1. A read job writes from the file straight into staging.
   2. Copies on the transfer queue go into fresh stream ranges.
-  3. The page is **activated by the frame** (`Geometry Pages Update`, after the GPU scene update): its clusters' draw records are
+  3. The page is **activated by the frame** (`Streaming Update`, after the GPU scene update): its clusters' draw records are
      patched and its resident flag set. Every pass of a frame then sees one residency. A transfer-queue flag flip could tear
      mid-frame or land before its data.
 - Evictions clear the flag the same way.
@@ -1221,26 +1221,55 @@ threshold for very large ones).
     fallback under every tile and the data for the coarsest mips.
   - Setting: `TextureSpecification::virtualTexture`, Auto / Off / On (Unreal's flag plus its Auto Virtual Texturing Size: Auto is
     virtual from 4096² texels). Stored in the registry as `VirtualTexture: On|Off`. A texture can be virtual only if it is one 2D
-    layer with a fixed block size (BC or plain texels, not a KTX2 kept in its own format), larger than a tile, with mips down to a
+    layer with power-of-two sides and a fixed block size (BC or plain texels, not a KTX2 kept in its own format), larger than a tile, with mips down to a
     tile. A cooked file whose kind disagrees with its setting is cooked again, as a stale hash would be.
   - `ReadCookedTextureMips` still returns whole mips of an NTV1 file, put together from the tiles' insides. Mip streaming, the
     synchronous importer and the HLOD bake read virtual textures unchanged until SVT-3 streams their tiles.
   - Offline test: every tile of every mip, block by block, against the source with wrapping; every run of mips read back
-    byte-identical; NTX1 reads as before. Sizes covered: 4K BC7, 8Kx2K BC1, odd sizes, thin, RGBA8. The cost is the borders, 13% for
+    byte-identical; NTX1 reads as before. Sizes covered: 4K BC7, 8Kx2K BC1, thin, RGBA8, one tiled mip (non-power-of-two sizes are refused). The cost is the borders, 13% for
     a 4K texture, as in UE.
-- **Runtime (SVT-3).**
-  - Physical tile pools: one image per block format, a grid of 136x136 tiles, with LRU slots.
-  - A page table per virtual texture: a uint image with its own mip chain over the tiled mips. Each texel holds the physical tile
-    and the mip it maps, always the best resident ancestor (or the tail), so a missing tile falls back to coarser data with no hole
-    and no shader loop. It is updated
-    by the frame that installs or evicts tiles (as geometry pages are, §5.7.2).
-  - Tile feedback: the G-buffer and transparent passes report, from one pixel per 8x8 tile, the tile and mip they want, deduped
-    into a request list and read back.
-  - The streamer: requests by priority, file reads straight into staging, copies into pool slots, eviction by LRU within the pool
-    budget (the Textures category's share).
-- **Virtual sampling (SVT-4).** A page table lookup at the pixel's mip gives a physical tile and a scale. The pixel samples the pool
-  with gradients scaled into the tile, so anisotropic filtering works within the border. Trilinear is two lookups blended across
-  the mip boundary. Ray-traced and path-traced hits use their ray-cone LOD through the same path, without feedback (as in UE).
+- **Runtime and virtual sampling (SVT-3 + SVT-4, built 2026-10-30; one step, since the tile feedback comes from the sampling helpers).**
+  - **Loading.** A virtual texture loads only its tail (the mips no larger than a tile) as an ordinary image; its slot is the
+    material texture index, with `shaderio::MaterialTextureVirtual` set (`Renderer::RegisterVirtualTexture`, from the asset manager).
+    With "Stream Virtual Textures" off, textures cooked as virtual load mip streamed instead (their tiles put together into whole mips).
+  - **Physical pools** (`VirtualTextureStreamer`): one image per format, a grid of 136x136-texel slots (48x48 by default: 41 MB of
+    BC7, 20 MB of BC1/BC4; "Pool Tiles Per Side" in the editor). Its first transition is on the transfer queue, and its tiles are
+    copied there too (`Texture2D::recordRegionUploads`).
+  - **Page table**: one buffer for all virtual textures (`VirtualTileCapacity` entries, 4 MB), one uint per tile of each tiled mip,
+    plus a `GpuVirtualTexture` descriptor per material texture slot.
+    - Each entry holds the pool slot and mip of the finest resident tile at or above it, or "unmapped" (the tail). So a sample takes
+      one lookup and never finds a hole.
+    - The CPU keeps each table and re-uploads a texture's whole table when it changes. Loading a tile maps its subtree to it;
+      evicting a leaf maps its subtree back to its parent.
+    - Power-of-two sizes make the tile hierarchy exact.
+    - The table changes by the frame's own commands, in the `Streaming Update` pass shared with geometry pages (§5.7.2).
+  - **Residency is ancestor closed**, as geometry pages are dependency closed:
+    - A tile starts loading only once its parent is loading or resident, and becomes visible only after its parent.
+    - Only leaves are evicted (no child loading or resident).
+    - An evicted tile's slot is reused only after MAX_FRAMES_IN_FLIGHT + 2 frames, once nothing samples it.
+  - **Tile feedback** (`MipFeedback.slang`): uses the G-buffer resolve's and the transparent pass's mip feedback pixels, one per 8x8
+    tile, rotating each frame.
+    - It reports the tile at the finer of the two mips the sample blends. The path tracer reports its primary and mirror hits with
+      their ray-cone LOD.
+    - It sends at most one request per tile and frame (a per-tile stamp buffer). A missing tile asks every frame; a resident one asks
+      once per 16 frames.
+    - Requests go into a list after the mip feedback in the same buffer, cleared and read back with it.
+  - **Streamer**: requests coarse mips first, along with each requested tile's missing ancestors.
+    - It reads tiles from the cooked file straight into staging, then copies them into pool slots.
+    - When a pool is full, it evicts tiles not wanted for 64 frames first (least recently wanted first), then wanted tiles finer
+      than the request (Nanite-style priority replacement by mip).
+  - **Sampling** (`shaderIO.h` helpers):
+    - LOD: as the anisotropic sampler picks it, with anisotropy capped at 8 (twice the border).
+    - Trilinear blends two mips, one page-table lookup each.
+    - The pool is sampled with gradients scaled to the mapped mip, with the footprint shortened to stay inside the border.
+    - Past the tiled mips, the tail image samples alone, filtered by the hardware.
+    - Ray-traced and path-traced hits use the same helpers at their ray-cone LOD.
+  - **Offline test** of the runtime logic: random ancestor-closed load and evict sequences on a 1024x512 texture, with every page
+    table entry checked against its finest resident ancestor. Then 750,000 shader-style samples, each with its bilinear neighbours,
+    checked against the source texels through a simulated pool filled from NTV1 tiles (borders and repeat wrapping included). All
+    pass.
+  - **Not covered yet:** the packaged runtime loads textures synchronously (no mip or tile streaming there yet). A virtual texture
+    renamed or moved while loaded keeps reading its old path until reloaded, as a mip-streamed one does.
 - **Exit criterion:** a 16K test texture renders identically to its mip-streamed version while holding only the visible tiles.
   Bistro is unchanged with SVT off, and its texture memory falls further with SVT on for its largest textures.
 

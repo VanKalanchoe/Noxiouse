@@ -205,12 +205,12 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
                                    lut.emissiveTextureIndex, lut.transmissionTextureIndex };
         for (uint t = 0; t < 5; ++t)
         {
-            if (textures[t] == 0xFFFFFFFF || textures[t] >= MipFeedbackSlots)
+            if (textures[t] == 0xFFFFFFFF)
                 continue;
             uint width, height;
             MaterialTextureSize(ubo, textures[t], width, height);
-            reportMipFeedbackLod(ubo, textures[t], log2(max(surface.uvFootprint, 1e-20)) + 0.5 * log2(float(width) * float(height)) +
-                                                   ubo->pathTracerTexLodBias);
+            reportMaterialTextureLod(ubo, textures[t], surface.uv, log2(max(surface.uvFootprint, 1e-20)) + 0.5 * log2(float(width) * float(height)) +
+                                                                  ubo->pathTracerTexLodBias);
         }
     }
 

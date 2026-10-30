@@ -1,4 +1,5 @@
 #pragma once
+#include <span>
 #include <algorithm>
 #include <cstdint>
 
@@ -85,6 +86,16 @@ namespace NRI
         bool sharedAcrossQueues = false;
     };
 
+    // A rectangle of a texture's mip 0 from a staging buffer (rows tightly packed; x, y, width, height multiples of the block size).
+    struct TextureRegionUpload
+    {
+        uint64_t stagingOffset = 0;
+        uint32_t x = 0;
+        uint32_t y = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+    };
+
     // Bytes per texel, or per 4x4 block for the BC formats (blockSize 4). False for the formats without a fixed texel size here
     // (None, Surface, the 3-byte RGB8 ones).
     inline bool imageFormatBlock(ImageFormat format, uint32_t& outBlockBytes, uint32_t& outBlockSize)
@@ -168,6 +179,9 @@ namespace NRI
         // The first transition alone, for an image created with sharedAcrossQueues whose mips all come from copies of
         // another image (a streamed texture shrinking).
         virtual void recordInitialLayout(class CommandBuffer& cmdBuffer) = 0;
+        // Rectangles of mip 0 from staging, after the first transition (a virtual texture's tiles into its pool): copy work only,
+        // ordered for readers by the submission's timeline point like recordUpload.
+        virtual void recordRegionUploads(class CommandBuffer& cmdBuffer, class Buffer& stagingBuffer, std::span<const TextureRegionUpload> regions) = 0;
         virtual void copyImageToBuffer(CommandBuffer& commandBuffer, Buffer& dstBuffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height) = 0;
         // Nearest-filtered resize copy into dst (dst may be a different resolution than this texture).
         // Used to propagate render-resolution G-buffer data (entity IDs, depth) up to display

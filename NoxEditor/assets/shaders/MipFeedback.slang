@@ -53,10 +53,59 @@ void reportMipFeedbackLod(UniformBufferObject* ubo, uint textureIndex, float lod
     InterlockedMin(feedback[textureIndex], value, previous);
 }
 
-// The mip the texture is asked for by these UV derivatives (raster passes).
-void reportMipFeedback(UniformBufferObject* ubo, uint textureIndex, float2 ddxUV, float2 ddyUV)
+// Streaming virtual textures (§5.12.2): the tile a sample at this LOD reads (the finer of the two mips it blends; the streamer loads
+// its ancestors with it), requested once per frame. A missing tile asks every frame; a resident one once per VirtualTileTouchInterval
+// frames, which keeps it from being evicted. Nothing when the tail covers the LOD.
+void reportVirtualTextureFeedback(UniformBufferObject* ubo, uint textureIndex, float2 uv, float lod)
 {
-    if (textureIndex == 0xFFFFFFFF || textureIndex >= MipFeedbackSlots)
+    if (ubo->virtualFeedbackReference == 0 || ubo->virtualTexturesReference == 0)
         return;
-    reportMipFeedbackLod(ubo, textureIndex, relativeMipLod(ubo, textureIndex, ddxUV, ddyUV));
+    GpuVirtualTexture* vt = virtualTextureOf(ubo, textureIndex);
+    if (lod >= float(vt.tiledMips))
+        return;
+    const uint mip = uint(max(lod, 0.0));
+    const uint tile = virtualTileIndex(vt, uv, mip);
+
+    // One report per tile and frame (the stamp is the frame + 1, 0 never).
+    const uint stamp = ubo->mipFeedbackFrame + 1;
+    uint* stamps = (uint*)ubo->virtualTileStampsReference;
+    if (stamps[tile] == stamp)
+        return;
+    uint previous;
+    InterlockedExchange(stamps[tile], stamp, previous);
+    if (previous == stamp)
+        return;
+    const uint entry = ((uint*)ubo->virtualPageTableReference)[tile];
+    const bool resident = entry != VirtualPageUnmapped && (entry >> VirtualPageMipShift) == mip;
+    if (resident && previous != 0 && (previous - 1) / VirtualTileTouchInterval == (stamp - 1) / VirtualTileTouchInterval)
+        return; // reported in use this interval already
+
+    VirtualTextureFeedback* feedback = (VirtualTextureFeedback*)ubo->virtualFeedbackReference;
+    uint request;
+    InterlockedAdd(feedback.count, 1, request);
+    if (request < VirtualTextureRequestCapacity)
+        feedback.requests[request] = tile | (resident ? VirtualRequestResident : 0u);
+}
+
+// What a sample at this LOD (mip 0's texels, bias included) asks of the texture: its mip (mip streaming) or its tile (a virtual texture).
+// The path tracer reports this way, with its ray cone LOD (PathTracerHit.slang).
+void reportMaterialTextureLod(UniformBufferObject* ubo, uint textureIndex, float2 uv, float lod)
+{
+    if (textureIndex == 0xFFFFFFFF)
+        return;
+    if (isVirtualMaterialTexture(textureIndex))
+        reportVirtualTextureFeedback(ubo, textureIndex, uv, lod);
+    else if (textureIndex < MipFeedbackSlots)
+        reportMipFeedbackLod(ubo, textureIndex, lod);
+}
+
+// The mip (or virtual texture tile) the texture is asked for by these UV derivatives (raster passes).
+void reportMipFeedback(UniformBufferObject* ubo, uint textureIndex, float2 uv, float2 ddxUV, float2 ddyUV)
+{
+    if (textureIndex == 0xFFFFFFFF)
+        return;
+    if (isVirtualMaterialTexture(textureIndex))
+        reportVirtualTextureFeedback(ubo, textureIndex, uv, virtualTextureLod(virtualTextureOf(ubo, textureIndex), ddxUV, ddyUV) + ubo->mipFeedbackLodBias);
+    else if (textureIndex < MipFeedbackSlots)
+        reportMipFeedbackLod(ubo, textureIndex, relativeMipLod(ubo, textureIndex, ddxUV, ddyUV));
 }

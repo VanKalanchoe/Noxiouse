@@ -22,6 +22,8 @@ namespace Nox
         bool Cooked = false;                     // cooked by this load (new files were written next to it)
         std::optional<CookedTextureHeader> Streamed; // a texture loaded with only its mip tail: it streams the rest
         uint32_t StreamedFirstMip = 0;           // the mip its image starts at
+        // A virtual texture (§5.12.2) loaded with its tail (the mips no larger than a tile): its tiles stream as the view samples them.
+        std::optional<CookedTextureHeader> Virtual;
         std::optional<XXH128_hash_t> SourceHash; // of the source file, for telling real edits from watcher noise
         double Milliseconds = 0.0;               // from the request to Ready
     };

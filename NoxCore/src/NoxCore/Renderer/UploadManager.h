@@ -45,6 +45,10 @@ namespace Nox
         void CopyToBuffer(const StagingSpan& source, uint64_t sourceOffset, uint64_t size, NRI::Buffer& destination, uint64_t destinationOffset);
         // Every mip of an image created with sharedAcrossQueues; mip i lives at source.offset + mipOffsets[i].
         void CopyToTexture(const StagingSpan& source, NRI::Texture2D& destination, const std::vector<size_t>& mipOffsets);
+        // A rectangle of mip 0 (width x height texels, tightly packed at source.offset + sourceOffset) into an image after its first
+        // transition (a virtual texture's tile into its pool slot).
+        void CopyToTextureRegion(const StagingSpan& source, uint64_t sourceOffset, NRI::Texture2D& destination, uint32_t x, uint32_t y,
+                                 uint32_t width, uint32_t height);
         // An image whose mips all come from CopyTextureMips (no staging): only its first transition.
         void InitializeTexture(NRI::Texture2D& texture);
         // Whole mips of one image into another (a streamed texture moving to an image with more or fewer mips), after the

@@ -1001,7 +1001,36 @@ namespace Nox
             if (ImGui::SliderInt("Geometry Pool Override (MB, 0 = budget)", &poolOverrideMB, 0, 4096))
                 streamer.SetPoolOverride(static_cast<uint64_t>(poolOverrideMB) * 1024 * 1024);
         }
-        
+
+        // Streaming virtual textures (§5.12.2): textures cooked as virtual hold only the 128x128 tiles the pixels sample, in one pool
+        // per format; a missing tile shows the finest resident tile above it.
+        if (ImGui::CollapsingHeader("Virtual Texturing"))
+        {
+            VirtualTextureStreamer& streamer = m_Renderer->GetVirtualTextures();
+            const VirtualTextureStreamer::Stats& stats = streamer.GetStats();
+            constexpr double MB = 1024.0 * 1024.0;
+            bool enabled = streamer.IsEnabled();
+            if (ImGui::Checkbox("Stream Virtual Textures", &enabled))
+                streamer.SetEnabled(enabled);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Textures cooked as virtual (VirtualTexture: Auto from 4096x4096, or On) loaded from now on stream by tile.\n"
+                                  "Off: they load mip streamed like any texture (reload the scene to apply to loaded ones).");
+            ImGui::Text("Virtual textures: %u | tiles %u of %u resident, %u loading, %u wanted", stats.Textures, stats.ResidentTiles, stats.Tiles,
+                        stats.LoadingTiles, stats.WantedTiles);
+            ImGui::Text("Pools: %u, %u tiles, %.0f MB", stats.Pools, stats.PoolTiles, stats.PoolBytes / MB);
+            ImGui::Text("Requests %u (dropped %u) | waiting for room %u | loaded %llu, evicted %llu", stats.Requests, stats.DroppedRequests,
+                        stats.WantedNotResident, static_cast<unsigned long long>(stats.TileLoads), static_cast<unsigned long long>(stats.TileEvictions));
+            if (stats.WantedNotResident > 0)
+                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Pool too small: %u tiles wanted have no room (coarser mips stand in)",
+                                   stats.WantedNotResident);
+            int tilesPerSide = static_cast<int>(streamer.GetPoolTilesPerSide());
+            if (ImGui::SliderInt("Pool Tiles Per Side", &tilesPerSide, 4, static_cast<int>(VirtualTextureStreamer::MaxPoolTilesPerSide)))
+                streamer.SetPoolTilesPerSide(static_cast<uint32_t>(tilesPerSide));
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Each format's pool holds this many tiles squared (136x136 texels each). Changing it makes the pools again:\n"
+                                  "every tile streams in again.");
+        }
+
         static const char* tonemapModeNames[] = {
             "0: None (Clamped Linear)",
             "1: ACES (Narkowicz)",

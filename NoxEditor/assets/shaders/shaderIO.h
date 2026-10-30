@@ -492,6 +492,13 @@ struct UniformBufferObject
     // 1: DLSS Ray Reconstruction denoises this frame's image (no NRD before it): what is drawn into it must keep its noise where
     // RR's guides are (Material_TransparentLit_Mesh's refraction).
     uint32_t rayReconstructionActive;
+    // Streaming virtual textures (§5.12.2): GpuVirtualTexture per material texture slot, the page table (uint per entry), the tile
+    // requests (VirtualTextureFeedback, in the mip feedback buffer) and the frame each tile was last requested (uint per entry,
+    // frame + 1). 0 while no virtual texture is registered.
+    uint64_t virtualTexturesReference;
+    uint64_t virtualPageTableReference;
+    uint64_t virtualFeedbackReference;
+    uint64_t virtualTileStampsReference;
 };
 
 // An emissive mesh instance as a light for the path tracer's direct light sampling: picked by weight (its emission's luminance
@@ -579,36 +586,143 @@ STATIC_CONST uint32_t SKINNING_VERTICES_PER_WORK_ITEM = 256;
 
 #ifdef __SLANG__
 // Material textures (§5.12.2): every lookup of a material's texture -- raster, ray traced, path traced -- goes through these, by the
-// texture index the material holds. Today that is the image's bindless slot; a streaming virtual texture is resolved here through its
-// page table, so no shader has to know which kind a material uses.
+// texture index the material holds: the image's bindless slot, or a streaming virtual texture's (MaterialTextureVirtual), resolved here
+// through its page table -- no shader has to know which kind a material uses.
+bool isVirtualMaterialTexture(uint textureIndex)
+{
+    return textureIndex != 0xFFFFFFFF && (textureIndex & MaterialTextureVirtual) != 0;
+}
+// The image: a virtual texture's tail.
 Texture2D MaterialTexture(UniformBufferObject* ubo, uint textureIndex)
 {
-    return Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + textureIndex, 0));
+    return Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + (textureIndex & ~MaterialTextureVirtual), 0));
+}
+GpuVirtualTexture* virtualTextureOf(UniformBufferObject* ubo, uint textureIndex)
+{
+    return &((GpuVirtualTexture*)ubo->virtualTexturesReference)[textureIndex & ~MaterialTextureVirtual];
+}
+uint2 virtualMipSize(GpuVirtualTexture* vt, uint mip)
+{
+    return uint2(max(vt.width >> mip, 1u), max(vt.height >> mip, 1u));
+}
+// The page table entry index of the tile holding uv (repeat addressing) at a tiled mip.
+uint virtualTileIndex(GpuVirtualTexture* vt, float2 uv, uint mip)
+{
+    const uint2 size = virtualMipSize(vt, mip);
+    const uint2 tiles = (size + VirtualTileSize - 1) / VirtualTileSize;
+    const uint2 tile = min(uint2(frac(uv) * float2(size)) / VirtualTileSize, tiles - 1);
+    return vt.pageTableOffset + vt.firstTile[mip] + tile.y * tiles.x + tile.x;
+}
+// The mip these UV derivatives ask of a virtual texture: as the anisotropic sampler picks it (the footprint's long axis over its
+// probes), with the anisotropy capped at what the tile borders hold.
+float virtualTextureLod(GpuVirtualTexture* vt, float2 ddxUV, float2 ddyUV)
+{
+    const float2 size = float2(vt.width, vt.height);
+    const float2 dx = ddxUV * size;
+    const float2 dy = ddyUV * size;
+    const float major = max(max(dot(dx, dx), dot(dy, dy)), 1e-12);
+    const float minor = max(min(dot(dx, dx), dot(dy, dy)), 1e-12);
+    const float anisotropy = min(ceil(sqrt(major / minor)), float(VirtualTextureMaxAnisotropy));
+    return 0.5 * log2(major) - log2(anisotropy);
+}
+// One mip of a virtual texture at uv: the texels of the tile its page table entry maps (its own, or the finest resident ancestor's),
+// sampled in the pool with the derivatives scaled to that mip (anisotropic filtering inside the tile's border); the tail when no
+// tile at or above it is resident.
+float4 sampleVirtualMip(UniformBufferObject* ubo, uint textureIndex, GpuVirtualTexture* vt, SamplerState samplerState, float2 uv, uint mip,
+                        float2 ddxUV, float2 ddyUV, bool gradients)
+{
+    if (mip < vt.tiledMips)
+    {
+        const uint entry = ((uint*)ubo->virtualPageTableReference)[virtualTileIndex(vt, uv, mip)];
+        if (entry != VirtualPageUnmapped)
+        {
+            const uint slot = entry & VirtualPageSlotMask;
+            const float2 size = float2(virtualMipSize(vt, entry >> VirtualPageMipShift));
+            const float2 texel = frac(uv) * size;
+            const float2 inTile = texel - floor(texel / float(VirtualTileSize)) * float(VirtualTileSize);
+            const float2 origin = float2(uint2(slot % vt.poolTilesPerRow, slot / vt.poolTilesPerRow) * VirtualTileStride + VirtualTileBorder);
+            const float2 physical = (origin + inTile) * vt.poolInvSize;
+            Texture2D pool = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + vt.poolTextureIndex, 0));
+            if (!gradients)
+                return pool.SampleLevel(samplerState, physical, 0.0);
+            float2 dx = ddxUV * size;
+            float2 dy = ddyUV * size;
+            const float major = sqrt(max(dot(dx, dx), dot(dy, dy)));
+            if (major > float(VirtualTextureMaxAnisotropy))
+            {
+                dx *= float(VirtualTextureMaxAnisotropy) / major;
+                dy *= float(VirtualTextureMaxAnisotropy) / major;
+            }
+            return pool.SampleGrad(samplerState, physical, dx * vt.poolInvSize, dy * vt.poolInvSize);
+        }
+    }
+    return MaterialTexture(ubo, textureIndex).SampleLevel(samplerState, uv, max(float(mip) - float(vt.tiledMips), 0.0));
+}
+// A virtual texture at a LOD (mip 0's texels): trilinear, the two mips around it blended (each one lookup); past the tiled mips the tail
+// alone, filtered by the hardware.
+float4 sampleVirtualTexture(UniformBufferObject* ubo, uint textureIndex, SamplerState samplerState, float2 uv, float lod, float2 ddxUV, float2 ddyUV,
+                            bool gradients)
+{
+    GpuVirtualTexture* vt = virtualTextureOf(ubo, textureIndex);
+    lod = max(lod, 0.0);
+    if (lod >= float(vt.tiledMips))
+    {
+        Texture2D tail = MaterialTexture(ubo, textureIndex);
+        return gradients ? tail.SampleGrad(samplerState, uv, ddxUV, ddyUV) : tail.SampleLevel(samplerState, uv, lod - float(vt.tiledMips));
+    }
+    const uint mip = uint(lod);
+    const float blend = lod - float(mip);
+    float4 color = sampleVirtualMip(ubo, textureIndex, vt, samplerState, uv, mip, ddxUV, ddyUV, gradients);
+    if (blend > 1.0 / 256.0)
+        color = lerp(color, sampleVirtualMip(ubo, textureIndex, vt, samplerState, uv, mip + 1, ddxUV, ddyUV, gradients), blend);
+    return color;
+}
+
+float4 SampleMaterialTextureGrad(UniformBufferObject* ubo, uint textureIndex, SamplerState samplerState, float2 uv, float2 ddxUV, float2 ddyUV)
+{
+    if (isVirtualMaterialTexture(textureIndex))
+        return sampleVirtualTexture(ubo, textureIndex, samplerState, uv, virtualTextureLod(virtualTextureOf(ubo, textureIndex), ddxUV, ddyUV),
+                                    ddxUV, ddyUV, true);
+    return MaterialTexture(ubo, textureIndex).SampleGrad(samplerState, uv, ddxUV, ddyUV);
 }
 float4 SampleMaterialTexture(UniformBufferObject* ubo, uint textureIndex, SamplerState samplerState, float2 uv)
 {
+    if (isVirtualMaterialTexture(textureIndex))
+        return SampleMaterialTextureGrad(ubo, textureIndex, samplerState, uv, ddx(uv), ddy(uv));
     return MaterialTexture(ubo, textureIndex).Sample(samplerState, uv);
 }
 float4 SampleMaterialTextureBias(UniformBufferObject* ubo, uint textureIndex, SamplerState samplerState, float2 uv, float bias)
 {
+    if (isVirtualMaterialTexture(textureIndex))
+    {
+        const float scale = exp2(bias);
+        return SampleMaterialTextureGrad(ubo, textureIndex, samplerState, uv, ddx(uv) * scale, ddy(uv) * scale);
+    }
     return MaterialTexture(ubo, textureIndex).SampleBias(samplerState, uv, bias);
-}
-float4 SampleMaterialTextureGrad(UniformBufferObject* ubo, uint textureIndex, SamplerState samplerState, float2 uv, float2 ddxUV, float2 ddyUV)
-{
-    return MaterialTexture(ubo, textureIndex).SampleGrad(samplerState, uv, ddxUV, ddyUV);
 }
 float4 SampleMaterialTextureLevel(UniformBufferObject* ubo, uint textureIndex, SamplerState samplerState, float2 uv, float lod)
 {
+    if (isVirtualMaterialTexture(textureIndex))
+        return sampleVirtualTexture(ubo, textureIndex, samplerState, uv, lod, float2(0.0), float2(0.0), false);
     return MaterialTexture(ubo, textureIndex).SampleLevel(samplerState, uv, lod);
 }
 // Texels of the full-resolution mip and the mip count (LOD from ray cones and footprints, mip feedback).
 void MaterialTextureSize(UniformBufferObject* ubo, uint textureIndex, out uint width, out uint height, out uint mipCount)
 {
+    if (isVirtualMaterialTexture(textureIndex))
+    {
+        GpuVirtualTexture* vt = virtualTextureOf(ubo, textureIndex);
+        width = vt.width;
+        height = vt.height;
+        mipCount = vt.mipLevels;
+        return;
+    }
     MaterialTexture(ubo, textureIndex).GetDimensions(0, width, height, mipCount);
 }
 void MaterialTextureSize(UniformBufferObject* ubo, uint textureIndex, out uint width, out uint height)
 {
-    MaterialTexture(ubo, textureIndex).GetDimensions(width, height);
+    uint mipCount;
+    MaterialTextureSize(ubo, textureIndex, width, height, mipCount);
 }
 
 // Ray traversal can use compact deformed positions while hit shading retains the base vertex's UVs and material data.
@@ -1046,6 +1160,50 @@ STATIC_CONST uint32_t NoSkinnedVertices = 0xFFFFFFFF;
 STATIC_CONST uint32_t MipFeedbackSlots = 4096; // the resource heap's image capacity
 STATIC_CONST uint32_t MipFeedbackBias = 16;
 STATIC_CONST uint32_t MipFeedbackNone = 0xFFFFFFFF;
+
+// Streaming virtual textures (§5.12.2, UE5's SVT). A material texture index with this flag names a virtual texture by its tail
+// image's slot (the mips no larger than a tile, always resident). Its mips larger than a tile are tiles in a physical pool of its
+// format, found through its page table: one entry per tile of each tiled mip (pageTableOffset + firstTile[mip] + row * tilesX +
+// column), always mapping the finest resident tile at or above it -- its own when resident, else an ancestor's -- so a sample takes
+// one lookup and never finds a hole. The tail stands in when no ancestor is resident.
+STATIC_CONST uint32_t MaterialTextureVirtual = 0x40000000;
+STATIC_CONST uint32_t VirtualTileSize = 128;    // texels of a tile, without borders (VirtualTextureLayout::TileSize)
+STATIC_CONST uint32_t VirtualTileBorder = 4;    // texels on each side, copied from the neighbors (filtering stays in the tile)
+STATIC_CONST uint32_t VirtualTileStride = 136;  // VirtualTileSize + 2 * VirtualTileBorder: a pool slot's texels per side
+STATIC_CONST uint32_t VirtualTextureMaxMips = 12; // tiled mips (a 256K texture)
+// Anisotropic filtering inside a tile reaches at most a border on each side: footprints longer than this many texels are shortened.
+STATIC_CONST uint32_t VirtualTextureMaxAnisotropy = 8;
+// A page table entry: the pool slot and the mip of the tile it maps; unmapped (the tail) when no tile at or above it is resident.
+STATIC_CONST uint32_t VirtualPageUnmapped = 0xFFFFFFFF;
+STATIC_CONST uint32_t VirtualPageSlotMask = 0x00FFFFFF;
+STATIC_CONST uint32_t VirtualPageMipShift = 24;
+STATIC_CONST uint32_t VirtualTileCapacity = 1u << 20; // page table entries of all virtual textures (4 MB)
+// Tile requests per frame (MipFeedback.slang reportVirtualTextureFeedback): one per tile and frame; a missing tile asks every
+// frame it is sampled, a resident one once per VirtualTileTouchInterval frames (the streamer evicts what stopped asking first).
+STATIC_CONST uint32_t VirtualTextureRequestCapacity = 16384;
+STATIC_CONST uint32_t VirtualTileTouchInterval = 16;
+STATIC_CONST uint32_t VirtualRequestResident = 0x80000000; // request flag: the tile is resident (a touch, not a load)
+
+struct GpuVirtualTexture // per material texture slot (its tail image's), UniformBufferObject::virtualTexturesReference
+{
+    uint32_t width;           // texels of mip 0
+    uint32_t height;
+    uint32_t mipLevels;       // the whole chain, tail included
+    uint32_t tiledMips;       // mips [0, tiledMips) are tiles; the tail image's mip 0 is mip tiledMips
+    uint32_t pageTableOffset; // its first page table entry
+    uint32_t poolTextureIndex; // its physical pool's image slot
+    uint32_t poolTilesPerRow;
+    float poolInvSize;        // 1 / the pool's texels per side
+    uint32_t firstTile[VirtualTextureMaxMips]; // per tiled mip, from pageTableOffset
+};
+
+// Appended to the mip feedback buffer (after MipFeedbackSlots entries): cleared and read back with it.
+struct VirtualTextureFeedback
+{
+    uint32_t count;
+    uint32_t padding[3];
+    uint32_t requests[VirtualTextureRequestCapacity]; // page table index | VirtualRequestResident
+};
 
 STATIC_CONST uint32_t CULL_BLOCK_SIZE = 256;
 STATIC_CONST uint32_t CULL_BUCKET_COUNT = 10; // RenderBucket::Count

@@ -15,6 +15,7 @@
 #include "MemoryBudget.h"
 #include "UploadManager.h"
 #include "GeometryStreamer.h"
+#include "VirtualTextureStreamer.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "GpuScene.h"
 #include "NoxCore/RenderGraph/RenderGraph.h"
@@ -760,6 +761,16 @@ namespace Nox
         // Whether loads read only the root pages of geometry that streams (the rest follows the feedback); off: every page.
         bool IsGeometryStreamingEnabled() const { return m_geometryStreamer.IsEnabled(); }
         static bool StreamsGeometryPages();
+        // Streaming virtual textures (§5.12.2): a loaded virtual texture's tail image and cooked header (its material texture index
+        // carries shaderio::MaterialTextureVirtual from now on); false when it cannot stream (it draws with its tail).
+        bool RegisterVirtualTexture(Texture2D& tail, const CookedTextureHeader& header);
+        // Its tail image is being unloaded.
+        void UnregisterVirtualTexture(uint32_t slot);
+        // Once per frame from the asset manager, within the upload budget it shares with the loads.
+        void UpdateVirtualTextures(uint64_t& uploadBudget) { m_virtualTextures.Update(uploadBudget); }
+        VirtualTextureStreamer& GetVirtualTextures() { return m_virtualTextures; }
+        // Whether textures cooked as virtual load as virtual textures (else mip streamed).
+        bool IsVirtualTexturingEnabled() const { return m_virtualTextures.IsEnabled(); }
         // What a memory category holds and may hold (§5.8.3); the budget is 0 until the first sample.
         const MemoryCategoryStats& GetMemoryCategory(MemoryCategory category) const
         {
@@ -1768,6 +1779,8 @@ namespace Nox
 
         // Texture streaming feedback (§5.12): cleared each frame, written by the G-buffer and transparent passes, read back
         // per frame slot into m_mipFeedback.
+        // The mip feedback (MipFeedbackSlots entries) and after it the virtual texture tile requests (VirtualTextureFeedback).
+        static constexpr uint64_t MipFeedbackBytes = sizeof(uint32_t) * shaderio::MipFeedbackSlots + sizeof(shaderio::VirtualTextureFeedback);
         std::unique_ptr<NRI::Buffer> m_mipFeedbackBuffer;
         std::vector<std::unique_ptr<NRI::Buffer>> m_mipFeedbackReadback;
         std::array<bool, MAX_FRAMES_IN_FLIGHT> m_mipFeedbackPending{};
@@ -1789,7 +1802,8 @@ namespace Nox
         GeometryArena m_geometryPageStream;
         // Changes the streamer makes to the draw stream and the page table, recorded by the frame (addGeometryPagesUpdatePass):
         // gathered here, copied into the frame slot's staging buffer once the slot is free.
-        enum class GeometryPatchTarget : uint8_t { Draws, Pages };
+        // Virtual textures (§5.12.2) change their page tables and descriptors the same way.
+        enum class GeometryPatchTarget : uint8_t { Draws, Pages, VirtualPages, VirtualTextures };
         struct GeometryPatch
         {
             GeometryPatchTarget Target = GeometryPatchTarget::Draws;
@@ -1805,6 +1819,8 @@ namespace Nox
         std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_geometryPatchStaging;
         std::array<std::vector<NRI::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_geometryDrawPatchRegions;
         std::array<std::vector<NRI::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_geometryPagePatchRegions;
+        std::array<std::vector<NRI::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_virtualPagePatchRegions;
+        std::array<std::vector<NRI::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_virtualTexturePatchRegions;
         std::unique_ptr<NRI::Buffer> m_geometryFeedbackBuffer;
         std::vector<std::unique_ptr<NRI::Buffer>> m_geometryFeedbackReadback;
         std::array<bool, MAX_FRAMES_IN_FLIGHT> m_geometryFeedbackPending{};
@@ -1813,6 +1829,14 @@ namespace Nox
         // Per frame slot: the cluster index jobs of the streamed BLAS builds recorded in it.
         std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_clusterIndexJobBuffers;
         GeometryStreamer m_geometryStreamer{ *this };
+
+        // Streaming virtual textures (§5.12.2): the page table (uint per entry of every virtual texture), the frame each entry was last
+        // requested (written by the feedback), and a GpuVirtualTexture per material texture slot. Made with the first virtual texture.
+        friend class VirtualTextureStreamer;
+        std::unique_ptr<NRI::Buffer> m_virtualPageTable;
+        std::unique_ptr<NRI::Buffer> m_virtualTileStamps;
+        std::unique_ptr<NRI::Buffer> m_virtualTextureTable;
+        VirtualTextureStreamer m_virtualTextures{ *this };
         uint32_t m_visibleInstanceCount = 0;
         uint32_t m_lateCandidateCount = 0;
         uint32_t m_lateDrawnCount = 0;

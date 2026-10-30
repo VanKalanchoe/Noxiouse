@@ -273,34 +273,49 @@ namespace Nox
     {
         std::vector<NRI::BufferCopyRegion>& drawRegions = m_geometryDrawPatchRegions[frameIndex];
         std::vector<NRI::BufferCopyRegion>& pageRegions = m_geometryPagePatchRegions[frameIndex];
-        if ((drawRegions.empty() && pageRegions.empty()) || !m_geometryPatchStaging[frameIndex])
+        std::vector<NRI::BufferCopyRegion>& virtualPageRegions = m_virtualPagePatchRegions[frameIndex];
+        std::vector<NRI::BufferCopyRegion>& virtualTextureRegions = m_virtualTexturePatchRegions[frameIndex];
+        if ((drawRegions.empty() && pageRegions.empty() && virtualPageRegions.empty() && virtualTextureRegions.empty()) || !m_geometryPatchStaging[frameIndex])
             return;
 
         // Geometry streaming (§5.7.2): pages that became drawable or were evicted, by this frame's commands -- every pass of the frame
-        // sees one residency. Their data arrived earlier on the transfer queue into ranges nothing read.
-        m_renderGraph.AddPass("Geometry Pages Update", RGPassFlags::NeverCull,
+        // sees one residency. Their data arrived earlier on the transfer queue into ranges nothing read. Virtual textures (§5.12.2) the
+        // same: the page table entries of tiles that became visible or were evicted, and the descriptors of new virtual textures.
+        m_renderGraph.AddPass("Streaming Update", RGPassFlags::NeverCull,
             [&](RGBuilder&) {},
-            [this, drawRegions = std::move(drawRegions), pageRegions = std::move(pageRegions)](RGPassContext& context)
+            [this, drawRegions = std::move(drawRegions), pageRegions = std::move(pageRegions), virtualPageRegions = std::move(virtualPageRegions),
+             virtualTextureRegions = std::move(virtualTextureRegions)](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 constexpr uint32_t readers = NRI::StageBits::Task | NRI::StageBits::Mesh | NRI::StageBits::Compute | NRI::StageBits::Fragment |
                                              NRI::StageBits::RayTracing | NRI::StageBits::AccelerationStructureBuild;
-                const NRI::BufferBarrierDesc before[2] = {
-                    { &m_meshletDrawStream.GetBuffer(), { NRI::AccessBits::ShaderRead, readers }, { NRI::AccessBits::TransferWrite, NRI::StageBits::Transfer } },
-                    { &m_geometryPageStream.GetBuffer(), { NRI::AccessBits::ShaderRead | NRI::AccessBits::ShaderWrite, readers },
-                      { NRI::AccessBits::TransferWrite, NRI::StageBits::Transfer } }
-                };
-                cmd.resourceBarriers({}, before);
                 NRI::Buffer& staging = *m_geometryPatchStaging[frameIndex];
-                if (!drawRegions.empty())
-                    cmd.copyBuffer(staging, m_meshletDrawStream.GetBuffer(), std::span<const NRI::BufferCopyRegion>(drawRegions));
-                if (!pageRegions.empty())
-                    cmd.copyBuffer(staging, m_geometryPageStream.GetBuffer(), std::span<const NRI::BufferCopyRegion>(pageRegions));
-                const NRI::BufferBarrierDesc after[2] = {
-                    { &m_meshletDrawStream.GetBuffer(), { NRI::AccessBits::TransferWrite, NRI::StageBits::Transfer }, { NRI::AccessBits::ShaderRead, readers } },
-                    { &m_geometryPageStream.GetBuffer(), { NRI::AccessBits::TransferWrite, NRI::StageBits::Transfer },
-                      { NRI::AccessBits::ShaderRead | NRI::AccessBits::ShaderWrite, readers } }
+                struct Target
+                {
+                    NRI::Buffer* buffer;
+                    const std::vector<NRI::BufferCopyRegion>* regions;
+                    uint32_t access; // how the frame's shaders use it
                 };
+                const Target targets[] = {
+                    { &m_meshletDrawStream.GetBuffer(), &drawRegions, NRI::AccessBits::ShaderRead },
+                    { &m_geometryPageStream.GetBuffer(), &pageRegions, NRI::AccessBits::ShaderRead | NRI::AccessBits::ShaderWrite },
+                    { m_virtualPageTable.get(), &virtualPageRegions, NRI::AccessBits::ShaderRead },
+                    { m_virtualTextureTable.get(), &virtualTextureRegions, NRI::AccessBits::ShaderRead },
+                };
+                std::vector<NRI::BufferBarrierDesc> before, after;
+                for (const Target& target : targets)
+                {
+                    if (!target.buffer || target.regions->empty())
+                        continue;
+                    before.push_back({ target.buffer, { target.access, readers }, { NRI::AccessBits::TransferWrite, NRI::StageBits::Transfer } });
+                    after.push_back({ target.buffer, { NRI::AccessBits::TransferWrite, NRI::StageBits::Transfer }, { target.access, readers } });
+                }
+                cmd.resourceBarriers({}, before);
+                for (const Target& target : targets)
+                {
+                    if (target.buffer && !target.regions->empty())
+                        cmd.copyBuffer(staging, *target.buffer, std::span<const NRI::BufferCopyRegion>(*target.regions));
+                }
                 cmd.resourceBarriers({}, after);
             });
     }
@@ -712,6 +727,8 @@ namespace Nox
                 [feedback = resources.MipFeedback](RGPassContext& context)
                 {
                     context.Cmd().fillBuffer(context.Buffer(feedback), 0, sizeof(uint32_t) * shaderio::MipFeedbackSlots, shaderio::MipFeedbackNone);
+                    // No virtual texture tile requested yet (VirtualTextureFeedback::count).
+                    context.Cmd().fillBuffer(context.Buffer(feedback), sizeof(uint32_t) * shaderio::MipFeedbackSlots, sizeof(uint32_t), 0);
                 });
         }
 
@@ -857,8 +874,7 @@ namespace Nox
             },
             [feedback = resources.MipFeedback, staging](RGPassContext& context)
             {
-                context.Cmd().copyBuffer(context.Buffer(feedback), context.Buffer(staging),
-                                         NRI::BufferCopyRegion{ .size = sizeof(uint32_t) * shaderio::MipFeedbackSlots });
+                context.Cmd().copyBuffer(context.Buffer(feedback), context.Buffer(staging), NRI::BufferCopyRegion{ .size = MipFeedbackBytes });
             });
     }
 

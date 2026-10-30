@@ -110,6 +110,8 @@ namespace Nox
     // Paths with no texture asset. Without this, every such path re-ran the whole lookup every
     // frame. Only valid while the asset registry hasn't changed size (a new import may resolve it).
     static std::unordered_set<std::string> s_TextureDescriptorMisses;
+    // Tail image slots of the registered virtual textures (§5.12.2): their material texture index carries MaterialTextureVirtual.
+    static std::unordered_set<uint32_t> s_VirtualTextureSlots;
     static size_t s_TextureDescriptorMissesRegistrySize = 0;
 
     uint64_t Renderer::GetDeviceLocalAllocatedBytes()
@@ -147,7 +149,7 @@ namespace Nox
 
         std::erase_if(s_TextureDescriptorCache, [&](const auto& entry)
         {
-            return std::find(slots.begin(), slots.end(), static_cast<uint32_t>(entry.second)) != slots.end();
+            return std::find(slots.begin(), slots.end(), static_cast<uint32_t>(entry.second) & ~shaderio::MaterialTextureVirtual) != slots.end();
         });
 
         // GPU materials may still point at the freed slots.
@@ -200,7 +202,8 @@ namespace Nox
             return -1;
         }
 
-        const int descriptorIndex = static_cast<int>(texture->GetDescriptorIndexSlot());
+        const uint32_t slot = texture->GetDescriptorIndexSlot();
+        const int descriptorIndex = static_cast<int>(s_VirtualTextureSlots.contains(slot) ? slot | shaderio::MaterialTextureVirtual : slot);
         descriptorCache.emplace(path, descriptorIndex);
         return descriptorIndex;
     }
@@ -395,7 +398,7 @@ namespace Nox
                 .usage = NRI::BufferUsage::Staging
             }));
             m_mipFeedbackReadback.emplace_back(m_device->createBuffer(NRI::BufferDesc{
-                .size = sizeof(uint32_t) * shaderio::MipFeedbackSlots,
+                .size = MipFeedbackBytes,
                 .usage = NRI::BufferUsage::Staging
             }));
             m_clusterStatsReadback.emplace_back(m_device->createBuffer(NRI::BufferDesc{
@@ -408,7 +411,7 @@ namespace Nox
             }));
         }
         m_mipFeedbackBuffer = m_device->createBuffer(NRI::BufferDesc{
-            .size = sizeof(uint32_t) * shaderio::MipFeedbackSlots,
+            .size = MipFeedbackBytes,
             .usage = NRI::BufferUsage::StorageStatic
         });
         m_clusterStatsBuffer = m_device->createBuffer(NRI::BufferDesc{
@@ -454,8 +457,10 @@ namespace Nox
         // which asserts on s_Instance and queues its geometry, so this drains in rounds -- clearing the vector in place
         // would push into it while its elements are being destroyed.
         m_device->waitIdle();
-        // Page reads write into staging: done before anything goes.
+        // Page and tile reads write into staging: done before anything goes.
         m_geometryStreamer.Shutdown();
+        m_virtualTextures.Shutdown();
+        s_VirtualTextureSlots.clear();
         while (!m_deferredReleases.empty())
         {
             std::vector<DeferredRelease> releasing;
@@ -5142,6 +5147,10 @@ namespace Nox
         uniformData.samplerIndex = selectedSampler;
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
         uniformData.mipFeedbackReference = m_mipFeedbackBuffer->getDeviceAddress();
+        uniformData.virtualFeedbackReference = m_mipFeedbackBuffer->getDeviceAddress() + sizeof(uint32_t) * shaderio::MipFeedbackSlots;
+        uniformData.virtualTexturesReference = m_virtualTextureTable ? m_virtualTextureTable->getDeviceAddress() : 0;
+        uniformData.virtualPageTableReference = m_virtualPageTable ? m_virtualPageTable->getDeviceAddress() : 0;
+        uniformData.virtualTileStampsReference = m_virtualTileStamps ? m_virtualTileStamps->getDeviceAddress() : 0;
         uniformData.mipFeedbackFrame = static_cast<uint32_t>(m_sceneFrameCounter);
         uniformData.lodErrorThreshold = m_lodErrorPixels / static_cast<float>(std::max(m_renderSize.height, 1u));
         uniformData.lodCameraNear = m_cameraNear;
@@ -6014,6 +6023,34 @@ namespace Nox
         m_clusterStatsReadback[frameSlot]->unmap();
     }
 
+    bool Renderer::RegisterVirtualTexture(Texture2D& tail, const CookedTextureHeader& header)
+    {
+        // The buffers every virtual texture shares, with the first one (UniformBufferObject's references stay 0 until then).
+        if (!m_virtualPageTable)
+        {
+            m_virtualPageTable = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(uint32_t) * uint64_t(shaderio::VirtualTileCapacity),
+                                                                         .usage = NRI::BufferUsage::StorageStatic });
+            m_virtualTileStamps = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(uint32_t) * uint64_t(shaderio::VirtualTileCapacity),
+                                                                          .usage = NRI::BufferUsage::StorageStatic });
+            m_virtualTextureTable = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::GpuVirtualTexture) * uint64_t(shaderio::MipFeedbackSlots),
+                                                                            .usage = NRI::BufferUsage::StorageStatic });
+        }
+        const uint32_t slot = tail.GetDescriptorIndexSlot();
+        if (!m_virtualTextures.Register(slot, header))
+            return false;
+        s_VirtualTextureSlots.insert(slot);
+        InvalidateTextureDescriptorSlots({ slot }); // materials pick up the flagged index
+        return true;
+    }
+
+    void Renderer::UnregisterVirtualTexture(uint32_t slot)
+    {
+        if (!s_VirtualTextureSlots.erase(slot))
+            return;
+        m_virtualTextures.Unregister(slot);
+        InvalidateTextureDescriptorSlots({ slot });
+    }
+
     bool Renderer::StreamsGeometryPages()
     {
         return s_Instance && s_Instance->m_geometryStreamer.IsEnabled();
@@ -6043,6 +6080,8 @@ namespace Nox
     {
         m_geometryDrawPatchRegions[frameSlot].clear();
         m_geometryPagePatchRegions[frameSlot].clear();
+        m_virtualPagePatchRegions[frameSlot].clear();
+        m_virtualTexturePatchRegions[frameSlot].clear();
         if (m_geometryPatches.empty())
             return;
 
@@ -6055,9 +6094,15 @@ namespace Nox
         staging->unmap();
         for (const GeometryPatch& patch : m_geometryPatches)
         {
-            std::vector<NRI::BufferCopyRegion>& regions = patch.Target == GeometryPatchTarget::Draws ? m_geometryDrawPatchRegions[frameSlot]
-                                                                                                     : m_geometryPagePatchRegions[frameSlot];
-            regions.push_back({ .srcOffset = patch.Source, .dstOffset = patch.Destination, .size = patch.Size });
+            std::vector<NRI::BufferCopyRegion>* regions = nullptr;
+            switch (patch.Target)
+            {
+            case GeometryPatchTarget::Draws: regions = &m_geometryDrawPatchRegions[frameSlot]; break;
+            case GeometryPatchTarget::Pages: regions = &m_geometryPagePatchRegions[frameSlot]; break;
+            case GeometryPatchTarget::VirtualPages: regions = &m_virtualPagePatchRegions[frameSlot]; break;
+            case GeometryPatchTarget::VirtualTextures: regions = &m_virtualTexturePatchRegions[frameSlot]; break;
+            }
+            regions->push_back({ .srcOffset = patch.Source, .dstOffset = patch.Destination, .size = patch.Size });
         }
         m_geometryPatchData.clear();
         m_geometryPatches.clear();
@@ -6078,8 +6123,10 @@ namespace Nox
         if (!std::exchange(m_mipFeedbackPending[frameSlot], false))
             return;
 
-        const auto* feedback = static_cast<const uint32_t*>(m_mipFeedbackReadback[frameSlot]->map(0, sizeof(uint32_t) * shaderio::MipFeedbackSlots));
+        const auto* feedback = static_cast<const uint32_t*>(m_mipFeedbackReadback[frameSlot]->map(0, MipFeedbackBytes));
         m_mipFeedback.assign(feedback, feedback + shaderio::MipFeedbackSlots);
+        // The virtual texture tiles the same pixels asked for, after the mips.
+        m_virtualTextures.ApplyFeedback(*reinterpret_cast<const shaderio::VirtualTextureFeedback*>(feedback + shaderio::MipFeedbackSlots));
         m_mipFeedbackReadback[frameSlot]->unmap();
         ++m_mipFeedbackSerial;
     }
