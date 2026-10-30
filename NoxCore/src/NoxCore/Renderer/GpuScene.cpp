@@ -782,7 +782,7 @@ namespace Nox
         const shaderio::GpuMesh& mesh = m_Meshes.Get(instance.meshIndex);
 
         shaderio::GpuRayTracingInstance& record = m_RayTracingInstances.Edit(instanceSlot);
-        record.vertexBufferAddress = m_GeometryVertexBase + uint64_t(mesh.verticesOffset) * sizeof(shaderio::Vertex);
+        record.vertexBufferAddress = m_GeometryVertexBase + uint64_t(mesh.verticesOffset) * sizeof(shaderio::PackedVertex);
         // Hit shading treats 0 as "no index buffer" (it then reads the vertices in triangle order).
         record.indexBufferAddress = mesh.indicesOffset == shaderio::NoGeometryRange
                                         ? 0

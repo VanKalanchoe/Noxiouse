@@ -33,7 +33,6 @@ void meshMain
     float4x4 modelMatrix = instance.modelMatrix;
 
     MeshletDraw* meshletDrawStream = (MeshletDraw*)ubo->geometryMeshletDrawsReference;
-    Vertex* vertexStream = (Vertex*)ubo->geometryVerticesReference;
     uint32_t* meshletVertexStream = (uint32_t*)ubo->geometryMeshletVerticesReference;
     uint8_t* meshletTriangleStream = (uint8_t*)ubo->geometryMeshletTrianglesReference;
     
@@ -57,7 +56,7 @@ void meshMain
     for(uint i = gtid.x; i < meshlet.vertexCount; i += MESH_SHADER_DISPATCH_X)
     {
         uint localVertexIndex = meshletVertexStream[meshlet.vertexOffset + i];
-        Vertex v = vertexStream[meshlet.globalVertexOffset + localVertexIndex];
+        Vertex v = loadMeshVertex(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.boneMatrixOffset != 0xFFFFFFFF);
 
         float4 localPos = float4(v.pos, 1.0);
         float3 localNormal = v.normal;

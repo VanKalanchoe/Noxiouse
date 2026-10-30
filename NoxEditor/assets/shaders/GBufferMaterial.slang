@@ -188,7 +188,6 @@
 
         // Pull the geometry streams
         MeshletDraw* meshletDrawStream = (MeshletDraw*)ubo->geometryMeshletDrawsReference;
-        Vertex* vertexStream = (Vertex*)ubo->geometryVerticesReference;
         uint32_t* meshletVertexStream = (uint32_t*)ubo->geometryMeshletVerticesReference;
         uint8_t* meshletTriangleStream = (uint8_t*)ubo->geometryMeshletTrianglesReference;
 
@@ -206,9 +205,9 @@
         uint vIdx2 = meshletVertexStream[meshlet.vertexOffset + i2];
 
         // Fetch the 3 Vertices via BDA
-        Vertex v0 = vertexStream[meshlet.globalVertexOffset + vIdx0];
-        Vertex v1 = vertexStream[meshlet.globalVertexOffset + vIdx1];
-        Vertex v2 = vertexStream[meshlet.globalVertexOffset + vIdx2];
+        Vertex v0 = loadMeshVertex(ubo, meshlet.globalVertexOffset + vIdx0, instance.boneMatrixOffset != 0xFFFFFFFF);
+        Vertex v1 = loadMeshVertex(ubo, meshlet.globalVertexOffset + vIdx1, instance.boneMatrixOffset != 0xFFFFFFFF);
+        Vertex v2 = loadMeshVertex(ubo, meshlet.globalVertexOffset + vIdx2, instance.boneMatrixOffset != 0xFFFFFFFF);
 
         // Skinning
         float4 localPos0 = float4(v0.pos, 1.0);

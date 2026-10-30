@@ -3605,7 +3605,8 @@ namespace Nox
         // its ranges touch; without them it starts at the size a page used to have and grows by copying itself. The ceiling is the
         // element space its allocator hands offsets out of, so it is set well above what a scene is expected to need.
         constexpr uint32_t MAX_ELEMENTS = 1u << 28;
-        m_vertexStream.Init(*m_device, sizeof(shaderio::Vertex), INITIAL_VERTICES, MAX_ELEMENTS);
+        m_vertexStream.Init(*m_device, sizeof(shaderio::PackedVertex), INITIAL_VERTICES, MAX_ELEMENTS);
+        m_skinStream.Init(*m_device, sizeof(shaderio::SkinVertex), INITIAL_VERTICES, MAX_ELEMENTS);
         m_meshletDrawStream.Init(*m_device, sizeof(shaderio::MeshletDraw), INITIAL_DRAWS, MAX_ELEMENTS);
         m_meshletBoundsStream.Init(*m_device, sizeof(shaderio::MeshletBounds), INITIAL_DRAWS, MAX_ELEMENTS);
         m_meshletVertexStream.Init(*m_device, sizeof(uint32_t), INITIAL_VERTS, MAX_ELEMENTS);
@@ -3618,10 +3619,15 @@ namespace Nox
     {
         std::unique_ptr<NRI::Buffer> grownFrom;
         const GeometryRange range = stream.Allocate(count, grownFrom);
+        if (grownFrom)
+            handleStreamGrowth(stream, std::move(grownFrom));
+        return range;
+    }
 
+    void Renderer::handleStreamGrowth(GeometryArena& stream, std::unique_ptr<NRI::Buffer> grownFrom)
+    {
         // The stream grew (only without sparse buffers): its content moves to the larger buffer unchanged (offsets stay valid, the
         // address changes).
-        if (grownFrom)
         {
             // Geometry streaming (§5.7.2) also writes three streams from the graphics queue: the draw records and page table (page
             // activation) and the RT indices (ClusterIndices.slang). The copy below runs on the transfer queue, unordered with frames
@@ -3646,7 +3652,6 @@ namespace Nox
                 m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT + 1, std::move(grownFrom) });
             }
         }
-        return range;
     }
 
     namespace
@@ -3660,10 +3665,12 @@ namespace Nox
             uint64_t meshletVertices = 0;
             uint64_t meshletTriangles = 0;
             uint64_t rtIndices = 0;
+            uint64_t skin = 0;
             uint64_t size = 0;
         };
 
-        MeshStagingLayout meshStagingLayout(uint64_t vertices, uint64_t draws, uint64_t meshletVertices, uint64_t meshletTriangles, uint64_t rtIndices)
+        MeshStagingLayout meshStagingLayout(uint64_t vertices, uint64_t draws, uint64_t meshletVertices, uint64_t meshletTriangles, uint64_t rtIndices,
+                                            bool skin)
         {
             MeshStagingLayout layout;
             uint64_t cursor = 0;
@@ -3673,12 +3680,13 @@ namespace Nox
                 cursor = (cursor + bytes + 15) / 16 * 16;
                 return offset;
             };
-            layout.vertices = place(sizeof(shaderio::Vertex) * vertices);
+            layout.vertices = place(sizeof(shaderio::PackedVertex) * vertices);
             layout.draws = place(sizeof(shaderio::MeshletDraw) * draws);
             layout.bounds = place(sizeof(shaderio::MeshletBounds) * draws);
             layout.meshletVertices = place(sizeof(uint32_t) * meshletVertices);
             layout.meshletTriangles = place(sizeof(uint8_t) * meshletTriangles);
             layout.rtIndices = place(sizeof(uint32_t) * rtIndices);
+            layout.skin = place(skin ? sizeof(shaderio::SkinVertex) * vertices : 0);
             layout.size = cursor;
             return layout;
         }
@@ -3686,7 +3694,7 @@ namespace Nox
         MeshStagingLayout meshStagingLayout(const MeshHandle& handle)
         {
             return meshStagingLayout(handle.vertices.count, handle.meshletDraws.count, handle.meshletVertices.count,
-                                     handle.meshletTriangles.count, handle.rtIndices.count);
+                                     handle.meshletTriangles.count, handle.rtIndices.count, handle.skin);
         }
     }
 
@@ -3740,7 +3748,9 @@ namespace Nox
             upload.Handle.boundsMax = highest;
             upload.Handle.hasBounds = true;
         }
-        const MeshStagingLayout layout = meshStagingLayout(vertCount, drawCount, meshVertCount, meshTriCount, rtIndexCount);
+        // Skinned (bone weights, never paged): its influences go to the skin stream at its vertices' range.
+        const bool skin = data.Pages.empty() && VertexPacking::HasSkin(data.Vertices);
+        const MeshStagingLayout layout = meshStagingLayout(vertCount, drawCount, meshVertCount, meshTriCount, rtIndexCount, skin);
         if (layout.size > 0)
         {
             std::optional<StagingSpan> staging = wait ? m_uploads.ReserveStaging(layout.size) : m_uploads.TryReserveStaging(layout.size);
@@ -3756,6 +3766,15 @@ namespace Nox
         upload.Handle.meshletVertices = allocateGeometry(m_meshletVertexStream, meshVertCount);
         upload.Handle.meshletTriangles = allocateGeometry(m_meshletTriangleStream, meshTriCount);
         upload.Handle.rtIndices = allocateGeometry(m_rtIndexStream, rtIndexCount);
+        if (skin && upload.Handle.vertices.IsValid())
+        {
+            std::unique_ptr<NRI::Buffer> grownFrom;
+            upload.Handle.skin = m_skinStream.Reserve(upload.Handle.vertices.offset, upload.Handle.vertices.count, grownFrom);
+            if (grownFrom)
+                handleStreamGrowth(m_skinStream, std::move(grownFrom));
+            if (!upload.Handle.skin)
+                NOX_CORE_ERROR("Renderer: no room for the bone influences of {} ({} vertices)", data.Name, vertCount);
+        }
         if (streamed)
         {
             upload.Handle.geometryPages = allocateGeometry(m_geometryPageStream, static_cast<uint32_t>(data.Pages.size()));
@@ -3768,6 +3787,7 @@ namespace Nox
             for (const shaderio::MeshletBounds& bounds : data.Bounds)
                 source->RefinedPages.push_back(bounds.refinedPage);
             source->RootPageCount = data.RootPageCount;
+            source->VertexBytes = data.StreamedVertexBytes;
             upload.Streaming = std::move(source);
         }
         return upload;
@@ -3794,7 +3814,18 @@ namespace Nox
 
         // Staging memory is written front to back and never read (it may be write-combined). Exactly the ranges'
         // counts: a block holds no more, and the bounds are one per draw.
-        memcpy(staging + layout.vertices, data.Vertices.data(), sizeof(shaderio::Vertex) * handle.vertices.count);
+        // Packed as the stream holds them (§5.8.2), and a skinned mesh's bone influences beside.
+        {
+            auto* packed = reinterpret_cast<shaderio::PackedVertex*>(staging + layout.vertices);
+            for (uint32_t index = 0; index < handle.vertices.count; ++index)
+                packed[index] = VertexPacking::Pack(data.Vertices[index]);
+            if (handle.skin)
+            {
+                auto* skin = reinterpret_cast<shaderio::SkinVertex*>(staging + layout.skin);
+                for (uint32_t index = 0; index < handle.vertices.count; ++index)
+                    skin[index] = VertexPacking::PackSkin(data.Vertices[index]);
+            }
+        }
         // Streamed geometry: only its root pages' clusters have data yet (they come first); the others' records are written as their
         // pages arrive, and are never read before (their pages are not resident).
         const bool streamed = data.IsStreamed();
@@ -3896,7 +3927,9 @@ namespace Nox
             if (range.count > 0)
                 m_uploads.CopyToBuffer(upload.Staging, stagingOffset, elementSize * range.count, stream.GetBuffer(), elementSize * range.offset);
         };
-        copy(m_vertexStream, handle.vertices, sizeof(shaderio::Vertex), layout.vertices);
+        copy(m_vertexStream, handle.vertices, sizeof(shaderio::PackedVertex), layout.vertices);
+        if (handle.skin)
+            copy(m_skinStream, handle.vertices, sizeof(shaderio::SkinVertex), layout.skin);
         copy(m_meshletDrawStream, handle.meshletDraws, sizeof(shaderio::MeshletDraw), layout.draws);
         copy(m_meshletBoundsStream, handle.meshletBounds, sizeof(shaderio::MeshletBounds), layout.bounds);
         copy(m_meshletVertexStream, handle.meshletVertices, sizeof(uint32_t), layout.meshletVertices);
@@ -3980,8 +4013,8 @@ namespace Nox
             .triangles = {
                 NRI::AccelerationStructureTrianglesDesc{
                     // Streamed geometry's indices address the whole stream (its pages lie anywhere in it).
-                    .vertexBufferAddress = m_vertexStream.GetDeviceAddress() + (build.absolute ? 0 : sizeof(shaderio::Vertex) * uint64_t(build.vertices.offset)),
-                    .vertexStride = sizeof(shaderio::Vertex),
+                    .vertexBufferAddress = m_vertexStream.GetDeviceAddress() + (build.absolute ? 0 : sizeof(shaderio::PackedVertex) * uint64_t(build.vertices.offset)),
+                    .vertexStride = sizeof(shaderio::PackedVertex),
                     .maxVertex = build.absolute ? build.maxVertex : build.vertices.count - 1,
                     .indexBufferAddress = m_rtIndexStream.GetDeviceAddress() + sizeof(uint32_t) * uint64_t(build.indices.offset),
                     .primitiveCount = build.indices.count / 3,
@@ -5256,6 +5289,7 @@ namespace Nox
         uniformData.sceneRayTracingInstancesReference = m_gpuScene.GetRayTracingInstances().GetDeviceAddress();
 
         uniformData.geometryVerticesReference = m_vertexStream.GetDeviceAddress();
+        uniformData.geometrySkinReference = m_skinStream.GetDeviceAddress();
         uniformData.geometryMeshletDrawsReference = m_meshletDrawStream.GetDeviceAddress();
         uniformData.geometryMeshletBoundsReference = m_meshletBoundsStream.GetDeviceAddress();
         uniformData.geometryMeshletVerticesReference = m_meshletVertexStream.GetDeviceAddress();
@@ -5454,6 +5488,8 @@ namespace Nox
             if (!mesh)
                 continue;
 
+            if (mesh->skin)
+                m_skinStream.Unreserve(mesh->vertices.offset, mesh->vertices.count);
             m_vertexStream.Free(mesh->vertices);
             m_meshletDrawStream.Free(mesh->meshletDraws);
             m_meshletBoundsStream.Free(mesh->meshletBounds);
@@ -5486,7 +5522,7 @@ namespace Nox
         // Geometry: the streams hold their capacity (sparse ones: their committed pages), of which the live ranges are in use.
         uint64_t geometryCommitted = 0;
         uint64_t geometryUsed = 0;
-        for (const GeometryArena* stream : { &m_vertexStream, &m_meshletDrawStream, &m_meshletBoundsStream,
+        for (const GeometryArena* stream : { &m_vertexStream, &m_skinStream, &m_meshletDrawStream, &m_meshletBoundsStream,
                                              &m_meshletVertexStream, &m_meshletTriangleStream, &m_rtIndexStream, &m_geometryPageStream })
         {
             geometryCommitted += stream->GetCapacityBytes();

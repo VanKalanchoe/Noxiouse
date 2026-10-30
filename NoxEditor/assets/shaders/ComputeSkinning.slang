@@ -9,7 +9,8 @@ void compMain(
     uint3 groupThreadID : SV_GroupThreadID,
     uniform PushConstantSkinning pushConstant)
 {
-    Vertex* sourceVertices = (Vertex*)pushConstant.sourceVerticesReference;
+    PackedVertex* sourceVertices = (PackedVertex*)pushConstant.sourceVerticesReference;
+    SkinVertex* sourceSkin = (SkinVertex*)pushConstant.sourceSkinReference;
     SkinnedVertex* skinnedVertices = (SkinnedVertex*)pushConstant.skinnedVerticesReference;
     float4x4* boneMatrices = (float4x4*)pushConstant.boneMatricesReference;
     SkinningWorkItem* workItems = (SkinningWorkItem*)pushConstant.workItemsReference;
@@ -17,7 +18,8 @@ void compMain(
     SkinningWorkItem work = workItems[groupID.x];
     for (uint vertexIndex = groupThreadID.x; vertexIndex < work.vertexCount; vertexIndex += 64)
     {
-        Vertex vertex = sourceVertices[work.sourceVertexOffset + vertexIndex];
+        Vertex vertex = unpackVertex(sourceVertices[work.sourceVertexOffset + vertexIndex]);
+        unpackSkin(sourceSkin[work.sourceVertexOffset + vertexIndex], vertex);
         float4x4 skinTransform =
             boneMatrices[work.boneMatrixOffset + vertex.boneIDs.x] * vertex.boneWeights.x +
             boneMatrices[work.boneMatrixOffset + vertex.boneIDs.y] * vertex.boneWeights.y +

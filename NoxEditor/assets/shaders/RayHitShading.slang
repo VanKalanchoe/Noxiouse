@@ -23,7 +23,7 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
         i2 = primIndex * 3 + 2;
     }
 
-    Vertex* vertices = (Vertex*)lut.vertexBufferAddress;
+    PackedVertex* vertices = (PackedVertex*)lut.vertexBufferAddress;
     float2 uv0 = vertices[i0].uv0;
     float2 uv1 = vertices[i1].uv0;
     float2 uv2 = vertices[i2].uv0;

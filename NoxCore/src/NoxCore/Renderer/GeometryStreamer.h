@@ -23,6 +23,8 @@ namespace Nox
         std::vector<shaderio::MeshletDraw> Draws; // per cluster, offsets into the page-ordered arrays of the cooked mesh
         std::vector<uint32_t> RefinedPages;       // per cluster: MeshletBounds::refinedPage
         uint32_t RootPageCount = 0;
+        // Bytes per vertex in the file's page payloads: packed, or a version 3 cook's unpacked vertices (packed as a page is read).
+        uint32_t VertexBytes = sizeof(shaderio::PackedVertex);
     };
 
     // Geometry streaming (§5.7.2, Nanite's page streaming): a streamed mesh keeps its cluster records and root pages; its other

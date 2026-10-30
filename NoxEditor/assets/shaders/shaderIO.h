@@ -361,6 +361,9 @@ struct UniformBufferObject
     uint64_t geometryMeshletVerticesReference;
     uint64_t geometryMeshletTrianglesReference;
     uint64_t geometryPagesReference; // GpuGeometryPage table (geometry streaming, §5.7.2)
+    // SkinVertex per vertex of a skinned mesh, at the vertex's own index (the stream mirrors the vertex stream; only skinned meshes'
+    // ranges hold data, §5.8.2).
+    uint64_t geometrySkinReference;
 
     // GPU scene tables (GpuInstance, GpuTransform, GpuMaterial, GpuMesh, GpuRayTracingInstance); 0 while the scene is empty
     uint64_t sceneInstancesReference;
@@ -565,6 +568,28 @@ struct Vertex
     vec4 boneWeights;
 };
 
+// The vertex as the geometry stream stores it (§5.8.2, Nanite-style packing): 36 bytes instead of 88. The position stays a float3 at
+// offset 0 (BLAS builds read it as R32G32B32_SFLOAT with this stride) and the UVs stay floats (tiling UVs go far past 0..1); the
+// normal and tangent are octahedral (16:16 unorm; the tangent 15:15 plus the bitangent sign in bit 31). Bone influences live in a
+// stream of their own (SkinVertex), only for skinned meshes. Shaders read it through unpackVertex / loadMeshVertex.
+struct PackedVertex
+{
+    vec3 pos;
+    uint32_t normal;
+    vec2 uv0;
+    vec2 uv1;
+    uint32_t tangent;
+};
+
+// A skinned vertex's four bone influences: 16-bit bone indices, 16-bit unorm weights (UniformBufferObject::geometrySkinReference).
+struct SkinVertex
+{
+    uint32_t boneIDs01;
+    uint32_t boneIDs23;
+    uint32_t boneWeights01;
+    uint32_t boneWeights23;
+};
+
 // Per-instance output of the compute skinning pass. Position and normal stay in mesh-local space so every raster
 // consumer can apply the instance transform, and the previous frame remains usable when only that transform changes.
 struct SkinnedVertex
@@ -725,10 +750,48 @@ void MaterialTextureSize(UniformBufferObject* ubo, uint textureIndex, out uint w
     MaterialTextureSize(ubo, textureIndex, width, height, mipCount);
 }
 
+// Octahedral unit vectors (Cigolle et al., "A Survey of Efficient Representations for Independent Unit Vectors"): the vector projected
+// onto the octahedron |x| + |y| + |z| = 1, the lower half folded over the upper. Decoded as packVertex (DataTypes.h) encodes.
+float3 octDecode(float2 e)
+{
+    float3 n = float3(e, 1.0 - abs(e.x) - abs(e.y));
+    const float t = saturate(-n.z);
+    n.x += n.x >= 0.0 ? -t : t;
+    n.y += n.y >= 0.0 ? -t : t;
+    return normalize(n);
+}
+Vertex unpackVertex(PackedVertex packed)
+{
+    Vertex vertex;
+    vertex.pos = packed.pos;
+    vertex.normal = octDecode(float2(packed.normal & 0xFFFFu, packed.normal >> 16) * (2.0 / 65535.0) - 1.0);
+    vertex.uv0 = packed.uv0;
+    vertex.uv1 = packed.uv1;
+    vertex.tangent = float4(octDecode(float2(packed.tangent & 0x7FFFu, (packed.tangent >> 15) & 0x7FFFu) * (2.0 / 32767.0) - 1.0),
+                            (packed.tangent & 0x80000000u) != 0 ? -1.0 : 1.0);
+    vertex.boneIDs = uint4(0);
+    vertex.boneWeights = float4(0.0);
+    return vertex;
+}
+void unpackSkin(SkinVertex skin, inout Vertex vertex)
+{
+    vertex.boneIDs = uint4(skin.boneIDs01 & 0xFFFFu, skin.boneIDs01 >> 16, skin.boneIDs23 & 0xFFFFu, skin.boneIDs23 >> 16);
+    vertex.boneWeights = float4(skin.boneWeights01 & 0xFFFFu, skin.boneWeights01 >> 16, skin.boneWeights23 & 0xFFFFu, skin.boneWeights23 >> 16) *
+                         (1.0 / 65535.0);
+}
+// A vertex of the geometry stream, with its bone influences when the caller skins it.
+Vertex loadMeshVertex(UniformBufferObject* ubo, uint vertexIndex, bool skinned)
+{
+    Vertex vertex = unpackVertex(((PackedVertex*)ubo->geometryVerticesReference)[vertexIndex]);
+    if (skinned && ubo->geometrySkinReference != 0)
+        unpackSkin(((SkinVertex*)ubo->geometrySkinReference)[vertexIndex], vertex);
+    return vertex;
+}
+
 // Ray traversal can use compact deformed positions while hit shading retains the base vertex's UVs and material data.
 Vertex LoadRayTracingVertex(GpuRayTracingInstance instance, uint vertexIndex)
 {
-    Vertex vertex = ((Vertex*)instance.vertexBufferAddress)[vertexIndex];
+    Vertex vertex = unpackVertex(((PackedVertex*)instance.vertexBufferAddress)[vertexIndex]);
     if (instance.skinnedVertexBufferAddress != 0)
     {
         SkinnedVertex skinned = ((SkinnedVertex*)instance.skinnedVertexBufferAddress)[vertexIndex];
@@ -1446,7 +1509,8 @@ struct PushConstantMeshlets
 
 struct PushConstantSkinning
 {
-    uint64_t sourceVerticesReference;
+    uint64_t sourceVerticesReference; // PackedVertex
+    uint64_t sourceSkinReference;     // SkinVertex, same indices
     uint64_t skinnedVerticesReference;
     uint64_t boneMatricesReference;
     uint64_t workItemsReference;

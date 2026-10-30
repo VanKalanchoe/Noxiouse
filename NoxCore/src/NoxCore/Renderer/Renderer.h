@@ -1107,6 +1107,8 @@ namespace Nox
         std::vector<char> readFile(const std::string& filename);
         // Sub-allocates from a geometry stream, copying the stream into a larger buffer first when it no longer fits.
         GeometryRange allocateGeometry(GeometryArena& stream, uint32_t count);
+        // A stream that grew (only without sparse buffers): its content copied into the larger buffer, the old one released later.
+        void handleStreamGrowth(GeometryArena& stream, std::unique_ptr<NRI::Buffer> grownFrom);
         void createLightBuffer(uint64_t bufferSize);
         void updateLightBuffer(uint32_t currentImage);
         void sampleMemoryStats();
@@ -1634,7 +1636,9 @@ namespace Nox
         std::mutex m_deferredReleasesMutex;
 
         // Unified geometry streams (§5.8.2): one buffer each, sub-allocated per mesh, addressed by offset.
-        GeometryArena m_vertexStream;
+        GeometryArena m_vertexStream; // shaderio::PackedVertex
+        // Bone influences (shaderio::SkinVertex) of skinned meshes, at their vertices' own element ranges (GeometryArena::Reserve).
+        GeometryArena m_skinStream;
         GeometryArena m_meshletDrawStream;
         GeometryArena m_meshletBoundsStream;
         GeometryArena m_meshletVertexStream;

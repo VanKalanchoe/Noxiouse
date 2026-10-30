@@ -136,6 +136,38 @@ namespace Nox
             changePageUse(range.offset, range.count, false);
     }
 
+    bool GeometryArena::Reserve(uint32_t offset, uint32_t count, std::unique_ptr<NRI::Buffer>& outGrownFrom)
+    {
+        if (count == 0)
+            return true;
+        if (uint64_t(offset) + count > m_maxCapacity)
+            return false;
+        if (IsSparse())
+        {
+            if (!changePageUse(offset, count, true))
+                return false;
+        }
+        else if (offset + count > m_capacity)
+        {
+            const uint32_t capacity = std::min(std::max(m_capacity * 2, offset + count), m_maxCapacity);
+            std::unique_ptr<NRI::Buffer> grown = createBuffer(capacity, false);
+            outGrownFrom = std::move(m_buffer);
+            m_buffer = std::move(grown);
+            m_capacity = capacity;
+        }
+        m_usedElements += count;
+        return true;
+    }
+
+    void GeometryArena::Unreserve(uint32_t offset, uint32_t count)
+    {
+        if (count == 0 || count > m_usedElements)
+            return;
+        m_usedElements -= count;
+        if (IsSparse())
+            changePageUse(offset, count, false);
+    }
+
     std::unique_ptr<NRI::Buffer> GeometryArena::createBuffer(uint32_t capacity, bool sparse) const
     {
         return m_device->createBuffer(NRI::BufferDesc{

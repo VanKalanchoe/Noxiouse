@@ -69,7 +69,7 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
         i2 = primIndex * 3 + 2;
     }
 
-    Vertex* vertices = (Vertex*)lut.vertexBufferAddress;
+    PackedVertex* vertices = (PackedVertex*)lut.vertexBufferAddress;
     float w0 = 1.0 - barycentrics.x - barycentrics.y;
     return w0 * vertices[i0].uv0 + barycentrics.x * vertices[i1].uv0 + barycentrics.y * vertices[i2].uv0;
 }

@@ -40,6 +40,11 @@ namespace Nox
         // copies its contents into the new buffer and releases it once the frames in flight are done with it.
         GeometryRange Allocate(uint32_t count, std::unique_ptr<NRI::Buffer>& outGrownFrom);
         void Free(const GeometryRange& range);
+        // A stream that mirrors another's element ranges (the skin stream mirrors the vertex stream for skinned meshes, §5.8.2): the
+        // range is the other stream's, this one only gets memory for it (sparse pages, else growth like Allocate's). False when it
+        // could not.
+        bool Reserve(uint32_t offset, uint32_t count, std::unique_ptr<NRI::Buffer>& outGrownFrom);
+        void Unreserve(uint32_t offset, uint32_t count);
 
         NRI::Buffer& GetBuffer() const { return *m_buffer; }
         uint64_t GetDeviceAddress() const { return m_buffer ? m_buffer->getDeviceAddress() : 0; }

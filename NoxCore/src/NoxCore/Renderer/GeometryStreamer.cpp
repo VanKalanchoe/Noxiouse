@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 
 #include "Renderer.h"
@@ -353,8 +354,8 @@ namespace Nox
 
                 // The three blocks into the streams' current buffers (they may have grown since the ranges were allocated).
                 UploadManager& uploads = m_Renderer.m_uploads;
-                uploads.CopyToBuffer(page.Staging, 0, sizeof(shaderio::Vertex) * uint64_t(info.VertexCount),
-                                     m_Renderer.m_vertexStream.GetBuffer(), sizeof(shaderio::Vertex) * uint64_t(page.Ranges.Vertices.offset));
+                uploads.CopyToBuffer(page.Staging, 0, sizeof(shaderio::PackedVertex) * uint64_t(info.VertexCount),
+                                     m_Renderer.m_vertexStream.GetBuffer(), sizeof(shaderio::PackedVertex) * uint64_t(page.Ranges.Vertices.offset));
                 uploads.CopyToBuffer(page.Staging, info.VertexBlockBytes(), sizeof(uint32_t) * uint64_t(info.MeshletVertexCount),
                                      m_Renderer.m_meshletVertexStream.GetBuffer(), sizeof(uint32_t) * uint64_t(page.Ranges.MeshletVertices.offset));
                 uploads.CopyToBuffer(page.Staging, info.VertexBlockBytes() + info.MeshletVertexBlockBytes(), info.MeshletTriangleCount,
@@ -399,11 +400,23 @@ namespace Nox
         page.State = PageState::Reading;
         page.Ranges = ranges;
         page.Staging = *staging;
-        // From the cooked file straight into staging (a pack's entry as a loose file's range).
+        // From the cooked file straight into staging (a pack's entry as a loose file's range). A version 3 cook's page holds unpacked
+        // vertices: read aside, its vertices packed into staging, the rest copied after them as the packed layout places it.
         page.Read = JobSystem::Get().AsyncIO("Read Geometry Page", JobPriority::High,
-            [file = source.File, offset = info.PayloadOffset, bytes, destination = staging->data](const CancellationToken&)
+            [file = source.File, offset = info.PayloadOffset, bytes, info, vertexBytes = source.VertexBytes, destination = staging->data](const CancellationToken&)
             {
-                return VFS::ReadRange(file, offset, bytes, destination);
+                if (vertexBytes == sizeof(shaderio::PackedVertex))
+                    return VFS::ReadRange(file, offset, bytes, destination);
+                std::vector<uint8_t> legacy(info.PayloadBytes(vertexBytes));
+                if (!VFS::ReadRange(file, offset, legacy.size(), legacy.data()))
+                    return false;
+                const auto* vertices = reinterpret_cast<const shaderio::Vertex*>(legacy.data());
+                auto* packed = reinterpret_cast<shaderio::PackedVertex*>(destination);
+                for (uint32_t vertex = 0; vertex < info.VertexCount; ++vertex)
+                    packed[vertex] = VertexPacking::Pack(vertices[vertex]);
+                const uint64_t rest = info.MeshletVertexBlockBytes() + MeshPage::Align16(info.MeshletTriangleCount);
+                std::memcpy(destination + info.VertexBlockBytes(), legacy.data() + info.VertexBlockBytes(vertexBytes), rest);
+                return true;
             });
         for (uint32_t dependency = 0; dependency < info.DependencyCount; ++dependency)
             ++mesh.Pages[source.Dependencies[info.FirstDependency + dependency]].Dependents;

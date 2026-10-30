@@ -52,6 +52,7 @@ namespace Nox
             {
                 shaderio::PushConstantSkinning push{};
                 push.sourceVerticesReference = context.Buffer(res->SkinningSourceVertices).getDeviceAddress();
+                push.sourceSkinReference = m_skinStream.GetDeviceAddress();
                 push.skinnedVerticesReference = context.Buffer(res->SkinnedVertices).getDeviceAddress();
                 push.boneMatricesReference = context.Buffer(res->SkinningBoneMatrices).getDeviceAddress();
                 push.workItemsReference = context.Buffer(res->SkinningWorkItems).getDeviceAddress();

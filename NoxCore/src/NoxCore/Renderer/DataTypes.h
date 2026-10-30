@@ -1,4 +1,6 @@
 #pragma once
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -27,6 +29,8 @@ namespace Nox
         // Geometry streaming (§5.7.2): the mesh's range of the page table, and its GeometryStreamer id (UINT32_MAX: not streamed).
         GeometryRange geometryPages;
         uint32_t streamingId = UINT32_MAX;
+        // Skinned (bone weights): its bone influences in the skin stream, at the same element range as its vertices (§5.8.2).
+        bool skin = false;
         // Local axis-aligned bounds of the vertices, worked out at upload (not saved): the editor's size readout and measuring use them.
         glm::vec3 boundsMin{ 0.0f };
         glm::vec3 boundsMax{ 0.0f };
@@ -219,9 +223,14 @@ namespace Nox
 
         bool IsRoot() const { return (Flags & Root) != 0; }
         static uint64_t Align16(uint64_t bytes) { return (bytes + 15) / 16 * 16; }
-        uint64_t VertexBlockBytes() const { return Align16(sizeof(shaderio::Vertex) * uint64_t(VertexCount)); }
+        // Block sizes with the vertex format the payload holds: packed (PackedVertex, version 4 cooks and the geometry stream), or
+        // vertexBytes = sizeof(shaderio::Vertex) for a version 3 cook's payload.
+        uint64_t VertexBlockBytes(uint64_t vertexBytes = sizeof(shaderio::PackedVertex)) const { return Align16(vertexBytes * VertexCount); }
         uint64_t MeshletVertexBlockBytes() const { return Align16(sizeof(uint32_t) * uint64_t(MeshletVertexCount)); }
-        uint64_t PayloadBytes() const { return VertexBlockBytes() + MeshletVertexBlockBytes() + Align16(MeshletTriangleCount); }
+        uint64_t PayloadBytes(uint64_t vertexBytes = sizeof(shaderio::PackedVertex)) const
+        {
+            return VertexBlockBytes(vertexBytes) + MeshletVertexBlockBytes() + Align16(MeshletTriangleCount);
+        }
     };
     static_assert(sizeof(MeshPage) == 72, "MeshPage is written to the cooked file as is");
 
@@ -245,7 +254,114 @@ namespace Nox
         // Set when only the root pages were read: Vertices, MeshletVertices and MeshletTriangles hold just those, the other pages
         // stream from this cooked file (MeshPage::PayloadOffset).
         std::filesystem::path StreamedFrom;
+        // Bytes per vertex in that file's page payloads: packed (version 4), or sizeof(shaderio::Vertex) (version 3, packed as read).
+        uint32_t StreamedVertexBytes = sizeof(shaderio::PackedVertex);
 
         bool IsStreamed() const { return !StreamedFrom.empty() && RootPageCount < Pages.size(); }
     };
+
+    // The geometry stream's vertex format (shaderio::PackedVertex, §5.8.2): packed when a mesh is cooked (version 4) or uploaded,
+    // unpacked when a cook is read (the importer, HLOD bake and editor tools work on shaderio::Vertex). Mirrors unpackVertex in
+    // shaderIO.h.
+    namespace VertexPacking
+    {
+        // Octahedral: the unit vector onto |x| + |y| + |z| = 1, the lower half folded over the upper (each component in [-1, 1]).
+        inline glm::vec2 OctEncode(glm::vec3 n)
+        {
+            const float sum = std::abs(n.x) + std::abs(n.y) + std::abs(n.z);
+            if (sum <= 0.0f)
+                return glm::vec2(0.0f, 0.0f); // a zero vector: decodes as +Z
+            n /= sum;
+            if (n.z < 0.0f)
+            {
+                const glm::vec2 folded((1.0f - std::abs(n.y)) * (n.x >= 0.0f ? 1.0f : -1.0f), (1.0f - std::abs(n.x)) * (n.y >= 0.0f ? 1.0f : -1.0f));
+                return folded;
+            }
+            return glm::vec2(n.x, n.y);
+        }
+        inline glm::vec3 OctDecode(glm::vec2 e)
+        {
+            glm::vec3 n(e.x, e.y, 1.0f - std::abs(e.x) - std::abs(e.y));
+            const float t = std::clamp(-n.z, 0.0f, 1.0f);
+            n.x += n.x >= 0.0f ? -t : t;
+            n.y += n.y >= 0.0f ? -t : t;
+            return glm::normalize(n);
+        }
+        // [-1, 1] to an unsigned integer of `bits` bits, rounded.
+        inline uint32_t Quantize(float value, uint32_t bits)
+        {
+            const float scale = float((1u << bits) - 1u);
+            return static_cast<uint32_t>(std::lround(std::clamp(value * 0.5f + 0.5f, 0.0f, 1.0f) * scale));
+        }
+        inline float Dequantize(uint32_t value, uint32_t bits) { return float(value) * (2.0f / float((1u << bits) - 1u)) - 1.0f; }
+
+        inline shaderio::PackedVertex Pack(const shaderio::Vertex& vertex)
+        {
+            shaderio::PackedVertex packed{};
+            packed.pos = vertex.pos;
+            const glm::vec2 normal = OctEncode(vertex.normal);
+            packed.normal = Quantize(normal.x, 16) | (Quantize(normal.y, 16) << 16);
+            packed.uv0 = vertex.uv0;
+            packed.uv1 = vertex.uv1;
+            const glm::vec2 tangent = OctEncode(glm::vec3(vertex.tangent));
+            packed.tangent = Quantize(tangent.x, 15) | (Quantize(tangent.y, 15) << 15) | (vertex.tangent.w < 0.0f ? 0x80000000u : 0u);
+            return packed;
+        }
+        inline shaderio::Vertex Unpack(const shaderio::PackedVertex& packed)
+        {
+            shaderio::Vertex vertex{};
+            vertex.pos = packed.pos;
+            vertex.normal = OctDecode(glm::vec2(Dequantize(packed.normal & 0xFFFFu, 16), Dequantize(packed.normal >> 16, 16)));
+            vertex.uv0 = packed.uv0;
+            vertex.uv1 = packed.uv1;
+            vertex.tangent = glm::vec4(OctDecode(glm::vec2(Dequantize(packed.tangent & 0x7FFFu, 15), Dequantize((packed.tangent >> 15) & 0x7FFFu, 15))),
+                                       (packed.tangent & 0x80000000u) != 0 ? -1.0f : 1.0f);
+            return vertex;
+        }
+
+        // Bone influences: 16-bit indices, 16-bit unorm weights (renormalized so they still sum to 1 after rounding).
+        inline shaderio::SkinVertex PackSkin(const shaderio::Vertex& vertex)
+        {
+            const glm::vec4 weights = vertex.boneWeights;
+            const float sum = weights.x + weights.y + weights.z + weights.w;
+            const glm::vec4 normalized = sum > 0.0f ? weights / sum : glm::vec4(0.0f);
+            uint32_t q[4];
+            uint32_t total = 0;
+            for (int i = 0; i < 4; ++i)
+            {
+                q[i] = static_cast<uint32_t>(std::lround(std::clamp(normalized[i], 0.0f, 1.0f) * 65535.0f));
+                total += q[i];
+            }
+            if (sum > 0.0f && total != 65535u)
+            {
+                // The rounding error onto the largest weight.
+                int largest = 0;
+                for (int i = 1; i < 4; ++i)
+                    largest = q[i] > q[largest] ? i : largest;
+                q[largest] = static_cast<uint32_t>(std::clamp<int64_t>(int64_t(q[largest]) + 65535 - int64_t(total), 0, 65535));
+            }
+            shaderio::SkinVertex skin{};
+            skin.boneIDs01 = (vertex.boneIDs.x & 0xFFFFu) | ((vertex.boneIDs.y & 0xFFFFu) << 16);
+            skin.boneIDs23 = (vertex.boneIDs.z & 0xFFFFu) | ((vertex.boneIDs.w & 0xFFFFu) << 16);
+            skin.boneWeights01 = q[0] | (q[1] << 16);
+            skin.boneWeights23 = q[2] | (q[3] << 16);
+            return skin;
+        }
+        inline void UnpackSkin(const shaderio::SkinVertex& skin, shaderio::Vertex& vertex)
+        {
+            vertex.boneIDs = glm::uvec4(skin.boneIDs01 & 0xFFFFu, skin.boneIDs01 >> 16, skin.boneIDs23 & 0xFFFFu, skin.boneIDs23 >> 16);
+            vertex.boneWeights = glm::vec4(float(skin.boneWeights01 & 0xFFFFu), float(skin.boneWeights01 >> 16), float(skin.boneWeights23 & 0xFFFFu),
+                                           float(skin.boneWeights23 >> 16)) / 65535.0f;
+        }
+        // Whether any vertex has a bone influence (a skinned mesh: its influences go to the skin stream).
+        inline bool HasSkin(const std::vector<shaderio::Vertex>& vertices)
+        {
+            for (const shaderio::Vertex& vertex : vertices)
+            {
+                if (vertex.boneWeights.x + vertex.boneWeights.y + vertex.boneWeights.z + vertex.boneWeights.w > 0.0f)
+                    return true;
+            }
+            return false;
+        }
+    }
 }

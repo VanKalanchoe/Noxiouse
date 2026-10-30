@@ -147,7 +147,7 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
     }
 
     uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
-    Vertex* vertices = (Vertex*)lut.vertexBufferAddress;
+    PackedVertex* vertices = (PackedVertex*)lut.vertexBufferAddress;
 
     uint i0, i1, i2;
     if (lut.indexBufferAddress != 0)

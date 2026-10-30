@@ -74,7 +74,7 @@ bool forwardShadowed(UniformBufferObject* ubo, float3 origin, float3 direction, 
         if (occluder.alphaMode == 1 && occluder.baseColorTextureIndex != 0xFFFFFFFF)
         {
             uint* indices = (uint*)occluder.indexBufferAddress;
-            Vertex* vertices = (Vertex*)occluder.vertexBufferAddress;
+            PackedVertex* vertices = (PackedVertex*)occluder.vertexBufferAddress;
             uint primitive = query.CandidatePrimitiveIndex();
             float2 barycentrics = query.CandidateTriangleBarycentrics();
             float2 uv = vertices[indices[primitive * 3 + 0]].uv0 * (1.0 - barycentrics.x - barycentrics.y) +

@@ -955,7 +955,7 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
     uint i0 = indices[primIndex * 3 + 0];
     uint i1 = indices[primIndex * 3 + 1];
     uint i2 = indices[primIndex * 3 + 2];
-    Vertex* vertices = (Vertex*)lut.vertexBufferAddress;
+    PackedVertex* vertices = (PackedVertex*)lut.vertexBufferAddress;
     float w0 = 1.0 - barycentrics.x - barycentrics.y;
     float w1 = barycentrics.x;
     float w2 = barycentrics.y;

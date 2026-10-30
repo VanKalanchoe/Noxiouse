@@ -98,7 +98,7 @@ namespace Nox
             uint64_t triangles = 0;
             for (const shaderio::MeshletDraw& draw : data.Draws)
                 triangles += draw.triangleCount;
-            return sizeof(shaderio::Vertex) * data.Vertices.size() +
+            return (sizeof(shaderio::PackedVertex) + sizeof(shaderio::SkinVertex)) * data.Vertices.size() +
                    (sizeof(shaderio::MeshletDraw) + sizeof(shaderio::MeshletBounds)) * data.Draws.size() +
                    sizeof(uint32_t) * data.MeshletVertices.size() + data.MeshletTriangles.size() + sizeof(uint32_t) * 3 * triangles;
         }

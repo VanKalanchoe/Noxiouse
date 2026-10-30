@@ -161,7 +161,7 @@ namespace Nox
             {
                 uint64_t bytes = 0;
                 for (uint32_t cluster : groups[group].Clusters)
-                    bytes += (sizeof(shaderio::Vertex) + sizeof(uint32_t)) * clusters[cluster].Vertices.size() + clusters[cluster].Triangles.size();
+                    bytes += (sizeof(shaderio::PackedVertex) + sizeof(uint32_t)) * clusters[cluster].Vertices.size() + clusters[cluster].Triangles.size();
                 if (pageGroups.empty() || pageRoot != groups[group].Terminal || (pageBytes > 0 && pageBytes + bytes > PageTargetBytes))
                 {
                     pageGroups.emplace_back();

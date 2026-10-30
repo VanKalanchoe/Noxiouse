@@ -1028,6 +1028,27 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
   - The geometry streaming pool for cluster pages (§5.7.2) is a byte budget inside these streams, not a separate fixed buffer.
 - **Freeing:** ranges return to the allocator after frames-in-flight (§5.8.4). Unlike pages, freed
   memory is immediately reusable by the next load.
+- **Vertex compression (R7, built 2026-10-30, Nanite-style packing):** the vertex stream holds `shaderio::PackedVertex`, 36 bytes
+  instead of 88.
+  - **Format:** the position stays a float3 at offset 0 (BLAS builds read it directly with the packed stride), and the UVs stay
+    floats (tiling UVs run far past 0..1). The normal is octahedral 16:16 unorm. The tangent is octahedral 15:15 with the bitangent
+    sign in bit 31.
+  - **Bone influences:** they left the vertex. A skinned mesh's go to a skin stream (`shaderio::SkinVertex`, 16 bytes: 16-bit bone
+    indices, 16-bit unorm weights renormalized to sum to 1). It mirrors the vertex stream's element ranges
+    (`GeometryArena::Reserve`, sparse pages), so a vertex's influences are at its own index. Static geometry carries none of the
+    32 bytes per vertex it used to.
+  - **Shaders** read through `unpackVertex` / `loadMeshVertex` (bone influences for the instances they skin) and
+    `LoadRayTracingVertex`. Most hit shaders read only `.uv0`, which kept its name and type in the packed vertex.
+  - **CPU and cook:** the CPU keeps working on `shaderio::Vertex` (import, cluster DAG, HLOD bake), packing at the boundaries:
+    the cook, where cooked format version 4 stores packed vertices and the page payloads are read into staging as they are, and the
+    upload. Version 3 cooks still load: their inline vertices are read as before, and their streamed pages are packed by the read
+    job (`GeometryStreamer`), so no re-import is needed. A re-import writes version 4, smaller on disk and per page read.
+  - **Offline test:**
+    - Precision over 200,000 directions: 0.034° at most for the normal and tangent, 1.5e-5 for bone weights.
+    - Version 4 round trip: positions and UVs exact.
+    - A version 3 file written by the previous commit's code reads back byte-identical, and its streamed page packs exactly as a
+      version 4 page.
+    - The cooked test mesh is 46% smaller.
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much
