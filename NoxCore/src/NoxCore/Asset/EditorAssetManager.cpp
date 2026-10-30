@@ -500,6 +500,7 @@ namespace Nox
                 metadata.MeshSettings.SourceMeshIndex = mesh.MeshIndex;
                 metadata.MeshSettings.MaterialBasePath = it->MaterialBase.FilePath;
                 metadata.MeshSettings.ImportScale = it->MaterialBase.MeshSettings.ImportScale;
+                metadata.MeshSettings.PreserveArea = it->MaterialBase.MeshSettings.PreserveArea;
                 handleOfMesh[mesh.MeshIndex] = RegisterAsset(metadata);
                 registryChanged = true;
             }
@@ -1883,6 +1884,8 @@ namespace Nox
             out << YAML::Key << "SkeletalCombine" << YAML::Value << static_cast<int>(metadata.MeshSettings.SkeletalCombine);
             out << YAML::Key << "SourceMeshIndex" << YAML::Value << metadata.MeshSettings.SourceMeshIndex;
             out << YAML::Key << "ImportScale" << YAML::Value << metadata.MeshSettings.ImportScale;
+            if (metadata.MeshSettings.PreserveArea != PreserveAreaMode::Auto)
+                out << YAML::Key << "PreserveArea" << YAML::Value << (metadata.MeshSettings.PreserveArea == PreserveAreaMode::On ? "On" : "Off");
             if (!metadata.MeshSettings.MaterialBasePath.empty())
                 out << YAML::Key << "MaterialBasePath" << YAML::Value << metadata.MeshSettings.MaterialBasePath.generic_string();
             out << YAML::EndMap;
@@ -2094,6 +2097,11 @@ namespace Nox
                     metadata.MeshSettings.SourceMeshIndex = settingsNode["SourceMeshIndex"].as<int32_t>();
                 if (settingsNode["ImportScale"])
                     metadata.MeshSettings.ImportScale = settingsNode["ImportScale"].as<float>();
+                if (settingsNode["PreserveArea"])
+                {
+                    const std::string mode = settingsNode["PreserveArea"].as<std::string>();
+                    metadata.MeshSettings.PreserveArea = mode == "On" ? PreserveAreaMode::On : mode == "Off" ? PreserveAreaMode::Off : PreserveAreaMode::Auto;
+                }
                 if (settingsNode["MaterialBasePath"])
                     metadata.MeshSettings.MaterialBasePath = settingsNode["MaterialBasePath"].as<std::string>();
             }

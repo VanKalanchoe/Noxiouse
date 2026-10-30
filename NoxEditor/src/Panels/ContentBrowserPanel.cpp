@@ -487,6 +487,17 @@ namespace Nox
                 if (m_ImportSettings.ImportSkinWeights)
                     combineCombo("Combine Skeletal Meshes", m_ImportSettings.SkeletalCombine, "Skinned meshes (they share the file's skeleton): Do Not Combine gives every skinned mesh its own asset when there are several; Combine merges them into one submesh per material.");
             }
+            if (m_ImportSettings.ImportStaticMeshes)
+            {
+                int preserveArea = static_cast<int>(m_ImportSettings.PreserveArea);
+                const char* preserveAreaNames[] = { "Auto (masked / double sided)", "Off", "On" };
+                if (ImGui::Combo("Preserve Area", &preserveArea, preserveAreaNames, 3))
+                    m_ImportSettings.PreserveArea = static_cast<PreserveAreaMode>(preserveArea);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Unreal's Nanite Preserve Area: the coarser LOD levels keep the area of what they replace by pushing their open borders outward,\n"
+                                      "so leaf cards and other thin geometry do not thin out and vanish in the distance (or with a small geometry pool).\n"
+                                      "Auto: for submeshes with an alpha masked or double sided material. Closed surfaces are not changed either way.");
+            }
             ImGui::SeparatorText("Scene");
             ImGui::Checkbox("Import Into Level", &m_ImportSettings.ImportIntoLevel);
             if (ImGui::IsItemHovered())

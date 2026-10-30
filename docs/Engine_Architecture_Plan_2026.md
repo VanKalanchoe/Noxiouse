@@ -939,8 +939,42 @@ The leaf cut is never coarser than what the raster draws (the raster cannot draw
 delay), so `raster_surface_bias` stays the only ray offset. 6b-2's fixed-error fallback is not repeated: near the camera the BLAS
 is full detail, far away it is what that distance needs.
 
-**Not yet:** vertex compression (positions relative to the cluster, octahedral normals: Nanite's pages are ~4x smaller), streaming
-skinned geometry (one level, not paged), per-view request priorities. Editor: Geometry Streaming section (enable for meshes loaded
+**Preserve Area (R9, 2026-10-30, `MeshImporter.cpp` preserveArea).** UE5 Nanite's per-mesh option for foliage. Simplifying thin, open
+geometry loses area. A 4x4-quad leaf ends as two triangles, then one (half its area), then disappears. So the coarse levels of a bush
+are thinner than the levels they replace, and foliage thins out in the distance or with a small pool. Measured on a synthetic bush
+(600 bent leaves, scratchpad `pareatest`): level 4 keeps 99.4% of the area, level 5 49.6%, level 6 24.7%, and level 10 1.5%.
+
+The pass runs after clodBuild and before the pages are written. Each simplification gets the area of the group it came from back:
+- The open borders of the clusters it produced are pushed outward, in the surface's plane, along the bisector of their edge normals
+  (mitered, at most 2x).
+- The push distance comes from the border length, then a bisection on the actual area, since corners add area with the square of
+  the distance. It is capped at the open edges' average length.
+- A vertex is pushed only if the simplifier could move it. Positions that clusters of other groups at the same level use are what
+  clusterlod locks, so they are never moved, and a cut mixing levels stays watertight.
+- A pushed vertex is a copy. The simplification's clusters use it, and so does everything simplified from them later. Clusters whose
+  vertices changed get new culling bounds; LOD bounds and errors stay as they are, so the DAG and its cuts do not change.
+- Closed surfaces have no open borders inside a group, so nothing moves on them. Area a simplifier adds by closing holes is left alone.
+
+Measured (`pareatest`):
+
+| Case | Without the pass | With the pass |
+|---|---|---|
+| Bush, levels 5 to 10 | 49.6% down to 1.5% of the area | 100.0% at every level |
+| Bush, vertices | – | +3% |
+| Sheet, disc, perforated net | – | at most +0.7% area |
+
+Other checks:
+- Triangle counts per level are identical with and without the pass.
+- No crack in 60 mixed cuts per case. The check is exact on the disc and the net: any open edge away from the rim and the holes counts.
+- No vertex lies outside its cluster's culling sphere.
+
+Setting: import settings **Preserve Area**.
+- **Auto** (default) applies it to submeshes whose material is alpha masked or double sided, the foliage, curtain and cloth case.
+- **On** and **Off** force it either way.
+
+It is applied by the cook, so a mesh must be re-imported to pick up a change.
+
+**Not yet:** streaming skinned geometry (one level, not paged), per-view request priorities. Editor: Geometry Streaming section (enable for meshes loaded
 next, stats, pool override for forcing pressure). The stats report's counters say whether streaming is engaged: Streamed Geometry
 Meshes, Pages (resident / total / loading), MB, Root MB, Page Requests, Pages Evicted. Debug view 23 colors clusters by their page:
 gray for a mesh that does not stream, blue for a root page, green for a streamed page (brighter = finer), cyan for original geometry.
