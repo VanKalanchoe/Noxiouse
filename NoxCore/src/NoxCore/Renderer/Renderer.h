@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -317,6 +318,15 @@ namespace Nox
         void SetMeshInstancesTransform(std::span<const uint32_t> instances, const glm::dmat4& world);
         // Skinned instances, every frame: this frame's joint matrices.
         void SetMeshInstancesBones(std::span<const uint32_t> instances, std::span<const glm::mat4> bones);
+        // This frame's morph target weights of an entity's instances, by target name (a target not named: its default weight).
+        void SetMeshInstancesMorphWeights(std::span<const uint32_t> instances, const std::map<std::string, float>& weights);
+        bool HasMorphTargets(std::span<const uint32_t> instances) const
+        {
+            for (uint32_t instance : instances)
+                if (m_gpuScene.GetInstanceMorphs(instance))
+                    return true;
+            return false;
+        }
         // Entities whose instances lost their mesh (it was unloaded) since the last call: register them again.
         void ConsumeInvalidatedMeshEntities(std::vector<int32_t>& outEntityIDs) { outEntityIDs.swap(m_invalidatedMeshEntities); m_invalidatedMeshEntities.clear(); }
         // A material asset's data was edited: instances using it shade with the new data from this frame.
@@ -1601,6 +1611,11 @@ namespace Nox
 
         // Animations
         std::vector<glm::mat4> m_boneMatrices;
+        // This frame's morph target weights (per deformed instance with morph targets: one per target), uploaded like the bones.
+        std::vector<float> m_morphWeights;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_morphWeightBuffers;
+        std::vector<void*> m_morphWeightBuffersMapped;
+        uint64_t m_morphWeightBufferCapacity = 0;
         std::vector<std::unique_ptr<NRI::Buffer>> m_boneBuffers;
         std::vector<void*> m_boneBuffersMapped;
         uint64_t m_BoneBufferCapacity = 0;
@@ -1626,6 +1641,8 @@ namespace Nox
         void updateBoneBuffer(uint32_t currentImage);
         void updateParticleBuffer(uint32_t currentImage);
         void createBoneBuffer(uint64_t size);
+        void createMorphWeightBuffers(uint64_t size);
+        void updateMorphWeightBuffer(uint32_t currentImage);
         void createSkinningBuffers(uint64_t skinnedVertexSize, uint64_t workItemSize);
 
         // Meshes
@@ -1640,6 +1657,8 @@ namespace Nox
         // Bone influences (shaderio::SkinVertex) of skinned meshes, at their vertices' own element ranges (GeometryArena::Reserve).
         GeometryArena m_skinStream;
         GeometryArena m_colorStream; // packed vertex colors, mirroring the vertex stream (only meshes with colors reserve their range)
+        GeometryArena m_morphRangeStream; // GpuMorphRange per vertex of a mesh with morph targets, mirroring the vertex stream
+        GeometryArena m_morphDeltaStream; // GpuMorphDelta, a range per mesh with morph targets
         GeometryArena m_meshletDrawStream;
         GeometryArena m_meshletBoundsStream;
         GeometryArena m_meshletVertexStream;

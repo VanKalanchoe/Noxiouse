@@ -306,7 +306,59 @@ namespace Nox
         // Version 5: a mesh's flags (vertex colors) after its bounds; with vertex colors, their packed RGBA8 per vertex (VertexPacking::
         // PackColor) after the bone influences, and in a block of each page (MeshPage::Colors). Version 4 cooks read without colors;
         // older ones are cooked again from their source (MeshImporter), not read.
+        // Version 6: a one-level mesh's morph targets after its triangles: per target its name, default weight and the vertices it
+        // moves (sparse: vertex index, position delta, normal delta). Version 5 and 4 cooks read without morph targets.
         static constexpr uint32_t MeshFlagVertexColors = 1u << 0;
+
+        struct MorphDelta
+        {
+            uint32_t Vertex = 0;
+            glm::vec3 Position{ 0.0f };
+            glm::vec3 Normal{ 0.0f };
+        };
+        static_assert(sizeof(MorphDelta) == 28, "written as is");
+
+        static void WriteMorphs(std::ofstream& stream, const MeshData& data)
+        {
+            const uint32_t count = static_cast<uint32_t>(data.Morphs.size());
+            stream.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+            for (const MorphTarget& morph : data.Morphs)
+            {
+                SerializerUtils::WriteString(stream, morph.Name);
+                stream.write(reinterpret_cast<const char*>(&morph.DefaultWeight), sizeof(float));
+                std::vector<MorphDelta> deltas;
+                for (uint32_t vertex = 0; vertex < morph.Positions.size() && vertex < morph.Normals.size(); ++vertex)
+                {
+                    if (morph.Positions[vertex] != glm::vec3(0.0f) || morph.Normals[vertex] != glm::vec3(0.0f))
+                        deltas.push_back({ vertex, morph.Positions[vertex], morph.Normals[vertex] });
+                }
+                SerializerUtils::WriteVector(stream, deltas);
+            }
+        }
+
+        static void ReadMorphs(std::istream& stream, MeshData& outData)
+        {
+            uint32_t count = 0;
+            stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
+            outData.Morphs.resize(count);
+            for (MorphTarget& morph : outData.Morphs)
+            {
+                SerializerUtils::ReadString(stream, morph.Name);
+                stream.read(reinterpret_cast<char*>(&morph.DefaultWeight), sizeof(float));
+                std::vector<MorphDelta> deltas;
+                SerializerUtils::ReadVector(stream, deltas);
+                morph.Positions.assign(outData.Vertices.size(), glm::vec3(0.0f));
+                morph.Normals.assign(outData.Vertices.size(), glm::vec3(0.0f));
+                for (const MorphDelta& delta : deltas)
+                {
+                    if (delta.Vertex < outData.Vertices.size())
+                    {
+                        morph.Positions[delta.Vertex] = delta.Position;
+                        morph.Normals[delta.Vertex] = delta.Normal;
+                    }
+                }
+            }
+        }
 
         static std::vector<shaderio::PackedVertex> PackVertices(const shaderio::Vertex* vertices, size_t count)
         {
@@ -357,6 +409,7 @@ namespace Nox
                     SerializerUtils::WriteVector(stream, PackColors(data.Vertices.data(), data.Vertices.size()));
                 SerializerUtils::WriteVector(stream, data.MeshletVertices);
                 SerializerUtils::WriteVector(stream, data.MeshletTriangles);
+                WriteMorphs(stream, data);
             }
         }
 
@@ -418,6 +471,8 @@ namespace Nox
                 }
                 SerializerUtils::ReadVector(stream, outData.MeshletVertices);
                 SerializerUtils::ReadVector(stream, outData.MeshletTriangles);
+                if (version >= 6)
+                    ReadMorphs(stream, outData);
             }
         }
 
@@ -751,8 +806,9 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             stream.write(reinterpret_cast<const char*>(&payloadBase), sizeof(uint64_t));
         }
 
-        // magic: this kind's version 5; magicV4: its version 4 (no vertex colors). Older cooks are not read (MeshImporter cooks them again).
-        static bool DeserializeMeshes(const std::filesystem::path& filepath, const char* magic, const char* magicV4, bool streamPages,
+        // magic: this kind's version 6; magicV5: its version 5 (no morph targets); magicV4: its version 4 (no vertex colors either).
+        // Older cooks are not read (MeshImporter cooks them again).
+        static bool DeserializeMeshes(const std::filesystem::path& filepath, const char* magic, const char* magicV5, const char* magicV4, bool streamPages,
                                       std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList,
                                       std::vector<LightNodeData>& outLightList, std::vector<MeshNodeData>& outNodeList,
                                       std::vector<CameraNodeData>& outCameraList)
@@ -760,7 +816,8 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             char header[HeaderBytes] = {};
             if (!VFS::ReadRange(filepath, 0, HeaderBytes, header))
                 return false;
-            const uint32_t version = std::memcmp(header, magic, 4) == 0 ? 5u : std::memcmp(header, magicV4, 4) == 0 ? 4u : 0u;
+            const uint32_t version = std::memcmp(header, magic, 4) == 0 ? 6u : std::memcmp(header, magicV5, 4) == 0 ? 5u
+                                   : std::memcmp(header, magicV4, 4) == 0 ? 4u : 0u;
             if (version == 0)
                 return false;
 
@@ -794,12 +851,14 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
         }
 
     public:
-        // The cooked format's version (2 to 5) from the magic, 0 when the file is not a mesh.
+        // The cooked format's version (2 to 6) from the magic, 0 when the file is not a mesh.
         static uint32_t ReadVersion(const std::filesystem::path& filepath)
         {
             char magic[4] = {};
             if (!VFS::ReadRange(filepath, 0, 4, magic))
                 return 0;
+            if (std::memcmp(magic, "NSM6", 4) == 0 || std::memcmp(magic, "NMS6", 4) == 0)
+                return 6;
             if (std::memcmp(magic, "NSM5", 4) == 0 || std::memcmp(magic, "NMS5", 4) == 0)
                 return 5;
             if (std::memcmp(magic, "NSM4", 4) == 0 || std::memcmp(magic, "NMS4", 4) == 0)
@@ -821,7 +880,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            SerializeMeshes(filepath, "NSM5", dataList, materialList, lightList, nodeList, cameraList);
+            SerializeMeshes(filepath, "NSM6", dataList, materialList, lightList, nodeList, cameraList);
         }
 
         static bool DeserializeStaticMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
@@ -857,7 +916,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             bool streamPages = false
             )
         {
-            return DeserializeMeshes(filepath, "NSM5", "NSM4", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
+            return DeserializeMeshes(filepath, "NSM6", "NSM5", "NSM4", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
         }
 
         static void SerializeMesh
@@ -870,7 +929,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            SerializeMeshes(filepath, "NMS5", dataList, materialList, lightList, nodeList, cameraList);
+            SerializeMeshes(filepath, "NMS6", dataList, materialList, lightList, nodeList, cameraList);
         }
         
         static bool DeserializeMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
@@ -905,7 +964,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             bool streamPages = false
         )
         {
-            return DeserializeMeshes(filepath, "NMS5", "NMS4", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
+            return DeserializeMeshes(filepath, "NMS6", "NMS5", "NMS4", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
         }
     };
 }

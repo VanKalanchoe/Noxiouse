@@ -4,6 +4,7 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 
+#include <map>
 #include <optional>
 #include "string"
 #include <unordered_map>
@@ -112,6 +113,8 @@ namespace Nox
         AssetHandle Mesh = 0;
         uint32_t SubmeshIndex = 0;
         uint32_t SubmeshCount = 1;
+        // Morph target weights by target name (Unreal's SetMorphTarget): a target not named here keeps the mesh's default weight.
+        std::map<std::string, float> MorphWeights;
         
         MeshComponent() = default;
         MeshComponent(const MeshComponent&) = default;

@@ -483,10 +483,32 @@ namespace Nox
     {
         if (m_Instances.Get(instanceSlot).boneMatrixOffset != boneMatrixOffset)
             m_Instances.Edit(instanceSlot).boneMatrixOffset = boneMatrixOffset;
-        if (boneMatrixOffset != NoBoneMatrices)
+        // Deformed (compute skinning) while it has bones or morph targets.
+        if (boneMatrixOffset != NoBoneMatrices || m_InstanceStates[instanceSlot].Morphs)
             m_SkinnedInstances.insert(instanceSlot);
         else if (m_SkinnedInstances.erase(instanceSlot) != 0)
             SetSkinnedVertexOffset(instanceSlot, shaderio::NoSkinnedVertices); // (no longer skinned: drawn from the mesh's vertices)
+    }
+
+    void GpuScene::SetInstanceMorphs(uint32_t instanceSlot, std::shared_ptr<const MorphTargetInfo> morphs)
+    {
+        if (instanceSlot >= m_InstanceStates.size())
+            return;
+        m_InstanceStates[instanceSlot].Morphs = std::move(morphs);
+        m_InstanceStates[instanceSlot].MorphWeightOffset = shaderio::NoMorphWeights;
+        SetBoneMatrixOffset(instanceSlot, m_Instances.Get(instanceSlot).boneMatrixOffset); // in or out of the deformed set
+    }
+
+    void GpuScene::SetMorphWeightOffset(uint32_t instanceSlot, uint32_t offset)
+    {
+        if (instanceSlot < m_InstanceStates.size())
+            m_InstanceStates[instanceSlot].MorphWeightOffset = offset;
+    }
+
+    void GpuScene::ResetMorphWeightOffsets()
+    {
+        for (uint32_t instanceSlot : m_SkinnedInstances)
+            m_InstanceStates[instanceSlot].MorphWeightOffset = shaderio::NoMorphWeights;
     }
 
     void GpuScene::SetSkinnedVertexOffset(uint32_t instanceSlot, uint32_t skinnedVertexOffset)

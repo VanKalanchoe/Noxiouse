@@ -1107,6 +1107,40 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     - A page read alone, as the streamer reads it, holds the right color block.
     - A red/blue seam is crossed by none of 102,263 triangles over all LOD levels.
     - A v4 file still reads; a v3 file is refused.
+- **Morph targets (I1 M1, built 2026-10-31, UE's morph targets / Blender's shape keys):** glTF primitive targets (POSITION and NORMAL
+  deltas; TANGENT deltas are left out, the tangent follows the base shape).
+  - **Import:** names come from the mesh's `extras.targetNames` and default weights from its `weights`. Sparse accessors, which
+    exporters commonly use for targets, are now read as glTF specifies (`ReadAccessorFloats`).
+  - **The cook:** `MeshData::Morphs` holds dense per-vertex deltas that follow their vertices through every step:
+    - welding (`meshopt_generateVertexRemapMulti` with the delta streams, so vertices with different deltas stay apart);
+    - vertex fetch order (`meshopt_optimizeVertexFetchRemap`);
+    - tangent-seam duplicates (`GenerateMissingTangents` reports their origins);
+    - import scale;
+    - combining: a morphed submesh stays its own group, its deltas transformed like its vertices.
+  - A mesh with morph targets is one level, like skinned geometry: no cluster LOD, since a simplified surface would move wrongly.
+  - **Cooked format v6 (`NSM6` / `NMS6`):** after a one-level mesh's triangles, each target's name, default weight and sparse
+    deltas (vertex, position, normal). v5 and v4 cooks still read, without targets.
+  - **GPU:**
+    - A `GpuMorphRange` per vertex in `m_morphRangeStream` (mirroring the vertex stream, reserved only by morphed meshes) points
+      at that vertex's run of `GpuMorphDelta`s (target, position, normal) in `m_morphDeltaStream`.
+    - `ComputeSkinning.slang` adds the weighted deltas before the bones (Unreal's order), so morph-only meshes go through it too
+      (no bones: identity).
+    - The deformed vertex cache then feeds every raster pass, ray tracing and motion vectors. Forward buckets now join the compute
+      pass, and `Material_PBR_Mesh.slang` reads the cache too, so transparent and unlit surfaces deform as well.
+  - **Weights:**
+    - `MeshComponent::MorphWeights` holds the entity's weights by name; a target it does not name keeps its mesh's default.
+    - They're handed over every frame (`Renderer::SetMeshInstancesMorphWeights`) into a per-frame buffer like the bone matrices; an
+      instance nobody set gets its defaults.
+    - The inspector's Mesh component has a Morph Targets section: one slider per target, plus Reset to Defaults.
+    - They're saved with the scene. Entities that have them use the text path in cooked world-partition cells.
+  - **Offline test (scratchpad `gstest/morphtest`):**
+    - Sparse accessors read correctly, both over zeros and over dense data.
+    - 9,600 unwelded vertices weld to the grid's 1,681, every delta still on its vertex.
+    - Vertices that differ only in their deltas are not welded.
+    - Tangent-seam duplicates report the right origins.
+    - v6 round-trips the deltas exactly; a v5 file still reads.
+    - The GPU's per-vertex runs equal the dense weighted sum for random weights.
+  - **M2 (next):** animated weights (glTF `weights` animation channels into clips, the Animator, sequencer tracks) and a script API.
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much

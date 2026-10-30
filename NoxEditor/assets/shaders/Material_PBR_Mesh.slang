@@ -55,7 +55,16 @@ void meshMain
         float3 localNormal = v.normal;
         float3 localTangent = v.tangent.xyz;
 
-        if(instance.boneMatrixOffset != 0xFFFFFFFF)
+        // The deformed vertex cache (compute skinning: bones and morph targets) as the visibility pass reads it, else direct skinning
+        // (a frame without the cache: right after a shader reload).
+        if (instance.skinnedVertexOffset != NoSkinnedVertices && pushConstant.skinnedVertexReference != 0)
+        {
+            const SkinnedVertex deformed = ((SkinnedVertex*)pushConstant.skinnedVertexReference)[instance.skinnedVertexOffset + localVertexIndex];
+            localPos = deformed.position;
+            localNormal = deformed.normal.xyz;
+            localTangent = deformed.tangent.xyz;
+        }
+        else if(instance.boneMatrixOffset != 0xFFFFFFFF)
         {
             float4x4* boneMatrices = (float4x4*)pushConstant.boneMatrixReference;
             uint baseOffset = instance.boneMatrixOffset;

@@ -160,6 +160,20 @@ namespace Nox
         const glm::dvec3& GetRenderOrigin() const { return m_RenderOrigin; }
         void SetBoneMatrixOffset(uint32_t instanceSlot, uint32_t boneMatrixOffset);
         void SetSkinnedVertexOffset(uint32_t instanceSlot, uint32_t skinnedVertexOffset);
+        // Morph targets: an instance of a submesh with them is deformed (compute skinning) every frame, with the weights set this frame
+        // (an offset into the renderer's morph weights; NoMorphWeights: its targets' default weights).
+        void SetInstanceMorphs(uint32_t instanceSlot, std::shared_ptr<const MorphTargetInfo> morphs);
+        const MorphTargetInfo* GetInstanceMorphs(uint32_t instanceSlot) const
+        {
+            return instanceSlot < m_InstanceStates.size() ? m_InstanceStates[instanceSlot].Morphs.get() : nullptr;
+        }
+        void SetMorphWeightOffset(uint32_t instanceSlot, uint32_t offset);
+        uint32_t GetMorphWeightOffset(uint32_t instanceSlot) const
+        {
+            return instanceSlot < m_InstanceStates.size() ? m_InstanceStates[instanceSlot].MorphWeightOffset : shaderio::NoMorphWeights;
+        }
+        // At the start of a frame: every instance's weights back to its defaults until set again.
+        void ResetMorphWeightOffsets();
         // The instances with bone matrices, by slot: the skinning layout walks these, not every instance.
         const std::set<uint32_t>& GetSkinnedInstances() const { return m_SkinnedInstances; }
         RenderBucket GetBucket(uint32_t instanceSlot) const { return m_InstanceStates[instanceSlot].Bucket; }
@@ -219,6 +233,8 @@ namespace Nox
             uint64_t LastMovedFrame = ~0ull;
             uint64_t BlasAddressOverride = 0;
             uint64_t SkinnedVertexAddress = 0;
+            std::shared_ptr<const MorphTargetInfo> Morphs;
+            uint32_t MorphWeightOffset = shaderio::NoMorphWeights;
             // The world bounding sphere of its mesh's box (center, radius), kept with its transform: the ray tracing culling reads
             // it every frame for every instance (Unreal keeps a primitive's world bounds the same way).
             glm::vec4 WorldSphere{ 0.0f };

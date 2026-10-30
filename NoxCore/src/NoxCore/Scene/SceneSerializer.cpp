@@ -412,6 +412,13 @@ namespace Nox
             out << YAML::Key << "MeshHandle" << YAML::Value << meshComponent.Mesh;
             out << YAML::Key << "SubmeshIndex" << YAML::Value << meshComponent.SubmeshIndex;
             out << YAML::Key << "SubmeshCount" << YAML::Value << meshComponent.SubmeshCount;
+            if (!meshComponent.MorphWeights.empty())
+            {
+                out << YAML::Key << "MorphWeights" << YAML::Value << YAML::BeginMap;
+                for (const auto& [target, weight] : meshComponent.MorphWeights)
+                    out << YAML::Key << target << YAML::Value << weight;
+                out << YAML::EndMap;
+            }
 
             out << YAML::EndMap; // MeshComponent
         }
@@ -1613,6 +1620,11 @@ namespace Nox
                 mc.SubmeshIndex = meshComponent["SubmeshIndex"].as<uint32_t>();
             if (meshComponent["SubmeshCount"])
                 mc.SubmeshCount = meshComponent["SubmeshCount"].as<uint32_t>();
+            if (const YAML::Node weights = meshComponent["MorphWeights"]; weights && weights.IsMap())
+            {
+                for (const auto& weight : weights)
+                    mc.MorphWeights[weight.first.as<std::string>()] = weight.second.as<float>();
+            }
         }
 
         if (auto folderComponent = entity["FolderComponent"])

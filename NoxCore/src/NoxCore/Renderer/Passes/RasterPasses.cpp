@@ -48,11 +48,15 @@ namespace Nox
                 builder.Read(resources.SkinningWorkItems);
                 builder.Write(resources.SkinnedVertices);
             },
-            [this, res = &resources](RGPassContext& context)
+            [this, res = &resources, morphWeights = frameIndex < m_morphWeightBuffers.size() && m_morphWeightBuffers[frameIndex]
+                                                        ? m_morphWeightBuffers[frameIndex]->getDeviceAddress() : 0](RGPassContext& context)
             {
                 shaderio::PushConstantSkinning push{};
                 push.sourceVerticesReference = context.Buffer(res->SkinningSourceVertices).getDeviceAddress();
                 push.sourceSkinReference = m_skinStream.GetDeviceAddress();
+                push.morphRangesReference = morphWeights != 0 ? m_morphRangeStream.GetDeviceAddress() : 0;
+                push.morphDeltasReference = m_morphDeltaStream.GetDeviceAddress();
+                push.morphWeightsReference = morphWeights;
                 push.skinnedVerticesReference = context.Buffer(res->SkinnedVertices).getDeviceAddress();
                 push.boneMatricesReference = context.Buffer(res->SkinningBoneMatrices).getDeviceAddress();
                 push.workItemsReference = context.Buffer(res->SkinningWorkItems).getDeviceAddress();

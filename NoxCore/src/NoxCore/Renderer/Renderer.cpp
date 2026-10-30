@@ -582,6 +582,8 @@ namespace Nox
 
         m_BoneBufferCapacity = sizeof(glm::mat4) * 64;
         createBoneBuffer(m_BoneBufferCapacity);
+        m_morphWeightBufferCapacity = sizeof(float) * 256;
+        createMorphWeightBuffers(m_morphWeightBufferCapacity);
 
         initGeometryBuffers();
 
@@ -3608,6 +3610,8 @@ namespace Nox
         m_vertexStream.Init(*m_device, sizeof(shaderio::PackedVertex), INITIAL_VERTICES, MAX_ELEMENTS);
         m_skinStream.Init(*m_device, sizeof(shaderio::SkinVertex), INITIAL_VERTICES, MAX_ELEMENTS);
         m_colorStream.Init(*m_device, sizeof(uint32_t), INITIAL_VERTICES, MAX_ELEMENTS);
+        m_morphRangeStream.Init(*m_device, sizeof(shaderio::GpuMorphRange), INITIAL_VERTICES, MAX_ELEMENTS);
+        m_morphDeltaStream.Init(*m_device, sizeof(shaderio::GpuMorphDelta), INITIAL_VERTICES, MAX_ELEMENTS);
         m_meshletDrawStream.Init(*m_device, sizeof(shaderio::MeshletDraw), INITIAL_DRAWS, MAX_ELEMENTS);
         m_meshletBoundsStream.Init(*m_device, sizeof(shaderio::MeshletBounds), INITIAL_DRAWS, MAX_ELEMENTS);
         m_meshletVertexStream.Init(*m_device, sizeof(uint32_t), INITIAL_VERTS, MAX_ELEMENTS);
@@ -3668,11 +3672,13 @@ namespace Nox
             uint64_t rtIndices = 0;
             uint64_t skin = 0;
             uint64_t colors = 0;
+            uint64_t morphRanges = 0;
+            uint64_t morphDeltas = 0;
             uint64_t size = 0;
         };
 
         MeshStagingLayout meshStagingLayout(uint64_t vertices, uint64_t draws, uint64_t meshletVertices, uint64_t meshletTriangles, uint64_t rtIndices,
-                                            bool skin, bool colors)
+                                            bool skin, bool colors, bool morphs, uint64_t morphDeltas)
         {
             MeshStagingLayout layout;
             uint64_t cursor = 0;
@@ -3690,6 +3696,8 @@ namespace Nox
             layout.rtIndices = place(sizeof(uint32_t) * rtIndices);
             layout.skin = place(skin ? sizeof(shaderio::SkinVertex) * vertices : 0);
             layout.colors = place(colors ? sizeof(uint32_t) * vertices : 0);
+            layout.morphRanges = place(morphs ? sizeof(shaderio::GpuMorphRange) * vertices : 0);
+            layout.morphDeltas = place(sizeof(shaderio::GpuMorphDelta) * morphDeltas);
             layout.size = cursor;
             return layout;
         }
@@ -3697,7 +3705,8 @@ namespace Nox
         MeshStagingLayout meshStagingLayout(const MeshHandle& handle)
         {
             return meshStagingLayout(handle.vertices.count, handle.meshletDraws.count, handle.meshletVertices.count,
-                                     handle.meshletTriangles.count, handle.rtIndices.count, handle.skin, handle.colors);
+                                     handle.meshletTriangles.count, handle.rtIndices.count, handle.skin, handle.colors, handle.morphRanges,
+                                     handle.morphDeltas.count);
         }
     }
 
@@ -3753,7 +3762,17 @@ namespace Nox
         }
         // Skinned (bone weights, never paged): its influences go to the skin stream at its vertices' range.
         const bool skin = data.Pages.empty() && VertexPacking::HasSkin(data.Vertices);
-        const MeshStagingLayout layout = meshStagingLayout(vertCount, drawCount, meshVertCount, meshTriCount, rtIndexCount, skin, data.VertexColors);
+        // Morph targets (one-level geometry only): per vertex a range of its non-zero deltas over all targets (MeshData keeps them dense).
+        const bool morphs = !data.Morphs.empty() && data.Pages.empty();
+        uint32_t morphDeltaCount = 0;
+        if (morphs)
+        {
+            for (const MorphTarget& morph : data.Morphs)
+                for (uint32_t vertex = 0; vertex < vertCount && vertex < morph.Positions.size(); ++vertex)
+                    morphDeltaCount += (morph.Positions[vertex] != glm::vec3(0.0f) || morph.Normals[vertex] != glm::vec3(0.0f)) ? 1u : 0u;
+        }
+        const MeshStagingLayout layout = meshStagingLayout(vertCount, drawCount, meshVertCount, meshTriCount, rtIndexCount, skin, data.VertexColors,
+                                                           morphs, morphDeltaCount);
         if (layout.size > 0)
         {
             std::optional<StagingSpan> staging = wait ? m_uploads.ReserveStaging(layout.size) : m_uploads.TryReserveStaging(layout.size);
@@ -3787,6 +3806,28 @@ namespace Nox
                 handleStreamGrowth(m_colorStream, std::move(grownFrom));
             if (!upload.Handle.colors)
                 NOX_CORE_ERROR("Renderer: no room for the vertex colors of {} ({} vertices)", data.Name, vertCount);
+        }
+        if (morphs && upload.Handle.vertices.IsValid())
+        {
+            std::unique_ptr<NRI::Buffer> grownFrom;
+            upload.Handle.morphRanges = m_morphRangeStream.Reserve(upload.Handle.vertices.offset, upload.Handle.vertices.count, grownFrom);
+            if (grownFrom)
+                handleStreamGrowth(m_morphRangeStream, std::move(grownFrom));
+            upload.Handle.morphDeltas = allocateGeometry(m_morphDeltaStream, morphDeltaCount);
+            if (upload.Handle.morphRanges && (morphDeltaCount == 0 || upload.Handle.morphDeltas.IsValid()))
+            {
+                auto info = std::make_shared<MorphTargetInfo>();
+                for (const MorphTarget& morph : data.Morphs)
+                {
+                    info->Names.push_back(morph.Name);
+                    info->DefaultWeights.push_back(morph.DefaultWeight);
+                }
+                upload.Handle.morphs = std::move(info);
+            }
+            else
+            {
+                NOX_CORE_ERROR("Renderer: no room for the morph targets of {} ({} deltas)", data.Name, morphDeltaCount);
+            }
         }
         if (streamed)
         {
@@ -3842,6 +3883,30 @@ namespace Nox
                 auto* colors = reinterpret_cast<uint32_t*>(staging + layout.colors);
                 for (uint32_t index = 0; index < handle.vertices.count; ++index)
                     colors[index] = VertexPacking::PackColor(data.Vertices[index].color);
+            }
+            if (handle.morphRanges)
+            {
+                // Vertex by vertex, its deltas over the targets (the stream's range of a vertex is one run, read by compute skinning).
+                auto* ranges = reinterpret_cast<shaderio::GpuMorphRange*>(staging + layout.morphRanges);
+                auto* deltas = reinterpret_cast<shaderio::GpuMorphDelta*>(staging + layout.morphDeltas);
+                uint32_t written = 0;
+                for (uint32_t vertex = 0; vertex < handle.vertices.count; ++vertex)
+                {
+                    shaderio::GpuMorphRange range{ handle.morphDeltas.offset + written, 0 };
+                    for (uint32_t target = 0; target < data.Morphs.size() && handle.morphs; ++target)
+                    {
+                        const MorphTarget& morph = data.Morphs[target];
+                        if (vertex >= morph.Positions.size() || (morph.Positions[vertex] == glm::vec3(0.0f) && morph.Normals[vertex] == glm::vec3(0.0f)))
+                            continue;
+                        shaderio::GpuMorphDelta delta{};
+                        delta.target = target;
+                        delta.position = morph.Positions[vertex];
+                        delta.normal = morph.Normals[vertex];
+                        memcpy(&deltas[written++], &delta, sizeof(delta));
+                        ++range.count;
+                    }
+                    memcpy(&ranges[vertex], &range, sizeof(range));
+                }
             }
         }
         // Streamed geometry: only its root pages' clusters have data yet (they come first); the others' records are written as their
@@ -3952,6 +4017,9 @@ namespace Nox
             copy(m_skinStream, handle.vertices, sizeof(shaderio::SkinVertex), layout.skin);
         if (handle.colors)
             copy(m_colorStream, handle.vertices, sizeof(uint32_t), layout.colors);
+        if (handle.morphRanges)
+            copy(m_morphRangeStream, handle.vertices, sizeof(shaderio::GpuMorphRange), layout.morphRanges);
+        copy(m_morphDeltaStream, handle.morphDeltas, sizeof(shaderio::GpuMorphDelta), layout.morphDeltas);
         copy(m_meshletDrawStream, handle.meshletDraws, sizeof(shaderio::MeshletDraw), layout.draws);
         copy(m_meshletBoundsStream, handle.meshletBounds, sizeof(shaderio::MeshletBounds), layout.bounds);
         copy(m_meshletVertexStream, handle.meshletVertices, sizeof(uint32_t), layout.meshletVertices);
@@ -4114,6 +4182,36 @@ namespace Nox
         memcpy(m_boneBuffersMapped[currentImage], m_boneMatrices.data(), requiredBoneSize);
     }
 
+    void Renderer::createMorphWeightBuffers(uint64_t size)
+    {
+        m_morphWeightBuffers.clear();
+        m_morphWeightBuffersMapped.clear();
+        for (uint32_t slot = 0; slot < MAX_FRAMES_IN_FLIGHT; ++slot)
+        {
+            std::unique_ptr<NRI::Buffer> buffer = m_device->createBuffer(NRI::BufferDesc{ .size = size, .usage = NRI::BufferUsage::Storage });
+            m_morphWeightBuffersMapped.push_back(buffer->map(0, size));
+            m_morphWeightBuffers.push_back(std::move(buffer));
+        }
+    }
+
+    void Renderer::updateMorphWeightBuffer(uint32_t currentImage)
+    {
+        if (m_morphWeights.empty())
+            return;
+        const uint64_t required = sizeof(float) * m_morphWeights.size();
+        if (required > m_morphWeightBufferCapacity)
+        {
+            for (std::unique_ptr<NRI::Buffer>& buffer : m_morphWeightBuffers)
+            {
+                std::scoped_lock lock(m_deferredReleasesMutex);
+                m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(buffer) });
+            }
+            m_morphWeightBufferCapacity = required * 2;
+            createMorphWeightBuffers(m_morphWeightBufferCapacity);
+        }
+        memcpy(m_morphWeightBuffersMapped[currentImage], m_morphWeights.data(), required);
+    }
+
     void Renderer::createBoneBuffer(uint64_t size)
     {
         m_boneBuffers.clear();
@@ -4167,8 +4265,8 @@ namespace Nox
     {
         // The skinned instances only, in slot order (the others keep NoSkinnedVertices: their default, set again when one stops being
         // skinned). Walking the whole draw list for them -- copied and sorted every frame -- cost 1.4 ms with 65k instances.
-        // Offsets are meaningful only for the visibility/G-buffer buckets. Forward unlit/transparent shaders retain
-        // their existing direct skinning path and therefore must not make this compute pass do unused work.
+        // Every drawn bucket reads the deformed vertices (the visibility / G-buffer passes and the forward ones), and the ray tracing
+        // builds the animated BLAS from them.
         const std::set<uint32_t>& skinned = m_gpuScene.GetSkinnedInstances();
         std::vector<SkinningLayoutEntry> layout;
         std::vector<shaderio::SkinningWorkItem> workItems;
@@ -4179,7 +4277,9 @@ namespace Nox
         for (uint32_t instanceSlot : skinned)
         {
             const shaderio::GpuInstance& instance = m_gpuScene.GetInstances().Get(instanceSlot);
-            if (m_gpuScene.GetBucket(instanceSlot) > RenderBucket::MaskDoubleSided) // (forward buckets, or not drawn)
+            // Every drawn bucket: the forward passes read the deformed vertices too (Material_PBR_Mesh.slang), so morph targets show
+            // on transparent and unlit surfaces as well.
+            if (m_gpuScene.GetBucket(instanceSlot) == RenderBucket::Count) // (not drawn)
             {
                 m_gpuScene.SetSkinnedVertexOffset(instanceSlot, shaderio::NoSkinnedVertices);
                 continue;
@@ -4192,12 +4292,24 @@ namespace Nox
                 continue;
             }
 
+            // Its morph weights: set this frame, else its targets' defaults.
+            uint32_t morphWeightOffset = shaderio::NoMorphWeights;
+            if (const MorphTargetInfo* morphs = m_gpuScene.GetInstanceMorphs(instanceSlot))
+            {
+                morphWeightOffset = m_gpuScene.GetMorphWeightOffset(instanceSlot);
+                if (morphWeightOffset == shaderio::NoMorphWeights)
+                {
+                    morphWeightOffset = static_cast<uint32_t>(m_morphWeights.size());
+                    m_morphWeights.insert(m_morphWeights.end(), morphs->DefaultWeights.begin(), morphs->DefaultWeights.end());
+                }
+            }
+
             layout.push_back({ instanceSlot, mesh.verticesOffset, destinationVertexOffset, mesh.vertexCount });
             for (uint32_t firstVertex = 0; firstVertex < mesh.vertexCount; firstVertex += shaderio::SKINNING_VERTICES_PER_WORK_ITEM)
             {
                 const uint32_t vertexCount = std::min(shaderio::SKINNING_VERTICES_PER_WORK_ITEM, mesh.vertexCount - firstVertex);
                 workItems.push_back({ mesh.verticesOffset + firstVertex, destinationVertexOffset + firstVertex,
-                                      vertexCount, instance.boneMatrixOffset });
+                                      vertexCount, instance.boneMatrixOffset, morphWeightOffset });
             }
             m_gpuScene.SetSkinnedVertexOffset(instanceSlot, destinationVertexOffset);
             destinationVertexOffset += mesh.vertexCount;
@@ -5515,6 +5627,9 @@ namespace Nox
                 m_skinStream.Unreserve(mesh->vertices.offset, mesh->vertices.count);
             if (mesh->colors)
                 m_colorStream.Unreserve(mesh->vertices.offset, mesh->vertices.count);
+            if (mesh->morphRanges)
+                m_morphRangeStream.Unreserve(mesh->vertices.offset, mesh->vertices.count);
+            m_morphDeltaStream.Free(mesh->morphDeltas);
             m_vertexStream.Free(mesh->vertices);
             m_meshletDrawStream.Free(mesh->meshletDraws);
             m_meshletBoundsStream.Free(mesh->meshletBounds);
@@ -5547,7 +5662,8 @@ namespace Nox
         // Geometry: the streams hold their capacity (sparse ones: their committed pages), of which the live ranges are in use.
         uint64_t geometryCommitted = 0;
         uint64_t geometryUsed = 0;
-        for (const GeometryArena* stream : { &m_vertexStream, &m_skinStream, &m_colorStream, &m_meshletDrawStream, &m_meshletBoundsStream,
+        for (const GeometryArena* stream : { &m_vertexStream, &m_skinStream, &m_colorStream, &m_morphRangeStream, &m_morphDeltaStream,
+                                             &m_meshletDrawStream, &m_meshletBoundsStream,
                                              &m_meshletVertexStream, &m_meshletTriangleStream, &m_rtIndexStream, &m_geometryPageStream })
         {
             geometryCommitted += stream->GetCapacityBytes();
@@ -5729,6 +5845,7 @@ namespace Nox
         {
             NOX_PROFILE_SCOPE("Bones Upload");
             updateBoneBuffer(frameIndex);
+            updateMorphWeightBuffer(frameIndex);
             updateParticleBuffer(frameIndex);
         }
 
@@ -6906,8 +7023,10 @@ namespace Nox
 
     bool Renderer::BindGpuScene(uint64_t sceneID)
     {
-        // Joint matrices are collected again every frame.
+        // Joint matrices and morph weights are collected again every frame.
         m_boneMatrices.clear();
+        m_morphWeights.clear();
+        m_gpuScene.ResetMorphWeightOffsets();
         // A registry change may resolve texture paths that were missing: re-pack the materials.
         if (RefreshTextureDescriptorMisses())
             m_gpuMaterialsDirty = true;
@@ -6973,6 +7092,22 @@ namespace Nox
             m_gpuScene.SetBoneMatrixOffset(instance, boneMatrixOffset);
     }
 
+    void Renderer::SetMeshInstancesMorphWeights(std::span<const uint32_t> instances, const std::map<std::string, float>& weights)
+    {
+        for (uint32_t instance : instances)
+        {
+            const MorphTargetInfo* morphs = m_gpuScene.GetInstanceMorphs(instance);
+            if (!morphs)
+                continue;
+            m_gpuScene.SetMorphWeightOffset(instance, static_cast<uint32_t>(m_morphWeights.size()));
+            for (size_t target = 0; target < morphs->Names.size(); ++target)
+            {
+                const auto found = weights.find(morphs->Names[target]);
+                m_morphWeights.push_back(found != weights.end() ? found->second : morphs->DefaultWeights[target]);
+            }
+        }
+    }
+
     void Renderer::MarkMaterialChanged(AssetHandle material)
     {
         if (!s_Instance)
@@ -7011,6 +7146,8 @@ namespace Nox
             const uint32_t materialSlot = acquireGpuMaterial(static_cast<uint64_t>(component.Mesh), static_cast<uint32_t>(submesh), mesh.GetMaterial(submesh),
                                                              materialAsset, complete, outMissingAssets);
             outInstances.push_back(m_gpuScene.AddInstance(handle.gpuSceneMesh, materialSlot, world, entityID));
+            if (handle.morphs)
+                m_gpuScene.SetInstanceMorphs(outInstances.back(), handle.morphs);
         }
         return complete;
     }

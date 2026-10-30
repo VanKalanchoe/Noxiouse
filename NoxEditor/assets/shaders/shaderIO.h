@@ -618,7 +618,24 @@ struct SkinningWorkItem
     uint32_t sourceVertexOffset;
     uint32_t destinationVertexOffset;
     uint32_t vertexCount;
-    uint32_t boneMatrixOffset;
+    uint32_t boneMatrixOffset; // NoSkinningBones: not skinned (morph targets only)
+    uint32_t morphWeightOffset; // its weights in the frame's morph weights (one per target of its mesh); NoMorphWeights: none
+};
+STATIC_CONST uint32_t NoSkinningBones = 0xFFFFFFFF;
+STATIC_CONST uint32_t NoMorphWeights = 0xFFFFFFFF;
+
+// Morph targets (§5.8.2): per vertex of a mesh with them, the run of its deltas (PushConstantSkinning::morphRangesReference, mirroring
+// the vertex stream); each delta, the target it belongs to and how far that target moves the vertex at weight 1.
+struct GpuMorphRange
+{
+    uint32_t first; // into the morph delta stream
+    uint32_t count;
+};
+struct GpuMorphDelta
+{
+    uint32_t target;
+    vec3 position;
+    vec3 normal;
 };
 STATIC_CONST uint32_t SKINNING_VERTICES_PER_WORK_ITEM = 256;
 
@@ -1580,6 +1597,9 @@ struct PushConstantSkinning
     uint64_t skinnedVerticesReference;
     uint64_t boneMatricesReference;
     uint64_t workItemsReference;
+    uint64_t morphRangesReference;    // GpuMorphRange, same indices as the vertices
+    uint64_t morphDeltasReference;    // GpuMorphDelta
+    uint64_t morphWeightsReference;   // float, SkinningWorkItem::morphWeightOffset
 };
 
 // Geometry streaming (§5.7.2, Nanite's page streaming). A streamed mesh's clusters live in pages; its records (MeshletDraw,

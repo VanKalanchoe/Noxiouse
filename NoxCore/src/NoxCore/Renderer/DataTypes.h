@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 #include "GeometryArena.h"
@@ -16,6 +17,14 @@ namespace shaderio // Shader IO namespace -- shared layout between C++ and shade
 
 namespace Nox
 {
+    // A submesh's morph targets as the renderer keeps them: their names and default weights (an entity's weights are by name), shared
+    // by every instance of the submesh.
+    struct MorphTargetInfo
+    {
+        std::vector<std::string> Names;
+        std::vector<float> DefaultWeights;
+    };
+
     struct MeshHandle
     {
         GeometryRange vertices;
@@ -33,6 +42,11 @@ namespace Nox
         bool skin = false;
         // Vertex colors (MeshData::VertexColors): in the color stream at the same element range as its vertices.
         bool colors = false;
+        // Morph targets: per vertex a GpuMorphRange in the morph range stream (the vertices' element range), the deltas they point
+        // at in their own range of the morph delta stream; null when it has none.
+        std::shared_ptr<const MorphTargetInfo> morphs;
+        bool morphRanges = false;
+        GeometryRange morphDeltas;
         // Local axis-aligned bounds of the vertices, worked out at upload (not saved): the editor's size readout and measuring use them.
         glm::vec3 boundsMin{ 0.0f };
         glm::vec3 boundsMax{ 0.0f };
@@ -239,6 +253,16 @@ namespace Nox
     };
     static_assert(sizeof(MeshPage) == 72, "MeshPage is written to the cooked file as is");
 
+    // A morph target (glTF's primitive targets; Unreal's morph targets, Blender's shape keys): how far each vertex's position and
+    // normal move at weight 1. The weighted targets are added to the vertices before skinning (ComputeSkinning.slang).
+    struct MorphTarget
+    {
+        std::string Name;
+        float DefaultWeight = 0.0f;       // the glTF mesh's weights: the shape it is drawn with when nothing sets the weight
+        std::vector<glm::vec3> Positions; // per vertex of the mesh (MeshData::Vertices, same order), zero for an unmoved one
+        std::vector<glm::vec3> Normals;
+    };
+
     struct MeshData
     {
         std::string Name;
@@ -259,6 +283,8 @@ namespace Nox
         // Vertex colors (glTF COLOR_0, Vertex::color): kept, in the color stream, only when set; the vertices' colors are ignored
         // (white) otherwise.
         bool VertexColors = false;
+        // Morph targets: a mesh with them is one level (no cluster LOD, as skinned geometry: a simplified surface would move wrongly).
+        std::vector<MorphTarget> Morphs;
         // Set when only the root pages were read: Vertices, MeshletVertices and MeshletTriangles hold just those, the other pages
         // stream from this cooked file (MeshPage::PayloadOffset).
         std::filesystem::path StreamedFrom;

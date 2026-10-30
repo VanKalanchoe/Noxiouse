@@ -1196,6 +1196,7 @@ namespace Nox
         {
             m_MeshRegistrations.clear();
             m_SkinnedMeshEntities.clear();
+            m_MorphedMeshEntities.clear();
             m_PendingMeshEntities.clear();
             for (auto entity : m_Registry.view<MeshComponent>())
                 m_PendingMeshEntities.push_back(entity);
@@ -1247,6 +1248,8 @@ namespace Nox
                     m_renderer->RemoveMeshInstances(found->second.Instances);
                     if (found->second.Skinned)
                         std::erase(m_SkinnedMeshEntities, entity);
+                    if (found->second.Morphed)
+                        std::erase(m_MorphedMeshEntities, entity);
                     m_MeshRegistrations.erase(found);
                 }
 
@@ -1282,6 +1285,9 @@ namespace Nox
                 registration.Skinned = m_Registry.all_of<AnimatorComponent>(entity) && AssetManager::GetAssetType(mesh->Mesh) == AssetType::Mesh;
                 if (registration.Skinned)
                     m_SkinnedMeshEntities.push_back(entity);
+                registration.Morphed = m_renderer->HasMorphTargets(registration.Instances);
+                if (registration.Morphed)
+                    m_MorphedMeshEntities.push_back(entity);
                 m_MeshRegistrations.emplace(entity, std::move(registration));
             }
         }
@@ -1315,6 +1321,13 @@ namespace Nox
             const std::vector<glm::mat4>* bones = m_SkinnedBones[index];
             m_renderer->SetMeshInstancesBones(m_MeshRegistrations.at(m_SkinnedMeshEntities[index]).Instances,
                                               bones ? std::span<const glm::mat4>(*bones) : std::span<const glm::mat4>());
+        }
+
+        // 6. This frame's morph target weights (the entity's, the meshes' defaults for the targets it does not name).
+        for (entt::entity entity : m_MorphedMeshEntities)
+        {
+            if (const MeshComponent* mesh = m_Registry.try_get<MeshComponent>(entity))
+                m_renderer->SetMeshInstancesMorphWeights(m_MeshRegistrations.at(entity).Instances, mesh->MorphWeights);
         }
     }
 

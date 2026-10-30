@@ -93,16 +93,43 @@ namespace Nox
         // meshoptimizer's first step (its README's "Indexing", the start of its demo's pipeline): vertices identical in every byte
         // (exporters split them per face, per primitive or per attribute set) become one, and vertices no triangle uses go. For the
         // cluster LOD a duplicate is also a border the simplifier has to keep, so welding them lets it simplify across.
+        // The morph targets' deltas follow their vertices into a new order (remap: old -> new index, as meshoptimizer's).
+        void remapMorphs(MeshData& data, const unsigned int* remap, size_t oldCount, size_t newCount)
+        {
+            for (MorphTarget& morph : data.Morphs)
+            {
+                std::vector<glm::vec3> positions(newCount), normals(newCount);
+                meshopt_remapVertexBuffer(positions.data(), morph.Positions.data(), oldCount, sizeof(glm::vec3), remap);
+                meshopt_remapVertexBuffer(normals.data(), morph.Normals.data(), oldCount, sizeof(glm::vec3), remap);
+                morph.Positions = std::move(positions);
+                morph.Normals = std::move(normals);
+            }
+        }
+
+        // The vertices in a new order (remap: old -> new index), their morph deltas with them.
+        void remapVertices(MeshData& data, std::vector<uint32_t>& indices, const std::vector<unsigned int>& remap, size_t newCount)
+        {
+            meshopt_remapIndexBuffer(indices.data(), indices.data(), indices.size(), remap.data());
+            std::vector<shaderio::Vertex> vertices(newCount);
+            meshopt_remapVertexBuffer(vertices.data(), data.Vertices.data(), data.Vertices.size(), sizeof(shaderio::Vertex), remap.data());
+            remapMorphs(data, remap.data(), data.Vertices.size(), newCount);
+            data.Vertices = std::move(vertices);
+        }
+
         void indexVertices(MeshData& data, std::vector<uint32_t>& indices)
         {
             s_VerticesBeforeIndexing += data.Vertices.size();
             std::vector<unsigned int> remap(data.Vertices.size());
-            const size_t unique = meshopt_generateVertexRemap(remap.data(), indices.data(), indices.size(), data.Vertices.data(),
-                                                              data.Vertices.size(), sizeof(shaderio::Vertex));
-            meshopt_remapIndexBuffer(indices.data(), indices.data(), indices.size(), remap.data());
-            std::vector<shaderio::Vertex> vertices(unique);
-            meshopt_remapVertexBuffer(vertices.data(), data.Vertices.data(), data.Vertices.size(), sizeof(shaderio::Vertex), remap.data());
-            data.Vertices = std::move(vertices);
+            // Two vertices are one only if their morph deltas are the same too (a lip corner and the cheek point it touches).
+            std::vector<meshopt_Stream> streams = { { data.Vertices.data(), sizeof(shaderio::Vertex), sizeof(shaderio::Vertex) } };
+            for (const MorphTarget& morph : data.Morphs)
+            {
+                streams.push_back({ morph.Positions.data(), sizeof(glm::vec3), sizeof(glm::vec3) });
+                streams.push_back({ morph.Normals.data(), sizeof(glm::vec3), sizeof(glm::vec3) });
+            }
+            const size_t unique = meshopt_generateVertexRemapMulti(remap.data(), indices.data(), indices.size(), data.Vertices.size(),
+                                                                   streams.data(), streams.size());
+            remapVertices(data, indices, remap, unique);
             s_VerticesAfterIndexing += data.Vertices.size();
         }
 
@@ -113,8 +140,11 @@ namespace Nox
             // triangles first use them (meshoptimizer's vertex cache and vertex fetch steps): a cluster's vertices lie close in memory.
             indexVertices(data, indices);
             meshopt_optimizeVertexCache(indices.data(), indices.data(), indices.size(), data.Vertices.size());
-            meshopt_optimizeVertexFetch(data.Vertices.data(), indices.data(), indices.size(), data.Vertices.data(), data.Vertices.size(),
-                                        sizeof(shaderio::Vertex));
+            {
+                std::vector<unsigned int> fetchOrder(data.Vertices.size());
+                const size_t used = meshopt_optimizeVertexFetchRemap(fetchOrder.data(), indices.data(), indices.size(), data.Vertices.size());
+                remapVertices(data, indices, fetchOrder, used);
+            }
 
             std::vector<meshopt_Meshlet> meshlets(meshopt_buildMeshletsBound(indices.size(), shaderio::MAX_VERTICES, shaderio::MAX_PRIMITIVES));
             std::vector<unsigned int> meshletVertices(indices.size());
@@ -576,7 +606,10 @@ namespace Nox
 
             for (uint32_t i = node.FirstSubmesh; i < node.FirstSubmesh + node.SubmeshCount && i < subset.Meshes.size(); ++i)
             {
-                const std::string key = MaterialKey(subset.Materials[i]);
+                // A submesh with morph targets is not merged (its targets are its own): a group of its own, per node using it.
+                const bool morphed = !subset.Meshes[i].Morphs.empty();
+                const std::string key = morphed ? MaterialKey(subset.Materials[i]) + "#morph" + std::to_string(nodeIndex) + "." + std::to_string(i)
+                                                : MaterialKey(subset.Materials[i]);
                 auto found = groupOfMaterial.find(key);
                 if (found == groupOfMaterial.end())
                 {
@@ -589,6 +622,21 @@ namespace Nox
                 Group& group = groups[found->second];
                 // One merged submesh with colors if any part has them (the others' vertices are white).
                 group.Data.VertexColors |= subset.Meshes[i].VertexColors;
+                if (morphed)
+                {
+                    // Its deltas in the merged space, as its vertices: positions by the node's linear part, normals by its normal matrix.
+                    group.Data.Morphs = subset.Meshes[i].Morphs;
+                    if (!skinned)
+                    {
+                        for (MorphTarget& morph : group.Data.Morphs)
+                        {
+                            for (glm::vec3& delta : morph.Positions)
+                                delta = glm::mat3(transform) * delta;
+                            for (glm::vec3& delta : morph.Normals)
+                                delta = normalMatrix * delta;
+                        }
+                    }
+                }
 
                 const uint32_t baseVertex = static_cast<uint32_t>(group.Data.Vertices.size());
                 for (shaderio::Vertex vertex : subset.Meshes[i].Vertices)
@@ -656,20 +704,15 @@ namespace Nox
         return nullptr;
     }
 
-    // An accessor's elements as floats (`components` per element): float, or normalized / plain integer components. Empty when it
-    // cannot be read.
+    // An accessor's elements as floats (`components` per element): float, or normalized / plain integer components, with its sparse
+    // substitutions applied (an accessor without a buffer view is zeros they are written into: what exporters do for morph targets
+    // that move a few vertices). Empty when it cannot be read.
     static std::vector<float> ReadAccessorFloats(const tg3_model& model, int64_t accessorIndex, uint32_t components)
     {
         std::vector<float> values;
         if (accessorIndex < 0 || accessorIndex >= static_cast<int64_t>(model.accessors_count))
             return values;
         const tg3_accessor& accessor = model.accessors[accessorIndex];
-        if (accessor.buffer_view < 0 || accessor.buffer_view >= static_cast<int32_t>(model.buffer_views_count))
-            return values;
-        const tg3_buffer_view& view = model.buffer_views[accessor.buffer_view];
-        if (view.buffer < 0 || view.buffer >= static_cast<int32_t>(model.buffers_count))
-            return values;
-        const tg3_buffer& buffer = model.buffers[view.buffer];
 
         uint32_t componentSize = 0;
         switch (accessor.component_type)
@@ -679,28 +722,72 @@ namespace Nox
         case TG3_COMPONENT_TYPE_SHORT: case TG3_COMPONENT_TYPE_UNSIGNED_SHORT: componentSize = 2; break;
         default: return values;
         }
-        const uint64_t stride = view.byte_stride != 0 ? view.byte_stride : static_cast<uint64_t>(componentSize) * components;
-        const uint64_t start = view.byte_offset + accessor.byte_offset;
-        if (accessor.count == 0 || start + stride * (accessor.count - 1) + componentSize * components > buffer.data.count)
-            return values;
-
-        values.resize(accessor.count * components);
-        for (uint64_t element = 0; element < accessor.count; element++)
+        auto convert = [&](const uint8_t* component)
         {
-            const uint8_t* at = buffer.data.data + start + stride * element;
-            for (uint32_t c = 0; c < components; c++)
+            float value = 0.0f;
+            switch (accessor.component_type)
             {
-                const uint8_t* component = at + componentSize * c;
-                float value = 0.0f;
-                switch (accessor.component_type)
-                {
-                case TG3_COMPONENT_TYPE_FLOAT: std::memcpy(&value, component, 4); break;
-                case TG3_COMPONENT_TYPE_BYTE: value = accessor.normalized ? std::max(static_cast<int8_t>(*component) / 127.0f, -1.0f) : static_cast<int8_t>(*component); break;
-                case TG3_COMPONENT_TYPE_UNSIGNED_BYTE: value = accessor.normalized ? *component / 255.0f : *component; break;
-                case TG3_COMPONENT_TYPE_SHORT: { int16_t v; std::memcpy(&v, component, 2); value = accessor.normalized ? std::max(v / 32767.0f, -1.0f) : v; break; }
-                case TG3_COMPONENT_TYPE_UNSIGNED_SHORT: { uint16_t v; std::memcpy(&v, component, 2); value = accessor.normalized ? v / 65535.0f : v; break; }
-                }
-                values[element * components + c] = value;
+            case TG3_COMPONENT_TYPE_FLOAT: std::memcpy(&value, component, 4); break;
+            case TG3_COMPONENT_TYPE_BYTE: value = accessor.normalized ? std::max(static_cast<int8_t>(*component) / 127.0f, -1.0f) : static_cast<int8_t>(*component); break;
+            case TG3_COMPONENT_TYPE_UNSIGNED_BYTE: value = accessor.normalized ? *component / 255.0f : *component; break;
+            case TG3_COMPONENT_TYPE_SHORT: { int16_t v; std::memcpy(&v, component, 2); value = accessor.normalized ? std::max(v / 32767.0f, -1.0f) : v; break; }
+            case TG3_COMPONENT_TYPE_UNSIGNED_SHORT: { uint16_t v; std::memcpy(&v, component, 2); value = accessor.normalized ? v / 65535.0f : v; break; }
+            }
+            return value;
+        };
+        // A buffer view's bytes from `offset` on, when `bytes` of them exist.
+        auto viewData = [&](int32_t viewIndex, uint64_t offset, uint64_t bytes) -> const uint8_t*
+        {
+            if (viewIndex < 0 || viewIndex >= static_cast<int32_t>(model.buffer_views_count))
+                return nullptr;
+            const tg3_buffer_view& view = model.buffer_views[viewIndex];
+            if (view.buffer < 0 || view.buffer >= static_cast<int32_t>(model.buffers_count))
+                return nullptr;
+            const tg3_buffer& buffer = model.buffers[view.buffer];
+            const uint64_t start = view.byte_offset + offset;
+            return start + bytes <= buffer.data.count ? buffer.data.data + start : nullptr;
+        };
+
+        values.assign(accessor.count * components, 0.0f);
+        if (accessor.count == 0)
+            return values;
+        if (accessor.buffer_view >= 0)
+        {
+            if (accessor.buffer_view >= static_cast<int32_t>(model.buffer_views_count))
+                return {};
+            const uint64_t viewStride = model.buffer_views[accessor.buffer_view].byte_stride;
+            const uint64_t stride = viewStride != 0 ? viewStride : static_cast<uint64_t>(componentSize) * components;
+            const uint8_t* data = viewData(accessor.buffer_view, accessor.byte_offset, stride * (accessor.count - 1) + componentSize * components);
+            if (!data)
+                return {};
+            for (uint64_t element = 0; element < accessor.count; element++)
+                for (uint32_t c = 0; c < components; c++)
+                    values[element * components + c] = convert(data + stride * element + componentSize * c);
+        }
+        else if (!accessor.sparse.is_sparse)
+        {
+            return {};
+        }
+
+        if (accessor.sparse.is_sparse && accessor.sparse.count > 0)
+        {
+            const tg3_accessor_sparse& sparse = accessor.sparse;
+            const uint32_t indexSize = sparse.indices.component_type == TG3_COMPONENT_TYPE_UNSIGNED_BYTE ? 1u
+                                     : sparse.indices.component_type == TG3_COMPONENT_TYPE_UNSIGNED_SHORT ? 2u
+                                     : sparse.indices.component_type == TG3_COMPONENT_TYPE_UNSIGNED_INT ? 4u : 0u;
+            const uint64_t count = static_cast<uint64_t>(sparse.count);
+            const uint8_t* indices = indexSize ? viewData(sparse.indices.buffer_view, sparse.indices.byte_offset, indexSize * count) : nullptr;
+            const uint8_t* substitutes = viewData(sparse.values.buffer_view, sparse.values.byte_offset, uint64_t(componentSize) * components * count);
+            if (!indices || !substitutes)
+                return {};
+            for (uint64_t k = 0; k < count; ++k)
+            {
+                uint32_t element = 0;
+                std::memcpy(&element, indices + indexSize * k, indexSize); // little endian: the low bytes
+                if (element >= accessor.count)
+                    continue;
+                for (uint32_t c = 0; c < components; c++)
+                    values[uint64_t(element) * components + c] = convert(substitutes + (k * components + c) * componentSize);
             }
         }
         return values;
@@ -900,8 +987,13 @@ namespace Nox
         if (std::abs(scale - 1.0f) < 1e-6f)
             return;
         for (MeshData& mesh : subset.Meshes)
+        {
             for (shaderio::Vertex& vertex : mesh.Vertices)
                 vertex.pos *= scale;
+            for (MorphTarget& morph : mesh.Morphs)
+                for (glm::vec3& delta : morph.Positions)
+                    delta *= scale;
+        }
         for (MeshNodeData& node : subset.Nodes)
             node.Translation *= scale;
         // The volume's lengths are the file's, like its vertices.
@@ -958,7 +1050,7 @@ namespace Nox
         s_VerticesAfterIndexing = 0;
         for (size_t i = 0; i < subset.Meshes.size(); ++i)
         {
-            if (subset.Pending[i].Skinned)
+            if (subset.Pending[i].Skinned || !subset.Meshes[i].Morphs.empty())
                 buildMeshlets(subset.Meshes[i], std::move(subset.Pending[i].Indices));
             else
                 buildClusterLod(subset.Meshes[i], std::move(subset.Pending[i].Indices));
@@ -2177,7 +2269,8 @@ namespace Nox
     // scratch per pixel, at runtime, from raw UV/position derivatives, which is what GBufferMaterial.slang used to
     // fall back to for every mesh) is exactly what produced a visible seam in specular response, right where such a
     // mirror seam actually is, on an otherwise perfectly continuous surface.
-    static void GenerateMissingTangents(std::vector<shaderio::Vertex>& vertices, std::vector<uint32_t>& indices)
+    // outOrigins: for every vertex appended (a tangent seam's duplicate), the vertex it copies (its morph deltas are the same).
+    static void GenerateMissingTangents(std::vector<shaderio::Vertex>& vertices, std::vector<uint32_t>& indices, std::vector<uint32_t>* outOrigins = nullptr)
     {
         if (vertices.empty() || indices.empty())
             return;
@@ -2229,6 +2322,8 @@ namespace Nox
                 duplicate.tangent = tangent;
                 target = static_cast<uint32_t>(vertices.size());
                 vertices.push_back(duplicate);
+                if (outOrigins)
+                    outOrigins->push_back(originalIndex);
                 variantsOf[originalIndex].push_back({ tangent, target });
             }
             indices[corner] = target;
@@ -2758,6 +2853,40 @@ namespace Nox
                     primitiveData.Vertices.push_back(vertex);
                 }
 
+                // Morph targets (blend shapes): each target's POSITION and NORMAL deltas (its TANGENT deltas are left out: the tangent
+                // follows the base shape). Their names from the mesh's extras.targetNames (Blender's shape key names), their default
+                // weights from the mesh's weights.
+                const tg3_value* targetNames = mesh.ext.extras ? FindMember(*mesh.ext.extras, "targetNames") : nullptr;
+                for (uint32_t target = 0; target < primitive.targets_count; ++target)
+                {
+                    MorphTarget morph;
+                    if (targetNames && targetNames->type == TG3_VALUE_ARRAY && target < targetNames->array_count &&
+                        targetNames->array_data[target].type == TG3_VALUE_STRING)
+                        morph.Name = std::string(targetNames->array_data[target].string_val.data, targetNames->array_data[target].string_val.len);
+                    if (morph.Name.empty())
+                        morph.Name = "Target " + std::to_string(target);
+                    morph.DefaultWeight = target < mesh.weights_count ? static_cast<float>(mesh.weights[target]) : 0.0f;
+                    morph.Positions.assign(primitiveVertexCount, glm::vec3(0.0f));
+                    morph.Normals.assign(primitiveVertexCount, glm::vec3(0.0f));
+                    for (uint32_t a = 0; a < primitive.target_attribute_counts[target]; ++a)
+                    {
+                        const tg3_str_int_pair& attribute = primitive.targets[target][a];
+                        const std::string_view name(attribute.key.data, attribute.key.len);
+                        std::vector<glm::vec3>* deltas = name == "POSITION" ? &morph.Positions : name == "NORMAL" ? &morph.Normals : nullptr;
+                        if (!deltas)
+                            continue;
+                        const std::vector<float> values = ReadAccessorFloats(model, attribute.value, 3);
+                        if (values.size() < primitiveVertexCount * 3)
+                        {
+                            NOX_CORE_WARN("MeshImporter: morph target {} of {} could not be read ({}), ignored", morph.Name, primitiveData.Name, name);
+                            continue;
+                        }
+                        for (size_t i = 0; i < primitiveVertexCount; ++i)
+                            (*deltas)[i] = glm::vec3(values[i * 3], values[i * 3 + 1], values[i * 3 + 2]);
+                    }
+                    primitiveData.Morphs.push_back(std::move(morph));
+                }
+
                 std::vector<uint32_t> primitiveIndices;
 
                 if (primitive.indices >= 0)
@@ -2815,13 +2944,24 @@ namespace Nox
                 }
 
                 if (!hasTangents && hasTexCoords)
-                    GenerateMissingTangents(primitiveData.Vertices, primitiveIndices);
+                {
+                    std::vector<uint32_t> origins;
+                    GenerateMissingTangents(primitiveData.Vertices, primitiveIndices, &origins);
+                    for (MorphTarget& morph : primitiveData.Morphs)
+                    {
+                        for (uint32_t origin : origins)
+                        {
+                            morph.Positions.push_back(morph.Positions[origin]);
+                            morph.Normals.push_back(morph.Normals[origin]);
+                        }
+                    }
+                }
 
                 // Clusters (§5.7): static geometry gets the cluster LOD DAG; skinned geometry one level (simplified in the bind
                 // pose, it would deform wrongly).
                 if (outPending)
                     outPending->push_back({ std::move(primitiveIndices), hasSkinning });
-                else if (hasSkinning)
+                else if (hasSkinning || !primitiveData.Morphs.empty())
                     buildMeshlets(primitiveData, primitiveIndices);
                 else
                     buildClusterLod(primitiveData, primitiveIndices);
