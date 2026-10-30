@@ -58,6 +58,7 @@ namespace Nox::HLOD
         std::vector<glm::vec3> Normals;
         std::vector<glm::vec4> Tangents; // xyz, w: bitangent sign (bitangent = cross(normal, tangent) * w)
         std::vector<glm::vec2> UVs;
+        std::vector<glm::vec4> Colors; // vertex colors (linear RGBA, multiplying the base color); empty: white
         std::vector<uint32_t> Indices;
         glm::dmat4 Transform{ 1.0 }; // world (double precision: large world coordinates)
         uint32_t Material = 0;

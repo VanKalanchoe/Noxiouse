@@ -12,6 +12,7 @@
         float4 pos : SV_Position;
         float2 uv0;
         float2 uv1;
+        float vertexAlpha; // vertex color alpha: part of the mask's alpha (VisibilityBuffer.slang)
         nointerpolation uint drawID;
     };
 
@@ -75,6 +76,7 @@
             vertices[i].pos = mul(viewProj, mul(modelMatrix, localPos));
             vertices[i].uv0 = vert.uv0;
             vertices[i].uv1 = vert.uv1;
+            vertices[i].vertexAlpha = instance.alphaMode == 1 ? loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors).a : 1.0;
             vertices[i].drawID = sharedPayload.drawID;
         }
 
@@ -100,11 +102,16 @@
         SceneInstances instances = SceneInstances(ubo);
         InstanceData instance = instances[inVert.drawID];
 
-        if (instance.alphaMode == 1 && instance.baseColorTextureIndex != 0xFFFFFFFF)
+        if (instance.alphaMode == 1 && (instance.baseColorTextureIndex != 0xFFFFFFFF || instance.vertexColors != 0))
         {
-            SamplerState samp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-            float2 uv = (instance.baseColorTextureSet == 0) ? inVert.uv0 : inVert.uv1;
-            if ((SampleMaterialTexture(ubo, instance.baseColorTextureIndex, samp, uv).a * instance.baseColorFactor.a) < instance.alphaMaskCutoff)
+            float alpha = instance.baseColorFactor.a * inVert.vertexAlpha;
+            if (instance.baseColorTextureIndex != 0xFFFFFFFF)
+            {
+                SamplerState samp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+                float2 uv = (instance.baseColorTextureSet == 0) ? inVert.uv0 : inVert.uv1;
+                alpha *= SampleMaterialTexture(ubo, instance.baseColorTextureIndex, samp, uv).a;
+            }
+            if (alpha < instance.alphaMaskCutoff)
                 discard;
         }
 

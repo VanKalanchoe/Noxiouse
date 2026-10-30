@@ -31,6 +31,8 @@ namespace Nox
         uint32_t streamingId = UINT32_MAX;
         // Skinned (bone weights): its bone influences in the skin stream, at the same element range as its vertices (§5.8.2).
         bool skin = false;
+        // Vertex colors (MeshData::VertexColors): in the color stream at the same element range as its vertices.
+        bool colors = false;
         // Local axis-aligned bounds of the vertices, worked out at upload (not saved): the editor's size readout and measuring use them.
         glm::vec3 boundsMin{ 0.0f };
         glm::vec3 boundsMax{ 0.0f };
@@ -199,6 +201,7 @@ namespace Nox
     struct MeshPage
     {
         static constexpr uint32_t Root = 1u << 0; // always resident: holds groups nothing coarser replaces
+        static constexpr uint32_t Colors = 1u << 1; // its mesh has vertex colors: a color block follows the vertex block
 
         uint32_t FirstCluster = 0;
         uint32_t ClusterCount = 0;
@@ -217,20 +220,22 @@ namespace Nox
         float LodRadius = 0.0f;
         float LodError = 0.0f;
         uint32_t Flags = 0;
-        // Where its data starts in the cooked file: the vertex block, the cluster vertex lists and the triangles, each padded
-        // to 16 bytes (PayloadBytes). Absolute once read.
+        // Where its data starts in the cooked file: the vertex block (shaderio::PackedVertex), the color block (one packed RGBA8 per
+        // vertex, only with Colors), the cluster vertex lists and the triangles, each padded to 16 bytes (PayloadBytes). Absolute once
+        // read.
         uint64_t PayloadOffset = 0;
 
         bool IsRoot() const { return (Flags & Root) != 0; }
+        bool HasColors() const { return (Flags & Colors) != 0; }
         static uint64_t Align16(uint64_t bytes) { return (bytes + 15) / 16 * 16; }
-        // Block sizes with the vertex format the payload holds: packed (PackedVertex, version 4 cooks and the geometry stream), or
-        // vertexBytes = sizeof(shaderio::Vertex) for a version 3 cook's payload.
-        uint64_t VertexBlockBytes(uint64_t vertexBytes = sizeof(shaderio::PackedVertex)) const { return Align16(vertexBytes * VertexCount); }
+        uint64_t VertexBlockBytes() const { return Align16(sizeof(shaderio::PackedVertex) * uint64_t(VertexCount)); }
+        uint64_t ColorBlockBytes() const { return HasColors() ? Align16(sizeof(uint32_t) * uint64_t(VertexCount)) : 0; }
         uint64_t MeshletVertexBlockBytes() const { return Align16(sizeof(uint32_t) * uint64_t(MeshletVertexCount)); }
-        uint64_t PayloadBytes(uint64_t vertexBytes = sizeof(shaderio::PackedVertex)) const
-        {
-            return VertexBlockBytes(vertexBytes) + MeshletVertexBlockBytes() + Align16(MeshletTriangleCount);
-        }
+        // Where each block starts in the payload.
+        uint64_t ColorBlockOffset() const { return VertexBlockBytes(); }
+        uint64_t MeshletVertexBlockOffset() const { return VertexBlockBytes() + ColorBlockBytes(); }
+        uint64_t TriangleBlockOffset() const { return MeshletVertexBlockOffset() + MeshletVertexBlockBytes(); }
+        uint64_t PayloadBytes() const { return TriangleBlockOffset() + Align16(MeshletTriangleCount); }
     };
     static_assert(sizeof(MeshPage) == 72, "MeshPage is written to the cooked file as is");
 
@@ -251,11 +256,12 @@ namespace Nox
         // Local bounds of all the vertices (paged geometry: the vertex arrays may hold only the root pages).
         glm::vec3 BoundsMin{ 0.0f };
         glm::vec3 BoundsMax{ 0.0f };
+        // Vertex colors (glTF COLOR_0, Vertex::color): kept, in the color stream, only when set; the vertices' colors are ignored
+        // (white) otherwise.
+        bool VertexColors = false;
         // Set when only the root pages were read: Vertices, MeshletVertices and MeshletTriangles hold just those, the other pages
         // stream from this cooked file (MeshPage::PayloadOffset).
         std::filesystem::path StreamedFrom;
-        // Bytes per vertex in that file's page payloads: packed (version 4), or sizeof(shaderio::Vertex) (version 3, packed as read).
-        uint32_t StreamedVertexBytes = sizeof(shaderio::PackedVertex);
 
         bool IsStreamed() const { return !StreamedFrom.empty() && RootPageCount < Pages.size(); }
     };
@@ -353,6 +359,29 @@ namespace Nox
             vertex.boneWeights = glm::vec4(float(skin.boneWeights01 & 0xFFFFu), float(skin.boneWeights01 >> 16), float(skin.boneWeights23 & 0xFFFFu),
                                            float(skin.boneWeights23 >> 16)) / 65535.0f;
         }
+        // Vertex colors as the color stream holds them: RGB sRGB-encoded 8 bits each (precision where the eye sees it, as a texture's),
+        // A linear 8 bits. Mirrors unpackVertexColor in shaderIO.h.
+        inline uint32_t PackColor(const glm::vec4& color)
+        {
+            auto encode = [](float linear)
+            {
+                linear = std::clamp(linear, 0.0f, 1.0f);
+                const float srgb = linear <= 0.0031308f ? linear * 12.92f : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
+                return static_cast<uint32_t>(std::lround(srgb * 255.0f));
+            };
+            const uint32_t alpha = static_cast<uint32_t>(std::lround(std::clamp(color.a, 0.0f, 1.0f) * 255.0f));
+            return encode(color.r) | (encode(color.g) << 8) | (encode(color.b) << 16) | (alpha << 24);
+        }
+        inline glm::vec4 UnpackColor(uint32_t packed)
+        {
+            auto decode = [](uint32_t value)
+            {
+                const float srgb = float(value) / 255.0f;
+                return srgb <= 0.04045f ? srgb / 12.92f : std::pow((srgb + 0.055f) / 1.055f, 2.4f);
+            };
+            return glm::vec4(decode(packed & 0xFFu), decode((packed >> 8) & 0xFFu), decode((packed >> 16) & 0xFFu), float(packed >> 24) / 255.0f);
+        }
+
         // Whether any vertex has a bone influence (a skinned mesh: its influences go to the skin stream).
         inline bool HasSkin(const std::vector<shaderio::Vertex>& vertices)
         {

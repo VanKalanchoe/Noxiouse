@@ -36,7 +36,7 @@ struct VSOutput
     float3 normal;
     float2 uv0;
     float2 uv1;
-    float4 color;
+    float4 color; // vertex color (glTF COLOR_0)
     nointerpolation uint drawID;
     nointerpolation int entityID;
     float4 tangent; // world tangent, w the bitangent handedness (Material_PBR_Mesh.slang)
@@ -71,16 +71,12 @@ bool forwardShadowed(UniformBufferObject* ubo, float3 origin, float3 direction, 
         GpuRayTracingInstance occluder = rtInstances[query.CandidateRayInstanceCustomIndex()];
         if (occluder.alphaMode == 2 || ray_see_through(occluder.transmissionFactor, occluder.alphaMode))
             continue;
-        if (occluder.alphaMode == 1 && occluder.baseColorTextureIndex != 0xFFFFFFFF)
+        if (occluder.alphaMode == 1 && RayHitAlphaTested(occluder))
         {
-            uint* indices = (uint*)occluder.indexBufferAddress;
-            PackedVertex* vertices = (PackedVertex*)occluder.vertexBufferAddress;
             uint primitive = query.CandidatePrimitiveIndex();
             float2 barycentrics = query.CandidateTriangleBarycentrics();
-            float2 uv = vertices[indices[primitive * 3 + 0]].uv0 * (1.0 - barycentrics.x - barycentrics.y) +
-                        vertices[indices[primitive * 3 + 1]].uv0 * barycentrics.x +
-                        vertices[indices[primitive * 3 + 2]].uv0 * barycentrics.y;
-            if (SampleMaterialTextureLevel(ubo, occluder.baseColorTextureIndex, samp, uv, RayAlphaTestLod).a * occluder.baseColorFactor.a < occluder.alphaCutoff)
+            const float2 uv = intersection_uv(occluder, primitive, barycentrics);
+            if (RayHitAlpha(ubo, occluder, samp, uv, RayAlphaTestLod, primitive, barycentrics) * occluder.baseColorFactor.a < occluder.alphaCutoff)
                 continue;
         }
         query.CommitNonOpaqueTriangleHit();
@@ -127,10 +123,11 @@ bool traceRefractionRay(UniformBufferObject* ubo, float3 origin, float3 directio
         GpuRayTracingInstance surface = rtInstances[candidate];
         if (surface.alphaMode == 2 || ray_see_through(surface.transmissionFactor, surface.alphaMode))
             continue;
-        if (surface.alphaMode == 1 && surface.baseColorTextureIndex != 0xFFFFFFFF)
+        if (surface.alphaMode == 1 && RayHitAlphaTested(surface))
         {
             const float2 uv = intersection_uv(surface, query.CandidatePrimitiveIndex(), query.CandidateTriangleBarycentrics());
-            if (SampleMaterialTextureLevel(ubo, surface.baseColorTextureIndex, samp, uv, RayAlphaTestLod).a * surface.baseColorFactor.a < surface.alphaCutoff)
+            if (RayHitAlpha(ubo, surface, samp, uv, RayAlphaTestLod, query.CandidatePrimitiveIndex(), query.CandidateTriangleBarycentrics()) *
+                    surface.baseColorFactor.a < surface.alphaCutoff)
                 continue;
         }
         query.CommitNonOpaqueTriangleHit();
@@ -313,7 +310,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         {
             maskBaseColor = SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias) * instance.baseColorFactor;
         }
-        if (maskBaseColor.a < instance.alphaMaskCutoff)
+        if (maskBaseColor.a * vertIn.color.a < instance.alphaMaskCutoff)
         {
             discard;
         }
@@ -378,6 +375,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         float3 baseColorSpecularPart = specular - (float3(c_MinRoughness) * (1.0 - metallic) * (1.0 / max(metallic, epsilon)));
         baseColor = float4(lerp(baseColorDiffusePart, baseColorSpecularPart, metallic * metallic), diffuseSample.a);
     }
+    baseColor *= vertIn.color; // glTF COLOR_0 (Material_PBR_Mesh.slang's meshMain; white without)
 
     float transmission = instance.transmissionFactor;
     if (instance.transmissionTextureIndex != 0xFFFFFFFF)

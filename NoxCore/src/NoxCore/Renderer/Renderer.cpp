@@ -3607,6 +3607,7 @@ namespace Nox
         constexpr uint32_t MAX_ELEMENTS = 1u << 28;
         m_vertexStream.Init(*m_device, sizeof(shaderio::PackedVertex), INITIAL_VERTICES, MAX_ELEMENTS);
         m_skinStream.Init(*m_device, sizeof(shaderio::SkinVertex), INITIAL_VERTICES, MAX_ELEMENTS);
+        m_colorStream.Init(*m_device, sizeof(uint32_t), INITIAL_VERTICES, MAX_ELEMENTS);
         m_meshletDrawStream.Init(*m_device, sizeof(shaderio::MeshletDraw), INITIAL_DRAWS, MAX_ELEMENTS);
         m_meshletBoundsStream.Init(*m_device, sizeof(shaderio::MeshletBounds), INITIAL_DRAWS, MAX_ELEMENTS);
         m_meshletVertexStream.Init(*m_device, sizeof(uint32_t), INITIAL_VERTS, MAX_ELEMENTS);
@@ -3666,11 +3667,12 @@ namespace Nox
             uint64_t meshletTriangles = 0;
             uint64_t rtIndices = 0;
             uint64_t skin = 0;
+            uint64_t colors = 0;
             uint64_t size = 0;
         };
 
         MeshStagingLayout meshStagingLayout(uint64_t vertices, uint64_t draws, uint64_t meshletVertices, uint64_t meshletTriangles, uint64_t rtIndices,
-                                            bool skin)
+                                            bool skin, bool colors)
         {
             MeshStagingLayout layout;
             uint64_t cursor = 0;
@@ -3687,6 +3689,7 @@ namespace Nox
             layout.meshletTriangles = place(sizeof(uint8_t) * meshletTriangles);
             layout.rtIndices = place(sizeof(uint32_t) * rtIndices);
             layout.skin = place(skin ? sizeof(shaderio::SkinVertex) * vertices : 0);
+            layout.colors = place(colors ? sizeof(uint32_t) * vertices : 0);
             layout.size = cursor;
             return layout;
         }
@@ -3694,7 +3697,7 @@ namespace Nox
         MeshStagingLayout meshStagingLayout(const MeshHandle& handle)
         {
             return meshStagingLayout(handle.vertices.count, handle.meshletDraws.count, handle.meshletVertices.count,
-                                     handle.meshletTriangles.count, handle.rtIndices.count, handle.skin);
+                                     handle.meshletTriangles.count, handle.rtIndices.count, handle.skin, handle.colors);
         }
     }
 
@@ -3750,7 +3753,7 @@ namespace Nox
         }
         // Skinned (bone weights, never paged): its influences go to the skin stream at its vertices' range.
         const bool skin = data.Pages.empty() && VertexPacking::HasSkin(data.Vertices);
-        const MeshStagingLayout layout = meshStagingLayout(vertCount, drawCount, meshVertCount, meshTriCount, rtIndexCount, skin);
+        const MeshStagingLayout layout = meshStagingLayout(vertCount, drawCount, meshVertCount, meshTriCount, rtIndexCount, skin, data.VertexColors);
         if (layout.size > 0)
         {
             std::optional<StagingSpan> staging = wait ? m_uploads.ReserveStaging(layout.size) : m_uploads.TryReserveStaging(layout.size);
@@ -3775,6 +3778,16 @@ namespace Nox
             if (!upload.Handle.skin)
                 NOX_CORE_ERROR("Renderer: no room for the bone influences of {} ({} vertices)", data.Name, vertCount);
         }
+        // Vertex colors go to the color stream at its vertices' range (a streamed mesh: its root pages'; the others reserve as they load).
+        if (data.VertexColors && upload.Handle.vertices.IsValid())
+        {
+            std::unique_ptr<NRI::Buffer> grownFrom;
+            upload.Handle.colors = m_colorStream.Reserve(upload.Handle.vertices.offset, upload.Handle.vertices.count, grownFrom);
+            if (grownFrom)
+                handleStreamGrowth(m_colorStream, std::move(grownFrom));
+            if (!upload.Handle.colors)
+                NOX_CORE_ERROR("Renderer: no room for the vertex colors of {} ({} vertices)", data.Name, vertCount);
+        }
         if (streamed)
         {
             upload.Handle.geometryPages = allocateGeometry(m_geometryPageStream, static_cast<uint32_t>(data.Pages.size()));
@@ -3787,7 +3800,6 @@ namespace Nox
             for (const shaderio::MeshletBounds& bounds : data.Bounds)
                 source->RefinedPages.push_back(bounds.refinedPage);
             source->RootPageCount = data.RootPageCount;
-            source->VertexBytes = data.StreamedVertexBytes;
             upload.Streaming = std::move(source);
         }
         return upload;
@@ -3824,6 +3836,12 @@ namespace Nox
                 auto* skin = reinterpret_cast<shaderio::SkinVertex*>(staging + layout.skin);
                 for (uint32_t index = 0; index < handle.vertices.count; ++index)
                     skin[index] = VertexPacking::PackSkin(data.Vertices[index]);
+            }
+            if (handle.colors)
+            {
+                auto* colors = reinterpret_cast<uint32_t*>(staging + layout.colors);
+                for (uint32_t index = 0; index < handle.vertices.count; ++index)
+                    colors[index] = VertexPacking::PackColor(data.Vertices[index].color);
             }
         }
         // Streamed geometry: only its root pages' clusters have data yet (they come first); the others' records are written as their
@@ -3886,6 +3904,8 @@ namespace Nox
         gpuMesh.triangleCount = handle.rtIndices.count / 3;
         gpuMesh.pageOffset = streamed ? handle.geometryPages.offset : shaderio::NoGeometryRange;
         gpuMesh.pageCount = streamed ? static_cast<uint32_t>(data.Pages.size()) : 0u;
+        // A streamed mesh has colors in every page when it has them at all (its root pages' range may have failed alone: then none).
+        gpuMesh.flags = handle.colors ? shaderio::GpuMeshVertexColors : 0u;
 
         // Local bounds of the (bind pose) vertices; paged geometry has them from its cook (its arrays may hold only the root pages).
         glm::vec3 boundsMin(std::numeric_limits<float>::max());
@@ -3930,6 +3950,8 @@ namespace Nox
         copy(m_vertexStream, handle.vertices, sizeof(shaderio::PackedVertex), layout.vertices);
         if (handle.skin)
             copy(m_skinStream, handle.vertices, sizeof(shaderio::SkinVertex), layout.skin);
+        if (handle.colors)
+            copy(m_colorStream, handle.vertices, sizeof(uint32_t), layout.colors);
         copy(m_meshletDrawStream, handle.meshletDraws, sizeof(shaderio::MeshletDraw), layout.draws);
         copy(m_meshletBoundsStream, handle.meshletBounds, sizeof(shaderio::MeshletBounds), layout.bounds);
         copy(m_meshletVertexStream, handle.meshletVertices, sizeof(uint32_t), layout.meshletVertices);
@@ -5251,7 +5273,7 @@ namespace Nox
     void Renderer::updateGpuScene(uint32_t currentImage)
     {
         refreshGpuMaterials();
-        m_gpuScene.SetGeometryBases(m_vertexStream.GetDeviceAddress(), m_rtIndexStream.GetDeviceAddress());
+        m_gpuScene.SetGeometryBases(m_vertexStream.GetDeviceAddress(), m_rtIndexStream.GetDeviceAddress(), m_colorStream.GetDeviceAddress());
 
         if (m_gpuScene.UpdateDrawList(glm::vec3(uniformData.cameraWorldPos), m_drawList, m_drawBucketStarts))
             m_drawListStale.fill(true);
@@ -5290,6 +5312,7 @@ namespace Nox
 
         uniformData.geometryVerticesReference = m_vertexStream.GetDeviceAddress();
         uniformData.geometrySkinReference = m_skinStream.GetDeviceAddress();
+        uniformData.geometryColorsReference = m_colorStream.GetDeviceAddress();
         uniformData.geometryMeshletDrawsReference = m_meshletDrawStream.GetDeviceAddress();
         uniformData.geometryMeshletBoundsReference = m_meshletBoundsStream.GetDeviceAddress();
         uniformData.geometryMeshletVerticesReference = m_meshletVertexStream.GetDeviceAddress();
@@ -5490,6 +5513,8 @@ namespace Nox
 
             if (mesh->skin)
                 m_skinStream.Unreserve(mesh->vertices.offset, mesh->vertices.count);
+            if (mesh->colors)
+                m_colorStream.Unreserve(mesh->vertices.offset, mesh->vertices.count);
             m_vertexStream.Free(mesh->vertices);
             m_meshletDrawStream.Free(mesh->meshletDraws);
             m_meshletBoundsStream.Free(mesh->meshletBounds);
@@ -5522,7 +5547,7 @@ namespace Nox
         // Geometry: the streams hold their capacity (sparse ones: their committed pages), of which the live ranges are in use.
         uint64_t geometryCommitted = 0;
         uint64_t geometryUsed = 0;
-        for (const GeometryArena* stream : { &m_vertexStream, &m_skinStream, &m_meshletDrawStream, &m_meshletBoundsStream,
+        for (const GeometryArena* stream : { &m_vertexStream, &m_skinStream, &m_colorStream, &m_meshletDrawStream, &m_meshletBoundsStream,
                                              &m_meshletVertexStream, &m_meshletTriangleStream, &m_rtIndexStream, &m_geometryPageStream })
         {
             geometryCommitted += stream->GetCapacityBytes();

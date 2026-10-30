@@ -269,12 +269,8 @@
             }
             else
             {
-                float alpha = lut.baseColorFactor.a;
-                if (lut.baseColorTextureIndex != 0xFFFFFFFF)
-                {
-                    float2 uv = intersection_uv(lut, primIndex, sq.CandidateTriangleBarycentrics());
-                    alpha *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uv, 0).a;
-                }
+                const float2 uv = intersection_uv(lut, primIndex, sq.CandidateTriangleBarycentrics());
+                const float alpha = lut.baseColorFactor.a * RayHitAlpha(ubo, lut, textureSampler, uv, 0, primIndex, sq.CandidateTriangleBarycentrics());
                 if (lut.alphaMode == 2)
                     transmittance *= 1.0 - saturate(alpha);
                 else if (alpha >= lut.alphaCutoff)
@@ -359,16 +355,16 @@
                 uint primIndex = rq.CandidatePrimitiveIndex();
                 GpuRayTracingInstance lut = instanceLUTBuffer[instID];
 
-                if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
+                if (lut.alphaMode == 0 || !RayHitAlphaTested(lut))
                 {
                     rq.CommitNonOpaqueTriangleHit();
                 }
                 else
                 {
                     float2 uvSample = intersection_uv(lut, primIndex, rq.CandidateTriangleBarycentrics());
-                    float4 col = SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uvSample, 0);
-                    if ((lut.alphaMode == 2 && rand(rngState) < saturate(col.a)) ||
-                        (lut.alphaMode != 2 && col.a >= lut.alphaCutoff))
+                    const float alpha = RayHitAlpha(ubo, lut, textureSampler, uvSample, 0, primIndex, rq.CandidateTriangleBarycentrics());
+                    if ((lut.alphaMode == 2 && rand(rngState) < saturate(alpha)) ||
+                        (lut.alphaMode != 2 && alpha >= lut.alphaCutoff))
                     {
                         rq.CommitNonOpaqueTriangleHit();
                     }
@@ -441,6 +437,7 @@
             {
                 albedo *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, hitUV, 0).rgb;
             }
+            albedo *= RayTracingVertexColor(lut, uint3(i0, i1, i2), bary).rgb; // glTF COLOR_0
 
             // Sample Metallic & Roughness
             float metallic = clamp(lut.metallicFactor, 0.0, 1.0);

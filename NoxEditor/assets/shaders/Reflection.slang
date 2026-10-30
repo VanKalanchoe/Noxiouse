@@ -238,16 +238,14 @@ float4 fragMain(
         // wood reflected bright panels where the street or the room should be.
         if (lut.alphaMode == 2 || ray_see_through(lut.transmissionFactor, lut.alphaMode))
             continue;
-        if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
+        if (lut.alphaMode == 0 || !RayHitAlphaTested(lut))
         {
             rq.CommitNonOpaqueTriangleHit();
         }
         else
         {
             float2 hitUV = intersection_uv(lut, primIndex, rq.CandidateTriangleBarycentrics());
-            float4 intersectionColor = SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, hitUV, 0);
-
-            if (intersectionColor.a >= lut.alphaCutoff)
+            if (RayHitAlpha(ubo, lut, textureSampler, hitUV, 0, primIndex, rq.CandidateTriangleBarycentrics()) >= lut.alphaCutoff)
             {
                 rq.CommitNonOpaqueTriangleHit();
             }

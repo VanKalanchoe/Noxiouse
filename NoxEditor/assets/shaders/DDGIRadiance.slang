@@ -148,16 +148,14 @@ float4 fragMain(
 
         GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
 
-        if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
+        if (lut.alphaMode == 0 || !RayHitAlphaTested(lut))
         {
             rq.CommitNonOpaqueTriangleHit();
         }
         else
         {
             float2 hitUV = intersection_uv(lut, primIndex, rq.CandidateTriangleBarycentrics());
-            float4 intersectionColor = SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, hitUV, 0);
-
-            if (intersectionColor.a >= lut.alphaCutoff)
+            if (RayHitAlpha(ubo, lut, textureSampler, hitUV, 0, primIndex, rq.CandidateTriangleBarycentrics()) >= lut.alphaCutoff)
             {
                 rq.CommitNonOpaqueTriangleHit();
             }
@@ -233,6 +231,7 @@ float4 fragMain(
     {
         albedo *= SampleMaterialTextureLevel(ubo, hitLut.baseColorTextureIndex, textureSampler, hitUV, 0).rgb;
     }
+    albedo *= RayTracingVertexColor(hitLut, uint3(i0, i1, i2), committedBary).rgb; // glTF COLOR_0
 
     // Direct light: the strongest lights at the hit exactly, one more for all the others (LightSelection.slang), each behind its
     // shadow ray; point and spot lights at most what they give 10 cm away.

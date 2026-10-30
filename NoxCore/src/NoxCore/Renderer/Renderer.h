@@ -1639,6 +1639,7 @@ namespace Nox
         GeometryArena m_vertexStream; // shaderio::PackedVertex
         // Bone influences (shaderio::SkinVertex) of skinned meshes, at their vertices' own element ranges (GeometryArena::Reserve).
         GeometryArena m_skinStream;
+        GeometryArena m_colorStream; // packed vertex colors, mirroring the vertex stream (only meshes with colors reserve their range)
         GeometryArena m_meshletDrawStream;
         GeometryArena m_meshletBoundsStream;
         GeometryArena m_meshletVertexStream;

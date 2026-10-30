@@ -1078,6 +1078,35 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     `meshopt_optimizeVertexFetch`), so a cluster's vertices lie close in memory.
   - Until then only the per-cluster steps ran (`meshopt_buildMeshlets`, `meshopt_optimizeMeshlet`, bounds, tangents). The log
     reports each cook's welded count.
+- **Vertex colors (I1, built 2026-10-30, UE's `FColorVertexBuffer`):** glTF COLOR_0 (float, normalized byte or short; RGB or RGBA)
+  multiplies the base color, alpha included, as the glTF spec says.
+  - **Where they live:** an optional color stream, `m_colorStream`, one packed RGBA8 per vertex: RGB sRGB-encoded (dark colors
+    0.0007 apart rather than 0.002), A linear. Like the skin stream, it mirrors the vertex stream's element indices, and only a mesh
+    with colors reserves (and with sparse buffers, commits) its range.
+  - **The cook:** `shaderio::Vertex::color` (white by default) and `MeshData::VertexColors`. Combining submeshes keeps colors if any
+    part has them. The simplifier gets the color as attributes 19-22: weighted 0.5 like the normal, and color seams protected.
+  - **Cooked format v5 (`NSM5` / `NMS5`):**
+    - Each mesh gets a flags word.
+    - One-level meshes store their colors after the bone influences.
+    - Pages carry a color block after the vertex block, marked by `MeshPage::Colors`.
+    - Version 4 cooks still read, without colors. Versions 2 and 3 are no longer read: they stored the old 88-byte vertex. With
+      their source present they are cooked again; without it the importer logs that the mesh must be imported again.
+  - **Runtime:** the upload stages the colors. `GeometryStreamer` reserves the color range of each page it loads and copies its color
+    block there. `GpuMesh::flags` (`GpuMeshVertexColors`) tells raster shaders (`InstanceData::vertexColors`) that the mesh has
+    colors; for ray tracing, `GpuRayTracingInstance::colorBufferAddress` is 0 when it has none.
+  - **Shaders:** `loadMeshVertexColor`, `RayTracingVertexColor`, `RayHitAlphaTested` and `RayHitAlpha` (`shaderIO.h`) apply the
+    color in every base color evaluation and every alpha test:
+    - raster: G-buffer resolve, the forward PBR, unlit and transparent passes, and the visibility, selection and stable-depth alpha
+      tests;
+    - ray traced: hit shading for reflections and GI, the screen-probe and DDGI rays, the path tracer, and ReSTIR DI/GI/PT;
+    - shadow and AO rays: their alpha tests.
+  - **HLOD bakes** multiply the colors into the baked base color.
+  - **Tested offline (scratchpad `gstest/colortest`):**
+    - Packing error is at most 0.0043.
+    - v5 round-trips colors on paged and one-level meshes, read whole and streamed.
+    - A page read alone, as the streamer reads it, holds the right color block.
+    - A red/blue seam is crossed by none of 102,263 triangles over all LOD levels.
+    - A v4 file still reads; a v3 file is refused.
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much

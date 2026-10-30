@@ -16,13 +16,9 @@ bool screen_probe_candidate_blocks(UniformBufferObject* ubo, GpuRayTracingInstan
         return false;
     if (instance.alphaMode == 0)
         return true;
-    float alpha = instance.baseColorFactor.a;
-    if (instance.baseColorTextureIndex != 0xFFFFFFFF)
-    {
-        const float2 uv = intersection_uv(instance, primitive, barycentrics);
-        SamplerState linearRepeat = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-        alpha *= SampleMaterialTextureLevel(ubo, instance.baseColorTextureIndex, linearRepeat, uv, RayAlphaTestLod).a;
-    }
+    SamplerState linearRepeat = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+    const float alpha = instance.baseColorFactor.a *
+                        RayHitAlpha(ubo, instance, linearRepeat, intersection_uv(instance, primitive, barycentrics), RayAlphaTestLod, primitive, barycentrics);
     return instance.alphaMode == 1 ? alpha >= instance.alphaCutoff : alpha >= 0.5;
 }
 
@@ -84,6 +80,7 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
     {
         albedo *= SampleMaterialTextureLevel(ubo, hit.baseColorTextureIndex, linearRepeat, uv, lod).rgb;
     }
+    albedo *= RayTracingVertexColor(hit, uint3(i0, i1, i2), barycentrics).rgb; // glTF COLOR_0
     if (hit.workflow < 0.5) // metal reflects, it has no diffuse color
         albedo *= 1.0 - saturate(hit.metallicFactor);
 

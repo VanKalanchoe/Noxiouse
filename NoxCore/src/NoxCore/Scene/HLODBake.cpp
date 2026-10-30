@@ -103,6 +103,7 @@ namespace Nox::HLOD
             glm::vec3 N[3];         // vertex normals, world orientation
             glm::vec4 T[3];         // vertex tangents
             glm::vec2 UV[3];
+            glm::vec4 Color[3] = { glm::vec4(1.0f), glm::vec4(1.0f), glm::vec4(1.0f) }; // vertex colors
             float UVPerUnit = 0.0f; // texture coordinates per world unit (which mip a sample of a given size reads)
             uint32_t Material = 0;
         };
@@ -329,7 +330,7 @@ namespace Nox::HLOD
             const glm::vec4 tangent = tri.T[0] * w + tri.T[1] * u + tri.T[2] * v;
 
             Surface surface;
-            glm::vec4 base = material.BaseColorFactor;
+            glm::vec4 base = material.BaseColorFactor * (tri.Color[0] * w + tri.Color[1] * u + tri.Color[2] * v);
             if (material.BaseColor && material.BaseColor->Valid())
             {
                 const glm::vec4 texel = sample(*material.BaseColor, uv);
@@ -788,6 +789,7 @@ namespace Nox::HLOD
                     else
                         tri.T[c] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
                     tri.UV[c] = vertex < mesh.UVs.size() ? mesh.UVs[vertex] : glm::vec2(0.0f);
+                    tri.Color[c] = vertex < mesh.Colors.size() ? mesh.Colors[vertex] : glm::vec4(1.0f);
                 }
                 if (!std::isfinite(tri.N[0].x) || glm::dot(glm::cross(tri.E1, tri.E2), glm::cross(tri.E1, tri.E2)) <= 0.0f)
                     continue; // degenerate

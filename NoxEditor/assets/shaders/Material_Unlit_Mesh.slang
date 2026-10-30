@@ -10,7 +10,7 @@
         float3 normal;
         float2 uv0;
         float2 uv1;
-        float4 color;
+        float4 color; // vertex color (Material_PBR_Mesh.slang's meshMain)
         nointerpolation uint drawID;
         nointerpolation int entityID;
         float4 tangent; // Material_PBR_Mesh.slang's output, unused here
@@ -72,6 +72,7 @@
         {
             baseColor = instance.baseColorFactor;
         }
+        baseColor *= vertIn.color; // glTF COLOR_0 (white without)
 
         // The fog in front of it (aerial perspective, height fog). Blended (alpha mode 2: the transparent pass, premultiplied):
         // its color by its alpha, and the fog's scattered light only where it covers what is behind (already fogged).

@@ -249,6 +249,7 @@ namespace Bridge
         {
             baseColor *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uv, textureLod(ubo, lut.baseColorTextureIndex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias));
         }
+        baseColor *= RayTracingVertexColor(lut, idx, barycentrics); // glTF COLOR_0
 
         float metallic = lut.metallicFactor;
         float roughness = lut.roughnessFactor;
@@ -367,7 +368,7 @@ namespace Bridge
         float2 uv = v0.uv0 * bary.x + v1.uv0 * bary.y + v2.uv0 * bary.z;
 
         SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-        float alpha = lut.baseColorFactor.a;
+        float alpha = lut.baseColorFactor.a * RayTracingVertexColor(lut, idx, barycentrics).a;
         if (lut.baseColorTextureIndex != 0xFFFFFFFF)
         {
             alpha *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uv, 0.0).a;
@@ -411,7 +412,7 @@ namespace Bridge
         float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
         float2 uv = v0.uv0 * bary.x + v1.uv0 * bary.y + v2.uv0 * bary.z;
         SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-        float alpha = lut.baseColorFactor.a;
+        float alpha = lut.baseColorFactor.a * RayTracingVertexColor(lut, idx, barycentrics).a;
         if (lut.baseColorTextureIndex != 0xFFFFFFFF)
         {
             alpha *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uv, 0.0).a;

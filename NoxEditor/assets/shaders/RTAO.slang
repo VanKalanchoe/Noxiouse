@@ -137,16 +137,14 @@ float trace_occlusion_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 ray
             continue;
         }
 
-        if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
+        if (lut.alphaMode == 0 || !RayHitAlphaTested(lut))
         {
             sq.CommitNonOpaqueTriangleHit();
         }
         else
         {
             float2 uv = intersection_uv(lut, primIndex, sq.CandidateTriangleBarycentrics());
-            float4 intersectionColor = SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uv, RayAlphaTestLod);
-
-            if (intersectionColor.a >= lut.alphaCutoff)
+            if (RayHitAlpha(ubo, lut, textureSampler, uv, RayAlphaTestLod, primIndex, sq.CandidateTriangleBarycentrics()) >= lut.alphaCutoff)
             {
                 sq.CommitNonOpaqueTriangleHit();
             }

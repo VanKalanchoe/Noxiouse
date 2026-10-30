@@ -1025,6 +1025,7 @@ RAB_Surface LoadSurfaceFromRayPayload(RAB_RayPayload rp, float3 rayOrigin, float
     {
         albedo *= SampleMaterialTextureLevel(g_UBO, lut.baseColorTextureIndex, textureSampler, hitUV, 0).rgb;
     }
+    albedo *= RayTracingVertexColor(lut, uint3(i0, i1, i2), rp.barycentrics).rgb; // glTF COLOR_0
 
     float metallic = clamp(lut.metallicFactor, 0.0, 1.0);
     float roughness = clamp(lut.roughnessFactor, kMinRoughness, 1.0);
@@ -1093,15 +1094,14 @@ RAB_RayPayload TraceNextBounce(RayDesc ray)
         uint primIndex = rq.CandidatePrimitiveIndex();
         GpuRayTracingInstance lut = g_InstanceLUT[instID];
 
-        if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
+        if (lut.alphaMode == 0 || !RayHitAlphaTested(lut))
         {
             rq.CommitNonOpaqueTriangleHit();
         }
         else
         {
             float2 uv = intersection_uv_candidate(lut, primIndex, rq.CandidateTriangleBarycentrics());
-            float4 col = SampleMaterialTextureLevel(g_UBO, lut.baseColorTextureIndex, textureSampler, uv, 0);
-            if (col.a >= lut.alphaCutoff)
+            if (RayHitAlpha(g_UBO, lut, textureSampler, uv, 0, primIndex, rq.CandidateTriangleBarycentrics()) >= lut.alphaCutoff)
                 rq.CommitNonOpaqueTriangleHit();
         }
     }

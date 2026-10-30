@@ -231,6 +231,7 @@ struct GpuRayTracingInstance
     uint64_t vertexBufferAddress;
     uint64_t indexBufferAddress;
     uint64_t skinnedVertexBufferAddress; // 0 for rigid instances; local-space SkinnedVertex stream otherwise
+    uint64_t colorBufferAddress;    // packed vertex colors at vertexBufferAddress's indices; 0 when the mesh has none
     mat4 normalMatrix;              // transpose(inverse(world))
     vec4 baseColorFactor;
     vec4 diffuseFactor;             // KHR_materials_pbrSpecularGlossiness
@@ -278,10 +279,11 @@ struct GpuMesh
     // Local bounds (GPU culling)
     vec4 boundsSphere; // xyz: center, w: radius
     vec3 boundsMin;
-    float padding0;
+    uint32_t flags;    // GpuMeshVertexColors
     vec3 boundsMax;
     float padding1;
 };
+STATIC_CONST uint32_t GpuMeshVertexColors = 1u << 0; // its vertices' colors are in the color stream (geometryColorsReference)
 
 // One DDGI cascade (UniformBufferObject::ddgiCascades). Plain 4-byte members (read through the uniforms' pointer). A probe's atlas slot
 // is its grid coordinate in the world modulo the probe counts (toroidal addressing), so a cascade that follows the camera keeps every
@@ -364,6 +366,9 @@ struct UniformBufferObject
     // SkinVertex per vertex of a skinned mesh, at the vertex's own index (the stream mirrors the vertex stream; only skinned meshes'
     // ranges hold data, §5.8.2).
     uint64_t geometrySkinReference;
+    // A packed vertex color (unpackVertexColor) per vertex of a mesh with vertex colors (GpuMesh::flags), mirroring the vertex
+    // stream the same way.
+    uint64_t geometryColorsReference;
 
     // GPU scene tables (GpuInstance, GpuTransform, GpuMaterial, GpuMesh, GpuRayTracingInstance); 0 while the scene is empty
     uint64_t sceneInstancesReference;
@@ -566,6 +571,14 @@ struct Vertex
 
     uvec4 boneIDs;
     vec4 boneWeights;
+
+    // glTF COLOR_0 (linear RGBA), multiplying the material's base color. White where a mesh has none: only meshes with vertex colors
+    // (MeshData::VertexColors) keep them, in the color stream (geometryColorsReference, §5.8.2).
+#ifndef __SLANG__
+    vec4 color = vec4(1.0f);
+#else
+    vec4 color;
+#endif
 };
 
 // The vertex as the geometry stream stores it (§5.8.2, Nanite-style packing): 36 bytes instead of 88. The position stays a float3 at
@@ -771,7 +784,22 @@ Vertex unpackVertex(PackedVertex packed)
                             (packed.tangent & 0x80000000u) != 0 ? -1.0 : 1.0);
     vertex.boneIDs = uint4(0);
     vertex.boneWeights = float4(0.0);
+    vertex.color = float4(1.0);
     return vertex;
+}
+// A vertex color as the color stream holds it (VertexPacking::PackColor): RGB sRGB-encoded, A linear, 8 bits each.
+float4 unpackVertexColor(uint32_t packed)
+{
+    const float3 srgb = float3(float(packed & 0xFFu), float((packed >> 8) & 0xFFu), float((packed >> 16) & 0xFFu)) * (1.0 / 255.0);
+    const float3 linear = select(srgb <= 0.04045, srgb * (1.0 / 12.92), pow((srgb + 0.055) * (1.0 / 1.055), 2.4));
+    return float4(linear, float(packed >> 24) * (1.0 / 255.0));
+}
+// The color of a geometry stream vertex (InstanceData::vertexColors: its mesh has them), white otherwise. It multiplies the base color.
+float4 loadMeshVertexColor(UniformBufferObject* ubo, uint vertexIndex, uint vertexColors)
+{
+    if (vertexColors == 0 || ubo->geometryColorsReference == 0)
+        return float4(1.0);
+    return unpackVertexColor(((uint32_t*)ubo->geometryColorsReference)[vertexIndex]);
 }
 void unpackSkin(SkinVertex skin, inout Vertex vertex)
 {
@@ -786,6 +814,44 @@ Vertex loadMeshVertex(UniformBufferObject* ubo, uint vertexIndex, bool skinned)
     if (skinned && ubo->geometrySkinReference != 0)
         unpackSkin(((SkinVertex*)ubo->geometrySkinReference)[vertexIndex], vertex);
     return vertex;
+}
+
+// A hit triangle's vertex indices into the instance's vertex (and color) addresses: its index buffer's, or the triangle's own three
+// vertices without one.
+uint3 RayTracingTriangle(GpuRayTracingInstance instance, uint primitive)
+{
+    if (instance.indexBufferAddress == 0)
+        return uint3(primitive * 3, primitive * 3 + 1, primitive * 3 + 2);
+    uint32_t* indices = (uint32_t*)instance.indexBufferAddress;
+    return uint3(indices[primitive * 3], indices[primitive * 3 + 1], indices[primitive * 3 + 2]);
+}
+// The vertex color at a hit (barycentrics of corners 1 and 2), white when the mesh has none: it multiplies the base color, as raster's.
+float4 RayTracingVertexColor(GpuRayTracingInstance instance, uint3 corners, float2 barycentrics)
+{
+    if (instance.colorBufferAddress == 0)
+        return float4(1.0);
+    uint32_t* colors = (uint32_t*)instance.colorBufferAddress;
+    return unpackVertexColor(colors[corners.x]) * (1.0 - barycentrics.x - barycentrics.y) + unpackVertexColor(colors[corners.y]) * barycentrics.x +
+           unpackVertexColor(colors[corners.z]) * barycentrics.y;
+}
+// Its alpha, for the alpha tests (the base color's alpha includes it).
+float RayTracingVertexAlpha(GpuRayTracingInstance instance, uint primitive, float2 barycentrics)
+{
+    return instance.colorBufferAddress == 0 ? 1.0 : RayTracingVertexColor(instance, RayTracingTriangle(instance, primitive), barycentrics).a;
+}
+// Whether a hit's base color has an alpha to test: a base color texture or vertex colors (else an alpha-masked surface is solid).
+bool RayHitAlphaTested(GpuRayTracingInstance instance)
+{
+    return instance.baseColorTextureIndex != 0xFFFFFFFF || instance.colorBufferAddress != 0;
+}
+// That alpha at a hit: the texture's (at uv) times the vertex color's (the ray alpha tests' rule; the factor's is the caller's).
+float RayHitAlpha(UniformBufferObject* ubo, GpuRayTracingInstance instance, SamplerState samplerState, float2 uv, float lod, uint primitive,
+                  float2 barycentrics)
+{
+    float alpha = RayTracingVertexAlpha(instance, primitive, barycentrics);
+    if (instance.baseColorTextureIndex != 0xFFFFFFFF)
+        alpha *= SampleMaterialTextureLevel(ubo, instance.baseColorTextureIndex, samplerState, uv, lod).a;
+    return alpha;
 }
 
 // Ray traversal can use compact deformed positions while hit shading retains the base vertex's UVs and material data.
@@ -2718,6 +2784,7 @@ struct InstanceData
     uint32_t boundsOffset;
     uint32_t meshletCount;
     uint32_t pageOffset; // GpuMesh::pageOffset: NoGeometryRange when every cluster is resident
+    uint32_t vertexColors; // the mesh has vertex colors (loadMeshVertexColor)
 
     float workflow;
     float4 diffuseFactor;
@@ -2791,6 +2858,7 @@ struct SceneInstances
             data.boundsOffset = mesh.boundsOffset;
             data.meshletCount = mesh.meshletCount;
             data.pageOffset = mesh.pageOffset;
+            data.vertexColors = mesh.flags & GpuMeshVertexColors;
 
             data.workflow = material.workflow;
             data.diffuseFactor = material.diffuseFactor;

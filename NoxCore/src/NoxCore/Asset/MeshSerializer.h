@@ -298,55 +298,28 @@ namespace Nox
     class MeshSerializer
     {
     private:
-        // Cluster bounds as version 2 files hold them (before the streaming page fields).
-        struct MeshletBoundsV2
-        {
-            glm::vec3 center;
-            float radius;
-            glm::vec3 coneApex;
-            float coneCutoff;
-            glm::vec3 coneAxis;
-            glm::vec3 lodCenter;
-            float lodRadius;
-            float lodError;
-            glm::vec3 parentCenter;
-            float parentRadius;
-            float parentError;
-            uint32_t lodLevel;
-            uint32_t triangleCount;
-        };
-        static_assert(sizeof(MeshletBoundsV2) == 92);
-
-        static void ReadMeshDataV2(std::istream& stream, MeshData& outData)
-        {
-            SerializerUtils::ReadString(stream, outData.Name);
-            SerializerUtils::ReadVector(stream, outData.Vertices);
-            std::vector<MeshletBoundsV2> bounds;
-            SerializerUtils::ReadVector(stream, bounds);
-            SerializerUtils::ReadVector(stream, outData.MeshletVertices);
-            SerializerUtils::ReadVector(stream, outData.MeshletTriangles);
-            SerializerUtils::ReadVector(stream, outData.Draws);
-
-            outData.Bounds.resize(bounds.size());
-            for (size_t index = 0; index < bounds.size(); ++index)
-            {
-                static_assert(offsetof(shaderio::MeshletBounds, page) == sizeof(MeshletBoundsV2));
-                std::memcpy(&outData.Bounds[index], &bounds[index], sizeof(MeshletBoundsV2));
-                outData.Bounds[index].page = 0;
-                outData.Bounds[index].refinedPage = shaderio::ClusterNoPage;
-            }
-        }
-
         // Version 3 (§5.7.2): a mesh's cluster records, page table and dependencies here; the pages' data (MeshPage::PayloadOffset,
         // from the payload section) after everything else, so a page is read on its own as it streams in. Geometry without pages
         // (skinned: one level) keeps its arrays here.
         // Version 4 (§5.8.2): the vertices packed as the geometry stream holds them (shaderio::PackedVertex, read into staging as
         // they are), the bone influences of a skinned mesh in a block of their own (shaderio::SkinVertex).
+        // Version 5: a mesh's flags (vertex colors) after its bounds; with vertex colors, their packed RGBA8 per vertex (VertexPacking::
+        // PackColor) after the bone influences, and in a block of each page (MeshPage::Colors). Version 4 cooks read without colors;
+        // older ones are cooked again from their source (MeshImporter), not read.
+        static constexpr uint32_t MeshFlagVertexColors = 1u << 0;
+
         static std::vector<shaderio::PackedVertex> PackVertices(const shaderio::Vertex* vertices, size_t count)
         {
             std::vector<shaderio::PackedVertex> packed(count);
             for (size_t index = 0; index < count; ++index)
                 packed[index] = VertexPacking::Pack(vertices[index]);
+            return packed;
+        }
+        static std::vector<uint32_t> PackColors(const shaderio::Vertex* vertices, size_t count)
+        {
+            std::vector<uint32_t> packed(count);
+            for (size_t index = 0; index < count; ++index)
+                packed[index] = VertexPacking::PackColor(vertices[index].color);
             return packed;
         }
 
@@ -358,6 +331,7 @@ namespace Nox
             std::vector<MeshPage> pages = data.Pages;
             for (MeshPage& page : pages)
             {
+                page.Flags = data.VertexColors ? page.Flags | MeshPage::Colors : page.Flags & ~MeshPage::Colors;
                 page.PayloadOffset = payloadCursor;
                 payloadCursor += page.PayloadBytes();
             }
@@ -366,6 +340,8 @@ namespace Nox
             stream.write(reinterpret_cast<const char*>(&data.RootPageCount), sizeof(uint32_t));
             stream.write(reinterpret_cast<const char*>(&data.BoundsMin), sizeof(glm::vec3));
             stream.write(reinterpret_cast<const char*>(&data.BoundsMax), sizeof(glm::vec3));
+            const uint32_t flags = data.VertexColors ? MeshFlagVertexColors : 0u;
+            stream.write(reinterpret_cast<const char*>(&flags), sizeof(uint32_t));
             if (data.Pages.empty())
             {
                 SerializerUtils::WriteVector(stream, PackVertices(data.Vertices.data(), data.Vertices.size()));
@@ -377,6 +353,8 @@ namespace Nox
                         skin.push_back(VertexPacking::PackSkin(vertex));
                 }
                 SerializerUtils::WriteVector(stream, skin);
+                if (data.VertexColors)
+                    SerializerUtils::WriteVector(stream, PackColors(data.Vertices.data(), data.Vertices.size()));
                 SerializerUtils::WriteVector(stream, data.MeshletVertices);
                 SerializerUtils::WriteVector(stream, data.MeshletTriangles);
             }
@@ -394,6 +372,11 @@ namespace Nox
             {
                 const std::vector<shaderio::PackedVertex> packed = PackVertices(data.Vertices.data() + page.FirstVertex, page.VertexCount);
                 block(packed.data(), sizeof(shaderio::PackedVertex) * packed.size());
+                if (data.VertexColors)
+                {
+                    const std::vector<uint32_t> colors = PackColors(data.Vertices.data() + page.FirstVertex, page.VertexCount);
+                    block(colors.data(), sizeof(uint32_t) * colors.size());
+                }
                 block(data.MeshletVertices.data() + page.FirstMeshletVertex, sizeof(uint32_t) * uint64_t(page.MeshletVertexCount));
                 block(data.MeshletTriangles.data() + page.FirstMeshletTriangle, page.MeshletTriangleCount);
             }
@@ -409,25 +392,29 @@ namespace Nox
             stream.read(reinterpret_cast<char*>(&outData.RootPageCount), sizeof(uint32_t));
             stream.read(reinterpret_cast<char*>(&outData.BoundsMin), sizeof(glm::vec3));
             stream.read(reinterpret_cast<char*>(&outData.BoundsMax), sizeof(glm::vec3));
+            uint32_t flags = 0;
+            if (version >= 5)
+                stream.read(reinterpret_cast<char*>(&flags), sizeof(uint32_t));
+            outData.VertexColors = (flags & MeshFlagVertexColors) != 0;
+            for (MeshPage& page : outData.Pages)
+                page.Flags = outData.VertexColors ? page.Flags | MeshPage::Colors : page.Flags & ~MeshPage::Colors;
             if (outData.Pages.empty())
             {
-                if (version >= 4)
+                std::vector<shaderio::PackedVertex> packed;
+                std::vector<shaderio::SkinVertex> skin;
+                std::vector<uint32_t> colors;
+                SerializerUtils::ReadVector(stream, packed);
+                SerializerUtils::ReadVector(stream, skin);
+                if (outData.VertexColors)
+                    SerializerUtils::ReadVector(stream, colors);
+                outData.Vertices.resize(packed.size());
+                for (size_t index = 0; index < packed.size(); ++index)
                 {
-                    std::vector<shaderio::PackedVertex> packed;
-                    std::vector<shaderio::SkinVertex> skin;
-                    SerializerUtils::ReadVector(stream, packed);
-                    SerializerUtils::ReadVector(stream, skin);
-                    outData.Vertices.resize(packed.size());
-                    for (size_t index = 0; index < packed.size(); ++index)
-                    {
-                        outData.Vertices[index] = VertexPacking::Unpack(packed[index]);
-                        if (index < skin.size())
-                            VertexPacking::UnpackSkin(skin[index], outData.Vertices[index]);
-                    }
-                }
-                else
-                {
-                    SerializerUtils::ReadVector(stream, outData.Vertices);
+                    outData.Vertices[index] = VertexPacking::Unpack(packed[index]);
+                    if (index < skin.size())
+                        VertexPacking::UnpackSkin(skin[index], outData.Vertices[index]);
+                    if (index < colors.size())
+                        outData.Vertices[index].color = VertexPacking::UnpackColor(colors[index]);
                 }
                 SerializerUtils::ReadVector(stream, outData.MeshletVertices);
                 SerializerUtils::ReadVector(stream, outData.MeshletTriangles);
@@ -436,13 +423,10 @@ namespace Nox
 
         // The pages' data into the arrays: every page, or with streamPages only the root pages (the rest stream from the file
         // as they are wanted, MeshData::StreamedFrom).
-        static bool ReadPagePayloads(const std::filesystem::path& filepath, uint64_t payloadBase, MeshData& data, bool streamPages, uint32_t version)
+        static bool ReadPagePayloads(const std::filesystem::path& filepath, uint64_t payloadBase, MeshData& data, bool streamPages)
         {
             if (data.Pages.empty())
                 return true;
-            // Version 3 payloads hold unpacked vertices; the streamer packs them as it reads (MeshData::StreamedVertexBytes).
-            const uint32_t vertexBytes = version >= 4 ? sizeof(shaderio::PackedVertex) : sizeof(shaderio::Vertex);
-            data.StreamedVertexBytes = vertexBytes;
             for (MeshPage& page : data.Pages)
                 page.PayloadOffset += payloadBase;
 
@@ -456,7 +440,7 @@ namespace Nox
             {
                 // The pages read are contiguous in the file: one read, then each block to its array.
                 const uint64_t begin = data.Pages[0].PayloadOffset;
-                const uint64_t end = last.PayloadOffset + last.PayloadBytes(vertexBytes);
+                const uint64_t end = last.PayloadOffset + last.PayloadBytes();
                 std::vector<uint8_t> payload(end - begin);
                 if (!VFS::ReadRange(filepath, begin, payload.size(), payload.data()))
                     return false;
@@ -464,20 +448,18 @@ namespace Nox
                 {
                     const MeshPage& page = data.Pages[index];
                     const uint8_t* source = payload.data() + (page.PayloadOffset - begin);
-                    if (version >= 4)
+                    const auto* packed = reinterpret_cast<const shaderio::PackedVertex*>(source);
+                    const auto* colors = reinterpret_cast<const uint32_t*>(source + page.ColorBlockOffset());
+                    for (uint32_t vertex = 0; vertex < page.VertexCount; ++vertex)
                     {
-                        const auto* packed = reinterpret_cast<const shaderio::PackedVertex*>(source);
-                        for (uint32_t vertex = 0; vertex < page.VertexCount; ++vertex)
-                            data.Vertices[page.FirstVertex + vertex] = VertexPacking::Unpack(packed[vertex]);
+                        shaderio::Vertex& unpacked = data.Vertices[page.FirstVertex + vertex];
+                        unpacked = VertexPacking::Unpack(packed[vertex]);
+                        if (page.HasColors())
+                            unpacked.color = VertexPacking::UnpackColor(colors[vertex]);
                     }
-                    else
-                    {
-                        std::memcpy(data.Vertices.data() + page.FirstVertex, source, sizeof(shaderio::Vertex) * uint64_t(page.VertexCount));
-                    }
-                    source += page.VertexBlockBytes(vertexBytes);
-                    std::memcpy(data.MeshletVertices.data() + page.FirstMeshletVertex, source, sizeof(uint32_t) * uint64_t(page.MeshletVertexCount));
-                    source += page.MeshletVertexBlockBytes();
-                    std::memcpy(data.MeshletTriangles.data() + page.FirstMeshletTriangle, source, page.MeshletTriangleCount);
+                    std::memcpy(data.MeshletVertices.data() + page.FirstMeshletVertex, source + page.MeshletVertexBlockOffset(),
+                                sizeof(uint32_t) * uint64_t(page.MeshletVertexCount));
+                    std::memcpy(data.MeshletTriangles.data() + page.FirstMeshletTriangle, source + page.TriangleBlockOffset(), page.MeshletTriangleCount);
                 }
             }
             if (streamed)
@@ -769,36 +751,17 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             stream.write(reinterpret_cast<const char*>(&payloadBase), sizeof(uint64_t));
         }
 
-        // magic: this kind's version 4; magicV3: its version 3 (unpacked vertices); legacyMagic: its version 2 (no pages, read as one level
-        // of always resident clusters).
-        static bool DeserializeMeshes(const std::filesystem::path& filepath, const char* magic, const char* magicV3, const char* legacyMagic, bool streamPages,
+        // magic: this kind's version 5; magicV4: its version 4 (no vertex colors). Older cooks are not read (MeshImporter cooks them again).
+        static bool DeserializeMeshes(const std::filesystem::path& filepath, const char* magic, const char* magicV4, bool streamPages,
                                       std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList,
                                       std::vector<LightNodeData>& outLightList, std::vector<MeshNodeData>& outNodeList,
                                       std::vector<CameraNodeData>& outCameraList)
         {
             char header[HeaderBytes] = {};
-            if (!VFS::ReadRange(filepath, 0, 4, header))
+            if (!VFS::ReadRange(filepath, 0, HeaderBytes, header))
                 return false;
-
-            if (std::memcmp(header, legacyMagic, 4) == 0)
-            {
-                std::unique_ptr<std::istream> file = VFS::Open(filepath);
-                if (!file) return false;
-                std::istream& stream = *file;
-                stream.seekg(4);
-                uint32_t count = 0;
-                stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
-                outDataList.resize(count);
-                for (uint32_t i = 0; i < count; i++)
-                    ReadMeshDataV2(stream, outDataList[i]);
-                ReadMaterials(stream, outMaterialList);
-                ReadLights(stream, outLightList);
-                ReadNodes(stream, outNodeList);
-                ReadCameras(stream, outCameraList);
-                return true;
-            }
-            const uint32_t version = std::memcmp(header, magic, 4) == 0 ? 4u : std::memcmp(header, magicV3, 4) == 0 ? 3u : 0u;
-            if (version == 0 || !VFS::ReadRange(filepath, 0, HeaderBytes, header))
+            const uint32_t version = std::memcmp(header, magic, 4) == 0 ? 5u : std::memcmp(header, magicV4, 4) == 0 ? 4u : 0u;
+            if (version == 0)
                 return false;
 
             // Only what comes before the pages' data is read whole (from a pack as from a loose file).
@@ -824,19 +787,21 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
 
             for (MeshData& data : outDataList)
             {
-                if (!ReadPagePayloads(filepath, payloadBase, data, streamPages, version))
+                if (!ReadPagePayloads(filepath, payloadBase, data, streamPages))
                     return false;
             }
             return true;
         }
 
     public:
-        // The cooked format's version (2, 3 or 4) from the magic, 0 when the file is not a mesh.
+        // The cooked format's version (2 to 5) from the magic, 0 when the file is not a mesh.
         static uint32_t ReadVersion(const std::filesystem::path& filepath)
         {
             char magic[4] = {};
             if (!VFS::ReadRange(filepath, 0, 4, magic))
                 return 0;
+            if (std::memcmp(magic, "NSM5", 4) == 0 || std::memcmp(magic, "NMS5", 4) == 0)
+                return 5;
             if (std::memcmp(magic, "NSM4", 4) == 0 || std::memcmp(magic, "NMS4", 4) == 0)
                 return 4;
             if (std::memcmp(magic, "NSM3", 4) == 0 || std::memcmp(magic, "NMS3", 4) == 0)
@@ -856,7 +821,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            SerializeMeshes(filepath, "NSM4", dataList, materialList, lightList, nodeList, cameraList);
+            SerializeMeshes(filepath, "NSM5", dataList, materialList, lightList, nodeList, cameraList);
         }
 
         static bool DeserializeStaticMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
@@ -892,7 +857,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             bool streamPages = false
             )
         {
-            return DeserializeMeshes(filepath, "NSM4", "NSM3", "NSM2", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
+            return DeserializeMeshes(filepath, "NSM5", "NSM4", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
         }
 
         static void SerializeMesh
@@ -905,7 +870,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            SerializeMeshes(filepath, "NMS4", dataList, materialList, lightList, nodeList, cameraList);
+            SerializeMeshes(filepath, "NMS5", dataList, materialList, lightList, nodeList, cameraList);
         }
         
         static bool DeserializeMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
@@ -940,7 +905,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             bool streamPages = false
         )
         {
-            return DeserializeMeshes(filepath, "NMS4", "NMS3", "NMS2", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
+            return DeserializeMeshes(filepath, "NMS5", "NMS4", streamPages, outDataList, outMaterialList, outLightList, outNodeList, outCameraList);
         }
     };
 }

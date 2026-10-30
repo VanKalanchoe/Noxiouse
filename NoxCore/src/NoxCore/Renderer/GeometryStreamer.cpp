@@ -352,13 +352,16 @@ namespace Nox
                     continue;
                 }
 
-                // The three blocks into the streams' current buffers (they may have grown since the ranges were allocated).
+                // The blocks into the streams' current buffers (they may have grown since the ranges were allocated).
                 UploadManager& uploads = m_Renderer.m_uploads;
                 uploads.CopyToBuffer(page.Staging, 0, sizeof(shaderio::PackedVertex) * uint64_t(info.VertexCount),
                                      m_Renderer.m_vertexStream.GetBuffer(), sizeof(shaderio::PackedVertex) * uint64_t(page.Ranges.Vertices.offset));
-                uploads.CopyToBuffer(page.Staging, info.VertexBlockBytes(), sizeof(uint32_t) * uint64_t(info.MeshletVertexCount),
+                if (page.Ranges.Colors)
+                    uploads.CopyToBuffer(page.Staging, info.ColorBlockOffset(), sizeof(uint32_t) * uint64_t(info.VertexCount),
+                                         m_Renderer.m_colorStream.GetBuffer(), sizeof(uint32_t) * uint64_t(page.Ranges.Vertices.offset));
+                uploads.CopyToBuffer(page.Staging, info.MeshletVertexBlockOffset(), sizeof(uint32_t) * uint64_t(info.MeshletVertexCount),
                                      m_Renderer.m_meshletVertexStream.GetBuffer(), sizeof(uint32_t) * uint64_t(page.Ranges.MeshletVertices.offset));
-                uploads.CopyToBuffer(page.Staging, info.VertexBlockBytes() + info.MeshletVertexBlockBytes(), info.MeshletTriangleCount,
+                uploads.CopyToBuffer(page.Staging, info.TriangleBlockOffset(), info.MeshletTriangleCount,
                                      m_Renderer.m_meshletTriangleStream.GetBuffer(), page.Ranges.MeshletTriangles.offset);
                 page.CopiesComplete = uploads.Commit(page.Staging, false);
                 page.Staging = {};
@@ -389,7 +392,14 @@ namespace Nox
         ranges.Vertices = m_Renderer.allocateGeometry(m_Renderer.m_vertexStream, info.VertexCount);
         ranges.MeshletVertices = m_Renderer.allocateGeometry(m_Renderer.m_meshletVertexStream, info.MeshletVertexCount);
         ranges.MeshletTriangles = m_Renderer.allocateGeometry(m_Renderer.m_meshletTriangleStream, info.MeshletTriangleCount);
-        if (!ranges.Vertices.IsValid() || !ranges.MeshletVertices.IsValid() || !ranges.MeshletTriangles.IsValid())
+        if (ranges.Vertices.IsValid() && info.HasColors())
+        {
+            std::unique_ptr<NRI::Buffer> grownFrom;
+            ranges.Colors = m_Renderer.m_colorStream.Reserve(ranges.Vertices.offset, ranges.Vertices.count, grownFrom);
+            if (grownFrom)
+                m_Renderer.handleStreamGrowth(m_Renderer.m_colorStream, std::move(grownFrom));
+        }
+        if (!ranges.Vertices.IsValid() || !ranges.MeshletVertices.IsValid() || !ranges.MeshletTriangles.IsValid() || ranges.Colors != info.HasColors())
         {
             m_Renderer.m_uploads.ReleaseStaging(*staging);
             releaseRanges(ranges, 1);
@@ -400,23 +410,11 @@ namespace Nox
         page.State = PageState::Reading;
         page.Ranges = ranges;
         page.Staging = *staging;
-        // From the cooked file straight into staging (a pack's entry as a loose file's range). A version 3 cook's page holds unpacked
-        // vertices: read aside, its vertices packed into staging, the rest copied after them as the packed layout places it.
+        // From the cooked file straight into staging (a pack's entry as a loose file's range).
         page.Read = JobSystem::Get().AsyncIO("Read Geometry Page", JobPriority::High,
-            [file = source.File, offset = info.PayloadOffset, bytes, info, vertexBytes = source.VertexBytes, destination = staging->data](const CancellationToken&)
+            [file = source.File, offset = info.PayloadOffset, bytes, destination = staging->data](const CancellationToken&)
             {
-                if (vertexBytes == sizeof(shaderio::PackedVertex))
-                    return VFS::ReadRange(file, offset, bytes, destination);
-                std::vector<uint8_t> legacy(info.PayloadBytes(vertexBytes));
-                if (!VFS::ReadRange(file, offset, legacy.size(), legacy.data()))
-                    return false;
-                const auto* vertices = reinterpret_cast<const shaderio::Vertex*>(legacy.data());
-                auto* packed = reinterpret_cast<shaderio::PackedVertex*>(destination);
-                for (uint32_t vertex = 0; vertex < info.VertexCount; ++vertex)
-                    packed[vertex] = VertexPacking::Pack(vertices[vertex]);
-                const uint64_t rest = info.MeshletVertexBlockBytes() + MeshPage::Align16(info.MeshletTriangleCount);
-                std::memcpy(destination + info.VertexBlockBytes(), legacy.data() + info.VertexBlockBytes(vertexBytes), rest);
-                return true;
+                return VFS::ReadRange(file, offset, bytes, destination);
             });
         for (uint32_t dependency = 0; dependency < info.DependencyCount; ++dependency)
             ++mesh.Pages[source.Dependencies[info.FirstDependency + dependency]].Dependents;
@@ -559,6 +557,7 @@ namespace Nox
         released.vertices = ranges.Vertices;
         released.meshletVertices = ranges.MeshletVertices;
         released.meshletTriangles = ranges.MeshletTriangles;
+        released.colors = ranges.Colors;
         std::scoped_lock lock(m_Renderer.m_deferredReleasesMutex);
         m_Renderer.m_deferredReleases.push_back({ frames, released });
     }

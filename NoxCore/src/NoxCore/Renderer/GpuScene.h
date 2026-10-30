@@ -136,7 +136,7 @@ namespace Nox
         void UpdateMeshGeometry(uint32_t meshSlot, uint32_t indicesOffset, uint32_t triangleCount, uint32_t vertexCount);
         // Where the geometry streams live now: the ray tracing records hold absolute addresses (the hit lookups read one
         // flat record), so they are rewritten whenever a stream that grew moved its contents.
-        void SetGeometryBases(uint64_t vertexBase, uint64_t indexBase);
+        void SetGeometryBases(uint64_t vertexBase, uint64_t indexBase, uint64_t colorBase);
         // Instances still using the mesh stop drawing and tracing; their slots are reported so the owner registers them
         // again (with the reloaded mesh).
         void RemoveMesh(uint32_t meshSlot, std::vector<uint32_t>& outDeactivatedInstances);
@@ -251,6 +251,7 @@ namespace Nox
 
         std::vector<uint64_t> m_MeshBlasAddresses;
         uint64_t m_GeometryVertexBase = 0;
+        uint64_t m_GeometryColorBase = 0;
         uint64_t m_GeometryIndexBase = 0;
 
         std::vector<NRI::AccelerationStructureInstance> m_TlasInstances; // by instance slot, inactive: no BLAS reference

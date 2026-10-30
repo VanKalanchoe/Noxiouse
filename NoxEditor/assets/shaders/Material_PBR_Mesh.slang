@@ -7,7 +7,7 @@ struct VSOutput
     float3 normal;
     float2 uv0;
     float2 uv1;
-    float4 color;
+    float4 color; // vertex color (glTF COLOR_0, white without): multiplies the base color
     nointerpolation uint drawID;
 
     nointerpolation int entityID;
@@ -42,13 +42,6 @@ void meshMain
     
     MeshletDraw meshlet = meshletDrawStream[globalMeshletIdx];
     float4x4 viewProj = mul(ubo.proj, ubo.view);
-
-    uint hash = globalMeshletIdx * 747796405u + 2891336453u;
-    float3 color = float3(
-        (hash & 0xFF) / 255.0,
-        ((hash >> 8) & 0xFF) / 255.0,
-        ((hash >> 16) & 0xFF) / 255.0
-    );
 
     SetMeshOutputCounts(meshlet.vertexCount, meshlet.triangleCount);
 
@@ -88,7 +81,7 @@ void meshMain
         vertices[i].normal = worldNormal;
         vertices[i].uv0 = v.uv0;
         vertices[i].uv1 = v.uv1;
-        vertices[i].color = float4(color, 1.0);
+        vertices[i].color = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors); // glTF COLOR_0
         vertices[i].entityID = instance.entityID;
         vertices[i].drawID = sharedPayload.drawID;
         // Along the surface: with the model matrix itself, not the normal matrix (as GBufferMaterial.slang).
@@ -273,7 +266,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         {
             baseColor = instance.baseColorFactor;
         }
-        if(baseColor.a < instance.alphaMaskCutoff)
+        if(baseColor.a * vertIn.color.a < instance.alphaMaskCutoff)
         {
             discard;
         }
@@ -349,7 +342,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
 		baseColor = float4(lerp(baseColorDiffusePart, baseColorSpecularPart, metallic * metallic), diffuse.a);
     }
 
-    //baseColor *= vertIn.color; // im confused do i need this ? i think my colors are not in vertex but in instance basecolorfactor no ?
+    baseColor *= vertIn.color; // glTF COLOR_0
 
     diffuseColor = baseColor.rgb * (float3(1.0) - f0);
 	diffuseColor *= 1.0 - metallic;

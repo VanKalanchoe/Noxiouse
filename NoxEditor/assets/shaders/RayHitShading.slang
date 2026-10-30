@@ -48,12 +48,8 @@ float3 ray_occluder_transmittance(UniformBufferObject* ubo, GpuRayTracingInstanc
         return saturate(lut.transmissionFactor) * saturate(lut.baseColorFactor.rgb) * 0.92;
     if (lut.alphaMode == 0)
         return float3(0.0);
-    float alpha = lut.baseColorFactor.a;
-    if (lut.baseColorTextureIndex != 0xFFFFFFFF)
-    {
-        alpha *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), intersection_uv(lut, primitive, barycentrics),
-                                 RayAlphaTestLod).a;
-    }
+    const float alpha = lut.baseColorFactor.a * RayHitAlpha(ubo, lut, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)),
+                                                         intersection_uv(lut, primitive, barycentrics), RayAlphaTestLod, primitive, barycentrics);
     if (lut.alphaMode == 2)
         return float3(1.0 - saturate(alpha));
     return alpha >= lut.alphaCutoff ? float3(0.0) : float3(1.0);
@@ -192,6 +188,7 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     {
         baseColor *= SampleMaterialTextureLevel(ubo, hitLut.baseColorTextureIndex, textureSampler, hitUV, 0).rgb;
     }
+    baseColor *= RayTracingVertexColor(hitLut, uint3(i0, i1, i2), committedBary).rgb; // glTF COLOR_0
     // Its diffuse and specular parts, as the path tracer splits them (PathTracerBridge.slang: the metallic-roughness inputs, or the
     // specular-glossiness ones converted). A metal is all specular: chrome's diffuse is near black.
     float3 albedo, specularF0;

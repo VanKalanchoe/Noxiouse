@@ -173,14 +173,14 @@ bool trace_visibility_alpha(
         GpuRayTracingInstance sLut = instanceLUTBuffer[sInst];
         if (ray_shadow_passes(sLut))
             continue;
-        if (sLut.alphaMode == 0 || sLut.baseColorTextureIndex == 0xFFFFFFFF)
+        if (sLut.alphaMode == 0 || !RayHitAlphaTested(sLut))
         {
             shadowQuery.CommitNonOpaqueTriangleHit();
         }
         else
         {
             float2 sUV = intersection_uv(sLut, sPrim, shadowQuery.CandidateTriangleBarycentrics());
-            if (SampleMaterialTextureLevel(ubo, sLut.baseColorTextureIndex, textureSampler, sUV, 0).a >= sLut.alphaCutoff)
+            if (RayHitAlpha(ubo, sLut, textureSampler, sUV, 0, sPrim, shadowQuery.CandidateTriangleBarycentrics()) >= sLut.alphaCutoff)
             {
                 shadowQuery.CommitNonOpaqueTriangleHit();
             }
@@ -415,16 +415,14 @@ PSOutput fragMain(
 
         GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
 
-        if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
+        if (lut.alphaMode == 0 || !RayHitAlphaTested(lut))
         {
             rq.CommitNonOpaqueTriangleHit();
         }
         else
         {
             float2 hitUV = intersection_uv(lut, primIndex, rq.CandidateTriangleBarycentrics());
-            float4 intersectionColor = SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, hitUV, 0);
-
-            if (intersectionColor.a >= lut.alphaCutoff)
+            if (RayHitAlpha(ubo, lut, textureSampler, hitUV, 0, primIndex, rq.CandidateTriangleBarycentrics()) >= lut.alphaCutoff)
             {
                 rq.CommitNonOpaqueTriangleHit();
             }
@@ -508,6 +506,7 @@ PSOutput fragMain(
         {
             albedo *= SampleMaterialTextureLevel(ubo, hitLut.baseColorTextureIndex, textureSampler, hitUV, 0).rgb;
         }
+        albedo *= RayTracingVertexColor(hitLut, uint3(i0, i1, i2), committedBary).rgb; // glTF COLOR_0
 
         float3 emissive = hitLut.emissiveFactor.rgb * hitLut.emissiveFactor.a;
 

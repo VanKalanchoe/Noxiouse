@@ -206,14 +206,14 @@ bool trace_visibility(float3 origin, float3 direction, float maxDist)
 
         if (ray_shadow_passes(lut))
             continue;
-        if (lut.alphaMode == 0 || lut.baseColorTextureIndex == 0xFFFFFFFF)
+        if (lut.alphaMode == 0 || !RayHitAlphaTested(lut))
         {
             shadowQuery.CommitNonOpaqueTriangleHit();
         }
         else
         {
             float2 uv = intersection_uv(lut, primIndex, shadowQuery.CandidateTriangleBarycentrics());
-            if (SampleMaterialTextureLevel(g_UBO, lut.baseColorTextureIndex, textureSampler, uv, RayAlphaTestLod).a >= lut.alphaCutoff)
+            if (RayHitAlpha(g_UBO, lut, textureSampler, uv, RayAlphaTestLod, primIndex, shadowQuery.CandidateTriangleBarycentrics()) >= lut.alphaCutoff)
             {
                 shadowQuery.CommitNonOpaqueTriangleHit();
             }

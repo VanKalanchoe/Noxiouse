@@ -665,6 +665,8 @@ namespace Nox
                                         mesh.Normals.push_back(vertex.normal);
                                         mesh.Tangents.push_back(vertex.tangent);
                                         mesh.UVs.push_back(vertex.uv0);
+                                        if (data.VertexColors)
+                                            mesh.Colors.push_back(vertex.color);
                                     }
                                     mesh.Indices.push_back(found->second);
                                 }

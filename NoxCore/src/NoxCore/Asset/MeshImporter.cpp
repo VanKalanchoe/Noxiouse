@@ -234,6 +234,7 @@ namespace Nox
             for (uint32_t pageIndex = 0; pageIndex < pageGroups.size(); ++pageIndex)
             {
                 MeshPage page;
+                page.Flags = data.VertexColors ? MeshPage::Colors : 0u;
                 page.FirstCluster = static_cast<uint32_t>(data.Draws.size());
                 page.FirstVertex = static_cast<uint32_t>(data.Vertices.size());
                 page.FirstMeshletVertex = static_cast<uint32_t>(data.MeshletVertices.size());
@@ -325,11 +326,19 @@ namespace Nox
             // face culled (holes). A stuck group stays at its level instead.
             config.simplify_fallback_sloppy = false;
 
-            // Attribute-aware: the normal (weights as the demo). Permissive simplification may collapse across any
-            // attribute discontinuity it is not told about (clusterlod.h: attribute_protect_mask), so every seam the
-            // shading uses is protected: hard edges (normal, attributes 0-2) and both UV sets (uv0 3-4, uv1 5-6), in
-            // Vertex order from the normal on.
-            const float attributeWeights[3] = { 0.5f, 0.5f, 0.5f };
+            // Attribute-aware: the normal (weights as the demo), and vertex colors where the mesh has them. Permissive
+            // simplification may collapse across any attribute discontinuity it is not told about (clusterlod.h:
+            // attribute_protect_mask), so every seam the shading uses is protected: hard edges (normal, attributes 0-2), both UV
+            // sets (uv0 3-4, uv1 5-6) and color edges (19-22), in Vertex order from the normal on (the tangent and bone fields in
+            // between weigh nothing).
+            constexpr uint32_t ColorAttribute = (offsetof(shaderio::Vertex, color) - offsetof(shaderio::Vertex, normal)) / sizeof(float);
+            static_assert(ColorAttribute == 19);
+            float attributeWeights[ColorAttribute + 4] = { 0.5f, 0.5f, 0.5f };
+            if (data.VertexColors)
+            {
+                for (uint32_t channel = 0; channel < 4; ++channel)
+                    attributeWeights[ColorAttribute + channel] = 0.5f;
+            }
             clodMesh mesh{};
             mesh.indices = indices.data();
             mesh.index_count = indices.size();
@@ -339,8 +348,8 @@ namespace Nox
             mesh.vertex_attributes = &data.Vertices[0].normal.x;
             mesh.vertex_attributes_stride = sizeof(shaderio::Vertex);
             mesh.attribute_weights = attributeWeights;
-            mesh.attribute_count = std::size(attributeWeights);
-            mesh.attribute_protect_mask = 0b1111111;
+            mesh.attribute_count = data.VertexColors ? ColorAttribute + 4 : 3;
+            mesh.attribute_protect_mask = 0b1111111u | (data.VertexColors ? 0b1111u << ColorAttribute : 0u);
 
             std::vector<DagCluster> clusters;
             std::vector<DagGroup> groups;
@@ -403,11 +412,14 @@ namespace Nox
         {
             return std::nullopt;
         }
-        // A cook from before streaming pages (version 2) is cooked again while its source is there, so it streams; without one it is
-        // read as it is (no pages: always resident). Not one mesh of a split import (Do Not Combine): cooking it alone parses the whole
-        // file -- Bistro's 551 meshes parsed it 551 times -- so it loads as it is until the model is reimported (one parse for all).
-        if (!sourceMissing && metadata.MeshSettings.SourceMeshIndex < 0 && MeshSerializer::ReadVersion(cookedPath) < 3)
+        // A cook from before the packed vertex format (version 4) is cooked again while its source is there; without one it cannot
+        // be read (no compatibility readers: the old vertex layout is gone).
+        if (MeshSerializer::ReadVersion(cookedPath) < 4)
+        {
+            if (sourceMissing)
+                NOX_CORE_ERROR("MeshImporter: {} is cooked in an old format and its source is gone: import it again", cookedPath.generic_string());
             return std::nullopt;
+        }
 
         CookedMesh cooked;
         const bool success = metadata.Type == AssetType::StaticMesh
@@ -575,6 +587,8 @@ namespace Nox
                     created.Geometry.Skinned = skinned;
                 }
                 Group& group = groups[found->second];
+                // One merged submesh with colors if any part has them (the others' vertices are white).
+                group.Data.VertexColors |= subset.Meshes[i].VertexColors;
 
                 const uint32_t baseVertex = static_cast<uint32_t>(group.Data.Vertices.size());
                 for (shaderio::Vertex vertex : subset.Meshes[i].Vertices)
@@ -2585,6 +2599,21 @@ namespace Nox
                 size_t primitiveVertexCount = posAccessor.count;
                 primitiveData.Vertices.reserve(primitiveVertexCount);
 
+                // Vertex colors (COLOR_0: float, or normalized unsigned byte / short; RGB or RGBA), multiplying the base color.
+                std::vector<float> colors;
+                uint32_t colorComponents = 0;
+                if (const int32_t colorAttribute = FindAttribute(primitive, "COLOR_0"); colorAttribute != -1)
+                {
+                    colorComponents = model.accessors[colorAttribute].type == TG3_TYPE_VEC4 ? 4u : 3u;
+                    colors = ReadAccessorFloats(model, colorAttribute, colorComponents);
+                    if (colors.size() < primitiveVertexCount * colorComponents)
+                    {
+                        NOX_CORE_WARN("MeshImporter: COLOR_0 of {} could not be read, ignored", primitiveData.Name);
+                        colors.clear();
+                    }
+                }
+                primitiveData.VertexColors = !colors.empty();
+
                 for (size_t i = 0; i < primitiveVertexCount; i++)
                 {
                     shaderio::Vertex vertex{};
@@ -2718,6 +2747,12 @@ namespace Nox
                     {
                         vertex.boneIDs = glm::uvec4(0);
                         vertex.boneWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+                    }
+
+                    if (!colors.empty())
+                    {
+                        const float* color = colors.data() + i * colorComponents;
+                        vertex.color = glm::vec4(color[0], color[1], color[2], colorComponents == 4 ? color[3] : 1.0f);
                     }
 
                     primitiveData.Vertices.push_back(vertex);

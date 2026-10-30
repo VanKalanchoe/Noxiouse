@@ -513,6 +513,14 @@
             metallic  = clamp(metallic, 0.0, 1.0);
         }
 
+        // Vertex colors (glTF COLOR_0) multiply the base color, in either workflow.
+        if (instance.vertexColors != 0)
+        {
+            baseColor *= loadMeshVertexColor(ubo, meshlet.globalVertexOffset + vIdx0, 1u) * w0 +
+                         loadMeshVertexColor(ubo, meshlet.globalVertexOffset + vIdx1, 1u) * w1 +
+                         loadMeshVertexColor(ubo, meshlet.globalVertexOffset + vIdx2, 1u) * w2;
+        }
+
         // 3. NORMAL MAPPING (stored per-vertex tangent, not a per-pixel analytic reconstruction)
         float3 finalNormal = geomNormal;
         float3 rawNormalTex = geomNormal * 0.5 + 0.5; // fallback matching Sascha's normalize(inNormal)

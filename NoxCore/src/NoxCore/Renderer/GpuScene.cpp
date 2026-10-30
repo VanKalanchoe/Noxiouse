@@ -259,12 +259,13 @@ namespace Nox
         return bytes;
     }
 
-    void GpuScene::SetGeometryBases(uint64_t vertexBase, uint64_t indexBase)
+    void GpuScene::SetGeometryBases(uint64_t vertexBase, uint64_t indexBase, uint64_t colorBase)
     {
-        if (m_GeometryVertexBase == vertexBase && m_GeometryIndexBase == indexBase)
+        if (m_GeometryVertexBase == vertexBase && m_GeometryIndexBase == indexBase && m_GeometryColorBase == colorBase)
             return;
         m_GeometryVertexBase = vertexBase;
         m_GeometryIndexBase = indexBase;
+        m_GeometryColorBase = colorBase;
 
         for (uint32_t instanceSlot = 0; instanceSlot < static_cast<uint32_t>(m_InstanceStates.size()); ++instanceSlot)
         {
@@ -788,6 +789,9 @@ namespace Nox
                                         ? 0
                                         : m_GeometryIndexBase + uint64_t(mesh.indicesOffset) * sizeof(uint32_t);
         record.skinnedVertexBufferAddress = m_InstanceStates[instanceSlot].SkinnedVertexAddress;
+        record.colorBufferAddress = (mesh.flags & shaderio::GpuMeshVertexColors) != 0
+                                        ? m_GeometryColorBase + uint64_t(mesh.verticesOffset) * sizeof(uint32_t)
+                                        : 0;
         record.normalMatrix = m_Transforms.Get(instanceSlot).normal;
         record.baseColorFactor = material.baseColorFactor;
         record.diffuseFactor = material.diffuseFactor;
