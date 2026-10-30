@@ -55,6 +55,17 @@ default; the RT one stays the default otherwise (RT shadows may well win). Both 
 | # | Item |
 |---|---|
 
+### Materials (decided 2026-10-31: OpenPBR as the reference model, not the runtime shader -- Unreal's way)
+
+Nox keeps its own material model (glTF PBR and its extensions) and does not run MaterialX graphs or the full OpenPBR shader at run
+time. Where glTF leaves room, a lobe follows OpenPBR's definition, so materials authored for OpenPBR / Standard Surface convert
+faithfully. Each lobe costs nothing for materials that do not use it.
+
+| # | Item |
+|---|---|
+| M1 | **The missing material lobes**, in the raster / hybrid shading and the path tracer, imported from glTF: `KHR_materials_clearcoat` (coat: car paint, varnish), `KHR_materials_sheen` (fuzz: cloth, velvet), `KHR_materials_specular` (specular weight / color), `KHR_materials_iridescence` (thin film), `KHR_materials_anisotropy` (brushed metal, hair), `KHR_materials_dispersion` (prism colors). Material editor fields, .nmat and cooked material data |
+| M2 | **MaterialX (.mtlx) material importer** (Unreal's Interchange MaterialX): a .mtlx file is a material only (no meshes) -- e.g. AMD's MaterialX library (Apache 2.0: keep attribution). Reads the surface shader (Standard Surface or OpenPBR Surface) and maps it onto a .nmat plus its textures (M1's lobes where they apply); procedural node graphs (noise, mixing) are baked to textures. Assigned to glTF meshes like any material. After M1 |
+
 ### Characters and animation (plan: `Animation_Graph_Architecture_Plan_2026.md`)
 
 | # | Item |
