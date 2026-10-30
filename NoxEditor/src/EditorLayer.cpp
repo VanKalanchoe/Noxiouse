@@ -1023,9 +1023,15 @@ namespace Nox
             if (stats.WantedNotResident > 0)
                 ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Pool too small: %u tiles wanted have no room (coarser mips stand in)",
                                    stats.WantedNotResident);
-            int tilesPerSide = static_cast<int>(streamer.GetPoolTilesPerSide());
-            if (ImGui::SliderInt("Pool Tiles Per Side", &tilesPerSide, 4, static_cast<int>(VirtualTextureStreamer::MaxPoolTilesPerSide)))
-                streamer.SetPoolTilesPerSide(static_cast<uint32_t>(tilesPerSide));
+            // Applied when the slider is let go: every change makes the pools again (after the GPU is idle), not every step of a drag.
+            static int s_PoolTilesPerSide = 0;
+            static bool s_PoolTilesDragging = false;
+            if (!s_PoolTilesDragging)
+                s_PoolTilesPerSide = static_cast<int>(streamer.GetPoolTilesPerSide());
+            ImGui::SliderInt("Pool Tiles Per Side", &s_PoolTilesPerSide, 4, static_cast<int>(VirtualTextureStreamer::MaxPoolTilesPerSide));
+            s_PoolTilesDragging = ImGui::IsItemActive();
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                streamer.SetPoolTilesPerSide(static_cast<uint32_t>(s_PoolTilesPerSide));
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Each format's pool holds this many tiles squared (136x136 texels each). Changing it makes the pools again:\n"
                                   "every tile streams in again.");
