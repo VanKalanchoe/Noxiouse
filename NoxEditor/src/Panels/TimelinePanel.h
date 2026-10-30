@@ -46,6 +46,7 @@ namespace Nox
         void DrawToolbar(Timeline& timeline, Scene* scene, Entity player);
         void DrawTracks(Timeline& timeline, Scene* scene, Entity player);
         void DrawSelectedKey(Timeline& timeline);
+        void DrawSubTimelineTarget(Timeline& timeline, TimelineTrack& track);
         void DrawAddTrack(Timeline& timeline, Scene& scene, Entity player);
         // The selected track's values as curves (a line per component) under the lanes; keys dragged up / down change their value.
         void DrawCurves(Timeline& timeline);

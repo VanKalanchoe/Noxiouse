@@ -74,12 +74,14 @@ namespace Nox
             {
                 out << YAML::Flow << YAML::BeginMap;
                 out << YAML::Key << "Time" << YAML::Value << key.Time;
-                if (TimelineEvaluation::HasNamedKeys(track.Property))
+                // Event and Camera Cut keys are a name; the rest a value (a Sub-Timeline's section too, which is not interpolated).
+                if (track.Property == TimelineProperty::Event || track.Property == TimelineProperty::CameraCut)
                     out << YAML::Key << "Event" << YAML::Value << key.Event;
                 else
                 {
                     out << YAML::Key << "Value" << YAML::Value << YAML::Flow << YAML::BeginSeq << key.Value.x << key.Value.y << key.Value.z << key.Value.w << YAML::EndSeq;
-                    out << YAML::Key << "Interpolation" << YAML::Value << InterpolationName(key.Interpolation);
+                    if (!TimelineEvaluation::HasNamedKeys(track.Property))
+                        out << YAML::Key << "Interpolation" << YAML::Value << InterpolationName(key.Interpolation);
                 }
                 out << YAML::EndMap;
             }

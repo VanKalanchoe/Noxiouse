@@ -382,6 +382,7 @@ namespace Nox
                     propertyItem(TimelineProperty::Event);
                     propertyItem(TimelineProperty::CameraCut);
                 }
+                propertyItem(TimelineProperty::SubTimeline); // the timeline to play is dropped on the track (details below)
                 ImGui::EndMenu();
             }
             if (entity.HasComponent<RelationshipComponent>())
@@ -458,8 +459,15 @@ namespace Nox
             ImGui::SetItemTooltip("Muted tracks do not play");
             ImGui::SameLine();
             const std::string targetName = track.Target.empty() ? (player ? player.GetName() : std::string("(player)")) : track.Target;
+            std::string parameter = track.Parameter;
+            if (track.Property == TimelineProperty::SubTimeline)
+            {
+                const AssetHandle child = static_cast<AssetHandle>(std::strtoull(track.Parameter.c_str(), nullptr, 10));
+                parameter = child != 0 && AssetManager::IsAssetHandleValid(child)
+                    ? AssetManager::GetMetadata(child).FilePath.stem().string() : std::string("(drop a timeline)");
+            }
             const std::string name = targetName + " : " + TimelineEvaluation::GetPropertyName(track.Property) +
-                                     (track.Parameter.empty() ? std::string() : " " + track.Parameter);
+                                     (parameter.empty() ? std::string() : " " + parameter);
             ImGui::PushStyleColor(ImGuiCol_Text, trackSelected ? ImVec4(1.0f, 0.8f, 0.4f, 1.0f) : ImGui::GetStyle().Colors[ImGuiCol_Text]);
             ImGui::TextUnformatted(name.c_str());
             ImGui::PopStyleColor();
@@ -481,6 +489,11 @@ namespace Nox
             else if (addKey && track.Property == TimelineProperty::CameraCut)
             {
                 key.Event = m_CutCamera;
+                key.Interpolation = TimelineInterpolation::Constant;
+            }
+            else if (addKey && track.Property == TimelineProperty::SubTimeline)
+            {
+                key.Value = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f); // the whole child, from its start, at its own speed
                 key.Interpolation = TimelineInterpolation::Constant;
             }
             else if (addKey)
@@ -508,6 +521,7 @@ namespace Nox
             }
             ImGui::SetItemTooltip(track.Property == TimelineProperty::Event       ? "Adds an event key at the playhead (named below)"
                                   : track.Property == TimelineProperty::CameraCut ? "Cuts to the camera picked below at the playhead (in Play)"
+                                  : track.Property == TimelineProperty::SubTimeline ? "Starts a section of the dropped timeline at the playhead"
                                                                                   : "Keys the target's current value at the playhead (move it with the gizmo first)");
             ImGui::SameLine();
             if (ImGui::SmallButton("X"))
@@ -754,6 +768,30 @@ namespace Nox
         ImGui::TextDisabled("Drag a key's dot up / down to change its value (Shift: also its time).");
     }
 
+    void TimelinePanel::DrawSubTimelineTarget(Timeline& timeline, TimelineTrack& track)
+    {
+        // The child timeline: dropped from the Content Browser (not this timeline itself).
+        const AssetHandle child = static_cast<AssetHandle>(std::strtoull(track.Parameter.c_str(), nullptr, 10));
+        const std::string label = child != 0 && AssetManager::IsAssetHandleValid(child)
+            ? AssetManager::GetMetadata(child).FilePath.filename().string() : std::string("Drop a timeline here");
+        ImGui::Button(label.c_str(), ImVec2(240.0f, 0.0f));
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+            {
+                const AssetHandle handle = *static_cast<const AssetHandle*>(payload->Data);
+                if (AssetManager::GetAssetType(handle) == AssetType::Timeline && handle != timeline.Handle)
+                {
+                    track.Parameter = std::to_string(static_cast<uint64_t>(handle));
+                    AssetManager::RequestAsset(handle);
+                    Save(timeline);
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+        ImGui::SetItemTooltip("The timeline this track plays, on its target (its tracks find their entities from there).");
+    }
+
     void TimelinePanel::DrawSelectedKey(Timeline& timeline)
     {
         if (m_SelectedTrack < 0 || m_SelectedTrack >= static_cast<int>(timeline.Tracks.size()))
@@ -777,6 +815,8 @@ namespace Nox
                 ImGui::SetNextItemWidth(240.0f);
                 ImGui::InputTextWithHint("Cut to camera", "name path from the player, e.g. Cameras/Close", &m_CutCamera);
             }
+            if (track.Property == TimelineProperty::SubTimeline)
+                DrawSubTimelineTarget(timeline, track);
             return;
         }
 
@@ -817,6 +857,27 @@ namespace Nox
             changed |= ImGui::IsItemDeactivatedAfterEdit();
             ImGui::SetItemTooltip("From this key on (in Play) this camera, below the player, is the primary one.");
             break;
+        case TimelineProperty::SubTimeline:
+        {
+            DrawSubTimelineTarget(timeline, track);
+            ImGui::SetNextItemWidth(100.0f);
+            ImGui::DragFloat("Length", &key.Value.x, 0.01f, 0.0f, 3600.0f, key.Value.x > 0.0f ? "%.2f s" : "whole");
+            changed |= ImGui::IsItemDeactivatedAfterEdit();
+            ImGui::SetItemTooltip("How long the section plays (0: the child timeline's whole length at this rate).");
+            ImGui::SetNextItemWidth(100.0f);
+            ImGui::DragFloat("Start in child", &key.Value.y, 0.01f, 0.0f, 3600.0f, "%.2f s");
+            changed |= ImGui::IsItemDeactivatedAfterEdit();
+            ImGui::SetNextItemWidth(100.0f);
+            ImGui::DragFloat("Rate", &key.Value.z, 0.01f, -10.0f, 10.0f, "%.2fx");
+            changed |= ImGui::IsItemDeactivatedAfterEdit();
+            bool loop = key.Value.w > 0.5f;
+            if (ImGui::Checkbox("Loop child", &loop))
+            {
+                key.Value.w = loop ? 1.0f : 0.0f;
+                changed = true;
+            }
+            break;
+        }
         case TimelineProperty::Event:
         {
             char name[64];

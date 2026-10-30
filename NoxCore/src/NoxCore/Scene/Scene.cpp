@@ -1509,12 +1509,58 @@ namespace Nox
         return current;
     }
 
-    void Scene::ApplyTimeline(Entity player, const Timeline& timeline, float time, bool cameraCuts)
+    namespace
+    {
+        // A Sub-Timeline track's child, when it is loaded (requested otherwise).
+        const Timeline* SubTimelineOf(const TimelineTrack& track, std::vector<AssetHandle>& missing)
+        {
+            const AssetHandle child = static_cast<AssetHandle>(std::strtoull(track.Parameter.c_str(), nullptr, 10));
+            if (child == 0)
+                return nullptr;
+            const Timeline* timeline = AssetManager::FindLoadedAsset<Timeline>(child);
+            if (!timeline)
+                missing.push_back(child);
+            return timeline;
+        }
+    }
+
+    void Scene::CollectTimelineEvents(const Timeline& timeline, float from, float to, bool wrapped, std::vector<std::string>& out, int depth)
+    {
+        for (const TimelineTrack& track : timeline.Tracks)
+        {
+            TimelineEvaluation::CollectEvents(track, from, to, wrapped, out);
+            if (track.Property != TimelineProperty::SubTimeline || track.Muted || depth >= 8)
+                continue;
+            const Timeline* child = SubTimelineOf(track, m_MissingAssets.Local());
+            float childTo = 0.0f;
+            int section = -1;
+            if (!child || !TimelineEvaluation::SubTimelineAt(track, to, child->Duration, childTo, &section))
+                continue;
+            // From where the playhead was in the same section; entering one, from just before the section's start in the child.
+            float childFrom = 0.0f;
+            int previousSection = -1;
+            if (wrapped || !TimelineEvaluation::SubTimelineAt(track, from, child->Duration, childFrom, &previousSection) || previousSection != section)
+                childFrom = track.Keys[section].Value.y - 1e-4f;
+            CollectTimelineEvents(*child, childFrom, childTo, childTo < childFrom, out, depth + 1);
+        }
+    }
+
+    void Scene::ApplyTimeline(Entity player, const Timeline& timeline, float time, bool cameraCuts, int depth)
     {
         for (const TimelineTrack& track : timeline.Tracks)
         {
             if (track.Muted || track.Keys.empty() || track.Property == TimelineProperty::Event)
                 continue;
+            if (track.Property == TimelineProperty::SubTimeline)
+            {
+                // The child timeline at its own time, its targets found from this track's target (one door sequence on any door).
+                const Timeline* child = depth < 8 ? SubTimelineOf(track, m_MissingAssets.Local()) : nullptr;
+                float childTime = 0.0f;
+                Entity root = child ? FindTimelineTarget(player, track.Target) : Entity();
+                if (root && TimelineEvaluation::SubTimelineAt(track, time, child->Duration, childTime))
+                    ApplyTimeline(root, *child, childTime, cameraCuts, depth + 1);
+                continue;
+            }
             if (track.Property == TimelineProperty::CameraCut)
             {
                 // The camera the cut names becomes the primary one (the others stop being primary), only when it changes.
@@ -1631,8 +1677,7 @@ namespace Nox
                         player.Playing = false;
                     }
                 }
-                for (const TimelineTrack& track : timeline->Tracks)
-                    TimelineEvaluation::CollectEvents(track, previous, player.Time, wrapped, player.FiredEvents);
+                CollectTimelineEvents(*timeline, previous, player.Time, wrapped, player.FiredEvents);
             }
 
             ApplyTimeline(Entity(handle, this), *timeline, player.Time, true);

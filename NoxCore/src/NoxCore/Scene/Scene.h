@@ -271,7 +271,10 @@ namespace Nox
         void StartTimelines();
         void UpdateTimelines();
         // cameraCuts: Camera Cut tracks switch the primary camera (Play only: the editor previews through its own camera).
-        void ApplyTimeline(Entity player, const Timeline& timeline, float time, bool cameraCuts = false);
+        // `depth`: how deep in Sub-Timeline tracks (a timeline nesting itself stops at 8).
+        void ApplyTimeline(Entity player, const Timeline& timeline, float time, bool cameraCuts = false, int depth = 0);
+        // The event names the playhead passed from `from` to `to`, the Sub-Timelines' included.
+        void CollectTimelineEvents(const Timeline& timeline, float from, float to, bool wrapped, std::vector<std::string>& out, int depth = 0);
         void SubmitLights();
         void Submit2D();
         // Particle emitters (ParticleSystem.h): simulated every frame the scene steps (the editor's too), restarted by Play / Simulate.

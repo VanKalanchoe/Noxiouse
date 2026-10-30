@@ -24,6 +24,9 @@ namespace Nox
         Event,          // keys carry names: the player's scripts receive OnAnimationEvent(name) when the playhead passes them
         CameraCut,      // keys carry a camera's name path from the player: from the key on, that camera is the primary one (Play)
         MorphWeight,    // the target's mesh: the weight of the morph target the track names (TimelineTrack::Parameter)
+        SubTimeline,    // another timeline (TimelineTrack::Parameter: its asset handle) played on the target (UE's Subsequence track):
+                        // each key starts a section, Value = (length, 0: the child's duration; start offset in the child; rate, 0: 1;
+                        // loop, 1: the child loops within the section); the child's tracks find their targets from the track's target
         Count
     };
 
@@ -74,8 +77,11 @@ namespace Nox
         void CollectEvents(const TimelineTrack& track, float from, float to, bool wrapped, std::vector<std::string>& out);
         // A Camera Cut track's camera path at `time`: the last key at or before it (the first key's before the first key).
         const std::string* CameraCutAt(const TimelineTrack& track, float time);
-        // Tracks whose keys carry a name (Event, CameraCut) instead of a value.
+        // Tracks whose keys carry a name or a section (Event, CameraCut, SubTimeline) instead of a value to interpolate.
         bool HasNamedKeys(TimelineProperty property);
+        // A Sub-Timeline track's section at `time`: the child timeline's time there (true), or false outside every section.
+        // `childDuration`: the child's length (a section of length 0 runs that long). `section`: the key that starts it.
+        bool SubTimelineAt(const TimelineTrack& track, float time, float childDuration, float& outChildTime, int* section = nullptr);
         void SortKeys(TimelineTrack& track);
     }
 }

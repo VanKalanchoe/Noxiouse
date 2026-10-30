@@ -17,6 +17,7 @@ namespace Nox::TimelineEvaluation
         case TimelineProperty::Event: return "Event";
         case TimelineProperty::CameraCut: return "Camera Cut";
         case TimelineProperty::MorphWeight: return "Morph Weight";
+        case TimelineProperty::SubTimeline: return "Sub-Timeline";
         default: return "Unknown";
         }
     }
@@ -108,7 +109,33 @@ namespace Nox::TimelineEvaluation
 
     bool HasNamedKeys(TimelineProperty property)
     {
-        return property == TimelineProperty::Event || property == TimelineProperty::CameraCut;
+        return property == TimelineProperty::Event || property == TimelineProperty::CameraCut || property == TimelineProperty::SubTimeline;
+    }
+
+    bool SubTimelineAt(const TimelineTrack& track, float time, float childDuration, float& outChildTime, int* section)
+    {
+        if (track.Property != TimelineProperty::SubTimeline)
+            return false;
+        // The last section that started at or before `time`.
+        int found = -1;
+        for (int k = 0; k < static_cast<int>(track.Keys.size()) && track.Keys[k].Time <= time; ++k)
+            found = k;
+        if (found < 0)
+            return false;
+        const glm::vec4& value = track.Keys[found].Value;
+        const float rate = value.z != 0.0f ? value.z : 1.0f;
+        const float child = std::max(childDuration, 0.0f);
+        const float length = value.x > 0.0f ? value.x : (child > 0.0f ? child / std::abs(rate) : 0.0f);
+        const float local = time - track.Keys[found].Time;
+        if (local > length)
+            return false;
+        float childTime = value.y + local * rate;
+        if (value.w > 0.5f && child > 0.0f)
+            childTime = std::fmod(std::fmod(childTime, child) + child, child);
+        outChildTime = std::clamp(childTime, 0.0f, child > 0.0f ? child : childTime);
+        if (section)
+            *section = found;
+        return true;
     }
 
     void SortKeys(TimelineTrack& track)
