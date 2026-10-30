@@ -128,7 +128,11 @@ namespace Nox
         const uint64_t value = ++m_submittedValue;
         NRI::CommandBuffer* commandBuffer = m_recording.get();
         const NRI::TimelinePoint signal{ m_timeline.get(), value };
-        m_device->submit(NRI::QueueType::Transfer, std::span<NRI::CommandBuffer* const>(&commandBuffer, 1), {},
+        // Copies into a sparse geometry stream's new pages run after their memory is bound (decision D5).
+        const NRI::TimelinePoint sparse = m_device->getSparseTimelinePoint();
+        const std::span<const NRI::TimelinePoint> waits = sparse.semaphore && sparse.value > 0 ? std::span<const NRI::TimelinePoint>(&sparse, 1)
+                                                                                                : std::span<const NRI::TimelinePoint>{};
+        m_device->submit(NRI::QueueType::Transfer, std::span<NRI::CommandBuffer* const>(&commandBuffer, 1), waits,
                          std::span<const NRI::TimelinePoint>(&signal, 1));
 
         m_inFlight.push_back(Submission{ value, std::move(m_recording), std::move(m_retained) });

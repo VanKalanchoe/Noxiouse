@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "VulkanCommon.h"
+#include "vk_mem_alloc_raii.hpp" // released sparse page memory (m_sparseRetired)
 
 #ifdef NDEBUG
 constexpr bool enableValidationLayers = false;
@@ -47,6 +48,10 @@ namespace NRI
         // Pipeline statistics queries including task/mesh shader invocations (GpuProfiler).
         bool isPipelineStatisticsEnabled() const { return m_pipelineStatisticsEnabled; }
         bool isMemoryBudgetSupported() const override { return m_memoryBudgetEnabled; }
+        bool supportsSparseBuffers() const override { return m_sparseQueue != nullptr; }
+        uint64_t getSparseBufferReserveLimit() const override { return m_sparseReserveLimit; }
+        bool updateSparseBuffer(Buffer& buffer, std::span<const SparsePageRange> commits, std::span<const SparsePageRange> releases) override;
+        TimelinePoint getSparseTimelinePoint() const override { return { m_sparseTimeline.get(), m_sparseValue }; }
         // VK_KHR_calibrated_timestamps (or its EXT original) with the device and the host's steady clock domains (GpuProfiler::calibrate).
         enum class CalibratedTimestamps : uint8_t { None, KHR, EXT };
         CalibratedTimestamps getCalibratedTimestamps() const { return m_calibratedTimestamps; }
@@ -185,6 +190,17 @@ namespace NRI
         vk::raii::Queue m_transferQueue = nullptr;
         // A family with compute but not graphics (async compute), ~0 when the device has none.
         uint32_t m_computeQueueIndex = ~0u;
+        // Sparse buffers (decision D5): the queue that binds their memory (the transfer queue when its family binds sparse memory, else
+        // the graphics queue; null without sparseBinding + sparseResidencyBuffer), the timeline its bindings signal one after the
+        // other, and the memory of released pages, freed once the unbind that released it completed.
+        vk::raii::Queue* m_sparseQueue = nullptr;
+        bool m_sparseFeatures = false;
+        uint64_t m_sparseReserveLimit = 0;
+        std::unique_ptr<TimelineSemaphore> m_sparseTimeline;
+        uint64_t m_sparseValue = 0;
+        std::vector<std::pair<std::vector<vma::raii::Allocation>, uint64_t>> m_sparseRetired;
+        std::vector<vk::SparseMemoryBind> m_sparseBindScratch;
+        void freeRetiredSparseMemory();
         // ImGui descriptor sets waiting for the frames that may draw them (releaseImGuiTexture): freed in beginFrame once the frame
         // that released them is ImGuiReleaseFrames behind -- the frames in flight (Renderer2D.h MAX_FRAMES_IN_FLIGHT, 2) and the
         // releasing frame itself.

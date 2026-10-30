@@ -114,6 +114,14 @@ namespace NRI
             return resultBuffer;
         }
         
+        // Device memory for one page of a sparse buffer (BufferVK::prepareSparseBinds), suballocated from VMA's blocks: it counts
+        // in the heap statistics like any allocation. Throws when the device is out of memory.
+        [[nodiscard]] vma::raii::Allocation allocateSparsePage(const vk::MemoryRequirements& requirements)
+        {
+            const vma::AllocationCreateInfo info{ .usage = vma::MemoryUsage::eUnknown, .requiredFlags = vk::MemoryPropertyFlagBits::eDeviceLocal };
+            return m_allocator->allocateMemory(requirements, info);
+        }
+
         /*--
         * Create a staging buffer, copy data into it, and track it.
         * This method accepts data, handles the mapping, copying, and unmapping

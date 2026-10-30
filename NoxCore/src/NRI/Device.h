@@ -177,6 +177,21 @@ namespace NRI
 
         // Once per frame before any allocation of that frame; refreshes the memory budget.
         virtual void beginFrame(uint32_t frameNumber) = 0;
+        // Sparse buffers (decision D5, Vulkan sparse binding + sparse residency): a buffer reserves address space and memory is bound
+        // to it page by page, so a geometry stream holds the pages its live ranges touch instead of a doubled, copied capacity.
+        virtual bool supportsSparseBuffers() const { return false; }
+        // The most address space one sparse buffer may reserve (the device's buffer size and sparse address space limits).
+        virtual uint64_t getSparseBufferReserveLimit() const { return 0; }
+        // Binds memory to the pages of a sparse buffer in `commits` and unbinds (then frees) the memory of those in `releases`, as one
+        // operation on the sparse binding queue after every earlier one. Work that uses committed pages must wait for
+        // getSparseTimelinePoint() (the uploads and the frame do); released pages must not be used by any GPU work any more.
+        // False when the memory could not be allocated (nothing is bound then). Main thread.
+        virtual bool updateSparseBuffer(Buffer& buffer, std::span<const SparsePageRange> commits, std::span<const SparsePageRange> releases)
+        {
+            return false;
+        }
+        // Where the newest sparse binding completes (semaphore null without sparse buffers).
+        virtual TimelinePoint getSparseTimelinePoint() const { return {}; }
         virtual bool isMemoryBudgetSupported() const = 0;
         virtual void getMemoryStats(std::vector<MemoryHeapStats>& outHeaps) const = 0;
         // Estimated device memory of every live texture (§5.8.3 accounts for images through their descriptions).

@@ -3601,8 +3601,9 @@ namespace Nox
         constexpr uint32_t INITIAL_VERTS = 500'000;
         constexpr uint32_t INITIAL_TRIS = 1'500'000;
 
-        // Each stream starts at the size a page used to have and grows by copying itself; the ceiling is the element
-        // space its allocator hands offsets out of, so it is set well above what a scene is expected to need.
+        // With sparse buffers (decision D5) each stream reserves its element space as address space and binds memory to the pages
+        // its ranges touch; without them it starts at the size a page used to have and grows by copying itself. The ceiling is the
+        // element space its allocator hands offsets out of, so it is set well above what a scene is expected to need.
         constexpr uint32_t MAX_ELEMENTS = 1u << 28;
         m_vertexStream.Init(*m_device, sizeof(shaderio::Vertex), INITIAL_VERTICES, MAX_ELEMENTS);
         m_meshletDrawStream.Init(*m_device, sizeof(shaderio::MeshletDraw), INITIAL_DRAWS, MAX_ELEMENTS);
@@ -3618,7 +3619,8 @@ namespace Nox
         std::unique_ptr<NRI::Buffer> grownFrom;
         const GeometryRange range = stream.Allocate(count, grownFrom);
 
-        // The stream grew: its content moves to the larger buffer unchanged (offsets stay valid, the address changes).
+        // The stream grew (only without sparse buffers): its content moves to the larger buffer unchanged (offsets stay valid, the
+        // address changes).
         if (grownFrom)
         {
             // Geometry streaming (§5.7.2) also writes three streams from the graphics queue: the draw records and page table (page
@@ -5481,7 +5483,7 @@ namespace Nox
         ++m_memorySampleCount;
         m_memoryBudget.Update(m_memoryHeapStats);
 
-        // Geometry: the streams hold their capacity, of which the live ranges are in use.
+        // Geometry: the streams hold their capacity (sparse ones: their committed pages), of which the live ranges are in use.
         uint64_t geometryCommitted = 0;
         uint64_t geometryUsed = 0;
         for (const GeometryArena* stream : { &m_vertexStream, &m_meshletDrawStream, &m_meshletBoundsStream,
@@ -5699,6 +5701,8 @@ namespace Nox
             // only orders the transfer writes. Streamed copies still in flight are not waited for.
             m_uploads.Flush();
             const NRI::TimelinePoint uploads{ &m_uploads.GetTimeline(), m_uploads.GetFrameWaitValue() };
+            // Pages of the sparse geometry streams bound so far (decision D5): the frame writes and reads ranges in them.
+            const NRI::TimelinePoint sparse = m_device->getSparseTimelinePoint();
             // With async compute the frame is several submissions on two queues, ordered by the graph's timeline points (each also
             // waits for the uploads); the last one is graphics and presents.
             for (size_t index = 0; index < submissions.size(); ++index)
@@ -5706,6 +5710,8 @@ namespace Nox
                 const RGSubmission& submission = submissions[index];
                 m_submitWaitScratch.assign(submission.Waits.begin(), submission.Waits.end());
                 m_submitWaitScratch.push_back(uploads);
+                if (sparse.semaphore && sparse.value > 0)
+                    m_submitWaitScratch.push_back(sparse);
                 if (index + 1 < submissions.size())
                     m_device->submit(submission.Queue, submission.CommandBuffers, m_submitWaitScratch, submission.Signals);
                 else

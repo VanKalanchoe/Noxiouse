@@ -95,12 +95,88 @@ namespace NRI
             break;
         }
 
-        m_allocatedBuffer = m_deviceVK.getAllocator().createBuffer(desc.size, usageFlags, memoryUsage, allocFlags, {},
-            (desc.sharedAcrossQueues || m_deviceVK.hasAsyncComputeQueue()) ? m_deviceVK.getSharedQueueFamilies() : std::span<const uint32_t>{});
+        const std::span<const uint32_t> queueFamilies =
+            (desc.sharedAcrossQueues || m_deviceVK.hasAsyncComputeQueue()) ? m_deviceVK.getSharedQueueFamilies() : std::span<const uint32_t>{};
+        if (desc.sparse && m_deviceVK.supportsSparseBuffers())
+        {
+            // Address space only: memory is bound page by page (prepareSparseBinds). Sparse residency lets the buffer be used while
+            // only some pages are bound; only bound pages are ever accessed.
+            const vk::BufferUsageFlags2CreateInfo usage2{ .usage = usageFlags };
+            const vk::BufferCreateInfo bufferInfo{
+                .pNext = &usage2,
+                .flags = vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency,
+                .size = desc.size,
+                .sharingMode = queueFamilies.size() > 1 ? vk::SharingMode::eConcurrent : vk::SharingMode::eExclusive,
+                .queueFamilyIndexCount = queueFamilies.size() > 1 ? static_cast<uint32_t>(queueFamilies.size()) : 0u,
+                .pQueueFamilyIndices = queueFamilies.size() > 1 ? queueFamilies.data() : nullptr
+            };
+            m_sparseBuffer = vk::raii::Buffer(m_deviceVK.getDevice(), bufferInfo);
+            m_sparseRequirements = m_sparseBuffer.getMemoryRequirements();
+            m_sparsePageSize = m_sparseRequirements.alignment;
+            const uint64_t pages = (m_sparseRequirements.size + m_sparsePageSize - 1) / m_sparsePageSize;
+            m_sparsePages.reserve(pages);
+            for (uint64_t page = 0; page < pages; ++page)
+                m_sparsePages.emplace_back(nullptr);
+            m_allocatedBuffer.size = desc.size;
+            if (usageFlags & vk::BufferUsageFlagBits2::eShaderDeviceAddress)
+                m_allocatedBuffer.address = m_deviceVK.getDevice().getBufferAddress(vk::BufferDeviceAddressInfo{ .buffer = *m_sparseBuffer });
+            return;
+        }
+
+        m_allocatedBuffer = m_deviceVK.getAllocator().createBuffer(desc.size, usageFlags, memoryUsage, allocFlags, {}, queueFamilies);
+    }
+
+    bool BufferVK::prepareSparseBinds(std::span<const SparsePageRange> commits, std::span<const SparsePageRange> releases,
+                                      std::vector<vk::SparseMemoryBind>& outBinds, std::vector<vma::raii::Allocation>& outRetired)
+    {
+        if (m_sparsePageSize == 0)
+            return false;
+        const size_t firstBind = outBinds.size();
+        std::vector<uint64_t> allocated;
+        const vk::MemoryRequirements page{ .size = m_sparsePageSize, .alignment = m_sparsePageSize,
+                                           .memoryTypeBits = m_sparseRequirements.memoryTypeBits };
+        for (const SparsePageRange& range : commits)
+        {
+            for (uint64_t index = range.firstPage; index < range.firstPage + range.pageCount && index < m_sparsePages.size(); ++index)
+            {
+                if (*m_sparsePages[index])
+                    continue;
+                try
+                {
+                    m_sparsePages[index] = m_deviceVK.getAllocator().allocateSparsePage(page);
+                }
+                catch (const std::exception&)
+                {
+                    // Out of device memory: nothing of this call is bound.
+                    for (uint64_t undo : allocated)
+                        m_sparsePages[undo].clear();
+                    outBinds.resize(firstBind);
+                    return false;
+                }
+                allocated.push_back(index);
+                const vma::AllocationInfo info = m_sparsePages[index].getInfo();
+                outBinds.push_back(vk::SparseMemoryBind{ .resourceOffset = index * m_sparsePageSize, .size = m_sparsePageSize,
+                                                         .memory = info.deviceMemory, .memoryOffset = info.offset });
+            }
+        }
+        for (const SparsePageRange& range : releases)
+        {
+            for (uint64_t index = range.firstPage; index < range.firstPage + range.pageCount && index < m_sparsePages.size(); ++index)
+            {
+                if (!*m_sparsePages[index])
+                    continue;
+                outBinds.push_back(vk::SparseMemoryBind{ .resourceOffset = index * m_sparsePageSize, .size = m_sparsePageSize });
+                outRetired.push_back(std::move(m_sparsePages[index]));
+                m_sparsePages[index] = vma::raii::Allocation(nullptr);
+            }
+        }
+        return true;
     }
 
     void* BufferVK::map(uint64_t offset, uint64_t size)
     {
+        if (m_sparsePageSize != 0)
+            return nullptr; // device local, never mappable
         //  Check if VMA already persistently mapped this for us (due to eMapped)
         vma::AllocationInfo info = m_allocatedBuffer.buffer.getAllocation().getInfo();
 
@@ -115,6 +191,8 @@ namespace NRI
 
     void BufferVK::unmap()
     {
+        if (m_sparsePageSize != 0)
+            return;
         vma::AllocationInfo info = m_allocatedBuffer.buffer.getAllocation().getInfo();
 
         //  If VMA is managing a persistent mapping via flags, do NOT unmap it manually!

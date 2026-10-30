@@ -220,9 +220,52 @@ namespace NRI
         return std::make_unique<GpuProfilerVK>(*this, framesInFlight);
     }
 
+    bool DeviceVK::updateSparseBuffer(Buffer& buffer, std::span<const SparsePageRange> commits, std::span<const SparsePageRange> releases)
+    {
+        if (!m_sparseQueue)
+            return false;
+        freeRetiredSparseMemory();
+        m_sparseBindScratch.clear();
+        std::vector<vma::raii::Allocation> retired;
+        BufferVK& sparse = static_cast<BufferVK&>(buffer);
+        if (!sparse.prepareSparseBinds(commits, releases, m_sparseBindScratch, retired))
+            return false;
+        if (m_sparseBindScratch.empty())
+            return true;
+
+        // After the previous binding (one chain: a page released and committed again is bound in that order), signalling the next value.
+        const vk::Semaphore semaphore = *static_cast<TimelineSemaphoreVK*>(m_sparseTimeline.get())->getNativeSemaphore();
+        const uint64_t waitValue = m_sparseValue;
+        const uint64_t signalValue = m_sparseValue + 1;
+        const vk::TimelineSemaphoreSubmitInfo timeline{ .waitSemaphoreValueCount = 1, .pWaitSemaphoreValues = &waitValue,
+                                                        .signalSemaphoreValueCount = 1, .pSignalSemaphoreValues = &signalValue };
+        const vk::SparseBufferMemoryBindInfo bufferBinds{ .buffer = *sparse.getNativeBuffer(),
+                                                          .bindCount = static_cast<uint32_t>(m_sparseBindScratch.size()),
+                                                          .pBinds = m_sparseBindScratch.data() };
+        const vk::BindSparseInfo bindInfo{ .pNext = &timeline, .waitSemaphoreCount = 1, .pWaitSemaphores = &semaphore, .bufferBindCount = 1,
+                                           .pBufferBinds = &bufferBinds, .signalSemaphoreCount = 1, .pSignalSemaphores = &semaphore };
+        m_sparseQueue->bindSparse(bindInfo, nullptr);
+        m_sparseValue = signalValue;
+        if (!retired.empty())
+            m_sparseRetired.push_back({ std::move(retired), signalValue });
+        return true;
+    }
+
+    void DeviceVK::freeRetiredSparseMemory()
+    {
+        if (m_sparseRetired.empty())
+            return;
+        const uint64_t completed = m_sparseTimeline->getValue();
+        std::erase_if(m_sparseRetired, [completed](const std::pair<std::vector<vma::raii::Allocation>, uint64_t>& retired)
+        {
+            return retired.second <= completed;
+        });
+    }
+
     void DeviceVK::beginFrame(uint32_t frameNumber)
     {
         m_allocator->setCurrentFrameIndex(frameNumber);
+        freeRetiredSparseMemory();
 
         std::scoped_lock lock(m_imGuiReleaseMutex);
         m_frameNumber = frameNumber;
@@ -297,6 +340,7 @@ namespace NRI
     {
         destroyNRD();
         m_imGuiReleases.clear(); // their images belong to the allocator
+        m_sparseRetired.clear();  // so does released sparse memory (the device is idle by now)
         // VMA must be destroyed BEFORE the logical device goes out of scope
         if (m_allocator)
         {
@@ -693,6 +737,14 @@ namespace NRI
                                      m_sharedQueueFamilies.begin() + m_sharedQueueFamilyCount)
                 m_sharedQueueFamilies[m_sharedQueueFamilyCount++] = family;
         }
+        // Sparse buffers (decision D5): both features, and a queue that binds sparse memory -- the transfer queue (the copies into new
+        // pages run there) when its family can, else the graphics queue.
+        {
+            const vk::PhysicalDeviceFeatures supported = m_physicalDevice.getFeatures();
+            const bool transferSparse = !!(queueFamilyProperties[m_transferQueueIndex].queueFlags & vk::QueueFlagBits::eSparseBinding);
+            const bool graphicsSparse = !!(queueFamilyProperties[m_queueIndex].queueFlags & vk::QueueFlagBits::eSparseBinding);
+            m_sparseFeatures = supported.sparseBinding && supported.sparseResidencyBuffer && (transferSparse || graphicsSparse);
+        }
         auto features = m_physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderObjectFeaturesEXT, vk::PhysicalDeviceMeshShaderFeaturesEXT>();
         m_shaderObjectsEnabled = features.template get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().shaderObject;
         m_pipelineStatisticsEnabled = features.template get<vk::PhysicalDeviceFeatures2>().features.pipelineStatisticsQuery &&
@@ -768,6 +820,8 @@ namespace NRI
                         .pipelineStatisticsQuery = m_pipelineStatisticsEnabled,
                         .shaderInt16 = true, // <-- Required by RTXDI PT's uint16_t path-state fields (RTXDI_PathTracerState, packed reservoir)
                         .shaderInt64 = true,
+                        .sparseBinding = m_sparseFeatures,         // geometry streams reserve address space (decision D5)
+                        .sparseResidencyBuffer = m_sparseFeatures,
                     }
                 }, // vk::PhysicalDeviceFeatures2
                 {.shaderDrawParameters = true}, // vk::PhysicalDeviceVulkan11Features
@@ -844,6 +898,8 @@ namespace NRI
         if (hasAsyncComputeQueue())
             m_computeQueue = vk::raii::Queue(m_device, m_computeQueueIndex, 0);
         m_submitFence = vk::raii::Fence(m_device, vk::FenceCreateInfo{});
+        if (m_sparseFeatures)
+            m_sparseQueue = (queueFamilyProperties[m_transferQueueIndex].queueFlags & vk::QueueFlagBits::eSparseBinding) ? &m_transferQueue : &m_queue;
         NOX_CORE_INFO("Transfer queue: {}", hasDedicatedTransferQueue() ? "dedicated family" : "graphics queue");
         NOX_CORE_INFO("Async compute queue: {}", hasAsyncComputeQueue() ? "compute-only family " + std::to_string(m_computeQueueIndex)
                                                                            : std::string("none (compute runs on the graphics queue)"));
@@ -861,8 +917,24 @@ namespace NRI
         m_depthFormat = findDepthFormat();
         m_surfaceFormat = chooseSurfaceFormat();
 
-        auto rtProps = m_physicalDevice.template getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceRayTracingPipelinePropertiesKHR>();
+        auto rtProps = m_physicalDevice.template getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceRayTracingPipelinePropertiesKHR,
+                                                                vk::PhysicalDeviceMaintenance4Properties>();
         m_rtPipelineProperties = rtProps.template get<vk::PhysicalDeviceRayTracingPipelinePropertiesKHR>();
+        if (m_sparseQueue)
+        {
+            // One stream may reserve up to the largest buffer, and a sixteenth of the sparse address space (every geometry stream reserves).
+            const uint64_t addressSpace = rtProps.template get<vk::PhysicalDeviceProperties2>().properties.limits.sparseAddressSpaceSize;
+            const uint64_t maxBuffer = rtProps.template get<vk::PhysicalDeviceMaintenance4Properties>().maxBufferSize;
+            m_sparseReserveLimit = std::min(maxBuffer, addressSpace / 16);
+            m_sparseTimeline = createTimelineSemaphore(0);
+            NOX_CORE_INFO("Sparse buffers: on ({} queue), {} GB reservable per buffer (sparse address space {} GB, largest buffer {} GB)",
+                          m_sparseQueue == &m_transferQueue && hasDedicatedTransferQueue() ? "transfer" : "graphics", m_sparseReserveLimit >> 30,
+                          addressSpace >> 30, maxBuffer >> 30);
+        }
+        else
+        {
+            NOX_CORE_INFO("Sparse buffers: off (no sparseBinding + sparseResidencyBuffer): geometry streams grow by copying");
+        }
         NOX_CORE_INFO("RT Pipeline Properties: handleSize={}, baseAlignment={}, handleAlignment={}, maxStride={}",
             m_rtPipelineProperties.shaderGroupHandleSize,
             m_rtPipelineProperties.shaderGroupBaseAlignment,

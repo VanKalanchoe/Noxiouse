@@ -1004,9 +1004,23 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
   Growth = create larger buffer → GPU copy of the used ranges → swap base address → old buffer through
   deferred release. Happens only while loading, never in a steady-state frame. BLAS are unaffected
   (built acceleration structures do not reference their input buffers).
-- **Later (D5):** reserve a sparse-bound buffer at the full category budget and commit memory on demand
-  instead of copying. Streaming pools for cluster pages (Phase 6b) are fixed-size at the budget from the
-  start (UE Nanite streaming pool model).
+- **Sparse binding (D5, built 2026-10-30):** each stream reserves its element space as address space (a sparse buffer, up to
+  the device's largest buffer and a sixteenth of its sparse address space) and memory is bound to it in pages (64 KB on desktop
+  GPUs) as live ranges touch them:
+  - `GeometryArena` counts the live ranges touching each page. A page whose count leaves 0 is committed when the range is
+    allocated. A page whose count returns to 0 is released when the range is freed, and ranges are freed only once frames are done
+    with them.
+  - `Device::updateSparseBuffer` allocates each page's memory from VMA (it shows in the heap statistics) and binds it with
+    `vkQueueBindSparse` on the transfer queue (or the graphics queue when the copy engine cannot bind sparse memory).
+  - Every binding waits for the previous one and signals the next value of a timeline. The upload submissions and every frame
+    submission wait for its newest value, so copies and GPU writes into new pages come after their memory. A released page's
+    memory is freed once its unbind completed.
+  - The buffer never moves and nothing is copied. The grow-copy, its full GPU wait when graphics-written streams grow, and the
+    doubled capacity are gone. The Geometry category's committed bytes are now the committed pages.
+  - Devices without `sparseBinding` + `sparseResidencyBuffer` (or without a queue that binds sparse memory) keep the grow-copy path.
+  - Offline test against a stub device: random allocate/free sequences on four element sizes, with the bound pages checked to be
+    exactly the pages the live ranges touch. No page is committed or released twice, and nothing is left bound at the end.
+  - The geometry streaming pool for cluster pages (§5.7.2) is a byte budget inside these streams, not a separate fixed buffer.
 - **Freeing:** ranges return to the allocator after frames-in-flight (§5.8.4). Unlike pages, freed
   memory is immediately reusable by the next load.
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
@@ -1669,7 +1683,7 @@ Phases 1, 2 and 3 are architecture-defining and each gets its own plan-mode desi
 | D2 | ~~RG resource naming/API style~~ **Decided** | **Typed handles returned by the builder + typed blackboard structs** (§5.4.11) | Decided September 2026 (Phase 2) |
 | D3 | ~~Texture streaming~~ **Decided** | **Mip streaming first** (reallocation into a new image, GPU feedback, §5.12.3); virtual texturing later (§5.12.2) | Decided September 2026 (Phase 6a) |
 | D4 | ~~Geometry LOD~~ **Decided** | **Cluster DAG** with meshoptimizer's clusterlod (§5.7.1) | Decided September 2026 (Phase 6b) |
-| D5 | Geometry buffer growth | grow-and-copy vs sparse binding reserve/commit | Base (Phase 4) uses grow-and-copy at load boundaries; sparse evaluated later, needs driver support validation |
+| D5 | Geometry buffer growth | grow-and-copy vs sparse binding reserve/commit | **Sparse binding built 2026-10-30** (§5.8.2): the streams reserve address space and commit 64 KB pages as live ranges touch them; grow-and-copy remains the fallback without device support |
 | D6 | Additional queues (**transfer and async compute decided**) | ~~one combined graphics/compute queue~~ · **dedicated transfer queue for uploads (Phase 5a, §5.11.6)** · **async compute queue: a compute-only family, render graph blocks with fork / join timeline points (§5.4.4), first user the screen-probe GI** | Transfer: multi-queue device creation, queue-family detection, timeline semaphores and per-queue command pools in NRI; concurrent sharing instead of ownership transfers |
 | D7 | IO backend | IoRing/overlapped IO vs DirectStorage | DirectStorage enables GPU decompression |
 | D8 | RT geometry LOD policy | ~~dedicated coarse RT LOD~~ (tried in 6b-2, reverted: holes in the path tracer, shadows lost to ray offsets) · RT from the same clusters as raster: cluster acceleration structures per frame (nvpro-samples vk_lod_clusters, `VK_NV_cluster_acceleration_structure`, NVIDIA only for now) | Until then ray tracing uses the original clusters (resident, full detail); streamed meshes trace their finest resident clusters (§5.7.2) |
