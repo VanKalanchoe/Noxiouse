@@ -939,57 +939,24 @@ The leaf cut is never coarser than what the raster draws (the raster cannot draw
 delay), so `raster_surface_bias` stays the only ray offset. 6b-2's fixed-error fallback is not repeated: near the camera the BLAS
 is full detail, far away it is what that distance needs.
 
-**Preserve Area (R9, 2026-10-30, `MeshImporter.cpp` preserveArea).** UE5 Nanite's per-mesh option for foliage. Simplifying thin, open
-geometry loses area. A 4x4-quad leaf ends as two triangles, then one (half its area), then disappears. So the coarse levels of a bush
-are thinner than the levels they replace, and foliage thins out in the distance or with a small pool. Measured on a synthetic bush
-(600 bent leaves, scratchpad `pareatest`): level 4 keeps 99.4% of the area, level 5 49.6%, level 6 24.7%, and level 10 1.5%.
+**Preserve Area (R9): tried and reverted (2026-10-30).** Simplifying thin, open geometry loses area. A leaf ends as one triangle,
+then disappears. On a synthetic bush, level 5 keeps 49.6% of the area and level 10 1.5%.
 
-The pass runs after clodBuild and before the pages are written. Each simplification gets the area of the group it came from back:
-- The open borders of the clusters it produced are pushed outward, in the surface's plane, along the bisector of their edge normals
-  (mitered, at most 2x).
-- The push distance comes from the border length, then a bisection on the actual area, since corners add area with the square of
-  the distance. One step is capped at the open edges' average length.
-- **Growth limit.** A vertex moves at most the radius of its original piece (the triangles connected to it, a leaf), so a surviving
-  leaf at most doubles in size. Area of leaves the simplifier removed entirely is mostly not handed to the survivors.
-- **The push is error.** A simplification's error becomes at least how far its vertices are from where they started, kept monotonic
-  up the DAG. Grown levels are then drawn only where that is below the threshold. Their finer pages are also requested at higher
-  priority, so a small pool keeps foliage detail instead of drawing the coarsest leaves up close.
-- A vertex is pushed only if the simplifier could move it. Positions that clusters of other groups at the same level use are what
-  clusterlod locks, so they are never moved, and a cut mixing levels stays watertight.
-- A pushed vertex is a copy. The simplification's clusters use it, and so does everything simplified from them later. Clusters whose
-  vertices changed get new culling bounds. LOD spheres and the DAG stay as they are.
-- Closed surfaces have no open borders inside a group, so nothing moves on them. Area a simplifier adds by closing holes is left alone.
+The attempt was UE5 Nanite's option: after clodBuild, each simplification's open borders were pushed outward until the area of the
+group it came from was restored. Positions shared with other groups were never moved, so offline cuts stayed exact and crack free.
 
-The first version had no growth limit and kept errors unchanged. The user tested it on Bistro with a 32 MB pool and found few leaves
-left, each much larger than the original. That version handed all the vanished leaves' area to the survivors: about 8x a leaf's
-length at the bush's coarsest level.
+Two versions were tested by the user on Bistro with the pool override at 32 MB:
+1. **Full restore.** The removed leaves' area went to the survivors: few leaves were left, each up to about 8x a leaf's length.
+2. **Growth limit plus error.** A vertex moved at most its leaf's radius, and the push counted as LOD error. The view looked the same,
+   but now flashed constantly. The likely cause is that the raised foliage priorities made foliage and other pages evict each other
+   in the starved pool; this was not confirmed.
 
-Measured (`pareatest`):
+Neither version helped in that test, and the benefit at a budget-sized pool (override 0, where coarse levels are only drawn far away)
+was never shown, so the code was reverted. Foliage density at a distance would need a different approach (Nanite's later voxel
+foliage, or impostors).
 
-| Bush | Without the pass | First version | Now |
-|---|---|---|---|
-| Area, levels 5 / 6 / 7 / 10 | 49.6 / 24.7 / 12.4 / 1.5% | 100% at every level | 100 / 100 / 64.3 / 8.0% |
-| Longest edge, coarsest level (leaf: 0.57) | 0.57 | 4.63 | 1.36 |
-| Largest error, coarsest level | 0.27 | 0.27 | 0.40 |
-| Vertices | – | +3% | +3% |
-
-On the sheet, disc and net, the pushes stay below the simplifier's own error, so their errors do not change; area changes by at
-most +0.7%.
-
-Other checks:
-- Triangle counts per level are identical with and without the pass.
-- Every cluster's parent error is at least its own.
-- Cuts are exact under 100 random dependency-closed residency sets.
-- No crack in 60 mixed cuts per case. The check is exact on the disc and the net: any open edge away from the rim and the holes counts.
-- No vertex lies outside its cluster's culling sphere.
-
-Setting: import settings **Preserve Area**.
-- **Auto** (default) applies it to submeshes whose material is alpha masked or double sided, the foliage, curtain and cloth case.
-- **On** and **Off** force it either way.
-
-It is applied by the cook, so a mesh must be re-imported to pick up a change.
-
-**Not yet:** streaming skinned geometry (one level, not paged), per-view request priorities. Editor: Geometry Streaming section (enable for meshes loaded
+**Not yet:** vertex compression (positions relative to the cluster, octahedral normals: Nanite's pages are ~4x smaller), streaming
+skinned geometry (one level, not paged), per-view request priorities. Editor: Geometry Streaming section (enable for meshes loaded
 next, stats, pool override for forcing pressure). The stats report's counters say whether streaming is engaged: Streamed Geometry
 Meshes, Pages (resident / total / loading), MB, Root MB, Page Requests, Pages Evicted. Debug view 23 colors clusters by their page:
 gray for a mesh that does not stream, blue for a root page, green for a streamed page (brighter = finer), cyan for original geometry.

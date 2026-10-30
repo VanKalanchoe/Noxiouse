@@ -45,16 +45,6 @@ namespace Nox
         CombineAll
     };
 
-    // Unreal's Nanite "Preserve Area": the coarser levels of the cluster LOD keep the surface area of what they replace, their open
-    // borders pushed outward -- leaf cards and other thin, open geometry thin out and vanish without it. Auto: for the submeshes whose
-    // material is alpha masked or double sided (foliage, curtains, cards); closed surfaces have no open border, nothing moves there.
-    enum class PreserveAreaMode : uint8_t
-    {
-        Auto = 0,
-        Off,
-        On
-    };
-
     // What a glTF import brings in (Unreal Interchange's Import Static Meshes / Skeletal Meshes / Animations).
     struct MeshImportSettings
     {
@@ -71,7 +61,6 @@ namespace Nox
         // claims meters too and comes in 100x too big -- nothing in the file says so, you tell the importer. Applied as the
         // scale of the entity a drag-in creates (the model itself is untouched).
         float ImportScale = 1.0f;
-        PreserveAreaMode PreserveArea = PreserveAreaMode::Auto;
         // Unreal's Import into Level: also place the file's scene (node hierarchy, lights, cameras) in the level. An action of
         // this import, not a property of the assets, so it is not saved with them.
         bool ImportIntoLevel = false;

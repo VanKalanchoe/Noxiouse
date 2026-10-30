@@ -2,12 +2,10 @@
 #include "NoxCore/Core/VirtualFileSystem.h"
 
 #include <algorithm>
-#include <bit>
 #include <cfloat>
 
 #include <array>
 #include <chrono>
-#include <numeric>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -91,8 +89,6 @@ namespace Nox
         // Vertices before and after indexVertices, per thread (BuildClusters reports a cook's totals).
         thread_local uint64_t s_VerticesBeforeIndexing = 0;
         thread_local uint64_t s_VerticesAfterIndexing = 0;
-        // Simplifications whose area preserveArea restored, per thread (BuildClusters reports a cook's total).
-        thread_local uint64_t s_PreservedAreaGroups = 0;
 
         // meshoptimizer's first step (its README's "Indexing", the start of its demo's pipeline): vertices identical in every byte
         // (exporters split them per face, per primitive or per attribute set) become one, and vertices no triangle uses go. For the
@@ -162,386 +158,6 @@ namespace Nox
             std::vector<uint32_t> Clusters; // DagCluster indices
             bool Terminal = false;          // nothing coarser replaces it (clusterlod: FLT_MAX error)
         };
-
-        // A position as clusterlod welds vertices (meshopt_generatePositionRemap: the same floats).
-        struct PositionKey
-        {
-            uint32_t X = 0, Y = 0, Z = 0;
-            bool operator==(const PositionKey&) const = default;
-        };
-        struct PositionKeyHash
-        {
-            size_t operator()(const PositionKey& key) const
-            {
-                return (size_t(key.X) * 73856093u) ^ (size_t(key.Y) * 19349663u) ^ (size_t(key.Z) * 83492791u);
-            }
-        };
-        PositionKey positionKey(const glm::vec3& position)
-        {
-            return { std::bit_cast<uint32_t>(position.x), std::bit_cast<uint32_t>(position.y), std::bit_cast<uint32_t>(position.z) };
-        }
-
-        // Preserve Area (Unreal's Nanite option for foliage, its FMeshSimplifier::PreserveSurfaceArea): simplifying thin, open geometry
-        // (leaf cards, curtain folds) loses area -- whole cards collapse -- so each level is thinner than the one it replaces, and in the
-        // distance (or with a small geometry pool) foliage vanishes. After clodBuild, every simplification gets its area back: the
-        // clusters a group was simplified into have the open borders of their surface pushed outward (in the surface's plane) by the
-        // distance that makes up the area lost.
-        //  - Only vertices the simplification could move: not the group's boundary (clusterlod locks vertices that clusters of other
-        //    groups of the same level use -- the neighbors that may be drawn finer). The cut stays watertight.
-        //  - A moved vertex is a copy, used by the clusters of that simplification and by everything simplified from them later (they
-        //    are their descendants: the boundary between them and their neighbors keeps one position).
-        //  - Closed surfaces have no open border outside the group boundaries: nothing moves there.
-        //  - A level is matched to the level it replaces as preserved, so the coarse levels keep the original area where they can: the
-        //    leaves that remain take over the area of the ones the simplifier removed. Within limits: a vertex moves at most the radius
-        //    of its original piece (a leaf at most doubles in size), and a step at most the open edges' average length.
-        //  - The push is part of the simplification's error (how far the surface moved from the original), kept monotonic up the DAG:
-        //    a level whose leaves grew is drawn only where that is below the error threshold, and its finer pages are wanted sooner
-        //    (and kept: a small pool holds foliage at the detail it needs instead of drawing it coarse up close).
-        void preserveArea(std::vector<shaderio::Vertex>& vertices, std::vector<DagCluster>& clusters, std::vector<DagGroup>& groups)
-        {
-            std::vector<std::vector<uint32_t>> simplifiedFrom(groups.size());
-            for (uint32_t cluster = 0; cluster < clusters.size(); ++cluster)
-            {
-                if (clusters[cluster].Refined >= 0)
-                    simplifiedFrom[clusters[cluster].Refined].push_back(cluster);
-            }
-            // clodBuild's vertex -> its newest copy, and each copy's original.
-            std::vector<uint32_t> current(vertices.size());
-            std::iota(current.begin(), current.end(), 0u);
-            std::vector<uint32_t> origin = current;
-
-            // Per original vertex, the radius of its piece (the triangles connected to it, welded by position: a leaf): how far
-            // it may move.
-            std::vector<float> pieceRadius(vertices.size(), 0.0f);
-            {
-                std::vector<uint32_t> parent(vertices.size());
-                std::iota(parent.begin(), parent.end(), 0u);
-                auto find = [&](uint32_t vertex)
-                {
-                    while (parent[vertex] != vertex)
-                        vertex = parent[vertex] = parent[parent[vertex]];
-                    return vertex;
-                };
-                auto unite = [&](uint32_t a, uint32_t b) { parent[find(a)] = find(b); };
-                std::unordered_map<PositionKey, uint32_t, PositionKeyHash> byPosition;
-                for (const DagCluster& cluster : clusters)
-                {
-                    if (cluster.Refined >= 0)
-                        continue; // the original clusters cover the original surface
-                    for (size_t corner = 0; corner + 2 < cluster.Triangles.size(); corner += 3)
-                    {
-                        unite(cluster.Vertices[cluster.Triangles[corner]], cluster.Vertices[cluster.Triangles[corner + 1]]);
-                        unite(cluster.Vertices[cluster.Triangles[corner]], cluster.Vertices[cluster.Triangles[corner + 2]]);
-                    }
-                    for (uint32_t vertex : cluster.Vertices)
-                        unite(vertex, byPosition.try_emplace(positionKey(vertices[vertex].pos), vertex).first->second);
-                }
-                std::unordered_map<uint32_t, std::pair<glm::vec3, glm::vec3>> pieceBounds;
-                for (uint32_t vertex = 0; vertex < vertices.size(); ++vertex)
-                {
-                    auto [bounds, inserted] = pieceBounds.try_emplace(find(vertex), vertices[vertex].pos, vertices[vertex].pos);
-                    bounds->second.first = glm::min(bounds->second.first, vertices[vertex].pos);
-                    bounds->second.second = glm::max(bounds->second.second, vertices[vertex].pos);
-                }
-                for (uint32_t vertex = 0; vertex < vertices.size(); ++vertex)
-                {
-                    const auto& bounds = pieceBounds[find(vertex)];
-                    pieceRadius[vertex] = 0.5f * glm::length(bounds.second - bounds.first);
-                }
-            }
-
-            auto area = [&](const std::vector<uint32_t>& list)
-            {
-                double total = 0.0;
-                for (uint32_t index : list)
-                {
-                    const DagCluster& cluster = clusters[index];
-                    for (size_t corner = 0; corner + 2 < cluster.Triangles.size(); corner += 3)
-                    {
-                        const glm::vec3& a = vertices[cluster.Vertices[cluster.Triangles[corner]]].pos;
-                        const glm::vec3& b = vertices[cluster.Vertices[cluster.Triangles[corner + 1]]].pos;
-                        const glm::vec3& c = vertices[cluster.Vertices[cluster.Triangles[corner + 2]]].pos;
-                        total += 0.5 * double(glm::length(glm::cross(b - a, c - a)));
-                    }
-                }
-                return total;
-            };
-
-            // Per level, the positions clusters of more than one group use (clusterlod's lockBoundary): -1 owner.
-            std::unordered_map<PositionKey, int32_t, PositionKeyHash> owner;
-
-            // Gives a simplification (the clusters it produced, their vertices as the levels below left them) the area of its group back.
-            // False when it lost none, or nothing can move.
-            auto restoreArea = [&](const DagGroup& group, const std::vector<uint32_t>& produced) -> bool
-            {
-                const double sourceArea = area(group.Clusters);
-                const double producedArea = area(produced);
-                if (!(producedArea < sourceArea * 0.999))
-                    return false;
-
-                // The open edges of the simplified surface (welded by position): one triangle each.
-                struct Edge
-                {
-                    uint32_t Count = 0;
-                    glm::vec3 A{}, B{}, Third{};
-                };
-                auto edgeKey = [](PositionKey a, PositionKey b)
-                {
-                    if (std::tie(b.X, b.Y, b.Z) < std::tie(a.X, a.Y, a.Z))
-                        std::swap(a, b);
-                    return std::pair<PositionKey, PositionKey>(a, b);
-                };
-                struct EdgeKeyHash
-                {
-                    size_t operator()(const std::pair<PositionKey, PositionKey>& key) const
-                    {
-                        return PositionKeyHash()(key.first) * 31u ^ PositionKeyHash()(key.second);
-                    }
-                };
-                std::unordered_map<std::pair<PositionKey, PositionKey>, Edge, EdgeKeyHash> edges;
-                for (uint32_t index : produced)
-                {
-                    const DagCluster& cluster = clusters[index];
-                    for (size_t corner = 0; corner + 2 < cluster.Triangles.size(); corner += 3)
-                    {
-                        const glm::vec3 p[3] = { vertices[cluster.Vertices[cluster.Triangles[corner]]].pos,
-                                                 vertices[cluster.Vertices[cluster.Triangles[corner + 1]]].pos,
-                                                 vertices[cluster.Vertices[cluster.Triangles[corner + 2]]].pos };
-                        for (int side = 0; side < 3; ++side)
-                        {
-                            Edge& edge = edges[edgeKey(positionKey(p[side]), positionKey(p[(side + 1) % 3]))];
-                            ++edge.Count;
-                            edge.A = p[side];
-                            edge.B = p[(side + 1) % 3];
-                            edge.Third = p[(side + 2) % 3];
-                        }
-                    }
-                }
-
-                // Each movable vertex's push: the outward normals (in the triangle's plane) of its open edges.
-                auto locked = [&](const glm::vec3& position)
-                {
-                    const auto found = owner.find(positionKey(position));
-                    return found == owner.end() || found->second == -1;
-                };
-                struct Push
-                {
-                    glm::vec3 Direction{ 0.0f };
-                    uint32_t Edges = 0;
-                };
-                std::unordered_map<PositionKey, Push, PositionKeyHash> pushes;
-                double movableLength = 0.0, edgeLength = 0.0;
-                uint32_t openEdges = 0;
-                for (const auto& [key, edge] : edges)
-                {
-                    if (edge.Count != 1)
-                        continue;
-                    const glm::vec3 along = edge.B - edge.A;
-                    const float length = glm::length(along);
-                    const glm::vec3 normal = glm::cross(along, edge.Third - edge.A);
-                    if (length <= 0.0f || glm::length(normal) <= 0.0f)
-                        continue;
-                    glm::vec3 outward = glm::normalize(glm::cross(along, normal));
-                    if (glm::dot(outward, edge.Third - edge.A) > 0.0f)
-                        outward = -outward;
-                    const bool moveA = !locked(edge.A), moveB = !locked(edge.B);
-                    ++openEdges;
-                    edgeLength += length;
-                    if (!moveA && !moveB)
-                        continue;
-                    for (const auto& [position, moves] : { std::pair<glm::vec3, bool>(edge.A, moveA), std::pair<glm::vec3, bool>(edge.B, moveB) })
-                    {
-                        if (!moves)
-                            continue;
-                        Push& push = pushes[positionKey(position)];
-                        push.Direction += outward;
-                        ++push.Edges;
-                    }
-                    // Moving one end of an edge outward by d sweeps half the area moving both does.
-                    movableLength += 0.5 * double(length) * (double(moveA) + double(moveB));
-                }
-                if (movableLength <= 0.0 || openEdges == 0)
-                    return false;
-
-                // Each pushed position's offset per unit of distance: along the bisector of its edges' normals, far enough
-                // (the miter) to move each edge by the distance. With the original vertex it started as (its limit).
-                struct Offset
-                {
-                    glm::vec3 Direction{ 0.0f };
-                    uint32_t Origin = 0;
-                };
-                std::unordered_map<PositionKey, Offset, PositionKeyHash> offsets;
-                for (uint32_t index : produced)
-                {
-                    for (uint32_t vertex : clusters[index].Vertices)
-                    {
-                        const PositionKey key = positionKey(vertices[vertex].pos);
-                        const auto push = pushes.find(key);
-                        if (push == pushes.end() || offsets.contains(key))
-                            continue;
-                        const float sum = glm::length(push->second.Direction);
-                        if (sum >= 1e-6f)
-                            offsets.emplace(key, Offset{ push->second.Direction / sum * std::min(float(push->second.Edges) / sum, 2.0f), origin[vertex] });
-                    }
-                }
-                if (offsets.empty())
-                    return false;
-                // A position pushed by `distance`, at most its piece's radius from where it started.
-                auto pushed = [&](const glm::vec3& position, const Offset& offset, double distance)
-                {
-                    const glm::vec3& start = vertices[offset.Origin].pos;
-                    const glm::vec3 moved = position + offset.Direction * float(distance) - start;
-                    const float length = glm::length(moved);
-                    const float limit = pieceRadius[offset.Origin];
-                    return start + (length > limit ? moved * (limit / length) : moved);
-                };
-                // The simplified surface's area with its open borders pushed by `distance`.
-                auto pushedArea = [&](double distance)
-                {
-                    double total = 0.0;
-                    for (uint32_t index : produced)
-                    {
-                        const DagCluster& cluster = clusters[index];
-                        for (size_t corner = 0; corner + 2 < cluster.Triangles.size(); corner += 3)
-                        {
-                            glm::vec3 p[3];
-                            for (int c = 0; c < 3; ++c)
-                            {
-                                p[c] = vertices[cluster.Vertices[cluster.Triangles[corner + c]]].pos;
-                                if (const auto offset = offsets.find(positionKey(p[c])); offset != offsets.end())
-                                    p[c] = pushed(p[c], offset->second, distance);
-                            }
-                            total += 0.5 * double(glm::length(glm::cross(p[1] - p[0], p[2] - p[0])));
-                        }
-                    }
-                    return total;
-                };
-                // The distance that gives the area back: the border's length times the distance first, then (bisection on the
-                // actual area) the corners' share, which grows with its square -- a few triangles left of many leaves are pushed
-                // by about their size. At most the open edges' average length; what the pieces' limits leave out stays lost.
-                const double maxDistance = edgeLength / openEdges;
-                const double guess = std::min((sourceArea - producedArea) / movableLength, maxDistance);
-                double low = 0.0, high = maxDistance;
-                (pushedArea(guess) > sourceArea ? high : low) = guess;
-                double distance = maxDistance;
-                if (high < maxDistance || pushedArea(maxDistance) > sourceArea)
-                {
-                    for (int step = 0; step < 24; ++step)
-                    {
-                        const double middle = 0.5 * (low + high);
-                        (pushedArea(middle) > sourceArea ? high : low) = middle;
-                    }
-                    distance = low;
-                }
-
-                // The pushed copies, shared by every cluster of this simplification (it stays watertight inside).
-                std::unordered_map<uint32_t, uint32_t> moved;
-                for (uint32_t index : produced)
-                {
-                    for (uint32_t& vertex : clusters[index].Vertices)
-                    {
-                        if (auto found = moved.find(vertex); found != moved.end())
-                        {
-                            vertex = found->second;
-                            continue;
-                        }
-                        const auto offset = offsets.find(positionKey(vertices[vertex].pos));
-                        if (offset == offsets.end())
-                            continue;
-                        shaderio::Vertex copy = vertices[vertex];
-                        copy.pos = pushed(copy.pos, offset->second, distance);
-                        const uint32_t copyIndex = static_cast<uint32_t>(vertices.size());
-                        vertices.push_back(copy);
-                        origin.push_back(origin[vertex]);
-                        current[origin[vertex]] = copyIndex;
-                        moved.emplace(vertex, copyIndex);
-                        vertex = copyIndex;
-                    }
-                }
-                return true;
-            };
-
-            int32_t ownerDepth = -1;
-            uint32_t restoredGroups = 0;
-            for (uint32_t groupIndex = 0; groupIndex < groups.size(); ++groupIndex) // clodBuild's order: level by level
-            {
-                DagGroup& group = groups[groupIndex];
-                if (group.Group.depth != ownerDepth)
-                {
-                    ownerDepth = group.Group.depth;
-                    owner.clear();
-                    for (uint32_t other = groupIndex; other < groups.size() && groups[other].Group.depth == ownerDepth; ++other)
-                    {
-                        for (uint32_t cluster : groups[other].Clusters)
-                        {
-                            for (uint32_t vertex : clusters[cluster].Vertices)
-                            {
-                                auto [found, inserted] = owner.try_emplace(positionKey(vertices[vertex].pos), int32_t(other));
-                                if (!inserted && found->second != int32_t(other))
-                                    found->second = -1;
-                            }
-                        }
-                    }
-                }
-                std::vector<uint32_t>& produced = simplifiedFrom[groupIndex];
-                if (group.Terminal || produced.empty())
-                    continue;
-                // Its error covers the errors of the simplifications its clusters came from (raised by their pushes).
-                float& error = groups[groupIndex].Group.simplified.error;
-                for (uint32_t cluster : group.Clusters)
-                {
-                    if (clusters[cluster].Refined >= 0)
-                        error = std::max(error, groups[clusters[cluster].Refined].Group.simplified.error);
-                }
-
-                // Its clusters' vertices as the levels below left them, then pushed out by what it lost.
-                bool changed = false;
-                for (uint32_t cluster : produced)
-                {
-                    for (uint32_t& vertex : clusters[cluster].Vertices)
-                    {
-                        changed |= current[vertex] != vertex;
-                        vertex = current[vertex];
-                    }
-                }
-                if (restoreArea(group, produced))
-                {
-                    changed = true;
-                    ++restoredGroups;
-                }
-
-                // Their culling bounds around the triangles as they are now (the LOD spheres stay the group's), and the
-                // simplification's error at least how far they are from the original surface.
-                if (!changed)
-                    continue;
-                for (uint32_t index : produced)
-                {
-                    DagCluster& cluster = clusters[index];
-                    for (uint32_t vertex : cluster.Vertices)
-                        error = std::max(error, glm::length(vertices[vertex].pos - vertices[origin[vertex]].pos));
-                    const meshopt_Bounds bounds = meshopt_computeMeshletBounds(cluster.Vertices.data(), cluster.Triangles.data(), cluster.Triangles.size() / 3,
-                                                                               &vertices[0].pos.x, vertices.size(), sizeof(shaderio::Vertex));
-                    cluster.Bounds.center = glm::vec3(bounds.center[0], bounds.center[1], bounds.center[2]);
-                    cluster.Bounds.radius = bounds.radius;
-                    cluster.Bounds.coneApex = glm::vec3(bounds.cone_apex[0], bounds.cone_apex[1], bounds.cone_apex[2]);
-                    cluster.Bounds.coneAxis = glm::vec3(bounds.cone_axis[0], bounds.cone_axis[1], bounds.cone_axis[2]);
-                    cluster.Bounds.coneCutoff = bounds.cone_cutoff;
-                }
-            }
-            s_PreservedAreaGroups += restoredGroups;
-
-            // The clusters' errors as the groups' are now: their own simplification's and the one they went into.
-            for (const DagGroup& group : groups)
-            {
-                for (uint32_t index : group.Clusters)
-                {
-                    DagCluster& cluster = clusters[index];
-                    cluster.Bounds.parentError = group.Group.simplified.error;
-                    if (cluster.Refined >= 0)
-                        cluster.Bounds.lodError = groups[cluster.Refined].Group.simplified.error;
-                }
-            }
-        }
 
         // Streaming pages (§5.7.2): about this much data each (Nanite's 128 KB pages; one group may exceed it alone).
         constexpr uint64_t PageTargetBytes = 128 * 1024;
@@ -697,7 +313,7 @@ namespace Nox
         // original geometry are merged into groups and simplified, level after level, until one cluster is left. Every
         // cluster keeps the bounds and error of the group it came from and of the group it went into, so the task shader
         // can pick the cut. The clusters are then packed into streaming pages (writePages).
-        void buildClusterLod(MeshData& data, std::vector<uint32_t> indices, bool preserveSurfaceArea = false)
+        void buildClusterLod(MeshData& data, std::vector<uint32_t> indices)
         {
             // Indexed first (vertex order does not matter here: each page takes its own vertex block, writePages).
             indexVertices(data, indices);
@@ -765,9 +381,7 @@ namespace Nox
                 return static_cast<int>(groups.size() - 1);
             });
 
-            std::vector<shaderio::Vertex> sourceVertices = std::move(data.Vertices);
-            if (preserveSurfaceArea)
-                preserveArea(sourceVertices, clusters, groups);
+            const std::vector<shaderio::Vertex> sourceVertices = std::move(data.Vertices);
             writePages(data, sourceVertices, clusters, groups);
         }
     }
@@ -1324,27 +938,18 @@ namespace Nox
                 key.Value *= scale;
     }
 
-    static void BuildClusters(MeshSubset& subset, PreserveAreaMode preserveArea)
+    static void BuildClusters(MeshSubset& subset)
     {
         s_VerticesBeforeIndexing = 0;
         s_VerticesAfterIndexing = 0;
-        s_PreservedAreaGroups = 0;
         for (size_t i = 0; i < subset.Meshes.size(); ++i)
         {
             if (subset.Pending[i].Skinned)
-            {
                 buildMeshlets(subset.Meshes[i], std::move(subset.Pending[i].Indices));
-                continue;
-            }
-            // Auto: thin, open surfaces -- what an alpha mask cuts out (foliage cards) or both sides show (curtains, cloth, leaves).
-            const MaterialData* material = i < subset.Materials.size() ? &subset.Materials[i] : nullptr;
-            const bool preserve = preserveArea == PreserveAreaMode::On ||
-                                  (preserveArea == PreserveAreaMode::Auto && material && (material->Mode == AlphaMode::Mask || material->DoubleSided));
-            buildClusterLod(subset.Meshes[i], std::move(subset.Pending[i].Indices), preserve);
+            else
+                buildClusterLod(subset.Meshes[i], std::move(subset.Pending[i].Indices));
         }
         subset.Pending.clear();
-        if (s_PreservedAreaGroups > 0)
-            NOX_CORE_INFO("MeshImporter: preserve area restored the area of {} simplified groups", s_PreservedAreaGroups);
         if (s_VerticesAfterIndexing < s_VerticesBeforeIndexing)
             NOX_CORE_INFO("MeshImporter: indexing welded {} -> {} vertices ({:.1f}% fewer)", s_VerticesBeforeIndexing, s_VerticesAfterIndexing,
                           100.0 * double(s_VerticesBeforeIndexing - s_VerticesAfterIndexing) / double(s_VerticesBeforeIndexing));
@@ -1550,7 +1155,7 @@ namespace Nox
         // ImportScale applied through its placement Transform.Scale either (matches the static path -- see EditorLayer's drag-in).
         ApplyImportScale(subset, importSettings.ImportScale);
 
-        BuildClusters(subset, importSettings.PreserveArea);
+        BuildClusters(subset);
 
         std::error_code error;
         std::filesystem::create_directories(cookedPath.parent_path(), error);
@@ -1657,7 +1262,7 @@ namespace Nox
             // (static or skeletal alike -- see the matching skeleton/animation scaling below for the skinned case).
             if (!level)
                 ApplyImportScale(subset, wholeFile.MeshSettings.ImportScale);
-            BuildClusters(subset, wholeFile.MeshSettings.PreserveArea);
+            BuildClusters(subset);
 
             std::string name = node.MeshName.empty() ? "Mesh_" + std::to_string(node.MeshIndex) : node.MeshName;
             for (char& character : name)
