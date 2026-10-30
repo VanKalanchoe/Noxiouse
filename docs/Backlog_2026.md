@@ -14,6 +14,28 @@
 
 | R11 | **More async compute:** only the screen-probe GI passes are marked `RGPassFlags::AsyncCompute` (`RTPasses.cpp`). Candidates: the sky lookup tables, particles, skinning and the light grid -- the queue, fork/join and submissions are built; each is mostly marking the pass and measuring it |
 
+### Raster versions of the RT features (decided 2026-10-31)
+
+RT stays required (every GPU Nox targets has it; no fallback for GPUs without it). Each item below is a raster version of an effect
+Nox already does with rays, built only to be **measured against the RT version** in the same scenes (Bistro, the streaming test world)
+at the same quality preset: GPU time, VRAM, and image quality side by side. The cheaper one at comparable quality becomes the preset
+default; the RT one stays the default otherwise (RT shadows may well win). Both stay selectable per setting.
+
+| # | Item |
+|---|---|
+| RS1 | **Shadow maps:** cascaded shadow maps for the sun (PCF / PCSS soft edges, stable cascades) and a shadow atlas for spot / point / rect lights. Vs RT shadows (`ShadowMask.slang`). Later, if measured worth it: Unreal-style virtual shadow maps |
+| RS2 | **Contact shadows:** a short screen-space ray towards the light per pixel, for the small detail shadow maps miss. Only with RS1 (RT shadows have the detail already) |
+| RS3 | **GTAO** (ground-truth AO, Unreal / Godot) replacing the classic `SSAO.slang`. Vs RTAO |
+| RS4 | **SSR + reflection probes:** hierarchical screen-space reflections over the existing Hi-Z / color pyramid (`HiZBuild`, `ColorPyramid`), falling back to placed box-projected reflection probes (captured by rasterized cubemaps), then the sky. Vs RT reflections (`Reflection.slang`) |
+| RS5 | **GI without rays:** irradiance probe volumes captured by rasterized cubemaps (baked, or updated a few per frame), shared capture code with RS4's probes; SSGI on top for dynamic bounce. Vs the screen-probe GI and DDGI |
+| RS6 | **Volumetric fog in froxels:** lit fog with light shafts, sampling the shadows (RT shadow mask or RS1's maps) per froxel; extends the height fog (`HeightFog.slang`) |
+
+### Post effects (new features)
+
+| # | Item |
+|---|---|
+| PP1 | **Bloom** (downsample / upsample chain, Call of Duty style), **depth of field** (bokeh, from the camera's aperture and focus distance), **motion blur** (per-pixel, from the motion vectors TAA / DLSS already have), **color grading LUT**, **vignette / film grain / chromatic aberration / lens flares**, **sharpening** (CAS). Settings on the camera / project like the existing exposure and tonemapping |
+
 ### Levels and streaming (plan: `Engine_Architecture_Plan_2026.md` §6c)
 
 | # | Item |
