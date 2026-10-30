@@ -1268,6 +1268,12 @@ threshold for very large ones).
     table entry checked against its finest resident ancestor. Then 750,000 shader-style samples, each with its bilinear neighbours,
     checked against the source texels through a simulated pool filled from NTV1 tiles (borders and repeat wrapping included). All
     pass.
+  - **Measured on Bistro (2026-10-30, 45 textures of 4096² cooked virtual, Release, hybrid, DLSS Quality):** texture VRAM went from
+    680 MB (virtual texturing off, the 45 textures mip-streamed) to 381 MB (on). The 45 textures took about 300 MB mip-streamed;
+    virtual, they take 2079 resident tiles in two pools (BC7 and BC7 sRGB, 48x48 slots, 81 MB together). The image is the same,
+    and the GPU frame is unchanged (18.2 vs 18.4 ms; the G-buffer resolve costs 0.31 -> 0.37 ms for the page table lookups).
+    With a deliberately small pool, the surfaces where tiles have no room fall back to coarser mips (rust on metal looks blurry
+    up close) and recover when the pool is large enough again -- the expected behavior.
   - **Not covered yet:** the packaged runtime loads textures synchronously (no mip or tile streaming there yet). A virtual texture
     renamed or moved while loaded keeps reading its old path until reloaded, as a mip-streamed one does.
 - **Exit criterion:** a 16K test texture renders identically to its mip-streamed version while holding only the visible tiles.
