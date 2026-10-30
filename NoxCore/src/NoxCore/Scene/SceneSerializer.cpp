@@ -1066,6 +1066,15 @@ namespace Nox
             out << YAML::EndMap; // CharacterController3DComponent
         }
 
+        if (entity.HasComponent<MetadataComponent>())
+        {
+            // A list of pairs: the order is kept (a map would sort it).
+            out << YAML::Key << "MetadataComponent" << YAML::Value << YAML::BeginSeq;
+            for (const auto& [key, value] : entity.GetComponent<MetadataComponent>().Values)
+                out << YAML::Flow << YAML::BeginSeq << key << value << YAML::EndSeq;
+            out << YAML::EndSeq;
+        }
+
         if (entity.HasComponent<TextComponent>())
         {
             out << YAML::Key << "TextComponent";
@@ -2311,6 +2320,16 @@ namespace Nox
                 socket.RotationOffset = socketNode["RotationOffset"].as<glm::vec3>();
             if (socketNode["Scale"])
                 socket.Scale = socketNode["Scale"].as<glm::vec3>();
+        }
+
+        if (auto metadata = entity["MetadataComponent"]; metadata && metadata.IsSequence())
+        {
+            auto& component = deserializedEntity.AddComponent<MetadataComponent>();
+            for (const auto& pair : metadata)
+            {
+                if (pair.IsSequence() && pair.size() == 2)
+                    component.Values.emplace_back(pair[0].as<std::string>(), pair[1].as<std::string>());
+            }
         }
 
         auto textComponent = entity["TextComponent"];

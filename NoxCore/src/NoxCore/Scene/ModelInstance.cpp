@@ -181,6 +181,61 @@ namespace Nox
             std::vector<int32_t> Nodes; // sorted, unique
         };
 
+        // What the file gave a node besides its mesh: its glTF extras (MetadataComponent) and physics (a body and its collider).
+        void addNodeData(Entity entity, const MeshNodeData& node)
+        {
+            if (!node.Extras.empty())
+                entity.AddOrReplaceComponent<MetadataComponent>().Values = node.Extras;
+
+            const NodePhysics& physics = node.Physics;
+            if (physics.Body != NodePhysics::BodyType::None)
+            {
+                auto& body = entity.AddOrReplaceComponent<RigidBody3DComponent>();
+                body.Type = physics.Body == NodePhysics::BodyType::Static    ? RigidBody3DComponent::BodyType::Static
+                          : physics.Body == NodePhysics::BodyType::Kinematic ? RigidBody3DComponent::BodyType::Kinematic
+                                                                              : RigidBody3DComponent::BodyType::Dynamic;
+                body.Mass = physics.Mass;
+                body.GravityFactor = physics.GravityFactor;
+                body.IsSensor = physics.Trigger;
+            }
+            switch (physics.Shape)
+            {
+            case NodePhysics::ShapeType::Box:
+            {
+                auto& box = entity.AddOrReplaceComponent<BoxCollider3DComponent>();
+                box.HalfExtents = physics.Size;
+                box.Friction = physics.Friction;
+                box.Restitution = physics.Restitution;
+                break;
+            }
+            case NodePhysics::ShapeType::Sphere:
+            {
+                auto& sphere = entity.AddOrReplaceComponent<SphereCollider3DComponent>();
+                sphere.Radius = physics.Size.x;
+                sphere.Friction = physics.Friction;
+                sphere.Restitution = physics.Restitution;
+                break;
+            }
+            case NodePhysics::ShapeType::Capsule:
+            {
+                auto& capsule = entity.AddOrReplaceComponent<CapsuleCollider3DComponent>();
+                capsule.Radius = physics.Size.x;
+                capsule.HalfHeight = physics.Size.y;
+                capsule.Friction = physics.Friction;
+                capsule.Restitution = physics.Restitution;
+                break;
+            }
+            default:
+                break;
+            }
+        }
+
+        // A node without a mesh that still needs an entity of its own (the flat placement would drop it).
+        bool carriesData(const MeshNodeData& node)
+        {
+            return node.SubmeshCount == 0 && node.Parent != MeshNodeData::OutsideScene && (!node.Extras.empty() || node.Physics.Any());
+        }
+
         bool sharesNode(const std::vector<int32_t>& a, const std::vector<int32_t>& b)
         {
             size_t i = 0, j = 0;
@@ -387,6 +442,7 @@ namespace Nox
                     meshComponent.SubmeshIndex = only->FirstSubmesh;
                     meshComponent.SubmeshCount = only->SubmeshCount;
                     root.AddComponent<MaterialComponent>();
+                    addNodeData(root, *only);
                     root.RemoveComponent<ModelInstanceComponent>(); // `instance` is gone
                     return true;
                 }
@@ -396,7 +452,8 @@ namespace Nox
             // the model becomes an entity of its own, side by side under the instance's parent, at its world transform; empty
             // grouping nodes vanish. Hierarchy stays where it is needed: animated models (a node animation moves parent-relative
             // transforms), models with overrides, and roots that carry other components.
-            if (mesh.GetAnimationAssets().empty() && instance.Overrides.empty() && onlyInstanceComponents(scene, root))
+            if (mesh.GetAnimationAssets().empty() && instance.Overrides.empty() && onlyInstanceComponents(scene, root) &&
+                std::none_of(nodes.begin(), nodes.end(), carriesData))
             {
                 std::vector<size_t> meshSlots;
                 for (size_t slot = 0; slot < nodes.size(); ++slot)
@@ -454,6 +511,7 @@ namespace Nox
                         meshComponent.SubmeshIndex = node.FirstSubmesh;
                         meshComponent.SubmeshCount = node.SubmeshCount;
                         piece.AddComponent<MaterialComponent>();
+                        addNodeData(piece, node);
                         place(piece, worldOf(meshSlots[i]));
                     }
 
@@ -508,6 +566,7 @@ namespace Nox
                 // A node whose parent was removed hangs off the root.
                 const int32_t parent = nodes[index].Parent;
                 attach(node, parent >= 0 && parent < static_cast<int32_t>(nodes.size()) && spawned[parent] ? spawned[parent] : root);
+                addNodeData(node, nodes[index]);
 
                 if (nodes[index].SubmeshCount > 0)
                 {
@@ -759,6 +818,7 @@ namespace Nox
                 continue;
             entities[i] = scene.CreateEntity(node.Name.empty() ? "Node " + std::to_string(i) : node.Name);
             entities[i].GetComponent<TransformComponent>() = makeTransform(node.Translation, node.Rotation, node.Scale);
+            addNodeData(entities[i], node);
         }
         for (size_t i = 0; i < level.Nodes.size(); ++i)
         {

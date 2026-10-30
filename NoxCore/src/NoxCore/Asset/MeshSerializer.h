@@ -343,6 +343,8 @@ namespace Nox
         // moves (sparse: vertex index, position delta, normal delta). Version 5 and 4 cooks read without morph targets.
         // Version 7: every mesh's material variants (KHR_materials_variants) at the end of its record: per mapping the variant's
         // name and index, then the materials. Older cooks read without variants.
+        // Version 8: every node's extras (key / value strings) and physics (NodePhysics, field by field) after its submesh range.
+        // Older cooks read without them.
         static constexpr uint32_t MeshFlagVertexColors = 1u << 0;
 
         struct MorphDelta
@@ -769,6 +771,21 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
                     stream.write(reinterpret_cast<const char*>(&node.Scale), sizeof(glm::vec3));
                     stream.write(reinterpret_cast<const char*>(&node.FirstSubmesh), sizeof(uint32_t));
                     stream.write(reinterpret_cast<const char*>(&node.SubmeshCount), sizeof(uint32_t));
+                    const uint32_t extraCount = static_cast<uint32_t>(node.Extras.size());
+                    stream.write(reinterpret_cast<const char*>(&extraCount), sizeof(uint32_t));
+                    for (const auto& [key, value] : node.Extras)
+                    {
+                        SerializerUtils::WriteString(stream, key);
+                        SerializerUtils::WriteString(stream, value);
+                    }
+                    const NodePhysics& physics = node.Physics;
+                    const uint8_t kinds[3] = { static_cast<uint8_t>(physics.Body), static_cast<uint8_t>(physics.Shape), physics.Trigger ? uint8_t(1) : uint8_t(0) };
+                    stream.write(reinterpret_cast<const char*>(kinds), sizeof(kinds));
+                    stream.write(reinterpret_cast<const char*>(&physics.Mass), sizeof(float));
+                    stream.write(reinterpret_cast<const char*>(&physics.GravityFactor), sizeof(float));
+                    stream.write(reinterpret_cast<const char*>(&physics.Size), sizeof(glm::vec3));
+                    stream.write(reinterpret_cast<const char*>(&physics.Friction), sizeof(float));
+                    stream.write(reinterpret_cast<const char*>(&physics.Restitution), sizeof(float));
                 }
             }
 
@@ -816,7 +833,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
                 }
             }
 
-            static void ReadNodes(std::istream& stream, std::vector<MeshNodeData>& outNodes)
+            static void ReadNodes(std::istream& stream, std::vector<MeshNodeData>& outNodes, uint32_t version)
             {
                 uint32_t count = 0;
                 stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
@@ -832,6 +849,28 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
                     stream.read(reinterpret_cast<char*>(&outNodes[i].Scale), sizeof(glm::vec3));
                     stream.read(reinterpret_cast<char*>(&outNodes[i].FirstSubmesh), sizeof(uint32_t));
                     stream.read(reinterpret_cast<char*>(&outNodes[i].SubmeshCount), sizeof(uint32_t));
+                    if (version < 8)
+                        continue;
+                    uint32_t extraCount = 0;
+                    stream.read(reinterpret_cast<char*>(&extraCount), sizeof(uint32_t));
+                    if (stream.fail()) return;
+                    outNodes[i].Extras.resize(extraCount);
+                    for (auto& [key, value] : outNodes[i].Extras)
+                    {
+                        SerializerUtils::ReadString(stream, key);
+                        SerializerUtils::ReadString(stream, value);
+                    }
+                    NodePhysics& physics = outNodes[i].Physics;
+                    uint8_t kinds[3] = {};
+                    stream.read(reinterpret_cast<char*>(kinds), sizeof(kinds));
+                    physics.Body = static_cast<NodePhysics::BodyType>(kinds[0]);
+                    physics.Shape = static_cast<NodePhysics::ShapeType>(kinds[1]);
+                    physics.Trigger = kinds[2] != 0;
+                    stream.read(reinterpret_cast<char*>(&physics.Mass), sizeof(float));
+                    stream.read(reinterpret_cast<char*>(&physics.GravityFactor), sizeof(float));
+                    stream.read(reinterpret_cast<char*>(&physics.Size), sizeof(glm::vec3));
+                    stream.read(reinterpret_cast<char*>(&physics.Friction), sizeof(float));
+                    stream.read(reinterpret_cast<char*>(&physics.Restitution), sizeof(float));
                 }
             }
 
@@ -867,16 +906,16 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             stream.write(reinterpret_cast<const char*>(&payloadBase), sizeof(uint64_t));
         }
 
-        // The version (2 to 7) of a magic of this kind ("NSM" static, "NMS" skeletal, then the digit), 0 for anything else.
+        // The version (2 to 8) of a magic of this kind ("NSM" static, "NMS" skeletal, then the digit), 0 for anything else.
         static uint32_t MagicVersion(const char* header, const char* kind)
         {
-            if (std::memcmp(header, kind, 3) != 0 || header[3] < '2' || header[3] > '7')
+            if (std::memcmp(header, kind, 3) != 0 || header[3] < '2' || header[3] > '8')
                 return 0;
             return static_cast<uint32_t>(header[3] - '0');
         }
 
-        // kind: "NSM" or "NMS". Versions 4 to 7 are read (each older one without what came after it: variants, morph targets,
-        // vertex colors); older cooks are not read (MeshImporter cooks them again).
+        // kind: "NSM" or "NMS". Versions 4 to 8 are read (each older one without what came after it: node extras and physics,
+        // variants, morph targets, vertex colors); older cooks are not read (MeshImporter cooks them again).
         static bool DeserializeMeshes(const std::filesystem::path& filepath, const char* kind, bool streamPages,
                                       std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList,
                                       std::vector<LightNodeData>& outLightList, std::vector<MeshNodeData>& outNodeList,
@@ -905,7 +944,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
                 ReadMeshData(stream, outDataList[i], version);
             ReadMaterials(stream, outMaterialList);
             ReadLights(stream, outLightList);
-            ReadNodes(stream, outNodeList);
+            ReadNodes(stream, outNodeList, version);
             ReadCameras(stream, outCameraList);
             if (stream.fail())
                 return false;
@@ -919,7 +958,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
         }
 
     public:
-        // The cooked format's version (2 to 7) from the magic, 0 when the file is not a mesh.
+        // The cooked format's version (2 to 8) from the magic, 0 when the file is not a mesh.
         static uint32_t ReadVersion(const std::filesystem::path& filepath)
         {
             char magic[4] = {};
@@ -938,7 +977,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            SerializeMeshes(filepath, "NSM7", dataList, materialList, lightList, nodeList, cameraList);
+            SerializeMeshes(filepath, "NSM8", dataList, materialList, lightList, nodeList, cameraList);
         }
 
         static bool DeserializeStaticMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
@@ -987,7 +1026,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            SerializeMeshes(filepath, "NMS7", dataList, materialList, lightList, nodeList, cameraList);
+            SerializeMeshes(filepath, "NMS8", dataList, materialList, lightList, nodeList, cameraList);
         }
         
         static bool DeserializeMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)

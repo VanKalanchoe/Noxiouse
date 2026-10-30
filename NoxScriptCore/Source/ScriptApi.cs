@@ -8,7 +8,7 @@ internal static class ScriptApi
 {
     // Raised whenever the internal calls change (InternalCalls.cs <-> DotNetBackend.cpp RegisterInternalCalls): the engine refuses
     // a Nox.ScriptCore of another version instead of calling functions that moved. Must equal kScriptApiVersion in DotNetBackend.cpp.
-    public const int Version = 12;
+    public const int Version = 13;
 
     internal static int GetVersion() => Version;
 

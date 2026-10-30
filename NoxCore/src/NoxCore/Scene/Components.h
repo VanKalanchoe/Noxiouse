@@ -6,6 +6,8 @@
 
 #include <map>
 #include <optional>
+#include <string_view>
+#include <utility>
 #include "string"
 #include <unordered_map>
 
@@ -136,6 +138,25 @@ namespace Nox
         MaterialComponent(const MaterialComponent&) = default;
     };
     
+    // Named values on an entity (Godot's node metadata, Unreal's actor tags and user-defined attributes): from an imported model's glTF
+    // extras (Blender's custom properties) or set by hand, read by scripts (Entity.GetMetadata). Values are text: strings as they
+    // are, numbers and the rest as their JSON. In the order they were given.
+    struct MetadataComponent
+    {
+        std::vector<std::pair<std::string, std::string>> Values;
+
+        const std::string* Find(std::string_view key) const
+        {
+            for (const auto& [name, value] : Values)
+                if (name == key)
+                    return &value;
+            return nullptr;
+        }
+
+        MetadataComponent() = default;
+        MetadataComponent(const MetadataComponent&) = default;
+    };
+
     // What a model instance changed on one of its nodes; everything else comes from the model's cooked node data.
     struct ModelNodeOverride
     {
@@ -873,7 +894,7 @@ namespace Nox
 
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
-        MeshComponent, MaterialComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, EnvironmentLightComponent, AnimatorComponent,
+        MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, EnvironmentLightComponent, AnimatorComponent,
         TimelinePlayerComponent, ParticleEmitterComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,

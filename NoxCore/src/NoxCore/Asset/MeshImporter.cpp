@@ -9,6 +9,7 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <string_view>
@@ -1051,7 +1052,10 @@ namespace Nox
                     delta *= scale;
         }
         for (MeshNodeData& node : subset.Nodes)
+        {
             node.Translation *= scale;
+            node.Physics.Size *= scale; // in the node's space, like its mesh's vertices
+        }
         // The volume's lengths are the file's, like its vertices.
         for (MaterialData& material : subset.Materials)
         {
@@ -1295,11 +1299,21 @@ namespace Nox
                 out.Pending.push_back(pending[i]);
         }
 
+        // The node's extras and its own body go along (a collider on a child node of the file stays with the file: Import Into
+        // Level keeps those).
+        auto carryNodeData = [](const MeshNodeData& from, MeshNodeData& to)
+        {
+            to.Extras = from.Extras;
+            if (from.Physics.Body != NodePhysics::BodyType::None)
+                to.Physics = from.Physics;
+        };
+
         MeshNodeData& node = out.Nodes.emplace_back();
         node.Name = user->MeshName;
         node.FirstSubmesh = 0;
         node.SubmeshCount = static_cast<uint32_t>(out.Meshes.size());
         node.MeshIndex = meshIndex;
+        carryNodeData(*user, node);
 
         const uint32_t submeshCount = static_cast<uint32_t>(out.Meshes.size());
         for (size_t index = 0; index < nodes.size(); ++index)
@@ -1317,6 +1331,7 @@ namespace Nox
             placed.FirstSubmesh = 0;
             placed.SubmeshCount = submeshCount;
             placed.MeshIndex = meshIndex;
+            carryNodeData(instance, placed);
         }
         return !out.Meshes.empty();
     }
@@ -3021,6 +3036,234 @@ namespace Nox
                   [](const MaterialVariantMapping& a, const MaterialVariantMapping& b) { return a.VariantIndex < b.VariantIndex; });
     }
 
+    // A glTF JSON value as compact JSON text (extras keep what the file wrote).
+    static void AppendJson(const tg3_value& value, std::string& out)
+    {
+        switch (value.type)
+        {
+        case TG3_VALUE_BOOL: out += value.bool_val ? "true" : "false"; break;
+        case TG3_VALUE_INT: out += std::to_string(value.int_val); break;
+        case TG3_VALUE_REAL:
+        {
+            char text[32];
+            std::snprintf(text, sizeof(text), "%.9g", value.real_val);
+            out += text;
+            break;
+        }
+        case TG3_VALUE_STRING:
+        {
+            out += '"';
+            for (uint32_t i = 0; i < value.string_val.len; ++i)
+            {
+                const char c = value.string_val.data[i];
+                if (c == '"' || c == '\\') { out += '\\'; out += c; }
+                else if (c == '\n') out += "\\n";
+                else if (c == '\t') out += "\\t";
+                else if (static_cast<unsigned char>(c) < 0x20) { char code[8]; std::snprintf(code, sizeof(code), "\\u%04x", c); out += code; }
+                else out += c;
+            }
+            out += '"';
+            break;
+        }
+        case TG3_VALUE_ARRAY:
+            out += '[';
+            for (uint32_t i = 0; i < value.array_count; ++i)
+            {
+                if (i) out += ',';
+                AppendJson(value.array_data[i], out);
+            }
+            out += ']';
+            break;
+        case TG3_VALUE_OBJECT:
+            out += '{';
+            for (uint32_t i = 0; i < value.object_count; ++i)
+            {
+                if (i) out += ',';
+                AppendJson(tg3_value{ .type = TG3_VALUE_STRING, .string_val = value.object_data[i].key }, out);
+                out += ':';
+                AppendJson(value.object_data[i].value, out);
+            }
+            out += '}';
+            break;
+        default: out += "null"; break;
+        }
+    }
+
+    // A node's glTF extras as key / value text (Godot keeps them as the node's metadata, Unreal as user-defined attributes): an object's
+    // members one each, a string as it is, anything else as its JSON. Extras that are not an object are one entry named "extras".
+    static std::vector<std::pair<std::string, std::string>> FlattenExtras(const tg3_value* extras)
+    {
+        std::vector<std::pair<std::string, std::string>> result;
+        if (!extras || extras->type == TG3_VALUE_NULL)
+            return result;
+        auto text = [](const tg3_value& value)
+        {
+            if (value.type == TG3_VALUE_STRING)
+                return value.string_val.data ? std::string(value.string_val.data, value.string_val.len) : std::string();
+            std::string json;
+            AppendJson(value, json);
+            return json;
+        };
+        if (extras->type != TG3_VALUE_OBJECT)
+        {
+            result.emplace_back("extras", text(*extras));
+            return result;
+        }
+        for (uint32_t i = 0; i < extras->object_count; ++i)
+        {
+            const tg3_kv_pair& member = extras->object_data[i];
+            result.emplace_back(std::string(member.key.data ? member.key.data : "", member.key.len), text(member.value));
+        }
+        return result;
+    }
+
+    // KHR_physics_rigid_bodies on the file's nodes (shapes from KHR_implicit_shapes) as NodePhysics. Nox has components for boxes,
+    // spheres and capsules; what it has none for (cylinders, planes, mesh and convex hull colliders, joints, collision filters, initial
+    // velocities, a set center of mass or inertia) is named once in the log and left out. Colliders and triggers with no body above
+    // them get a static body of their own (the spec's static colliders).
+    static void ReadNodePhysics(const tg3_model& model, std::vector<MeshNodeData>& nodes)
+    {
+        const uint32_t fileNodes = std::min<uint32_t>(model.nodes_count, static_cast<uint32_t>(nodes.size()));
+        const tg3_extension* shapesExtension = FindExtension(model.ext, "KHR_implicit_shapes");
+        const tg3_value* shapes = shapesExtension ? FindMember(shapesExtension->value, "shapes") : nullptr;
+        const tg3_extension* bodiesExtension = FindExtension(model.ext, "KHR_physics_rigid_bodies");
+        const tg3_value* materials = bodiesExtension ? FindMember(bodiesExtension->value, "physicsMaterials") : nullptr;
+
+        auto number = [](const tg3_value* value, double fallback)
+        {
+            if (!value)
+                return fallback;
+            return value->type == TG3_VALUE_REAL ? value->real_val : value->type == TG3_VALUE_INT ? static_cast<double>(value->int_val) : fallback;
+        };
+        auto index = [&](const tg3_value& object, std::string_view key) { return static_cast<int64_t>(number(FindMember(object, key), -1.0)); };
+        auto element = [](const tg3_value* array, int64_t at) -> const tg3_value*
+        {
+            return array && array->type == TG3_VALUE_ARRAY && at >= 0 && at < static_cast<int64_t>(array->array_count) ? &array->array_data[at] : nullptr;
+        };
+
+        std::set<std::string> leftOut;
+        // The collider's shape into `physics`; false (and named in leftOut) when Nox has no component for it.
+        auto readGeometry = [&](const tg3_value& geometry, NodePhysics& physics) -> bool
+        {
+            if (FindMember(geometry, "mesh"))
+            {
+                const tg3_value* hull = FindMember(geometry, "convexHull");
+                leftOut.insert(hull && hull->type == TG3_VALUE_BOOL && hull->bool_val ? "convex hull colliders" : "mesh colliders");
+                return false;
+            }
+            const tg3_value* shape = element(shapes, index(geometry, "shape"));
+            const tg3_value* type = shape ? FindMember(*shape, "type") : nullptr;
+            const std::string_view kind = type && type->type == TG3_VALUE_STRING ? std::string_view(type->string_val.data, type->string_val.len) : "";
+            const tg3_value* parameters = shape && !kind.empty() ? FindMember(*shape, kind) : nullptr;
+            if (!parameters)
+            {
+                leftOut.insert("colliders without a shape");
+                return false;
+            }
+            if (kind == "box")
+            {
+                const tg3_value* size = FindMember(*parameters, "size");
+                physics.Shape = NodePhysics::ShapeType::Box;
+                for (int axis = 0; axis < 3; ++axis)
+                    physics.Size[axis] = 0.5f * static_cast<float>(number(element(size, axis), 1.0));
+                return true;
+            }
+            if (kind == "sphere")
+            {
+                physics.Shape = NodePhysics::ShapeType::Sphere;
+                physics.Size = glm::vec3(static_cast<float>(number(FindMember(*parameters, "radius"), 0.5)), 0.0f, 0.0f);
+                return true;
+            }
+            if (kind == "capsule")
+            {
+                // height: between the centers of the two capping spheres (Jolt's and Nox's half height is half of it).
+                const float top = static_cast<float>(number(FindMember(*parameters, "radiusTop"), 0.25));
+                const float bottom = static_cast<float>(number(FindMember(*parameters, "radiusBottom"), 0.25));
+                if (std::abs(top - bottom) > 1e-4f)
+                    leftOut.insert("tapered capsules (made straight, the larger radius)");
+                physics.Shape = NodePhysics::ShapeType::Capsule;
+                physics.Size = glm::vec3(std::max(top, bottom), 0.5f * static_cast<float>(number(FindMember(*parameters, "height"), 0.5)), 0.0f);
+                return true;
+            }
+            leftOut.insert(std::string(kind) + " colliders");
+            return false;
+        };
+
+        for (uint32_t i = 0; i < fileNodes; ++i)
+        {
+            const tg3_extension* extension = FindExtension(model.nodes[i].ext, "KHR_physics_rigid_bodies");
+            if (!extension || nodes[i].Parent == MeshNodeData::OutsideScene)
+                continue;
+            NodePhysics& physics = nodes[i].Physics;
+            if (const tg3_value* motion = FindMember(extension->value, "motion"))
+            {
+                const tg3_value* kinematic = FindMember(*motion, "isKinematic");
+                const double mass = number(FindMember(*motion, "mass"), -1.0);
+                // A mass of 0 is the spec's infinite mass: nothing moves it, as a kinematic body.
+                physics.Body = (kinematic && kinematic->type == TG3_VALUE_BOOL && kinematic->bool_val) || mass == 0.0
+                    ? NodePhysics::BodyType::Kinematic : NodePhysics::BodyType::Dynamic;
+                physics.Mass = mass > 0.0 ? static_cast<float>(mass) : 0.0f;
+                physics.GravityFactor = static_cast<float>(number(FindMember(*motion, "gravityFactor"), 1.0));
+                for (const char* unsupported : { "linearVelocity", "angularVelocity", "centerOfMass", "inertiaDiagonal", "inertiaOrientation" })
+                    if (FindMember(*motion, unsupported))
+                        leftOut.insert(std::string("motion.") + unsupported);
+            }
+            const tg3_value* collider = FindMember(extension->value, "collider");
+            const tg3_value* trigger = FindMember(extension->value, "trigger");
+            const tg3_value* geometry = collider ? FindMember(*collider, "geometry") : trigger ? FindMember(*trigger, "geometry") : nullptr;
+            if (geometry && readGeometry(*geometry, physics))
+            {
+                physics.Trigger = !collider && trigger;
+                if (const tg3_value* material = collider ? element(materials, index(*collider, "physicsMaterial")) : nullptr)
+                {
+                    physics.Friction = static_cast<float>(number(FindMember(*material, "dynamicFriction"), number(FindMember(*material, "staticFriction"), 0.5)));
+                    physics.Restitution = static_cast<float>(number(FindMember(*material, "restitution"), 0.0));
+                }
+            }
+            else if (trigger && FindMember(*trigger, "nodes"))
+            {
+                leftOut.insert("compound triggers");
+            }
+            if (FindMember(extension->value, "joint"))
+                leftOut.insert("joints");
+            if ((collider && FindMember(*collider, "collisionFilter")) || (trigger && FindMember(*trigger, "collisionFilter")))
+                leftOut.insert("collision filters");
+        }
+
+        // Only motions are bodies so far. A collider under one is part of it (the compound JoltPhysics3DScene builds); any other
+        // collider is a static body of its own, and so is a trigger (a sensor): one under a moving body would have to move with it,
+        // and Nox's sensors are whole bodies. Decided from the motions alone, so the order of the nodes does not matter.
+        std::vector<uint8_t> underMotion(fileNodes, 0);
+        for (uint32_t i = 0; i < fileNodes; ++i)
+        {
+            for (int32_t parent = nodes[i].Parent, depth = 0; parent >= 0 && parent < static_cast<int32_t>(fileNodes) && depth < 256;
+                 parent = nodes[parent].Parent, ++depth)
+                underMotion[i] |= nodes[parent].Physics.Body != NodePhysics::BodyType::None ? 1 : 0;
+        }
+        for (uint32_t i = 0; i < fileNodes; ++i)
+        {
+            NodePhysics& physics = nodes[i].Physics;
+            if (physics.Shape == NodePhysics::ShapeType::None || physics.Body != NodePhysics::BodyType::None)
+                continue;
+            if (physics.Trigger && underMotion[i])
+            {
+                leftOut.insert("triggers on moving bodies");
+                physics.Shape = NodePhysics::ShapeType::None;
+                continue;
+            }
+            if (!underMotion[i])
+                physics.Body = NodePhysics::BodyType::Static;
+        }
+
+        if (!leftOut.empty())
+        {
+            std::string list;
+            for (const std::string& item : leftOut)
+                list += (list.empty() ? "" : ", ") + item;
+            NOX_CORE_WARN("[Importer] glTF physics: no Nox equivalent, left out: {}", list);
+        }
+    }
+
     std::vector<MeshData> MeshImporter::ParseGltfToMeshData
     (
         const std::filesystem::path& path,
@@ -3094,6 +3337,7 @@ namespace Nox
                     nodeData.Parent = parentMap[i];
                     nodeData.Skinned = node.skin >= 0;
                     ExtractNodeTRS(node, nodeData.Translation, nodeData.Rotation, nodeData.Scale);
+                    nodeData.Extras = FlattenExtras(node.ext.extras);
                 }
             }
             else
@@ -3562,6 +3806,7 @@ namespace Nox
         if (model.nodes_count > 0)
         {
             ApplyNodeExtensions(model, outNodes);
+            ReadNodePhysics(model, outNodes);
             // Lights and cameras on another scene's nodes are not imported either.
             auto outside = [&](int32_t node)
             {

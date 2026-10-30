@@ -590,6 +590,52 @@ namespace Nox
             }
         }
 
+        // Nox.Entity's metadata (MetadataComponent). A value comes back as UTF-8 into the caller's buffer: its length in bytes (what
+        // to allocate when it is more than `capacity`), -1 when the entity has no such key.
+        int32_t EntityGetMetadata(uint64_t entityID, Coral::String key, uint8_t* buffer, int32_t capacity)
+        {
+            if (!s_Scene) return -1;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!entity || !entity.HasComponent<MetadataComponent>())
+                return -1;
+            const std::string* value = entity.GetComponent<MetadataComponent>().Find(std::string(key));
+            if (!value)
+                return -1;
+            if (buffer && capacity > 0)
+                std::memcpy(buffer, value->data(), std::min<size_t>(value->size(), static_cast<size_t>(capacity)));
+            return static_cast<int32_t>(value->size());
+        }
+
+        void EntitySetMetadata(uint64_t entityID, Coral::String key, Coral::String value)
+        {
+            if (!s_Scene) return;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!entity)
+                return;
+            auto& metadata = entity.HasComponent<MetadataComponent>() ? entity.GetComponent<MetadataComponent>()
+                                                                      : entity.AddComponent<MetadataComponent>();
+            const std::string name(key);
+            for (auto& [existing, text] : metadata.Values)
+            {
+                if (existing == name)
+                {
+                    text = std::string(value);
+                    return;
+                }
+            }
+            metadata.Values.emplace_back(name, std::string(value));
+        }
+
+        Coral::Bool32 EntityRemoveMetadata(uint64_t entityID, Coral::String key)
+        {
+            if (!s_Scene) return false;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!entity || !entity.HasComponent<MetadataComponent>())
+                return false;
+            const std::string name(key);
+            return std::erase_if(entity.GetComponent<MetadataComponent>().Values, [&](const auto& pair) { return pair.first == name; }) > 0;
+        }
+
         // Nox.Entity's material variants (MaterialVariants: the entity and everything below it, a model's whole set).
         Coral::Bool32 EntitySetMaterialVariant(uint64_t entityID, Coral::String variant)
         {
@@ -1035,6 +1081,9 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetMorphWeight", reinterpret_cast<void*>(&MeshSetMorphWeight));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_GetMorphWeight", reinterpret_cast<void*>(&MeshGetMorphWeight));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_ClearMorphWeight", reinterpret_cast<void*>(&MeshClearMorphWeight));
+        assembly.AddInternalCall("Nox.InternalCalls", "Entity_GetMetadata", reinterpret_cast<void*>(&EntityGetMetadata));
+        assembly.AddInternalCall("Nox.InternalCalls", "Entity_SetMetadata", reinterpret_cast<void*>(&EntitySetMetadata));
+        assembly.AddInternalCall("Nox.InternalCalls", "Entity_RemoveMetadata", reinterpret_cast<void*>(&EntityRemoveMetadata));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_SetMaterialVariant", reinterpret_cast<void*>(&EntitySetMaterialVariant));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_SetMaterialVariantIndex", reinterpret_cast<void*>(&EntitySetMaterialVariantIndex));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_GetMaterialVariantCount", reinterpret_cast<void*>(&EntityGetMaterialVariantCount));

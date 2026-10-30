@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace Nox;
 
@@ -57,6 +58,9 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, NativeString, float, void> Mesh_SetMorphWeight;
     private static delegate*<ulong, NativeString, float> Mesh_GetMorphWeight;
     private static delegate*<ulong, NativeString, void> Mesh_ClearMorphWeight;
+    private static delegate*<ulong, NativeString, byte*, int, int> Entity_GetMetadata;
+    private static delegate*<ulong, NativeString, NativeString, void> Entity_SetMetadata;
+    private static delegate*<ulong, NativeString, uint> Entity_RemoveMetadata;
     private static delegate*<ulong, NativeString, uint> Entity_SetMaterialVariant;
     private static delegate*<ulong, int, uint> Entity_SetMaterialVariantIndex;
     private static delegate*<ulong, int> Entity_GetMaterialVariantCount;
@@ -276,6 +280,32 @@ internal static unsafe class InternalCalls
     {
         using NativeString nativeTarget = new(target);
         Mesh_ClearMorphWeight(entityID, nativeTarget);
+    }
+
+    // The engine writes the value as UTF-8 into a buffer of ours (no string crosses back): its length first, then the bytes.
+    internal static string? GetMetadata(ulong entityID, string key)
+    {
+        using NativeString nativeKey = new(key);
+        int length = Entity_GetMetadata(entityID, nativeKey, null, 0);
+        if (length <= 0)
+            return length < 0 ? null : string.Empty;
+        byte[] bytes = new byte[length];
+        fixed (byte* buffer = bytes)
+            length = Entity_GetMetadata(entityID, nativeKey, buffer, bytes.Length);
+        return length < 0 ? null : Encoding.UTF8.GetString(bytes, 0, Math.Min(length, bytes.Length));
+    }
+
+    internal static void SetMetadata(ulong entityID, string key, string value)
+    {
+        using NativeString nativeKey = new(key);
+        using NativeString nativeValue = new(value);
+        Entity_SetMetadata(entityID, nativeKey, nativeValue);
+    }
+
+    internal static bool RemoveMetadata(ulong entityID, string key)
+    {
+        using NativeString nativeKey = new(key);
+        return Entity_RemoveMetadata(entityID, nativeKey) != 0;
     }
 
     internal static bool SetMaterialVariant(ulong entityID, string variant)

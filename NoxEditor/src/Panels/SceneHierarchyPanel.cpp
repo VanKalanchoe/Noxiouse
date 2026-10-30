@@ -1008,6 +1008,7 @@ namespace Nox
             DisplayAddComponentEntry<CapsuleCollider3DComponent>("Capsule Collider 3D");
             DisplayAddComponentEntry<CharacterController3DComponent>("Character Controller 3D");
             DisplayAddComponentEntry<TextComponent>("Text Component");
+            DisplayAddComponentEntry<MetadataComponent>("Metadata");
 
             ImGui::EndPopup();
         }
@@ -2801,7 +2802,9 @@ namespace Nox
                 ImGui::EndCombo();
             }
 
-            ImGui::DragFloat("Mass", &component.Mass, 0.1f, 0.001f, 10000.0f);
+            ImGui::DragFloat("Mass", &component.Mass, 0.1f, 0.0f, 10000.0f, component.Mass > 0.0f ? "%.3f kg" : "from volume");
+            ImGui::SetItemTooltip("Kilograms. 0: from the colliders' volume at the density of water (Unreal's default physical material).\n"
+                                  "Colliders on child entities without a body of their own are part of this body.");
             ImGui::DragFloat("Linear Damping", &component.LinearDamping, 0.01f, 0.0f, 10.0f);
             ImGui::DragFloat("Angular Damping", &component.AngularDamping, 0.01f, 0.0f, 10.0f);
             ImGui::DragFloat("Gravity Factor", &component.GravityFactor, 0.05f, -10.0f, 10.0f);
@@ -2894,6 +2897,38 @@ namespace Nox
                 component.RotationOffset = glm::radians(degrees);
             ImGui::DragFloat3("Scale", glm::value_ptr(component.Scale), 0.01f);
             ImGui::TextDisabled("Its transform is set every frame from the bone (edit the offset here).");
+        });
+
+        DrawComponent<MetadataComponent>("Metadata", entity, [](auto& component)
+        {
+            // Named values for scripts (Entity.GetMetadata); an imported model's come from its glTF extras (Blender's custom properties).
+            int removed = -1;
+            if (ImGui::BeginTable("##Metadata", 3, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_BordersInnerV))
+            {
+                ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthStretch, 0.4f);
+                ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.6f);
+                ImGui::TableSetupColumn("##Remove", ImGuiTableColumnFlags_WidthFixed);
+                for (int i = 0; i < static_cast<int>(component.Values.size()); ++i)
+                {
+                    ImGui::PushID(i);
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    ImGui::InputText("##Key", &component.Values[i].first);
+                    ImGui::TableNextColumn();
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    ImGui::InputText("##Value", &component.Values[i].second);
+                    ImGui::TableNextColumn();
+                    if (ImGui::SmallButton("X"))
+                        removed = i;
+                    ImGui::PopID();
+                }
+                ImGui::EndTable();
+            }
+            if (removed >= 0)
+                component.Values.erase(component.Values.begin() + removed);
+            if (ImGui::Button("Add Value"))
+                component.Values.emplace_back("Key" + std::to_string(component.Values.size()), "");
         });
 
         DrawComponent<TextComponent>("Text Renderer", entity, [](auto& component)

@@ -189,6 +189,27 @@ namespace Nox
         glm::vec3 Scale = glm::vec3(1.0f);
     };
 
+    // glTF physics on a node (KHR_physics_rigid_bodies with KHR_implicit_shapes shapes), as Nox's components: a body
+    // (RigidBody3DComponent) where the file has a motion, a collider (Box / Sphere / Capsule Collider 3D) where it has a collider or a
+    // trigger. A collider without a body of its own is part of the nearest body above it (JoltPhysics3DScene builds the compound), or
+    // gets a static body when there is none.
+    struct NodePhysics
+    {
+        enum class BodyType : uint8_t { None = 0, Static, Dynamic, Kinematic };
+        enum class ShapeType : uint8_t { None = 0, Box, Sphere, Capsule };
+
+        BodyType Body = BodyType::None;
+        float Mass = 0.0f;        // kg; 0 = from the colliders' volume (RigidBody3DComponent::Mass)
+        float GravityFactor = 1.0f;
+        bool Trigger = false;     // the collider senses overlaps without pushing back (RigidBody3DComponent::IsSensor)
+        ShapeType Shape = ShapeType::None;
+        glm::vec3 Size{ 0.0f };   // box: half extents; sphere: radius in x; capsule: radius in x, half height of the straight part in y
+        float Friction = 0.5f;    // the physics material's dynamic friction
+        float Restitution = 0.0f;
+
+        bool Any() const { return Body != BodyType::None || Shape != ShapeType::None; }
+    };
+
     struct MeshNodeData
     {
         std::string Name;
@@ -209,6 +230,9 @@ namespace Nox
         bool Skinned = false; // import time only (not cooked): the node's mesh is skinned by a glTF skin
         int32_t MeshIndex = -1;  // import time only: the glTF mesh this node instances
         std::string MeshName;    // import time only: that mesh's name
+        // glTF extras (Blender's custom properties), flattened: key, value as text (strings as they are, the rest as JSON).
+        std::vector<std::pair<std::string, std::string>> Extras;
+        NodePhysics Physics;
     };
     
     // A streaming page of a mesh's cluster DAG (§5.7.2, Nanite's pages): whole groups of clusters with their own vertices, the

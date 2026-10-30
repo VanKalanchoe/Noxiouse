@@ -14,6 +14,7 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
+#include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
@@ -210,95 +211,159 @@ namespace Nox {
             m_PhysicsSystem->OptimizeBroadPhase();
     }
 
+    namespace
+    {
+        // An entity's world position, rotation and scale: its WorldTransformComponent's when it has one, its own transform otherwise.
+        struct WorldPose
+        {
+            glm::dvec3 Position;
+            glm::quat Rotation;
+            glm::vec3 Scale;
+        };
+        WorldPose WorldPoseOf(Entity entity)
+        {
+            const auto& transform = entity.GetComponent<TransformComponent>();
+            WorldPose pose{ transform.Translation, glm::quat(transform.Rotation), transform.Scale };
+            if (entity.HasComponent<WorldTransformComponent>())
+            {
+                const auto& world = entity.GetComponent<WorldTransformComponent>();
+                pose.Position = world.GetPosition();
+                pose.Scale = glm::vec3(
+                    glm::length(glm::vec3(world.WorldMatrix[0])),
+                    glm::length(glm::vec3(world.WorldMatrix[1])),
+                    glm::length(glm::vec3(world.WorldMatrix[2]))
+                );
+                if (pose.Scale.x > 1e-5f && pose.Scale.y > 1e-5f && pose.Scale.z > 1e-5f)
+                {
+                    glm::mat3 rotMat(
+                        glm::vec3(world.WorldMatrix[0]) / pose.Scale.x,
+                        glm::vec3(world.WorldMatrix[1]) / pose.Scale.y,
+                        glm::vec3(world.WorldMatrix[2]) / pose.Scale.z
+                    );
+                    pose.Rotation = glm::quat_cast(rotMat);
+                }
+            }
+            return pose;
+        }
+
+        // What a body's collider says about its surface; RollingRadius in Jolt units (the sphere's or capsule's radius, what it rolls on).
+        struct ColliderSurface
+        {
+            float Friction = 0.5f;
+            float Restitution = 0.0f;
+            float RollingResistance = 0.0f;
+            float RollingRadius = 0.0f;
+        };
+
+        // The entity's collider component as a Jolt shape: its size times the entity's world scale, moved by its Offset. Collider sizes
+        // are world-unit lengths (the component fields); Jolt wants its own native unit (nativePerWorld). Null without a collider.
+        JPH::Ref<JPH::Shape> ColliderShapeOf(Entity entity, const glm::vec3& worldScale, float nativePerWorld, ColliderSurface& surface)
+        {
+            JPH::Ref<JPH::Shape> shape;
+            glm::vec3 offset(0.0f);
+            if (entity.HasComponent<BoxCollider3DComponent>())
+            {
+                const auto& box = entity.GetComponent<BoxCollider3DComponent>();
+                const glm::vec3 halfExtents = glm::max(box.HalfExtents * worldScale, glm::vec3(0.001f)) * nativePerWorld;
+                shape = JPH::BoxShapeSettings(JoltUtils::ToJolt(halfExtents)).Create().Get();
+                offset = box.Offset;
+                surface.Friction = box.Friction;
+                surface.Restitution = box.Restitution;
+            }
+            else if (entity.HasComponent<SphereCollider3DComponent>())
+            {
+                const auto& sphere = entity.GetComponent<SphereCollider3DComponent>();
+                const float radius = std::max(sphere.Radius * std::max(worldScale.x, std::max(worldScale.y, worldScale.z)), 0.001f) * nativePerWorld;
+                shape = JPH::SphereShapeSettings(radius).Create().Get();
+                offset = sphere.Offset;
+                surface.Friction = sphere.Friction;
+                surface.Restitution = sphere.Restitution;
+                surface.RollingResistance = sphere.RollingResistance;
+                surface.RollingRadius = radius;
+            }
+            else if (entity.HasComponent<CapsuleCollider3DComponent>())
+            {
+                const auto& capsule = entity.GetComponent<CapsuleCollider3DComponent>();
+                const float halfHeight = std::max(capsule.HalfHeight * worldScale.y, 0.001f) * nativePerWorld;
+                const float radius = std::max(capsule.Radius * std::max(worldScale.x, worldScale.z), 0.001f) * nativePerWorld;
+                shape = JPH::CapsuleShapeSettings(halfHeight, radius).Create().Get();
+                offset = capsule.Offset;
+                surface.Friction = capsule.Friction;
+                surface.Restitution = capsule.Restitution;
+                surface.RollingResistance = capsule.RollingResistance;
+                surface.RollingRadius = radius;
+            }
+            if (shape && offset != glm::vec3(0.0f))
+                shape = JPH::RotatedTranslatedShapeSettings(JoltUtils::ToJolt(offset * nativePerWorld), JPH::Quat::sIdentity(), shape).Create().Get();
+            return shape;
+        }
+    }
+
     void JoltPhysics3DScene::CreateBody(Entity entity)
     {
         if (!m_PhysicsSystem || !entity)
             return;
 
         auto& rb = entity.GetComponent<RigidBody3DComponent>();
-        const auto& transform = entity.GetComponent<TransformComponent>();
+        const float nativePerWorld = PhysicsScale();
+        const WorldPose pose = WorldPoseOf(entity);
+        const glm::dvec3 worldPos = pose.Position;
+        const glm::quat worldRot = pose.Rotation;
+        const glm::vec3 worldScale = pose.Scale;
 
-        glm::dvec3 worldPos = transform.Translation;
-        glm::quat worldRot = glm::quat(transform.Rotation);
-        glm::vec3 worldScale = transform.Scale;
-
-        if (entity.HasComponent<WorldTransformComponent>())
+        // The entity's own collider, then the colliders of descendants without a body of their own: they are part of this body (a
+        // compound, as Godot's collision shapes under a body and Unreal's attached shape components), each where it stands relative
+        // to the body. KHR_physics_rigid_bodies places shapes the same way (a rotated or offset shape sits on a child node).
+        ColliderSurface surface;
+        JPH::Ref<JPH::Shape> shape = ColliderShapeOf(entity, worldScale, nativePerWorld, surface);
+        struct Part
         {
-            const auto& world = entity.GetComponent<WorldTransformComponent>();
-            worldPos = world.GetPosition();
-            worldScale = glm::vec3(
-                glm::length(glm::vec3(world.WorldMatrix[0])),
-                glm::length(glm::vec3(world.WorldMatrix[1])),
-                glm::length(glm::vec3(world.WorldMatrix[2]))
-            );
-            if (worldScale.x > 1e-5f && worldScale.y > 1e-5f && worldScale.z > 1e-5f)
+            JPH::Ref<JPH::Shape> Shape;
+            glm::vec3 Position; // native units, in the body's frame
+            glm::quat Rotation;
+        };
+        std::vector<Part> parts;
+        if (m_Scene && entity.HasComponent<RelationshipComponent>())
+        {
+            const glm::quat toBody = glm::inverse(worldRot);
+            std::vector<UUID> pending = entity.GetComponent<RelationshipComponent>().Children;
+            while (!pending.empty())
             {
-                glm::mat3 rotMat(
-                    glm::vec3(world.WorldMatrix[0]) / worldScale.x,
-                    glm::vec3(world.WorldMatrix[1]) / worldScale.y,
-                    glm::vec3(world.WorldMatrix[2]) / worldScale.z
-                );
-                worldRot = glm::quat_cast(rotMat);
+                Entity child = m_Scene->GetEntityByUUID(pending.back());
+                pending.pop_back();
+                if (!child || child.HasComponent<RigidBody3DComponent>())
+                    continue; // a body of its own takes its subtree
+                const WorldPose childPose = WorldPoseOf(child);
+                ColliderSurface childSurface;
+                if (JPH::Ref<JPH::Shape> childShape = ColliderShapeOf(child, childPose.Scale, nativePerWorld, childSurface))
+                {
+                    if (!shape && parts.empty())
+                        surface = childSurface; // the body's surface: its own collider's, else its first part's
+                    parts.push_back({ childShape, glm::vec3(toBody * glm::vec3(childPose.Position - worldPos)) * nativePerWorld,
+                                      toBody * childPose.Rotation });
+                }
+                if (child.HasComponent<RelationshipComponent>())
+                {
+                    const std::vector<UUID>& children = child.GetComponent<RelationshipComponent>().Children;
+                    pending.insert(pending.end(), children.begin(), children.end());
+                }
             }
         }
-
-        // Create collision shape based on attached collider components
-        JPH::Ref<JPH::Shape> shape;
-        float rollingRadius = 0.0f; // Jolt units: the sphere's or capsule's radius, what it rolls on
-
-        // Collider sizes are world-unit lengths (the component fields); Jolt wants its own native unit -> ToNative at the shape.
-        if (entity.HasComponent<BoxCollider3DComponent>())
+        if (!parts.empty())
         {
-            const auto& box = entity.GetComponent<BoxCollider3DComponent>();
-            glm::vec3 halfExtents = ToNative(glm::max(box.HalfExtents * worldScale, glm::vec3(0.001f)));
-            JPH::BoxShapeSettings shapeSettings(JoltUtils::ToJolt(halfExtents));
-
-            if (box.Offset != glm::vec3(0.0f))
-            {
-                JPH::RotatedTranslatedShapeSettings offsetShape(JoltUtils::ToJolt(ToNative(box.Offset)), JPH::Quat::sIdentity(), &shapeSettings);
-                shape = offsetShape.Create().Get();
-            }
+            JPH::StaticCompoundShapeSettings compound;
+            if (shape)
+                compound.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), shape);
+            for (const Part& part : parts)
+                compound.AddShape(JoltUtils::ToJolt(part.Position), JoltUtils::ToJolt(part.Rotation), part.Shape);
+            JPH::Shape::ShapeResult result = compound.Create();
+            if (result.HasError())
+                SPDLOG_ERROR("Compound collider for entity {}: {}", static_cast<uint32_t>(entity), result.GetError().c_str());
             else
-            {
-                shape = shapeSettings.Create().Get();
-            }
+                shape = result.Get();
+            surface.RollingRadius = 0.0f; // several shapes: no one radius it rolls on
         }
-        else if (entity.HasComponent<SphereCollider3DComponent>())
-        {
-            const auto& sphere = entity.GetComponent<SphereCollider3DComponent>();
-            float radius = ToNative(std::max(sphere.Radius * std::max(worldScale.x, std::max(worldScale.y, worldScale.z)), 0.001f));
-            JPH::SphereShapeSettings shapeSettings(radius);
-            rollingRadius = radius;
-
-            if (sphere.Offset != glm::vec3(0.0f))
-            {
-                JPH::RotatedTranslatedShapeSettings offsetShape(JoltUtils::ToJolt(ToNative(sphere.Offset)), JPH::Quat::sIdentity(), &shapeSettings);
-                shape = offsetShape.Create().Get();
-            }
-            else
-            {
-                shape = shapeSettings.Create().Get();
-            }
-        }
-        else if (entity.HasComponent<CapsuleCollider3DComponent>())
-        {
-            const auto& capsule = entity.GetComponent<CapsuleCollider3DComponent>();
-            float halfHeight = ToNative(std::max(capsule.HalfHeight * worldScale.y, 0.001f));
-            float radius = ToNative(std::max(capsule.Radius * std::max(worldScale.x, worldScale.z), 0.001f));
-            JPH::CapsuleShapeSettings shapeSettings(halfHeight, radius);
-            rollingRadius = radius;
-
-            if (capsule.Offset != glm::vec3(0.0f))
-            {
-                JPH::RotatedTranslatedShapeSettings offsetShape(JoltUtils::ToJolt(ToNative(capsule.Offset)), JPH::Quat::sIdentity(), &shapeSettings);
-                shape = offsetShape.Create().Get();
-            }
-            else
-            {
-                shape = shapeSettings.Create().Get();
-            }
-        }
-        else
+        if (!shape)
         {
             // Default fallback shape: 1x1x1 unit box
             glm::vec3 halfExtents = ToNative(glm::max(0.5f * worldScale, glm::vec3(0.001f)));
@@ -310,26 +375,10 @@ namespace Nox {
         JPH::EMotionType motionType = JPH::EMotionType::Dynamic;
         JPH::ObjectLayer objectLayer = rb.Layer;
 
-        float friction = 0.5f;
-        float restitution = 0.0f;
-        float rollingResistance = 0.0f;
-        if (entity.HasComponent<BoxCollider3DComponent>())
-        {
-            friction = entity.GetComponent<BoxCollider3DComponent>().Friction;
-            restitution = entity.GetComponent<BoxCollider3DComponent>().Restitution;
-        }
-        else if (entity.HasComponent<SphereCollider3DComponent>())
-        {
-            friction = entity.GetComponent<SphereCollider3DComponent>().Friction;
-            restitution = entity.GetComponent<SphereCollider3DComponent>().Restitution;
-            rollingResistance = entity.GetComponent<SphereCollider3DComponent>().RollingResistance;
-        }
-        else if (entity.HasComponent<CapsuleCollider3DComponent>())
-        {
-            friction = entity.GetComponent<CapsuleCollider3DComponent>().Friction;
-            restitution = entity.GetComponent<CapsuleCollider3DComponent>().Restitution;
-            rollingResistance = entity.GetComponent<CapsuleCollider3DComponent>().RollingResistance;
-        }
+        const float friction = surface.Friction;
+        const float restitution = surface.Restitution;
+        const float rollingResistance = surface.RollingResistance;
+        const float rollingRadius = surface.RollingRadius;
 
         if (rb.Type == RigidBody3DComponent::BodyType::Static)
         {
@@ -372,8 +421,13 @@ namespace Nox {
         // rb.Mass is the body's mass (kg), independent of the shape's native-unit volume: set it directly instead of through density
         // (mDensity x volume), so a collider's mass no longer changes when the world unit -- and so the native geometry's size --
         // changes (U6). CalculateInertia takes only the mass from here and works out the inertia tensor from the shape and it.
-        bodySettings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
-        bodySettings.mMassPropertiesOverride.mMass = rb.Mass;
+        // 0: from the volume instead, at Jolt's density of water (Unreal's default physical material is the same 1 g/cm^3); the
+        // native unit is meters, so that is the real-world mass. What glTF physics (KHR_physics_rigid_bodies) asks when it gives none.
+        if (rb.Mass > 0.0f)
+        {
+            bodySettings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+            bodySettings.mMassPropertiesOverride.mMass = rb.Mass;
+        }
 
         JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
         JPH::Body* body = bodyInterface.CreateBody(bodySettings);

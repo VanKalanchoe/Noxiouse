@@ -51,6 +51,24 @@ public readonly struct Entity
         InternalCalls.SetEntityMeshCollider(ID, mesh?.Handle ?? 0, friction, restitution);
 
     /// <summary>
+    /// A named value on the entity (its Metadata component): an imported model's glTF extras (Blender's custom properties) or one set
+    /// in the Properties panel. Text: a string as it is, a number as written ("50"), anything else as JSON. Null when there is none.
+    /// </summary>
+    public string? GetMetadata(string key) => InternalCalls.GetMetadata(ID, key);
+
+    public bool HasMetadata(string key) => InternalCalls.GetMetadata(ID, key) != null;
+
+    /// <summary>A number from the metadata (<paramref name="fallback"/> when missing or not a number).</summary>
+    public float GetMetadataFloat(string key, float fallback = 0.0f) =>
+        float.TryParse(GetMetadata(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float value)
+            ? value : fallback;
+
+    /// <summary>Sets a value (adds the Metadata component when the entity has none). Lasts until Play stops, like any change made in Play.</summary>
+    public void SetMetadata(string key, string value) => InternalCalls.SetMetadata(ID, key, value);
+
+    public bool RemoveMetadata(string key) => InternalCalls.RemoveMetadata(ID, key);
+
+    /// <summary>
     /// The glTF material variants (KHR_materials_variants) of the meshes on this entity and below it: a model's material sets, a
     /// shoe in three colors. On a model's root it switches every part. Names are the ones the Properties panel lists.
     /// </summary>

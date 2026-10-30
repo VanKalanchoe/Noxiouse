@@ -1229,6 +1229,55 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     default scene; the mesh-kind check now does too.
   - **Offline test (scratchpad `gstest/scenestest`):** default scene 1, no default (first scene, whole subtree), an invalid
     default, and no scenes at all (every node).
+- **glTF extras (I1, built 2026-10-31):** a node's extras (Blender's custom properties) become a `MetadataComponent` on its entity.
+  Godot keeps them as node metadata, Unreal as user-defined attributes.
+  - **Format:** key / value text, in the file's order. An object's members become one pair each: a string as it is, anything else
+    as compact JSON (`Health` = `50`, `Tags` = `["a","b"]`). Extras that are not an object become one entry named `extras`.
+  - **Where they go:**
+    - Cooked into the node table (format v8). Per-mesh assets carry their node's extras.
+    - Model instances, flat placement and Import Into Level put them on the node entities. A node without a mesh that carries extras
+      or physics keeps the model instance's hierarchy (flat placement would drop it).
+  - **Editing:** saved with the scene and editable in Properties (Metadata: key, value, add, remove).
+  - **Scripts (API 13):** `Entity.GetMetadata(key)` (null when missing), `HasMetadata`, `GetMetadataFloat`, `SetMetadata`,
+    `RemoveMetadata`. A value comes back as UTF-8 into a buffer the script side allocates, so no native string crosses back.
+  - Mesh and material extras are not imported.
+- **glTF physics (I1, built 2026-10-31; `KHR_physics_rigid_bodies` with `KHR_implicit_shapes`, both Release Candidate):** Godot
+  imports physics bodies from glTF (OMI_physics_*, with an importer for the KHR extensions). Unreal does not import glTF physics.
+  - **Mapping onto Nox's components** (`NodePhysics` in the node table, format v8):
+    - A **motion** becomes a Dynamic `RigidBody3DComponent` (Kinematic with `isKinematic`, or with mass 0, the spec's infinite
+      mass), with its mass and gravity factor.
+    - A **collider** becomes a Box / Sphere / Capsule Collider 3D: box half extents, sphere radius, capsule radius and half height
+      (the spec's height is between the cap centers). The physics material gives dynamic friction (else static) and restitution.
+    - A **trigger** becomes a sensor.
+    - Sizes go through Import Scale like the vertices.
+  - **Bodies:**
+    - A collider under a motion is part of that body. A collider with no motion above it gets a static body of its own (the spec's
+      static colliders).
+    - A trigger gets a static sensor body; one under a moving body is left out, since Nox's sensors are whole bodies.
+    - Decided from the motions alone, so the order of the nodes does not matter.
+  - **Compound bodies (new in `JoltPhysics3DScene::CreateBody`, Godot's collision shapes under a body, Unreal's attached shape
+    components):**
+    - Colliders on descendant entities without a body of their own are added to the body as a `StaticCompoundShape`, each at its
+      position and rotation relative to the body and sized by its own world scale. The spec puts offset or rotated shapes on child
+      nodes, and so does Blender's exporter.
+    - The body's friction and restitution come from its own collider, else its first part's.
+  - **Mass:** `RigidBody3DComponent::Mass` 0 now means "from the colliders' volume" (Jolt's density of water, Unreal's default
+    1 g/cm³), which is what the spec asks when a file gives no mass. The Properties panel shows "from volume".
+  - **Left out:** what Nox has no component for is left out and named once in the log (`glTF physics: no Nox equivalent, left
+    out: ...`): cylinder and plane shapes, mesh and convex hull colliders, joints, collision filters, compound triggers, initial
+    velocities, a set center of mass or inertia. Tapered capsules come in straight, with the larger radius.
+  - **Per-mesh assets** carry their node's own body. Colliders on child nodes stay with the whole file (Import Into Level or the
+    whole-file asset).
+  - **Offline test (scratchpad `gstest/physicstest`):** the importer's own `FlattenExtras` and `ReadNodePhysics` on a hand-written
+    file with every case:
+    - Extras of each JSON kind.
+    - A dynamic crate with a box and a child capsule.
+    - A static ground with a sensor zone under it.
+    - A kinematic body, and mass 0 read as kinematic.
+    - Everything left out, named.
+    - The v8 node table round trip; a v7 cook still reads.
+
+    The compound body in Jolt is only compile-checked.
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much

@@ -2123,7 +2123,7 @@ namespace Nox
         // Relationship links contain entity UUIDs and must be rebuilt. Copying
         // them directly makes duplicated glTF hierarchies share their children.
         using DuplicatableComponents = ComponentGroup<
-            MeshComponent, MaterialComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
+            MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
             PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent,
             FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
@@ -2710,6 +2710,11 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<TextComponent>(Entity entity, TextComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<MetadataComponent>(Entity entity, MetadataComponent& component)
     {
     }
 
