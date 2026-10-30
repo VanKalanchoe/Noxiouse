@@ -637,7 +637,9 @@ namespace Nox
             staticSettings.ImportSkeletalMeshes = false;
             if (skinnedAsStatic)
                 staticSettings.ImportStaticMeshes = true; // the skinned meshes are what it holds
-            staticSettings.ImportAnimations = settings.ImportAnimations && !skeletal;
+            // Clips are split by what they move (MeshImporter::CharacterNodes): the skeleton's go with the skeletal asset, the other
+            // nodes' (a door, a fan next to the character) with the static meshes or the level.
+            staticSettings.ImportAnimations = settings.ImportAnimations;
 
             if (settings.StaticCombine != MeshCombineMode::DoNotCombine && !intoLevel)
                 registerAsset(AssetType::StaticMesh, ".nsmesh", staticSettings);

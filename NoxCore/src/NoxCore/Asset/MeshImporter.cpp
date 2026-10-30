@@ -1371,6 +1371,43 @@ namespace Nox
             out << clip.filename().string() << "\n";
     }
 
+    // The file's nodes that belong to a character: the skins' joints and every node above them (the armature). A clip that moves only
+    // these is the skeletal asset's; one that moves any other node is (also) a node animation of the static meshes or the level.
+    static std::vector<uint8_t> CharacterNodes(const Skeleton& skeleton, size_t nodeCount)
+    {
+        std::vector<uint8_t> character(nodeCount, 0);
+        for (const Skin* skin : skeleton.Skins)
+        {
+            for (const Node* joint : skin->Joints)
+            {
+                for (const Node* node = joint; node; node = node->Parent)
+                {
+                    if (node->Index >= 0 && node->Index < static_cast<int32_t>(nodeCount))
+                        character[node->Index] = 1;
+                }
+            }
+        }
+        return character;
+    }
+
+    // The nodes a clip moves that are not a character's, sorted, each once.
+    static std::vector<int32_t> NodeAnimationTargets(const AnimationSequence& clip, const std::vector<uint8_t>& character)
+    {
+        std::vector<int32_t> nodes;
+        auto add = [&](int32_t node)
+        {
+            if (node >= 0 && (node >= static_cast<int32_t>(character.size()) || !character[node]))
+                nodes.push_back(node);
+        };
+        for (const NodeAnimationChannel& channel : clip.Channels)
+            add(channel.TargetNodeIndex);
+        for (const MorphCurve& curve : clip.MorphCurves)
+            add(curve.TargetNodeIndex);
+        std::sort(nodes.begin(), nodes.end());
+        nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+        return nodes;
+    }
+
     bool MeshImporter::CookMesh(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata)
     {
         const std::filesystem::path cookedPath = assetDirectory / metadata.FilePath;
@@ -1467,8 +1504,12 @@ namespace Nox
             std::vector<std::filesystem::path> clips;
             if (importSettings.ImportAnimations)
             {
+                const std::vector<uint8_t> character = CharacterNodes(extractedSkeleton, nodeDataList.size());
                 for (const Ref<AnimationSequence>& animation : extractedAnimations)
                 {
+                    // A static asset takes the node animations only (a character's clips are its skeletal asset's).
+                    if (isStatic && NodeAnimationTargets(*animation, character).empty())
+                        continue;
                     ApplyAnimationScale(*animation, importSettings.ImportScale);
                     std::filesystem::path animPath = cookedPath.parent_path() / (cookedPath.stem().string() + "_" + animation->Name + ".nanim");
                     AnimationSerializer::Serialize(animPath, *animation);
@@ -1627,22 +1668,20 @@ namespace Nox
         // base path like a skeletal model's clips.
         if (!skinned && level && wholeFile.MeshSettings.ImportAnimations)
         {
+            // Only what moves the level's own nodes: a character's joints are animated by its skeletal asset's animator.
+            const std::vector<uint8_t> character = CharacterNodes(extractedSkeleton, nodeDataList.size());
             for (const Ref<AnimationSequence>& animation : extractedAnimations)
             {
+                std::vector<int32_t> targets = NodeAnimationTargets(*animation, character);
+                if (targets.empty())
+                    continue;
                 const std::filesystem::path relativePath = wholeFile.FilePath.parent_path() / (wholeFile.FilePath.stem().string() + "_" + animation->Name + ".nanim");
                 AnimationSerializer::Serialize(assetDirectory / relativePath, *animation);
 
                 SplitLevel::Clip clip;
                 clip.FilePath = relativePath;
-                for (const auto& channel : animation->Channels)
-                {
-                    if (channel.TargetNodeIndex >= 0)
-                        clip.Nodes.push_back(channel.TargetNodeIndex);
-                }
-                std::sort(clip.Nodes.begin(), clip.Nodes.end());
-                clip.Nodes.erase(std::unique(clip.Nodes.begin(), clip.Nodes.end()), clip.Nodes.end());
-                if (!clip.Nodes.empty())
-                    level->Clips.push_back(std::move(clip));
+                clip.Nodes = std::move(targets);
+                level->Clips.push_back(std::move(clip));
             }
         }
         return result;

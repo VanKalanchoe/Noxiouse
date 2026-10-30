@@ -11,14 +11,12 @@
 | # | Item |
 |---|---|
 | R10 | DLSS "WorldToScreenMatrix not invertible" every frame (seen 2026-10-29 after a DLSS recreate in LevelStreamingTest). A one-time log names the degenerate camera input (`addDLSSPass`): needs that log line to fix |
-| H5 | Denoising for the transparent signals (RT shadows on glass, refraction) through the NRD front end (the rest of F4 is built) |
 
 ### Import / glTF (plan: `Animation_Graph_Architecture_Plan_2026.md` section 8)
 
 | # | Item |
 |---|---|
 | I1 | **glTF features not handled yet:** mesh / material extras; physics shapes and features Nox has no component for (cylinders, planes, mesh and convex colliders, joints, collision filters). (Built: `EXT_mesh_gpu_instancing`, `KHR_node_visibility` 2026-10-20; **vertex colors** COLOR_0 2026-10-30, tested by the user (works); **morph targets** 2026-10-31, M1 and M2's animated weights tested by the user (AnimatedMorphCube plays, per-mesh import keeps its clips); sequencer Morph Weight tracks and script `MeshComponent.SetMorphWeight` untested; **material variants** (`KHR_materials_variants`) 2026-10-31, tested by the user (MaterialsVariantsShoe); **multiple scenes** 2026-10-31: only the default scene is imported, as Unreal and Godot do (no scene picker, by decision), untested; **node extras** -> Metadata component and **glTF physics** (`KHR_physics_rigid_bodies`: bodies, box / sphere / capsule colliders, triggers, materials; compound bodies from child colliders, mass 0 = from volume) 2026-10-31, untested -- `Engine_Architecture_Plan_2026.md` §5.8.2) |
-| I4 | Import Into Level of a file that also has a skeletal model: its animations are not placed (the skeletal asset owns those clips) |
 
 ### Characters and animation (plan: `Animation_Graph_Architecture_Plan_2026.md`)
 
@@ -26,7 +24,6 @@
 |---|---|
 | C1 | **Jump / Fall states** in the locomotion graph -- needs jump/fall clips (the Fox has only Survey, Walk, Run); add the `VerticalSpeed` parameter back with the states |
 | C3 | Skeletal meshes with **several skins**, or unskinned meshes next to the skin, still spawn as nodes (not the single-entity path) |
-| C4 | Step 8: **audio graph**, a second node-graph domain on the same core and editor panel (the other leftovers of the plan's section 8 are built) |
 | C5 | Fox sizes: the movement defaults are for a ~1.8 m character; the Fox capsule and speeds need values for a ~0.8 m animal (scene tuning; the `Speed` thresholds were fixed 2026-10-20) |
 | C8 | Timeline material parameter tracks (needs per-entity material parameter overrides first), sub-sequences; variable node input pins |
 
@@ -38,6 +35,8 @@
 | B2 | ReSTIR PT temporal artifact (ignore for now) |
 | B3 | ReSTIR light indices across light changes (ignore for now) |
 | B4 | Meshlet cone culling (ignore for now) |
+| H5 | Denoising for the transparent signals (RT shadows on glass, refraction) through the NRD front end (ignore for now: after the rest of the backlog) |
+| C4 | Step 8: **audio graph**, a second node-graph domain on the same core and editor panel (ignore for now: after the rest of the backlog) |
 
 ## Closed (checked against the code 2026-10-30)
 
@@ -54,6 +53,10 @@ Built items many of which the user has not tested yet (marked "untested"); the p
 - **Prefabs P1-P7:** built 2026-10-20 (P1, P5, P7 untested); P4 decided (Unity's rule), P6 closed by R2. `Prefab_Architecture_Plan_2026.md`
 - **C2** script late / fixed update, **C7** sync markers, notifies, sockets, graph preview and the rest: built 2026-10-20 (untested)
 - **C6** rename `.nmesh` -> SkeletalMesh: not done, by decision
+- **I4** Import Into Level / static meshes of a file that also has a character: clips are now split by what they move (2026-10-31,
+  untested). A clip that moves only the skins' joints and the armature above them stays with the skeletal asset; one that moves
+  other nodes (a door, a fan) also goes to the static meshes and the level, which animate only those nodes. Before, any skeleton
+  in the file kept every clip from the level. Offline test: scratchpad `gstest/clipsplittest`.
 - **I2** combining static meshes drops the node structure, lights, cameras and node animations: by design (Import Into Level keeps them)
 - **I3** Import Into Level with skeletal models: built, untested (no glTF with two skinned meshes at hand)
 - **R1** own TAA (2026-10-20), **R2** geometry streaming (2026-10-29, tested on Bistro), **R4** -> F9, **R5** camera-following DDGI
