@@ -17,7 +17,7 @@
 
 | # | Item |
 |---|---|
-| I1 | **glTF features not handled yet:** morph targets, `KHR_materials_variants`, extras, multiple scenes, physics extensions. (Built: `EXT_mesh_gpu_instancing`, `KHR_node_visibility` 2026-10-20; **vertex colors** COLOR_0 2026-10-30, untested in the editor: an optional color stream, cooked format v5, every shading and alpha-test path -- `Engine_Architecture_Plan_2026.md` §5.8.2) |
+| I1 | **glTF features not handled yet:** morph targets, `KHR_materials_variants`, extras, multiple scenes, physics extensions. (Built: `EXT_mesh_gpu_instancing`, `KHR_node_visibility` 2026-10-20; **vertex colors** COLOR_0 2026-10-30, tested by the user (works): an optional color stream, cooked format v5, every shading and alpha-test path -- `Engine_Architecture_Plan_2026.md` §5.8.2) |
 | I4 | Import Into Level of a file that also has a skeletal model: its animations are not placed (the skeletal asset owns those clips) |
 
 ### Characters and animation (plan: `Animation_Graph_Architecture_Plan_2026.md`)

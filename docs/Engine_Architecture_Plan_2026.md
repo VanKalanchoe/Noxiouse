@@ -1078,7 +1078,7 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     `meshopt_optimizeVertexFetch`), so a cluster's vertices lie close in memory.
   - Until then only the per-cluster steps ran (`meshopt_buildMeshlets`, `meshopt_optimizeMeshlet`, bounds, tangents). The log
     reports each cook's welded count.
-- **Vertex colors (I1, built 2026-10-30, UE's `FColorVertexBuffer`):** glTF COLOR_0 (float, normalized byte or short; RGB or RGBA)
+- **Vertex colors (I1, built 2026-10-30 and tested by the user, UE's `FColorVertexBuffer`):** glTF COLOR_0 (float, normalized byte or short; RGB or RGBA)
   multiplies the base color, alpha included, as the glTF spec says.
   - **Where they live:** an optional color stream, `m_colorStream`, one packed RGBA8 per vertex: RGB sRGB-encoded (dark colors
     0.0007 apart rather than 0.002), A linear. Like the skin stream, it mirrors the vertex stream's element indices, and only a mesh
