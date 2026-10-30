@@ -1493,14 +1493,26 @@ namespace Nox
         const std::filesystem::path animationDirectory = base.parent_path();
         const std::string animationPrefix = base.stem().string() + "_";
 
+        // A mesh asset with clips of its own (a static per-mesh asset's retargeted clips) lists them in <asset>.clips: exactly those,
+        // so a "Cube" never takes "Cube_Large"'s clips. Otherwise the clips are found by name next to the base.
+        std::unordered_set<std::string> ownClips;
+        if (std::ifstream manifest(Project::GetActiveAssetDirectory() / (meshMetadata.FilePath.generic_string() + ".clips")); manifest)
+        {
+            std::string name;
+            while (std::getline(manifest, name))
+                if (!name.empty())
+                    ownClips.insert((meshMetadata.FilePath.parent_path() / name).generic_string());
+        }
+
         AssetHandle skeleton = 0;
         std::vector<std::pair<std::string, AssetHandle>> animations;
         for (const auto& [handle, metadata] : m_AssetRegistry)
         {
             if (metadata.Type == AssetType::Skeleton && (metadata.FilePath == skeletonPath || metadata.SourceFilePath == skeletonPath))
                 skeleton = handle;
-            else if (metadata.Type == AssetType::AnimationSequence && metadata.FilePath.parent_path() == animationDirectory &&
-                     metadata.FilePath.stem().string().starts_with(animationPrefix))
+            else if (metadata.Type == AssetType::AnimationSequence &&
+                     (!ownClips.empty() ? ownClips.contains(metadata.FilePath.generic_string())
+                                        : metadata.FilePath.parent_path() == animationDirectory && metadata.FilePath.stem().string().starts_with(animationPrefix)))
                 animations.emplace_back(metadata.FilePath.generic_string(), handle);
         }
         std::sort(animations.begin(), animations.end());

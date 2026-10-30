@@ -252,11 +252,17 @@ namespace Nox
                 const AnimationSequence* clip = AssetManager::FindLoadedAsset<AnimationSequence>(clipHandle);
                 if (!clip)
                     continue;
+                // The nodes it moves and the nodes whose morph targets it animates (a morph-only clip has no channels).
                 ClipTargets targets{ clipHandle, {} };
                 for (const auto& channel : clip->Channels)
                 {
                     if (channel.TargetNodeIndex >= 0 && channel.TargetNodeIndex < static_cast<int32_t>(nodeCount))
                         targets.Nodes.push_back(channel.TargetNodeIndex);
+                }
+                for (const MorphCurve& curve : clip->MorphCurves)
+                {
+                    if (curve.TargetNodeIndex >= 0 && curve.TargetNodeIndex < static_cast<int32_t>(nodeCount))
+                        targets.Nodes.push_back(curve.TargetNodeIndex);
                 }
                 std::sort(targets.Nodes.begin(), targets.Nodes.end());
                 targets.Nodes.erase(std::unique(targets.Nodes.begin(), targets.Nodes.end()), targets.Nodes.end());
@@ -277,7 +283,13 @@ namespace Nox
             {
                 // Clip i is the group's first (sorted) clip -> the default. Joint clips belong to the skinned mesh (it
                 // plays them and skins from them); anything else goes on the node it animates.
-                Entity owner = firstSkinnedMesh && sharesNode(clips[i].Nodes, jointIndices) ? firstSkinnedMesh : spawned[clips[i].Nodes.front()];
+                // The first of its nodes that was placed (a per-mesh asset places either its plain node or its file-layout ones).
+                Entity owner;
+                if (firstSkinnedMesh && sharesNode(clips[i].Nodes, jointIndices))
+                    owner = firstSkinnedMesh;
+                for (size_t n = 0; !owner && n < clips[i].Nodes.size(); ++n)
+                    if (clips[i].Nodes[n] < static_cast<int32_t>(spawned.size()))
+                        owner = spawned[clips[i].Nodes[n]];
                 if (!owner)
                     continue;
 

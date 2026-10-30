@@ -17,6 +17,7 @@
 #define TINYGLTF3_IMPLEMENTATION
 #define TINYGLTF3_ENABLE_FS 
 #include <glm/gtx/matrix_decompose.hpp>
+#include "NoxCore/Animation/Animator.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -1045,6 +1046,95 @@ namespace Nox
         }
     }
 
+    // A clip of the whole file for one per-mesh asset (Do Not Combine, CopySingleMesh's node table): the channels and morph curves of the
+    // file's nodes that draw the mesh, onto the asset's nodes standing for them --
+    //  - node 0 (what a plain drag places, standing for the first file node with the mesh): relative to that node's rest pose, so the
+    //    mesh moves the way it did in the file wherever it is put (a fan spins in place, a door swings on its hinge);
+    //  - the file-layout node of each file node with the mesh (a drag with the file layout): in model space, as the layout places it
+    //    (the file node's parents held at their rest pose: an animated parent's motion is not carried over).
+    // False when the clip animates none of the mesh's nodes.
+    static bool RetargetClipToMesh(const AnimationSequence& clip, const std::vector<MeshNodeData>& fileNodes, const std::vector<glm::mat4>& worlds,
+                                   int32_t meshIndex, bool skinned, AnimationSequence& out)
+    {
+        out.Name = clip.Name;
+        out.Duration = clip.Duration;
+        out.TicksPerSecond = clip.TicksPerSecond;
+        out.Channels.clear();
+        out.MorphCurves.clear();
+
+        // File node -> its per-mesh nodes: 0 for the first user, then 1 + its place among the users (CopySingleMesh's order).
+        std::unordered_map<int32_t, std::vector<int32_t>> targets;
+        int32_t layoutIndex = 1;
+        for (size_t index = 0; index < fileNodes.size(); ++index)
+        {
+            const MeshNodeData& node = fileNodes[index];
+            if (node.MeshIndex != meshIndex || node.Skinned != skinned || node.SubmeshCount == 0)
+                continue;
+            std::vector<int32_t>& stand = targets[static_cast<int32_t>(index)];
+            if (layoutIndex == 1)
+                stand.push_back(0);
+            stand.push_back(layoutIndex++);
+        }
+
+        auto restLocal = [&](int32_t node)
+        {
+            const MeshNodeData& data = fileNodes[node];
+            return glm::translate(glm::mat4(1.0f), data.Translation) * glm::mat4_cast(data.Rotation) * glm::scale(glm::mat4(1.0f), data.Scale);
+        };
+        for (const NodeAnimationChannel& channel : clip.Channels)
+        {
+            const auto found = targets.find(channel.TargetNodeIndex);
+            if (found == targets.end() || channel.TargetNodeIndex < 0 || channel.TargetNodeIndex >= static_cast<int32_t>(worlds.size()))
+                continue;
+            const MeshNodeData& rest = fileNodes[channel.TargetNodeIndex];
+            const glm::mat4 local = restLocal(channel.TargetNodeIndex);
+            const glm::mat4 parentWorld = worlds[channel.TargetNodeIndex] * glm::inverse(local);
+            // Every key time of the channel: the node's whole transform is resampled there (a rotation-only channel moves the node in
+            // the space it is put into).
+            std::vector<float> times;
+            for (const auto& key : channel.PositionKeys) times.push_back(key.Time);
+            for (const auto& key : channel.RotationKeys) times.push_back(key.Time);
+            for (const auto& key : channel.ScaleKeys) times.push_back(key.Time);
+            std::sort(times.begin(), times.end());
+            times.erase(std::unique(times.begin(), times.end()), times.end());
+
+            for (int32_t target : found->second)
+            {
+                NodeAnimationChannel& retargeted = out.Channels.emplace_back();
+                retargeted.NodeName = rest.Name;
+                retargeted.TargetNodeIndex = target;
+                retargeted.Interpolation = channel.Interpolation == AnimationInterpolation::Step ? AnimationInterpolation::Step : AnimationInterpolation::Linear;
+                const glm::mat4 space = target == 0 ? glm::inverse(local) : parentWorld; // relative to its rest, or in model space
+                for (float time : times)
+                {
+                    const glm::vec3 translation = channel.PositionKeys.empty() ? rest.Translation : Animator::InterpolatePosition(time, channel);
+                    const glm::quat rotation = channel.RotationKeys.empty() ? rest.Rotation : Animator::InterpolateRotation(time, channel);
+                    const glm::vec3 scale = channel.ScaleKeys.empty() ? rest.Scale : Animator::InterpolateScale(time, channel);
+                    const glm::mat4 animated = space * glm::translate(glm::mat4(1.0f), translation) * glm::mat4_cast(rotation) * glm::scale(glm::mat4(1.0f), scale);
+                    glm::vec3 t, s, skew;
+                    glm::quat r;
+                    glm::vec4 perspective;
+                    glm::decompose(animated, s, r, t, skew, perspective);
+                    retargeted.PositionKeys.push_back({ time, t });
+                    retargeted.RotationKeys.push_back({ time, glm::normalize(r) });
+                    retargeted.ScaleKeys.push_back({ time, s });
+                }
+            }
+        }
+        for (const MorphCurve& curve : clip.MorphCurves)
+        {
+            const auto found = targets.find(curve.TargetNodeIndex);
+            if (found == targets.end())
+                continue;
+            for (int32_t target : found->second)
+            {
+                MorphCurve& retargeted = out.MorphCurves.emplace_back(curve);
+                retargeted.TargetNodeIndex = target;
+            }
+        }
+        return !out.Channels.empty() || !out.MorphCurves.empty();
+    }
+
     static void ApplyAnimationScale(AnimationSequence& animation, float scale)
     {
         if (std::abs(scale - 1.0f) < 1e-6f)
@@ -1398,6 +1488,27 @@ namespace Nox
                 MeshSerializer::SerializeMesh(cookedPath, subset.Meshes, subset.Materials, {}, subset.Nodes, {});
             else
                 MeshSerializer::SerializeStaticMesh(cookedPath, subset.Meshes, subset.Materials, {}, subset.Nodes, {});
+            // A static mesh's node animations and morph target animations (a fan, a door, a blinking face card): its own clips,
+            // retargeted to its nodes (a plain drag of it then animates as in the file). Import Into Level keeps the file's own
+            // clips with the level instead (below); skinned meshes share the file's (they play on its skeleton).
+            if (!skinned && !level)
+            {
+                std::vector<std::filesystem::path> clips;
+                if (wholeFile.MeshSettings.ImportAnimations)
+                {
+                    for (const Ref<AnimationSequence>& animation : extractedAnimations)
+                    {
+                        AnimationSequence retargeted;
+                        if (!RetargetClipToMesh(*animation, nodeDataList, worlds, node.MeshIndex, skinned, retargeted))
+                            continue;
+                        ApplyAnimationScale(retargeted, wholeFile.MeshSettings.ImportScale);
+                        const std::filesystem::path animPath = cookedPath.parent_path() / (cookedPath.stem().string() + "_" + animation->Name + ".nanim");
+                        AnimationSerializer::Serialize(animPath, retargeted);
+                        clips.push_back(animPath);
+                    }
+                }
+                ReplaceClipManifest(cookedPath, clips);
+            }
             WriteMaterials(assetDirectory, wholeFile.FilePath, subset);
             Utility::saveHashToFile(cookedPath.string() + ".hash", sourceHash);
             result.push_back(std::move(split));

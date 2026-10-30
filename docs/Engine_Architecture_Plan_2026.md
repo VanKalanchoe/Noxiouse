@@ -1162,6 +1162,25 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
         CUBICSPLINE (values, not tangents).
       - Sampling, the Animator's weights, and all four pose blends give the expected values.
       - NAN2 round-trips; NANM reads without curves.
+  - **Clips of a static mesh imported per mesh (built 2026-10-31):** a Do Not Combine import without Import Into Level used to
+    drop the file's clips, so a model like AnimatedMorphCube had nothing to play.
+    - **Cooking:** each mesh now gets its own copies, `Meshes/<Mesh>_<Clip>.nanim`, the clip moved onto the mesh asset's nodes
+      (`RetargetClipToMesh`):
+      - **Node 0, the node a plain drag places:** the animation relative to the mesh node's rest pose, so it plays where it is put.
+      - **The file-layout nodes:** world space, under the mesh's resting parents.
+      - **Morph curves:** pointed at both nodes.
+      - **Resampling:** channels are resampled at their key times (STEP stays STEP, everything else becomes LINEAR).
+    - **Linking:** the cook writes `<Mesh>.nsmesh.clips`, the exact list of clips it wrote. `LinkImportedAssets` links those
+      instead of matching names by prefix (a mesh named `Cube` would otherwise also take `Cube_Top`'s clips).
+    - **Spawning:** `ModelInstance::addAnimators` now counts morph curves as a clip's targets. Clips with only weights (in any
+      import) used to get no animator. The owner is the first node of the clip that was placed.
+    - **Limitation:** an animated parent of the mesh node is held at its rest pose. Import the whole file, or Into Level, to keep
+      the hierarchy's motion.
+    - **Offline test (scratchpad `gstest/retargettest`):**
+      - A door swinging under a rotated hinge: node 0 starts at identity and moves relative to its rest; the layout node matches
+        the hinge's world times the door's local transform (error 1e-7).
+      - The hinge's own channel is dropped.
+      - A clip of weights only keeps its curves, on both nodes.
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much
