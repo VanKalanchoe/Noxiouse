@@ -7143,13 +7143,96 @@ namespace Nox
             AssetHandle materialAsset = material && submesh < material->MaterialAssets.size() ? material->MaterialAssets[submesh] : AssetHandle(0);
             if (materialAsset == 0 && submesh < meshMaterials.size())
                 materialAsset = meshMaterials[submesh];
-            const uint32_t materialSlot = acquireGpuMaterial(static_cast<uint64_t>(component.Mesh), static_cast<uint32_t>(submesh), mesh.GetMaterial(submesh),
-                                                             materialAsset, complete, outMissingAssets);
+            // An entity with material parameters draws this slot with a material record of its own (its parameters over the slot's
+            // material), refreshed every frame (RefreshEntityMaterials); the others share the material's record.
+            const uint32_t materialSlot = material && material->HasParameters()
+                ? acquireEntityMaterial(entityID, static_cast<uint32_t>(submesh), entityMaterialData(mesh.GetMaterial(submesh), materialAsset, *material,
+                                                                                                   static_cast<uint32_t>(submesh), complete, outMissingAssets))
+                : acquireGpuMaterial(static_cast<uint64_t>(component.Mesh), static_cast<uint32_t>(submesh), mesh.GetMaterial(submesh),
+                                     materialAsset, complete, outMissingAssets);
             outInstances.push_back(m_gpuScene.AddInstance(handle.gpuSceneMesh, materialSlot, world, entityID));
             if (handle.morphs)
                 m_gpuScene.SetInstanceMorphs(outInstances.back(), handle.morphs);
         }
         return complete;
+    }
+
+    namespace
+    {
+        // The material record of one entity's slot (MaterialComponent::Parameters): apart from every asset's (the high bit).
+        GpuMaterialKey EntityMaterialKey(int32_t entityID, uint32_t submesh)
+        {
+            return { .Asset = (1ull << 63) | static_cast<uint32_t>(entityID), .Submesh = submesh };
+        }
+    }
+
+    MaterialData Renderer::entityMaterialData(const MaterialData& meshMaterial, AssetHandle materialAsset, const MaterialComponent& component,
+                                              uint32_t submesh, bool& outComplete, std::vector<AssetHandle>& outMissingAssets)
+    {
+        // The slot's material (its .nmat once loaded, the mesh's embedded one until then), with the entity's parameters over it.
+        MaterialData data = meshMaterial;
+        if (materialAsset != 0 && AssetManager::IsAssetHandleValid(materialAsset))
+        {
+            if (const Material* loaded = AssetManager::FindLoadedAsset<Material>(materialAsset))
+                data = loaded->GetData();
+            else
+            {
+                outMissingAssets.push_back(materialAsset);
+                outComplete = false;
+            }
+        }
+        component.ApplyParameters(data, submesh);
+        return data;
+    }
+
+    uint32_t Renderer::acquireEntityMaterial(int32_t entityID, uint32_t submesh, const MaterialData& data)
+    {
+        const GpuMaterialKey key = EntityMaterialKey(entityID, submesh);
+        const shaderio::GpuMaterial packed = PackMaterial(data);
+        if (const uint32_t slot = m_gpuScene.FindMaterial(key); slot != GpuScene::InvalidSlot)
+        {
+            m_gpuScene.UpdateMaterial(slot, packed);
+            return slot;
+        }
+        return m_gpuScene.AddMaterial(key, packed);
+    }
+
+    template <typename MeshAsset>
+    void Renderer::refreshEntityMaterials(const MeshAsset& mesh, const MeshComponent& component, const MaterialComponent& material, int32_t entityID)
+    {
+        const std::vector<AssetHandle>& meshMaterials = mesh.GetMaterialAssets();
+        const uint64_t submeshTotal = mesh.GetSubMeshCount();
+        const uint64_t first = std::min<uint64_t>(component.SubmeshIndex, submeshTotal);
+        const uint64_t count = component.SubmeshCount == UINT32_MAX ? submeshTotal : std::max(component.SubmeshCount, 1u);
+        const uint64_t last = std::min(first + count, submeshTotal);
+        std::vector<AssetHandle> missing;
+        bool complete = true;
+        for (uint64_t submesh = first; submesh < last; ++submesh)
+        {
+            const uint32_t slot = m_gpuScene.FindMaterial(EntityMaterialKey(entityID, static_cast<uint32_t>(submesh)));
+            if (slot == GpuScene::InvalidSlot)
+                continue;
+            AssetHandle materialAsset = submesh < material.MaterialAssets.size() ? material.MaterialAssets[submesh] : AssetHandle(0);
+            if (materialAsset == 0 && submesh < meshMaterials.size())
+                materialAsset = meshMaterials[submesh];
+            m_gpuScene.UpdateMaterial(slot, PackMaterial(entityMaterialData(mesh.GetMaterial(submesh), materialAsset, material,
+                                                                            static_cast<uint32_t>(submesh), complete, missing)));
+        }
+    }
+
+    void Renderer::RefreshEntityMaterials(const MeshComponent& component, const MaterialComponent& material, int32_t entityID)
+    {
+        const AssetType type = AssetManager::GetAssetType(component.Mesh);
+        if (type == AssetType::Mesh)
+        {
+            if (const Mesh* mesh = AssetManager::FindLoadedAsset<Mesh>(component.Mesh))
+                refreshEntityMaterials(*mesh, component, material, entityID);
+        }
+        else if (type == AssetType::StaticMesh)
+        {
+            if (const StaticMesh* mesh = AssetManager::FindLoadedAsset<StaticMesh>(component.Mesh))
+                refreshEntityMaterials(*mesh, component, material, entityID);
+        }
     }
 
     uint32_t Renderer::acquireGpuMaterial(uint64_t meshAsset, uint32_t submesh, const MaterialData& meshMaterial, AssetHandle materialAsset,

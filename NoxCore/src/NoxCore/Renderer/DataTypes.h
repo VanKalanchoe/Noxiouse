@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 #include "GeometryArena.h"
 #include <glm/glm.hpp>
@@ -317,6 +318,66 @@ namespace Nox
         std::vector<glm::vec3> Positions; // per vertex of the mesh (MeshData::Vertices, same order), zero for an unmoved one
         std::vector<glm::vec3> Normals;
     };
+
+    // A material value an entity can set for itself (MaterialComponent::Parameters; Unreal's dynamic material instance parameters,
+    // Unity's MaterialPropertyBlock), over the material it draws with, without a material asset of its own.
+    enum class MaterialParameter : uint8_t { BaseColor = 0, EmissiveColor, EmissiveStrength, Metallic, Roughness, Count };
+
+    namespace MaterialParameters
+    {
+        inline const char* Name(MaterialParameter parameter)
+        {
+            switch (parameter)
+            {
+            case MaterialParameter::BaseColor: return "Base Color";
+            case MaterialParameter::EmissiveColor: return "Emissive Color";
+            case MaterialParameter::EmissiveStrength: return "Emissive Strength";
+            case MaterialParameter::Metallic: return "Metallic";
+            case MaterialParameter::Roughness: return "Roughness";
+            default: return "Unknown";
+            }
+        }
+        // MaterialParameter::Count when no parameter has that name.
+        inline MaterialParameter FromName(std::string_view name)
+        {
+            for (uint8_t index = 0; index < static_cast<uint8_t>(MaterialParameter::Count); ++index)
+                if (name == Name(static_cast<MaterialParameter>(index)))
+                    return static_cast<MaterialParameter>(index);
+            return MaterialParameter::Count;
+        }
+        // 3 for colors (RGB; base color keeps the material's alpha), 1 for numbers (x).
+        inline int ComponentCount(MaterialParameter parameter)
+        {
+            return parameter == MaterialParameter::BaseColor || parameter == MaterialParameter::EmissiveColor ? 3 : 1;
+        }
+        inline void Apply(MaterialData& material, MaterialParameter parameter, const glm::vec4& value)
+        {
+            switch (parameter)
+            {
+            case MaterialParameter::BaseColor:
+                material.BaseColorFactor = glm::vec4(glm::vec3(value), material.BaseColorFactor.a);
+                material.DiffuseFactor = glm::vec4(glm::vec3(value), material.DiffuseFactor.a); // the specular-glossiness workflow's
+                break;
+            case MaterialParameter::EmissiveColor: material.EmissiveFactor = glm::vec3(value); break;
+            case MaterialParameter::EmissiveStrength: material.emissiveStrength = value.x; break;
+            case MaterialParameter::Metallic: material.MetallicFactor = value.x; break;
+            case MaterialParameter::Roughness: material.RoughnessFactor = value.x; break;
+            default: break;
+            }
+        }
+        inline glm::vec4 Read(const MaterialData& material, MaterialParameter parameter)
+        {
+            switch (parameter)
+            {
+            case MaterialParameter::BaseColor: return material.BaseColorFactor;
+            case MaterialParameter::EmissiveColor: return glm::vec4(material.EmissiveFactor, 0.0f);
+            case MaterialParameter::EmissiveStrength: return glm::vec4(material.emissiveStrength);
+            case MaterialParameter::Metallic: return glm::vec4(material.MetallicFactor);
+            case MaterialParameter::Roughness: return glm::vec4(material.RoughnessFactor);
+            default: return glm::vec4(0.0f);
+            }
+        }
+    }
 
     // KHR_materials_variants: the material a submesh draws with while the named variant is selected (a submesh without an entry
     // for a variant keeps its own). VariantIndex is the variant's place in the file's list, what orders the variants.

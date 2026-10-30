@@ -1,4 +1,5 @@
 #include "Timeline.h"
+#include "NoxCore/Renderer/DataTypes.h"
 
 #include <algorithm>
 
@@ -18,6 +19,7 @@ namespace Nox::TimelineEvaluation
         case TimelineProperty::CameraCut: return "Camera Cut";
         case TimelineProperty::MorphWeight: return "Morph Weight";
         case TimelineProperty::SubTimeline: return "Sub-Timeline";
+        case TimelineProperty::MaterialParameter: return "Material Parameter";
         default: return "Unknown";
         }
     }
@@ -35,6 +37,16 @@ namespace Nox::TimelineEvaluation
         case TimelineProperty::MorphWeight: return 1;
         default: return 0;
         }
+    }
+
+    int GetComponentCount(const TimelineTrack& track)
+    {
+        if (track.Property == TimelineProperty::MaterialParameter)
+        {
+            const MaterialParameter parameter = MaterialParameters::FromName(track.Parameter);
+            return parameter == MaterialParameter::Count ? 0 : MaterialParameters::ComponentCount(parameter);
+        }
+        return GetComponentCount(track.Property);
     }
 
     glm::vec4 Evaluate(const TimelineTrack& track, float time)

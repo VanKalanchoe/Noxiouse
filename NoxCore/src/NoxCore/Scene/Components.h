@@ -135,6 +135,28 @@ namespace Nox
         // entry, uses the mesh primitive's own .nmat; without overrides the list is empty and nothing is serialized.
         std::vector<AssetHandle> MaterialAssets;
 
+        // Values this entity sets on its materials (Unreal's dynamic material instance parameters): over the slot's material, on this
+        // entity only, without a material asset of its own. Slot UINT32_MAX: every slot. Later entries win over earlier ones.
+        struct Parameter
+        {
+            MaterialParameter Name = MaterialParameter::BaseColor;
+            glm::vec4 Value{ 1.0f };
+            uint32_t Slot = UINT32_MAX;
+        };
+        std::vector<Parameter> Parameters;
+        // Runtime only: what a sequencer's Material Parameter tracks set (over Parameters), kept after the timeline as it left them.
+        std::vector<Parameter> SequencerParameters;
+
+        bool HasParameters() const { return !Parameters.empty() || !SequencerParameters.empty(); }
+        // The slot's material with this entity's parameters applied.
+        void ApplyParameters(MaterialData& material, uint32_t slot) const
+        {
+            for (const std::vector<Parameter>* list : { &Parameters, &SequencerParameters })
+                for (const Parameter& parameter : *list)
+                    if (parameter.Slot == UINT32_MAX || parameter.Slot == slot)
+                        MaterialParameters::Apply(material, parameter.Name, parameter.Value);
+        }
+
         MaterialComponent() = default;
         MaterialComponent(const MaterialComponent&) = default;
     };

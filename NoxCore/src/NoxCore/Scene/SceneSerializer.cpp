@@ -493,7 +493,20 @@ namespace Nox
                 for (auto handle : mc.MaterialAssets) out << (uint64_t)handle;
                 out << YAML::EndSeq;
             }
-
+            if (!mc.Parameters.empty())
+            {
+                out << YAML::Key << "Parameters" << YAML::Value << YAML::BeginSeq;
+                for (const MaterialComponent::Parameter& parameter : mc.Parameters)
+                {
+                    out << YAML::Flow << YAML::BeginMap;
+                    out << YAML::Key << "Name" << YAML::Value << MaterialParameters::Name(parameter.Name);
+                    out << YAML::Key << "Value" << YAML::Value << parameter.Value;
+                    if (parameter.Slot != UINT32_MAX)
+                        out << YAML::Key << "Slot" << YAML::Value << parameter.Slot;
+                    out << YAML::EndMap;
+                }
+                out << YAML::EndSeq;
+            }
 
             out << YAML::EndMap; // MaterialComponent
         }
@@ -1773,6 +1786,19 @@ namespace Nox
                 mc.MaterialAssets.clear();
                 for (auto node : materialAssetsSeq)
                     mc.MaterialAssets.push_back(node.as<uint64_t>());
+            }
+            if (auto parameters = materialComponent["Parameters"]; parameters && parameters.IsSequence())
+            {
+                for (const YAML::Node& node : parameters)
+                {
+                    MaterialComponent::Parameter parameter;
+                    parameter.Name = MaterialParameters::FromName(node["Name"].as<std::string>(std::string()));
+                    if (parameter.Name == MaterialParameter::Count)
+                        continue;
+                    parameter.Value = node["Value"].as<glm::vec4>(glm::vec4(1.0f));
+                    parameter.Slot = node["Slot"].as<uint32_t>(UINT32_MAX);
+                    mc.Parameters.push_back(parameter);
+                }
             }
         }
 

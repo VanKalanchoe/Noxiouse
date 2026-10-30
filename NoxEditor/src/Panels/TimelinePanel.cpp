@@ -1,4 +1,5 @@
 #include "TimelinePanel.h"
+#include "NoxCore/Asset/Material.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -118,6 +119,8 @@ namespace Nox
                 state.CameraFOV = target.GetComponent<CameraComponent>().Camera.GetPerspectiveVerticalFOV();
             if (target.HasComponent<MeshComponent>())
                 state.SequencerMorphWeights = target.GetComponent<MeshComponent>().SequencerMorphWeights;
+            if (target.HasComponent<MaterialComponent>())
+                state.SequencerParameters = target.GetComponent<MaterialComponent>().SequencerParameters;
             snapshot.Targets.emplace(target.GetUUID(), state);
         }
         m_Snapshot = std::move(snapshot);
@@ -156,6 +159,8 @@ namespace Nox
                     target.GetComponent<CameraComponent>().Camera.SetPerspectiveVerticalFOV(*state.CameraFOV);
                 if (state.SequencerMorphWeights && target.HasComponent<MeshComponent>())
                     target.GetComponent<MeshComponent>().SequencerMorphWeights = *state.SequencerMorphWeights;
+                if (state.SequencerParameters && target.HasComponent<MaterialComponent>())
+                    target.GetComponent<MaterialComponent>().SequencerParameters = *state.SequencerParameters;
             }
         }
         m_Snapshot.reset();
@@ -202,6 +207,34 @@ namespace Nox
                 if (name == track.Parameter)
                     return glm::vec4(weight);
             return glm::vec4(0.0f);
+        }
+        case TimelineProperty::MaterialParameter:
+        {
+            // What the entity shows now: the sequencer's value, else its own parameter, else the first slot's material.
+            const MaterialParameter parameter = MaterialParameters::FromName(track.Parameter);
+            if (parameter == MaterialParameter::Count || !target.HasComponent<MaterialComponent>())
+                return std::nullopt;
+            const MaterialComponent& material = target.GetComponent<MaterialComponent>();
+            for (const std::vector<MaterialComponent::Parameter>* list : { &material.SequencerParameters, &material.Parameters })
+                for (auto it = list->rbegin(); it != list->rend(); ++it)
+                    if (it->Name == parameter)
+                        return it->Value;
+            if (target.HasComponent<MeshComponent>())
+            {
+                const AssetHandle mesh = target.GetComponent<MeshComponent>().Mesh;
+                const uint32_t slot = target.GetComponent<MeshComponent>().SubmeshIndex;
+                AssetHandle asset = slot < material.MaterialAssets.size() ? material.MaterialAssets[slot] : AssetHandle(0);
+                if (asset == 0)
+                {
+                    if (const StaticMesh* staticMesh = AssetManager::FindLoadedAsset<StaticMesh>(mesh); staticMesh && slot < staticMesh->GetMaterialAssets().size())
+                        asset = staticMesh->GetMaterialAssets()[slot];
+                    else if (const Mesh* skeletal = AssetManager::FindLoadedAsset<Mesh>(mesh); skeletal && slot < skeletal->GetMaterialAssets().size())
+                        asset = skeletal->GetMaterialAssets()[slot];
+                }
+                if (const Material* loaded = asset != 0 ? AssetManager::FindLoadedAsset<Material>(asset) : nullptr)
+                    return MaterialParameters::Read(loaded->GetData(), parameter);
+            }
+            return MaterialParameters::Read(MaterialData{}, parameter);
         }
         default:
             return glm::vec4(0.0f);
@@ -374,6 +407,12 @@ namespace Nox
                     {
                         for (const auto& [target, defaultWeight] : targets)
                             propertyItem(TimelineProperty::MorphWeight, target);
+                        ImGui::EndMenu();
+                    }
+                    if (ImGui::BeginMenu(TimelineEvaluation::GetPropertyName(TimelineProperty::MaterialParameter)))
+                    {
+                        for (uint8_t index = 0; index < static_cast<uint8_t>(MaterialParameter::Count); ++index)
+                            propertyItem(TimelineProperty::MaterialParameter, MaterialParameters::Name(static_cast<MaterialParameter>(index)));
                         ImGui::EndMenu();
                     }
                 }
@@ -618,7 +657,7 @@ namespace Nox
         bool keyed = false;
         for (TimelineTrack& track : timeline.Tracks)
         {
-            const int components = TimelineEvaluation::GetComponentCount(track.Property);
+            const int components = TimelineEvaluation::GetComponentCount(track);
             if (track.Muted || track.Keys.empty() || components == 0)
                 continue;
             const std::optional<glm::vec4> value = ReadTargetValue(scene, player, track);
@@ -656,7 +695,7 @@ namespace Nox
             return;
         }
         TimelineTrack& track = timeline.Tracks[m_SelectedTrack];
-        const int components = TimelineEvaluation::GetComponentCount(track.Property);
+        const int components = TimelineEvaluation::GetComponentCount(track);
         if (components == 0 || track.Keys.empty())
         {
             ImGui::TextDisabled(components == 0 ? "This track has no values." : "No keys yet.");
@@ -856,6 +895,15 @@ namespace Nox
             ImGui::InputTextWithHint("Camera", "name path from the player", &key.Event);
             changed |= ImGui::IsItemDeactivatedAfterEdit();
             ImGui::SetItemTooltip("From this key on (in Play) this camera, below the player, is the primary one.");
+            break;
+        case TimelineProperty::MaterialParameter:
+            if (TimelineEvaluation::GetComponentCount(track) == 3)
+                changed |= ImGui::ColorEdit3("Value", glm::value_ptr(key.Value), ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+            else
+            {
+                ImGui::DragFloat("Value", &key.Value.x, 0.01f, 0.0f, 1000.0f);
+                changed |= ImGui::IsItemDeactivatedAfterEdit();
+            }
             break;
         case TimelineProperty::SubTimeline:
         {

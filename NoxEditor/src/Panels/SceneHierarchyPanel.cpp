@@ -1548,6 +1548,63 @@ namespace Nox
                     ImGui::TreePop();
                 }
             }
+
+            // Values this entity sets over its materials (Unreal's dynamic material instance parameters): no material asset of its
+            // own, nothing else changes. A timeline's Material Parameter tracks set them too, over these.
+            if (ImGui::TreeNodeEx("Parameters", component.Parameters.empty() ? 0 : ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                bool changed = false;
+                int removed = -1;
+                for (int i = 0; i < static_cast<int>(component.Parameters.size()); ++i)
+                {
+                    MaterialComponent::Parameter& parameter = component.Parameters[i];
+                    ImGui::PushID(i);
+                    const char* name = MaterialParameters::Name(parameter.Name);
+                    if (MaterialParameters::ComponentCount(parameter.Name) == 3)
+                        changed |= ImGui::ColorEdit3(name, glm::value_ptr(parameter.Value), ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+                    else
+                        changed |= ImGui::DragFloat(name, &parameter.Value.x, 0.01f, 0.0f, parameter.Name == MaterialParameter::EmissiveStrength ? 1000.0f : 1.0f);
+                    ImGui::SameLine();
+                    int slot = parameter.Slot == UINT32_MAX ? -1 : static_cast<int>(parameter.Slot);
+                    ImGui::SetNextItemWidth(60.0f);
+                    if (ImGui::DragInt("Slot", &slot, 0.1f, -1, 1024, slot < 0 ? "all" : "%d"))
+                    {
+                        parameter.Slot = slot < 0 ? UINT32_MAX : static_cast<uint32_t>(slot);
+                        changed = true;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("X"))
+                        removed = i;
+                    ImGui::PopID();
+                }
+                bool added = false;
+                if (removed >= 0)
+                    component.Parameters.erase(component.Parameters.begin() + removed);
+                if (ImGui::BeginCombo("##AddParameter", "Add Parameter"))
+                {
+                    for (uint8_t index = 0; index < static_cast<uint8_t>(MaterialParameter::Count); ++index)
+                    {
+                        const MaterialParameter kind = static_cast<MaterialParameter>(index);
+                        if (ImGui::Selectable(MaterialParameters::Name(kind)))
+                        {
+                            MaterialComponent::Parameter parameter;
+                            parameter.Name = kind;
+                            parameter.Value = kind == MaterialParameter::BaseColor ? glm::vec4(1.0f)
+                                            : kind == MaterialParameter::EmissiveStrength ? glm::vec4(1.0f)
+                                            : kind == MaterialParameter::Roughness ? glm::vec4(0.5f) : glm::vec4(0.0f);
+                            component.Parameters.push_back(parameter);
+                            added = true;
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+                // Gaining or losing parameters registers the entity anew (Scene's step 7 sees it too); changed values are picked up
+                // every frame, so a drag needs nothing.
+                (void)changed;
+                if (added || removed >= 0)
+                    Entity(entity).PatchComponent<MaterialComponent>();
+                ImGui::TreePop();
+            }
         });
 
         DrawComponent<DirectionalLightComponent>("Directional Light", entity, [](auto& component)

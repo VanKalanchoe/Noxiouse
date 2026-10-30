@@ -376,11 +376,13 @@ namespace Nox
             std::vector<uint32_t> Instances;
             bool Skinned = false;
             bool Morphed = false; // an instance has morph targets: its weights are handed over every frame
+            bool Parameterized = false; // material parameters (MaterialComponent::Parameters): its records are refreshed every frame
         };
         uint64_t m_SceneID = 0;
         std::unordered_map<entt::entity, MeshRegistration> m_MeshRegistrations;
         std::vector<entt::entity> m_SkinnedMeshEntities;
         std::vector<entt::entity> m_MorphedMeshEntities;
+        std::vector<entt::entity> m_ParameterizedMeshEntities;
         std::vector<const std::vector<glm::mat4>*> m_SkinnedBones; // SyncGpuScene: each skinned mesh's joint matrices this frame
         static constexpr uint32_t SkinnedMeshesPerTask = 8;
         // UpdateAnimators: the animators by node table (SharesNodeTable, Key: the table's first node), and where each group starts.

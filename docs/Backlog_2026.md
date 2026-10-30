@@ -23,7 +23,6 @@
 |---|---|
 | C1 | **Jump / Fall states** in the locomotion graph -- needs jump/fall clips (the Fox has only Survey, Walk, Run); add the `VerticalSpeed` parameter back with the states |
 | C5 | Fox sizes: the movement defaults are for a ~1.8 m character; the Fox capsule and speeds need values for a ~0.8 m animal (scene tuning; the `Speed` thresholds were fixed 2026-10-20) |
-| C8 | Timeline material parameter tracks (needs per-entity material parameter overrides first), sub-sequences; variable node input pins |
 
 ### Ignore for now
 
@@ -57,6 +56,19 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   joints (new Cylinder / Plane / Mesh Collider 3D, Physics Joint 3D, Collision Filter 3D components; compound bodies from child
   colliders). Tested by the user: vertex colors, morph targets, material variants; the rest untested. Mesh / material extras not
   imported by decision. `Engine_Architecture_Plan_2026.md` §5.8.2
+- **C8** built 2026-10-31, untested:
+  - **Per-entity material parameters** (Unreal's dynamic material instance parameters):
+    - MaterialComponent `Parameters`: Base Color, Emissive Color / Strength, Metallic, Roughness, per slot or on all.
+    - Such an entity draws with GPU material records of its own, refreshed every frame.
+    - Edited in the Material section; saved with the scene.
+  - **Material Parameter timeline tracks:** they write `SequencerParameters`, over the authored ones, kept after the timeline;
+    previews restore them.
+  - **Sub-Timeline tracks** (Unreal's Subsequence track): sections of another timeline (length, start offset, rate, loop), played on
+    the track's target, nested up to depth 8, with the child's events.
+  - **Variable node input pins** (Unreal's Add Pin): `NodeTypeDesc::VariableInput`, with + Pin / - Pin in the graph editor, and a new
+    **Blend Poses by Int** node.
+  - Offline tests in scratchpad `gstest/`: `subtimelinetest`, `varpintest` (the real compiler and evaluator), `matparamtest`.
+  - **Not carried:** material parameters on a model instance's spawned nodes (not node overrides), and parameters in HLOD bakes.
 - **I4** Import Into Level / static meshes of a file that also has a character: clips are now split by what they move (2026-10-31,
   untested). A clip that moves only the skins' joints and the armature above them stays with the skeletal asset; one that moves
   other nodes (a door, a fan) also goes to the static meshes and the level, which animate only those nodes. Before, any skeleton

@@ -82,6 +82,7 @@ namespace Nox
             std::optional<float> LightIntensity;
             std::optional<float> CameraFOV; // radians
             std::optional<std::map<std::string, float>> SequencerMorphWeights;
+            std::optional<std::vector<MaterialComponent::Parameter>> SequencerParameters;
         };
         struct Snapshot
         {

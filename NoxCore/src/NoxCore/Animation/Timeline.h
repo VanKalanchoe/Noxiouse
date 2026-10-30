@@ -27,6 +27,8 @@ namespace Nox
         SubTimeline,    // another timeline (TimelineTrack::Parameter: its asset handle) played on the target (UE's Subsequence track):
                         // each key starts a section, Value = (length, 0: the child's duration; start offset in the child; rate, 0: 1;
                         // loop, 1: the child loops within the section); the child's tracks find their targets from the track's target
+        MaterialParameter, // the target's material parameter the track names (TimelineTrack::Parameter: "Base Color", "Roughness"...),
+                           // over its MaterialComponent::Parameters, on every slot (MaterialComponent::SequencerParameters)
         Count
     };
 
@@ -70,6 +72,8 @@ namespace Nox
         const char* GetPropertyName(TimelineProperty property);
         // How many of a key's value components the property uses (3 for vectors and colors, 1 for numbers, 0 for events).
         int GetComponentCount(TimelineProperty property);
+        // The same for a track (a Material Parameter track's count depends on the parameter it names).
+        int GetComponentCount(const TimelineTrack& track);
         // The track's value at `time` (seconds); the first key's before it, the last key's after it.
         glm::vec4 Evaluate(const TimelineTrack& track, float time);
         // The event names of the keys a playhead passed going from `from` to `to` (`wrapped`: it went past the end, or the start

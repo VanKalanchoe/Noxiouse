@@ -1207,6 +1207,7 @@ namespace Nox
             m_MeshRegistrations.clear();
             m_SkinnedMeshEntities.clear();
             m_MorphedMeshEntities.clear();
+            m_ParameterizedMeshEntities.clear();
             m_PendingMeshEntities.clear();
             for (auto entity : m_Registry.view<MeshComponent>())
                 m_PendingMeshEntities.push_back(entity);
@@ -1260,6 +1261,8 @@ namespace Nox
                         std::erase(m_SkinnedMeshEntities, entity);
                     if (found->second.Morphed)
                         std::erase(m_MorphedMeshEntities, entity);
+                    if (found->second.Parameterized)
+                        std::erase(m_ParameterizedMeshEntities, entity);
                     m_MeshRegistrations.erase(found);
                 }
 
@@ -1298,6 +1301,10 @@ namespace Nox
                 registration.Morphed = m_renderer->HasMorphTargets(registration.Instances);
                 if (registration.Morphed)
                     m_MorphedMeshEntities.push_back(entity);
+                const MaterialComponent* material = m_Registry.try_get<MaterialComponent>(entity);
+                registration.Parameterized = material && material->HasParameters();
+                if (registration.Parameterized)
+                    m_ParameterizedMeshEntities.push_back(entity);
                 m_MeshRegistrations.emplace(entity, std::move(registration));
             }
         }
@@ -1351,6 +1358,22 @@ namespace Nox
             for (const auto& [target, weight] : mesh->MorphWeights)
                 weights[target] = weight;
             m_renderer->SetMeshInstancesMorphWeights(m_MeshRegistrations.at(entity).Instances, weights);
+        }
+
+        // 7. Material parameters: an entity that gained or lost them (a sequencer's track started or a script set one) draws with
+        //    records of its own or the shared ones again (registered anew); the others' records take the values as they are now.
+        for (auto entity : m_Registry.view<MaterialComponent>())
+        {
+            const auto found = m_MeshRegistrations.find(entity);
+            if (found != m_MeshRegistrations.end() && found->second.Parameterized != m_Registry.get<MaterialComponent>(entity).HasParameters())
+                m_PendingMeshEntities.push_back(entity);
+        }
+        for (entt::entity entity : m_ParameterizedMeshEntities)
+        {
+            const MeshComponent* mesh = m_Registry.try_get<MeshComponent>(entity);
+            const MaterialComponent* material = m_Registry.try_get<MaterialComponent>(entity);
+            if (mesh && material)
+                m_renderer->RefreshEntityMaterials(*mesh, *material, static_cast<int32_t>(entity));
         }
     }
 
@@ -1623,6 +1646,19 @@ namespace Nox
                 if (target.HasComponent<MeshComponent>() && !track.Parameter.empty())
                     target.GetComponent<MeshComponent>().SequencerMorphWeights[track.Parameter] = value.x;
                 break;
+            case TimelineProperty::MaterialParameter:
+            {
+                // Every slot; the entity draws with records of its own from the next registration (Scene's step 7), refreshed each frame.
+                const MaterialParameter parameter = MaterialParameters::FromName(track.Parameter);
+                if (parameter == MaterialParameter::Count || !target.HasComponent<MaterialComponent>())
+                    break;
+                std::vector<MaterialComponent::Parameter>& values = target.GetComponent<MaterialComponent>().SequencerParameters;
+                auto found = std::find_if(values.begin(), values.end(), [&](const MaterialComponent::Parameter& p) { return p.Name == parameter && p.Slot == UINT32_MAX; });
+                if (found == values.end())
+                    found = values.insert(values.end(), MaterialComponent::Parameter{ parameter, value, UINT32_MAX });
+                found->Value = value;
+                break;
+            }
             default:
                 break;
             }

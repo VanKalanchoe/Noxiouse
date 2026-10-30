@@ -320,6 +320,9 @@ namespace Nox
         void SetMeshInstancesBones(std::span<const uint32_t> instances, std::span<const glm::mat4> bones);
         // This frame's morph target weights of an entity's instances, by target name (a target not named: its default weight).
         void SetMeshInstancesMorphWeights(std::span<const uint32_t> instances, const std::map<std::string, float>& weights);
+        // An entity with material parameters (MaterialComponent::Parameters, a sequencer's): its slots' records repacked with the
+        // parameters as they are now (every frame: a timeline animates them).
+        void RefreshEntityMaterials(const MeshComponent& component, const MaterialComponent& material, int32_t entityID);
         bool HasMorphTargets(std::span<const uint32_t> instances) const
         {
             for (uint32_t instance : instances)
@@ -866,6 +869,11 @@ namespace Nox
         bool addSubmeshInstances(const glm::dmat4& world, const MeshAsset& mesh, const MeshComponent& component, const MaterialComponent* material,
                                  int32_t entityID, std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets);
         // Shared material record of a submesh: its material asset when loaded, else the mesh's embedded material.
+        MaterialData entityMaterialData(const MaterialData& meshMaterial, AssetHandle materialAsset, const MaterialComponent& component,
+                                        uint32_t submesh, bool& outComplete, std::vector<AssetHandle>& outMissingAssets);
+        uint32_t acquireEntityMaterial(int32_t entityID, uint32_t submesh, const MaterialData& data);
+        template <typename MeshAsset>
+        void refreshEntityMaterials(const MeshAsset& mesh, const MeshComponent& component, const MaterialComponent& material, int32_t entityID);
         uint32_t acquireGpuMaterial(uint64_t meshAsset, uint32_t submesh, const MaterialData& meshMaterial, AssetHandle materialAsset,
                                     bool& outComplete, std::vector<AssetHandle>& outMissingAssets);
         // Re-packs materials whose texture slots may have changed (texture imported or unloaded).
