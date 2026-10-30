@@ -5,6 +5,9 @@
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Components.h"
+#include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Asset/MeshImporter.h"
+#include "NoxCore/Project/Project.h"
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/PhysicsSystem.h>
@@ -15,6 +18,13 @@
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
+#include <Jolt/Physics/Collision/Shape/CylinderShape.h>
+#include <Jolt/Physics/Collision/Shape/TaperedCapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/TaperedCylinderShape.h>
+#include <Jolt/Physics/Collision/Shape/PlaneShape.h>
+#include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
+#include <Jolt/Physics/Collision/Shape/ScaledShape.h>
+#include <Jolt/Physics/Constraints/SixDOFConstraint.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
@@ -25,6 +35,8 @@
 #include <Jolt/Physics/Body/BodyFilter.h>
 
 #include <spdlog/spdlog.h>
+#include <functional>
+#include <set>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/quaternion.hpp>
@@ -159,8 +171,50 @@ namespace Nox {
         }
     }
 
+    // KHR_physics_rigid_bodies' collision filters and the pairs of jointed bodies that do not collide (CollisionFilter3DComponent,
+    // PhysicsJoint3DComponent::EnableCollision), as Jolt's group filter: a body's group is its filter (0: none), its sub group the body.
+    class NoxCollisionGroupFilter final : public JPH::GroupFilter
+    {
+    public:
+        struct Filter
+        {
+            std::vector<std::string> Systems, CollideWith, NotCollideWith;
+        };
+        std::vector<Filter> Filters; // group g uses Filters[g - 1]
+        std::set<std::pair<uint32_t, uint32_t>> Apart; // sub groups (bodies), smaller first
+
+        bool CanCollide(const JPH::CollisionGroup& a, const JPH::CollisionGroup& b) const override
+        {
+            const uint32_t first = std::min(a.GetSubGroupID(), b.GetSubGroupID()), second = std::max(a.GetSubGroupID(), b.GetSubGroupID());
+            if (Apart.contains({ first, second }))
+                return false;
+            return Allows(a.GetGroupID(), b.GetGroupID()) && Allows(b.GetGroupID(), a.GetGroupID());
+        }
+
+        // A collides with B (the spec): A's systems are among B's CollideWith when B has that list (which then lets nothing else in, a
+        // body in no system included), and not all among B's NotCollideWith (which never excludes a body in no system).
+        bool Allows(uint32_t groupA, uint32_t groupB) const
+        {
+            if (groupB == 0 || groupB > Filters.size())
+                return true;
+            static const std::vector<std::string> none;
+            const std::vector<std::string>& systems = groupA != 0 && groupA <= Filters.size() ? Filters[groupA - 1].Systems : none;
+            const Filter& b = Filters[groupB - 1];
+            auto within = [&](const std::vector<std::string>& list)
+            {
+                return std::all_of(systems.begin(), systems.end(), [&](const std::string& system) { return std::find(list.begin(), list.end(), system) != list.end(); });
+            };
+            if (!b.CollideWith.empty() && (systems.empty() || !within(b.CollideWith)))
+                return false;
+            if (!b.NotCollideWith.empty() && !systems.empty() && within(b.NotCollideWith))
+                return false;
+            return true;
+        }
+    };
+
     void JoltPhysics3DScene::Init()
     {
+        m_GroupFilter = new NoxCollisionGroupFilter();
         PhysicsEngine::Init();
 
         m_TempAllocator = std::make_unique<JPH::TempAllocatorImpl>(10 * 1024 * 1024);
@@ -257,7 +311,11 @@ namespace Nox {
 
         // The entity's collider component as a Jolt shape: its size times the entity's world scale, moved by its Offset. Collider sizes
         // are world-unit lengths (the component fields); Jolt wants its own native unit (nativePerWorld). Null without a collider.
-        JPH::Ref<JPH::Shape> ColliderShapeOf(Entity entity, const glm::vec3& worldScale, float nativePerWorld, ColliderSurface& surface)
+        // `dynamic`: the body moves under forces (triangle meshes and unbounded planes have no mass: a mesh takes its hull there).
+        // `meshShape`: a mesh collider's unscaled native shape (JoltPhysics3DScene::MeshColliderShape, cached per mesh).
+        JPH::Ref<JPH::Shape> ColliderShapeOf(Entity entity, const glm::vec3& worldScale, float nativePerWorld, bool dynamic,
+                                             const std::function<JPH::Ref<JPH::Shape>(const MeshCollider3DComponent&, bool)>& meshShape,
+                                             ColliderSurface& surface)
         {
             JPH::Ref<JPH::Shape> shape;
             glm::vec3 offset(0.0f);
@@ -286,12 +344,66 @@ namespace Nox {
                 const auto& capsule = entity.GetComponent<CapsuleCollider3DComponent>();
                 const float halfHeight = std::max(capsule.HalfHeight * worldScale.y, 0.001f) * nativePerWorld;
                 const float radius = std::max(capsule.Radius * std::max(worldScale.x, worldScale.z), 0.001f) * nativePerWorld;
-                shape = JPH::CapsuleShapeSettings(halfHeight, radius).Create().Get();
+                const float bottom = std::max(capsule.BottomRadius * std::max(worldScale.x, worldScale.z), 0.001f) * nativePerWorld;
+                if (capsule.BottomRadius > 0.0f && std::abs(bottom - radius) > 1e-5f)
+                    shape = JPH::TaperedCapsuleShapeSettings(halfHeight, radius, bottom).Create().Get();
+                else
+                    shape = JPH::CapsuleShapeSettings(halfHeight, radius).Create().Get();
                 offset = capsule.Offset;
                 surface.Friction = capsule.Friction;
                 surface.Restitution = capsule.Restitution;
                 surface.RollingResistance = capsule.RollingResistance;
                 surface.RollingRadius = radius;
+            }
+            else if (entity.HasComponent<CylinderCollider3DComponent>())
+            {
+                const auto& cylinder = entity.GetComponent<CylinderCollider3DComponent>();
+                const float halfHeight = std::max(cylinder.HalfHeight * worldScale.y, 0.001f) * nativePerWorld;
+                const float horizontal = std::max(worldScale.x, worldScale.z) * nativePerWorld;
+                const float top = std::max(cylinder.Radius * horizontal, 0.0f);
+                const float bottom = cylinder.BottomRadius > 0.0f ? cylinder.BottomRadius * horizontal : top;
+                // The convex radius rounds the edges: no more than the smallest dimension allows.
+                const float convexRadius = std::min({ JPH::cDefaultConvexRadius, halfHeight, std::max(std::min(top, bottom), 0.0f) });
+                if (std::abs(top - bottom) > 1e-5f)
+                    shape = JPH::TaperedCylinderShapeSettings(halfHeight, top, bottom, convexRadius).Create().Get();
+                else
+                    shape = JPH::CylinderShapeSettings(halfHeight, std::max(top, 0.001f), convexRadius).Create().Get();
+                offset = cylinder.Offset;
+                surface.Friction = cylinder.Friction;
+                surface.Restitution = cylinder.Restitution;
+            }
+            else if (entity.HasComponent<PlaneCollider3DComponent>())
+            {
+                const auto& plane = entity.GetComponent<PlaneCollider3DComponent>();
+                if (plane.HalfSize.x > 0.0f && plane.HalfSize.y > 0.0f)
+                {
+                    // A finite plane: a slab one convex radius thick under the surface.
+                    const glm::vec3 halfExtents(plane.HalfSize.x * worldScale.x * nativePerWorld, JPH::cDefaultConvexRadius,
+                                                plane.HalfSize.y * worldScale.z * nativePerWorld);
+                    JPH::BoxShapeSettings slab(JoltUtils::ToJolt(halfExtents), 0.5f * JPH::cDefaultConvexRadius);
+                    shape = JPH::RotatedTranslatedShapeSettings(JPH::Vec3(0.0f, -JPH::cDefaultConvexRadius, 0.0f), JPH::Quat::sIdentity(), slab.Create().Get()).Create().Get();
+                }
+                else if (!dynamic)
+                {
+                    shape = JPH::PlaneShapeSettings(JPH::Plane(JPH::Vec3::sAxisY(), 0.0f)).Create().Get();
+                }
+                else
+                {
+                    SPDLOG_WARN("Entity {}: an unbounded plane collider cannot move (give it a Half Size, or a static body)", static_cast<uint32_t>(entity));
+                }
+                offset = plane.Offset;
+                surface.Friction = plane.Friction;
+                surface.Restitution = plane.Restitution;
+            }
+            else if (entity.HasComponent<MeshCollider3DComponent>())
+            {
+                const auto& mesh = entity.GetComponent<MeshCollider3DComponent>();
+                if (JPH::Ref<JPH::Shape> base = meshShape(mesh, mesh.Convex || dynamic))
+                {
+                    shape = worldScale == glm::vec3(1.0f) ? base : JPH::ScaledShapeSettings(base, JoltUtils::ToJolt(worldScale)).Create().Get();
+                    surface.Friction = mesh.Friction;
+                    surface.Restitution = mesh.Restitution;
+                }
             }
             if (shape && offset != glm::vec3(0.0f))
                 shape = JPH::RotatedTranslatedShapeSettings(JoltUtils::ToJolt(offset * nativePerWorld), JPH::Quat::sIdentity(), shape).Create().Get();
@@ -314,8 +426,10 @@ namespace Nox {
         // The entity's own collider, then the colliders of descendants without a body of their own: they are part of this body (a
         // compound, as Godot's collision shapes under a body and Unreal's attached shape components), each where it stands relative
         // to the body. KHR_physics_rigid_bodies places shapes the same way (a rotated or offset shape sits on a child node).
+        const bool dynamic = rb.Type == RigidBody3DComponent::BodyType::Dynamic;
+        auto meshShape = [this](const MeshCollider3DComponent& collider, bool convex) { return MeshColliderShape(collider, convex); };
         ColliderSurface surface;
-        JPH::Ref<JPH::Shape> shape = ColliderShapeOf(entity, worldScale, nativePerWorld, surface);
+        JPH::Ref<JPH::Shape> shape = ColliderShapeOf(entity, worldScale, nativePerWorld, dynamic, meshShape, surface);
         struct Part
         {
             JPH::Ref<JPH::Shape> Shape;
@@ -335,7 +449,7 @@ namespace Nox {
                     continue; // a body of its own takes its subtree
                 const WorldPose childPose = WorldPoseOf(child);
                 ColliderSurface childSurface;
-                if (JPH::Ref<JPH::Shape> childShape = ColliderShapeOf(child, childPose.Scale, nativePerWorld, childSurface))
+                if (JPH::Ref<JPH::Shape> childShape = ColliderShapeOf(child, childPose.Scale, nativePerWorld, dynamic, meshShape, childSurface))
                 {
                     if (!shape && parts.empty())
                         surface = childSurface; // the body's surface: its own collider's, else its first part's
@@ -418,6 +532,31 @@ namespace Nox {
 
         bodySettings.mUserData = static_cast<uint64_t>(static_cast<uint32_t>(entity));
 
+        // The collision group: the filter of the body (its own, else one of its colliders'), and the body itself (joints keep pairs apart).
+        uint32_t filterGroup = 0;
+        const CollisionFilter3DComponent* filter = entity.HasComponent<CollisionFilter3DComponent>() ? &entity.GetComponent<CollisionFilter3DComponent>() : nullptr;
+        if (!filter && m_Scene && entity.HasComponent<RelationshipComponent>())
+        {
+            for (UUID childID : entity.GetComponent<RelationshipComponent>().Children)
+            {
+                Entity child = m_Scene->GetEntityByUUID(childID);
+                if (child && !child.HasComponent<RigidBody3DComponent>() && child.HasComponent<CollisionFilter3DComponent>())
+                {
+                    filter = &child.GetComponent<CollisionFilter3DComponent>();
+                    break;
+                }
+            }
+        }
+        auto* groups = static_cast<NoxCollisionGroupFilter*>(m_GroupFilter.GetPtr());
+        if (filter)
+        {
+            groups->Filters.push_back({ filter->Systems, filter->CollideWith, filter->NotCollideWith });
+            filterGroup = static_cast<uint32_t>(groups->Filters.size());
+        }
+        const uint32_t serial = m_NextBodySerial++;
+        m_BodySerials[static_cast<uint32_t>(entity)] = serial;
+        bodySettings.mCollisionGroup = JPH::CollisionGroup(m_GroupFilter, filterGroup, serial);
+
         // rb.Mass is the body's mass (kg), independent of the shape's native-unit volume: set it directly instead of through density
         // (mDensity x volume), so a collider's mass no longer changes when the world unit -- and so the native geometry's size --
         // changes (U6). CalculateInertia takes only the mass from here and works out the inertia tensor from the shape and it.
@@ -449,10 +588,207 @@ namespace Nox {
         m_BodyToEntityMap[bodyIdVal] = entity;
     }
 
+    JPH::Ref<JPH::Shape> JoltPhysics3DScene::MeshColliderShape(const MeshCollider3DComponent& collider, bool convex)
+    {
+        const std::string key = std::to_string(static_cast<uint64_t>(collider.Mesh)) + ':' + std::to_string(collider.SubmeshIndex) + ':' +
+                                std::to_string(collider.SubmeshCount) + (convex ? ":hull" : ":mesh");
+        if (const auto found = m_MeshShapes.find(key); found != m_MeshShapes.end())
+            return found->second;
+        JPH::Ref<JPH::Shape>& shape = m_MeshShapes[key]; // a mesh that cannot be read is not tried again this session
+
+        const AssetType type = AssetManager::GetAssetType(collider.Mesh);
+        if (type != AssetType::StaticMesh && type != AssetType::Mesh)
+            return shape;
+        const std::optional<CookedMesh> cooked = MeshImporter::ReadCookedMesh(Project::GetActiveAssetDirectory(), AssetManager::GetMetadata(collider.Mesh));
+        if (!cooked)
+        {
+            SPDLOG_WARN("Mesh collider: the cooked mesh of asset {} cannot be read", static_cast<uint64_t>(collider.Mesh));
+            return shape;
+        }
+
+        // The original triangles (the clusters of LOD level 0, as the ray tracing BLAS and HLOD take them), the copies of a vertex
+        // that streaming pages hold welded back into one, in native units.
+        const float nativePerWorld = PhysicsScale();
+        JPH::VertexList vertices;
+        JPH::IndexedTriangleList triangles;
+        std::unordered_map<std::string, uint32_t> welded;
+        const size_t first = std::min<size_t>(collider.SubmeshIndex, cooked->Submeshes.size());
+        const size_t last = collider.SubmeshCount == UINT32_MAX ? cooked->Submeshes.size()
+                                                                : std::min<size_t>(first + collider.SubmeshCount, cooked->Submeshes.size());
+        for (size_t submesh = first; submesh < last; ++submesh)
+        {
+            const MeshData& data = cooked->Submeshes[submesh];
+            for (size_t index = 0; index < data.Draws.size() && index < data.Bounds.size(); ++index)
+            {
+                if (data.Bounds[index].lodLevel != 0)
+                    continue;
+                const shaderio::MeshletDraw& draw = data.Draws[index];
+                for (uint32_t triangle = 0; triangle < draw.triangleCount; ++triangle)
+                {
+                    uint32_t corners[3];
+                    for (uint32_t corner = 0; corner < 3; ++corner)
+                    {
+                        const glm::vec3 position = data.Vertices[draw.globalVertexOffset +
+                            data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[draw.triangleOffset + triangle * 3 + corner]]].pos * nativePerWorld;
+                        auto [found, inserted] = welded.try_emplace(std::string(reinterpret_cast<const char*>(&position), sizeof(position)),
+                                                                    static_cast<uint32_t>(vertices.size()));
+                        if (inserted)
+                            vertices.push_back(JPH::Float3(position.x, position.y, position.z));
+                        corners[corner] = found->second;
+                    }
+                    triangles.push_back(JPH::IndexedTriangle(corners[0], corners[1], corners[2], 0));
+                }
+            }
+        }
+        if (triangles.empty())
+            return shape;
+
+        JPH::Shape::ShapeResult result;
+        if (convex)
+        {
+            JPH::Array<JPH::Vec3> points;
+            points.reserve(vertices.size());
+            for (const JPH::Float3& vertex : vertices)
+                points.push_back(JPH::Vec3(vertex));
+            result = JPH::ConvexHullShapeSettings(points).Create();
+        }
+        else
+        {
+            result = JPH::MeshShapeSettings(std::move(vertices), std::move(triangles)).Create();
+        }
+        if (result.HasError())
+            SPDLOG_ERROR("Mesh collider of asset {}: {}", static_cast<uint64_t>(collider.Mesh), result.GetError().c_str());
+        else
+            shape = result.Get();
+        return shape;
+    }
+
+    JPH::BodyID JoltPhysics3DScene::BodyAtOrAbove(Entity entity) const
+    {
+        for (int depth = 0; entity && depth < 256; ++depth, entity = entity.GetParent())
+        {
+            if (const auto found = m_EntityToBodyMap.find(static_cast<uint32_t>(entity)); found != m_EntityToBodyMap.end())
+                return found->second;
+        }
+        return JPH::BodyID();
+    }
+
+    void JoltPhysics3DScene::RemoveConstraints()
+    {
+        for (JPH::Ref<JPH::Constraint>& constraint : m_Constraints)
+            m_PhysicsSystem->RemoveConstraint(constraint);
+        m_Constraints.clear();
+        static_cast<NoxCollisionGroupFilter*>(m_GroupFilter.GetPtr())->Apart.clear();
+        m_ConstraintsDirty = true;
+    }
+
+    void JoltPhysics3DScene::RebuildConstraints()
+    {
+        RemoveConstraints();
+        m_ConstraintsDirty = false;
+        if (!m_Scene)
+            return;
+        auto* groups = static_cast<NoxCollisionGroupFilter*>(m_GroupFilter.GetPtr());
+        JPH::BodyInterface& bodies = m_PhysicsSystem->GetBodyInterface();
+        auto view = m_Scene->GetRegistry().view<PhysicsJoint3DComponent>();
+        for (auto handle : view)
+        {
+            Entity entity{ handle, m_Scene };
+            const PhysicsJoint3DComponent& joint = view.get<PhysicsJoint3DComponent>(handle);
+            Entity connected = joint.ConnectedEntity != 0 ? m_Scene->GetEntityByUUID(joint.ConnectedEntity) : Entity();
+            const JPH::BodyID first = BodyAtOrAbove(entity);
+            const JPH::BodyID second = connected ? BodyAtOrAbove(connected) : JPH::BodyID();
+            if (first.IsInvalid() || first == second)
+                continue;
+
+            // The frames: this entity's and the connected one's (the world: where this entity stands), in world space (native units).
+            const WorldPose pose1 = WorldPoseOf(entity);
+            const WorldPose pose2 = connected ? WorldPoseOf(connected) : pose1;
+            JPH::SixDOFConstraintSettings settings;
+            settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+            settings.mPosition1 = JoltUtils::ToJoltPosition(ToNative(pose1.Position));
+            settings.mAxisX1 = JoltUtils::ToJolt(pose1.Rotation * glm::vec3(1, 0, 0));
+            settings.mAxisY1 = JoltUtils::ToJolt(pose1.Rotation * glm::vec3(0, 1, 0));
+            settings.mPosition2 = JoltUtils::ToJoltPosition(ToNative(pose2.Position));
+            settings.mAxisX2 = JoltUtils::ToJolt(pose2.Rotation * glm::vec3(1, 0, 0));
+            settings.mAxisY2 = JoltUtils::ToJolt(pose2.Rotation * glm::vec3(0, 1, 0));
+            for (int axis = 0; axis < 6; ++axis)
+            {
+                const auto jointAxis = static_cast<JPH::SixDOFConstraintSettings::EAxis>(axis);
+                const float toNative = axis < 3 ? PhysicsScale() : 1.0f; // translation in world units, rotation in radians
+                switch (joint.Axes[axis])
+                {
+                case PhysicsJoint3DComponent::Motion::Locked: settings.MakeFixedAxis(jointAxis); break;
+                case PhysicsJoint3DComponent::Motion::Limited: settings.SetLimitedAxis(jointAxis, joint.Min[axis] * toNative, joint.Max[axis] * toNative); break;
+                default: settings.MakeFreeAxis(jointAxis); break;
+                }
+                if (axis < 3 && joint.LimitStiffness[axis] > 0.0f)
+                    settings.mLimitsSpringSettings[axis] = JPH::SpringSettings(JPH::ESpringMode::StiffnessAndDamping, joint.LimitStiffness[axis], joint.LimitDamping[axis]);
+                const PhysicsJoint3DComponent::Drive& drive = joint.Drives[axis];
+                if (drive.Enabled)
+                {
+                    const float limit = drive.MaxForce > 0.0f ? drive.MaxForce : FLT_MAX;
+                    settings.mMotorSettings[axis] = JPH::MotorSettings(JPH::ESpringMode::StiffnessAndDamping, drive.Stiffness, drive.Damping, limit, limit);
+                }
+            }
+
+            JPH::TwoBodyConstraint* constraint = bodies.CreateConstraint(&settings, first, second);
+            if (!constraint)
+                continue;
+            auto* sixDOF = static_cast<JPH::SixDOFConstraint*>(constraint);
+            // Drives: a position target with a spring (stiffness), else the velocity.
+            JPH::Vec3 position = JPH::Vec3::sZero(), velocity = JPH::Vec3::sZero(), angularVelocity = JPH::Vec3::sZero();
+            glm::vec3 angles(0.0f);
+            for (int axis = 0; axis < 6; ++axis)
+            {
+                const PhysicsJoint3DComponent::Drive& drive = joint.Drives[axis];
+                if (!drive.Enabled)
+                    continue;
+                const auto jointAxis = static_cast<JPH::SixDOFConstraintSettings::EAxis>(axis);
+                sixDOF->SetMotorState(jointAxis, drive.Stiffness > 0.0f ? JPH::EMotorState::Position : JPH::EMotorState::Velocity);
+                if (axis < 3)
+                {
+                    position.SetComponent(axis, drive.PositionTarget * PhysicsScale());
+                    velocity.SetComponent(axis, drive.VelocityTarget * PhysicsScale());
+                }
+                else
+                {
+                    angles[axis - 3] = drive.PositionTarget;
+                    angularVelocity.SetComponent(axis - 3, drive.VelocityTarget);
+                }
+            }
+            sixDOF->SetTargetPositionCS(position);
+            sixDOF->SetTargetVelocityCS(velocity);
+            sixDOF->SetTargetAngularVelocityCS(angularVelocity);
+            sixDOF->SetTargetOrientationCS(JoltUtils::ToJolt(glm::quat(angles)));
+            m_PhysicsSystem->AddConstraint(constraint);
+            bodies.ActivateConstraint(constraint);
+            m_Constraints.emplace_back(constraint);
+
+            if (!joint.EnableCollision && !second.IsInvalid())
+            {
+                const auto serialOf = [&](JPH::BodyID body) -> uint32_t
+                {
+                    const auto found = m_BodyToEntityMap.find(body.GetIndexAndSequenceNumber());
+                    if (found == m_BodyToEntityMap.end())
+                        return 0;
+                    const auto serial = m_BodySerials.find(static_cast<uint32_t>(found->second));
+                    return serial != m_BodySerials.end() ? serial->second : 0;
+                };
+                const uint32_t a = serialOf(first), b = serialOf(second);
+                if (a && b)
+                    groups->Apart.insert({ std::min(a, b), std::max(a, b) });
+            }
+        }
+    }
+
     void JoltPhysics3DScene::DestroyBody(Entity entity)
     {
         if (!m_PhysicsSystem || !entity)
             return;
+        // Constraints keep pointers to their bodies: they go first, and are made again before the next step.
+        if (m_EntityToBodyMap.contains(static_cast<uint32_t>(entity)) && !m_Constraints.empty())
+            RemoveConstraints();
 
         uint32_t entIdVal = static_cast<uint32_t>(entity);
         auto it = m_EntityToBodyMap.find(entIdVal);
@@ -745,6 +1081,9 @@ namespace Nox {
         m_Accumulator += dt;
         constexpr int maxSubSteps = 8; // below ~8 fps the simulation runs slower than real time instead of spiralling
         int steps = 0;
+
+        if (m_ConstraintsDirty)
+            RebuildConstraints();
 
         while (m_Accumulator >= c_FixedDeltaTime && steps < maxSubSteps)
         {

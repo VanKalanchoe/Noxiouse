@@ -313,6 +313,16 @@ namespace Nox
         m_Registry.on_destroy<SphereCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
         m_Registry.on_construct<CapsuleCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
         m_Registry.on_destroy<CapsuleCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_construct<CylinderCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_destroy<CylinderCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_construct<PlaneCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_destroy<PlaneCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_construct<MeshCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_destroy<MeshCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_construct<PhysicsJoint3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_destroy<PhysicsJoint3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_construct<CollisionFilter3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_destroy<CollisionFilter3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
         m_Registry.on_construct<CharacterController3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
         m_Registry.on_destroy<CharacterController3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
 
@@ -2128,6 +2138,7 @@ namespace Nox
             FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
+            CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent, PhysicsJoint3DComponent, CollisionFilter3DComponent,
             CharacterController3DComponent, TextComponent, LevelStreamingVolumeComponent, WorldPartitionComponent, WorldStreamingSourceComponent>;
 
         // Source UUID -> duplicate UUID, so a duplicated animator drives the duplicated nodes
@@ -2370,6 +2381,18 @@ namespace Nox
             Entity entity = GetEntityByUUID(id);
             if (!entity)
                 continue;
+            // A collider without a body of its own is part of the nearest body above it (a compound): that body is made again.
+            if (!entity.HasComponent<RigidBody3DComponent>() && !entity.HasComponent<CharacterController3DComponent>())
+            {
+                for (Entity up = entity.GetParent(); up; up = up.GetParent())
+                {
+                    if (up.HasComponent<RigidBody3DComponent>())
+                    {
+                        entity = up;
+                        break;
+                    }
+                }
+            }
             // Made again from the components as they are now: a collider added or removed changes the body's shape.
             m_Physics3DScene->DestroyBody(entity);
             m_Physics3DScene->DestroyCharacter(entity);
@@ -2379,6 +2402,7 @@ namespace Nox
                 m_Physics3DScene->CreateCharacter(entity);
         }
         m_PendingPhysics3D.clear();
+        m_Physics3DScene->InvalidateConstraints(); // a joint added, removed, or one of its bodies made again
     }
     
     void Scene::SubmitLights()
@@ -2715,6 +2739,31 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<MetadataComponent>(Entity entity, MetadataComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<CylinderCollider3DComponent>(Entity entity, CylinderCollider3DComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<PlaneCollider3DComponent>(Entity entity, PlaneCollider3DComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<MeshCollider3DComponent>(Entity entity, MeshCollider3DComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<PhysicsJoint3DComponent>(Entity entity, PhysicsJoint3DComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<CollisionFilter3DComponent>(Entity entity, CollisionFilter3DComponent& component)
     {
     }
 

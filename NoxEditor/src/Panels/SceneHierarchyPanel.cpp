@@ -1006,6 +1006,11 @@ namespace Nox
             DisplayAddComponentEntry<BoxCollider3DComponent>("Box Collider 3D");
             DisplayAddComponentEntry<SphereCollider3DComponent>("Sphere Collider 3D");
             DisplayAddComponentEntry<CapsuleCollider3DComponent>("Capsule Collider 3D");
+            DisplayAddComponentEntry<CylinderCollider3DComponent>("Cylinder Collider 3D");
+            DisplayAddComponentEntry<PlaneCollider3DComponent>("Plane Collider 3D");
+            DisplayAddComponentEntry<MeshCollider3DComponent>("Mesh Collider 3D");
+            DisplayAddComponentEntry<PhysicsJoint3DComponent>("Physics Joint 3D");
+            DisplayAddComponentEntry<CollisionFilter3DComponent>("Collision Filter 3D");
             DisplayAddComponentEntry<CharacterController3DComponent>("Character Controller 3D");
             DisplayAddComponentEntry<TextComponent>("Text Component");
             DisplayAddComponentEntry<MetadataComponent>("Metadata");
@@ -2834,11 +2839,165 @@ namespace Nox
         {
             DrawLengthControl("Half Height", component.HalfHeight);
             DrawLengthControl("Radius", component.Radius);
+            DrawLengthControl("Bottom Radius", component.BottomRadius);
+            ImGui::SetItemTooltip("0: the same as Radius (a straight capsule). Otherwise a tapered capsule: Radius at the top, this at the bottom.");
             DrawLengthVec3Control("Offset", component.Offset);
             ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
             ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
             ImGui::DragFloat("Rolling Resistance", &component.RollingResistance, 0.005f, 0.0f, 1.0f);
             ImGui::SetItemTooltip("Slows it down when it rolls, until it stops: ~0.01 a hard floor, ~0.05 grass or carpet.\n0: rolls on for minutes (damping alone slows it).");
+        });
+
+        DrawComponent<CylinderCollider3DComponent>("Cylinder Collider 3D", entity, [](auto& component)
+        {
+            DrawLengthControl("Half Height", component.HalfHeight);
+            DrawLengthControl("Radius", component.Radius);
+            DrawLengthControl("Bottom Radius", component.BottomRadius);
+            ImGui::SetItemTooltip("0: the same as Radius (a straight cylinder). Otherwise a cone or frustum: Radius at the top (0 for a point).");
+            DrawLengthVec3Control("Offset", component.Offset);
+            ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
+        });
+
+        DrawComponent<PlaneCollider3DComponent>("Plane Collider 3D", entity, [](auto& component)
+        {
+            DrawLengthControl("Half Size X", component.HalfSize.x);
+            DrawLengthControl("Half Size Z", component.HalfSize.y);
+            ImGui::SetItemTooltip("0 (both): an unbounded ground through the entity, its +Y the normal, everything below solid (static bodies).\n"
+                                  "Otherwise a flat slab of this size.");
+            DrawLengthVec3Control("Offset", component.Offset);
+            ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
+        });
+
+        DrawComponent<MeshCollider3DComponent>("Mesh Collider 3D", entity, [entity](auto& component)
+        {
+            std::string label = "None";
+            if (component.Mesh != 0 && AssetManager::IsAssetHandleValid(component.Mesh))
+                label = AssetManager::GetMetadata(component.Mesh).FilePath.filename().string();
+            ImGui::Button(label.c_str(), ImVec2(-FLT_MIN, 0.0f));
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    const AssetHandle handle = *static_cast<const AssetHandle*>(payload->Data);
+                    const AssetType type = AssetManager::GetAssetType(handle);
+                    if (type == AssetType::StaticMesh || type == AssetType::Mesh)
+                        component.Mesh = handle;
+                }
+                ImGui::EndDragDropTarget();
+            }
+            ImGui::SetItemTooltip("Drop a mesh asset: its triangles collide (static and kinematic bodies), or their convex hull.");
+            Entity self = entity; // (`entity` is const in this lambda)
+            if (self.HasComponent<MeshComponent>() && ImGui::SmallButton("Use This Entity's Mesh"))
+            {
+                const MeshComponent& drawn = self.GetComponent<MeshComponent>();
+                component.Mesh = drawn.Mesh;
+                component.SubmeshIndex = drawn.SubmeshIndex;
+                component.SubmeshCount = drawn.SubmeshCount;
+            }
+            ImGui::DragScalar("Submesh Index", ImGuiDataType_U32, &component.SubmeshIndex, 0.1f);
+            ImGui::DragScalar("Submesh Count", ImGuiDataType_U32, &component.SubmeshCount, 0.1f);
+            ImGui::Checkbox("Convex Hull", &component.Convex);
+            ImGui::SetItemTooltip("Its convex hull instead of its triangles: cheaper, and what a dynamic body always uses (triangles have no mass).");
+            ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
+        });
+
+        DrawComponent<PhysicsJoint3DComponent>("Physics Joint 3D", entity, [this](auto& component)
+        {
+            // The other end: an entity dropped from the hierarchy (its body, or the nearest one above it), or the world.
+            Entity connected = component.ConnectedEntity != 0 ? m_Context->GetEntityByUUID(component.ConnectedEntity) : Entity();
+            const std::string label = connected ? connected.GetName() : std::string("World");
+            ImGui::Button(label.c_str(), ImVec2(-30.0f, 0.0f));
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_HIERARCHY_ENTITY"))
+                    component.ConnectedEntity = *static_cast<const UUID*>(payload->Data);
+                ImGui::EndDragDropTarget();
+            }
+            ImGui::SetItemTooltip("Connected to: drop an entity from the hierarchy (its body, or the nearest body above it). World: fixed in place.");
+            if (component.ConnectedEntity != 0)
+            {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("X"))
+                    component.ConnectedEntity = 0;
+            }
+            ImGui::Checkbox("Collide With Each Other", &component.EnableCollision);
+            const char* axisNames[6] = { "Move X", "Move Y", "Move Z", "Turn X", "Turn Y", "Turn Z" };
+            const char* motionNames[3] = { "Free", "Locked", "Limited" };
+            for (int axis = 0; axis < 6; ++axis)
+            {
+                ImGui::PushID(axis);
+                int motion = static_cast<int>(component.Axes[axis]);
+                if (ImGui::Combo(axisNames[axis], &motion, motionNames, 3))
+                    component.Axes[axis] = static_cast<PhysicsJoint3DComponent::Motion>(motion);
+                if (component.Axes[axis] == PhysicsJoint3DComponent::Motion::Limited)
+                {
+                    if (axis < 3)
+                    {
+                        DrawLengthControl("Min", component.Min[axis]);
+                        DrawLengthControl("Max", component.Max[axis]);
+                        ImGui::DragFloat("Limit Stiffness", &component.LimitStiffness[axis], 1.0f, 0.0f, 1e7f);
+                        ImGui::SetItemTooltip("0: a hard limit. Otherwise a spring (N/m) past it.");
+                        ImGui::DragFloat("Limit Damping", &component.LimitDamping[axis], 0.1f, 0.0f, 1e6f);
+                    }
+                    else
+                    {
+                        float degrees[2] = { glm::degrees(component.Min[axis]), glm::degrees(component.Max[axis]) };
+                        if (ImGui::DragFloat2("Min / Max (deg)", degrees, 0.5f, -180.0f, 180.0f))
+                        {
+                            component.Min[axis] = glm::radians(degrees[0]);
+                            component.Max[axis] = glm::radians(degrees[1]);
+                        }
+                    }
+                }
+                PhysicsJoint3DComponent::Drive& drive = component.Drives[axis];
+                ImGui::Checkbox("Drive", &drive.Enabled);
+                if (drive.Enabled)
+                {
+                    ImGui::DragFloat("Position Target", &drive.PositionTarget, 0.01f);
+                    ImGui::DragFloat("Velocity Target", &drive.VelocityTarget, 0.01f);
+                    ImGui::DragFloat("Stiffness", &drive.Stiffness, 1.0f, 0.0f, 1e7f);
+                    ImGui::SetItemTooltip("0: drives the velocity only. Otherwise a spring towards the position target.");
+                    ImGui::DragFloat("Damping", &drive.Damping, 0.1f, 0.0f, 1e6f);
+                    ImGui::DragFloat("Max Force", &drive.MaxForce, 1.0f, 0.0f, 1e7f, drive.MaxForce > 0.0f ? "%.1f" : "unlimited");
+                }
+                ImGui::Separator();
+                ImGui::PopID();
+            }
+        });
+
+        DrawComponent<CollisionFilter3DComponent>("Collision Filter 3D", entity, [](auto& component)
+        {
+            // Comma-separated names.
+            auto editList = [](const char* label, std::vector<std::string>& list, const char* tooltip)
+            {
+                std::string text;
+                for (const std::string& name : list)
+                    text += (text.empty() ? "" : ", ") + name;
+                if (ImGui::InputText(label, &text))
+                {
+                    list.clear();
+                    size_t start = 0;
+                    while (start <= text.size())
+                    {
+                        const size_t comma = text.find(',', start);
+                        std::string name = text.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+                        name.erase(0, name.find_first_not_of(" \t"));
+                        name.erase(name.find_last_not_of(" \t") + 1);
+                        if (!name.empty())
+                            list.push_back(name);
+                        if (comma == std::string::npos)
+                            break;
+                        start = comma + 1;
+                    }
+                }
+                ImGui::SetItemTooltip("%s", tooltip);
+            };
+            editList("Systems", component.Systems, "The systems this body is in (comma-separated names, e.g. character, debris).");
+            editList("Collide With", component.CollideWith, "When set: it collides only with bodies whose systems are all in this list.");
+            editList("Not Collide With", component.NotCollideWith, "It does not collide with bodies whose systems are all in this list.");
         });
 
         DrawComponent<CharacterController3DComponent>("Character Controller 3D", entity, [](auto& component)

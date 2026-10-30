@@ -4206,6 +4206,56 @@ namespace Nox
             }
         }
 
+        // Cylinder (or cone / frustum): its top and bottom circles and four lines between them.
+        auto cylinderView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CylinderCollider3DComponent>();
+        for (auto entity : cylinderView)
+        {
+            auto [wtc, cylinder] = cylinderView.get<WorldTransformComponent, CylinderCollider3DComponent>(entity);
+            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const float halfHeight = cylinder.HalfHeight * worldScale.y;
+            const float horizontal = std::max(worldScale.x, worldScale.z);
+            const float top = cylinder.Radius * horizontal;
+            const float bottom = (cylinder.BottomRadius > 0.0f ? cylinder.BottomRadius : cylinder.Radius) * horizontal;
+            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const glm::vec3 topCentre = cylinder.Offset + glm::vec3(0.0f, halfHeight, 0.0f);
+            const glm::vec3 bottomCentre = cylinder.Offset - glm::vec3(0.0f, halfHeight, 0.0f);
+            if (top > 0.0f)
+                drawCircle(transform, topCentre, top, 1);
+            drawCircle(transform, bottomCentre, bottom, 1);
+            for (int i = 0; i < 4; ++i)
+            {
+                const float t = glm::half_pi<float>() * static_cast<float>(i);
+                const glm::vec3 direction(std::cos(t), 0.0f, std::sin(t));
+                m_Renderer2D->DrawXRayLine(glm::vec3(transform * glm::vec4(topCentre + direction * top, 1.0f)),
+                                           glm::vec3(transform * glm::vec4(bottomCentre + direction * bottom, 1.0f)), kColliderColor);
+            }
+        }
+
+        // Plane: its rectangle, or for an unbounded one a 10 m cross on it and its normal.
+        auto planeView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, PlaneCollider3DComponent>();
+        for (auto entity : planeView)
+        {
+            auto [wtc, plane] = planeView.get<WorldTransformComponent, PlaneCollider3DComponent>(entity);
+            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            auto point = [&](float x, float y, float z) { return glm::vec3(transform * glm::vec4(plane.Offset + glm::vec3(x, y, z), 1.0f)); };
+            if (plane.HalfSize.x > 0.0f && plane.HalfSize.y > 0.0f)
+            {
+                const float x = plane.HalfSize.x * worldScale.x, z = plane.HalfSize.y * worldScale.z;
+                m_Renderer2D->DrawXRayLine(point(-x, 0, -z), point(x, 0, -z), kColliderColor);
+                m_Renderer2D->DrawXRayLine(point(x, 0, -z), point(x, 0, z), kColliderColor);
+                m_Renderer2D->DrawXRayLine(point(x, 0, z), point(-x, 0, z), kColliderColor);
+                m_Renderer2D->DrawXRayLine(point(-x, 0, z), point(-x, 0, -z), kColliderColor);
+            }
+            else
+            {
+                const float reach = WorldUnits::FromMeters(5.0f);
+                m_Renderer2D->DrawXRayLine(point(-reach, 0, 0), point(reach, 0, 0), kColliderColor);
+                m_Renderer2D->DrawXRayLine(point(0, 0, -reach), point(0, 0, reach), kColliderColor);
+                m_Renderer2D->DrawXRayLine(point(0, 0, 0), point(0, WorldUnits::FromMeters(1.0f), 0), kColliderColor);
+            }
+        }
+
         // A terrain/heightfield collider goes here later, as its own block: read its component, draw a wireframe grid of its sampled
         // heights (or its own bounds) the same way, no changes needed above.
     }

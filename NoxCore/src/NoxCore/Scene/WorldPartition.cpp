@@ -99,7 +99,9 @@ namespace Nox
                    entity.HasComponent<CircleRendererComponent>() || entity.HasComponent<ParticleEmitterComponent>() ||
                    entity.HasComponent<TextComponent>() || entity.HasComponent<RigidBody3DComponent>() ||
                    entity.HasComponent<RigidBody2DComponent>() || entity.HasComponent<BoxCollider3DComponent>() ||
-                   entity.HasComponent<SphereCollider3DComponent>() || entity.HasComponent<CapsuleCollider3DComponent>();
+                   entity.HasComponent<SphereCollider3DComponent>() || entity.HasComponent<CapsuleCollider3DComponent>() ||
+                   entity.HasComponent<CylinderCollider3DComponent>() || entity.HasComponent<PlaneCollider3DComponent>() ||
+                   entity.HasComponent<MeshCollider3DComponent>();
         }
 
         // What the whole world needs whatever the streaming source's place: the sky, the sun, cameras, the player, streaming itself.

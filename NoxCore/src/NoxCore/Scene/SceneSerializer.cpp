@@ -1044,8 +1044,84 @@ namespace Nox
             out << YAML::Key << "Friction" << YAML::Value << cc3d.Friction;
             out << YAML::Key << "Restitution" << YAML::Value << cc3d.Restitution;
             out << YAML::Key << "RollingResistance" << YAML::Value << cc3d.RollingResistance;
+            if (cc3d.BottomRadius > 0.0f)
+                out << YAML::Key << "BottomRadius" << YAML::Value << cc3d.BottomRadius;
 
             out << YAML::EndMap; // CapsuleCollider3DComponent
+        }
+
+        if (entity.HasComponent<CylinderCollider3DComponent>())
+        {
+            const auto& cylinder = entity.GetComponent<CylinderCollider3DComponent>();
+            out << YAML::Key << "CylinderCollider3DComponent" << YAML::BeginMap;
+            out << YAML::Key << "HalfHeight" << YAML::Value << cylinder.HalfHeight;
+            out << YAML::Key << "Radius" << YAML::Value << cylinder.Radius;
+            out << YAML::Key << "BottomRadius" << YAML::Value << cylinder.BottomRadius;
+            out << YAML::Key << "Offset" << YAML::Value << cylinder.Offset;
+            out << YAML::Key << "Friction" << YAML::Value << cylinder.Friction;
+            out << YAML::Key << "Restitution" << YAML::Value << cylinder.Restitution;
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<PlaneCollider3DComponent>())
+        {
+            const auto& plane = entity.GetComponent<PlaneCollider3DComponent>();
+            out << YAML::Key << "PlaneCollider3DComponent" << YAML::BeginMap;
+            out << YAML::Key << "HalfSize" << YAML::Value << plane.HalfSize;
+            out << YAML::Key << "Offset" << YAML::Value << plane.Offset;
+            out << YAML::Key << "Friction" << YAML::Value << plane.Friction;
+            out << YAML::Key << "Restitution" << YAML::Value << plane.Restitution;
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<PhysicsJoint3DComponent>())
+        {
+            const auto& joint = entity.GetComponent<PhysicsJoint3DComponent>();
+            out << YAML::Key << "PhysicsJoint3DComponent" << YAML::BeginMap;
+            out << YAML::Key << "ConnectedEntity" << YAML::Value << static_cast<uint64_t>(joint.ConnectedEntity);
+            out << YAML::Key << "EnableCollision" << YAML::Value << joint.EnableCollision;
+            out << YAML::Key << "Axes" << YAML::Value << YAML::BeginSeq;
+            for (int axis = 0; axis < 6; ++axis)
+            {
+                const PhysicsJoint3DComponent::Drive& drive = joint.Drives[axis];
+                out << YAML::Flow << YAML::BeginMap;
+                out << YAML::Key << "Motion" << YAML::Value << static_cast<int>(joint.Axes[axis]);
+                out << YAML::Key << "Min" << YAML::Value << joint.Min[axis] << YAML::Key << "Max" << YAML::Value << joint.Max[axis];
+                if (axis < 3)
+                    out << YAML::Key << "LimitStiffness" << YAML::Value << joint.LimitStiffness[axis] << YAML::Key << "LimitDamping" << YAML::Value << joint.LimitDamping[axis];
+                if (drive.Enabled)
+                {
+                    out << YAML::Key << "DrivePosition" << YAML::Value << drive.PositionTarget << YAML::Key << "DriveVelocity" << YAML::Value << drive.VelocityTarget;
+                    out << YAML::Key << "DriveStiffness" << YAML::Value << drive.Stiffness << YAML::Key << "DriveDamping" << YAML::Value << drive.Damping;
+                    out << YAML::Key << "DriveMaxForce" << YAML::Value << drive.MaxForce;
+                }
+                out << YAML::EndMap;
+            }
+            out << YAML::EndSeq;
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<CollisionFilter3DComponent>())
+        {
+            const auto& filter = entity.GetComponent<CollisionFilter3DComponent>();
+            out << YAML::Key << "CollisionFilter3DComponent" << YAML::BeginMap;
+            out << YAML::Key << "Systems" << YAML::Value << YAML::Flow << filter.Systems;
+            out << YAML::Key << "CollideWith" << YAML::Value << YAML::Flow << filter.CollideWith;
+            out << YAML::Key << "NotCollideWith" << YAML::Value << YAML::Flow << filter.NotCollideWith;
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<MeshCollider3DComponent>())
+        {
+            const auto& mesh = entity.GetComponent<MeshCollider3DComponent>();
+            out << YAML::Key << "MeshCollider3DComponent" << YAML::BeginMap;
+            out << YAML::Key << "Mesh" << YAML::Value << static_cast<uint64_t>(mesh.Mesh);
+            out << YAML::Key << "SubmeshIndex" << YAML::Value << mesh.SubmeshIndex;
+            out << YAML::Key << "SubmeshCount" << YAML::Value << mesh.SubmeshCount;
+            out << YAML::Key << "Convex" << YAML::Value << mesh.Convex;
+            out << YAML::Key << "Friction" << YAML::Value << mesh.Friction;
+            out << YAML::Key << "Restitution" << YAML::Value << mesh.Restitution;
+            out << YAML::EndMap;
         }
 
         if (entity.HasComponent<CharacterController3DComponent>())
@@ -2285,6 +2361,76 @@ namespace Nox
                 cc3d.Restitution = capsuleCollider3DComponent["Restitution"].as<float>();
             if (capsuleCollider3DComponent["RollingResistance"])
                 cc3d.RollingResistance = capsuleCollider3DComponent["RollingResistance"].as<float>();
+            if (capsuleCollider3DComponent["BottomRadius"])
+                cc3d.BottomRadius = capsuleCollider3DComponent["BottomRadius"].as<float>();
+        }
+
+        if (auto node = entity["CylinderCollider3DComponent"])
+        {
+            auto& cylinder = deserializedEntity.AddComponent<CylinderCollider3DComponent>();
+            cylinder.HalfHeight = node["HalfHeight"].as<float>(cylinder.HalfHeight);
+            cylinder.Radius = node["Radius"].as<float>(cylinder.Radius);
+            cylinder.BottomRadius = node["BottomRadius"].as<float>(cylinder.BottomRadius);
+            cylinder.Offset = node["Offset"].as<glm::vec3>(cylinder.Offset);
+            cylinder.Friction = node["Friction"].as<float>(cylinder.Friction);
+            cylinder.Restitution = node["Restitution"].as<float>(cylinder.Restitution);
+        }
+
+        if (auto node = entity["PlaneCollider3DComponent"])
+        {
+            auto& plane = deserializedEntity.AddComponent<PlaneCollider3DComponent>();
+            plane.HalfSize = node["HalfSize"].as<glm::vec2>(plane.HalfSize);
+            plane.Offset = node["Offset"].as<glm::vec3>(plane.Offset);
+            plane.Friction = node["Friction"].as<float>(plane.Friction);
+            plane.Restitution = node["Restitution"].as<float>(plane.Restitution);
+        }
+
+        if (auto node = entity["PhysicsJoint3DComponent"])
+        {
+            auto& joint = deserializedEntity.AddComponent<PhysicsJoint3DComponent>();
+            joint.ConnectedEntity = node["ConnectedEntity"].as<uint64_t>(0);
+            joint.EnableCollision = node["EnableCollision"].as<bool>(false);
+            if (auto axes = node["Axes"]; axes && axes.IsSequence())
+            {
+                for (size_t axis = 0; axis < 6 && axis < axes.size(); ++axis)
+                {
+                    const YAML::Node a = axes[axis];
+                    joint.Axes[axis] = static_cast<PhysicsJoint3DComponent::Motion>(a["Motion"].as<int>(0));
+                    joint.Min[axis] = a["Min"].as<float>(0.0f);
+                    joint.Max[axis] = a["Max"].as<float>(0.0f);
+                    if (axis < 3)
+                    {
+                        joint.LimitStiffness[axis] = a["LimitStiffness"].as<float>(0.0f);
+                        joint.LimitDamping[axis] = a["LimitDamping"].as<float>(0.0f);
+                    }
+                    PhysicsJoint3DComponent::Drive& drive = joint.Drives[axis];
+                    drive.Enabled = static_cast<bool>(a["DriveStiffness"]);
+                    drive.PositionTarget = a["DrivePosition"].as<float>(0.0f);
+                    drive.VelocityTarget = a["DriveVelocity"].as<float>(0.0f);
+                    drive.Stiffness = a["DriveStiffness"].as<float>(0.0f);
+                    drive.Damping = a["DriveDamping"].as<float>(0.0f);
+                    drive.MaxForce = a["DriveMaxForce"].as<float>(0.0f);
+                }
+            }
+        }
+
+        if (auto node = entity["CollisionFilter3DComponent"])
+        {
+            auto& filter = deserializedEntity.AddComponent<CollisionFilter3DComponent>();
+            filter.Systems = node["Systems"].as<std::vector<std::string>>(std::vector<std::string>{});
+            filter.CollideWith = node["CollideWith"].as<std::vector<std::string>>(std::vector<std::string>{});
+            filter.NotCollideWith = node["NotCollideWith"].as<std::vector<std::string>>(std::vector<std::string>{});
+        }
+
+        if (auto node = entity["MeshCollider3DComponent"])
+        {
+            auto& mesh = deserializedEntity.AddComponent<MeshCollider3DComponent>();
+            mesh.Mesh = node["Mesh"].as<uint64_t>(0);
+            mesh.SubmeshIndex = node["SubmeshIndex"].as<uint32_t>(0);
+            mesh.SubmeshCount = node["SubmeshCount"].as<uint32_t>(UINT32_MAX);
+            mesh.Convex = node["Convex"].as<bool>(false);
+            mesh.Friction = node["Friction"].as<float>(mesh.Friction);
+            mesh.Restitution = node["Restitution"].as<float>(mesh.Restitution);
         }
 
         auto characterController3DComponent = entity["CharacterController3DComponent"];

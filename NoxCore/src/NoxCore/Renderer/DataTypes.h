@@ -196,18 +196,44 @@ namespace Nox
     struct NodePhysics
     {
         enum class BodyType : uint8_t { None = 0, Static, Dynamic, Kinematic };
-        enum class ShapeType : uint8_t { None = 0, Box, Sphere, Capsule };
+        enum class ShapeType : uint8_t { None = 0, Box, Sphere, Capsule, Cylinder, Plane, Mesh };
 
         BodyType Body = BodyType::None;
         float Mass = 0.0f;        // kg; 0 = from the colliders' volume (RigidBody3DComponent::Mass)
         float GravityFactor = 1.0f;
         bool Trigger = false;     // the collider senses overlaps without pushing back (RigidBody3DComponent::IsSensor)
         ShapeType Shape = ShapeType::None;
-        glm::vec3 Size{ 0.0f };   // box: half extents; sphere: radius in x; capsule: radius in x, half height of the straight part in y
+        // Box: half extents. Sphere: radius in x. Capsule: (top) radius in x, half height of the straight part in y, bottom radius in z
+        // (0: the same). Cylinder: top radius in x, half height in y, bottom radius in z (0: the same). Plane: half sizes in x and z
+        // (0: unbounded).
+        glm::vec3 Size{ 0.0f };
         float Friction = 0.5f;    // the physics material's dynamic friction
         float Restitution = 0.0f;
+        // Mesh: the glTF mesh whose triangles (or convex hull) collide, and its submeshes in the asset that holds this node (resolved
+        // when the asset is cooked; a count of 0: no node of that asset draws the mesh).
+        int32_t ColliderMesh = -1;
+        uint32_t ColliderFirstSubmesh = 0;
+        uint32_t ColliderSubmeshCount = 0;
+        bool Convex = false;
+        // The collision filter (CollisionFilter3DComponent): empty lists, none.
+        std::vector<std::string> Systems, CollideWith, NotCollideWith;
 
-        bool Any() const { return Body != BodyType::None || Shape != ShapeType::None; }
+        // A joint on this node (PhysicsJoint3DComponent); ConnectedNode -1: none.
+        struct Joint
+        {
+            int32_t ConnectedNode = -1;
+            bool EnableCollision = false;
+            uint8_t Axes[6] = {};          // PhysicsJoint3DComponent::Motion
+            float Min[6] = {}, Max[6] = {}; // translation in the file's units (scaled with it), rotation in radians
+            float LimitStiffness[3] = {}, LimitDamping[3] = {};
+            struct Drive
+            {
+                bool Enabled = false;
+                float PositionTarget = 0.0f, VelocityTarget = 0.0f, Stiffness = 0.0f, Damping = 0.0f, MaxForce = 0.0f;
+            } Drives[6];
+        } JointData;
+
+        bool Any() const { return Body != BodyType::None || Shape != ShapeType::None || JointData.ConnectedNode >= 0; }
     };
 
     struct MeshNodeData

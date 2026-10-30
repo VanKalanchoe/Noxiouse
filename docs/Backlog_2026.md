@@ -16,7 +16,6 @@
 
 | # | Item |
 |---|---|
-| I1 | **glTF features not handled yet:** mesh / material extras; physics shapes and features Nox has no component for (cylinders, planes, mesh and convex colliders, joints, collision filters). (Built: `EXT_mesh_gpu_instancing`, `KHR_node_visibility` 2026-10-20; **vertex colors** COLOR_0 2026-10-30, tested by the user (works); **morph targets** 2026-10-31, M1 and M2's animated weights tested by the user (AnimatedMorphCube plays, per-mesh import keeps its clips); sequencer Morph Weight tracks and script `MeshComponent.SetMorphWeight` untested; **material variants** (`KHR_materials_variants`) 2026-10-31, tested by the user (MaterialsVariantsShoe); **multiple scenes** 2026-10-31: only the default scene is imported, as Unreal and Godot do (no scene picker, by decision), untested; **node extras** -> Metadata component and **glTF physics** (`KHR_physics_rigid_bodies`: bodies, box / sphere / capsule colliders, triggers, materials; compound bodies from child colliders, mass 0 = from volume) 2026-10-31, untested -- `Engine_Architecture_Plan_2026.md` §5.8.2) |
 
 ### Characters and animation (plan: `Animation_Graph_Architecture_Plan_2026.md`)
 
@@ -52,6 +51,12 @@ Built items many of which the user has not tested yet (marked "untested"); the p
 - **Prefabs P1-P7:** built 2026-10-20 (P1, P5, P7 untested); P4 decided (Unity's rule), P6 closed by R2. `Prefab_Architecture_Plan_2026.md`
 - **C2** script late / fixed update, **C7** sync markers, notifies, sockets, graph preview and the rest: built 2026-10-20 (untested)
 - **C6** rename `.nmesh` -> SkeletalMesh: not done, by decision
+- **I1 glTF features:** all handled (2026-10-31): `EXT_mesh_gpu_instancing`, `KHR_node_visibility`, vertex colors, morph targets
+  (M1, M2), material variants, the default scene only, node extras -> Metadata, and `KHR_physics_rigid_bodies` complete: bodies,
+  box / sphere / capsule (tapered) / cylinder (cone) / plane / mesh / convex colliders, materials, triggers, collision filters,
+  joints (new Cylinder / Plane / Mesh Collider 3D, Physics Joint 3D, Collision Filter 3D components; compound bodies from child
+  colliders). Tested by the user: vertex colors, morph targets, material variants; the rest untested. Mesh / material extras not
+  imported by decision. `Engine_Architecture_Plan_2026.md` §5.8.2
 - **I4** Import Into Level / static meshes of a file that also has a character: clips are now split by what they move (2026-10-31,
   untested). A clip that moves only the skins' joints and the armature above them stays with the skeletal asset; one that moves
   other nodes (a door, a fan) also goes to the static meshes and the level, which animate only those nodes. Before, any skeleton

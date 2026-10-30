@@ -8,7 +8,9 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <cmath>
 #include <functional>
+#include <limits>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -1088,6 +1090,14 @@ namespace Nox
         {
             node.Translation *= scale;
             node.Physics.Size *= scale; // in the node's space, like its mesh's vertices
+            NodePhysics::Joint& joint = node.Physics.JointData;
+            for (int axis = 0; axis < 3; ++axis) // translation limits and targets: lengths
+            {
+                joint.Min[axis] *= scale;
+                joint.Max[axis] *= scale;
+                joint.Drives[axis].PositionTarget *= scale;
+                joint.Drives[axis].VelocityTarget *= scale;
+            }
         }
         // The volume's lengths are the file's, like its vertices.
         for (MaterialData& material : subset.Materials)
@@ -1422,6 +1432,28 @@ namespace Nox
         skeleton.Skins = { unified };
     }
 
+    // A mesh collider's submeshes in this asset: those of a node of the asset drawing that glTF mesh (none: a count of 0, the collider
+    // is left out where the asset is placed). Before the asset's clusters are built, after its subset was taken.
+    static void ResolveColliderMeshes(MeshSubset& subset)
+    {
+        for (MeshNodeData& node : subset.Nodes)
+        {
+            NodePhysics& physics = node.Physics;
+            if (physics.Shape != NodePhysics::ShapeType::Mesh)
+                continue;
+            physics.ColliderSubmeshCount = 0;
+            for (const MeshNodeData& drawer : subset.Nodes)
+            {
+                if (drawer.MeshIndex == physics.ColliderMesh && drawer.SubmeshCount > 0)
+                {
+                    physics.ColliderFirstSubmesh = drawer.FirstSubmesh;
+                    physics.ColliderSubmeshCount = drawer.SubmeshCount;
+                    break;
+                }
+            }
+        }
+    }
+
     // A glTF mesh as an asset of its own (Do Not Combine): its submeshes, copied, under one identity node (what a drag places).
     // After it come the file's instances of the mesh, one node each at its world transform (FileLayoutParent): dragging
     // several assets together places all of them where the file had them. False when no unskinned node uses the mesh.
@@ -1458,6 +1490,7 @@ namespace Nox
             to.Extras = from.Extras;
             if (from.Physics.Body != NodePhysics::BodyType::None)
                 to.Physics = from.Physics;
+            to.Physics.JointData = {}; // its other end is a node of the file, not of this asset
         };
 
         MeshNodeData& node = out.Nodes.emplace_back();
@@ -1615,6 +1648,8 @@ namespace Nox
             return false;
         }
 
+        ResolveColliderMeshes(subset);
+
         // Combine (Unreal): only for an asset that holds one kind, which the import always gives it.
         const bool onlyStatic = importSettings.ImportStaticMeshes && !importSettings.ImportSkeletalMeshes;
         const bool onlySkeletal = importSettings.ImportSkeletalMeshes && !importSettings.ImportStaticMeshes;
@@ -1740,6 +1775,7 @@ namespace Nox
             MeshSubset subset;
             if (!CopySingleMesh(meshDataList, materialDataList, pendingGeometry, nodeDataList, worlds, node.MeshIndex, skinned, subset))
                 continue;
+            ResolveColliderMeshes(subset);
             // Not for Import Into Level (level != nullptr): that path scales the whole placed scene -- meshes, lights, cameras --
             // uniformly through the level root's own Transform.Scale (ModelInstance::SpawnLevel), unrelated to this baking; baking
             // it into the geometry here too would scale it twice. Only the plain "drag this cooked mesh in on its own" case gets it
@@ -3312,9 +3348,9 @@ namespace Nox
         return result;
     }
 
-    // KHR_physics_rigid_bodies on the file's nodes (shapes from KHR_implicit_shapes) as NodePhysics. Nox has components for boxes,
-    // spheres and capsules; what it has none for (cylinders, planes, mesh and convex hull colliders, joints, collision filters, initial
-    // velocities, a set center of mass or inertia) is named once in the log and left out. Colliders and triggers with no body above
+    // KHR_physics_rigid_bodies on the file's nodes (shapes from KHR_implicit_shapes) as NodePhysics: bodies, every shape (box,
+    // sphere, capsule and cylinder, tapered too, plane, mesh and convex hull), materials, collision filters and joints. What Nox has
+    // no equivalent for (initial velocities, a set center of mass or inertia, compound triggers) is named once in the log and left out. Colliders and triggers with no body above
     // them get a static body of their own (the spec's static colliders).
     static void ReadNodePhysics(const tg3_model& model, std::vector<MeshNodeData>& nodes)
     {
@@ -3323,6 +3359,8 @@ namespace Nox
         const tg3_value* shapes = shapesExtension ? FindMember(shapesExtension->value, "shapes") : nullptr;
         const tg3_extension* bodiesExtension = FindExtension(model.ext, "KHR_physics_rigid_bodies");
         const tg3_value* materials = bodiesExtension ? FindMember(bodiesExtension->value, "physicsMaterials") : nullptr;
+        const tg3_value* filters = bodiesExtension ? FindMember(bodiesExtension->value, "collisionFilters") : nullptr;
+        const tg3_value* joints = bodiesExtension ? FindMember(bodiesExtension->value, "physicsJoints") : nullptr;
 
         auto number = [](const tg3_value* value, double fallback)
         {
@@ -3342,9 +3380,12 @@ namespace Nox
         {
             if (FindMember(geometry, "mesh"))
             {
+                // The mesh's triangles, or their convex hull (MeshCollider3DComponent); its submeshes are found when the asset is cooked.
                 const tg3_value* hull = FindMember(geometry, "convexHull");
-                leftOut.insert(hull && hull->type == TG3_VALUE_BOOL && hull->bool_val ? "convex hull colliders" : "mesh colliders");
-                return false;
+                physics.Shape = NodePhysics::ShapeType::Mesh;
+                physics.ColliderMesh = static_cast<int32_t>(index(geometry, "mesh"));
+                physics.Convex = hull && hull->type == TG3_VALUE_BOOL && hull->bool_val;
+                return physics.ColliderMesh >= 0;
             }
             const tg3_value* shape = element(shapes, index(geometry, "shape"));
             const tg3_value* type = shape ? FindMember(*shape, "type") : nullptr;
@@ -3374,10 +3415,26 @@ namespace Nox
                 // height: between the centers of the two capping spheres (Jolt's and Nox's half height is half of it).
                 const float top = static_cast<float>(number(FindMember(*parameters, "radiusTop"), 0.25));
                 const float bottom = static_cast<float>(number(FindMember(*parameters, "radiusBottom"), 0.25));
-                if (std::abs(top - bottom) > 1e-4f)
-                    leftOut.insert("tapered capsules (made straight, the larger radius)");
                 physics.Shape = NodePhysics::ShapeType::Capsule;
-                physics.Size = glm::vec3(std::max(top, bottom), 0.5f * static_cast<float>(number(FindMember(*parameters, "height"), 0.5)), 0.0f);
+                physics.Size = glm::vec3(top, 0.5f * static_cast<float>(number(FindMember(*parameters, "height"), 0.5)),
+                                         std::abs(top - bottom) > 1e-5f ? bottom : 0.0f); // tapered: the bottom radius in z
+                return true;
+            }
+            if (kind == "cylinder")
+            {
+                const float top = static_cast<float>(number(FindMember(*parameters, "radiusTop"), 0.25));
+                const float bottom = static_cast<float>(number(FindMember(*parameters, "radiusBottom"), 0.25));
+                physics.Shape = NodePhysics::ShapeType::Cylinder;
+                physics.Size = glm::vec3(top, 0.5f * static_cast<float>(number(FindMember(*parameters, "height"), 0.5)),
+                                         std::abs(top - bottom) > 1e-5f ? std::max(bottom, 1e-6f) : 0.0f); // a cone: bottom radius in z
+                return true;
+            }
+            if (kind == "plane")
+            {
+                // Unbounded by default; sizeX / sizeZ are total sizes. (One-sided or double-sided: Jolt's plane is a half-space.)
+                physics.Shape = NodePhysics::ShapeType::Plane;
+                physics.Size = glm::vec3(0.5f * static_cast<float>(number(FindMember(*parameters, "sizeX"), 0.0)), 0.0f,
+                                         0.5f * static_cast<float>(number(FindMember(*parameters, "sizeZ"), 0.0)));
                 return true;
             }
             leftOut.insert(std::string(kind) + " colliders");
@@ -3419,10 +3476,103 @@ namespace Nox
             {
                 leftOut.insert("compound triggers");
             }
-            if (FindMember(extension->value, "joint"))
-                leftOut.insert("joints");
-            if ((collider && FindMember(*collider, "collisionFilter")) || (trigger && FindMember(*trigger, "collisionFilter")))
-                leftOut.insert("collision filters");
+
+            // The collision filter (top-level collisionFilters).
+            const tg3_value* owner = collider ? collider : trigger;
+            if (const tg3_value* filter = owner ? element(filters, index(*owner, "collisionFilter")) : nullptr)
+            {
+                auto names = [&](std::string_view key)
+                {
+                    std::vector<std::string> list;
+                    if (const tg3_value* array = FindMember(*filter, key); array && array->type == TG3_VALUE_ARRAY)
+                        for (uint32_t k = 0; k < array->array_count; ++k)
+                            if (array->array_data[k].type == TG3_VALUE_STRING)
+                                list.emplace_back(array->array_data[k].string_val.data, array->array_data[k].string_val.len);
+                    return list;
+                };
+                physics.Systems = names("collisionSystems");
+                physics.CollideWith = names("collideWithSystems");
+                physics.NotCollideWith = names("notCollideWithSystems");
+            }
+
+            // The joint: its limits and drives (top-level physicsJoints) on the six axes of this node's frame.
+            if (const tg3_value* joint = FindMember(extension->value, "joint"))
+            {
+                const int64_t connected = index(*joint, "connectedNode");
+                const tg3_value* description = element(joints, index(*joint, "joint"));
+                if (connected >= 0 && connected < static_cast<int64_t>(fileNodes) && description)
+                {
+                    NodePhysics::Joint& data = physics.JointData;
+                    data.ConnectedNode = static_cast<int32_t>(connected);
+                    const tg3_value* collide = FindMember(*joint, "enableCollision");
+                    data.EnableCollision = collide && collide->type == TG3_VALUE_BOOL && collide->bool_val;
+                    if (const tg3_value* limits = FindMember(*description, "limits"); limits && limits->type == TG3_VALUE_ARRAY)
+                    {
+                        for (uint32_t l = 0; l < limits->array_count; ++l)
+                        {
+                            const tg3_value& limit = limits->array_data[l];
+                            const double low = number(FindMember(limit, "min"), -std::numeric_limits<double>::infinity());
+                            const double high = number(FindMember(limit, "max"), std::numeric_limits<double>::infinity());
+                            const double stiffness = number(FindMember(limit, "stiffness"), 0.0);
+                            const double damping = number(FindMember(limit, "damping"), 0.0);
+                            const tg3_value* linear = FindMember(limit, "linearAxes");
+                            const tg3_value* angular = FindMember(limit, "angularAxes");
+                            if ((linear && linear->array_count > 1) || (angular && angular->array_count > 1))
+                                leftOut.insert("joint limits on several axes at once (limited per axis)");
+                            for (int kind = 0; kind < 2; ++kind)
+                            {
+                                const tg3_value* axes = kind == 0 ? linear : angular;
+                                for (uint32_t k = 0; axes && axes->type == TG3_VALUE_ARRAY && k < axes->array_count; ++k)
+                                {
+                                    const int64_t axis = static_cast<int64_t>(number(&axes->array_data[k], -1.0));
+                                    if (axis < 0 || axis > 2)
+                                        continue;
+                                    const int slot = kind * 3 + static_cast<int>(axis);
+                                    const bool bounded = std::isfinite(low) || std::isfinite(high);
+                                    data.Axes[slot] = !bounded ? 0u : low >= high ? 1u : 2u; // Free, Locked, Limited
+                                    data.Min[slot] = std::isfinite(low) ? static_cast<float>(low) : -1e6f;
+                                    data.Max[slot] = std::isfinite(high) ? static_cast<float>(high) : 1e6f;
+                                    if (kind == 0)
+                                    {
+                                        data.LimitStiffness[axis] = static_cast<float>(stiffness);
+                                        data.LimitDamping[axis] = static_cast<float>(damping);
+                                    }
+                                    else if (stiffness > 0.0)
+                                    {
+                                        leftOut.insert("soft angular joint limits (made hard)");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (const tg3_value* drives = FindMember(*description, "drives"); drives && drives->type == TG3_VALUE_ARRAY)
+                    {
+                        for (uint32_t d = 0; d < drives->array_count; ++d)
+                        {
+                            const tg3_value& drive = drives->array_data[d];
+                            const tg3_value* type = FindMember(drive, "type");
+                            const bool angular = type && type->type == TG3_VALUE_STRING && std::string_view(type->string_val.data, type->string_val.len) == "angular";
+                            const int64_t axis = static_cast<int64_t>(number(FindMember(drive, "axis"), -1.0));
+                            if (axis < 0 || axis > 2)
+                                continue;
+                            if (const tg3_value* mode = FindMember(drive, "mode"); mode && mode->type == TG3_VALUE_STRING &&
+                                std::string_view(mode->string_val.data, mode->string_val.len) == "acceleration")
+                                leftOut.insert("acceleration-mode joint drives (driven as force)");
+                            NodePhysics::Joint::Drive& target = data.Drives[(angular ? 3 : 0) + axis];
+                            target.Enabled = true;
+                            target.PositionTarget = static_cast<float>(number(FindMember(drive, "positionTarget"), 0.0));
+                            target.VelocityTarget = static_cast<float>(number(FindMember(drive, "velocityTarget"), 0.0));
+                            target.Stiffness = static_cast<float>(number(FindMember(drive, "stiffness"), 0.0));
+                            target.Damping = static_cast<float>(number(FindMember(drive, "damping"), 0.0));
+                            target.MaxForce = static_cast<float>(number(FindMember(drive, "maxForce"), 0.0));
+                        }
+                    }
+                }
+                else
+                {
+                    leftOut.insert("joints without a connected node or description");
+                }
+            }
         }
 
         // Only motions are bodies so far. A collider under one is part of it (the compound JoltPhysics3DScene builds); any other

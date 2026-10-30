@@ -4,6 +4,7 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 
+#include <array>
 #include <map>
 #include <optional>
 #include <string_view>
@@ -782,9 +783,101 @@ namespace Nox
         float Friction = 0.5f;
         float Restitution = 0.0f;
         float RollingResistance = 0.05f; // as SphereCollider3DComponent's (rolling on its side)
+        // 0: Radius (a straight capsule). Otherwise the bottom cap's radius and Radius the top's (Jolt TaperedCapsuleShape).
+        float BottomRadius = 0.0f;
 
         CapsuleCollider3DComponent() = default;
         CapsuleCollider3DComponent(const CapsuleCollider3DComponent&) = default;
+    };
+
+    // A cylinder along the entity's Y (Jolt CylinderShape); with BottomRadius a cone or a frustum (Jolt TaperedCylinderShape).
+    struct CylinderCollider3DComponent
+    {
+        float HalfHeight = 0.5f;
+        float Radius = 0.5f;       // the top's, and the bottom's when BottomRadius is 0
+        float BottomRadius = 0.0f; // 0: Radius (a straight cylinder)
+        glm::vec3 Offset = { 0.0f, 0.0f, 0.0f };
+
+        float Friction = 0.5f;
+        float Restitution = 0.0f;
+
+        CylinderCollider3DComponent() = default;
+        CylinderCollider3DComponent(const CylinderCollider3DComponent&) = default;
+    };
+
+    // A plane through the entity with the entity's +Y as its normal (Jolt PlaneShape: everything below it is solid, Godot's
+    // WorldBoundaryShape) -- a ground that never ends; with a HalfSize, a flat slab of that size instead. Static and kinematic bodies.
+    struct PlaneCollider3DComponent
+    {
+        glm::vec2 HalfSize = { 0.0f, 0.0f }; // along X and Z; 0: unbounded
+        glm::vec3 Offset = { 0.0f, 0.0f, 0.0f };
+
+        float Friction = 0.5f;
+        float Restitution = 0.0f;
+
+        PlaneCollider3DComponent() = default;
+        PlaneCollider3DComponent(const PlaneCollider3DComponent&) = default;
+    };
+
+    // A mesh asset's triangles as the collider (Unreal's complex collision, Godot's trimesh shape), or with Convex their convex hull
+    // (Unreal's simple collision from a hull). Triangles collide on static and kinematic bodies only: a dynamic body takes the hull
+    // (Jolt gives a triangle soup no mass). The original triangles of the cooked mesh, in the entity's space, scaled with it.
+    struct MeshCollider3DComponent
+    {
+        AssetHandle Mesh = 0;
+        uint32_t SubmeshIndex = 0;
+        uint32_t SubmeshCount = UINT32_MAX; // UINT32_MAX: every submesh from SubmeshIndex on
+        bool Convex = false;
+
+        float Friction = 0.5f;
+        float Restitution = 0.0f;
+
+        MeshCollider3DComponent() = default;
+        MeshCollider3DComponent(const MeshCollider3DComponent&) = default;
+    };
+
+    // A joint between two bodies (Unreal's physics constraint, Godot's Generic6DOFJoint, glTF KHR_physics_rigid_bodies joints; Jolt
+    // SixDOFConstraint): the nearest body at or above this entity and the nearest one at or above ConnectedEntity (none: the world).
+    // The joint's frame is this entity's transform on one side and ConnectedEntity's on the other, as they stand when the simulation
+    // starts. Per axis of that frame (translation X, Y, Z, then rotation X, Y, Z) the relative motion is free, locked, or limited,
+    // and a drive can push it towards a position or velocity.
+    struct PhysicsJoint3DComponent
+    {
+        enum class Motion : uint8_t { Free = 0, Locked, Limited };
+        struct Drive
+        {
+            bool Enabled = false;
+            float PositionTarget = 0.0f; // world units / radians
+            float VelocityTarget = 0.0f; // world units / radians per second
+            float Stiffness = 0.0f;      // N/m, N*m/rad: 0 drives the velocity only
+            float Damping = 0.0f;
+            float MaxForce = 0.0f;       // N or N*m; 0: unlimited
+        };
+
+        UUID ConnectedEntity = 0;
+        bool EnableCollision = false; // the two bodies still collide with each other
+        std::array<Motion, 6> Axes = { Motion::Free, Motion::Free, Motion::Free, Motion::Free, Motion::Free, Motion::Free };
+        std::array<float, 6> Min = {}; // Limited: world units for translation, radians for rotation
+        std::array<float, 6> Max = {};
+        std::array<float, 3> LimitStiffness = {}; // translation limits: 0 hard, else a spring (N/m) past the limit
+        std::array<float, 3> LimitDamping = {};
+        std::array<Drive, 6> Drives = {};
+
+        PhysicsJoint3DComponent() = default;
+        PhysicsJoint3DComponent(const PhysicsJoint3DComponent&) = default;
+    };
+
+    // Which bodies a body collides with, by named systems (glTF KHR_physics_rigid_bodies collision filters, Unreal's object channels
+    // by name): it is in Systems; it collides only with bodies in CollideWith (when given), and not with bodies all of whose systems
+    // are in NotCollideWith. Both sides must agree. On the body's entity, or on one of its colliders.
+    struct CollisionFilter3DComponent
+    {
+        std::vector<std::string> Systems;
+        std::vector<std::string> CollideWith;
+        std::vector<std::string> NotCollideWith;
+
+        CollisionFilter3DComponent() = default;
+        CollisionFilter3DComponent(const CollisionFilter3DComponent&) = default;
     };
 
     // A kinematic capsule character (Jolt CharacterVirtual): slides along walls, climbs steps and slopes, sticks to
@@ -899,6 +992,7 @@ namespace Nox
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,
-            SphereCollider3DComponent, CapsuleCollider3DComponent, CharacterController3DComponent, TextComponent, BoneSocketComponent, LevelStreamingVolumeComponent,
+            SphereCollider3DComponent, CapsuleCollider3DComponent, CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent,
+            PhysicsJoint3DComponent, CollisionFilter3DComponent, CharacterController3DComponent, TextComponent, BoneSocketComponent, LevelStreamingVolumeComponent,
             WorldPartitionComponent, WorldStreamingSourceComponent, HLODComponent>;
 }

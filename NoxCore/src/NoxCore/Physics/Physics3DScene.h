@@ -40,6 +40,9 @@ namespace Nox {
 
         // Character controllers (CharacterController3DComponent). Created for every such entity in Init(); driven
         // inside the fixed step from the component's input fields, results written back to the component + transform.
+        // The joints (PhysicsJoint3DComponent) are made again before the next step: one was added or removed, or a body changed.
+        virtual void InvalidateConstraints() {}
+
         virtual void CreateCharacter(Entity entity) = 0;
         virtual void DestroyCharacter(Entity entity) = 0;
 

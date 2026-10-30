@@ -8,8 +8,11 @@
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
+#include <Jolt/Physics/Collision/GroupFilter.h>
+#include <Jolt/Physics/Constraints/Constraint.h>
 
 #include <memory>
+#include <string>
 #include <unordered_map>
 
 namespace Nox 
@@ -30,6 +33,7 @@ namespace Nox
         virtual void OptimizeBroadPhase() override;
 
         virtual void CreateBody(Entity entity) override;
+        virtual void InvalidateConstraints() override { m_ConstraintsDirty = true; }
         virtual void DestroyBody(Entity entity) override;
 
         virtual void CreateCharacter(Entity entity) override;
@@ -59,6 +63,24 @@ namespace Nox
         const JPH::PhysicsSystem& GetPhysicsSystem() const { return *m_PhysicsSystem; }
 
     private:
+        // A mesh collider's shape in native units, unscaled (triangles, or their convex hull): read once from the cooked mesh, then
+        // shared by every body using that mesh this session.
+        JPH::Ref<JPH::Shape> MeshColliderShape(const struct MeshCollider3DComponent& collider, bool convex);
+        std::unordered_map<std::string, JPH::Ref<JPH::Shape>> m_MeshShapes;
+
+        // Joints (PhysicsJoint3DComponent) as Jolt constraints, all made again when anything they hold on to changed (a body is
+        // destroyed: they go first, Jolt keeps pointers to their bodies).
+        void RebuildConstraints();
+        void RemoveConstraints();
+        JPH::BodyID BodyAtOrAbove(Entity entity) const;
+        std::vector<JPH::Ref<JPH::Constraint>> m_Constraints;
+        bool m_ConstraintsDirty = true;
+        // Collision filters (CollisionFilter3DComponent) and the body pairs a joint keeps apart: every body's collision group points
+        // at this filter, its group the filter it uses (0: none), its sub group the body itself (m_BodySerials).
+        JPH::Ref<JPH::GroupFilter> m_GroupFilter;
+        std::unordered_map<uint32_t, uint32_t> m_BodySerials; // entity -> sub group
+        uint32_t m_NextBodySerial = 1;
+
         void StepCharacters(float dt);
         void SyncCharactersToTransforms();
         void CaptureBodyPoses();

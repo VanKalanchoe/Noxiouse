@@ -345,6 +345,7 @@ namespace Nox
         // name and index, then the materials. Older cooks read without variants.
         // Version 8: every node's extras (key / value strings) and physics (NodePhysics, field by field) after its submesh range.
         // Older cooks read without them.
+        // Version 9: a node's physics also has its mesh collider, collision filter and joint (after the version 8 fields).
         static constexpr uint32_t MeshFlagVertexColors = 1u << 0;
 
         struct MorphDelta
@@ -786,6 +787,37 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
                     stream.write(reinterpret_cast<const char*>(&physics.Size), sizeof(glm::vec3));
                     stream.write(reinterpret_cast<const char*>(&physics.Friction), sizeof(float));
                     stream.write(reinterpret_cast<const char*>(&physics.Restitution), sizeof(float));
+                    stream.write(reinterpret_cast<const char*>(&physics.ColliderMesh), sizeof(int32_t));
+                    stream.write(reinterpret_cast<const char*>(&physics.ColliderFirstSubmesh), sizeof(uint32_t));
+                    stream.write(reinterpret_cast<const char*>(&physics.ColliderSubmeshCount), sizeof(uint32_t));
+                    const uint8_t convex = physics.Convex ? 1 : 0;
+                    stream.write(reinterpret_cast<const char*>(&convex), sizeof(uint8_t));
+                    for (const std::vector<std::string>* list : { &physics.Systems, &physics.CollideWith, &physics.NotCollideWith })
+                    {
+                        const uint32_t count = static_cast<uint32_t>(list->size());
+                        stream.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+                        for (const std::string& name : *list)
+                            SerializerUtils::WriteString(stream, name);
+                    }
+                    const NodePhysics::Joint& joint = physics.JointData;
+                    stream.write(reinterpret_cast<const char*>(&joint.ConnectedNode), sizeof(int32_t));
+                    if (joint.ConnectedNode >= 0)
+                    {
+                        const uint8_t collide = joint.EnableCollision ? 1 : 0;
+                        stream.write(reinterpret_cast<const char*>(&collide), sizeof(uint8_t));
+                        stream.write(reinterpret_cast<const char*>(joint.Axes), sizeof(joint.Axes));
+                        stream.write(reinterpret_cast<const char*>(joint.Min), sizeof(joint.Min));
+                        stream.write(reinterpret_cast<const char*>(joint.Max), sizeof(joint.Max));
+                        stream.write(reinterpret_cast<const char*>(joint.LimitStiffness), sizeof(joint.LimitStiffness));
+                        stream.write(reinterpret_cast<const char*>(joint.LimitDamping), sizeof(joint.LimitDamping));
+                        for (const NodePhysics::Joint::Drive& drive : joint.Drives)
+                        {
+                            const uint8_t enabled = drive.Enabled ? 1 : 0;
+                            stream.write(reinterpret_cast<const char*>(&enabled), sizeof(uint8_t));
+                            const float values[5] = { drive.PositionTarget, drive.VelocityTarget, drive.Stiffness, drive.Damping, drive.MaxForce };
+                            stream.write(reinterpret_cast<const char*>(values), sizeof(values));
+                        }
+                    }
                 }
             }
 
@@ -871,6 +903,44 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
                     stream.read(reinterpret_cast<char*>(&physics.Size), sizeof(glm::vec3));
                     stream.read(reinterpret_cast<char*>(&physics.Friction), sizeof(float));
                     stream.read(reinterpret_cast<char*>(&physics.Restitution), sizeof(float));
+                    if (version < 9)
+                        continue;
+                    stream.read(reinterpret_cast<char*>(&physics.ColliderMesh), sizeof(int32_t));
+                    stream.read(reinterpret_cast<char*>(&physics.ColliderFirstSubmesh), sizeof(uint32_t));
+                    stream.read(reinterpret_cast<char*>(&physics.ColliderSubmeshCount), sizeof(uint32_t));
+                    uint8_t convex = 0;
+                    stream.read(reinterpret_cast<char*>(&convex), sizeof(uint8_t));
+                    physics.Convex = convex != 0;
+                    for (std::vector<std::string>* list : { &physics.Systems, &physics.CollideWith, &physics.NotCollideWith })
+                    {
+                        uint32_t count = 0;
+                        stream.read(reinterpret_cast<char*>(&count), sizeof(uint32_t));
+                        if (stream.fail()) return;
+                        list->resize(count);
+                        for (std::string& name : *list)
+                            SerializerUtils::ReadString(stream, name);
+                    }
+                    NodePhysics::Joint& joint = physics.JointData;
+                    stream.read(reinterpret_cast<char*>(&joint.ConnectedNode), sizeof(int32_t));
+                    if (joint.ConnectedNode >= 0)
+                    {
+                        uint8_t collide = 0;
+                        stream.read(reinterpret_cast<char*>(&collide), sizeof(uint8_t));
+                        joint.EnableCollision = collide != 0;
+                        stream.read(reinterpret_cast<char*>(joint.Axes), sizeof(joint.Axes));
+                        stream.read(reinterpret_cast<char*>(joint.Min), sizeof(joint.Min));
+                        stream.read(reinterpret_cast<char*>(joint.Max), sizeof(joint.Max));
+                        stream.read(reinterpret_cast<char*>(joint.LimitStiffness), sizeof(joint.LimitStiffness));
+                        stream.read(reinterpret_cast<char*>(joint.LimitDamping), sizeof(joint.LimitDamping));
+                        for (NodePhysics::Joint::Drive& drive : joint.Drives)
+                        {
+                            uint8_t enabled = 0;
+                            stream.read(reinterpret_cast<char*>(&enabled), sizeof(uint8_t));
+                            float values[5] = {};
+                            stream.read(reinterpret_cast<char*>(values), sizeof(values));
+                            drive = { enabled != 0, values[0], values[1], values[2], values[3], values[4] };
+                        }
+                    }
                 }
             }
 
@@ -906,15 +976,15 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             stream.write(reinterpret_cast<const char*>(&payloadBase), sizeof(uint64_t));
         }
 
-        // The version (2 to 8) of a magic of this kind ("NSM" static, "NMS" skeletal, then the digit), 0 for anything else.
+        // The version (2 to 9) of a magic of this kind ("NSM" static, "NMS" skeletal, then the digit), 0 for anything else.
         static uint32_t MagicVersion(const char* header, const char* kind)
         {
-            if (std::memcmp(header, kind, 3) != 0 || header[3] < '2' || header[3] > '8')
+            if (std::memcmp(header, kind, 3) != 0 || header[3] < '2' || header[3] > '9')
                 return 0;
             return static_cast<uint32_t>(header[3] - '0');
         }
 
-        // kind: "NSM" or "NMS". Versions 4 to 8 are read (each older one without what came after it: node extras and physics,
+        // kind: "NSM" or "NMS". Versions 4 to 9 are read (each older one without what came after it: mesh colliders, joints and filters, node extras and physics,
         // variants, morph targets, vertex colors); older cooks are not read (MeshImporter cooks them again).
         static bool DeserializeMeshes(const std::filesystem::path& filepath, const char* kind, bool streamPages,
                                       std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList,
@@ -958,7 +1028,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
         }
 
     public:
-        // The cooked format's version (2 to 8) from the magic, 0 when the file is not a mesh.
+        // The cooked format's version (2 to 9) from the magic, 0 when the file is not a mesh.
         static uint32_t ReadVersion(const std::filesystem::path& filepath)
         {
             char magic[4] = {};
@@ -977,7 +1047,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            SerializeMeshes(filepath, "NSM8", dataList, materialList, lightList, nodeList, cameraList);
+            SerializeMeshes(filepath, "NSM9", dataList, materialList, lightList, nodeList, cameraList);
         }
 
         static bool DeserializeStaticMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)
@@ -1026,7 +1096,7 @@ static void ReadMaterials(std::istream& stream, std::vector<MaterialData>& outMa
             const std::vector<CameraNodeData>& cameraList = {}
         )
         {
-            SerializeMeshes(filepath, "NMS8", dataList, materialList, lightList, nodeList, cameraList);
+            SerializeMeshes(filepath, "NMS9", dataList, materialList, lightList, nodeList, cameraList);
         }
         
         static bool DeserializeMesh(const std::filesystem::path& filepath, std::vector<MeshData>& outDataList, std::vector<MaterialData>& outMaterialList)

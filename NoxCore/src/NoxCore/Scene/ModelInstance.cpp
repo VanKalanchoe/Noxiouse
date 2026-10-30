@@ -181,8 +181,20 @@ namespace Nox
             std::vector<int32_t> Nodes; // sorted, unique
         };
 
-        // What the file gave a node besides its mesh: its glTF extras (MetadataComponent) and physics (a body and its collider).
-        void addNodeData(Entity entity, const MeshNodeData& node)
+        // How a node's data reaches the others of its model: its asset (a mesh collider of the model's own submeshes), the entities of
+        // the other nodes (a joint's other end), the per-mesh assets of an Import Into Level (a mesh collider's glTF mesh), and the
+        // scale of joint lengths not baked into the cook (Import Into Level's root scale).
+        struct NodeLinks
+        {
+            AssetHandle Model = 0;
+            std::function<Entity(int32_t)> NodeEntity;
+            std::function<AssetHandle(int32_t)> LevelMesh;
+            float LengthScale = 1.0f;
+        };
+
+        // What the file gave a node besides its mesh: its glTF extras (MetadataComponent) and physics (a body, its collider, collision
+        // filter and joint).
+        void addNodeData(Entity entity, const MeshNodeData& node, const NodeLinks& links = {})
         {
             if (!node.Extras.empty())
                 entity.AddOrReplaceComponent<MetadataComponent>().Values = node.Extras;
@@ -221,19 +233,87 @@ namespace Nox
                 auto& capsule = entity.AddOrReplaceComponent<CapsuleCollider3DComponent>();
                 capsule.Radius = physics.Size.x;
                 capsule.HalfHeight = physics.Size.y;
+                capsule.BottomRadius = physics.Size.z;
                 capsule.Friction = physics.Friction;
                 capsule.Restitution = physics.Restitution;
+                break;
+            }
+            case NodePhysics::ShapeType::Cylinder:
+            {
+                auto& cylinder = entity.AddOrReplaceComponent<CylinderCollider3DComponent>();
+                cylinder.Radius = physics.Size.x;
+                cylinder.HalfHeight = physics.Size.y;
+                cylinder.BottomRadius = physics.Size.z;
+                cylinder.Friction = physics.Friction;
+                cylinder.Restitution = physics.Restitution;
+                break;
+            }
+            case NodePhysics::ShapeType::Plane:
+            {
+                auto& plane = entity.AddOrReplaceComponent<PlaneCollider3DComponent>();
+                plane.HalfSize = glm::vec2(physics.Size.x, physics.Size.z);
+                plane.Friction = physics.Friction;
+                plane.Restitution = physics.Restitution;
+                break;
+            }
+            case NodePhysics::ShapeType::Mesh:
+            {
+                // Import Into Level: the glTF mesh's own asset; a model: its submeshes in the model's asset (none: left out).
+                const AssetHandle levelMesh = links.LevelMesh ? links.LevelMesh(physics.ColliderMesh) : AssetHandle(0);
+                if (levelMesh == 0 && (links.Model == 0 || physics.ColliderSubmeshCount == 0))
+                    break;
+                auto& mesh = entity.AddOrReplaceComponent<MeshCollider3DComponent>();
+                mesh.Mesh = levelMesh != 0 ? levelMesh : links.Model;
+                mesh.SubmeshIndex = levelMesh != 0 ? 0 : physics.ColliderFirstSubmesh;
+                mesh.SubmeshCount = levelMesh != 0 ? UINT32_MAX : physics.ColliderSubmeshCount;
+                mesh.Convex = physics.Convex;
+                mesh.Friction = physics.Friction;
+                mesh.Restitution = physics.Restitution;
                 break;
             }
             default:
                 break;
             }
+
+            if (!physics.Systems.empty() || !physics.CollideWith.empty() || !physics.NotCollideWith.empty())
+            {
+                auto& filter = entity.AddOrReplaceComponent<CollisionFilter3DComponent>();
+                filter.Systems = physics.Systems;
+                filter.CollideWith = physics.CollideWith;
+                filter.NotCollideWith = physics.NotCollideWith;
+            }
+
+            const NodePhysics::Joint& data = physics.JointData;
+            Entity other = data.ConnectedNode >= 0 && links.NodeEntity ? links.NodeEntity(data.ConnectedNode) : Entity();
+            if (other)
+            {
+                auto& joint = entity.AddOrReplaceComponent<PhysicsJoint3DComponent>();
+                joint.ConnectedEntity = other.GetUUID();
+                joint.EnableCollision = data.EnableCollision;
+                for (int axis = 0; axis < 6; ++axis)
+                {
+                    const float scale = axis < 3 ? links.LengthScale : 1.0f;
+                    joint.Axes[axis] = static_cast<PhysicsJoint3DComponent::Motion>(std::min<uint8_t>(data.Axes[axis], 2));
+                    joint.Min[axis] = data.Min[axis] * scale;
+                    joint.Max[axis] = data.Max[axis] * scale;
+                    const NodePhysics::Joint::Drive& from = data.Drives[axis];
+                    joint.Drives[axis] = { from.Enabled, from.PositionTarget * scale, from.VelocityTarget * scale, from.Stiffness, from.Damping, from.MaxForce };
+                }
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    joint.LimitStiffness[axis] = data.LimitStiffness[axis];
+                    joint.LimitDamping[axis] = data.LimitDamping[axis];
+                }
+            }
         }
 
-        // A node without a mesh that still needs an entity of its own (the flat placement would drop it).
+        // A node that keeps the model's hierarchy: one without a mesh that carries data (the flat placement would drop it), or a joint
+        // (its other end must be an entity of its own).
         bool carriesData(const MeshNodeData& node)
         {
-            return node.SubmeshCount == 0 && node.Parent != MeshNodeData::OutsideScene && (!node.Extras.empty() || node.Physics.Any());
+            if (node.Parent == MeshNodeData::OutsideScene)
+                return false;
+            return node.Physics.JointData.ConnectedNode >= 0 || (node.SubmeshCount == 0 && (!node.Extras.empty() || node.Physics.Any()));
         }
 
         bool sharesNode(const std::vector<int32_t>& a, const std::vector<int32_t>& b)
@@ -442,7 +522,7 @@ namespace Nox
                     meshComponent.SubmeshIndex = only->FirstSubmesh;
                     meshComponent.SubmeshCount = only->SubmeshCount;
                     root.AddComponent<MaterialComponent>();
-                    addNodeData(root, *only);
+                    addNodeData(root, *only, NodeLinks{ model });
                     root.RemoveComponent<ModelInstanceComponent>(); // `instance` is gone
                     return true;
                 }
@@ -511,7 +591,7 @@ namespace Nox
                         meshComponent.SubmeshIndex = node.FirstSubmesh;
                         meshComponent.SubmeshCount = node.SubmeshCount;
                         piece.AddComponent<MaterialComponent>();
-                        addNodeData(piece, node);
+                        addNodeData(piece, node, NodeLinks{ model });
                         place(piece, worldOf(meshSlots[i]));
                     }
 
@@ -566,7 +646,9 @@ namespace Nox
                 // A node whose parent was removed hangs off the root.
                 const int32_t parent = nodes[index].Parent;
                 attach(node, parent >= 0 && parent < static_cast<int32_t>(nodes.size()) && spawned[parent] ? spawned[parent] : root);
-                addNodeData(node, nodes[index]);
+                NodeLinks links{ instance.Model };
+                links.NodeEntity = [&](int32_t other) { return other >= 0 && other < static_cast<int32_t>(nodes.size()) ? spawned[other] : Entity(); };
+                addNodeData(node, nodes[index], links);
 
                 if (nodes[index].SubmeshCount > 0)
                 {
@@ -818,7 +900,17 @@ namespace Nox
                 continue;
             entities[i] = scene.CreateEntity(node.Name.empty() ? "Node " + std::to_string(i) : node.Name);
             entities[i].GetComponent<TransformComponent>() = makeTransform(node.Translation, node.Rotation, node.Scale);
-            addNodeData(entities[i], node);
+        }
+        // Their extras and physics, once every node is an entity (a joint's other end may come later in the file). Lengths the cook
+        // did not scale (this path scales the root instead) are scaled here.
+        NodeLinks links;
+        links.NodeEntity = [&](int32_t other) { return other >= 0 && other < static_cast<int32_t>(entities.size()) ? entities[other] : Entity(); };
+        links.LevelMesh = [&](int32_t mesh) { const auto found = level.MeshAssets.find(mesh); return found != level.MeshAssets.end() ? found->second : AssetHandle(0); };
+        links.LengthScale = level.Scale > 0.0f ? level.Scale : 1.0f;
+        for (size_t i = 0; i < level.Nodes.size(); ++i)
+        {
+            if (entities[i])
+                addNodeData(entities[i], level.Nodes[i], links);
         }
         for (size_t i = 0; i < level.Nodes.size(); ++i)
         {

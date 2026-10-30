@@ -1278,6 +1278,51 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     - The v8 node table round trip; a v7 cook still reads.
 
     The compound body in Jolt is only compile-checked.
+- **Every glTF physics feature (I1, 2026-10-31):** the rest of `KHR_physics_rigid_bodies`, with the engine components it needed
+  (Unreal's and Godot's physics have them all).
+  - **New colliders:**
+    - **Cylinder Collider 3D:** with a bottom radius it becomes a cone or frustum (Jolt Cylinder / TaperedCylinderShape).
+    - **Plane Collider 3D:** unbounded is Jolt's PlaneShape (a half-space, Godot's WorldBoundaryShape); with a half size it is a
+      flat slab.
+    - **Mesh Collider 3D:** a mesh asset's triangles, or with Convex their hull (Unreal's complex / simple collision).
+      - It reads the cooked file's LOD-0 cluster triangles (welded, as HLOD does) once per physics session, cached per mesh.
+      - A dynamic body always takes the hull, since Jolt gives triangles no mass.
+      - "Use This Entity's Mesh" fills it from the entity's own Mesh component.
+    - **Capsule Collider 3D:** gains Bottom Radius (Jolt TaperedCapsuleShape).
+    - Cylinder and plane draw in the viewport like the others.
+    - A collider added or removed during Play rebuilds the body it belongs to (its own, or the nearest one above).
+  - **Physics Joint 3D** (Unreal's physics constraint, Godot's Generic6DOFJoint, Jolt SixDOFConstraint):
+    - It joins the body at or above its entity to the one at or above Connected Entity (or the world). The frames are the two
+      entities' transforms.
+    - Per axis (move X/Y/Z, turn X/Y/Z): Free, Locked or Limited, with soft translation limits.
+    - Drives: a position target with a spring, else a velocity, with an optional maximum force.
+    - Collide With Each Other off keeps the pair apart.
+    - Constraints are rebuilt before the next step whenever a body or joint changes. They are removed before a body goes, since
+      Jolt holds pointers to their bodies.
+  - **Collision Filter 3D:**
+    - Fields: Systems, Collide With, Not Collide With (the spec's names).
+    - It is enforced by a Jolt group filter: every body's group is its filter, its sub group the body. The same filter keeps
+      jointed pairs apart.
+    - The spec's rule, both sides agreeing. A Collide With list admits nothing else, a body in no system included; Not Collide With
+      never excludes a body in no system.
+  - **Import:**
+    - Shapes: cylinders and cones, finite and unbounded planes, tapered capsules.
+    - Mesh and convex colliders are matched to the asset's submeshes of that glTF mesh at cook time. Import Into Level uses the
+      mesh's own asset.
+    - Collision filters, and joints: limits per axis, translation scaled with the import, drives.
+    - Format v9 holds them in the node table. Per-mesh assets drop joints, whose other end is another node of the file.
+  - **Still left out (named in the log):**
+    - Initial velocities, a set center of mass or inertia, compound triggers, triggers on moving bodies.
+    - Simplified on the way in: limits on several axes at once are limited per axis; soft angular limits are hard;
+      acceleration-mode drives are driven as force.
+  - **Mesh / material extras:** not imported, by decision. Assets have no metadata a script or the editor reads, and node extras
+    carry Blender's object properties.
+  - **Offline tests:**
+    - `gstest/physicstest`, extended: cylinder, finite plane, tapered capsule, convex mesh collider, a locked + limited joint with
+      an angular drive, a collision filter; v9 round trip.
+    - `jolt/filtertest` with real Jolt: the filter rules, jointed pairs kept apart, and a filtered box falling through a floor an
+      unfiltered one rests on.
+    - Joint constraints and mesh collider shapes in a running scene are compile-checked only.
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much
