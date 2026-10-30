@@ -1,102 +1,77 @@
 # Backlog -- one list of everything that is open (kept up to date; started 2026-09-26)
 
 > How to use: pick an item, say its number/name, and it is built the way the plans say (phase gates: the user builds and tests, nothing is
-> built by me). When an item is done, move it to "Done" with the date. Details live in the plan doc named in each line -- this file is
+> built by me). When an item is done, move it to "Closed" with the date. Details live in the plan doc named in each line -- this file is
 > only the index. Newest decisions win over older notes.
 
-## Now (in progress)
+## Open
 
-| # | Item | Notes |
-|---|---|---|
-| N4 | **World units and world tools** (grid, snap, ortho views, measure, bounds readout, unit conversion at the boundaries, physics unit interface) | plan written 2026-09-26: `Units_And_World_Tools_Plan_2026.md`; decisions taken 2026-09-26 (cm, tools first); **U1 (WorldUnits) and the first part of U2 (Inspector size readout, snap toolbar) built, untested**; world grid (Godot port) + snap feedback line built, being tuned; world grid, snap feedback, Measure tool and reference figure built (U2); U1-U6 built, plus per-field unit display/editing (Transform Position, script [Expose] Unit) -- testing next. Replaces the old E1 idea of a bare "model size in the import dialog" (that is phase U4 of the plan) |
-
-## Bugs and open items found by the second audit (2026-10-19)
-
-Full list with file references: `Status_Audit_2026-10.md` §0 (broken, untested, missing by area, stale docs). **Fixed 2026-10-20
-(untested):** asserts (`NOX_DEBUG` in Debug builds), root motion on character controllers, Fox speed thresholds in m/s, failed script
-reload / reload generation / `OnAfterReload`, script jobs during reload, Text font saved, runtime serializer, dead `LoadMesh`, ortho camera
-unit-scaled, Import Scale tooltip, quit on cancelled project dialog, 3D physics duplicated, NRD / DLSS distances in units. **Still open (left
-out on purpose this round):** ReSTIR DI broken (cause unknown), ReSTIR PT temporal artifact, ReSTIR light indices across light changes,
-meshlet cone culling.
-
-## Future.md (2026-10-18; audit: `Status_Audit_2026-10.md`)
-
-| # | Item | State |
-|---|---|---|
-| F1 | Docs audit | done: `Status_Audit_2026-10.md` |
-| F2 | Modern content browser, material window | first part **built, untested** (tree, path, search, type filter, Material Editor); **B3 built** (context menu, delete with reference check, find references, move by drag, unused assets); **B1 / B2 built, untested** (rendered thumbnails of meshes and materials, live material sphere in the Material Editor): `Editor_Features_Plan_2026-10.md` §2 |
-| F3 | Animation player node, sequencer, editing | first part **built, untested** (Clip = Sequence Player with Speed pin + Start Position, BlendSpace1D); **A2-A6 built** (notifies + clip window, layered blend per bone, additive, slots + montages from scripts, root motion, BlendSpace2D); **A7 preview + A8 sequencer built, untested** (3D clip preview; Timeline assets, Timeline Player, Timeline window, script API): same plan §3 |
-| F4 | Hybrid renderer near the path tracer, RT fallbacks, DLSS edge jitter, transparency / transmission | DLSS outline jitter **fixed, confirmed by the user** (non-jittered selection mask, `Hybrid_Renderer_Plan_2026-10.md` §3); **built, untested (2026-10-18):** grid / gizmo / picking jitter (Stable Overlays), quality presets Low / Medium / High with Auto by VRAM (§2), RT shadows on transparent surfaces (H2), glass refraction (H3b), ray traced glass for smooth glass on High (H3); **2026-10-20:** OIT (H4, particles included), shadowed-lights-per-pixel rung, DDGI probe relocation, own TAA; open: H5 |
-| F5 | Up to four viewports with layout presets | **built, untested** (2026-10-18): Window > Viewports presets 1 / 2 / 2 stacked / 3 / 4, draggable and resizable, own camera each; the active one is the full render with every tool, the others raster-only extra views: `Editor_Features_Plan_2026-10.md` §4 |
-| F6 | Procedural sky (Hillaire / UE SkyAtmosphere recommended over Hosek-Wilkie) | **S1, S2, S4 + sun disc built (untested):** Environment Light -> Source: Procedural Sky, sun = first Directional Light (elevation / azimuth in the panel), updated inside the frame (no freeze), sky feeds skybox / IBL / DDGI / path tracer, aerial perspective on the lit scene (`Hybrid_Renderer_Plan_2026-10.md` §5b). The Texture source's **Rotation** now applies (2026-10-18): baked into the cubemap conversion (`EquirectToCubemap` / `CubemapResample`, `PushConstantEquirect::rotation`), so skybox, IBL, reflections, DDGI and the path tracer agree; a new angle rebuilds once it has held for 250 ms. Open: haze on forward passes, night |
-| F7 | Runtime asset manager + runtime player | R1 runtime player **built, untested** (`NoxRuntime`, CMake `-DNOX_BUILD_RUNTIME=ON`); R2 first part **built, untested** (engine code asks `AssetManagerBase`, never the editor's manager; `Scene.Instantiate` included); the separate runtime manager moved to R4: `Runtime_And_Packaging_Plan_2026-10.md` §2c |
-| F8 | Packaging a distribution build | answered (a PCH is a build-speed tool, not packaging); **File > Package Game built, untested** (R3 dependency-collected assets without sources, R6 scripts, a first R7 folder: runtime exe + engine DLLs + shaders + Game/): same doc §2d; open: pack files (R4), precompiled shaders (R5) |
-| F9 | Stats overlay text broken | **fixed, confirmed by the user**: drawn in screen space (was world-space quads: inside the scene in ortho views, float precision far from the origin); replaces R4 |
-| F10 | Basic shapes | **built, untested**: Create > Shapes / hierarchy right-click > Shapes |
-| F11 | Minecraft-style game: script or C++? | answered: `Runtime_And_Packaging_Plan_2026-10.md` §4 (C++ voxel module + C# gameplay). **Script APIs built (2026-10-18, untested, §4b):** `Nox.Mesh` / `MeshBuilder` (run-time meshes drawn and ray traced like imported ones), `Nox.Jobs`, `Entity.SetMesh` / `SetMeshCollider`, `Scene.CreateEntity`, `Physics.Raycast`; example `Facerun/.../VoxelTerrain.cs` |
-| F12 | Undo / redo | **built, tested by the user** (works); 2026-10-18: shortcuts follow the keyboard layout (Z/Y were swapped on QWERTZ) and read the modifiers of the key event (Ctrl+Shift+Z read as Ctrl+Z when Shift was let go before the frame handled the key) |
-| F13 | VFX, particles, clouds | answered + planned: `Hybrid_Renderer_Plan_2026-10.md` §6; **volumetric clouds built** (untested, in the procedural sky, §5b); **particles built (2026-10-18, untested, §6b):** Particle Emitter component (V1, CPU simulation, Edit / Simulate / Play), lit and soft rendering (V2, without OIT), C# Play / Stop / Emit |
-| F14 | Unregister a mesh when its entity is deleted? | answered: no (`Status_Audit_2026-10.md`, F14 answer); stale registry entries (files gone) are removed at load: **built, untested**; asset Delete with reference check + unused-asset report: `Editor_Features_Plan_2026-10.md` B3 |
-
-## Prefabs (plan: `Prefab_Architecture_Plan_2026.md`, section 8)
+### Rendering (plan: `Engine_Architecture_Plan_2026.md`, `Hybrid_Renderer_Plan_2026-10.md`)
 
 | # | Item |
 |---|---|
-| P1 | ~~Apply of a nested instance's change into the OUTER prefab~~ -> built 2026-10-20 (added entities too; untested) |
-| P4 | ~~Re-parenting a spawned entity is not tracked~~ -> decided 2026-10-20: Unity's rule, an instance's entities cannot be re-parented (Unpack or Prefab Mode) |
-| P5 | ~~Overrides on a deleted instance entity are dropped~~ -> built 2026-10-20: kept for Revert |
-| P6 | ~~Exported games need their own prefab lookup for `Scene.Instantiate`~~ -> closed by R2 (engine code asks `AssetManagerBase`, 2026-10-18) |
-| P7 | ~~Unpack All; prefab thumbnails; variant tint~~ -> built 2026-10-20 (Unpack Completely, rendered prefab thumbnails, purple variants) |
-
-## Characters, animation and gameplay (plan: `Animation_Graph_Architecture_Plan_2026.md`)
-
-| # | Item |
-|---|---|
-| C1 | **Jump / Fall states** in the locomotion graph -- needs jump/fall clips (the Fox has only Survey, Walk, Run); `VerticalSpeed` parameter was tried and reverted, add it back with the states |
-| C2 | ~~Script late update~~ -> built 2026-10-20 (`OnLateUpdate`, `OnFixedUpdate`) |
-| C3 | Skeletal meshes with **several skins** or unskinned meshes next to the skin still spawn as nodes (not the single-entity path) |
-| C4 | Animation graph phases the first commit message calls missing (see the plan doc, section 8) |
-| C5 | Fox_Locomotion `Speed` thresholds assume walk 2 / run 5 m/s (retune if the speeds change); movement defaults are for a ~1.8 m character -- the Fox capsule / speeds need sizes for a ~0.8 m animal |
-| C6 | Optional rename `.nmesh` -> SkeletalMesh (deferred by decision) |
-| C7 | ~~Sync markers, notifies in single-clip mode, per-instance skeleton poses, sockets, graph preview, clip loop ranges, skeleton-filtered clip picker, double-click a skinned mesh, Timeline auto-key / curves / camera cuts~~ -> built 2026-10-20 (untested) |
-| C8 | Timeline material parameter tracks (need per-entity material parameter overrides first), sub-sequences; variable node input pins |
-
-## Import / glTF (plan: `Animation_Graph_Architecture_Plan_2026.md` section 8, "known limits of Import Into Level")
-
-| # | Item |
-|---|---|
-| I1 | **Not-yet-handled glTF features:** vertex colors (COLOR_0: a new cooked vertex layout through every `shaderio::Vertex` consumer and RT vertex fetch), morph targets, `KHR_materials_variants`, extras, multiple scenes, physics extensions. (`EXT_mesh_gpu_instancing`, `KHR_node_visibility` and stale clip cleanup: built 2026-10-20) |
-| I2 | Combining static meshes drops the file's node structure, lights, cameras and node animations by design (Import Into Level keeps them) |
-| I3 | Import Into Level with skeletal models: the group logic (static + skinned jobs, one level) is **untested** -- no glTF with two skinned meshes at hand (the sample assets have none) |
-| I4 | Import Into Level: animations of a file that also has a skeletal model (the skeletal asset owns those clips) |
-
-## Rendering (plan: `Engine_Architecture_Plan_2026.md`)
-
-| # | Item |
-|---|---|
-| R1 | ~~Own TAA~~ -> built 2026-10-20 (`TAA.slang`: R2 jitter, nearest-depth velocity, Catmull-Rom history, YCoCg variance clipping; used when DLSS is off) |
-| R2 | ~~Phase 6b **geometry streaming** (cluster pages)~~ -> built 2026-10-29 (`Engine_Architecture_Plan_2026.md` §5.7.2), tested by the user on Bistro: pages stream by LOD feedback, live pool, debug view 23 |
-| R3 | Phase 6b-2 RT fallback LOD: tried and reverted (holes in the path tracer) -- see the plan |
-| R4 | ~~Stats overlay text looked broken~~ -> F9 (cause found 2026-10-18: the overlay was world-space geometry through the camera; now screen space) |
-| R6 | **Streaming Virtual Texturing** (UE5 SVT): chosen 2026-10-29, in progress -- phases SVT-1 sampling refactor (built), SVT-2 tiled cook (built), SVT-3 runtime (page tables, physical tile cache, tile feedback, IO) + SVT-4 virtual sampling (built and measured 2026-10-30: Bistro texture VRAM 680 -> 381 MB, same image, frame time unchanged) (`Engine_Architecture_Plan_2026.md` §5.12.2) |
-| R7 | **Geometry compression** (Nanite-style packed vertices): built 2026-10-30 -- 88 -> 36 bytes per vertex (octahedral normal / tangent, float position and UVs so BLAS builds stay direct), bone influences in a 16-byte skin stream only for skinned meshes, cooked format v4 (v3 cooks still load, their pages packed as read). Measured on Bistro: geometry 319 -> 161 MB; vertex indexing (meshopt_generateVertexRemap) added before clustering, to be measured on a re-import (`Engine_Architecture_Plan_2026.md` §5.8.2) |
-| R8 | **Sparse geometry buffers** (Vulkan sparse binding, decision D5): built 2026-10-30 -- the streams reserve address space and commit 64 KB pages as live ranges touch them (no grow-copy, no growth stalls; committed = touched pages). Measured on Bistro: 621 -> 319 MB committed for 317-328 MB used (302 MB of VRAM back) (`Engine_Architecture_Plan_2026.md` §5.8.2) |
-| R9 | Geometry streaming **Preserve Area for foliage** (UE5 Nanite's option): tried and reverted 2026-10-30 -- see `Engine_Architecture_Plan_2026.md` §5.7.2. Coarse foliage levels still thin out; with the pool override at 0 (budget-sized pool) they are only drawn far away |
 | R10 | DLSS "WorldToScreenMatrix not invertible" every frame (seen 2026-10-29 after a DLSS recreate in LevelStreamingTest). A one-time log names the degenerate camera input (`addDLSSPass`): needs that log line to fix |
-| R5 | ~~Editor/DDGI: the probe grid is a fixed 1.8 m grid~~ -> camera-following DDGI cascades (2026-10-19), now only the second bounce under the screen-probe GI (`Hybrid_Renderer_Plan_2026-10.md` §2b-2c) |
+| H5 | Denoising for the transparent signals (RT shadows on glass, refraction) through the NRD front end (the rest of F4 is built) |
 
-## Editor and tools
+### Import / glTF (plan: `Animation_Graph_Architecture_Plan_2026.md` section 8)
 
 | # | Item |
 |---|---|
-| E1 | Scene sizes: the test scene's floor collider must match the mesh (`Cube` mesh is 2 m: half extents 1,1,1; `Sphere` mesh radius 1). Check any new scene against the mesh bounds (the import dialog does not show model size yet: idea -- show bounds and a "fit to height" Import Scale) |
-| E2 | ~~Content Browser rename for more asset types~~ -> built 2026-10-20 (textures, materials, meshes with their companions; old paths kept as aliases; Reimport; Replace References) |
-| E3 | Rigid body **default damping** (0.05 rolls a ball for over a minute; ~0.5 angular damping is more usual) |
+| I1 | **glTF features not handled yet:** vertex colors (COLOR_0: a new cooked vertex layout through every `shaderio::Vertex` consumer and RT vertex fetch), morph targets, `KHR_materials_variants`, extras, multiple scenes, physics extensions. (`EXT_mesh_gpu_instancing`, `KHR_node_visibility`: built 2026-10-20) |
+| I4 | Import Into Level of a file that also has a skeletal model: its animations are not placed (the skeletal asset owns those clips) |
 
-## Untested (built, waiting for the user)
+### Characters and animation (plan: `Animation_Graph_Architecture_Plan_2026.md`)
 
-- Import Into Level: animations (tested, works), skinned-only level and skeletal Do Not Combine placement (untested, I3)
-- Rigid body interpolation (built 2026-09-26, tested by the user: works)
+| # | Item |
+|---|---|
+| C1 | **Jump / Fall states** in the locomotion graph -- needs jump/fall clips (the Fox has only Survey, Walk, Run); add the `VerticalSpeed` parameter back with the states |
+| C3 | Skeletal meshes with **several skins**, or unskinned meshes next to the skin, still spawn as nodes (not the single-entity path) |
+| C4 | Step 8: **audio graph**, a second node-graph domain on the same core and editor panel (the other leftovers of the plan's section 8 are built) |
+| C5 | Fox sizes: the movement defaults are for a ~1.8 m character; the Fox capsule and speeds need values for a ~0.8 m animal (scene tuning; the `Speed` thresholds were fixed 2026-10-20) |
+| C8 | Timeline material parameter tracks (needs per-entity material parameter overrides first), sub-sequences; variable node input pins |
+
+### Physics
+
+| # | Item |
+|---|---|
+| E3 | Rigid body **default damping**: 0.05 rolls a ball for over a minute; ~0.5 angular damping is more usual |
+
+### Ignore for now
+
+| # | Item |
+|---|---|
+| B1 | ReSTIR DI broken, cause unknown (ignore for now) |
+| B2 | ReSTIR PT temporal artifact (ignore for now) |
+| B3 | ReSTIR light indices across light changes (ignore for now) |
+| B4 | Meshlet cone culling (ignore for now) |
+
+## Closed (checked against the code 2026-10-30)
+
+Built items many of which the user has not tested yet (marked "untested"); the plan docs hold the details.
+
+- **N4 World units and world tools:** U1-U6 built (cm world unit, grid, snap, ortho views, Measure tool, reference figure, import
+  units, physics unit boundary) plus per-field unit display. U2 confirmed by the user; the rest untested. `Units_And_World_Tools_Plan_2026.md`
+- **E1 Model size at import:** the import dialog shows Size W x H x D, a Source Unit combo, a wrong-unit warning and Fit to height (U4, untested)
+- **E2 Rename more asset types:** built 2026-10-20 (textures, materials, meshes with companions, Reimport, Replace References)
+- **F1-F14 (Future.md):** all built or answered. F2 content browser + material window, F3 animation player / sequencer, F5 four
+  viewports, F7 runtime player + `RuntimeAssetManager`, F8 packaging (`.npak`, precompiled shaders), F10 basic shapes, F11 script
+  mesh / jobs APIs, F13 particles + clouds, F14 stale registry cleanup: untested. F4 hybrid renderer: built except H5 (open above).
+  F6 procedural sky: built, including night (moon, stars) and haze on forward passes. F9 stats overlay and F12 undo / redo: confirmed by the user.
+- **Prefabs P1-P7:** built 2026-10-20 (P1, P5, P7 untested); P4 decided (Unity's rule), P6 closed by R2. `Prefab_Architecture_Plan_2026.md`
+- **C2** script late / fixed update, **C7** sync markers, notifies, sockets, graph preview and the rest: built 2026-10-20 (untested)
+- **C6** rename `.nmesh` -> SkeletalMesh: not done, by decision
+- **I2** combining static meshes drops the node structure, lights, cameras and node animations: by design (Import Into Level keeps them)
+- **I3** Import Into Level with skeletal models: built, untested (no glTF with two skinned meshes at hand)
+- **R1** own TAA (2026-10-20), **R2** geometry streaming (2026-10-29, tested on Bistro), **R4** -> F9, **R5** camera-following DDGI
+  cascades (2026-10-19)
+- **R6 Streaming Virtual Texturing:** all phases built and measured 2026-10-30 (Bistro texture VRAM 680 -> 381 MB, same image,
+  frame time unchanged). `Engine_Architecture_Plan_2026.md` §5.12.2
+- **R7 Geometry compression:** 88 -> 36 bytes per vertex, cooked format v4, Bistro geometry 319 -> 161 MB; vertex indexing before
+  clustering, Bistro re-imported (folder 4.21 -> 4.03 GB). §5.8.2
+- **R8 Sparse geometry buffers:** Bistro 621 -> 319 MB committed (302 MB of VRAM back). §5.8.2
+- **Tried and reverted:** R3 RT fallback LOD (holes in the path tracer); R9 Preserve Area for foliage (2026-10-30, no gain in the
+  Bistro test, §5.7.2)
+- **Rigid body interpolation:** tested by the user, works
 
 ## Done (recent)
 
