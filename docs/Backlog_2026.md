@@ -23,7 +23,6 @@
 | # | Item |
 |---|---|
 | C1 | **Jump / Fall states** in the locomotion graph -- needs jump/fall clips (the Fox has only Survey, Walk, Run); add the `VerticalSpeed` parameter back with the states |
-| C3 | Skeletal meshes with **several skins**, or unskinned meshes next to the skin, still spawn as nodes (not the single-entity path) |
 | C5 | Fox sizes: the movement defaults are for a ~1.8 m character; the Fox capsule and speeds need values for a ~0.8 m animal (scene tuning; the `Speed` thresholds were fixed 2026-10-20) |
 | C8 | Timeline material parameter tracks (needs per-entity material parameter overrides first), sub-sequences; variable node input pins |
 
@@ -57,6 +56,11 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   untested). A clip that moves only the skins' joints and the armature above them stays with the skeletal asset; one that moves
   other nodes (a door, a fan) also goes to the static meshes and the level, which animate only those nodes. Before, any skeleton
   in the file kept every clip from the level. Offline test: scratchpad `gstest/clipsplittest`.
+- **C3** Characters with several skins, or meshes under a joint, are one character entity (2026-10-31, untested). The cook merges
+  the file's skins into one (Unreal's one skeleton per skeletal mesh): a joint shared with the same inverse bind matrix is one entry,
+  and every skinned vertex's joint indices move into the merged list. An unskinned mesh under a joint (a sword in the hand) is bound
+  to it rigidly (Unreal's Import Meshes in Bone Hierarchy): a model-space copy with weight 1 on that joint. `MeshImporter::UnifySkins`;
+  offline test scratchpad `gstest/unifytest` (merged skinning equals each skin's, at rest and posed; the sword follows the hand).
 - **I2** combining static meshes drops the node structure, lights, cameras and node animations: by design (Import Into Level keeps them)
 - **I3** Import Into Level with skeletal models: built, untested (no glTF with two skinned meshes at hand)
 - **R1** own TAA (2026-10-20), **R2** geometry streaming (2026-10-29, tested on Bistro), **R4** -> F9, **R5** camera-following DDGI

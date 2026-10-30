@@ -387,8 +387,8 @@ namespace Nox
             // A skinned character is a skeletal mesh (UE5): one entity holding the mesh and its animator, no node or
             // joint entities -- the pose goes straight into skinning matrices (Scene::UpdateAnimators' self-contained
             // path), bones are data. It stops being a model instance, so everything on it saves as ordinary
-            // components. Lights and cameras in such a file are not spawned. Models with several skins or with
-            // unskinned meshes next to the skin are not handled yet and spawn as nodes below.
+            // components. Lights and cameras in such a file are not spawned. The cook gives every character one skin
+            // (MeshImporter's UnifySkins: several skins merged, meshes under a joint bound to it rigidly).
             if (skinned && skeleton->Skins.size() == 1)
             {
                 const AssetHandle model = instance.Model;

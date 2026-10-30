@@ -848,6 +848,36 @@ namespace Nox
         return in;
     }
 
+    // The nearest joint above each node of the file (a joint of any skin), -1 where there is none. An unskinned mesh under a joint (a
+    // sword in the hand, a hat on the head) is a rigid part of the character: Unreal's Import Meshes in Bone Hierarchy.
+    static std::vector<int32_t> JointAncestors(const tg3_model& model)
+    {
+        const int32_t count = static_cast<int32_t>(model.nodes_count);
+        std::vector<uint8_t> isJoint(count, 0);
+        for (uint32_t s = 0; s < model.skins_count; ++s)
+            for (uint32_t j = 0; j < model.skins[s].joints_count; ++j)
+                if (model.skins[s].joints[j] >= 0 && model.skins[s].joints[j] < count)
+                    isJoint[model.skins[s].joints[j]] = 1;
+        std::vector<int32_t> parent(count, -1);
+        for (int32_t n = 0; n < count; ++n)
+            for (uint32_t c = 0; c < model.nodes[n].children_count; ++c)
+                if (model.nodes[n].children[c] >= 0 && model.nodes[n].children[c] < count)
+                    parent[model.nodes[n].children[c]] = n;
+        std::vector<int32_t> ancestor(count, -1);
+        for (int32_t n = 0; n < count; ++n)
+        {
+            for (int32_t up = parent[n], depth = 0; up >= 0 && depth < 256; up = parent[up], ++depth)
+            {
+                if (isJoint[up])
+                {
+                    ancestor[n] = up;
+                    break;
+                }
+            }
+        }
+        return ancestor;
+    }
+
     MeshImporter::GltfContent MeshImporter::InspectGltf(const std::filesystem::path& sourcePath)
     {
         GltfContent content;
@@ -868,6 +898,7 @@ namespace Nox
 
         const int32_t importedScene = ImportedScene(model);
         const std::vector<uint8_t> inScene = NodesInScene(model);
+        const std::vector<int32_t> jointAncestors = JointAncestors(model);
 
         // The size: every mesh of the imported scene, its POSITION accessor's min / max box through the node transforms.
         {
@@ -1009,8 +1040,10 @@ namespace Nox
             const tg3_node& node = model.nodes[i];
             if (node.mesh < 0 || node.mesh >= static_cast<int32_t>(model.meshes_count) || !inScene[i])
                 continue;
-            (node.skin >= 0 ? content.HasSkinnedMeshes : content.HasStaticMeshes) = true;
-            (node.skin >= 0 ? skinnedMeshes : staticMeshes).insert(node.mesh);
+            // A rigid part under a joint belongs to the character (UnifySkins binds it to the joint).
+            const bool skinned = node.skin >= 0 || jointAncestors[i] >= 0;
+            (skinned ? content.HasSkinnedMeshes : content.HasStaticMeshes) = true;
+            (skinned ? skinnedMeshes : staticMeshes).insert(node.mesh);
         }
         // A file without nodes draws its meshes as they are.
         if (model.nodes_count == 0 && model.meshes_count > 0)
@@ -1270,6 +1303,125 @@ namespace Nox
         return world;
     }
 
+    // One skin for the character, as Unreal's skeletal mesh has one skeleton: the file's skins merged (a joint shared by several skins
+    // with the same inverse bind matrix is one entry, otherwise each its own), every skinned vertex's joint indices moved from its
+    // skin's list into the merged one, and the rigid parts (unskinned meshes under a joint, MeshNodeData::RigidJoint) bound to their
+    // joint with weight 1: a copy of their submeshes in model space at the rest pose, so the joint carries them as it moves. The
+    // runtime then has the one skin it uses (Scene, AnimPose: Skins[0]), and the model is one character entity.
+    static void UnifySkins(Skeleton& skeleton, std::vector<MeshData>& meshes, std::vector<MaterialData>& materials,
+                           std::vector<PendingGeometry>& pending, std::vector<MeshNodeData>& nodes)
+    {
+        const bool rigidParts = std::any_of(nodes.begin(), nodes.end(), [](const MeshNodeData& node) { return node.RigidJoint >= 0 && node.SubmeshCount > 0; });
+        if (skeleton.Skins.empty() || (skeleton.Skins.size() == 1 && !rigidParts))
+            return;
+
+        Skin* unified = new Skin();
+        unified->Name = skeleton.Skins.size() == 1 && skeleton.Skins[0] ? skeleton.Skins[0]->Name : "Skin";
+        auto entryOf = [&](Node* joint, const glm::mat4& inverseBind) -> uint32_t
+        {
+            for (size_t k = 0; k < unified->Joints.size(); ++k)
+            {
+                if (unified->Joints[k] != joint)
+                    continue;
+                float difference = 0.0f;
+                for (int c = 0; c < 4; ++c)
+                    difference = std::max(difference, glm::length(unified->InverseBindMatrices[k][c] - inverseBind[c]));
+                if (difference < 1e-4f)
+                    return static_cast<uint32_t>(k);
+            }
+            unified->Joints.push_back(joint);
+            unified->InverseBindMatrices.push_back(inverseBind);
+            return static_cast<uint32_t>(unified->Joints.size() - 1);
+        };
+        std::vector<std::vector<uint32_t>> remap(skeleton.Skins.size());
+        for (size_t s = 0; s < skeleton.Skins.size(); ++s)
+        {
+            const Skin* skin = skeleton.Skins[s];
+            if (!skin)
+                continue;
+            for (size_t j = 0; j < skin->Joints.size(); ++j)
+                remap[s].push_back(entryOf(skin->Joints[j], j < skin->InverseBindMatrices.size() ? skin->InverseBindMatrices[j] : glm::mat4(1.0f)));
+        }
+
+        // Skinned submeshes, each once (a mesh instanced by nodes of different skins keeps the first one's).
+        std::vector<int32_t> submeshSkin(meshes.size(), -1);
+        for (const MeshNodeData& node : nodes)
+        {
+            if (!node.Skinned || node.RigidJoint >= 0 || node.SubmeshCount == 0 || node.SkinIndex < 0 ||
+                node.SkinIndex >= static_cast<int32_t>(remap.size()))
+                continue;
+            for (uint32_t i = node.FirstSubmesh; i < node.FirstSubmesh + node.SubmeshCount && i < meshes.size(); ++i)
+            {
+                if (submeshSkin[i] >= 0)
+                {
+                    if (submeshSkin[i] != node.SkinIndex)
+                        NOX_CORE_WARN("[Importer] mesh '{}' is skinned by several skins: the first one is kept", meshes[i].Name);
+                    continue;
+                }
+                submeshSkin[i] = node.SkinIndex;
+                const std::vector<uint32_t>& table = remap[node.SkinIndex];
+                for (shaderio::Vertex& vertex : meshes[i].Vertices)
+                {
+                    for (int c = 0; c < 4; ++c)
+                        vertex.boneIDs[c] = vertex.boneWeights[c] > 0.0f && vertex.boneIDs[c] < table.size() ? table[vertex.boneIDs[c]] : 0u;
+                }
+            }
+        }
+
+        // Rigid parts.
+        const std::vector<glm::mat4> worlds = NodeWorldMatrices(nodes);
+        for (size_t n = 0; n < nodes.size(); ++n)
+        {
+            MeshNodeData& node = nodes[n];
+            if (node.RigidJoint < 0 || node.SubmeshCount == 0 || node.RigidJoint >= static_cast<int32_t>(skeleton.AllNodes.size()) ||
+                !skeleton.AllNodes[node.RigidJoint])
+                continue;
+            const uint32_t entry = entryOf(skeleton.AllNodes[node.RigidJoint], glm::inverse(worlds[node.RigidJoint]));
+            const glm::mat4 world = worlds[n];
+            const glm::mat3 linear(world);
+            const glm::mat3 normalMatrix = glm::transpose(glm::inverse(linear));
+            const bool flip = glm::determinant(linear) < 0.0f;
+            const uint32_t first = static_cast<uint32_t>(meshes.size());
+            for (uint32_t i = node.FirstSubmesh; i < node.FirstSubmesh + node.SubmeshCount && i < first; ++i)
+            {
+                MeshData part = meshes[i];
+                for (shaderio::Vertex& vertex : part.Vertices)
+                {
+                    vertex.pos = glm::vec3(world * glm::vec4(vertex.pos, 1.0f));
+                    const glm::vec3 normal = normalMatrix * vertex.normal;
+                    vertex.normal = glm::length(normal) > 0.0f ? glm::normalize(normal) : vertex.normal;
+                    const glm::vec3 tangent = linear * glm::vec3(vertex.tangent);
+                    vertex.tangent = glm::vec4(glm::length(tangent) > 0.0f ? glm::normalize(tangent) : glm::vec3(vertex.tangent),
+                                               flip ? -vertex.tangent.w : vertex.tangent.w);
+                    vertex.boneIDs = glm::uvec4(entry, 0, 0, 0);
+                    vertex.boneWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+                }
+                for (MorphTarget& morph : part.Morphs)
+                {
+                    for (glm::vec3& delta : morph.Positions)
+                        delta = linear * delta;
+                    for (glm::vec3& delta : morph.Normals)
+                        delta = normalMatrix * delta;
+                }
+                PendingGeometry geometry = i < pending.size() ? pending[i] : PendingGeometry{};
+                geometry.Skinned = true;
+                if (flip)
+                    for (size_t t = 0; t + 2 < geometry.Indices.size(); t += 3)
+                        std::swap(geometry.Indices[t + 1], geometry.Indices[t + 2]);
+                MaterialData material = i < materials.size() ? materials[i] : MaterialData{};
+                meshes.push_back(std::move(part));
+                materials.push_back(std::move(material));
+                pending.push_back(std::move(geometry));
+            }
+            node.FirstSubmesh = first;
+            node.SubmeshCount = static_cast<uint32_t>(meshes.size()) - first;
+        }
+
+        for (Skin* skin : skeleton.Skins)
+            delete skin;
+        skeleton.Skins = { unified };
+    }
+
     // A glTF mesh as an asset of its own (Do Not Combine): its submeshes, copied, under one identity node (what a drag places).
     // After it come the file's instances of the mesh, one node each at its world transform (FileLayoutParent): dragging
     // several assets together places all of them where the file had them. False when no unskinned node uses the mesh.
@@ -1436,6 +1588,8 @@ namespace Nox
         const MeshImportSettings& importSettings = metadata.MeshSettings;
         if (!importSettings.ImportSkinWeights)
             ConvertSkinnedToStatic(nodeDataList, pendingGeometry);
+        else
+            UnifySkins(extractedSkeleton, meshDataList, materialDataList, pendingGeometry, nodeDataList);
         const bool isStatic = metadata.Type == AssetType::StaticMesh;
         const bool singleMesh = importSettings.SourceMeshIndex >= 0;
         MeshSubset subset;
@@ -1546,6 +1700,8 @@ namespace Nox
 
         if (!wholeFile.MeshSettings.ImportSkinWeights)
             ConvertSkinnedToStatic(nodeDataList, pendingGeometry);
+        else
+            UnifySkins(extractedSkeleton, meshDataList, materialDataList, pendingGeometry, nodeDataList);
 
         if (level)
         {
@@ -3363,6 +3519,7 @@ namespace Nox
                 }
             }
 
+            const std::vector<int32_t> jointAncestors = JointAncestors(model);
             if (model.nodes_count > 0)
             {
                 outNodes.resize(model.nodes_count);
@@ -3375,6 +3532,12 @@ namespace Nox
                                         : ("Node_" + std::to_string(i));
                     nodeData.Parent = parentMap[i];
                     nodeData.Skinned = node.skin >= 0;
+                    nodeData.SkinIndex = node.skin;
+                    if (node.skin < 0 && node.mesh >= 0 && jointAncestors[i] >= 0)
+                    {
+                        nodeData.Skinned = true; // a rigid part of the character
+                        nodeData.RigidJoint = jointAncestors[i];
+                    }
                     ExtractNodeTRS(node, nodeData.Translation, nodeData.Rotation, nodeData.Scale);
                     nodeData.Extras = FlattenExtras(node.ext.extras);
                 }

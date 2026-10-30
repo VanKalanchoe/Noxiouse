@@ -229,6 +229,8 @@ namespace Nox
         uint32_t SubmeshCount = 0;
         bool Skinned = false; // import time only (not cooked): the node's mesh is skinned by a glTF skin
         int32_t MeshIndex = -1;  // import time only: the glTF mesh this node instances
+        int32_t SkinIndex = -1;  // import time only: the glTF skin of a skinned node
+        int32_t RigidJoint = -1; // import time only: an unskinned mesh node's nearest joint above it (a rigid part of the character)
         std::string MeshName;    // import time only: that mesh's name
         // glTF extras (Blender's custom properties), flattened: key, value as text (strings as they are, the rest as JSON).
         std::vector<std::pair<std::string, std::string>> Extras;
