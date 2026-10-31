@@ -387,7 +387,7 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
 
         // --- UNLIT MATERIAL CHECK ---
         // If material is UNLIT (workflow == 2.0), bypass all lighting and output base color directly!
-        if (materialSample.b >= 0.75)
+        if (gbuffer_unlit(materialSample.b))
         {
             TonemapParameters tonemapParams;
             tonemapParams.exposure = ubo->exposure;
@@ -396,19 +396,16 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
             return float4(toneMap(baseColor, tonemapParams), 1.0);
         }
 
-        float3 f0 = float3(0.04);
-        float3 diffuseColor = baseColor * (float3(1.0) - f0) * (1.0 - metallic);
-        float3 specularColor = lerp(f0, baseColor, metallic);
-        float reflectance = max(max(specularColor.r, specularColor.g), specularColor.b);
+        // The lobes past the core model (clear coat, sheen, specular, iridescence, anisotropy: GBufferLobes, PBRLighting.slang). A
+        // pixel without them shades exactly as the core model below always did.
+        const GBufferLobes lobes = gbuffer_load_lobes(ubo, int2(pixelCoord), materialSample.b);
+        const bool hasLobes = lobes.flags != 0u;
+
+        float3 diffuseColor, specularColor, specularEnvironmentR90;
+        lobe_base_reflectance(lobes, baseColor, metallic, diffuseColor, specularColor, specularEnvironmentR90);
         float3 specularEnvironmentR0 = specularColor;
-        // The grazing-angle Fresnel reflectance (F90): Sascha Willems' reference glTF PBR shader (and every other copy of
-        // this same formula, e.g. Khronos' own glTF-WebGL-PBR/gltf-viewer) uses `reflectance * 25.0` here -- this had
-        // `* 50.0`, which saturates F90 to full white reflectance at half the reflectance value it should, making the
-        // Fresnel rim/edge highlight ramp up far too aggressively on ordinary (low-reflectance, non-metal) surfaces --
-        // cobblestones, fabric, wood, painted walls -- giving the whole scene a "wet"/polished look, while the path
-        // tracer's separate, simpler Schlick Fresnel (fresnel_schlick in PathTracer.slang: no F90 term at all,
-        // equivalent to always using the correct F90 = 1) was never affected.
-        float3 specularEnvironmentR90 = clamp(float3(reflectance * 25.0), 0.0, 1.0);
+        // (F90 without the specular lobe: max(F0) x 25, as the reference glTF shaders this follows -- Sascha Willems', Khronos'
+        // glTF-WebGL-PBR -- where it once was x 50 and saturated F90 at half the reflectance it should: a "wet" look everywhere.)
 
         // 5. Vectors
         // "Camera position to surface" only diverges correctly for a real point (perspective) camera; the editor's orthographic
@@ -433,6 +430,13 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
         float3 v = normalize(nearH.xyz / nearH.w - worldPos);
         float NdotV = clamp(dot(n, v), 0.001, 1.0);
         float3 reflection = normalize(reflect(-v, n));
+
+        LobeShading lobeShading;
+        if (hasLobes)
+        {
+            const float3 anisotropicT = lobes.anisotropy > 0.0 ? lobe_anisotropy_direction(n, lobes.anisotropyAngle, n) : float3(0.0);
+            lobeShading = lobe_prepare(ubo, lobes, anisotropicT, n, v, NdotV, baseColor, metallic, alphaRoughness);
+        }
 
         // 6. Direct Analytical Lighting (Directional, Point, Spot) -- or ReSTIR DI's resampled
         // result, which shadow-rays every light regardless of count instead of only light index 0
@@ -463,7 +467,8 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
                 {
                     PBRInfo rectInputs = PBRInfo(1.0, NdotV, 1.0, 1.0, 1.0, perceptualRoughness, metallic, specularEnvironmentR0,
                                                  specularEnvironmentR90, alphaRoughness, diffuseColor, specularColor);
-                    const float3 rectLight = evaluateRectLight(rectInputs, light, worldPos, n, v);
+                    const float3 rectLight = hasLobes ? evaluateRectLightLobes(rectInputs, lobeShading, light, worldPos, n, v)
+                                                      : evaluateRectLight(rectInputs, light, worldPos, n, v);
                     if (any(rectLight > 0.0) && light_shadow_priority(light, worldPos) < shadowThreshold)
                         directLighting += rectLight; // over the shadow-ray budget: unshadowed
                     else if (any(rectLight > 0.0))
@@ -561,11 +566,28 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
 
                 float3 lightRadiance = light.color.rgb * light.color.w * attenuation * lightShadow;
                 // Light through a leaf or cloth from behind is diffuse: no specular highlight on the side it leaves.
-                directLighting += backLit ? NdotL * lightRadiance * diffuse(pbrInputs) : evaluateDirectLight(pbrInputs, lightRadiance);
+                if (backLit)
+                    directLighting += NdotL * lightRadiance * diffuse(pbrInputs);
+                else if (hasLobes)
+                    directLighting += evaluateDirectLightLobes(ubo, pbrInputs, lobeShading, n, v, l, lightRadiance);
+                else
+                    directLighting += evaluateDirectLight(pbrInputs, lightRadiance);
             }
         }
 
         // 7. Image-Based Lighting (IBL) & Decoupled RT Reflections
+        // The lobes' ambient: the film's Fresnel at this view angle as the split sum's F0 (so environment, GI and reflections all
+        // see it), an anisotropic surface's environment along its bent reflection.
+        float3 environmentReflection = reflection;
+        if (hasLobes)
+        {
+            if (lobeShading.lobes.iridescence > 0.0)
+            {
+                specularColor = lerp(specularColor, schlick_to_f0(lobeShading.iridescenceFresnel, NdotV), lobeShading.lobes.iridescence);
+                specularEnvironmentR0 = specularColor;
+            }
+            environmentReflection = lobe_reflection(lobeShading, n, v, perceptualRoughness);
+        }
         PBRInfo iblInputs = PBRInfo(
             1.0,
             NdotV,
@@ -580,16 +602,19 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
             diffuseColor,
             specularColor
         );
-        IBLResult ibl = getIBLContribution(ubo, iblInputs, n, reflection, occlusion);
+        IBLResult ibl = getIBLContribution(ubo, iblInputs, n, environmentReflection, occlusion);
         float3 ambientDiffuse = ibl.diffuse;
         float3 ambientSpecular = ibl.specular;
 
         float specularOcclusion = 1.0;
+        float3 screenProbeIrradiance = float3(0.0); // the screen probes' irradiance (rough reflections take it in place of the sky)
+        bool hasScreenProbeIrradiance = false;
         // Diffuse Global Illumination: screen probes (ScreenProbeIntegrate.slang), ReSTIR GI (Screen-Space Resampling) or DDGI Probes
         if (pushConstant.diffuseGIMode == 3 && pushConstant.screenProbeGITextureIndex != 0xFFFFFFFF)
         {
             Texture2D screenProbeTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.screenProbeGITextureIndex, 0));
-            const float3 screenProbeIrradiance = screenProbeTex.Load(int3(pixelCoord, 0)).rgb;
+            screenProbeIrradiance = screenProbeTex.Load(int3(pixelCoord, 0)).rgb;
+            hasScreenProbeIrradiance = true;
             ambientDiffuse = screenProbeIrradiance * diffuseColor;
 
             // The sky's reflection only as far as the sky reaches this surface (indoors it does not).
@@ -639,10 +664,16 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
 
         // Sample Decoupled RT Reflection (Denoised via NRD REBLUR/RELAX or Raw 1-SPP)
         float3 reflColor = float3(0.0);
+        float3 rtRadiance = float3(0.0); // the reflection's radiance, its sky share held back as the environment's (for the coat too)
         uint reflDenoiserMode = (pushConstant.nrdShadowsEnabled >> 1) & 3;
         // As far as Reflection.slang traces (RTReflectionMaxRoughness, shaderIO.h).
         const float maxRoughness = RTReflectionMaxRoughness;
-        bool hasRTReflection = (ubo->enableRTReflections != 0 && perceptualRoughness < maxRoughness && ubo->brdfLutIndex != 0xFFFFFFFF);
+        // The reflection is traced for the reflection layer (gbuffer_reflection_layer: the clear coat's blend where there is one).
+        float3 reflectionNormal = n;
+        float reflectionRoughness = perceptualRoughness;
+        gbuffer_reflection_layer(lobes, reflectionNormal, reflectionRoughness);
+        const bool reflectionTraced = ubo->enableRTReflections != 0 && reflectionRoughness < maxRoughness && ubo->brdfLutIndex != 0xFFFFFFFF;
+        bool hasRTReflection = reflectionTraced && perceptualRoughness < maxRoughness;
         if (hasRTReflection)
         {
             Texture2D reflTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.reflectionTextureIndex, 0));
@@ -655,7 +686,6 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
 
             // Specular Fresnel factor: only ~0.04 (4%) for dielectrics (plants, stone), ~0.9-1.0 for metals
             float3 specularFactor = specularColor * brdf.x + brdf.y;
-            float3 rtSpecular = reflColor * specularFactor;
 
             // Where the reflection rays went to the sky (Reflection.slang: a miss's hit distance is reflection_miss_distance), indoors or
             // in the dark the sky's light is held back like the environment's (specularOcclusion). The hit distance is in world units
@@ -664,11 +694,51 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
             // REBLUR).
             const float skyShare = reflDenoiserMode == 1 ? smoothstep(0.85, 0.98, reflSample.a)
                                                          : smoothstep(0.25, 0.9, reflSample.a / reflection_miss_distance(ubo));
-            rtSpecular *= lerp(1.0, specularOcclusion, skyShare);
+            rtRadiance = reflColor * lerp(1.0, specularOcclusion, skyShare);
+            const float3 rtSpecular = rtRadiance * specularFactor;
 
             // Smooth fade out into environment IBL as roughness reaches maxRoughness
             float rtWeight = saturate((maxRoughness - perceptualRoughness) / 0.15);
             ambientSpecular = lerp(ambientSpecular, rtSpecular, rtWeight);
+        }
+
+        // The coat's and the sheen's ambient over the base's (lobe_ambient): each lobe's environment at its own roughness, held back
+        // as the base's is (the specular occlusion; rough ones take the screen probes' GI), the coat the traced reflection where
+        // there is one.
+        if (hasLobes && (lobeShading.lobes.coat > 0.0 || (lobes.flags & MaterialLobeSheen) != 0u))
+        {
+            float3 sheenRadiance = float3(0.0);
+            if ((lobes.flags & MaterialLobeSheen) != 0u)
+            {
+                sheenRadiance = prefilteredRadiance(ubo, reflection, lobes.sheenRoughness) *
+                                iblSpecularOcclusion(NdotV, occlusion, lobes.sheenRoughness) * specularOcclusion;
+                if (hasScreenProbeIrradiance)
+                    sheenRadiance = lerp(sheenRadiance, screenProbeIrradiance, smoothstep(0.35, 0.8, lobes.sheenRoughness));
+            }
+            float3 coatRadiance = float3(0.0);
+            if (lobeShading.lobes.coat > 0.0)
+            {
+                const float coatRoughness = clamp(lobes.coatRoughness, c_MinRoughness, 1.0);
+                coatRadiance = prefilteredRadiance(ubo, normalize(reflect(-v, lobes.coatNormal)), coatRoughness) *
+                               iblSpecularOcclusion(lobeShading.coatNdotV, occlusion, coatRoughness) * specularOcclusion;
+                if (hasScreenProbeIrradiance)
+                    coatRadiance = lerp(coatRadiance, screenProbeIrradiance, smoothstep(0.35, 0.8, coatRoughness));
+                if (reflectionTraced && coatRoughness < maxRoughness)
+                {
+                    if (!hasRTReflection) // the base too rough for it: read here
+                    {
+                        Texture2D reflTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.reflectionTextureIndex, 0));
+                        const float4 reflSample = reflTex.Load(int3(pixelCoord, 0));
+                        reflColor = NRD_UnpackSignal(reflDenoiserMode, reflSample);
+                        const float skyShare = reflDenoiserMode == 1 ? smoothstep(0.85, 0.98, reflSample.a)
+                                                                     : smoothstep(0.25, 0.9, reflSample.a / reflection_miss_distance(ubo));
+                        rtRadiance = reflColor * lerp(1.0, specularOcclusion, skyShare);
+                    }
+                    coatRadiance = lerp(coatRadiance, rtRadiance, saturate((maxRoughness - coatRoughness) / 0.15));
+                }
+            }
+            ambientDiffuse *= lobe_ambient(ubo, lobeShading, float3(1.0), float3(0.0), float3(0.0), NdotV);
+            ambientSpecular = lobe_ambient(ubo, lobeShading, ambientSpecular, coatRadiance, sheenRadiance, NdotV);
         }
 
         float3 iblColor = ambientDiffuse + ambientSpecular;

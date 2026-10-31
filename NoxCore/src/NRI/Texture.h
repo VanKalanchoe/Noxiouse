@@ -26,6 +26,7 @@ namespace NRI
         R32SINT,
         R32G32_UINT,
         R32G32_SFLOAT,
+        R32G32B32A32_UINT,
         
         R16G16_SFLOAT,
         R16G16B16A16_SFLOAT,
@@ -112,6 +113,7 @@ namespace NRI
         case ImageFormat::R32G32_UINT:
         case ImageFormat::R32G32_SFLOAT:
         case ImageFormat::R16G16B16A16_SFLOAT: outBlockBytes = 8; break;
+        case ImageFormat::R32G32B32A32_UINT:
         case ImageFormat::R32G32B32A32_SFLOAT: outBlockBytes = 16; break;
         case ImageFormat::BC1_UNorm:
         case ImageFormat::BC1_UNorm_SRGB:

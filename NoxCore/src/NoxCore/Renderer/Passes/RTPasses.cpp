@@ -21,6 +21,10 @@ namespace Nox
             {
                 builder.Read(resources.Depth);
                 builder.Read(resources.GBufferNormal);
+                // The reflection layer's normal and roughness (gbuffer_reflection_layer): the lobe bits and the lobes.
+                builder.Read(resources.GBufferMaterial);
+                builder.Read(resources.GBufferLobes);
+                builder.Read(resources.GBufferSpecular);
                 builder.ColorTarget(resources.ViewZ, NRI::LoadOP::dontCare, NRI::StoreOP::store);
                 builder.ColorTarget(resources.NRDNormalRoughness, NRI::LoadOP::dontCare, NRI::StoreOP::store);
                 builder.SetRenderArea(m_frame.renderExtent);
@@ -44,6 +48,7 @@ namespace Nox
                 push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.gbufferNormalIndex = context.Slot(res->GBufferNormal);
+                push.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
                 push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
                 cmd.pushData(&push, sizeof(push));
                 cmd.drawMeshTasks(1, 1, 1);
@@ -242,6 +247,8 @@ namespace Nox
                     builder.Read(resources.Depth);
                     builder.Read(resources.GBufferNormal);
                     builder.Read(resources.GBufferMaterial);
+                    builder.Read(resources.GBufferLobes);    // the reflection layer (gbuffer_reflection_layer)
+                    builder.Read(resources.GBufferSpecular);
                     ReadIfValid(builder, resources.GBufferAlbedo);
                     builder.Read(resources.Visibility);
                     ReadIfValid(builder, resources.TLAS);

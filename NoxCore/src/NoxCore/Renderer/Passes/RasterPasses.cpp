@@ -791,6 +791,8 @@ namespace Nox
                 builder.ColorTarget(resources.GBufferMaterial, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f }); // roughness, metallic, workflow
                 builder.ColorTarget(resources.GBufferEmission, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f }); // RGBA16F
                 builder.ColorTarget(resources.Entity, NRI::LoadOP::clear, NRI::StoreOP::store, { -1.0f, 0.0f, 0.0f, 0.0f });         // R32SINT
+                builder.ColorTarget(resources.GBufferLobes, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });    // RGBA32U lobes
+                builder.ColorTarget(resources.GBufferSpecular, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f }); // RGBA8 F0, weight
                 if (writeVelocity)
                     builder.ColorTarget(resources.GBufferVelocity, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f }); // RG32F
                 builder.SetRenderArea(m_frame.renderExtent);
@@ -801,7 +803,7 @@ namespace Nox
                     return;
 
                 NRI::CommandBuffer& cmd = context.Cmd();
-                const uint32_t attachmentCount = writeVelocity ? 6u : 5u;
+                const uint32_t attachmentCount = writeVelocity ? 8u : 7u;
                 const float rw = static_cast<float>(m_frame.renderExtent.width);
                 const float rh = static_cast<float>(m_frame.renderExtent.height);
 

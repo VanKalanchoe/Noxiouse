@@ -544,6 +544,8 @@ namespace Nox
                 builder.Read(resources.GBufferNormal);
                 builder.Read(resources.GBufferMaterial);
                 builder.Read(resources.GBufferEmission);
+                builder.Read(resources.GBufferLobes);    // the lobes (gbuffer_load_lobes, through the uniforms)
+                builder.Read(resources.GBufferSpecular);
                 builder.Read(resources.Depth);
                 if (frame.gbufferVelocityWritten && m_debugMode == 15)
                     builder.Read(resources.GBufferVelocity);

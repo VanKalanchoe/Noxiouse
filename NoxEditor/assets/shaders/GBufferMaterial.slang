@@ -1,5 +1,6 @@
- #include "shaderIO.h"
+#include "shaderIO.h"
 #include "MipFeedback.slang"
+#include "MaterialLobes.slang"
 
     struct GBufferPayload
     {
@@ -61,10 +62,12 @@
     {
         float4 albedo   : SV_Target0; // RGB: BaseColor, A: Occlusion
         float4 normal   : SV_Target1; // RGB: World Normal, A: Roughness
-        float4 material : SV_Target2; // R: Roughness, G: Metallic, B: Workflow, A: double sided
+        float4 material : SV_Target2; // R: Roughness, G: Metallic, B: lobe and unlit bits (gbuffer_encode_flags), A: double sided
         float4 emission : SV_Target3; // RGB: Emissive, A: 1.0
         int    entityID : SV_Target4; // Editor Entity Picking ID
-        float2 velocity : SV_Target5; // Screen-Space Motion Vectors (RG32F)
+        uint4  lobes    : SV_Target5; // the lobes (gbuffer_encode_lobes; RGBA32_UINT)
+        float4 specular : SV_Target6; // the dielectric F0 and specular weight (gbuffer_encode_specular; RGBA8)
+        float2 velocity : SV_Target7; // Screen-Space Motion Vectors (RG32F)
     };
 
     struct GBufferOutputNoVelocity
@@ -74,6 +77,8 @@
         float4 material : SV_Target2;
         float4 emission : SV_Target3;
         int    entityID : SV_Target4;
+        uint4  lobes    : SV_Target5;
+        float4 specular : SV_Target6;
     };
 
     // Ray/triangle-plane intersection, for the derivative samples (below) only: they need a barycentric solve for a
@@ -148,6 +153,8 @@
             output.material = float4(0.0, 0.0, 0.0, 0.0);
             output.emission = float4(0.0, 0.0, 0.0, 0.0);
             output.entityID = -1;
+            output.lobes = uint4(0u);
+            output.specular = float4(0.0);
             output.velocity = float2(0.0, 0.0);
 
             // Compute camera background motion vector (rotation-only, jitter-free like the geometry path below)
@@ -323,6 +330,8 @@
                 output.material = float4(0.0, 0.0, 0.0, 0.0);
                 output.emission = float4(0.0, 0.0, 0.0, 0.0);
                 output.entityID = -1;
+                output.lobes = uint4(0u);
+                output.specular = float4(0.0);
                 return output;
             }
             float4 hitPosH = mul(ubo->invViewProj, float4(ndc, pixelDepth, 1.0));
@@ -571,6 +580,37 @@
             finalNormal = -finalNormal;
         }
 
+        // 3b. THE LOBES past the core model (MaterialLobes.slang): clear coat, sheen, specular, iridescence, anisotropy.
+        GpuMaterial* gpuMaterial = instances.material(instanceSlot);
+        GBufferLobes lobes = gbuffer_default_lobes();
+        float3 anisotropicT = float3(0.0);
+        if (gpuMaterial.lobes != 0u && instance.unlit == 0)
+        {
+            MaterialSampleCoords coords;
+            coords.uv[0] = uv0; coords.ddx[0] = ddx_uv0; coords.ddy[0] = ddy_uv0;
+            coords.uv[1] = uv1; coords.ddx[1] = ddx_uv1; coords.ddy[1] = ddy_uv1;
+            coords.lod = -1.0;
+            lobes = evaluate_material_lobes(ubo, gpuMaterial, coords, samp, geomNormal, rawGeomTangent, tangentHandedness, backFace, anisotropicT);
+            // Texture streaming: the lobe textures' mips, as the base textures' above.
+            if (ubo->mipFeedbackReference != 0 && isMipFeedbackPixel(pixelCoord, ubo->mipFeedbackFrame))
+            {
+                const uint lobeTextures[10] = { gpuMaterial.clearcoatTextureIndex, gpuMaterial.clearcoatRoughnessTextureIndex, gpuMaterial.clearcoatNormalTextureIndex,
+                                                gpuMaterial.sheenColorTextureIndex, gpuMaterial.sheenRoughnessTextureIndex, gpuMaterial.specularColorTextureIndex,
+                                                gpuMaterial.specularStrengthTextureIndex, gpuMaterial.iridescenceTextureIndex,
+                                                gpuMaterial.iridescenceThicknessTextureIndex, gpuMaterial.anisotropyTextureIndex };
+                const int lobeSets[10] = { gpuMaterial.clearcoatTextureSet, gpuMaterial.clearcoatRoughnessTextureSet, gpuMaterial.clearcoatNormalTextureSet,
+                                           gpuMaterial.sheenColorTextureSet, gpuMaterial.sheenRoughnessTextureSet, gpuMaterial.specularColorTextureSet,
+                                           gpuMaterial.specularStrengthTextureSet, gpuMaterial.iridescenceTextureSet,
+                                           gpuMaterial.iridescenceThicknessTextureSet, gpuMaterial.anisotropyTextureSet };
+                const float lodScale = exp2(-ubo->textureLodBias); // the gradients before the LOD bias (as the base textures report)
+                for (uint t = 0; t < 10; ++t)
+                {
+                    const uint set = lobeSets[t] == 1 ? 1u : 0u;
+                    reportMipFeedback(ubo, lobeTextures[t], coords.uv[set], coords.ddx[set] * lodScale, coords.ddy[set] * lodScale);
+                }
+            }
+        }
+
         // 4. OCCLUSION
         float occlusion = 1.0;
         if (instance.occlusionTextureIndex != 0xFFFFFFFF)
@@ -627,14 +667,27 @@
         }
         output.normal   = (pushConstant.debugMode == 2) ? float4(rawNormalTex, roughness) : float4(finalNormal, roughness);
 
-        // Encode unlit flag: 2.0 = UNLIT
-        // The material target is RGBA8 (0..1): unlit is 1, the workflow (0 metal-rough, 1 spec-gloss) halved. Unlit used to be
-        // stored as 2, which the target clamped to 1: every reader's "unlit" test (>= 2) never held and unlit surfaces were lit.
-        float workflow  = (instance.unlit != 0) ? 1.0 : instance.workflow * 0.5;
-        output.material = float4(roughness, metallic, workflow, gbuffer_encode_back_light(instance.doubleSided != 0, instance.diffuseTransmission));
+        // The lobe bits and unlit (gbuffer_unlit): which lobe targets hold data for this pixel.
+        output.material = float4(roughness, metallic, gbuffer_encode_flags(lobes.flags, instance.unlit != 0),
+                                 gbuffer_encode_back_light(instance.doubleSided != 0, instance.diffuseTransmission));
 
+        // The coat is over the emission too: what it reflects of the view does not come from below (the spec's coated_emission).
+        if (lobes.coat > 0.0)
+            emission *= 1.0 - lobes.coat * (0.04 + 0.96 * pow(1.0 - saturate(dot(lobes.coatNormal, -viewDir)), 5.0));
         output.emission = float4(emission, 1.0);
         output.entityID = instance.entityID;
+
+        // The anisotropy direction as an angle against the stored normal's basis (the reader rebuilds the same basis from it).
+        if (lobes.anisotropy > 0.0)
+        {
+            const float3 storedNormal = gbuffer_stored_normal(finalNormal);
+            float3 t0, b0;
+            gbuffer_normal_basis(storedNormal, t0, b0);
+            const float3 t = anisotropicT - storedNormal * dot(storedNormal, anisotropicT);
+            lobes.anisotropyAngle = atan2(dot(t, b0), dot(t, t0));
+        }
+        output.lobes = gbuffer_encode_lobes(lobes);
+        output.specular = gbuffer_encode_specular(lobes);
 
         output.velocity = float2(0.0, 0.0);
         if (writeVelocity)
@@ -673,5 +726,7 @@
         output.material = full.material;
         output.emission = full.emission;
         output.entityID = full.entityID;
+        output.lobes = full.lobes;
+        output.specular = full.specular;
         return output;
     }

@@ -4,6 +4,8 @@
 
 #include "SceneGI.slang"
 #include "LightSelection.slang"
+#include "PBRLighting.slang"
+#include "MaterialLobes.slang"
 
 // Intersection UV interpolation
 float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
@@ -84,7 +86,7 @@ float3 ray_transmittance(UniformBufferObject* ubo, float3 origin, float3 directi
 // metallic-roughness from the factors and the metallic-roughness texture (G roughness, B metallic) with the IoR's dielectric F0;
 // specular-glossiness (RGB specular, A glossiness) converted to it (specGlossToMetalRough there, Donut's formula).
 void hit_material(UniformBufferObject* ubo, GpuRayTracingInstance lut, float3 color, float2 uv, SamplerState textureSampler,
-                  out float3 albedo, out float3 specularF0, out float roughness)
+                  out float3 albedo, out float3 specularF0, out float roughness, out float metallic)
 {
     const float ior = lut.ior > 0.0 ? lut.ior : 1.5;
     const float dielectricF0 = pow((ior - 1.0) / (ior + 1.0), 2.0);
@@ -96,7 +98,7 @@ void hit_material(UniformBufferObject* ubo, GpuRayTracingInstance lut, float3 co
 
     if (lut.workflow != 1.0)
     {
-        const float metallic = saturate(lut.metallicFactor * mrSample.b);
+        metallic = saturate(lut.metallicFactor * mrSample.b);
         roughness = saturate(lut.roughnessFactor * mrSample.g);
         albedo = color * (1.0 - metallic);
         specularF0 = lerp(float3(dielectricF0), color, metallic);
@@ -109,7 +111,7 @@ void hit_material(UniformBufferObject* ubo, GpuRayTracingInstance lut, float3 co
     const float specularStrength = max(specularColor.r, max(specularColor.g, specularColor.b));
     const float diffuseBrightness = sqrt(dot(color * color, float3(0.299, 0.587, 0.114)));
     const float specularBrightness = sqrt(dot(specularColor * specularColor, float3(0.299, 0.587, 0.114)));
-    float metallic = 0.0;
+    metallic = 0.0;
     if (specularBrightness >= dielectricSpecular)
     {
         const float a = dielectricSpecular;
@@ -192,8 +194,38 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     // Its diffuse and specular parts, as the path tracer splits them (PathTracerBridge.slang: the metallic-roughness inputs, or the
     // specular-glossiness ones converted). A metal is all specular: chrome's diffuse is near black.
     float3 albedo, specularF0;
-    float roughness;
-    hit_material(ubo, hitLut, baseColor, hitUV, textureSampler, albedo, specularF0, roughness);
+    float roughness, metallic;
+    hit_material(ubo, hitLut, baseColor, hitUV, textureSampler, albedo, specularF0, roughness, metallic);
+    const float hitNdotV = clamp(dot(hitNormal, -R), 0.001, 1.0);
+
+    // The hit's lobes (MaterialLobes.slang): the specular lobe's F0 and weight, the film's Fresnel as the environment's F0, and the
+    // sheen and clear coat over what this last bounce has (no coat normal map or anisotropy: the hit has no tangent frame here).
+    float3 specularF90 = float3(1.0);
+    bool hasLobes = false;
+    LobeShading lobeShading;
+    if (hitLut.lobes != 0u && hitLut.workflow != 1.0)
+    {
+        GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[hitLut.materialIndex];
+        MaterialSampleCoords coords;
+        coords.uv[0] = hitUV;
+        coords.uv[1] = w0 * vertex0.uv1 + w1 * vertex1.uv1 + w2 * vertex2.uv1;
+        coords.ddx[0] = coords.ddx[1] = coords.ddy[0] = coords.ddy[1] = float2(0.0);
+        coords.lod = 0.0;
+        float3 unusedDirection;
+        const GBufferLobes lobes = evaluate_material_lobes(ubo, material, coords, textureSampler, hitNormal, float3(0.0), 1.0, false, unusedDirection);
+        hasLobes = lobes.flags != 0u;
+        if (hasLobes)
+        {
+            if ((lobes.flags & MaterialLobeSpecular) != 0u)
+            {
+                specularF0 = lerp(lobes.dielectricF0 * lobes.specularWeight, baseColor, metallic);
+                specularF90 = float3(lerp(lobes.specularWeight, 1.0, metallic));
+            }
+            lobeShading = lobe_prepare(ubo, lobes, float3(0.0), hitNormal, -R, hitNdotV, baseColor, metallic, roughness * roughness);
+            if (lobeShading.lobes.iridescence > 0.0)
+                specularF0 = lerp(specularF0, schlick_to_f0(lobeShading.iridescenceFresnel, hitNdotV), lobeShading.lobes.iridescence);
+        }
+    }
 
     // Direct light: the strongest lights at the hit exactly, one more for all the others (LightSelection.slang), each behind a
     // shadow ray with alpha-masked occluders cut out.
@@ -230,13 +262,27 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     float3 specularLight = float3(0.0);
     if (ubo->prefilteredMapIndex != 0xFFFFFFFF && ubo->brdfLutIndex != 0xFFFFFFFF && any(specularF0 > 0.0))
     {
-        const float NdotV = clamp(dot(hitNormal, -R), 0.001, 1.0);
+        const float NdotV = hitNdotV;
         TextureCube environment = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
         const float3 environmentLight = environment.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0)),
                                                                 reflect(R, hitNormal), roughness * ubo->prefilteredCubeMipLevels).rgb;
         Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
         const float2 brdf = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)), float2(NdotV, 1.0 - roughness), 0).rg;
-        specularLight = environmentLight * ubo->scaleIBLAmbient * (specularF0 * brdf.x + brdf.y) * specularOcclusion;
+        specularLight = environmentLight * ubo->scaleIBLAmbient * (specularF0 * brdf.x + specularF90 * brdf.y) * specularOcclusion;
+    }
+
+    float3 directShare = directLight;
+    float coatWeight = 0.0;
+    if (hasLobes)
+    {
+        const float3 mirror = reflect(R, hitNormal);
+        const float3 sheenRadiance = prefilteredRadiance(ubo, mirror, lobeShading.lobes.sheenRoughness) * specularOcclusion;
+        const float3 coatRadiance = prefilteredRadiance(ubo, mirror, clamp(lobeShading.lobes.coatRoughness, c_MinRoughness, 1.0)) * specularOcclusion;
+        const float3 below = lobe_ambient(ubo, lobeShading, float3(1.0), float3(0.0), float3(0.0), hitNdotV);
+        directShare *= below;
+        ambientLight *= below;
+        specularLight = lobe_ambient(ubo, lobeShading, specularLight, coatRadiance, sheenRadiance, hitNdotV);
+        coatWeight = lobeShading.coatWeight;
     }
 
     // Emissive light from hit surface (e.g. Cornell Box ceiling light)
@@ -247,7 +293,8 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
         emissiveLight *= SampleMaterialTextureLevel(ubo, hitLut.emissiveTextureIndex, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), hitUV, 2.0).rgb;
     }
 
-    return directLight + ambientLight + specularLight + emissiveLight * emissionWeight;
+    // The coat over the emission (the spec's coated_emission).
+    return directShare + ambientLight + specularLight + emissiveLight * emissionWeight * (1.0 - coatWeight);
 }
 
 #endif

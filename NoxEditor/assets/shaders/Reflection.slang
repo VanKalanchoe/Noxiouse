@@ -154,13 +154,16 @@ float4 fragMain(
     float4 materialSample = materialTex.Load(int3(pixelCoord, 0));
 
     float lenSqN = dot(normalSample.rgb, normalSample.rgb);
-    if (lenSqN < 1e-6 || materialSample.b >= 0.75) // Invalid normal or Unlit material
+    if (lenSqN < 1e-6 || gbuffer_unlit(materialSample.b)) // Invalid normal or Unlit material
     {
         return noReflection(ubo, pushConstant.denoiserMode);
     }
 
     float3 normal = normalSample.rgb * rsqrt(lenSqN);
-    float roughness = clamp(materialSample.r, 0.001, 1.0);
+    float roughness = materialSample.r;
+    // The layer reflected: a clear coat's blend over the base (gbuffer_reflection_layer), else the surface itself.
+    gbuffer_reflection_layer(gbuffer_load_lobes(ubo, pixelCoord, materialSample.b), normal, roughness);
+    roughness = clamp(roughness, 0.001, 1.0);
     if (smoothFill && roughness >= pushConstant.smoothFillRoughness)
         discard; // rough enough: the upsampled reduced-resolution result stays
 

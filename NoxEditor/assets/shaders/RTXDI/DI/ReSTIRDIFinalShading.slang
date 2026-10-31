@@ -412,7 +412,7 @@ PSOutput fragMain(
     float4 albedoSample = albedoTex.Load(int3(pixelCoord, 0));
     float4 materialSample = materialTex.Load(int3(pixelCoord, 0));
 
-    if (materialSample.b >= 0.75) // Unlit workflow: no direct lighting contribution
+    if (gbuffer_unlit(materialSample.b)) // Unlit: no direct lighting contribution
     {
         return outVal;
     }

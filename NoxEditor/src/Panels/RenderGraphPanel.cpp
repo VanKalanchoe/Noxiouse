@@ -29,6 +29,7 @@ namespace Nox
             case NRI::ImageFormat::R16G16: return "RG16";
             case NRI::ImageFormat::R32SINT: return "R32I";
             case NRI::ImageFormat::R32G32_UINT: return "RG32U";
+            case NRI::ImageFormat::R32G32B32A32_UINT: return "RGBA32U";
             case NRI::ImageFormat::R32G32_SFLOAT: return "RG32F";
             case NRI::ImageFormat::R16G16_SFLOAT: return "RG16F";
             case NRI::ImageFormat::R16G16B16A16_SFLOAT: return "RGBA16F";
@@ -525,6 +526,7 @@ namespace Nox
         }
 
         const bool floatFormat = key.Format != NRI::ImageFormat::R32SINT && key.Format != NRI::ImageFormat::R32G32_UINT &&
+                                 key.Format != NRI::ImageFormat::R32G32B32A32_UINT &&
                                  key.Usage != NRI::TextureUsage::DepthStencilAttachment;
         if (floatFormat)
         {

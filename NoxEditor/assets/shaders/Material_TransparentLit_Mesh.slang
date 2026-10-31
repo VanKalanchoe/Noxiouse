@@ -22,6 +22,7 @@
 #include "shaderIO.h"
 #include "DDGICommon.slang"
 #include "PBRLighting.slang"
+#include "MaterialLobes.slang"
 #include "MipFeedback.slang"
 #include "RayHitShading.slang"
 #include "HeightFog.slang"
@@ -399,12 +400,32 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     const float coverage = instance.alphaMode == 2 ? baseColor.a : 1.0;
     const float diffuseAlpha = 1.0 - transmission;
 
+    // The lobes past the core model (MaterialLobes.slang), as the G-buffer evaluates them for opaque surfaces.
+    GBufferLobes lobes = gbuffer_default_lobes();
+    float3 anisotropicT = float3(0.0);
+    GpuMaterial* gpuMaterial = instances.material(vertIn.drawID);
+    if (gpuMaterial.lobes != 0u && instance.unlit == 0 && instance.workflow == PBR_WORKFLOW_METALLIC_ROUGHNESS)
+    {
+        const float lodScale = exp2(ubo->textureLodBias); // as SampleMaterialTextureBias reads the base textures
+        MaterialSampleCoords coords;
+        coords.uv[0] = vertIn.uv0; coords.ddx[0] = ddx(vertIn.uv0) * lodScale; coords.ddy[0] = ddy(vertIn.uv0) * lodScale;
+        coords.uv[1] = vertIn.uv1; coords.ddx[1] = ddx(vertIn.uv1) * lodScale; coords.ddy[1] = ddy(vertIn.uv1) * lodScale;
+        coords.lod = -1.0;
+        lobes = evaluate_material_lobes(ubo, gpuMaterial, coords, sampLinearHandle, normalize(vertIn.normal), vertIn.tangent.xyz, vertIn.tangent.w,
+                                        instance.doubleSided != 0 && !isFrontFace, anisotropicT);
+    }
+    const bool hasLobes = lobes.flags != 0u;
+    // KHR_materials_specular: the dielectric F0 tinted (the IOR's already in it) and weighted, F90 the weight.
+    if ((lobes.flags & MaterialLobeSpecular) != 0u)
+        f0 = lobes.dielectricF0 * lobes.specularWeight;
+
     float3 diffuseColor = baseColor.rgb * (1.0 - metallic) * diffuseAlpha;
     float3 specularColor = lerp(f0, baseColor.rgb, metallic);
     float alphaRoughness = perceptualRoughness * perceptualRoughness;
     float reflectance = max(max(specularColor.r, specularColor.g), specularColor.b);
     float3 specularEnvironmentR0 = specularColor;
-    float3 specularEnvironmentR90 = clamp(float3(reflectance * 25.0), 0.0, 1.0);
+    float3 specularEnvironmentR90 = (lobes.flags & MaterialLobeSpecular) != 0u ? float3(lerp(lobes.specularWeight, 1.0, metallic))
+                                                                                : clamp(float3(reflectance * 25.0), 0.0, 1.0);
 
     float3 n = (instance.normalTextureIndex != 0xFFFFFFFF) ? getNormal(ubo, instance, vertIn, sampLinearHandle) : normalize(vertIn.normal);
     if (instance.doubleSided != 0 && !isFrontFace)
@@ -416,9 +437,15 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     // the ray). A pane modeled facing away -- the Bistro's picture cover glass faces the picture -- was shaded as seen edge-on:
     // Fresnel 1, a perfect mirror of the room, the picture behind it gone.
     if (transmission > 0.0 && dot(instance.doubleSided != 0 && !isFrontFace ? -vertIn.normal : vertIn.normal, v) < 0.0)
+    {
         n = -n;
+        lobes.coatNormal = -lobes.coatNormal;
+    }
     float3 reflection = normalize(reflect(-v, n));
     float NdotV = clamp(dot(n, v), 0.001, 1.0);
+    LobeShading lobeShading;
+    if (hasLobes)
+        lobeShading = lobe_prepare(ubo, lobes, anisotropicT, n, v, NdotV, baseColor.rgb, metallic, alphaRoughness);
 
     // The glass's first pass (MESHLET_GLASS_MULTIPLY): what the pane lets through of the scene behind it, multiplied into it -- the
     // transmission past the Fresnel reflection, through the base color, where it covers the pixel. Glass that bends or blurs the view
@@ -468,7 +495,8 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             // with the pixel and the frame (a soft shadow's grain the temporal upscale smooths).
             PBRInfo rectInputs = PBRInfo(1.0, NdotV, 1.0, 1.0, 1.0, perceptualRoughness, metallic, specularEnvironmentR0,
                                          specularEnvironmentR90, alphaRoughness, diffuseColor, specularColor);
-            contribution = evaluateRectLight(rectInputs, light, vertIn.worldPos, n, v);
+            contribution = hasLobes ? evaluateRectLightLobes(rectInputs, lobeShading, light, vertIn.worldPos, n, v)
+                                    : evaluateRectLight(rectInputs, light, vertIn.worldPos, n, v);
             if (!any(contribution > 0.0))
                 continue;
             const float2 u = frac(float2(52.9829189 * frac(0.06711056 * vertIn.pos.x + 0.00583715 * vertIn.pos.y),
@@ -514,7 +542,8 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             );
 
             float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
-            contribution = evaluateDirectLight(pbrInputs, lightRadiance);
+            contribution = hasLobes ? evaluateDirectLightLobes(ubo, pbrInputs, lobeShading, n, v, l, lightRadiance)
+                                    : evaluateDirectLight(pbrInputs, lightRadiance);
         }
         directLighting += contribution;
 
@@ -551,6 +580,18 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         directLighting = max(directLighting, float3(0.0));
     }
 
+    // The lobes' ambient (as DeferredLighting.slang): the film's Fresnel as the split sum's F0, an anisotropic surface's environment
+    // along its bent reflection.
+    float3 environmentReflection = reflection;
+    if (hasLobes)
+    {
+        if (lobeShading.lobes.iridescence > 0.0)
+        {
+            specularColor = lerp(specularColor, schlick_to_f0(lobeShading.iridescenceFresnel, NdotV), lobeShading.lobes.iridescence);
+            specularEnvironmentR0 = specularColor;
+        }
+        environmentReflection = lobe_reflection(lobeShading, n, v, perceptualRoughness);
+    }
     PBRInfo iblInputs = PBRInfo(
         1.0, NdotV, 1.0, 1.0, 1.0,
         perceptualRoughness, metallic,
@@ -582,17 +623,19 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         }
     }
 
-    IBLResult ibl = getIBLContribution(ubo, iblInputs, n, reflection, ao);
+    IBLResult ibl = getIBLContribution(ubo, iblInputs, n, environmentReflection, ao);
     float3 ambientDiffuse = ibl.diffuse;
     float3 ambientSpecular = ibl.specular;
 
     // With a GI technique running: the scene's diffuse light here (SceneGI.slang -- a decal gets exactly its wall's screen-probe
     // GI, glass the DDGI cascades), and the sky's reflection only as far as the sky reaches, as the deferred lighting does.
     float3 sceneIrradiance;
+    float sceneSpecularOcclusion = 1.0;
     if ((ubo->screenGITextureIndex != 0xFFFFFFFF || ubo->enableDDGI != 0) && sample_scene_gi(ubo, vertIn.worldPos, n, normalize(vertIn.normal), v, sceneIrradiance))
     {
         ambientDiffuse = sceneIrradiance * diffuseColor;
-        ambientSpecular *= scene_gi_specular_occlusion(ubo, sceneIrradiance, n);
+        sceneSpecularOcclusion = scene_gi_specular_occlusion(ubo, sceneIrradiance, n);
+        ambientSpecular *= sceneSpecularOcclusion;
     }
 
     // Smooth glass with ray traced glass on: its reflection traced like its refraction (the room around a jar on a counter, not
@@ -621,6 +664,20 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         ambientSpecular = lerp(ambientSpecular, radiance * (specularColor * brdf.x + brdf.y), tracedReflectionWeight);
     }
 
+    // The coat's and the sheen's ambient over the base's (lobe_ambient), each at its own roughness, occluded as the base's.
+    float3 lobeBelow = float3(1.0); // what the sheen and the coat let through of what is below them (refraction too)
+    if (hasLobes && (lobeShading.lobes.coat > 0.0 || (lobes.flags & MaterialLobeSheen) != 0u))
+    {
+        const float coatRoughness = clamp(lobes.coatRoughness, c_MinRoughness, 1.0);
+        const float3 sheenRadiance = prefilteredRadiance(ubo, reflection, lobes.sheenRoughness) *
+                                     iblSpecularOcclusion(NdotV, ao, lobes.sheenRoughness) * sceneSpecularOcclusion;
+        const float3 coatRadiance = prefilteredRadiance(ubo, normalize(reflect(-v, lobes.coatNormal)), coatRoughness) *
+                                    iblSpecularOcclusion(lobeShading.coatNdotV, ao, coatRoughness) * sceneSpecularOcclusion;
+        lobeBelow = lobe_ambient(ubo, lobeShading, float3(1.0), float3(0.0), float3(0.0), NdotV);
+        ambientDiffuse *= lobeBelow;
+        ambientSpecular = lobe_ambient(ubo, lobeShading, ambientSpecular, coatRadiance, sheenRadiance, NdotV);
+    }
+
     float3 color = (directLighting + ambientDiffuse + ambientSpecular) * ao;
 
     float3 emissive = instance.emissiveFactor.rgb * instance.emissiveStrength;
@@ -628,6 +685,8 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     {
         emissive *= SampleMaterialTextureBias(ubo, instance.emissiveTextureIndex, sampLinearHandle, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).rgb;
     }
+    if (hasLobes)
+        emissive *= 1.0 - lobeShading.coatWeight; // the coat over the emission (the spec's coated_emission)
     color += emissive;
 
     // The fog in front of the surface (aerial perspective, height fog) on its own light, and its scattered light where the surface
@@ -660,26 +719,46 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         if (stackedGlass && (pushConstant.meshletCulling & MESHLET_GLASS_ADD) != 0)
             tracedWeight = 1.0;
         else if (tracedWeight > 0.0)
-            behind = tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v, ior, modelScale) * tracedWeight;
+        {
+            // Dispersion (KHR_materials_dispersion): each color channel refracted at its own IOR, the spread from the Abbe number
+            // (the spec's half spread around the material's IOR, green's).
+            if ((gpuMaterial.lobes & MaterialLobeDispersion) != 0u)
+            {
+                const float3 iors = dispersion_iors(ior, gpuMaterial.dispersion);
+                behind = float3(tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v, iors.r, modelScale).r,
+                                tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v, iors.g, modelScale).g,
+                                tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v, iors.b, modelScale).b) * tracedWeight;
+            }
+            else
+                behind = tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v, ior, modelScale) * tracedWeight;
+        }
         if (tracedWeight < 1.0)
         {
             Texture2D refractionSource = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.refractionTextureIndex, 0));
             uint sourceWidth, sourceHeight, sourceLevels;
             refractionSource.GetDimensions(0, sourceWidth, sourceHeight, sourceLevels);
 
-            float3 refracted = refract(-v, n, 1.0 / ior);
-            if (dot(refracted, refracted) < 1e-6)
-                refracted = -v;
-            const float3 exitPoint = vertIn.worldPos + normalize(refracted) * instance.thickness * modelScale;
-
-            // The exit point's offset on screen from the surface's own pixel (the same projection the HDR image was drawn with).
+            // The exit point's offset on screen from the surface's own pixel (the same projection the HDR image was drawn with), per
+            // color channel with dispersion (each at its own IOR, dispersion_iors).
+            const bool dispersive = (gpuMaterial.lobes & MaterialLobeDispersion) != 0u;
+            const float3 iors = dispersive ? dispersion_iors(ior, gpuMaterial.dispersion) : float3(ior);
             const float4x4 viewProjection = mul(ubo->proj, ubo->view);
             const float4 surfaceClip = mul(viewProjection, float4(vertIn.worldPos, 1.0));
-            const float4 exitClip = mul(viewProjection, float4(exitPoint, 1.0));
-            float2 offset = float2(0.0);
-            if (surfaceClip.w > 1e-5 && exitClip.w > 1e-5)
-                offset = (exitClip.xy / exitClip.w - surfaceClip.xy / surfaceClip.w) * float2(0.5, -0.5);
-            const float2 uv = saturate(vertIn.pos.xy / float2(sourceWidth, sourceHeight) + offset);
+            float2 channelUV[3];
+            float3 refracted = float3(0.0);
+            for (uint channel = 0; channel < (dispersive ? 3u : 1u); ++channel)
+            {
+                refracted = refract(-v, n, 1.0 / iors[dispersive ? channel : 1u]);
+                if (dot(refracted, refracted) < 1e-6)
+                    refracted = -v;
+                const float3 exitPoint = vertIn.worldPos + normalize(refracted) * instance.thickness * modelScale;
+                const float4 exitClip = mul(viewProjection, float4(exitPoint, 1.0));
+                float2 offset = float2(0.0);
+                if (surfaceClip.w > 1e-5 && exitClip.w > 1e-5)
+                    offset = (exitClip.xy / exitClip.w - surfaceClip.xy / surfaceClip.w) * float2(0.5, -0.5);
+                channelUV[channel] = saturate(vertIn.pos.xy / float2(sourceWidth, sourceHeight) + offset);
+            }
+            const float2 uv = dispersive ? channelUV[1] : channelUV[0];
 
             float lod = log2(float(max(sourceWidth, sourceHeight))) * perceptualRoughness * saturate(ior * 2.0 - 2.0);
             // Under DLSS Ray Reconstruction the scene behind is its raw ray traced lighting (NRD is off), and RR's guides at a glass
@@ -692,11 +771,16 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             // Through the volume's thickness: what it absorbs on the way (KHR_materials_volume attenuation).
             const float3 absorbed = volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale,
                                                          instance.thickness * modelScale / max(dot(normalize(refracted), -n), 0.1));
-            behind += refractionSource.SampleLevel(linearClamp, uv, min(lod, float(sourceLevels - 1))).rgb * absorbed * (1.0 - tracedWeight);
+            const float sourceLod = min(lod, float(sourceLevels - 1));
+            const float3 seen = dispersive ? float3(refractionSource.SampleLevel(linearClamp, channelUV[0], sourceLod).r,
+                                                    refractionSource.SampleLevel(linearClamp, channelUV[1], sourceLod).g,
+                                                    refractionSource.SampleLevel(linearClamp, channelUV[2], sourceLod).b)
+                                           : refractionSource.SampleLevel(linearClamp, uv, sourceLod).rgb;
+            behind += seen * absorbed * (1.0 - tracedWeight);
         }
 
         const float3 fresnel = specularEnvironmentR0 + (1.0 - specularEnvironmentR0) * pow(1.0 - NdotV, 5.0);
-        color += behind * baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel);
+        color += behind * baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel) * lobeBelow;
         output.color = float4(color * coverage, coverage); // added in the glass's second pass (the alpha unused)
         output.entityID = vertIn.entityID;
         return output;

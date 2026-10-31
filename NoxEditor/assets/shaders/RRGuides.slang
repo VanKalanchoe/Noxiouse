@@ -1,4 +1,5 @@
 #include "shaderIO.h"
+#include "PBRLighting.slang"
 
 // DLSS Ray Reconstruction guides (Streamline docs/ProgrammingGuideDLSS_RR.md 4.1.1, 4.1.2, 4.2.1). RR divides the lit
 // image by the diffuse and specular albedo, denoises the lighting and multiplies back, so both must be the reflectance
@@ -66,20 +67,20 @@ void guidesMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConsta
     float3 normalSample = normalTex.Load(int3(pixel, 0)).rgb;
     float4 materialSample = materialTex.Load(int3(pixel, 0));
 
-    // Unlit (workflow 2): the lighting outputs the base color itself.
-    if (materialSample.b >= 0.75)
+    // Unlit: the lighting outputs the base color itself.
+    if (gbuffer_unlit(materialSample.b))
     {
         diffuseOut[pixel] = float4(baseColor, 1.0);
         specularOut[pixel] = float4(0.0, 0.0, 0.0, 1.0);
         return;
     }
 
-    // As DeferredLighting.slang: dielectric F0 0.04, metals reflect their base color.
+    // As DeferredLighting.slang: the dielectric F0 (0.04, or the specular lobe's), metals reflect their base color.
     float metallic = saturate(materialSample.g);
     float roughness = saturate(materialSample.r);
-    float3 f0 = float3(0.04);
-    float3 diffuseColor = baseColor * (float3(1.0) - f0) * (1.0 - metallic);
-    float3 specularColor = lerp(f0, baseColor, metallic);
+    const GBufferLobes lobes = gbuffer_load_lobes(ubo, pixel, materialSample.b);
+    float3 diffuseColor, specularColor, f90;
+    lobe_base_reflectance(lobes, baseColor, metallic, diffuseColor, specularColor, f90);
 
     // N.V from the pixel's world position (the jittered projection its depth was rasterized with).
     float2 uv = (float2(pixel) + 0.5) / float2(pushConstant.width, pushConstant.height);
@@ -87,10 +88,24 @@ void guidesMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConsta
     float3 worldPos = worldPosH.xyz / worldPosH.w;
     float lenSqN = dot(normalSample, normalSample);
     float3 n = lenSqN > 1e-6 ? normalSample * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);
-    float NoV = dot(n, normalize(ubo->cameraWorldPos.xyz - worldPos));
+    const float3 toCamera = normalize(ubo->cameraWorldPos.xyz - worldPos);
+    float NoV = dot(n, toCamera);
 
+    // Under a clear coat what the base reflects is what the coat lets through, plus the coat's own reflection (lobe_ambient's
+    // layering); the reflection's guides follow the reflection layer (gbuffer_reflection_layer).
+    float3 specularAlbedo = EnvBRDFApprox2(specularColor, roughness * roughness, NoV);
+    if (lobes.coat > 0.0)
+    {
+        const float coatNoV = saturate(dot(lobes.coatNormal, toCamera));
+        const float coatWeight = lobes.coat * (0.04 + 0.96 * pow(1.0 - coatNoV, 5.0));
+        const float coatRoughness = max(lobes.coatRoughness, 0.04);
+        diffuseColor *= 1.0 - coatWeight;
+        specularAlbedo = specularAlbedo * (1.0 - coatWeight) + coatWeight * EnvBRDFApprox2(float3(1.0), coatRoughness * coatRoughness, coatNoV);
+        float3 reflectionNormal = n;
+        gbuffer_reflection_layer(lobes, reflectionNormal, roughness);
+    }
     diffuseOut[pixel] = float4(diffuseColor, 1.0);
-    specularOut[pixel] = float4(EnvBRDFApprox2(specularColor, roughness * roughness, NoV), 1.0);
+    specularOut[pixel] = float4(specularAlbedo, 1.0);
 
     // RTXPT's specular motion vectors (PostProcess.hlsl): on a smooth surface (roughness below 0.25, kSpecularRoughnessThreshold)
     // with a traced reflection, the reflected point's mirror image behind the surface -- as far along the camera's ray as the

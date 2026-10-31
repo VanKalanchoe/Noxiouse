@@ -1323,6 +1323,62 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     - `jolt/filtertest` with real Jolt: the filter rules, jointed pairs kept apart, and a filtered box falling through a floor an
       unfiltered one rests on.
     - Joint constraints and mesh collider shapes in a running scene are compile-checked only.
+- **Material lobes (M1, built 2026-10-31; glTF `KHR_materials_clearcoat`, `_sheen`, `_specular`, `_iridescence`, `_anisotropy`,
+  `_dispersion`):** the lobes past the core metallic-roughness model, one slab as UE5 Substrate's: every lobe in the same material
+  at once, each costing nothing where it is off. The math is each extension's spec, checked against the Khronos glTF Sample
+  Renderer (`pbr.frag`, `brdf.glsl`, `iridescence.glsl`).
+  - **Data:**
+    - `MaterialData` has each extension's factors and textures (`MaterialTexture`: path and UV set); `ReadGltfMaterial` reads the
+      members, a missing one keeps the spec default.
+    - `.nmat` (magic `NMA2`) and a cooked mesh's material list share one writer, `MaterialSerializer::WriteFields`. The cooked
+      list had dropped IOR, volume, diffuse transmission and depth bias before; it carries every field now.
+    - **Format v10** (`NSM:` / `NMS:`, the magic's character is `'0' + version`). Only the current version is read: an older
+      cook is cooked again from its source, an older `.nmat` is logged (delete it and the model's import writes it again).
+    - `GpuMaterial` carries the lobes and `lobes`, the `MaterialLobe*` bits (`PackMaterial`: a lobe is on when its factor is;
+      the specular bit also for an IOR other than 1.5). Ray tracing records link their material (`materialIndex`, `lobes`).
+    - The lobe textures are imported with their color space (sheen and specular color sRGB, the coat normal BC5) and kept loaded
+      with their materials; the G-buffer reports their mips to texture streaming.
+  - **G-buffer** (`GBufferMaterial.slang`, `MaterialLobes.slang`'s `evaluate_material_lobes`):
+    - The material target's blue holds the pixel's lobe bits and the unlit bit (`gbuffer_encode_flags`, `gbuffer_unlit`).
+    - Two targets: `GBuffer Lobes` (RGBA32_UINT: coat normal octahedral 16:16; coat factor, coat roughness, sheen roughness,
+      anisotropy strength; sheen color and the anisotropy direction; iridescence factor, IOR and thickness) and
+      `GBuffer Specular` (RGBA8: the dielectric F0's square root and the specular weight). Readers load them only for pixels with
+      lobe bits (`gbuffer_load_lobes`).
+    - The anisotropy direction is an angle against an orthonormal basis of the stored normal (Duff et al. 2017), rebuilt exactly
+      by the reader from the same half-float normal.
+    - The coat darkens the emission by its Fresnel (the spec's coated emission).
+  - **Shading** (`PBRLighting.slang`): `evaluateDirectLightLobes` and `evaluateRectLightLobes` for lights, `lobe_ambient` for the
+    environment, GI and reflections, in the deferred lighting, the forward pass (transparent surfaces, the editor's extra views)
+    and ray hits (`RayHitShading.slang`: what reflections and GI rays see).
+    - Specular: F0 from the IOR tinted by the specular color (at most 1), times the weight; F90 the weight.
+    - Iridescence: the thin film's Fresnel (Belcour & Barla) at the view angle, the metal's and dielectric's mixed by metallic, in
+      place of the base Fresnel; below it the diffuse by its largest channel (the spec's `rgb_mix`). The split sum takes its F0
+      (`schlick_to_f0`). A film of 0 nm is none (as the reference renderer).
+    - Anisotropy: Burley's anisotropic GGX and its height-correlated visibility; the environment along the spec's bent normal.
+    - Sheen: Conty & Kulla's Charlie distribution and visibility; what is below scaled by `1 - max(sheen color) x E`, E the
+      sheen's directional albedo in the BRDF LUT's blue (`BRDFIntegration.slang`, now RGBA16F); the environment at the sheen's
+      roughness as Filament does.
+    - Clear coat: GGX with the coat's normal and roughness at IOR 1.5; everything below weighted by `1 - coat x F(N_c.V)`
+      (`fresnel_coat`). Rect lights give the coat its highlight by the same representative point.
+  - **Reflections:** one ray per pixel traces the *reflection layer* (`gbuffer_reflection_layer`, UE's clear coat rule): the coat's
+    roughness blended over the base's by the coat factor, the normal likewise. The NRD and DLSS-RR guides describe the same layer;
+    the RR specular albedo includes the coat's. The deferred lighting gives the traced radiance to each layer by its own
+    roughness, so a smooth coat over a rough base reflects the traced scene.
+  - **Dispersion:** refraction per color channel at the spec's IORs (`dispersion_iors`), in the screen-space and the traced
+    refraction of the forward pass.
+  - **Not yet:** the path tracer's BSDF (next); ReSTIR DI's direct lighting mode shades the base lobes only; reflection rays
+    sample an isotropic lobe for an anisotropic surface; ray hits have no coat normal map or anisotropy (no tangent frame there);
+    `KHR_texture_transform` (backlog I2: ClearCoatCarPaint and SheenChair use it).
+  - **Offline tests:**
+    - `lobetest/lobetest`: the importer's `ReadGltfMaterial` on 8 Khronos sample assets (ClearCoatTest, ClearCoatCarPaint,
+      SheenChair, SpecularTest, IridescenceLamp, AnisotropyBarnLamp, AnisotropyRotationTest, DispersionTest: 89 materials, every
+      member against the files' JSON), `.nmat` and v10 round trips of every field, older files refused.
+    - `slangcpu/lobetests`: the shader functions themselves compiled to C++ (`slangc -target cpp`). Charlie and anisotropic GGX
+      distributions integrate to 1; the anisotropic visibility equals the isotropic one at equal roughness (2e-7); white furnace:
+      the coat and anisotropy never gain energy over the base; the iridescence Fresnel equals the reference renderer's to 7e-8
+      and an exact spectral thin film (Airy reflectance, CIE 1931 observer) to 0.011; the sheen LUT within 1e-4 of a
+      2048 x 2048 integration; G-buffer encodings: octahedral 0.03 degrees, anisotropy direction 0.35 degrees, values 0.002.
+    - The shading in a running scene is compile-checked only.
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much

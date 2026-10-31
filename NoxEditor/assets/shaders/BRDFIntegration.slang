@@ -1,4 +1,5 @@
 #include "shaderIO.h"
+#include "PBRLighting.slang"
 
 static const float PI = 3.1415926536;
 
@@ -87,6 +88,29 @@ for (uint i = 0u; i < NUM_SAMPLES; i++) {
 return LUT / float(NUM_SAMPLES);
 }
 
+// The sheen BRDF's directional albedo E(NdotV, roughness) (PBRLighting.slang's D_charlie and V_charlie, KHR_materials_sheen):
+// its integral over the hemisphere on a 64 x 64 grid of equal solid angle (cos theta, phi). Within 0.003 of a 2048 x 2048 grid
+// everywhere (checked offline); the sheen's albedo scaling and environment term read it.
+float sheenAlbedo(float NoV, float sheenRoughness)
+{
+    const float3 V = float3(sqrt(1.0 - NoV * NoV), 0.0, NoV);
+    const uint N = 64u;
+    float sum = 0.0;
+    for (uint i = 0u; i < N; i++)
+    {
+        const float cosTheta = (float(i) + 0.5) / float(N);
+        const float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+        for (uint j = 0u; j < N; j++)
+        {
+            const float phi = 2.0 * PI * (float(j) + 0.5) / float(N);
+            const float3 L = float3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
+            const float3 H = normalize(L + V);
+            sum += D_charlie(sheenRoughness, H.z) * V_charlie(cosTheta, max(NoV, 1e-4), sheenRoughness) * cosTheta;
+        }
+    }
+    return sum * 2.0 * PI / float(N * N);
+}
+
 [shader("compute")]
 [numthreads(16, 16, 1)]
 void compMain(
@@ -101,5 +125,5 @@ float2 uv = (float2(dispatchThreadID.xy) + 0.5) / float(pushConstant.lutSize);
 float2 integratedBRDF = BRDF(uv.x, 1.0 - uv.y);
 
 RWTexture2D<float4> brdfOutput = RWTexture2D<float4>::Handle(uint2(pushConstant.lutStorageIndex, 0));
-brdfOutput[dispatchThreadID.xy] = float4(integratedBRDF, 0.0, 1.0);
+brdfOutput[dispatchThreadID.xy] = float4(integratedBRDF, sheenAlbedo(uv.x, 1.0 - uv.y), 1.0);
 }

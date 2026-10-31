@@ -64,11 +64,15 @@ GuidesOutput fragMain(MSOutput input, uniform PushConstantNRDGuides pushConstant
     float3 worldPos = worldPosH.xyz / worldPosH.w;
     output.viewZ = abs(mul(ubo->view, float4(worldPos, 1.0)).z);
 
-    // The G-buffer normal's alpha is the roughness the lighting uses.
+    // The G-buffer normal's alpha is the roughness the lighting uses; the reflections are of the reflection layer (a clear coat's
+    // blend, gbuffer_reflection_layer), so the guide describes that.
     Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
+    Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
     float4 normalSample = normalTex.Load(int3(pixel, 0));
     float lenSqN = dot(normalSample.rgb, normalSample.rgb);
     float3 normal = lenSqN > 1e-6 ? normalSample.rgb * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);
-    output.normalRoughness = NRD_FrontEnd_PackNormalAndRoughness(normal, saturate(normalSample.a), 0.0);
+    float roughness = normalSample.a;
+    gbuffer_reflection_layer(gbuffer_load_lobes(ubo, pixel, materialTex.Load(int3(pixel, 0)).b), normal, roughness);
+    output.normalRoughness = NRD_FrontEnd_PackNormalAndRoughness(normal, saturate(roughness), 0.0);
     return output;
 }

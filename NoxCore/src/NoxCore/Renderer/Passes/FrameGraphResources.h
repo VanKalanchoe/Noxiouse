@@ -31,6 +31,8 @@ namespace Nox
         RGTexture GBufferNormal;
         RGTexture GBufferMaterial;
         RGTexture GBufferEmission;
+        RGTexture GBufferLobes;    // the lobes past the core model (gbuffer_encode_lobes): RGBA32_UINT
+        RGTexture GBufferSpecular; // the specular lobe's dielectric F0 and weight (gbuffer_encode_specular): RGBA8
         RGTexture GBufferVelocity;
         RGTexture RRDiffuseAlbedo;  // DLSS-RR guides: RRGuides.slang or the path tracer's primary hit
         RGTexture RRSpecularAlbedo;

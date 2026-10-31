@@ -234,6 +234,159 @@ float gbuffer_back_light(float encoded)
     return diffuseTransmission > 0.01 ? diffuseTransmission : 0.6;
 }
 
+// The G-buffer material target's blue (RGBA8): the pixel's MaterialLobe* bits (which lobe targets hold data for it) and the unlit
+// bit, as a byte.
+static const uint GBufferUnlit = 0x80u;
+
+float gbuffer_encode_flags(uint lobes, bool unlit)
+{
+    return float((lobes & 0x3Fu) | (unlit ? GBufferUnlit : 0u)) / 255.0;
+}
+
+uint gbuffer_flags(float encoded)
+{
+    return uint(encoded * 255.0 + 0.5);
+}
+
+bool gbuffer_unlit(float encoded)
+{
+    return (gbuffer_flags(encoded) & GBufferUnlit) != 0u;
+}
+
+// A unit vector as two 16-bit octahedral coordinates (and back).
+uint gbuffer_encode_octahedral(float3 v)
+{
+    v /= abs(v.x) + abs(v.y) + abs(v.z);
+    float2 e = v.z >= 0.0 ? v.xy : (1.0 - abs(v.yx)) * select(v.xy >= 0.0, float2(1.0), float2(-1.0));
+    const uint2 q = uint2(round(saturate(e * 0.5 + 0.5) * 65535.0));
+    return q.x | (q.y << 16u);
+}
+
+float3 gbuffer_decode_octahedral(uint packed)
+{
+    const float2 e = float2(packed & 0xFFFFu, packed >> 16u) / 65535.0 * 2.0 - 1.0;
+    float3 v = float3(e, 1.0 - abs(e.x) - abs(e.y));
+    const float t = saturate(-v.z);
+    v.xy += select(v.xy >= 0.0, float2(-t), float2(t));
+    return normalize(v);
+}
+
+// An orthonormal basis around a unit normal (Duff et al. 2017, "Building an Orthonormal Basis, Revisited"): the reference a
+// direction in the surface's plane is stored against as an angle.
+void gbuffer_normal_basis(float3 n, out float3 t, out float3 b)
+{
+    const float s = n.z >= 0.0 ? 1.0 : -1.0;
+    const float a = -1.0 / (s + n.z);
+    const float c = n.x * n.y * a;
+    t = float3(1.0 + s * n.x * n.x * a, s * c, -s * n.x);
+    b = float3(c, s + n.y * n.y * a, -n.y);
+}
+
+// The normal the G-buffer normal target gives back (its half floats, normalized as the readers do): an anisotropy direction is
+// stored against this one's basis, so the reader rebuilds exactly the same basis.
+float3 gbuffer_stored_normal(float3 n)
+{
+    const float3 h = f16tof32(f32tof16(n));
+    const float lengthSq = dot(h, h);
+    return lengthSq > 1e-6 ? h * rsqrt(lengthSq) : float3(0.0, 1.0, 0.0);
+}
+
+// The lobes of one G-buffer pixel (the MaterialLobe* bits say which hold data), as GBufferMaterial.slang evaluates them.
+struct GBufferLobes
+{
+    uint flags;
+    float3 dielectricF0;     // min(F0 of the IOR x specular color, 1) (MaterialLobeSpecular; else 0.04)
+    float specularWeight;    // (else 1)
+    float coat;              // clear coat factor
+    float coatRoughness;
+    float3 coatNormal;
+    float3 sheenColor;
+    float sheenRoughness;
+    float anisotropy;        // strength
+    float anisotropyAngle;   // the direction, radians in [0, pi) against gbuffer_normal_basis of the stored normal
+    float iridescence;       // factor
+    float iridescenceIor;
+    float iridescenceThickness; // nanometers
+};
+
+GBufferLobes gbuffer_default_lobes()
+{
+    GBufferLobes lobes;
+    lobes.flags = 0u;
+    lobes.dielectricF0 = float3(0.04);
+    lobes.specularWeight = 1.0;
+    lobes.coat = 0.0;
+    lobes.coatRoughness = 0.0;
+    lobes.coatNormal = float3(0.0, 0.0, 1.0);
+    lobes.sheenColor = float3(0.0);
+    lobes.sheenRoughness = 0.0;
+    lobes.anisotropy = 0.0;
+    lobes.anisotropyAngle = 0.0;
+    lobes.iridescence = 0.0;
+    lobes.iridescenceIor = 1.3;
+    lobes.iridescenceThickness = 0.0;
+    return lobes;
+}
+
+// The lobe target (RGBA32_UINT): x the coat normal (octahedral 16:16); y coat factor, coat roughness, sheen roughness, anisotropy
+// strength (8 bits each); z the sheen color (square root, 8 bits a channel) and the anisotropy angle (8 bits over pi); w the
+// iridescence factor (8), its IOR (8 bits over 1..3) and thickness (16 bits, nanometers).
+uint4 gbuffer_encode_lobes(GBufferLobes lobes)
+{
+    uint4 packed;
+    packed.x = gbuffer_encode_octahedral(lobes.coatNormal);
+    const uint4 y = uint4(round(saturate(float4(lobes.coat, lobes.coatRoughness, lobes.sheenRoughness, lobes.anisotropy)) * 255.0));
+    packed.y = y.x | (y.y << 8u) | (y.z << 16u) | (y.w << 24u);
+    const uint3 sheen = uint3(round(sqrt(saturate(lobes.sheenColor)) * 255.0));
+    const uint angle = uint(round(frac(lobes.anisotropyAngle / 3.14159265) * 255.0)) & 0xFFu;
+    packed.z = sheen.x | (sheen.y << 8u) | (sheen.z << 16u) | (angle << 24u);
+    const uint iridescence = uint(round(saturate(lobes.iridescence) * 255.0));
+    const uint ior = uint(round(saturate((lobes.iridescenceIor - 1.0) * 0.5) * 255.0));
+    const uint thickness = uint(round(clamp(lobes.iridescenceThickness, 0.0, 65535.0)));
+    packed.w = iridescence | (ior << 8u) | (thickness << 16u);
+    return packed;
+}
+
+// The specular target (RGBA8): the dielectric F0's square root (precision where F0 lives, a few percent) and the weight.
+float4 gbuffer_encode_specular(GBufferLobes lobes)
+{
+    return float4(sqrt(saturate(lobes.dielectricF0)), saturate(lobes.specularWeight));
+}
+
+GBufferLobes gbuffer_decode_lobes(uint flags, uint4 packed, float4 specular)
+{
+    GBufferLobes lobes = gbuffer_default_lobes();
+    lobes.flags = flags & 0x3Fu;
+    if ((lobes.flags & MaterialLobeSpecular) != 0u)
+    {
+        lobes.dielectricF0 = specular.rgb * specular.rgb;
+        lobes.specularWeight = specular.a;
+    }
+    lobes.coatNormal = gbuffer_decode_octahedral(packed.x);
+    const float4 y = float4(packed.y & 0xFFu, (packed.y >> 8u) & 0xFFu, (packed.y >> 16u) & 0xFFu, packed.y >> 24u) / 255.0;
+    lobes.coat = (lobes.flags & MaterialLobeClearcoat) != 0u ? y.x : 0.0;
+    lobes.coatRoughness = y.y;
+    lobes.sheenRoughness = y.z;
+    lobes.anisotropy = (lobes.flags & MaterialLobeAnisotropy) != 0u ? y.w : 0.0;
+    const float3 sheen = float3(packed.z & 0xFFu, (packed.z >> 8u) & 0xFFu, (packed.z >> 16u) & 0xFFu) / 255.0;
+    lobes.sheenColor = (lobes.flags & MaterialLobeSheen) != 0u ? sheen * sheen : float3(0.0);
+    lobes.anisotropyAngle = float(packed.z >> 24u) / 255.0 * 3.14159265;
+    lobes.iridescence = (lobes.flags & MaterialLobeIridescence) != 0u ? float(packed.w & 0xFFu) / 255.0 : 0.0;
+    lobes.iridescenceIor = 1.0 + 2.0 * float((packed.w >> 8u) & 0xFFu) / 255.0;
+    lobes.iridescenceThickness = float(packed.w >> 16u);
+    return lobes;
+}
+
+// The specular layer one reflection ray per pixel traces (Reflection.slang) and its denoiser guides describe: with a clear coat
+// UE's blend, the coat's roughness by its factor over the base's and the normal likewise; without one, the surface's own.
+void gbuffer_reflection_layer(GBufferLobes lobes, inout float3 normal, inout float roughness)
+{
+    if (lobes.coat <= 0.0)
+        return;
+    roughness = lerp(roughness, lobes.coatRoughness, lobes.coat);
+    normal = normalize(lerp(normal, lobes.coatNormal, lobes.coat));
+}
+
 // Beer-Lambert absorption over `length` (world units) of a volume whose light keeps attenuationColor over attenuationDistance.
 float3 volume_transmittance(float3 attenuationColor, float attenuationDistance, float length)
 {
@@ -382,6 +535,9 @@ struct UniformBufferObject
 
     uint entityTextureIndex; // Heap index of m_entityResolveReference for edge detection outline (display resolution)
     uint entityGBufferTextureIndex; // Heap index of the render-resolution G-buffer entity ID texture (debug views only)
+    // The G-buffer's lobe targets (GBufferMaterial.slang; gbuffer_decode_lobes): 0xFFFFFFFF when not read this frame.
+    uint gbufferLobesTextureIndex;    // RGBA32_UINT: clear coat, sheen, anisotropy, iridescence
+    uint gbufferSpecularTextureIndex; // RGBA8: dielectric F0 (square root) and the specular weight
 
     // PBR IBL
     uint irradianceMapIndex;
@@ -1955,6 +2111,8 @@ struct PushConstantNRDGuides
     uint64_t matrixReference;
     uint32_t depthTextureIndex;
     uint32_t gbufferNormalIndex;
+    uint32_t gbufferMaterialIndex; // the lobe bits (gbuffer_load_lobes: the reflection layer)
+    uint32_t padding;              // (viewportSize at an 8-byte offset)
     vec2 viewportSize;
 };
 
@@ -2838,6 +2996,17 @@ struct PushConstantReSTIRPTTemporal
 };
 
 #ifdef __SLANG__
+// A pixel's lobes from the G-buffer lobe targets (ubo indices), default when it has none.
+GBufferLobes gbuffer_load_lobes(UniformBufferObject* ubo, int2 pixel, float encodedFlags)
+{
+    const uint flags = gbuffer_flags(encodedFlags) & 0x3Fu;
+    if (flags == 0u || ubo->gbufferLobesTextureIndex == 0xFFFFFFFF)
+        return gbuffer_default_lobes();
+    Texture2D<uint4> lobesTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->gbufferLobesTextureIndex, 0));
+    Texture2D specularTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->gbufferSpecularTextureIndex, 0));
+    return gbuffer_decode_lobes(flags, lobesTex.Load(int3(pixel, 0)), specularTex.Load(int3(pixel, 0)));
+}
+
 // Raster view of one GPU scene instance: the instance record joined with its transform, material and mesh (ray tracing
 // shaders read GpuRayTracingInstance instead).
 struct InstanceData
@@ -2902,6 +3071,12 @@ struct SceneInstances
         transforms = (GpuTransform*)ubo->sceneTransformsReference;
         materials = (GpuMaterial*)ubo->sceneMaterialsReference;
         meshes = (GpuMesh*)ubo->sceneMeshesReference;
+    }
+
+    // The instance's material record (its lobes and their textures, which InstanceData leaves out).
+    GpuMaterial* material(uint slot)
+    {
+        return &materials[instances[slot].materialIndex];
     }
 
     // Field by field through the pointers: a lookup loads only the fields its caller uses (whole-record loads would

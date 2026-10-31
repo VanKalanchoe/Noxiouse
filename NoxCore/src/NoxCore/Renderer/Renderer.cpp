@@ -2167,7 +2167,9 @@ namespace Nox
             NRI::ImageFormat::RGBA8, // 2: SV_Target2 (Material)
             NRI::ImageFormat::R16G16B16A16_SFLOAT, // 3: SV_Target3 (Emission)
             NRI::ImageFormat::R32SINT, // 4: SV_Target4 (Entity ID)
-            NRI::ImageFormat::R32G32_SFLOAT // 5: SV_Target5 (Velocity)
+            NRI::ImageFormat::R32G32B32A32_UINT, // 5: SV_Target5 (Lobes)
+            NRI::ImageFormat::RGBA8, // 6: SV_Target6 (Specular)
+            NRI::ImageFormat::R32G32_SFLOAT // 7: SV_Target7 (Velocity)
         };
 
         desc.shaders.push_back({
@@ -2188,7 +2190,7 @@ namespace Nox
 
         m_gbufferPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
 
-        // Native raster frames do not need motion vectors. A matching five-target variant avoids both
+        // Native raster frames do not need motion vectors. A matching seven-target variant avoids both
         // the RG32F attachment bandwidth and the per-pixel reprojection work in that case.
         desc.colorFormats.pop_back();
         desc.shaders.back().entryPoint = "fragMainNoVelocity";
@@ -3087,7 +3089,8 @@ namespace Nox
             .mipLevels = 1,
             .sampleCount = 1,
             .usage = NRI::TextureUsage::Storage,
-            .format = NRI::ImageFormat::R16G16_SFLOAT
+            // R, G: the GGX split sum's scale and bias; B: the sheen's directional albedo (BRDFIntegration.slang).
+            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
         });
 
         m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::Storage);
@@ -5092,6 +5095,8 @@ namespace Nox
         resources.GBufferNormal = graph.CreateTexture("GBuffer Normal", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         resources.GBufferMaterial = graph.CreateTexture("GBuffer Material", renderTarget(NRI::ImageFormat::RGBA8));
         resources.GBufferEmission = graph.CreateTexture("GBuffer Emission", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.GBufferLobes = graph.CreateTexture("GBuffer Lobes", renderTarget(NRI::ImageFormat::R32G32B32A32_UINT));
+        resources.GBufferSpecular = graph.CreateTexture("GBuffer Specular", renderTarget(NRI::ImageFormat::RGBA8));
         resources.GBufferVelocity = graph.CreateTexture("GBuffer Velocity", renderTarget(NRI::ImageFormat::R32G32_SFLOAT));
         resources.HDRScene = graph.CreateTexture("HDR Scene", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
         resources.SSAORaw = graph.CreateTexture("SSAO Raw", renderTarget(NRI::ImageFormat::R16_SFLOAT));
@@ -5245,6 +5250,9 @@ namespace Nox
 
         uniformData.entityTextureIndex = graph.GetSlotOr(resources.EntityHi, 0);
         uniformData.entityGBufferTextureIndex = graph.GetSlotOr(resources.Entity, 0);
+        // The G-buffer's lobe targets (gbuffer_load_lobes); a pass reading them declares the read (ReadGBufferLobes).
+        uniformData.gbufferLobesTextureIndex = graph.GetSlotOr(resources.GBufferLobes, NoTexture);
+        uniformData.gbufferSpecularTextureIndex = graph.GetSlotOr(resources.GBufferSpecular, NoTexture);
 
         // The atlases this frame's DDGI blend writes (the lighting pass reads them).
         uniformData.ddgiIrradianceTextureIndex = frame.ddgiAdded ? graph.GetSlotOr(resources.DDGIIrradiance[frame.ddgiWriteIndex], NoTexture) : NoTexture;

@@ -37,6 +37,8 @@ namespace Nox
                     builder.Read(resources.GBufferAlbedo);
                     builder.Read(resources.GBufferNormal);
                     builder.Read(resources.GBufferMaterial);
+                    builder.Read(resources.GBufferLobes);    // the clear coat's share of the specular albedo
+                    builder.Read(resources.GBufferSpecular);
                     builder.Write(resources.RRDiffuseAlbedo, RGTextureAccess::StorageWrite);
                     builder.Write(resources.RRSpecularAlbedo, RGTextureAccess::StorageWrite);
                     builder.Read(resources.GBufferVelocity);
