@@ -436,6 +436,13 @@ proportion to its light from the rest, stands for them: exact where a few lights
 most at 10 cm (a ray grazing a lamp's own fixture is no firefly), and the screen-probe history no longer drops to 4 frames on a
 large jump (one bright frame made it flash). Used by the screen probes, DDGI and RT reflection / refraction hits.
 
+**Emissive light samples near a small lamp** (2026-10-31, `ScreenProbeTrace.slang` `screen_probe_emissive_sample`): the probes'
+emissive triangle samples used the same 10 cm rule (a lamp nearer counted as 10 cm away). Inside AnisotropyBarnLamp's shade,
+3-7 cm from the filament, that dropped 70% of its light (measured on the mesh: 29.5% kept) and the shade's white inside came out
+gray in hybrid while raster and the path tracer showed it white. Now a sample credits its triangle with at most a hemisphere
+(2 pi sr; `EmissiveLights::Sample::solidAngle`, area x cos / d^2): no triangle subtends more, so the bound only acts closer than
+the triangle's own size -- where the 1/d^2 spike was -- and keeps 100% of the filament's light on the shade.
+
 **Rect area lights** (Add Component > Rect Light: color, intensity = the radiance of its surface, width / height along the
 entity's X / Y, range; it shines along -Z; an outline and direction stroke in the editor viewport):
 - Deferred and transparent shading (`PBRLighting.slang` `evaluateRectLight`): **diffuse exact** (Lambert's polygon formula

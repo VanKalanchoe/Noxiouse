@@ -142,9 +142,6 @@ float4 screen_probe_emissive_sample(UniformBufferObject* ubo, float3 origin, flo
 {
     if (ubo->emissiveLightCount == 0 || ubo->tlasDeviceAddress == 0)
         return float4(0.0);
-    // Closer than 10 cm a lamp counts as 10 cm away, as the probe rays' light sampling does (no 1/d^2 spike next to a fixture).
-    const float nearDistance = 0.1 * ubo->unitsPerMeter;
-
     EmissiveLights::Sample chosen = (EmissiveLights::Sample)0;
     float chosenTarget = 0.0;
     float weightSum = 0.0;
@@ -161,7 +158,11 @@ float4 screen_probe_emissive_sample(UniformBufferObject* ubo, float3 origin, flo
         const float cosProbe = dot(sample.direction, probeNormal);
         if (!sample.valid || cosProbe <= 0.0)
             continue;
-        sample.radiance *= min(1.0, sample.distance * sample.distance / (nearDistance * nearDistance));
+        // No 1/d^2 spike next to a fixture: a sample credits its triangle with at most a hemisphere (2 pi sr), which no triangle
+        // exceeds -- the bound acts only where the point estimate is wrong (closer than the triangle's own size). It used to be a
+        // fixed 10 cm (a lamp nearer counted as 10 cm away), which dimmed every surface close to a small lamp: inside the
+        // AnisotropyBarnLamp's shade (3-7 cm from the filament) 70% of the filament's light was lost, the shade gray, not white.
+        sample.radiance *= min(1.0, 2.0 * ScreenProbePi / max(sample.solidAngle, 1e-20));
         // Not the cosine alone: the irradiance pass weighs a sample by the cosine of each direction it is for, so a sample picked
         // for a near-zero probe cosine came out huge in the sideways directions (unbounded spikes).
         const float target = dot(sample.radiance, float3(0.2126, 0.7152, 0.0722)) * (0.25 + 0.75 * cosProbe);

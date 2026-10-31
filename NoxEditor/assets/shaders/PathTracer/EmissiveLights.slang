@@ -51,6 +51,7 @@ namespace EmissiveLights
         float distance;
         float3 radiance;   // its emission
         float pdf;         // solid angle, without the branch probability
+        float solidAngle;  // the triangle's solid angle as this point estimates it (area x cosLight / distance^2)
         bool valid;
     };
 
@@ -102,6 +103,7 @@ namespace EmissiveLights
         }
         const float areaPdf = areaProbability / (0.5 * doubleArea);
         result.pdf = areaPdf * distanceSquared / cosLight;
+        result.solidAngle = 0.5 * doubleArea * cosLight / distanceSquared;
         result.valid = any(result.radiance > 0.0) && result.pdf > 0.0 && isfinite(result.pdf);
         return result;
     }
