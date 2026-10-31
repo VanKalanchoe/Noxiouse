@@ -217,8 +217,16 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
         coords.uv[1] = meshUV1;
         coords.ddx[0] = coords.ddx[1] = coords.ddy[0] = coords.ddy[1] = float2(0.0);
         coords.lod = 0.0;
-        float3 unusedDirection;
-        const GBufferLobes lobes = evaluate_material_lobes(ubo, material, coords, textureSampler, hitNormal, float3(0.0), 1.0, false, unusedDirection);
+        // The hit's tangent frame (the vertex tangents through the instance's transform: a tangent runs along the surface, so the model
+        // matrix, not the normal matrix), for a coat normal map and the anisotropy direction.
+        const float3x3 world = (float3x3)((GpuTransform*)ubo->sceneTransformsReference)[instanceSlot].world;
+        float3 hitTangent = mul(world, w0 * vertex0.tangent.xyz + w1 * vertex1.tangent.xyz + w2 * vertex2.tangent.xyz);
+        const bool backFace = hitLut.doubleSided != 0 && dot(mul((float3x3)hitLut.normalMatrix, w0 * vertex0.normal + w1 * vertex1.normal + w2 * vertex2.normal), -R) < 0.0;
+        float3 anisotropicT;
+        GBufferLobes lobes = evaluate_material_lobes(ubo, material, coords, textureSampler, backFace ? -hitNormal : hitNormal, hitTangent,
+                                                     vertex0.tangent.w < 0.0 ? -1.0 : 1.0, backFace, anisotropicT);
+        if (lobes.coat > 0.0)
+            lobes.coatNormal = lobe_facing_normal(lobes.coatNormal, -R);
         hasLobes = lobes.flags != 0u;
         if (hasLobes)
         {
@@ -227,7 +235,7 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
                 specularF0 = lerp(lobes.dielectricF0 * lobes.specularWeight, baseColor, metallic);
                 specularF90 = float3(lerp(lobes.specularWeight, 1.0, metallic));
             }
-            lobeShading = lobe_prepare(ubo, lobes, float3(0.0), hitNormal, -R, hitNdotV, baseColor, metallic, roughness * roughness);
+            lobeShading = lobe_prepare(ubo, lobes, anisotropicT, hitNormal, -R, hitNdotV, baseColor, metallic, roughness * roughness);
             if (lobeShading.lobes.iridescence > 0.0)
                 specularF0 = lerp(specularF0, schlick_to_f0(lobeShading.iridescenceFresnel, hitNdotV), lobeShading.lobes.iridescence);
         }
@@ -270,8 +278,10 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     {
         const float NdotV = hitNdotV;
         TextureCube environment = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
+        // Along an anisotropic surface's bent reflection (lobe_reflection), else the mirror direction.
+        const float3 mirrorDirection = hasLobes ? lobe_reflection(lobeShading, hitNormal, -R, roughness) : reflect(R, hitNormal);
         const float3 environmentLight = environment.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0)),
-                                                                reflect(R, hitNormal), roughness * ubo->prefilteredCubeMipLevels).rgb;
+                                                                mirrorDirection, roughness * ubo->prefilteredCubeMipLevels).rgb;
         Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
         const float2 brdf = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)), float2(NdotV, 1.0 - roughness), 0).rg;
         specularLight = environmentLight * ubo->scaleIBLAmbient * (specularF0 * brdf.x + specularF90 * brdf.y) * specularOcclusion;
@@ -283,7 +293,8 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     {
         const float3 mirror = reflect(R, hitNormal);
         const float3 sheenRadiance = prefilteredRadiance(ubo, mirror, lobeShading.lobes.sheenRoughness) * specularOcclusion;
-        const float3 coatRadiance = prefilteredRadiance(ubo, mirror, clamp(lobeShading.lobes.coatRoughness, c_MinRoughness, 1.0)) * specularOcclusion;
+        const float3 coatRadiance = prefilteredRadiance(ubo, reflect(R, lobeShading.lobes.coatNormal),
+                                                        clamp(lobeShading.lobes.coatRoughness, c_MinRoughness, 1.0)) * specularOcclusion;
         const float3 below = lobe_ambient(ubo, lobeShading, float3(1.0), float3(0.0), float3(0.0), hitNdotV);
         directShare *= below;
         ambientLight *= below;

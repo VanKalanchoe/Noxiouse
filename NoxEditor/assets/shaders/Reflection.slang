@@ -82,20 +82,27 @@ float4 noReflection(UniformBufferObject* ubo, uint denoiserMode)
     return NRD_PackSignal(denoiserMode, float3(0.0), reflection_miss_distance(ubo), 1.0, 1.0, ubo->unitsPerMeter);
 }
 
-// GGX Visible Normal Distribution Function (VNDF) Importance Sampling (Heitz 2018)
+// GGX Visible Normal Distribution Function (VNDF) Importance Sampling (Heitz 2018), isotropic.
+float3 sample_ggx_vndf_frame(float3 V, float3 N, float3 T, float3 B, float alphaX, float alphaY, float2 u);
 float3 sample_ggx_vndf(float3 V, float3 N, float roughness, float2 u)
 {
-    float alpha = max(roughness * roughness, 0.001);
-
-    // 1. Build orthonormal basis around macro normal N
+    const float alpha = max(roughness * roughness, 0.001);
     float3 T, B;
     build_orthonormal_basis(N, T, B);
+    return sample_ggx_vndf_frame(V, N, T, B, alpha, alpha, u);
+}
+
+// The same in a given tangent frame with a roughness along each axis: an anisotropic surface's stretched lobe (KHR_materials_anisotropy).
+float3 sample_ggx_vndf_frame(float3 V, float3 N, float3 T, float3 B, float alphaX, float alphaY, float2 u)
+{
+    alphaX = max(alphaX, 0.001);
+    alphaY = max(alphaY, 0.001);
 
     // 2. Transform V into tangent frame
     float3 V_local = float3(dot(V, T), dot(V, B), dot(V, N));
 
     // 3. Stretch view vector
-    float3 Vh = normalize(float3(alpha * V_local.x, alpha * V_local.y, V_local.z));
+    float3 Vh = normalize(float3(alphaX * V_local.x, alphaY * V_local.y, V_local.z));
 
     // 4. Orthonormal basis in stretched space
     float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
@@ -114,7 +121,7 @@ float3 sample_ggx_vndf(float3 V, float3 N, float roughness, float2 u)
     float3 Nh = t1 * T1 + t2 * T2 + sqrt(max(0.0, 1.0 - t1 * t1 - t2 * t2)) * Vh;
 
     // 7. Unstretch to get microfacet normal in tangent frame
-    float3 Ne_local = normalize(float3(alpha * Nh.x, alpha * Nh.y, max(0.0, Nh.z)));
+    float3 Ne_local = normalize(float3(alphaX * Nh.x, alphaY * Nh.y, max(0.0, Nh.z)));
 
     // 8. Transform back to world space
     float3 M = Ne_local.x * T + Ne_local.y * B + Ne_local.z * N;
@@ -161,8 +168,12 @@ float4 fragMain(
 
     float3 normal = normalSample.rgb * rsqrt(lenSqN);
     float roughness = materialSample.r;
-    // The layer reflected: a clear coat's blend over the base (gbuffer_reflection_layer), else the surface itself.
-    gbuffer_reflection_layer(gbuffer_load_lobes(ubo, pixelCoord, materialSample.b), normal, roughness);
+    // The layer reflected: a clear coat's blend over the base (gbuffer_reflection_layer), else the surface itself -- stretched along
+    // its anisotropy direction when it is an anisotropic base (KHR_materials_anisotropy).
+    const GBufferLobes lobes = gbuffer_load_lobes(ubo, pixelCoord, materialSample.b);
+    const bool anisotropic = lobes.anisotropy > 0.0 && lobes.coat <= 0.0;
+    const float3 anisotropicT = anisotropic ? lobe_anisotropy_direction(normal, lobes.anisotropyAngle, normal) : float3(0.0);
+    gbuffer_reflection_layer(lobes, normal, roughness);
     roughness = clamp(roughness, 0.001, 1.0);
     if (smoothFill && roughness >= pushConstant.smoothFillRoughness)
         discard; // rough enough: the upsampled reduced-resolution result stays
@@ -181,14 +192,13 @@ float4 fragMain(
     float3 worldPos = worldPosH.xyz / worldPosH.w;
 
     float3 V = normalize(ubo->cameraWorldPos.xyz - worldPos);
-    if (dot(normal, V) <= 0.001)
-    {
-        return noReflection(ubo, pushConstant.denoiserMode);
-    }
+    // A normal-mapped normal facing away from the camera reflects nothing it could see: bent back to facing it (lobe_facing_normal),
+    // instead of no reflection -- the black spots a coat with a strong normal map showed.
+    normal = lobe_facing_normal(normal, V);
 
     // 4. GGX VNDF Importance-Sampled Reflection Direction
     float3 R;
-    if (roughness < 0.01)
+    if (roughness < 0.01 && !anisotropic)
     {
         // Smooth mirror surface: exact reflection without stochastic noise
         R = reflect(-V, normal);
@@ -200,7 +210,15 @@ float4 fragMain(
         const float2 noisePixel = (smoothFill || ubo->rtSubsample <= 1u) ? float2(pixelCoord) : floor(input.pos.xy);
         float ign = interleaved_gradient_noise(noisePixel, pushConstant.frameIndex);
         float2 u = float2(ign, frac(ign * 1.6180339887 + 0.314159));
-        float3 M = sample_ggx_vndf(V, normal, roughness, u);
+        float3 M;
+        if (anisotropic)
+        {
+            const float3 T = normalize(anisotropicT - normal * dot(normal, anisotropicT));
+            const float alpha = roughness * roughness;
+            M = sample_ggx_vndf_frame(V, normal, T, cross(normal, T), lerp(alpha, 1.0, lobes.anisotropy * lobes.anisotropy), alpha, u);
+        }
+        else
+            M = sample_ggx_vndf(V, normal, roughness, u);
         R = reflect(-V, M);
 
         // If sample is below the macro hemisphere, fallback to mirror ray

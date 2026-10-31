@@ -595,6 +595,7 @@
             coords.uv[1] = uv1; coords.ddx[1] = ddx_uv1; coords.ddy[1] = ddy_uv1;
             coords.lod = -1.0;
             lobes = evaluate_material_lobes(ubo, gpuMaterial, coords, samp, geomNormal, rawGeomTangent, tangentHandedness, backFace, anisotropicT);
+            lobes.coatNormal = lobe_facing_normal(lobes.coatNormal, -viewDir); // a coat normal map tipped away from the camera
             // Texture streaming: the lobe textures' mips, as the base textures' above.
             if (ubo->mipFeedbackReference != 0 && isMipFeedbackPixel(pixelCoord, ubo->mipFeedbackFrame))
             {

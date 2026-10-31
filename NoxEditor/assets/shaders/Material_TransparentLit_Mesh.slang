@@ -444,6 +444,8 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     }
     float3 reflection = normalize(reflect(-v, n));
     float NdotV = clamp(dot(n, v), 0.001, 1.0);
+    if (lobes.coat > 0.0)
+        lobes.coatNormal = lobe_facing_normal(lobes.coatNormal, v); // a coat normal map tipped away from the camera
     LobeShading lobeShading;
     if (hasLobes)
         lobeShading = lobe_prepare(ubo, lobes, anisotropicT, n, v, NdotV, baseColor.rgb, metallic, alphaRoughness);

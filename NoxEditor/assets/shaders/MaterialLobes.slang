@@ -33,6 +33,15 @@ float4 material_sample_or(UniformBufferObject* ubo, uint textureIndex, int set, 
     return textureIndex == 0xFFFFFFFF ? fallback : material_sample(ubo, textureIndex, set, coords, samplerState);
 }
 
+// A shading normal (normal-mapped) that faces away from the viewer bent back to just facing it: such a normal sees nothing (its
+// Fresnel at 1, the view below its horizon), and a coat over it covered everything with black. The bend is continuous, as Unreal's
+// normal correction for reflections.
+float3 lobe_facing_normal(float3 n, float3 v)
+{
+    const float NdotV = dot(n, v);
+    return NdotV < 0.01 ? normalize(n + v * (0.01 - NdotV)) : n;
+}
+
 // Dispersion (KHR_materials_dispersion): the red, green and blue IORs of a material whose green (its own) IOR is `ior`, spread by its
 // dispersion (20 / Abbe number) as the spec gives it: half of (ior - 1) / Abbe either side of green, red never below 1.
 float3 dispersion_iors(float ior, float dispersion)
