@@ -227,8 +227,10 @@ pass of the scene, editor only).
 - **H3 (2026-10-18, untested):** in the Forward Transparent pass, smooth glass (roughness up to 0.08, fading into H3b by 0.2)
   traces what is behind it (`tracedRefraction` in `Material_TransparentLit_Mesh.slang`, flag `MESHLET_RT_REFRACTION`). Thin-walled
   glass (thickness 0) passes the view ray on unbent; glass with a volume thickness bends it in at the surface and out at the
-  mesh's own far side, found with a ray that only accepts this instance (TLAS custom index = the GPU scene instance slot =
-  `drawID`), with total internal reflection mirroring it; an open mesh falls back to the thickness slab. The ray then goes on
+  mesh's own far side, found with a ray that accepts this instance or a solid surface inside the volume (TLAS custom index =
+  the GPU scene instance slot = `drawID`; other glass is passed), with total internal reflection mirroring it; an open mesh
+  falls back to the thickness slab. A solid surface inside (a bulb's filament) is shaded and seen through the front surface with
+  the volume's absorption over the distance (2026-10-31: it used to be passed, so an emissive filament stayed dark). The ray then goes on
   through the scene past blended / transmissive surfaces (alpha-masked ones cut out) and the hit is shaded by `shadeRayHit`,
   the RT reflections' hit shading moved into `RayHitShading.slang` (base color, every light with a shadow ray, DDGI or
   irradiance, emission); a miss reads the environment. So glass shows what is off screen or hidden behind other objects, and
