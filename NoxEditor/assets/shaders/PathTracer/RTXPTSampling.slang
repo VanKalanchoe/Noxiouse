@@ -8,6 +8,7 @@ namespace RTXPTSampling
     static const uint EffectScatterBSDF = 1u;
     static const uint EffectNEE = 2u;
     static const uint EffectRussianRoulette = 6u;
+    static const uint EffectDispersion = 7u; // Nox: the color channel a path takes at its first dispersive refraction
 
     uint hash32(uint x)
     {

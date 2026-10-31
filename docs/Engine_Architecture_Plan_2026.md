@@ -1332,8 +1332,9 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
       members, a missing one keeps the spec default.
     - `.nmat` (magic `NMA2`) and a cooked mesh's material list share one writer, `MaterialSerializer::WriteFields`. The cooked
       list had dropped IOR, volume, diffuse transmission and depth bias before; it carries every field now.
-    - **Format v10** (`NSM:` / `NMS:`, the magic's character is `'0' + version`). Only the current version is read: an older
-      cook is cooked again from its source, an older `.nmat` is logged (delete it and the model's import writes it again).
+    - **Format v10** (`NSM:` / `NMS:`, the magic's character is `'0' + version`), **v11** with the UV channels. Only the current
+      version is read: an older cook is cooked again from its source, an older `.nmat` (now `NMA3`) is logged (delete it and the
+      model's import writes it again).
     - `GpuMaterial` carries the lobes and `lobes`, the `MaterialLobe*` bits (`PackMaterial`: a lobe is on when its factor is;
       the specular bit also for an IOR other than 1.5). Ray tracing records link their material (`materialIndex`, `lobes`).
     - The lobe textures are imported with their color space (sheen and specular color sRGB, the coat normal BC5) and kept loaded
@@ -1366,9 +1367,20 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     roughness, so a smooth coat over a rough base reflects the traced scene.
   - **Dispersion:** refraction per color channel at the spec's IORs (`dispersion_iors`), in the screen-space and the traced
     refraction of the forward pass.
-  - **Not yet:** the path tracer's BSDF (next); ReSTIR DI's direct lighting mode shades the base lobes only; reflection rays
-    sample an isotropic lobe for an anisotropic surface; ray hits have no coat normal map or anisotropy (no tangent frame there);
-    `KHR_texture_transform` (backlog I2: ClearCoatCarPaint and SheenChair use it).
+  - **Normal maps facing away:** a normal-mapped normal turned away from the camera is bent back to just facing it
+    (`lobe_facing_normal`) for the coat and the reflection ray; the reflection pass returned nothing there and a coat (Fresnel 1
+    at that angle) covered the pixel with black (ClearCoatTest's shared-normal row). Anisotropic surfaces' reflection rays sample
+    the anisotropic GGX; ray hits build their tangent frame (coat normal map, anisotropy).
+  - **Path tracer** (`PathTracer/StandardBSDF.slang`, `RTXPT/BxDF.hlsli`): RTXPT's specular lobe gained the anisotropic GGX (VNDF
+    sampling, D, height-correlated G in the shading frame whose T is the stretch direction), F90 (the specular weight) and the
+    thin film in place of its Schlick Fresnel; the isotropic path is unchanged. The sheen (Charlie, cosine-sampled) and the clear
+    coat (GGX around its normal) are layers over RTXPT's BSDF: one-sample MIS over the layers by their shares, delta lobes of the
+    base keep what the layers let through. Dispersion: at its first dispersive refraction a path takes one color channel (a third
+    of the time each, its throughput that channel times 3) and refracts at that channel's IOR, as every later dispersive surface
+    does for it. The pure lobe math is one module (`MaterialLobeMath.slang`) for the raster and the path tracer.
+  - **Not yet / simplified:** ReSTIR DI's direct lighting mode shades the base lobes only (the user's decision: ignore for now);
+    the specular weight does not change the transmission's Fresnel (the spec lets it); the path tracer's film takes the base's
+    combined F0 (exact for metallic 0 or 1).
   - **Offline tests:**
     - `lobetest/lobetest`: the importer's `ReadGltfMaterial` on 8 Khronos sample assets (ClearCoatTest, ClearCoatCarPaint,
       SheenChair, SpecularTest, IridescenceLamp, AnisotropyBarnLamp, AnisotropyRotationTest, DispersionTest: 89 materials, every
@@ -1378,7 +1390,21 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
       the coat and anisotropy never gain energy over the base; the iridescence Fresnel equals the reference renderer's to 7e-8
       and an exact spectral thin film (Airy reflectance, CIE 1931 observer) to 0.011; the sheen LUT within 1e-4 of a
       2048 x 2048 integration; G-buffer encodings: octahedral 0.03 degrees, anisotropy direction 0.35 degrees, values 0.002.
+    - `slangcpu/bsdftest`: the path tracer's `StandardBSDF` (RTXPT's lobes and the layers) compiled to C++, 400k samples per case
+      (plain, clear coat, sheen, anisotropic metal, specular 0.5 with a film, coat with sheen, at N.V 0.9 and 0.3): the mean
+      sample weight equals eval integrated over the sphere (within 0.003), the pdf's integral equals the share of samples taken
+      (0.79 for the rough anisotropic lobe, whose rest goes below the horizon), no case above a white furnace of 1.
     - The shading in a running scene is compile-checked only.
+- **Texture transforms (I2, built 2026-10-31; glTF `KHR_texture_transform`, Unreal's per-texture UVs):** a material has four UV
+  channels (`MaterialData::UVChannels`): a mesh UV set and its transform (offset, rotation, scale: `uv' = T x R x S x uv`). Every
+  texture reference's set and transform become a channel at import (textures sharing both share one; a fifth distinct one is
+  logged and shares the nearest), the texture reading it (its Set). The shaders transform each texture's UV and gradients where
+  they sample it (`instance_texture_uv`, `material_texture_uv`): G-buffer, forward, alpha tests, lobes, ray hits and the path
+  tracer (its mip requests and footprints too); the hybrid passes that only read a base color (GI, ReSTIR) take the base color's
+  channel from the ray tracing record. glTF's `normalTextureInfo.scale` (the coat's too) and `occlusionTextureInfo.strength` are
+  read and applied. Khronos' SheenChair needs three channels (base color 7x with an offset, normal 2x, occlusion on UV set 1);
+  `lobetest` checks those, ClearCoatCarPaint's 0.2 normal strength and 3x tiling, TextureTransformMultiTest, and the rows against
+  the spec's matrix product.
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much

@@ -272,6 +272,52 @@ float evalMaskingSmithGGXCorrelated(float alpha, float cosThetaI, float cosTheta
     return 1 / (1 + lambdaI + lambdaO);
 }
 
+// Nox: anisotropic GGX (KHR_materials_anisotropy) -- the functions above with a width along each local axis (x: the shading frame's
+// tangent, the direction highlights stretch along; y: the bitangent). Equal widths give exactly the isotropic forms.
+float evalNdfGGXAnisotropic(float alphaX, float alphaY, float3 h)
+{
+    if (h.z <= 0) return 0;
+    const float3 stretched = float3(h.x / alphaX, h.y / alphaY, h.z);
+    const float d = dot(stretched, stretched);
+    return 1 / (K_PI * alphaX * alphaY * d * d);
+}
+
+float evalLambdaGGXAnisotropic(float alphaX, float alphaY, float3 w)
+{
+    if (w.z <= 0) return 0;
+    const float alphaSqrTanSqr = (alphaX * alphaX * w.x * w.x + alphaY * alphaY * w.y * w.y) / (w.z * w.z);
+    return 0.5 * (-1 + sqrt(1 + alphaSqrTanSqr));
+}
+
+float evalMaskingSmithGGXCorrelatedAnisotropic(float alphaX, float alphaY, float3 wi, float3 wo)
+{
+    return 1 / (1 + evalLambdaGGXAnisotropic(alphaX, alphaY, wi) + evalLambdaGGXAnisotropic(alphaX, alphaY, wo));
+}
+
+// The reflected direction's pdf when the half vector is sampled from the visible normals (as evalPdfGGX_VNDF: G1(wi) D(h) / (4 wi.z)).
+float evalPdfGGX_VNDFAnisotropic(float alphaX, float alphaY, float3 wi, float3 h)
+{
+    if (wi.z <= 0 || dot(wi, h) <= 0) return 0;
+    const float G1 = 1 / (1 + evalLambdaGGXAnisotropic(alphaX, alphaY, wi));
+    return G1 * evalNdfGGXAnisotropic(alphaX, alphaY, h) / (4.0f * wi.z);
+}
+
+float3 sampleGGX_VNDFAnisotropic(float alphaX, float alphaY, float3 wi, float2 u)
+{
+    const float3 Vh = normalize(float3(alphaX * wi.x, alphaY * wi.y, wi.z));
+    const float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
+    const float3 T1 = lensq > 0.0002f ? float3(-Vh.y, Vh.x, 0) * rsqrt(lensq) : float3(1, 0, 0);
+    const float3 T2 = cross(Vh, T1);
+    const float r = sqrt(u.x);
+    const float phi = (2.f * K_PI) * u.y;
+    const float t1 = r * cos(phi);
+    float t2 = r * sin(phi);
+    const float s = 0.5f * (1.f + Vh.z);
+    t2 = (1.f - s) * sqrt(1.f - t1 * t1) + s * t2;
+    const float3 Nh = t1 * T1 + t2 * T2 + sqrt(max(0.f, 1.f - t1 * t1 - t2 * t2)) * Vh;
+    return normalize(float3(alphaX * Nh.x, alphaY * Nh.y, max(0.f, Nh.z)));
+}
+
 /** Approximate pre-integrated specular BRDF. The approximation assumes GGX VNDF and Schlick's approximation.
     See Eq 4 in [Ray Tracing Gems, Chapter 32]
 

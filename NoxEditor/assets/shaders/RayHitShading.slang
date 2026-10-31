@@ -217,6 +217,8 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
         coords.uv[1] = meshUV1;
         coords.ddx[0] = coords.ddx[1] = coords.ddy[0] = coords.ddy[1] = float2(0.0);
         coords.lod = 0.0;
+        coords.footprint = 0.0;
+        coords.lodBias = 0.0;
         // The hit's tangent frame (the vertex tangents through the instance's transform: a tangent runs along the surface, so the model
         // matrix, not the normal matrix), for a coat normal map and the anisotropy direction.
         const float3x3 world = (float3x3)((GpuTransform*)ubo->sceneTransformsReference)[instanceSlot].world;

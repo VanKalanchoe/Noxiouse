@@ -193,6 +193,24 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         ObjectToWorld3x4()
     );
 
+    // Dispersion (KHR_materials_dispersion) in an RGB path tracer: at its first dispersive refraction the path takes one color channel
+    // (each a third of the time, its throughput that channel alone times 3: the same mean), then refracts at that channel's IOR -- as
+    // every later dispersive surface does for it. The colors split because each channel bends its own way.
+    if (surface.dispersionIors.x != surface.dispersionIors.z && surface.bsdf.data.SpecularTransmission() > 0.0)
+    {
+        uint channel = path.dispersionChannel();
+        if (channel == 0u)
+        {
+            uint dispersionState = RTXPTSampling::uniformState(path.id, vertexIdx, pushConstant.frameIndex, RTXPTSampling::EffectDispersion);
+            channel = 1u + min(uint(Bridge::rand(dispersionState) * 3.0), 2u);
+            path.setDispersionChannel(channel);
+            path.thp *= 3.0 * float3(channel == 1u ? 1.0 : 0.0, channel == 2u ? 1.0 : 0.0, channel == 3u ? 1.0 : 0.0);
+        }
+        const float channelIor = surface.dispersionIors[channel - 1u];
+        // The ratio as the bridge set it (entering or a thin sheet: 1 / IOR; leaving: IOR), at the channel's IOR.
+        surface.bsdf.data._eta = (lpfloat)(surface.bsdf.data.Eta() <= 1.0 ? 1.0 / channelIor : channelIor);
+    }
+
 
     // Texture streaming: the mips the surfaces the camera sees (directly, in mirrors, through glass) ask for, with the ray cone LOD
     // the samples use. Raster feedback alone asked for the render resolution's mips without the path tracer's sharper bias, and

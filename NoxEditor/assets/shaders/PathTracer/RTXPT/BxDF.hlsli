@@ -14,6 +14,7 @@
 #include "BxDFConfig.hlsli"
 #include "Fresnel.hlsli"
 #include "Microfacet.hlsli"
+#include "../../MaterialLobeMath.slang" // Nox: the thin film's Fresnel (iridescence_fresnel)
 
 
 
@@ -279,8 +280,25 @@ struct SpecularReflectionMicrofacet // : IBxDF
     float3 albedo;      ///< Specular albedo.
     float alpha;        ///< GGX width parameter.
     uint activeLobes;   ///< BSDF lobes to include for sampling and evaluation. See LobeType.hlsli.
+    // Nox (the glTF lobes, StandardBSDF.slang): alphaY the width along the local y axis (anisotropy; alpha is then along x, the
+    // stretch direction); f90 the grazing reflectance (KHR_materials_specular's weight); the thin film (KHR_materials_iridescence) in
+    // place of the Schlick Fresnel by its factor. initialize leaves them isotropic, f90 1, no film.
+    float alphaY;
+    float3 f90;
+    float iridescence;
+    float iridescenceIor;
+    float iridescenceThickness;
 
     bool hasLobe(LobeType lobe) { return (activeLobes & (uint)lobe) != 0; }
+    bool anisotropic() { return alphaY != alpha; }
+
+    float3 fresnel(float cosTheta)
+    {
+        float3 F = evalFresnelSchlick(albedo, f90, cosTheta);
+        if (iridescence > 0.f)
+            F = lerp(F, iridescence_fresnel(1.0, iridescenceIor, albedo, iridescenceThickness, cosTheta), iridescence);
+        return F;
+    }
 
     float3 eval(const float3 wi, const float3 wo)
     {
@@ -296,13 +314,20 @@ struct SpecularReflectionMicrofacet // : IBxDF
         float3 h = normalize(wi + wo);
         float wiDotH = dot(wi, h);
 
+        if (anisotropic())
+        {
+            const float Da = evalNdfGGXAnisotropic(alpha, alphaY, h);
+            const float Ga = evalMaskingSmithGGXCorrelatedAnisotropic(alpha, alphaY, wi, wo);
+            return MultiScatterSpecularApprox(sqrt(alpha * alphaY), wi.z, albedo) * fresnel(wiDotH) * (Da * Ga * 0.25f / wi.z);
+        }
+
         float D = evalNdfGGX(alpha, h.z);
 #if SpecularMaskingFunction == SpecularMaskingFunctionSmithGGXSeparable
         float G = evalMaskingSmithGGXSeparable(alpha, wi.z, wo.z);
 #elif SpecularMaskingFunction == SpecularMaskingFunctionSmithGGXCorrelated
         float G = evalMaskingSmithGGXCorrelated(alpha, wi.z, wo.z);
 #endif
-        float3 F = evalFresnelSchlick(albedo, 1.f, wiDotH);
+        float3 F = fresnel(wiDotH);
         
         float3 ms = MultiScatterSpecularApprox(alpha, wi.z, albedo);
         
@@ -328,7 +353,7 @@ struct SpecularReflectionMicrofacet // : IBxDF
 
             wo = float3(-wi.x, -wi.y, wi.z);
             pdf = 0.f;
-            weight = evalFresnelSchlick(albedo, 1.f, wi.z);
+            weight = fresnel(wi.z);
             lobe = (uint)LobeType::DeltaReflection;
             return true;
         }
@@ -337,15 +362,21 @@ struct SpecularReflectionMicrofacet // : IBxDF
         if (!hasLobe(LobeType::SpecularReflection)) return false;
 
         // Sample the GGX distribution to find a microfacet normal (half vector).
+        float3 h;
+        if (anisotropic())
+            h = sampleGGX_VNDFAnisotropic(alpha, alphaY, wi, preGeneratedSample.xy);
+        else
+        {
 #if GGXSampling == GGXSamplingVNDF
-        float3 h = sampleGGX_VNDF(alpha, wi, preGeneratedSample.xy);    // pdf = G1(wi) * D(h) * max(0,dot(wi,h)) / wi.z
+            h = sampleGGX_VNDF(alpha, wi, preGeneratedSample.xy);    // pdf = G1(wi) * D(h) * max(0,dot(wi,h)) / wi.z
 #elif GGXSampling == GGXSamplingBVNDF
-        float3 h = sampleGGX_BVNDF(alpha, wi, preGeneratedSample.xy);
+            h = sampleGGX_BVNDF(alpha, wi, preGeneratedSample.xy);
 #elif GGXSampling == GGXSamplingNDF
-        float3 h = sampleGGX_NDF(alpha, preGeneratedSample.xy);         // pdf = D(h) * h.z
+            h = sampleGGX_NDF(alpha, preGeneratedSample.xy);         // pdf = D(h) * h.z
 #else
-        #error unknown sampling type
+            #error unknown sampling type
 #endif
+        }
 
         // Reflect the incident direction to find the outgoing direction.
         float wiDotH = dot(wi, h);
@@ -370,6 +401,8 @@ struct SpecularReflectionMicrofacet // : IBxDF
         if (!hasLobe(LobeType::SpecularReflection)) return 0.f;
 
         float3 h = normalize(wi + wo);
+        if (anisotropic())
+            return evalPdfGGX_VNDFAnisotropic(alpha, alphaY, wi, h);
 
 #if GGXSampling == GGXSamplingVNDF
         float pdf = evalPdfGGX_VNDF(alpha, wi, h);
@@ -780,6 +813,11 @@ struct FalcorBSDF // : IBxDF
 
         specularReflection.albedo = dataSpecular;
         specularReflection.alpha = alpha;
+        specularReflection.alphaY = alpha; // isotropic, F90 1, no film (StandardBSDF.slang sets the glTF lobes)
+        specularReflection.f90 = float3(1.f, 1.f, 1.f);
+        specularReflection.iridescence = 0.f;
+        specularReflection.iridescenceIor = 1.f;
+        specularReflection.iridescenceThickness = 0.f;
         specularReflection.activeLobes = activeLobes;
 
         specularReflectionTransmission.transmissionAlbedo = transmissionAlbedo;

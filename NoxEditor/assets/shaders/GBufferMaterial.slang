@@ -594,6 +594,8 @@
             coords.uv[0] = uv0; coords.ddx[0] = ddx_uv0; coords.ddy[0] = ddy_uv0;
             coords.uv[1] = uv1; coords.ddx[1] = ddx_uv1; coords.ddy[1] = ddy_uv1;
             coords.lod = -1.0;
+            coords.footprint = 0.0;
+            coords.lodBias = 0.0;
             lobes = evaluate_material_lobes(ubo, gpuMaterial, coords, samp, geomNormal, rawGeomTangent, tangentHandedness, backFace, anisotropicT);
             lobes.coatNormal = lobe_facing_normal(lobes.coatNormal, -viewDir); // a coat normal map tipped away from the camera
             // Texture streaming: the lobe textures' mips, as the base textures' above.

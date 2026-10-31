@@ -16,11 +16,21 @@ struct MaterialSampleCoords
     float2 ddx[2];
     float2 ddy[2];
     float lod;
+    float footprint; // > 0: a ray cone's width in mesh UV units (the path tracer): each texture's mip from it and its size
+    float lodBias;   // (with a footprint)
 };
 
 float4 material_sample(UniformBufferObject* ubo, uint textureIndex, int set, MaterialSampleCoords coords, SamplerState samplerState)
 {
     const float2 uv = material_texture_uv(coords.material, set, coords.uv[0], coords.uv[1]);
+    if (coords.footprint > 0.0)
+    {
+        uint width, height;
+        MaterialTextureSize(ubo, textureIndex, width, height);
+        const float lod = log2(max(coords.footprint * material_texture_uv_scale(coords.material, set), 1e-20)) +
+                          0.5 * log2(float(max(width * height, 1u))) + coords.lodBias;
+        return SampleMaterialTextureLevel(ubo, textureIndex, samplerState, uv, max(lod, 0.0));
+    }
     if (coords.lod >= 0.0)
         return SampleMaterialTextureLevel(ubo, textureIndex, samplerState, uv, coords.lod);
     return SampleMaterialTextureGrad(ubo, textureIndex, samplerState, uv, material_texture_uv_delta(coords.material, set, coords.ddx[0], coords.ddx[1]),

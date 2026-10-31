@@ -345,6 +345,12 @@ path tracer and raster agree on the sky color.
 - **Brightness:** the sky is physically relative to the sun: at noon the zenith is ~0.03 x the sun's illuminance in blue
   (~0.013 in luminance), a sunlit white wall ~20x brighter, as outside. Auto exposure (camera) or Radiance Scale bring the
   sky up when it reads too dark next to an exposure tuned for a bright HDR map.
+- **Exposure (2026-10-31, Unreal's model):** auto exposure meters the frame's log-average luminance L as a reflected-light meter
+  (EV100 = log2(L x 100 / 12.5)) and shows it at 1 / (1.2 x 2^EV100): L maps to 0.104 (`AutoExposureKey`). RTXPT's key, 0.042, put
+  the average 2.3 stops lower: through the Hable UC2 tonemapper an average surface came out at sRGB ~49/255, daylight looked dim
+  and a frame of sky alone (the sky's ~0.13 at noon is its average then) dark. Without auto exposure the camera's **Manual EV100**
+  applies (default 2, the default sun's daylight; the old fixed exposure 1.0 was EV100 -0.3, blown out); the editor's slider is a
+  compensation in stops on top. Asset previews and unlit views keep their own exposure.
 - **Still open:** time-slicing the update over a few frames (UE's real-time sky capture) if 1-2 ms per changing frame
   shows; aerial perspective on forward-rendered (unlit / transparent) surfaces; night (no moon / stars, the sky just goes dark); the viewer's altitude comes from the
   component, not the camera; the sun disc in path-traced views. Found while here: the component's **Rotation** is drawn

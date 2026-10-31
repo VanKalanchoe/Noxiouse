@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../shaderIO.h"
+#include "../MaterialLobes.slang"
 #include "StandardBSDF.slang"
 #include "Ray.slang"
 #include "RTXPT/EnvMap.hlsli"
@@ -47,6 +48,8 @@ namespace Bridge
         float2 uv; // the base color's coordinates
         float2 meshUV0;
         float2 meshUV1;
+        // KHR_materials_dispersion: the red, green and blue IORs (all the material's IOR without dispersion).
+        float3 dispersionIors;
     };
 
     // RTXPT's stateless uniform generator advances with Hash32. Effect-specific seed construction is
@@ -320,6 +323,77 @@ namespace Bridge
                 textureLod(ubo, lut.transmissionTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.transmissionTextureSet), ubo->pathTracerTexLodBias)).r;
         }
 
+        // 5b. The glTF lobes (MaterialLobes.slang, StandardBSDF.slang's BSDFLobes): evaluated as the raster passes do, each texture at
+        // its ray cone mip. The anisotropy direction becomes the shading frame's T (the base's stretched GGX is along local x).
+        BSDFLobes bsdfLobes = BSDFLobes::none();
+        surface.dispersionIors = float3(ior, ior, ior);
+        if (lut.lobes != 0u && lut.workflow != 1.0)
+        {
+            MaterialSampleCoords coords;
+            coords.material = material;
+            coords.uv[0] = meshUV0;
+            coords.uv[1] = meshUV1;
+            coords.ddx[0] = coords.ddx[1] = coords.ddy[0] = coords.ddy[1] = float2(0.0);
+            coords.lod = -1.0;
+            coords.footprint = max(rayConeWidth * uvPerWorld, 1e-20);
+            coords.lodBias = ubo->pathTracerTexLodBias;
+            const float3 tangentW = mul((float3x3)objToWorld, v0.tangent.xyz * bary.x + v1.tangent.xyz * bary.y + v2.tangent.xyz * bary.z);
+            float3 anisotropicT;
+            // The geometric normal as the mesh has it (normalW is turned to the ray for a back face: the lobes turn theirs alike).
+            GBufferLobes lobes = evaluate_material_lobes(ubo, material, coords, textureSampler, frontFace ? normalW : -normalW, tangentW,
+                                                         v0.tangent.w < 0.0 ? -1.0 : 1.0, !frontFace, anisotropicT);
+            const float3 N = surface.shadingData.N;
+            const float3 V = surface.shadingData.V;
+            const float NdotV = saturate(dot(N, V));
+            bsdfLobes.flags = lobes.flags;
+            if ((lobes.flags & MaterialLobeSpecular) != 0u)
+            {
+                // KHR_materials_specular: the IOR's F0 tinted and weighted; F90 the weight (metals keep theirs).
+                specularF0 = lerp(lobes.dielectricF0 * lobes.specularWeight, baseColor.rgb, saturate(metallic));
+                bsdfLobes.specularF90 = float3(lerp(lobes.specularWeight, 1.0, saturate(metallic)));
+            }
+            if (lobes.iridescence > 0.0 && lobes.iridescenceThickness > 0.0)
+            {
+                bsdfLobes.iridescence = lobes.iridescence;
+                bsdfLobes.iridescenceIor = lobes.iridescenceIor;
+                bsdfLobes.iridescenceThickness = lobes.iridescenceThickness;
+            }
+            if (lobes.anisotropy > 0.0)
+            {
+                const float alpha = max(saturate(roughness) * saturate(roughness), kMinGGXAlpha);
+                bsdfLobes.alphaT = lerp(alpha, 1.0, lobes.anisotropy * lobes.anisotropy);
+                bsdfLobes.alphaB = alpha;
+                const float3 t = anisotropicT - N * dot(N, anisotropicT);
+                if (dot(t, t) > 1e-12)
+                {
+                    surface.shadingData.T = normalize(t);
+                    surface.shadingData.B = cross(N, surface.shadingData.T);
+                }
+            }
+            if (lobes.coat > 0.0)
+            {
+                bsdfLobes.coatNormal = lobe_facing_normal(lobes.coatNormal, V);
+                bsdfLobes.coatWeight = lobes.coat * (0.04 + 0.96 * pow(1.0 - saturate(dot(bsdfLobes.coatNormal, V)), 5.0));
+                bsdfLobes.coatAlpha = max(lobes.coatRoughness * lobes.coatRoughness, kMinGGXAlpha);
+            }
+            if ((lobes.flags & MaterialLobeSheen) != 0u)
+            {
+                bsdfLobes.sheenColor = lobes.sheenColor;
+                bsdfLobes.sheenRoughness = lobes.sheenRoughness;
+                // The sheen's directional albedo E(N.V): the BRDF LUT's blue (BRDFIntegration.slang).
+                float sheenAlbedo = 0.0;
+                if (ubo->brdfLutIndex != 0xFFFFFFFF)
+                {
+                    Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+                    sheenAlbedo = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)), float2(NdotV, 1.0 - lobes.sheenRoughness), 0).b;
+                }
+                bsdfLobes.sheenScaling = saturate(1.0 - max(max(lobes.sheenColor.r, lobes.sheenColor.g), lobes.sheenColor.b) * sheenAlbedo);
+            }
+            // KHR_materials_dispersion: each color channel's IOR (PathTracerHit picks one per path at a dispersive refraction).
+            if ((lobes.flags & MaterialLobeDispersion) != 0u)
+                surface.dispersionIors = dispersion_iors(ior, material.dispersion);
+        }
+
         // 6. Setup BSDF data
         // A thin surface has no inside: 1 / IoR on both faces, as RTXPT's bridge. The inside -> outside ratio on a pane's back face
         // (Bistro's windows are two single-sided sheets, one crossed from behind) was total internal reflection from ~30 degrees:
@@ -335,7 +409,7 @@ namespace Bridge
             specularF0,
             saturate(roughness), saturate(metallic), eta, baseColor.rgb, diffuseTransmission, saturate(transmission));
 
-        surface.bsdf = StandardBSDF::make(bsdfData);
+        surface.bsdf = StandardBSDF::make(bsdfData, bsdfLobes);
         float specularTransmission = saturate(transmission);
         surface.rrRoughness = saturate(roughness);
         // Match RTXPT StandardBSDF::estimateSpecDiffBSDF exactly: transmission belongs to the specular guide and the
@@ -354,6 +428,8 @@ namespace Bridge
             surface.emission *= SampleMaterialTextureLevel(ubo, lut.emissiveTextureIndex, textureSampler, material_texture_uv(material, material.emissiveTextureSet, meshUV0, meshUV1),
                 textureLod(ubo, lut.emissiveTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.emissiveTextureSet), ubo->pathTracerTexLodBias)).rgb;
         }
+        // The coat is over the emission too (the spec's coated emission).
+        surface.emission *= 1.0 - bsdfLobes.coatWeight;
         surface.ior = ior;
         surface.isOpaque = (lut.alphaMode == 0);
 

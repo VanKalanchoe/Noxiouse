@@ -412,6 +412,8 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         coords.uv[0] = vertIn.uv0; coords.ddx[0] = ddx(vertIn.uv0) * lodScale; coords.ddy[0] = ddy(vertIn.uv0) * lodScale;
         coords.uv[1] = vertIn.uv1; coords.ddx[1] = ddx(vertIn.uv1) * lodScale; coords.ddy[1] = ddy(vertIn.uv1) * lodScale;
         coords.lod = -1.0;
+        coords.footprint = 0.0;
+        coords.lodBias = 0.0;
         lobes = evaluate_material_lobes(ubo, gpuMaterial, coords, sampLinearHandle, normalize(vertIn.normal), vertIn.tangent.xyz, vertIn.tangent.w,
                                         instance.doubleSided != 0 && !isFrontFace, anisotropicT);
     }
