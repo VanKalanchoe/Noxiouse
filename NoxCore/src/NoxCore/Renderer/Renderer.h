@@ -937,6 +937,7 @@ namespace Nox
         void createRTAOPipeline(bool forceCompile = false);
         void createSSAOKernel();
         void addSSAOPass();
+        float ambientOcclusionShortRangePixels() const;
         void addRTAOPass();
         void addOcclusionBlurPass();
         // Post Process

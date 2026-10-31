@@ -1203,6 +1203,22 @@ float3 directional_light_discs(UniformBufferObject* ubo, float3 direction)
     return radiance;
 }
 
+// The radius SSAO / RTAO look within at a surface point (`ndc`, `depth`, rebuilt to `worldPos`). With a traced GI that already holds
+// the occlusion past its probe spacing (the screen probes), the AO is only its short range, as Unreal's Lumen short-range AO (Lumen
+// does not apply SSAO, r.Lumen.DiffuseIndirect.SSAO 0): at most `shortRangePixels` pixels' width at the surface -- the occlusion
+// between the probes -- else the whole `radius`. Applied over the GI's own occlusion at the full radius it counted every cavity
+// twice: inside AnisotropyBarnLamp's shade the GI's sky visibility (0.345) was multiplied by an RTAO measuring the same 0.345.
+float ambient_occlusion_radius(float4x4 invViewProj, float2 ndc, float depth, float3 worldPos, float2 viewportSize, float radius,
+                               float shortRangePixels)
+{
+    if (shortRangePixels <= 0.0)
+        return radius;
+    // One pixel's width at the surface, from the neighbor's position at the same depth (perspective or orthographic alike).
+    const float4 neighborH = mul(invViewProj, float4(ndc + float2(2.0 / max(viewportSize.x, 1.0), 0.0), depth, 1.0));
+    const float pixelWidth = length(neighborH.xyz / neighborH.w - worldPos);
+    return clamp(shortRangePixels * pixelWidth, 1e-6, radius);
+}
+
 // How far a ray that starts on a rasterized surface (rebuilt from the depth buffer, or a raster vertex) must start off it. The raster
 // draws cluster LODs simplified by up to lodErrorThreshold of the render height at their distance; the TLAS holds the original
 // triangles (§5.7.1), so the two surfaces can be that far apart. A ray starting under the traced surface hits it at once: black
@@ -2243,6 +2259,7 @@ struct PushConstantSSAO
     float bias;     // world units: shrugs off self-occlusion from the surface's own micro-slope / depth precision
     float power;    // contrast (pow(ao, power) after averaging)
     vec2 viewportSize;
+    float shortRangePixels; // > 0: the radius at most this many pixels' width at the surface (ambient_occlusion_radius)
 };
 
 struct PushConstantSSAOBlur
@@ -2269,6 +2286,7 @@ struct PushConstantRTAO
     float radius;
     vec2 viewportSize;
     float power;
+    float shortRangePixels; // > 0: the radius at most this many pixels' width at the surface (ambient_occlusion_radius)
 };
 
 struct PushConstantPathTracer

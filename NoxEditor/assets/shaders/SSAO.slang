@@ -111,6 +111,8 @@ SSAOOutput fragMain(MSOutput input, uniform PushConstantSSAO pushConstant)
     float3 bitangent = -tangent0 * sin(angle) + bitangent0 * cos(angle);
     float3x3 TBN = float3x3(tangent, bitangent, N);
 
+    const float radius = ambient_occlusion_radius(pushConstant.invViewProj, ndc, depth, worldPos, pushConstant.viewportSize,
+                                                  pushConstant.radius, pushConstant.shortRangePixels);
     float4* kernel = (float4*)pushConstant.kernelReference;
     float3 cameraWorldPos = ubo->cameraWorldPos.xyz;
     float occlusion = 0.0;
@@ -118,7 +120,7 @@ SSAOOutput fragMain(MSOutput input, uniform PushConstantSSAO pushConstant)
     for (uint i = 0; i < pushConstant.kernelSize; i++)
     {
         float3 sampleDir = mul(kernel[i].xyz, TBN); // tangent-space hemisphere sample -> world space
-        float3 samplePosWorld = worldPos + sampleDir * pushConstant.radius;
+        float3 samplePosWorld = worldPos + sampleDir * radius;
 
         float4 sampleView = mul(pushConstant.view, float4(samplePosWorld, 1.0));
         float4 sampleClip = mul(pushConstant.proj, sampleView);
@@ -146,7 +148,7 @@ SSAOOutput fragMain(MSOutput input, uniform PushConstantSSAO pushConstant)
         {
             // Fades out occlusion from geometry far behind the sample point (a wall on the other side of a street,
             // still technically "closer to the camera" at a glancing angle, should not occlude a nearby surface).
-            float rangeCheck = saturate(pushConstant.radius / max(abs(sampleDist - sceneDist), 1e-4));
+            float rangeCheck = saturate(radius / max(abs(sampleDist - sceneDist), 1e-4));
             occlusion += rangeCheck;
         }
     }

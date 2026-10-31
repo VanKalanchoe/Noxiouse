@@ -443,6 +443,17 @@ gray in hybrid while raster and the path tracer showed it white. Now a sample cr
 (2 pi sr; `EmissiveLights::Sample::solidAngle`, area x cos / d^2): no triangle subtends more, so the bound only acts closer than
 the triangle's own size -- where the 1/d^2 spike was -- and keeps 100% of the filament's light on the shade.
 
+**AO with the screen-probe GI is short-range only** (2026-10-31, `ambient_occlusion_radius` in shaderIO.h, SSAO.slang, RTAO.slang,
+`Renderer::ambientOcclusionShortRangePixels`): the deferred lighting multiplies the ambient diffuse by SSAO / RTAO and the material's
+AO. The screen probes trace their rays, so their irradiance already holds the occlusion; RTAO's 0.5 m radius on top counted every
+cavity twice. Measured on AnisotropyBarnLamp (its 20 cm shade, CPU ray casts against the mesh): the GI's sky visibility inside the
+shade 0.345, RTAO there 0.409 -- the GI darkened to 0.41 of itself, with the material AO (0.64) to 0.26, gray where raster and the
+path tracer are white. Unreal does not apply SSAO to Lumen (`r.Lumen.DiffuseIndirect.SSAO` 0) and has Lumen's own short-range AO
+for what lies between its screen probes; so here, with the screen-probe GI running, SSAO / RTAO look only within the probe spacing
+at each pixel (tile size x one pixel's width at the surface, at most the AO radius). Inside the shade: 1.0 close up (16 px = 3 mm),
+0.95 from 2 m at 1080p (16 px = 3.4 cm). The material AO stays (Unreal applies it to Lumen's indirect light too). DDGI and the
+irradiance cubemap keep the whole radius (no visibility below their probe spacing).
+
 **Rect area lights** (Add Component > Rect Light: color, intensity = the radiance of its surface, width / height along the
 entity's X / Y, range; it shines along -Z; an outline and direction stroke in the editor viewport):
 - Deferred and transparent shading (`PBRLighting.slang` `evaluateRectLight`): **diffuse exact** (Lambert's polygon formula

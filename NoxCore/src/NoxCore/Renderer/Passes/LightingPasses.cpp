@@ -403,6 +403,15 @@ namespace Nox
             });
     }
 
+    // With the screen-probe GI this frame, SSAO / RTAO are only its short-range AO (Unreal's Lumen short-range AO; Lumen does not
+    // apply SSAO): within the probe spacing at each pixel (shaderIO.h ambient_occlusion_radius). The probes trace the occlusion
+    // past it, and the full radius on top counted every cavity twice. DDGI's probes see no detail below their meters of spacing,
+    // nor the irradiance cubemap any: the whole radius stays for them.
+    float Renderer::ambientOcclusionShortRangePixels() const
+    {
+        return m_frame.screenProbeGIAdded ? static_cast<float>(std::clamp(m_screenProbeTileSize, 4u, 64u)) : 0.0f;
+    }
+
     void Renderer::addSSAOPass()
     {
         // Mutually exclusive with RTAO: both only ever produce resources.SSAORaw, never together (see the comment on
@@ -451,6 +460,7 @@ namespace Nox
                 ssaoPush.bias = WorldUnits::FromMeters(m_ssaoBiasMeters);
                 ssaoPush.power = m_ssaoPower;
                 ssaoPush.viewportSize = glm::vec2(rw, rh);
+                ssaoPush.shortRangePixels = ambientOcclusionShortRangePixels();
                 cmd.pushData(&ssaoPush, sizeof(shaderio::PushConstantSSAO));
 
                 cmd.drawMeshTasks(1, 1, 1);
@@ -514,6 +524,7 @@ namespace Nox
                 rtaoPush.radius = getSSAORadius();
                 rtaoPush.power = m_ssaoPower;
                 rtaoPush.viewportSize = glm::vec2(rw, rh);
+                rtaoPush.shortRangePixels = ambientOcclusionShortRangePixels();
                 cmd.pushData(&rtaoPush, sizeof(shaderio::PushConstantRTAO));
 
                 cmd.drawMeshTasks(1, 1, 1);

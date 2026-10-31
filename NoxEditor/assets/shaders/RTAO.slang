@@ -199,6 +199,8 @@ RTAOOutput fragMain(MSOutput input, uniform PushConstantRTAO pushConstant)
     // would let rays self-intersect the surface (black acne).
     float originBias = raster_surface_bias(ubo, worldPos, 0.01 * ubo->unitsPerMeter);
     float3 rayOrigin = worldPos + N * originBias;
+    const float radius = ambient_occlusion_radius(pushConstant.invViewProj, ndc, depth, worldPos, pushConstant.viewportSize,
+                                                  pushConstant.radius, pushConstant.shortRangePixels);
     float occlusion = 0.0;
 
     for (uint i = 0; i < pushConstant.kernelSize; i++)
@@ -208,12 +210,12 @@ RTAOOutput fragMain(MSOutput input, uniform PushConstantRTAO pushConstant)
         const float phi = frac(float(i) * 0.6180339887 + hash12(noiseSeed.yx + 3.7)) * 6.28318530718;
         const float sinTheta = sqrt(saturate(stratum));
         float3 rayDir = normalize(mul(float3(sinTheta * cos(phi), sinTheta * sin(phi), sqrt(saturate(1.0 - stratum))), TBN));
-        float hitDist = trace_occlusion_ray(ubo, rayOrigin, rayDir, pushConstant.radius);
+        float hitDist = trace_occlusion_ray(ubo, rayOrigin, rayDir, radius);
         if (hitDist >= 0.0)
         {
             // A hit right next to the surface fully occludes; one out near the edge of the radius barely
             // registers -- the same intent as SSAO's rangeCheck, so radius means the same thing for both.
-            occlusion += 1.0 - saturate(hitDist / pushConstant.radius);
+            occlusion += 1.0 - saturate(hitDist / radius);
         }
     }
 
