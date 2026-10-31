@@ -1435,6 +1435,29 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
   maps BC5, grayscale BC4; sRGB or linear from the texture, not the file). Other KTX2 formats (BC, float) keep their format.
   Found 2026-10-31: the earlier BC7 transcode was still flagged RGBA8, so the cook's BC7 encoder read 16 MB from the 4 MB of a
   2048² texture and the editor crashed loading the lamp (reproduced offline against libktx 4.4.2; now every mip in bounds).
+- **MaterialX import (M2, 2026-10-31; `Asset/MaterialXImporter`, Unreal's Interchange MaterialX):** a .mtlx is a source of
+  materials (no meshes). Import (content browser drop / Import, or a changed .mtlx whose output folder exists) writes each
+  surfacematerial as a .nmat in "<name>_mtlx/" beside it (a document outside the project: into the folder shown, read where it
+  lies) and registers it and its textures (`EditorAssetManager::ImportMaterialX`, the textures through the model import's
+  `ImportMaterialTextures`: color space and compression per slot). The shaders map onto glTF's material through MaterialX's own
+  translation graphs, shipped unmodified with its shader definitions in `NoxEditor/assets/materialx` (Apache 2.0):
+  Standard Surface through `standard_surface_to_gltf_pbr`, OpenPBR through `open_pbr_to_standard_surface` first (its dispersion
+  from the Abbe number directly), glTF PBR directly, UsdPreviewSurface by a small table. The importer evaluates node graphs per
+  texel: the standard library's nodes (math, mixing, channels, conditionals, images and tiled images, place2d, ramps / splits /
+  checkerboard, MaterialX's Perlin noise with its Jenkins hash, fractal, cell and Worley noise), and any node whose definition is a
+  node graph by expanding a copy of that graph (glTF's gltf_image / gltf_normalmap, the translation graphs); definitions that
+  inherit another (Standard Surface 1.0.1 over 1.0.0) take its inputs. An output constant over the surface becomes the factor; one
+  that varies is baked to a texture in glTF's channel layout (roughness G + metalness B, clear coat R + roughness G, sheen color +
+  roughness A, specular color + strength A, iridescence R + thickness G, anisotropy direction RG + strength B), in the texture space
+  of its one tiled image (the material's UV channel holds the tiling) else over UV set 0; normal maps from the normalmap node's
+  input, its scale the strength. A bake that equals its one source image (inside the project) is not written: the material names
+  the image; one that is uniform after all is dropped for the factor. Not equivalent, with warnings: subsurface, diffuse roughness,
+  coat color / IOR / anisotropy, transmission scatter; 3D procedurals (position) bake with UV for position; UDIMs.
+  Verified offline against MaterialX's 44 example documents (60 materials: Standard Surface, OpenPBR, glTF PBR, UsdPreviewSurface,
+  includes, procedural brick / marble, the chess set): all convert, each .nmat round-trips, defaults equal the definitions' (0.8 /
+  0.8 / 1 / 0.18 base color), the chess set's base colors name their JPEGs; 64 s for all (the chess set's 28 baked 2048^2 textures most).
+  The translation's thickness for solid transmissive materials is 1 model unit (MaterialX's choice; the traced refraction finds the
+  real far side, the screen-space fallback uses it).
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much

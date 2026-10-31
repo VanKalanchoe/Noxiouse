@@ -139,6 +139,9 @@ namespace Nox
         bool RelocateAsset(AssetHandle handle, const std::filesystem::path& relativeFolder, const std::string& newStem);
         void OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath);
         void ImportMeshTextures(const Ref<Asset>& meshAsset);
+        void ImportMaterialTextures(const std::vector<const MaterialData*>& materials);
+        // A MaterialX (.mtlx) document: its materials as .nmat files and their textures (MaterialXImporter).
+        void ImportMaterialX(const std::filesystem::path& sourcePath, const std::filesystem::path& outputFolder = {});
         void ImportMeshMaterials(const Ref<Asset>& meshAsset, const AssetMetadata& meshMetadata);
         void PublishLoadedAssets();
         // Registers the per-mesh static assets of finished ImportModel split cooks (Do Not Combine).

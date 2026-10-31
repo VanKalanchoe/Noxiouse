@@ -19,6 +19,7 @@
 #include "NoxCore/Core/Application.h"
 #include "Material.h"
 #include "MaterialSerializer.h"
+#include "MaterialXImporter.h"
 
 #include <fstream>
 #include <cstring>
@@ -209,6 +210,14 @@ namespace Nox
         for (const std::filesystem::path& absolutePath : modifiedPaths)
         {
             const std::filesystem::path relativePath = absolutePath.lexically_relative(assetDir).lexically_normal();
+            // An imported MaterialX document that changed: its materials and textures made again.
+            if (relativePath.extension() == ".mtlx")
+            {
+                std::error_code exists;
+                if (!m_ReadOnly && std::filesystem::is_directory(assetDir / MaterialXImporter::DefaultOutputFolder(relativePath), exists))
+                    ImportMaterialX(relativePath);
+                continue;
+            }
             // Through the path index (every source path is in it): a scan of the registry per changed file cost milliseconds in
             // a large project, and every file written under the asset directory comes here (the registry itself too).
             const auto indexed = m_HandleByPath.find(relativePath.generic_string());
@@ -432,6 +441,14 @@ namespace Nox
 
     void EditorAssetManager::ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType, const MeshImportSettings& meshSettings)
     {
+        // A MaterialX document is a source of materials, not an asset itself (Unreal's Interchange): its materials and textures are
+        // made now. `destPath` (when another than the source) is the folder they go to.
+        if (sourcePath.extension() == ".mtlx")
+        {
+            ImportMaterialX(sourcePath, destPath.empty() || destPath == sourcePath ? std::filesystem::path() : destPath);
+            return;
+        }
+
         AssetMetadata metadata;
         metadata.FilePath = destPath.empty() ? sourcePath : destPath;
         metadata.SourceFilePath = sourcePath;
@@ -667,6 +684,19 @@ namespace Nox
         if (!materials)
             return;
 
+        std::vector<const MaterialData*> list;
+        for (const MaterialData& material : *materials)
+            list.push_back(&material);
+        // The variants' materials name textures the submeshes' own may not (MaterialsVariantsShoe: each variant's base color).
+        for (const std::vector<MaterialVariantMapping>& mappings : *variants)
+            for (const MaterialVariantMapping& mapping : mappings)
+                list.push_back(&mapping.Material);
+        ImportMaterialTextures(list);
+    }
+
+    // Registers the textures materials name (a model's, a MaterialX import's) with the color space and compression their slot needs.
+    void EditorAssetManager::ImportMaterialTextures(const std::vector<const MaterialData*>& materials)
+    {
         // Bistro: 254 materials x 6 slots = 1524 paths, all usually already imported. Checking each
         // with std::filesystem::relative + a linear registry scan measured 2.1s per load. Index the
         // registry once, resolve paths lexically, and handle each distinct path only once.
@@ -764,12 +794,8 @@ namespace Nox
             for (const MaterialLobeTextureSlot& slot : MaterialLobeTextures)
                 importTexture((material.*slot.Member).Path, slot.SRGB, slot.NormalMap ? TextureCompression::Normalmap : TextureCompression::Default);
         };
-        for (const MaterialData& material : *materials)
-            importMaterialTextures(material);
-        // The variants' materials name textures the submeshes' own may not (MaterialsVariantsShoe: each variant's base color).
-        for (const std::vector<MaterialVariantMapping>& mappings : *variants)
-            for (const MaterialVariantMapping& mapping : mappings)
-                importMaterialTextures(mapping.Material);
+        for (const MaterialData* material : materials)
+            importMaterialTextures(*material);
 
         if (registryChanged)
             m_RegistryDirty = true; // written by Update(), not per load
@@ -792,6 +818,44 @@ namespace Nox
             std::filesystem::remove(cookedPath, ec);
             std::filesystem::remove(cookedPath.string() + ".hash", ec);
         }
+    }
+
+    void EditorAssetManager::ImportMaterialX(const std::filesystem::path& sourcePath, const std::filesystem::path& outputFolder)
+    {
+        if (m_ReadOnly)
+            return;
+        NOX_PROFILE_FUNCTION();
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        const std::filesystem::path folder = outputFolder.empty() ? MaterialXImporter::DefaultOutputFolder(sourcePath) : outputFolder;
+        std::vector<MaterialXMaterial> materials;
+        std::string error;
+        // The shipped definitions and translation graphs (NoxEditor/assets/materialx), beside the shaders.
+        if (!MaterialXImporter::Import(assetDirectory, sourcePath, folder, std::filesystem::path("assets") / "materialx", materials, error))
+        {
+            NOX_CORE_ERROR("MaterialX import of {} failed: {}", sourcePath.generic_string(), error);
+            return;
+        }
+
+        std::vector<const MaterialData*> written;
+        for (const MaterialXMaterial& material : materials)
+        {
+            for (const std::string& warning : material.Warnings)
+                NOX_CORE_WARN("MaterialX {} ({}): {}", sourcePath.filename().generic_string(), material.Name, warning);
+            if (!MaterialSerializer::Serialize(assetDirectory / material.MaterialPath, material.Data))
+            {
+                NOX_CORE_ERROR("MaterialX: cannot write {}", material.MaterialPath.generic_string());
+                continue;
+            }
+            // Made again (the document changed): what uses the material reloads it.
+            if (const AssetHandle existing = FindHandleByPath(material.MaterialPath, AssetType::Material))
+                ReimportAsset(existing);
+            else
+                RegisterGeneratedFile(material.MaterialPath, AssetType::Material);
+            written.push_back(&material.Data);
+        }
+        ImportMaterialTextures(written);
+        m_RegistryDirty = true;
+        NOX_CORE_INFO("MaterialX: {} material(s) from {} into {}", written.size(), sourcePath.generic_string(), folder.generic_string());
     }
 
     void EditorAssetManager::ImportMeshMaterials(const Ref<Asset>& meshAsset, const AssetMetadata& meshMetadata)

@@ -65,7 +65,7 @@ faithfully. Each lobe costs nothing for materials that do not use it.
 | # | Item |
 |---|---|
 | M1 | **The missing material lobes**: `KHR_materials_clearcoat`, `_sheen`, `_specular`, `_iridescence`, `_anisotropy`, `_dispersion`. **Done 2026-10-31:** data, import, material editor, G-buffer, deferred, forward, ray hits, reflections and guides, the path tracer's BSDF (`Engine_Architecture_Plan_2026.md` §5.8.2). ReSTIR DI's mode shades the base lobes only (ignored for now) |
-| M2 | **MaterialX (.mtlx) material importer** (Unreal's Interchange MaterialX): a .mtlx file is a material only (no meshes) -- e.g. AMD's MaterialX library (Apache 2.0: keep attribution). Reads the surface shader (Standard Surface or OpenPBR Surface) and maps it onto a .nmat plus its textures (M1's lobes where they apply); procedural node graphs (noise, mixing) are baked to textures. Assigned to glTF meshes like any material. After M1 |
+| M2 | **MaterialX (.mtlx) material importer** (Unreal's Interchange MaterialX): a .mtlx file is a material only (no meshes) -- e.g. AMD's MaterialX library (Apache 2.0: keep attribution). Reads the surface shader (Standard Surface or OpenPBR Surface) and maps it onto a .nmat plus its textures (M1's lobes where they apply); procedural node graphs (noise, mixing) are baked to textures. Assigned to glTF meshes like any material. **Done 2026-10-31** (`Engine_Architecture_Plan_2026.md` §5.8.2: MaterialX's translation graphs evaluated per texel, bakes in glTF's layout; verified on MaterialX's 44 example documents) |
 
 ### Characters and animation (plan: `Animation_Graph_Architecture_Plan_2026.md`)
 
