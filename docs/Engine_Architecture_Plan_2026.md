@@ -1377,7 +1377,10 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     coat (GGX around its normal) are layers over RTXPT's BSDF: one-sample MIS over the layers by their shares, delta lobes of the
     base keep what the layers let through. Dispersion: at its first dispersive refraction a path takes one color channel (a third
     of the time each, its throughput that channel times 3) and refracts at that channel's IOR, as every later dispersive surface
-    does for it. The pure lobe math is one module (`MaterialLobeMath.slang`) for the raster and the path tracer.
+    does for it. The pure lobe math is one module (`MaterialLobeMath.slang`) for the raster and the path tracer. Under DLSS RR
+    the pixel's guides stay on the first dispersive glass the camera's delta path meets (2026-10-31): RTXPT's stable planes take
+    the guides from the one surface behind clear glass, and with a channel picked per frame that was three surfaces taking turns
+    (depth, motion, albedo jumping every frame: RR flickered, more with more dispersion).
   - **Not yet / simplified:** ReSTIR DI's direct lighting mode shades the base lobes only (the user's decision: ignore for now);
     the specular weight does not change the transmission's Fresnel (the spec lets it); the path tracer's film takes the base's
     combined F0 (exact for metallic 0 or 1).

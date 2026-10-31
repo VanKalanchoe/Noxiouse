@@ -196,8 +196,14 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     // Dispersion (KHR_materials_dispersion) in an RGB path tracer: at its first dispersive refraction the path takes one color channel
     // (each a third of the time, its throughput that channel alone times 3: the same mean), then refracts at that channel's IOR -- as
     // every later dispersive surface does for it. The colors split because each channel bends its own way.
+    // RR's guides through glass follow the one image the camera's delta path sees (RTXPT's stable planes). A dispersive refraction
+    // makes three, one per channel, and the path takes a random one each frame: the guides (depth, motion, albedo of the surface
+    // behind) jumped between three surfaces every frame and RR flickered, the more the higher the dispersion. The guides stay on
+    // this glass instead -- the same every frame -- and RR is left the channels' color noise, which it averages.
+    bool dispersiveGuide = false;
     if (surface.dispersionIors.x != surface.dispersionIors.z && surface.bsdf.data.SpecularTransmission() > 0.0)
     {
+        dispersiveGuide = path.hasFlag(PathFlags::deltaOnlyPath) || vertexIdx == 1;
         uint channel = path.dispersionChannel();
         if (channel == 0u)
         {
@@ -300,6 +306,8 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
             rrNormalRoughness[pixel] = float4(surface.shadingData.N, surface.rrRoughness);
         }
     }
+    if (dispersiveGuide && rrVisibleSurface)
+        path.setFlag(PathFlags::rrGuidesDone, true); // (above) this glass is the pixel's guide
 
     // 2. Collect surface emission (with MIS if previous bounce used NEE)
     if (any(surface.emission > float3(0.0)))
