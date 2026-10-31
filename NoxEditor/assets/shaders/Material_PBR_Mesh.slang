@@ -177,7 +177,7 @@ float3 getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, vec3 n, v
     float3 specularLight = prefilteredSample.rgb;
 
 	float3 diffuse = diffuseLight * pbrInputs.diffuseColor;
-	float3 specular = specularLight * (pbrInputs.specularColor * brdf.x + brdf.y);
+	float3 specular = specularLight * (pbrInputs.specularColor * brdf.x + pbrInputs.reflectance90 * brdf.y);
 
 	// For presentation, this allows us to disable IBL terms
 	// For presentation, this allows us to disable IBL terms

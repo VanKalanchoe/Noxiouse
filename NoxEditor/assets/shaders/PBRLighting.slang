@@ -178,7 +178,9 @@ IBLResult getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, float3
 
     IBLResult result;
     result.diffuse = diffuseLight * pbrInputs.diffuseColor * ubo->scaleIBLAmbient;
-    result.specular = specularLight * (pbrInputs.specularColor * brdf.x + brdf.y) *
+    // The split sum with the material's F90 (F0 x scale + F90 x bias), as the direct light's Fresnel has it: a reflection weaker than
+    // full (KHR_materials_specular) has no grazing rim either.
+    result.specular = specularLight * (pbrInputs.specularColor * brdf.x + pbrInputs.reflectance90 * brdf.y) *
                       iblSpecularOcclusion(pbrInputs.NdotV, ao, pbrInputs.perceptualRoughness);
     return result;
 }

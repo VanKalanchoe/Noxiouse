@@ -10,7 +10,8 @@
 // in a smooth floor came out as the sign's letter above it, where NRD (and the path tracer) showed the bulb.
 
 // Streamline DLSS-RR programming guide 4.2.1 [Ray Tracing Gems, Chapter 32].
-float3 EnvBRDFApprox2(float3 SpecularColor, float alpha, float NoV)
+// `f90`: the grazing reflectance (KHR_materials_specular's weight; 1 otherwise).
+float3 EnvBRDFApprox2(float3 SpecularColor, float alpha, float NoV, float3 f90 = float3(1.0))
 {
     NoV = abs(NoV);
     float4 X;
@@ -31,7 +32,7 @@ float3 EnvBRDFApprox2(float3 SpecularColor, float alpha, float NoV)
     float scale = dot(mul(M3, X.xy), Y.xy) * rcp(dot(mul(M4, X.xzw), Y.xyw));
     // This is a hack for specular reflectance of 0
     bias *= saturate(SpecularColor.g * 50);
-    return mad(SpecularColor, max(0, scale), max(0, bias));
+    return mad(SpecularColor, max(0, scale), max(0, bias) * f90);
 }
 
 [shader("compute")]
@@ -93,7 +94,7 @@ void guidesMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConsta
 
     // Under a clear coat what the base reflects is what the coat lets through, plus the coat's own reflection (lobe_ambient's
     // layering); the reflection's guides follow the reflection layer (gbuffer_reflection_layer).
-    float3 specularAlbedo = EnvBRDFApprox2(specularColor, roughness * roughness, NoV);
+    float3 specularAlbedo = EnvBRDFApprox2(specularColor, roughness * roughness, NoV, (lobes.flags & MaterialLobeSpecular) != 0u ? f90 : float3(1.0));
     if (lobes.coat > 0.0)
     {
         const float coatNoV = saturate(dot(lobes.coatNormal, toCamera));

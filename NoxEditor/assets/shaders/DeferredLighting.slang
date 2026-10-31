@@ -629,7 +629,7 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
                 SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
                 Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
                 const float2 brdf = brdfTex.SampleLevel(samplerBrdf, float2(NdotV, 1.0 - perceptualRoughness), 0).rg;
-                const float3 giSpecular = screenProbeIrradiance * (specularColor * brdf.x + brdf.y);
+                const float3 giSpecular = screenProbeIrradiance * (specularColor * brdf.x + specularEnvironmentR90 * brdf.y);
                 ambientSpecular = lerp(ambientSpecular, giSpecular, smoothstep(0.35, 0.8, perceptualRoughness));
             }
         }
@@ -685,7 +685,7 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
             float3 brdf = brdfTex.Sample(samplerBrdf, float2(NdotV, 1.0 - perceptualRoughness)).rgb;
 
             // Specular Fresnel factor: only ~0.04 (4%) for dielectrics (plants, stone), ~0.9-1.0 for metals
-            float3 specularFactor = specularColor * brdf.x + brdf.y;
+            float3 specularFactor = specularColor * brdf.x + specularEnvironmentR90 * brdf.y; // F90 as the IBL's (getIBLContribution)
 
             // Where the reflection rays went to the sky (Reflection.slang: a miss's hit distance is reflection_miss_distance), indoors or
             // in the dark the sky's light is held back like the environment's (specularOcclusion). The hit distance is in world units

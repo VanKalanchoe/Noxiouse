@@ -667,7 +667,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         }
         Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
         const float2 brdf = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)), float2(NdotV, 1.0 - perceptualRoughness), 0).rg;
-        ambientSpecular = lerp(ambientSpecular, radiance * (specularColor * brdf.x + brdf.y), tracedReflectionWeight);
+        ambientSpecular = lerp(ambientSpecular, radiance * (specularColor * brdf.x + specularEnvironmentR90 * brdf.y), tracedReflectionWeight);
     }
 
     // The coat's and the sheen's ambient over the base's (lobe_ambient), each at its own roughness, occluded as the base's.
