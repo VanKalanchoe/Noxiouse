@@ -89,6 +89,8 @@ bool forwardShadowed(UniformBufferObject* ubo, float3 origin, float3 direction, 
 // over the band below it: a single sharp ray stands for a rough lobe badly, the blurred pyramid does that better.
 static const float RTRefractionFullRoughness = 0.08;
 static const float RTRefractionMaxRoughness = 0.2;
+// Total internal reflections a traced refraction follows inside a glass volume before it goes on as it is.
+static const uint TracedRefractionMaxInternalBounces = 6;
 
 // The closest hit along the ray: surfaces that let light through are passed (blended, transmissive) and alpha-masked ones cut out,
 // as the shadow rays do. With `self` >= 0 (a ray inside that glass instance) its own surface counts too: its far side.
@@ -179,33 +181,60 @@ float3 tracedRefraction(UniformBufferObject* ubo, InstanceData instance, uint se
         inside = dot(inside, inside) > 1e-6 ? normalize(inside) : -v;
         const float3 entry = position - n * bias;
 
-        uint slot, primitive;
-        float2 barycentrics;
-        float hitT;
-        if (traceRefractionRay(ubo, entry, inside, maxDistance, int(selfSlot), slot, primitive, barycentrics, hitT))
+        // Through the volume to where the ray leaves it. Total internal reflection at the far side mirrors the ray back inside, and it
+        // goes on to the next side, as the path tracer follows it: in DispersionTest's prisms seen from the front 22% of the rays
+        // (IOR 1.5) to 93% (IOR 2.42) reflect at the first side they reach, up to 10% more than once. One reflection that then went
+        // on as if outside passed the prism's other sides unseen (glass is skipped) and showed what lay along the mirrored line.
+        GpuRayTracingInstance* rtInstances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+        float3 position = entry;
+        float3 travel = inside;
+        float insideDistance = 0.0;
+        bool left = false;
+        for (uint bounce = 0; bounce < TracedRefractionMaxInternalBounces && !left; ++bounce)
         {
+            uint slot, primitive;
+            float2 barycentrics;
+            float hitT;
+            if (!traceRefractionRay(ubo, position, travel, maxDistance, int(selfSlot), slot, primitive, barycentrics, hitT))
+            {
+                if (bounce > 0)
+                    break; // a mesh that is not closed: out where the ray is
+                // No far side at all (an open mesh): a slab of the given thickness.
+                const float slab = instance.thickness * modelScale / max(dot(inside, -n), 0.1);
+                position = entry + inside * slab - v * bias;
+                insideDistance = slab;
+                travel = -v;
+                left = true;
+                break;
+            }
+            insideDistance += hitT;
             // Something solid inside the volume before its far side (a filament in a bulb): that is what is seen, through the
             // front surface and what the volume absorbs on the way. The ray used to look for the glass's own far side only and went
             // through it (the hybrid's dark filament the path tracer and the raster's screen-space refraction both show lit).
             if (slot != selfSlot)
-                return shadeRayHit(ubo, slot, primitive, barycentrics, entry, inside, hitT) *
-                       volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale, hitT);
-            GpuRayTracingInstance* rtInstances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+                return shadeRayHit(ubo, slot, primitive, barycentrics, position, travel, hitT) *
+                       volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale, insideDistance);
             float3 outward = rayHitNormal(rtInstances[slot], primitive, barycentrics);
-            if (dot(outward, inside) < 0.0)
+            if (dot(outward, travel) < 0.0)
                 outward = -outward;
-            const float3 exitPoint = entry + inside * hitT;
-            absorbed = volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale, hitT);
-            float3 outside = refract(inside, -outward, ior);
-            direction = dot(outside, outside) > 1e-6 ? normalize(outside) : reflect(inside, -outward);
-            origin = exitPoint + direction * bias;
+            const float3 exitPoint = position + travel * hitT;
+            const float3 outside = refract(travel, -outward, ior);
+            if (dot(outside, outside) > 1e-6)
+            {
+                travel = normalize(outside);
+                position = exitPoint + travel * bias;
+                left = true;
+            }
+            else
+            {
+                travel = reflect(travel, outward); // total internal reflection: back into the volume
+                position = exitPoint + travel * bias;
+            }
         }
-        else
-        {
-            const float slab = instance.thickness * modelScale / max(dot(inside, -n), 0.1);
-            origin = entry + inside * slab - v * bias;
-            absorbed = volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale, slab);
-        }
+        // Still inside after the last reflection followed: it goes on from there (rare: a few per cent of the rays in a prism).
+        direction = travel;
+        origin = position;
+        absorbed = volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale, insideDistance);
     }
 
     uint slot, primitive;
