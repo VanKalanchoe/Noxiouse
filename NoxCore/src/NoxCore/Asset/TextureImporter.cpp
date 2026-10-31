@@ -473,8 +473,8 @@ namespace Nox
         if (!decoded)
             return false;
         // PNG/JPG decode to RGBA8 with generated mips, compressed as the texture's settings say (BC7, normal maps BC5, grayscale
-        // BC4: always linear); DDS and KTX2 keep the format they ship in.
-        if (cpuData.Format == NRI::ImageFormat::SRGBA8 || cpuData.Format == NRI::ImageFormat::RGBA8)
+        // BC4: always linear), as do a Basis or RGBA8 KTX2; DDS and other KTX2 keep the format they ship in.
+        if (cpuData.DirectFormat == UINT32_MAX && (cpuData.Format == NRI::ImageFormat::SRGBA8 || cpuData.Format == NRI::ImageFormat::RGBA8))
         {
             if (metadata.TextureSpec.compression == TextureCompression::Default)
                 EncodeBC7(cpuData);
@@ -845,15 +845,12 @@ namespace Nox
         bool needsOrientationFix = (kTexture->orientation.y == KTX_ORIENT_Y_UP);
         bool needsFlip = (needsOrientationFix != spec.flip);
 
+        // A Basis Universal texture (ETC1S / UASTC, glTF's KHR_texture_basisu) is a source like a PNG: transcoded to RGBA8 and
+        // cooked by this texture's own settings (BC7, normal maps BC5, grayscale BC4, sRGB or linear), as Unreal imports any
+        // compressed source. A plain RGBA8 KTX2 is the same. Any other format (BC, float) is kept as it ships (DirectFormat).
         if (ktxTexture2_NeedsTranscoding(kTexture))
         {
-            // BC7 is block-compressed (4x4 texel blocks) - a plain row-reverse of the compressed
-            // bytes would scramble the blocks instead of flipping the image, so when a flip is
-            // required, transcode to plain RGBA32 instead so the row-flip below is safe. This
-            // costs VRAM only for the textures that actually need correcting.
-            ktx_transcode_fmt_e transcodeTarget = needsFlip ? KTX_TTF_RGBA32 : KTX_TTF_BC7_RGBA;
-            result = ktxTexture2_TranscodeBasis(kTexture, transcodeTarget, 0);
-
+            result = ktxTexture2_TranscodeBasis(kTexture, KTX_TTF_RGBA32, 0);
             if (result != KTX_SUCCESS)
             {
                 NOX_CORE_ERROR("TextureImporter::DecodeKTX - failed to transcode Basis texture: {}", path.string());
@@ -861,11 +858,18 @@ namespace Nox
                 return false;
             }
         }
+        const bool rgba8 = kTexture->vkFormat == 37 /* VK_FORMAT_R8G8B8A8_UNORM */ || kTexture->vkFormat == 43 /* _SRGB */;
+        if (rgba8 && (kTexture->numDimensions != 2 || kTexture->numLayers != 1 || kTexture->numFaces != 1))
+        {
+            NOX_CORE_ERROR("TextureImporter::DecodeKTX - '{}' is not a single 2D image (array, cube or 3D)", path.string());
+            ktxTexture2_Destroy(kTexture);
+            return false;
+        }
 
         // Get texture dimensions and data
         cpuData.Width = kTexture->baseWidth;
         cpuData.Height = kTexture->baseHeight;
-        cpuData.MipLevels = kTexture->numLevels; // todo:
+        cpuData.MipLevels = kTexture->numLevels;
 
         cpuData.MipOffsets.resize(kTexture->numLevels);
         for (uint32_t level = 0; level < kTexture->numLevels; level++)
@@ -875,26 +879,23 @@ namespace Nox
             cpuData.MipOffsets[level] = offset;
         }
 
-        // Check if the KTX texture has a format
-        if (kTexture->classId == ktxTexture2_c)
+        if (rgba8)
         {
-            // For KTX2 files, we can get the format directly
-            cpuData.DirectFormat = kTexture->vkFormat;
+            // The texture's color space is its settings' (as for a PNG), not the file's transfer function.
+            cpuData.Format = spec.format;
+            cpuData.DirectFormat = UINT32_MAX;
         }
         else
         {
-            uint32_t directFormat = UINT32_MAX;
-            // For KTX1 files or if we can't determine the format, use a reasonable default
-            cpuData.DirectFormat = directFormat;
+            cpuData.DirectFormat = kTexture->vkFormat;
         }
 
         if (needsFlip)
         {
-            // Block-compressed formats (a natively block-compressed KTX2 that didn't go through
-            // Basis transcoding above) can't be vertically flipped by reversing rows of bytes -
-            // the texel order *inside* each 4x4 block would also need flipping, which needs a
-            // real BC codec. Only flip when we know the data is a plain uncompressed format.
-            uint32_t texelSize = UncompressedVkFormatTexelSize(cpuData.DirectFormat);
+            // Block-compressed formats (a natively block-compressed KTX2) can't be vertically flipped by reversing rows of
+            // bytes - the texel order *inside* each 4x4 block would also need flipping, which needs a real BC codec. Only flip
+            // when we know the data is a plain uncompressed format (every Basis texture is, transcoded above).
+            uint32_t texelSize = UncompressedVkFormatTexelSize(kTexture->vkFormat);
             if (texelSize > 0)
             {
                 for (uint32_t level = 0; level < kTexture->numLevels; level++)
@@ -919,6 +920,18 @@ namespace Nox
             {
                 NOX_CORE_ERROR("TextureImporter::DecodeKTX - '{}' is block-compressed, flipping it at load time isn't safe. Flip the source image before baking it to KTX2.", path.string());
             }
+        }
+
+        // An RGBA8 image that ships without its mip chain gets one made here, as a PNG does.
+        if (rgba8 && kTexture->numLevels == 1 && spec.generateMips)
+        {
+            const size_t size = static_cast<size_t>(cpuData.Width) * cpuData.Height * 4;
+            cpuData.Data = Buffer::Copy(Buffer(kTexture->pData + cpuData.MipOffsets[0], size));
+            ktxTexture2_Destroy(kTexture);
+            cpuData.MipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(cpuData.Width, cpuData.Height)))) + 1;
+            cpuData.MipOffsets = { 0 };
+            GenerateRGBA8MipChain(cpuData);
+            return true;
         }
 
         // Owned (the KTX texture's memory goes away with it), and largest mip first like every other texture: KTX2 stores

@@ -1407,8 +1407,12 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
   the spec's matrix product.
 - **KTX2 / Basis textures (2026-10-31; glTF `KHR_texture_basisu`):** a texture's image is the one `KHR_texture_basisu` (or
   `MSFT_texture_dds`) names, else the core `source` -- a file that ships only KTX2 (Khronos' glTF-KTX-BasisU samples) has no
-  `source` at all, and every texture of AnisotropyBarnLamp's KTX version was dropped (gray instead of bronze). The cook
-  transcodes Basis to BC7 (`TextureImporter::DecodeKTX`), its color space from the file's own transfer function.
+  `source` at all, and every texture of AnisotropyBarnLamp's KTX version was dropped (gray instead of bronze). A Basis (ETC1S /
+  UASTC) or plain RGBA8 KTX2 is a source like a PNG, as Unreal imports any compressed source: `TextureImporter::DecodeKTX`
+  transcodes it to RGBA8 (its mips made when it ships none) and the cook compresses it by the texture's own settings (BC7, normal
+  maps BC5, grayscale BC4; sRGB or linear from the texture, not the file). Other KTX2 formats (BC, float) keep their format.
+  Found 2026-10-31: the earlier BC7 transcode was still flagged RGBA8, so the cook's BC7 encoder read 16 MB from the 4 MB of a
+  2048² texture and the editor crashed loading the lamp (reproduced offline against libktx 4.4.2; now every mip in bounds).
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much
