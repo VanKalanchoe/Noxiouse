@@ -565,6 +565,17 @@
                 float3 B = cross(N, T) * tangentHandedness;
                 float3x3 TBN = float3x3(T, B, N);
                 finalNormal = normalize(mul(tangentNormal, TBN));
+
+                // Specular anti-aliasing (specular_aa_roughness): how much the mapped normal turns one pixel over, from the map
+                // itself a pixel's UV step away (at the same mip) -- the surface's own steps, so a neighbouring object across a
+                // silhouette does not count, as a ddx of the resolved normal would. AnisotropyRotationTest's groove map sparkled
+                // under TAA and DLSS: grooves finer than a pixel make a highlight no pixel can hold.
+                const float pixelStep = exp2(-ubo->textureLodBias); // one render pixel (the gradients are scaled by the LOD bias)
+                const float3 normalDx = normalize(mul(tangent_normal_from_map(SampleMaterialTextureGrad(ubo, instance.normalTextureIndex, samp,
+                    normalUV + ddx_normal * pixelStep, ddx_normal, ddy_normal).xyz, instance.normalScale), TBN));
+                const float3 normalDy = normalize(mul(tangent_normal_from_map(SampleMaterialTextureGrad(ubo, instance.normalTextureIndex, samp,
+                    normalUV + ddy_normal * pixelStep, ddx_normal, ddy_normal).xyz, instance.normalScale), TBN));
+                roughness = specular_aa_roughness(roughness, normalDx - finalNormal, normalDy - finalNormal);
             }
         }
         else

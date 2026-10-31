@@ -1741,6 +1741,17 @@ float3 tangent_normal_from_map(float3 sampled, float scale = 1.0)
     return dot(tangentNormal, tangentNormal) > 1e-12 ? normalize(tangentNormal) : float3(0.0, 0.0, 1.0);
 }
 
+// Specular anti-aliasing: a normal that changes faster than a pixel (a fine normal map's grooves, seen from afar) makes a highlight
+// no pixel can hold -- it sparkles and TAA / DLSS cannot settle it. The roughness grows by the normal's variance over the pixel
+// (Tokuyoshi & Kaplanyan 2019, "Improved Geometric Specular Antialiasing"), as Godot's screen-space roughness limiter does with its
+// defaults (amount 0.25, limit 0.18). `dndx`, `dndy`: the normal's change one pixel over. Perceptual roughness in and out.
+float specular_aa_roughness(float perceptualRoughness, float3 dndx, float3 dndy)
+{
+    const float variance = 0.25 * (dot(dndx, dndx) + dot(dndy, dndy));
+    const float kernelRoughness2 = min(2.0 * variance, 0.18);
+    return sqrt(min(1.0, perceptualRoughness * perceptualRoughness + kernelRoughness2));
+}
+
 // A normal map sample to a world-space normal in the mesh's stored tangent frame (xyz world tangent, w bitangent handedness),
 // Gram-Schmidt'ed against the interpolated normal, as the G-buffer does it.
 float3 normal_from_map(float3 sampled, float3 normal, float4 tangent, float scale = 1.0)

@@ -379,15 +379,24 @@ float3 evaluateRectLightLobes(PBRInfo pbrInputs, LobeShading shading, LightData 
     return color;
 }
 
+// The normal an anisotropic surface reflects its surroundings about (the glTF Sample Viewer's bent normal; Unreal's
+// ModifyGGXAnisotropicNormalRoughness, which its reflection captures, SSR and ray traced reflections all use): turned towards the
+// view in the plane across the stretch direction (anisotropicB the direction across it), more the stronger the anisotropy and the
+// smoother the surface. The environment lookup and the hybrid's reflection rays take an isotropic lobe around it.
+float3 anisotropic_bent_normal(float3 n, float3 anisotropicB, float3 v, float anisotropy, float perceptualRoughness)
+{
+    float3 bentNormal = cross(anisotropicB, v);
+    bentNormal = normalize(cross(bentNormal, anisotropicB));
+    const float a = pow(1.0 - anisotropy * (1.0 - perceptualRoughness), 4.0);
+    return normalize(lerp(bentNormal, n, a));
+}
+
 // The reflection direction an anisotropic surface's environment lookup takes (the spec's bent normal); the plain reflection otherwise.
 float3 lobe_reflection(LobeShading shading, float3 n, float3 v, float perceptualRoughness)
 {
     if (shading.lobes.anisotropy <= 0.0)
         return normalize(reflect(-v, n));
-    float3 bentNormal = cross(shading.anisotropicB, v);
-    bentNormal = normalize(cross(bentNormal, shading.anisotropicB));
-    const float a = pow(1.0 - shading.lobes.anisotropy * (1.0 - perceptualRoughness), 4.0);
-    bentNormal = normalize(lerp(bentNormal, n, a));
+    const float3 bentNormal = anisotropic_bent_normal(n, shading.anisotropicB, v, shading.lobes.anisotropy, perceptualRoughness);
     const float3 r = reflect(-v, bentNormal);
     return normalize(lerp(r, bentNormal, perceptualRoughness * perceptualRoughness));
 }

@@ -195,10 +195,22 @@ float4 fragMain(
     // A normal-mapped normal facing away from the camera reflects nothing it could see: bent back to facing it (lobe_facing_normal),
     // instead of no reflection -- the black spots a coat with a strong normal map showed.
     normal = lobe_facing_normal(normal, V);
+    const float3 surfaceNormal = normal; // the ray starts off the surface itself
+
+    // An anisotropic base reflects about its bent normal (anisotropic_bent_normal, PBRLighting.slang), an isotropic lobe around it,
+    // as the raster's environment lookup does and Unreal's ray traced reflections do (ModifyGGXAnisotropicNormalRoughness). The
+    // stretched lobe sampled here before was right in the mean, but one ray a pixel of it is the denoisers' worst case: REBLUR and RR
+    // are given the surface's roughness (0.1 on AnisotropyRotationTest), took the rare ray far along the stretch for a firefly, and
+    // the streaks -- the whole look of the material -- were filtered away.
+    if (anisotropic)
+    {
+        const float3 T = normalize(anisotropicT - normal * dot(normal, anisotropicT));
+        normal = anisotropic_bent_normal(normal, normalize(cross(normal, T)), V, lobes.anisotropy, roughness);
+    }
 
     // 4. GGX VNDF Importance-Sampled Reflection Direction
     float3 R;
-    if (roughness < 0.01 && !anisotropic)
+    if (roughness < 0.01)
     {
         // Smooth mirror surface: exact reflection without stochastic noise
         R = reflect(-V, normal);
@@ -210,15 +222,7 @@ float4 fragMain(
         const float2 noisePixel = (smoothFill || ubo->rtSubsample <= 1u) ? float2(pixelCoord) : floor(input.pos.xy);
         float ign = interleaved_gradient_noise(noisePixel, pushConstant.frameIndex);
         float2 u = float2(ign, frac(ign * 1.6180339887 + 0.314159));
-        float3 M;
-        if (anisotropic)
-        {
-            const float3 T = normalize(anisotropicT - normal * dot(normal, anisotropicT));
-            const float alpha = roughness * roughness;
-            M = sample_ggx_vndf_frame(V, normal, T, cross(normal, T), lerp(alpha, 1.0, lobes.anisotropy * lobes.anisotropy), alpha, u);
-        }
-        else
-            M = sample_ggx_vndf(V, normal, roughness, u);
+        const float3 M = sample_ggx_vndf(V, normal, roughness, u);
         R = reflect(-V, M);
 
         // If sample is below the macro hemisphere, fallback to mirror ray
@@ -227,10 +231,12 @@ float4 fragMain(
             R = reflect(-V, normal);
         }
     }
+    if (dot(surfaceNormal, R) <= 0.001)
+        R = reflect(-V, surfaceNormal); // the bent normal's reflection must still leave the surface
 
     // 5. Trace Reflection Ray against TLAS
     // Use robust bias to prevent depth-buffer precision self-intersection (same as DeferredLighting)
-    float3 rayOrigin = worldPos + normal * raster_surface_bias(ubo, worldPos, 0.01 * ubo->unitsPerMeter);
+    float3 rayOrigin = worldPos + surfaceNormal * raster_surface_bias(ubo, worldPos, 0.01 * ubo->unitsPerMeter);
 
     RayDesc reflectionRayDesc;
     reflectionRayDesc.Origin = rayOrigin;

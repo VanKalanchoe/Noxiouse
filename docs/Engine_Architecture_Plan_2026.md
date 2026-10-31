@@ -1381,6 +1381,18 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
     the pixel's guides stay on the first dispersive glass the camera's delta path meets (2026-10-31): RTXPT's stable planes take
     the guides from the one surface behind clear glass, and with a channel picked per frame that was three surfaces taking turns
     (depth, motion, albedo jumping every frame: RR flickered, more with more dispersion).
+    The channel is stratified over frames (a pixel takes red, green, blue in turn from a hashed start) and Russian roulette judges a
+    one-channel path by its channel (by luminance a blue-only path was killed ten times as often as a green-only one: blue speckles;
+    simulated on the prism's bounce counts, the channel-blind rule's blue std 0.58-0.78 against 0, the mean unbiased either way).
+  - **Anisotropic reflections in the hybrid (2026-10-31):** the reflection rays take an isotropic lobe around the bent normal
+    (`anisotropic_bent_normal`, PBRLighting.slang), as the raster's environment lookup and Unreal's ray traced reflections do
+    (`ModifyGGXAnisotropicNormalRoughness`). One ray a pixel of the stretched lobe is right in the mean (a CPU render of the
+    test's band with the path tracer's math shows the strong horizontal streaks the test asks for), but REBLUR / RR, given the
+    surface's roughness (0.1), filtered its rare far rays as fireflies and the streaks vanished. The path tracer keeps the exact lobe.
+  - **Specular anti-aliasing (2026-10-31):** the G-buffer roughness grows by the mapped normal's change over a pixel
+    (`specular_aa_roughness`, Tokuyoshi & Kaplanyan 2019 with Godot's screen-space roughness limiter defaults: amount 0.25, limit
+    0.18), measured from the normal map one pixel's UV step away (not a ddx of the resolved normal, which would count neighbours
+    across silhouettes): AnisotropyRotationTest's groove map sparkled under TAA and DLSS.
   - **Not yet / simplified:** ReSTIR DI's direct lighting mode shades the base lobes only (the user's decision: ignore for now);
     the specular weight does not change the transmission's Fresnel (the spec lets it); the path tracer's film takes the base's
     combined F0 (exact for metallic 0 or 1).

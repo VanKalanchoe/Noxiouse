@@ -207,8 +207,10 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         uint channel = path.dispersionChannel();
         if (channel == 0u)
         {
-            uint dispersionState = RTXPTSampling::uniformState(path.id, vertexIdx, pushConstant.frameIndex, RTXPTSampling::EffectDispersion);
-            channel = 1u + min(uint(Bridge::rand(dispersionState) * 3.0), 2u);
+            // Stratified over frames: a pixel takes red, green and blue in turn (from a start hashed per pixel), so every three frames
+            // carry each channel once and neighbouring pixels carry different ones. A random channel per frame left long runs of one
+            // color in a pixel: the accumulation's chroma noise, and for RR a signal whose color wandered.
+            channel = 1u + (RTXPTSampling::hash32(path.id ^ (vertexIdx * 0x9E3779B9u)) + pushConstant.frameIndex) % 3u;
             path.setDispersionChannel(channel);
             path.thp *= 3.0 * float3(channel == 1u ? 1.0 : 0.0, channel == 2u ? 1.0 : 0.0, channel == 3u ? 1.0 : 0.0);
         }
@@ -526,7 +528,11 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     // 5. Russian Roulette early termination (after 2nd bounce)
     if (vertexIdx >= 2)
     {
-        float rrVal = sqrt(Luminance(path.thp));
+        // A path carrying one color channel (dispersion: that channel times 3) is judged by what it carries for its channel, as a
+        // full-color path of the same strength would be: by luminance a blue-only path (0.07 of it) was killed far more often than a
+        // green-only one and its survivors boosted, the blue speckles over dispersive glass.
+        const uint carriedChannel = path.dispersionChannel();
+        float rrVal = sqrt(carriedChannel != 0u ? path.thp[carriedChannel - 1u] / 3.0 : Luminance(path.thp));
         float prob = saturate(0.85 - rrVal);
         prob = prob * prob;
         prob = saturate(prob + max(0.0, float(vertexIdx) / float(pushConstant.maxBounces) - 0.4));
