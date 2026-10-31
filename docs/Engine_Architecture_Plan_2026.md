@@ -1405,6 +1405,10 @@ cheap allocation (a range, not a Vulkan call). Separate objects remain correct w
   read and applied. Khronos' SheenChair needs three channels (base color 7x with an offset, normal 2x, occlusion on UV set 1);
   `lobetest` checks those, ClearCoatCarPaint's 0.2 normal strength and 3x tiling, TextureTransformMultiTest, and the rows against
   the spec's matrix product.
+- **KTX2 / Basis textures (2026-10-31; glTF `KHR_texture_basisu`):** a texture's image is the one `KHR_texture_basisu` (or
+  `MSFT_texture_dds`) names, else the core `source` -- a file that ships only KTX2 (Khronos' glTF-KTX-BasisU samples) has no
+  `source` at all, and every texture of AnisotropyBarnLamp's KTX version was dropped (gray instead of bronze). The cook
+  transcodes Basis to BC7 (`TextureImporter::DecodeKTX`), its color space from the file's own transfer function.
 - **Defragmentation (later, only if measured):** move live ranges and patch the mesh table's offsets.
 
 #### 5.8.3 Budgets: who decides how much

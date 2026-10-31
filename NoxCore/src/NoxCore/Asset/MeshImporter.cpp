@@ -2472,13 +2472,15 @@ namespace Nox
         return 1.0f; // Default fallback
     };
 
+    // A texture's image: the one an extension with a format Nox decodes names (KHR_texture_basisu's KTX2, MSFT_texture_dds's DDS),
+    // else the core `source` (a PNG / JPEG; absent in a file that ships only KTX2, as Khronos' glTF-KTX-BasisU samples).
     static int32_t GetTextureSourceImageIndex(const tg3_texture& texture)
     {
         for (uint32_t i = 0; i < texture.ext.extensions_count; i++)
         {
             const tg3_extension& ext = texture.ext.extensions[i];
-            if (std::string_view(ext.name.data, ext.name.len) != "MSFT_texture_dds" ||
-                ext.value.type != TG3_VALUE_OBJECT)
+            const std::string_view name(ext.name.data, ext.name.len);
+            if ((name != "KHR_texture_basisu" && name != "MSFT_texture_dds") || ext.value.type != TG3_VALUE_OBJECT)
             {
                 continue;
             }
