@@ -54,6 +54,10 @@ void PT_SurfaceFactors(UniformBufferObject* ubo, int2 pixel, uint depthIndex, ui
 
     float metallic = saturate(material.g);
     outRoughness = clamp(material.r, 0.04, 1.0);
+    // NRD's specular lobe for an anisotropic base: its width along the stretch (anisotropic_guide_roughness), as RR's guide.
+    const GBufferLobes lobes = gbuffer_load_lobes(ubo, pixel, material.b);
+    if (lobes.anisotropy > 0.0 && lobes.coat <= 0.0)
+        outRoughness = clamp(anisotropic_guide_roughness(outRoughness, lobes.anisotropy), 0.04, 1.0);
     float3 f0 = float3(0.04);
     NRD_MaterialFactors(normalSample * rsqrt(lenSqN), normalize(ubo->cameraWorldPos.xyz - worldPos),
                         baseColor * (float3(1.0) - f0) * (1.0 - metallic), lerp(f0, baseColor, metallic), outRoughness, diffFactor, specFactor);

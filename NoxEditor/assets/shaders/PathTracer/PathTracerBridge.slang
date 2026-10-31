@@ -36,6 +36,7 @@ namespace Bridge
         float3 rrDiffuseAlbedo;
         float3 rrSpecularAlbedo;
         float rrRoughness;
+        float rrGuideRoughness; // the roughness RR's guide gives (an anisotropic lobe: its width along the stretch)
         // The ray reached the surface from inside its volume (a back face): what the volume absorbs per world unit on the way
         // (KHR_materials_volume attenuation; 0 outside, for a thin surface, or without absorption).
         float3 absorptionCoefficient;
@@ -326,6 +327,7 @@ namespace Bridge
         // 5b. The glTF lobes (MaterialLobes.slang, StandardBSDF.slang's BSDFLobes): evaluated as the raster passes do, each texture at
         // its ray cone mip. The anisotropy direction becomes the shading frame's T (the base's stretched GGX is along local x).
         BSDFLobes bsdfLobes = BSDFLobes::none();
+        float guideAnisotropy = 0.0;
         surface.dispersionIors = float3(ior, ior, ior);
         if (lut.lobes != 0u && lut.workflow != 1.0)
         {
@@ -360,6 +362,7 @@ namespace Bridge
             }
             if (lobes.anisotropy > 0.0)
             {
+                guideAnisotropy = lobes.anisotropy;
                 const float alpha = max(saturate(roughness) * saturate(roughness), kMinGGXAlpha);
                 bsdfLobes.alphaT = lerp(alpha, 1.0, lobes.anisotropy * lobes.anisotropy);
                 bsdfLobes.alphaB = alpha;
@@ -412,6 +415,10 @@ namespace Bridge
         surface.bsdf = StandardBSDF::make(bsdfData, bsdfLobes);
         float specularTransmission = saturate(transmission);
         surface.rrRoughness = saturate(roughness);
+        // RR's guide for an anisotropic surface: its width along the stretch (anisotropic_guide_roughness). Given the roughness alone
+        // (0.1 on AnisotropyRotationTest), RR took the stretched lobe's far samples for noise and filtered the streaks away -- only the
+        // normal-mapped grooves, which its normal guide shows, kept theirs.
+        surface.rrGuideRoughness = guideAnisotropy > 0.0 ? anisotropic_guide_roughness(surface.rrRoughness, guideAnisotropy) : surface.rrRoughness;
         // Match RTXPT StandardBSDF::estimateSpecDiffBSDF exactly: transmission belongs to the specular guide and the
         // reflection integral is evaluated after its (1 - transmission) mixture weight is applied.
         float3 specularReflectionAlbedo = (1.0 - specularTransmission) * specularF0;

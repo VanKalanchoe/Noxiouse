@@ -1741,6 +1741,15 @@ float3 tangent_normal_from_map(float3 sampled, float scale = 1.0)
     return dot(tangentNormal, tangentNormal) > 1e-12 ? normalize(tangentNormal) : float3(0.0, 0.0, 1.0);
 }
 
+// The roughness a denoiser's guide gives an anisotropic GGX lobe (KHR_materials_anisotropy): its width along the stretch, alphaT =
+// mix(alpha, 1, anisotropy^2) as perceptual roughness. The denoisers know isotropic lobes only; given the surface's roughness they
+// took the stretched lobe's far samples for noise. Wider than the lobe across the stretch, which they then blur a little more.
+float anisotropic_guide_roughness(float perceptualRoughness, float anisotropy)
+{
+    const float alpha = perceptualRoughness * perceptualRoughness;
+    return sqrt(lerp(alpha, 1.0, anisotropy * anisotropy));
+}
+
 // Specular anti-aliasing: a normal that changes faster than a pixel (a fine normal map's grooves, seen from afar) makes a highlight
 // no pixel can hold -- it sparkles and TAA / DLSS cannot settle it. The roughness grows by the normal's variance over the pixel
 // (Tokuyoshi & Kaplanyan 2019, "Improved Geometric Specular Antialiasing"), as Godot's screen-space roughness limiter does with its

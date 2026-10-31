@@ -8,6 +8,45 @@
 [[vk::push_constant]]
 ConstantBuffer<PushConstantPathTracer> pushConstant;
 
+// One camera path to its end, then the branch the first smooth glass left (PathTracerHit.slang), if any. `dispersedChannel`: the
+// channel the camera's delta path took at a dispersive refraction (PathFlags::cameraDispersion), else 0.
+void tracePixelPath(RaytracingAccelerationStructure as, inout PathState path, out uint dispersedChannel)
+{
+    dispersedChannel = 0u;
+    for (;;)
+    {
+        while (path.isActive())
+        {
+            RayDesc ray;
+            ray.Origin = path.origin;
+            ray.Direction = path.dir;
+            // Scatter origins are already moved off the surface with RTXPT's scale-aware ULP offset.
+            // Keeping the old 1 mm TMin would still skip the painting immediately behind Bistro's glass.
+            ray.TMin = 0.0;
+            ray.TMax = 1e9;
+
+            PathPayload payload = PathPayload::pack(path);
+            TraceRay(
+                as,
+                RAY_FLAG_NONE,
+                0xFF,
+                0, // rayContributionToHitGroupIndex
+                1, // multiplierForGeometryContributionToHitGroupIndex
+                0, // missShaderIndex
+                ray,
+                payload
+            );
+            path = PathPayload::unpack(payload);
+        }
+        // (the branch's own flags replace the path's when it resumes)
+        if (dispersedChannel == 0u && path.hasFlag(PathFlags::cameraDispersion))
+            dispersedChannel = path.dispersionChannel();
+        if (!path.hasBranch())
+            break;
+        path.resumeBranch();
+    }
+}
+
 [shader("raygeneration")]
 void rayGenMain()
 {
@@ -50,35 +89,33 @@ void rayGenMain()
         rrSpecularHitDistance[pixelPos] = 0.0; // none (RTXPT's default)
     }
 
-    // Iterative Wavefront/Bounce Loop, then the branch the first smooth glass left (PathTracerHit.slang), if any.
-    for (;;)
-    {
-    while (path.isActive())
-    {
-        RayDesc ray;
-        ray.Origin = path.origin;
-        ray.Direction = path.dir;
-        // Scatter origins are already moved off the surface with RTXPT's scale-aware ULP offset.
-        // Keeping the old 1 mm TMin would still skip the painting immediately behind Bistro's glass.
-        ray.TMin = 0.0;
-        ray.TMax = 1e9;
+    const PathState cameraPath = path;
+    uint dispersedChannel = 0u;
+    tracePixelPath(as, path, dispersedChannel);
 
-        PathPayload payload = PathPayload::pack(path);
-        TraceRay(
-            as,
-            RAY_FLAG_NONE,
-            0xFF,
-            0, // rayContributionToHitGroupIndex
-            1, // multiplierForGeometryContributionToHitGroupIndex
-            0, // missShaderIndex
-            ray,
-            payload
-        );
-        path = PathPayload::unpack(payload);
-    }
-    if (!path.hasBranch())
-        break;
-    path.resumeBranch();
+    // The camera's delta path refracted dispersively (seen through dispersive glass): it took one color channel. The pixel is traced
+    // again for the other two (the same random numbers: the same path up to the glass) and the three averaged -- each an estimate of
+    // the whole pixel with its channel times 3 -- so the frame's pixel is full color (PathTracerHit.slang).
+    if (dispersedChannel != 0u)
+    {
+        float4 sumL = path.L;
+        float3 sumStable = path.stableL, sumDiffuse = path.diffuseRadiance, sumSpecular = path.specularRadiance;
+        for (uint pass = 1u; pass < 3u; ++pass)
+        {
+            PathState channelPath = cameraPath;
+            channelPath.setDispersionChannel((dispersedChannel - 1u + pass) % 3u + 1u);
+            channelPath.setFlag(PathFlags::dispersionPending, true);
+            uint unused;
+            tracePixelPath(as, channelPath, unused);
+            sumL += channelPath.L;
+            sumStable += channelPath.stableL;
+            sumDiffuse += channelPath.diffuseRadiance;
+            sumSpecular += channelPath.specularRadiance;
+        }
+        path.L = sumL / 3.0;
+        path.stableL = sumStable / 3.0;
+        path.diffuseRadiance = sumDiffuse / 3.0;
+        path.specularRadiance = sumSpecular / 3.0;
     }
 
     // RTXPT's last steps on RR's guides (PostProcess.hlsl DENOISER_PREPARE_INPUTS, MIX_STABLE_RADIANCE): the stable radiance -- the

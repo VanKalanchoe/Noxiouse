@@ -13,6 +13,8 @@ namespace PathFlags
     static const uint insideDielectricVolume  = (1 << 5);
     static const uint terminateAtNextBounce   = (1 << 6);
     // (1 << 7), (1 << 8): the color channel the path carries after a dispersive refraction (PathState::dispersionChannel)
+    static const uint dispersionPending       = (1 << 9);  // the channel was set by the ray generation: taken at the first dispersive refraction
+    static const uint cameraDispersion        = (1 << 10); // the camera's delta path refracted dispersively (the ray generation traces each channel)
     static const uint deltaOnlyPath           = (1 << 12);
     static const uint deltaTree               = (1 << 13); // only delta events since the camera (RTXPT's stable planes): no firefly filter
     static const uint rrSpecHitPending        = (1 << 14); // the ray leaving RR's guide surface: its length is the specular hit distance

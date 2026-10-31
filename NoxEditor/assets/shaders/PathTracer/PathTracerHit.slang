@@ -96,7 +96,7 @@ void writeSplitRRGuides(uint2 pixel, Bridge::SurfaceData pane, float3 thp, Delta
     float3 diffuse = weights.x * pane.rrDiffuseAlbedo;
     float3 specular = weights.x * pane.rrSpecularAlbedo;
     float3 normal = weights.x * paneN;
-    float roughness = weights.x * pane.rrRoughness;
+    float roughness = weights.x * pane.rrGuideRoughness;
     float3 dominantPosition = pane.shadingData.posW;
 
     Bridge::SurfaceData base;
@@ -107,7 +107,7 @@ void writeSplitRRGuides(uint2 pixel, Bridge::SurfaceData pane, float3 thp, Delta
         diffuse += weights.y * base.rrDiffuseAlbedo;
         specular += weights.y * base.rrSpecularAlbedo;
         normal += weights.y * base.shadingData.N;
-        roughness += weights.y * base.rrRoughness;
+        roughness += weights.y * base.rrGuideRoughness;
         if (dominant == 1u)
             dominantPosition = base.shadingData.posW;
     }
@@ -123,7 +123,7 @@ void writeSplitRRGuides(uint2 pixel, Bridge::SurfaceData pane, float3 thp, Delta
         specular += weights.z * base.rrSpecularAlbedo;
         // Its normal as the mirror shows it (RTXPT turns a plane's normal by the delta path's image transform).
         normal += weights.z * reflect(base.shadingData.N, paneN);
-        roughness += weights.z * base.rrRoughness;
+        roughness += weights.z * base.rrGuideRoughness;
         if (dominant == 2u) // the point the reflection shows, straight on along the camera's ray
             dominantPosition = pane.shadingData.posW - pane.shadingData.V * hitT;
     }
@@ -194,25 +194,29 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     );
 
     // Dispersion (KHR_materials_dispersion) in an RGB path tracer: at its first dispersive refraction the path takes one color channel
-    // (each a third of the time, its throughput that channel alone times 3: the same mean), then refracts at that channel's IOR -- as
-    // every later dispersive surface does for it. The colors split because each channel bends its own way.
+    // (its throughput that channel alone times 3), then refracts at that channel's IOR -- as every later dispersive surface does for
+    // it. The colors split because each channel bends its own way. Where the camera's delta path does it (seen through the glass), the
+    // ray generation traces the pixel once per channel and averages them (PathTracerRayGen.slang): the frame's pixel is full color.
+    // One channel per frame -- random, then cycled -- was a pixel of pure red, green or blue times 3 every frame, which plain
+    // accumulation averages but the denoisers cannot: NRD's history clamp tinted the glass pink, DLSS RR turned it into blotches.
     // RR's guides through glass follow the one image the camera's delta path sees (RTXPT's stable planes). A dispersive refraction
-    // makes three, one per channel, and the path takes a random one each frame: the guides (depth, motion, albedo of the surface
-    // behind) jumped between three surfaces every frame and RR flickered, the more the higher the dispersion. The guides stay on
-    // this glass instead -- the same every frame -- and RR is left the channels' color noise, which it averages.
+    // makes three, one per channel: the guides (depth, motion, albedo of the surface behind) stay on this glass instead, the same
+    // in every pass and every frame.
     bool dispersiveGuide = false;
     if (surface.dispersionIors.x != surface.dispersionIors.z && surface.bsdf.data.SpecularTransmission() > 0.0)
     {
         dispersiveGuide = path.hasFlag(PathFlags::deltaOnlyPath) || vertexIdx == 1;
         uint channel = path.dispersionChannel();
-        if (channel == 0u)
+        if (channel == 0u || path.hasFlag(PathFlags::dispersionPending))
         {
-            // Stratified over frames: a pixel takes red, green and blue in turn (from a start hashed per pixel), so every three frames
-            // carry each channel once and neighbouring pixels carry different ones. A random channel per frame left long runs of one
-            // color in a pixel: the accumulation's chroma noise, and for RR a signal whose color wandered.
-            channel = 1u + (RTXPTSampling::hash32(path.id ^ (vertexIdx * 0x9E3779B9u)) + pushConstant.frameIndex) % 3u;
+            // A channel of its own when the ray generation did not set one: red, green and blue in turn over frames.
+            if (channel == 0u)
+                channel = 1u + (RTXPTSampling::hash32(path.id ^ (vertexIdx * 0x9E3779B9u)) + pushConstant.frameIndex) % 3u;
             path.setDispersionChannel(channel);
+            path.setFlag(PathFlags::dispersionPending, false);
             path.thp *= 3.0 * float3(channel == 1u ? 1.0 : 0.0, channel == 2u ? 1.0 : 0.0, channel == 3u ? 1.0 : 0.0);
+            if (dispersiveGuide)
+                path.setFlag(PathFlags::cameraDispersion, true);
         }
         const float channelIor = surface.dispersionIors[channel - 1u];
         // The ratio as the bridge set it (entering or a thin sheet: 1 / IOR; leaving: IOR), at the channel's IOR.
@@ -288,7 +292,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
             uint2 pixel = uint2(path.id & 0xFFFFu, path.id >> 16);
             rrDiffuse[pixel] = float4(surface.rrDiffuseAlbedo, 1.0);
             rrSpecular[pixel] = float4(surface.rrSpecularAlbedo, 1.0);
-            rrNormalRoughness[pixel] = float4(surface.shadingData.N, surface.rrRoughness);
+            rrNormalRoughness[pixel] = float4(surface.shadingData.N, surface.rrGuideRoughness);
         }
     }
     else if (vertexIdx >= 2)
@@ -305,7 +309,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
             uint2 pixel = uint2(path.id & 0xFFFFu, path.id >> 16);
             rrDiffuse[pixel] = float4(surface.rrDiffuseAlbedo, 1.0);
             rrSpecular[pixel] = float4(surface.rrSpecularAlbedo, 1.0);
-            rrNormalRoughness[pixel] = float4(surface.shadingData.N, surface.rrRoughness);
+            rrNormalRoughness[pixel] = float4(surface.shadingData.N, surface.rrGuideRoughness);
         }
     }
     if (dispersiveGuide && rrVisibleSurface)
@@ -499,7 +503,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         if (pushConstant.rrSpecularHitDistanceStorageIndex != 0xFFFFFFFF)
         {
             const bool specularScatter = (sampleResult.lobe & (LobeType::DiffuseReflection | LobeType::DiffuseTransmission)) == 0 &&
-                                         surface.rrRoughness <= 0.35;
+                                         surface.rrGuideRoughness <= 0.35;
             RWTexture2D<float>.Handle(uint2(pushConstant.rrSpecularHitDistanceStorageIndex, 0))[uint2(path.id & 0xFFFFu, path.id >> 16)] =
                 specularScatter ? -path.sceneLength : 0.0;
             path.setFlag(PathFlags::rrSpecHitPending, specularScatter);
@@ -531,7 +535,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         // A path carrying one color channel (dispersion: that channel times 3) is judged by what it carries for its channel, as a
         // full-color path of the same strength would be: by luminance a blue-only path (0.07 of it) was killed far more often than a
         // green-only one and its survivors boosted, the blue speckles over dispersive glass.
-        const uint carriedChannel = path.dispersionChannel();
+        const uint carriedChannel = path.hasFlag(PathFlags::dispersionPending) ? 0u : path.dispersionChannel(); // (pending: not taken yet)
         float rrVal = sqrt(carriedChannel != 0u ? path.thp[carriedChannel - 1u] / 3.0 : Luminance(path.thp));
         float prob = saturate(0.85 - rrVal);
         prob = prob * prob;
