@@ -90,8 +90,8 @@ bool forwardShadowed(UniformBufferObject* ubo, float3 origin, float3 direction, 
 static const float RTRefractionFullRoughness = 0.08;
 static const float RTRefractionMaxRoughness = 0.2;
 
-// The closest hit along the ray. With `self` >= 0 only that instance counts (the glass's own far side); otherwise surfaces that
-// let light through are passed (blended, transmissive) and alpha-masked ones cut out, as the shadow rays do.
+// The closest hit along the ray: surfaces that let light through are passed (blended, transmissive) and alpha-masked ones cut out,
+// as the shadow rays do. With `self` >= 0 (a ray inside that glass instance) its own surface counts too: its far side.
 bool traceRefractionRay(UniformBufferObject* ubo, float3 origin, float3 direction, float maxDistance, int self, out uint instanceSlot,
                         out uint primitive, out float2 barycentrics, out float hitT)
 {
@@ -115,10 +115,11 @@ bool traceRefractionRay(UniformBufferObject* ubo, float3 origin, float3 directio
     while (query.Proceed())
     {
         const uint candidate = query.CandidateRayInstanceCustomIndex();
-        if (self >= 0)
+        // Inside a glass volume: its own surface (where the ray leaves it), or anything solid inside it (a lamp's filament in its
+        // bulb) -- not other glass, as everywhere else.
+        if (self >= 0 && candidate == uint(self))
         {
-            if (candidate == uint(self))
-                query.CommitNonOpaqueTriangleHit();
+            query.CommitNonOpaqueTriangleHit();
             continue;
         }
         GpuRayTracingInstance surface = rtInstances[candidate];
@@ -183,6 +184,12 @@ float3 tracedRefraction(UniformBufferObject* ubo, InstanceData instance, uint se
         float hitT;
         if (traceRefractionRay(ubo, entry, inside, maxDistance, int(selfSlot), slot, primitive, barycentrics, hitT))
         {
+            // Something solid inside the volume before its far side (a filament in a bulb): that is what is seen, through the
+            // front surface and what the volume absorbs on the way. The ray used to look for the glass's own far side only and went
+            // through it (the hybrid's dark filament the path tracer and the raster's screen-space refraction both show lit).
+            if (slot != selfSlot)
+                return shadeRayHit(ubo, slot, primitive, barycentrics, entry, inside, hitT) *
+                       volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale, hitT);
             GpuRayTracingInstance* rtInstances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
             float3 outward = rayHitNormal(rtInstances[slot], primitive, barycentrics);
             if (dot(outward, inside) < 0.0)
