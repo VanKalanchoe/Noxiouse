@@ -398,6 +398,7 @@
             float2 ddx_uv1 = v0.uv1 * dbary_dx.x + v1.uv1 * dbary_dx.y + v2.uv1 * dbary_dx.z;
             float2 ddy_uv1 = v0.uv1 * dbary_dy.x + v1.uv1 * dbary_dy.y + v2.uv1 * dbary_dy.z;
 
+
             float3 worldNorm0 = mul((float3x3)instance.normalMatrix, localNorm0);
             float3 worldNorm1 = mul((float3x3)instance.normalMatrix, localNorm1);
             float3 worldNorm2 = mul((float3x3)instance.normalMatrix, localNorm2);
@@ -428,24 +429,25 @@
 
         SamplerState samp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
-        // 1. TEXTURE COORDINATE SETS & DERIVATIVES
-        float2 baseColorUV = (instance.baseColorTextureSet == 0) ? uv0 : uv1;
-        float2 ddx_bc = (instance.baseColorTextureSet == 0) ? ddx_uv0 : ddx_uv1;
-        float2 ddy_bc = (instance.baseColorTextureSet == 0) ? ddy_uv0 : ddy_uv1;
+        // 1. TEXTURE COORDINATE SETS & DERIVATIVES: each texture's set names a material UV channel (KHR_texture_transform:
+        // instance_texture_uv), its gradients through the same channel.
+        float2 baseColorUV = instance_texture_uv(instance, instance.baseColorTextureSet, uv0, uv1);
+        float2 ddx_bc = instance_texture_uv_delta(instance, instance.baseColorTextureSet, ddx_uv0, ddx_uv1);
+        float2 ddy_bc = instance_texture_uv_delta(instance, instance.baseColorTextureSet, ddy_uv0, ddy_uv1);
 
-        float2 mrUV = (instance.physicalDescriptorTextureSet == 0) ? uv0 : uv1;
-        float2 ddx_mr = (instance.physicalDescriptorTextureSet == 0) ? ddx_uv0 : ddx_uv1;
-        float2 ddy_mr = (instance.physicalDescriptorTextureSet == 0) ? ddy_uv0 : ddy_uv1;
+        float2 mrUV = instance_texture_uv(instance, instance.physicalDescriptorTextureSet, uv0, uv1);
+        float2 ddx_mr = instance_texture_uv_delta(instance, instance.physicalDescriptorTextureSet, ddx_uv0, ddx_uv1);
+        float2 ddy_mr = instance_texture_uv_delta(instance, instance.physicalDescriptorTextureSet, ddy_uv0, ddy_uv1);
 
         // Texture streaming: the mips this surface's textures need, from the same derivatives the samples use.
         if (ubo->mipFeedbackReference != 0 && isMipFeedbackPixel(pixelCoord, ubo->mipFeedbackFrame))
         {
             reportMipFeedback(ubo, instance.baseColorTextureIndex, baseColorUV, ddx_bc, ddy_bc);
             reportMipFeedback(ubo, instance.metallicRoughnessTextureIndex, mrUV, ddx_mr, ddy_mr);
-            reportMipFeedback(ubo, instance.normalTextureIndex, instance.normalTextureSet == 0 ? uv0 : uv1, instance.normalTextureSet == 0 ? ddx_uv0 : ddx_uv1, instance.normalTextureSet == 0 ? ddy_uv0 : ddy_uv1);
-            reportMipFeedback(ubo, instance.occlusionTextureIndex, instance.occlusionTextureSet == 0 ? uv0 : uv1, instance.occlusionTextureSet == 0 ? ddx_uv0 : ddx_uv1, instance.occlusionTextureSet == 0 ? ddy_uv0 : ddy_uv1);
-            reportMipFeedback(ubo, instance.emissiveTextureIndex, instance.emissiveTextureSet == 0 ? uv0 : uv1, instance.emissiveTextureSet == 0 ? ddx_uv0 : ddx_uv1, instance.emissiveTextureSet == 0 ? ddy_uv0 : ddy_uv1);
-            reportMipFeedback(ubo, instance.transmissionTextureIndex, instance.transmissionTextureSet == 0 ? uv0 : uv1, instance.transmissionTextureSet == 0 ? ddx_uv0 : ddx_uv1, instance.transmissionTextureSet == 0 ? ddy_uv0 : ddy_uv1);
+            reportMipFeedback(ubo, instance.normalTextureIndex, instance_texture_uv(instance, instance.normalTextureSet, uv0, uv1), instance_texture_uv_delta(instance, instance.normalTextureSet, ddx_uv0, ddx_uv1), instance_texture_uv_delta(instance, instance.normalTextureSet, ddy_uv0, ddy_uv1));
+            reportMipFeedback(ubo, instance.occlusionTextureIndex, instance_texture_uv(instance, instance.occlusionTextureSet, uv0, uv1), instance_texture_uv_delta(instance, instance.occlusionTextureSet, ddx_uv0, ddx_uv1), instance_texture_uv_delta(instance, instance.occlusionTextureSet, ddy_uv0, ddy_uv1));
+            reportMipFeedback(ubo, instance.emissiveTextureIndex, instance_texture_uv(instance, instance.emissiveTextureSet, uv0, uv1), instance_texture_uv_delta(instance, instance.emissiveTextureSet, ddx_uv0, ddx_uv1), instance_texture_uv_delta(instance, instance.emissiveTextureSet, ddy_uv0, ddy_uv1));
+            reportMipFeedback(ubo, instance.transmissionTextureIndex, instance_texture_uv(instance, instance.transmissionTextureSet, uv0, uv1), instance_texture_uv_delta(instance, instance.transmissionTextureSet, ddx_uv0, ddx_uv1), instance_texture_uv_delta(instance, instance.transmissionTextureSet, ddy_uv0, ddy_uv1));
         }
 
         // Sampled as for the shown resolution, not the (upscaled) render resolution: the gradients scaled by the LOD bias.
@@ -535,15 +537,16 @@
         float3 rawNormalTex = geomNormal * 0.5 + 0.5; // fallback matching Sascha's normalize(inNormal)
         if (instance.normalTextureIndex != 0xFFFFFFFF)
         {
-            float2 normalUV = (instance.normalTextureSet == 0) ? uv0 : uv1;
-            float2 ddx_normal = (instance.normalTextureSet == 0) ? ddx_uv0 : ddx_uv1;
-            float2 ddy_normal = (instance.normalTextureSet == 0) ? ddy_uv0 : ddy_uv1;
+            float2 normalUV = instance_texture_uv(instance, instance.normalTextureSet, uv0, uv1);
+            float2 ddx_normal = instance_texture_uv_delta(instance, instance.normalTextureSet, ddx_uv0, ddx_uv1);
+            float2 ddy_normal = instance_texture_uv_delta(instance, instance.normalTextureSet, ddy_uv0, ddy_uv1);
             rawNormalTex = SampleMaterialTextureGrad(ubo, instance.normalTextureIndex, samp, normalUV, ddx_normal, ddy_normal).xyz;
             float3 tangentNormal;
             tangentNormal.xy = rawNormalTex.xy * 2.0 - 1.0;
             tangentNormal.z = rawNormalTex.z <= 0.0
                 ? sqrt(saturate(1.0 - dot(tangentNormal.xy, tangentNormal.xy)))
                 : abs(rawNormalTex.z * 2.0 - 1.0);
+            tangentNormal.xy *= instance.normalScale; // glTF's normal strength: X and Y scaled, then normalized
             tangentNormal = dot(tangentNormal, tangentNormal) > 1e-12 ? normalize(tangentNormal) : float3(0.0, 0.0, 1.0);
 
             // Gram-Schmidt re-orthonormalize the stored tangent against the (interpolated, possibly non-uniformly
@@ -587,6 +590,7 @@
         if (gpuMaterial.lobes != 0u && instance.unlit == 0)
         {
             MaterialSampleCoords coords;
+            coords.material = gpuMaterial;
             coords.uv[0] = uv0; coords.ddx[0] = ddx_uv0; coords.ddy[0] = ddy_uv0;
             coords.uv[1] = uv1; coords.ddx[1] = ddx_uv1; coords.ddy[1] = ddy_uv1;
             coords.lod = -1.0;
@@ -605,8 +609,9 @@
                 const float lodScale = exp2(-ubo->textureLodBias); // the gradients before the LOD bias (as the base textures report)
                 for (uint t = 0; t < 10; ++t)
                 {
-                    const uint set = lobeSets[t] == 1 ? 1u : 0u;
-                    reportMipFeedback(ubo, lobeTextures[t], coords.uv[set], coords.ddx[set] * lodScale, coords.ddy[set] * lodScale);
+                    reportMipFeedback(ubo, lobeTextures[t], material_texture_uv(gpuMaterial, lobeSets[t], coords.uv[0], coords.uv[1]),
+                                      material_texture_uv_delta(gpuMaterial, lobeSets[t], coords.ddx[0], coords.ddx[1]) * lodScale,
+                                      material_texture_uv_delta(gpuMaterial, lobeSets[t], coords.ddy[0], coords.ddy[1]) * lodScale);
                 }
             }
         }
@@ -615,19 +620,20 @@
         float occlusion = 1.0;
         if (instance.occlusionTextureIndex != 0xFFFFFFFF)
         {
-            float2 occUV = (instance.occlusionTextureSet == 0) ? uv0 : uv1;
-            float2 ddx_occ = (instance.occlusionTextureSet == 0) ? ddx_uv0 : ddx_uv1;
-            float2 ddy_occ = (instance.occlusionTextureSet == 0) ? ddy_uv0 : ddy_uv1;
-            occlusion = SampleMaterialTextureGrad(ubo, instance.occlusionTextureIndex, samp, occUV, ddx_occ, ddy_occ).r;
+            float2 occUV = instance_texture_uv(instance, instance.occlusionTextureSet, uv0, uv1);
+            float2 ddx_occ = instance_texture_uv_delta(instance, instance.occlusionTextureSet, ddx_uv0, ddx_uv1);
+            float2 ddy_occ = instance_texture_uv_delta(instance, instance.occlusionTextureSet, ddy_uv0, ddy_uv1);
+            occlusion = 1.0 + instance.occlusionStrength *
+                        (SampleMaterialTextureGrad(ubo, instance.occlusionTextureIndex, samp, occUV, ddx_occ, ddy_occ).r - 1.0);
         }
 
         // 5. EMISSION
         float3 emission = instance.emissiveFactor * instance.emissiveStrength;
         if (instance.emissiveTextureIndex != 0xFFFFFFFF)
         {
-            float2 emUV = (instance.emissiveTextureSet == 0) ? uv0 : uv1;
-            float2 ddx_em = (instance.emissiveTextureSet == 0) ? ddx_uv0 : ddx_uv1;
-            float2 ddy_em = (instance.emissiveTextureSet == 0) ? ddy_uv0 : ddy_uv1;
+            float2 emUV = instance_texture_uv(instance, instance.emissiveTextureSet, uv0, uv1);
+            float2 ddx_em = instance_texture_uv_delta(instance, instance.emissiveTextureSet, ddx_uv0, ddx_uv1);
+            float2 ddy_em = instance_texture_uv_delta(instance, instance.emissiveTextureSet, ddy_uv0, ddy_uv1);
             emission *= SampleMaterialTextureGrad(ubo, instance.emissiveTextureIndex, samp, emUV, ddx_em, ddy_em).rgb;
         }
 

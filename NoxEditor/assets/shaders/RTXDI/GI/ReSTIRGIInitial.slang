@@ -137,7 +137,7 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
     float w1 = barycentrics.x;
     float w2 = barycentrics.y;
 
-    return w0 * vertices[i0].uv0 + w1 * vertices[i1].uv0 + w2 * vertices[i2].uv0;
+    return ray_hit_uv(lut, w0 * vertices[i0].uv0 + w1 * vertices[i1].uv0 + w2 * vertices[i2].uv0);
 }
 
 bool trace_visibility_alpha(
@@ -489,7 +489,7 @@ PSOutput fragMain(
         float w1 = committedBary.x;
         float w2 = committedBary.y;
 
-        float2 hitUV = w0 * vertex0.uv0 + w1 * vertex1.uv0 + w2 * vertex2.uv0;
+        float2 hitUV = ray_hit_uv(hitLut, w0 * vertex0.uv0 + w1 * vertex1.uv0 + w2 * vertex2.uv0);
         float3 localNormal = normalize(w0 * vertex0.normal + w1 * vertex1.normal + w2 * vertex2.normal);
         hitNormal = normalize(mul((float3x3)hitLut.normalMatrix, localNormal));
 

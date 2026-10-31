@@ -3209,11 +3209,14 @@ namespace Nox
                 if (value && value->type == TG3_VALUE_ARRAY && value->array_count >= 3)
                     out = glm::vec3(getFloatVal(value->array_data[0]), getFloatVal(value->array_data[1]), getFloatVal(value->array_data[2]));
             };
+            // Every texture reference's textureInfo object (its KHR_texture_transform, below), by the Set field it fills.
+            std::vector<std::pair<int32_t*, const tg3_value*>> textureInfos;
             auto texture = [&](const tg3_value& object, std::string_view key, MaterialTexture& out)
             {
                 const tg3_value* info = FindMember(object, key);
                 if (!info || info->type != TG3_VALUE_OBJECT)
                     return;
+                textureInfos.push_back({ &out.Set, info });
                 const tg3_value* index = FindMember(*info, "index");
                 const tg3_value* texCoord = FindMember(*info, "texCoord");
                 if (index && index->type == TG3_VALUE_INT)
@@ -3260,6 +3263,92 @@ namespace Nox
             }
             if (const tg3_extension* dispersion = FindExtension(gltfMaterial.ext, "KHR_materials_dispersion"))
                 number(dispersion->value, "dispersion", materialData.Dispersion);
+
+            // Normal map strength and occlusion strength (core glTF; KHR_materials_clearcoat's coat normal has its own scale).
+            materialData.NormalScale = static_cast<float>(gltfMaterial.normal_texture.scale);
+            materialData.OcclusionStrength = static_cast<float>(gltfMaterial.occlusion_texture.strength);
+            if (const tg3_extension* clearcoat = FindExtension(gltfMaterial.ext, "KHR_materials_clearcoat"))
+                if (const tg3_value* coatNormal = FindMember(clearcoat->value, "clearcoatNormalTexture"))
+                    number(*coatNormal, "scale", materialData.ClearcoatNormalScale);
+
+            // KHR_texture_transform: each texture reference's UV set and transform become one of the material's UV channels
+            // (MaxMaterialUVChannels), the texture reading that channel (its Set). Textures sharing a set and a transform share one.
+            {
+                struct Reference { int32_t* Set; MaterialUVChannel Channel; const std::string* Path; };
+                std::vector<Reference> references;
+                auto reference = [&](const std::string& path, int32_t& set, const tg3_value* transform)
+                {
+                    if (path.empty())
+                        return;
+                    MaterialUVChannel channel;
+                    channel.Source = set;
+                    if (transform && transform->type == TG3_VALUE_OBJECT)
+                    {
+                        auto vec2 = [&](std::string_view key, glm::vec2& out)
+                        {
+                            const tg3_value* value = FindMember(*transform, key);
+                            if (value && value->type == TG3_VALUE_ARRAY && value->array_count >= 2)
+                                out = glm::vec2(getFloatVal(value->array_data[0]), getFloatVal(value->array_data[1]));
+                        };
+                        vec2("offset", channel.Offset);
+                        vec2("scale", channel.Scale);
+                        number(*transform, "rotation", channel.Rotation);
+                        if (const tg3_value* texCoord = FindMember(*transform, "texCoord"); texCoord && texCoord->type == TG3_VALUE_INT)
+                            channel.Source = static_cast<int32_t>(texCoord->int_val);
+                    }
+                    references.push_back({ &set, channel, &path });
+                };
+                auto transformOf = [](const tg3_extras_ext& ext) -> const tg3_value*
+                {
+                    const tg3_extension* extension = FindExtension(ext, "KHR_texture_transform");
+                    return extension ? &extension->value : nullptr;
+                };
+                auto transformIn = [](const tg3_value* info) -> const tg3_value*
+                {
+                    const tg3_value* extensions = info ? FindMember(*info, "extensions") : nullptr;
+                    return extensions ? FindMember(*extensions, "KHR_texture_transform") : nullptr;
+                };
+                // The specular-glossiness extension's textures fill the base color and metallic-roughness slots.
+                const tg3_extension* specularGlossiness = FindExtension(gltfMaterial.ext, "KHR_materials_pbrSpecularGlossiness");
+                const tg3_value* diffuse = specularGlossiness ? FindMember(specularGlossiness->value, "diffuseTexture") : nullptr;
+                const tg3_value* specular = specularGlossiness ? FindMember(specularGlossiness->value, "specularGlossinessTexture") : nullptr;
+                reference(materialData.BaseColorTexturePath, materialData.BaseColorTextureSet,
+                          diffuse ? transformIn(diffuse) : transformOf(gltfMaterial.pbr_metallic_roughness.base_color_texture.ext));
+                reference(materialData.MetallicRoughnessTexturePath, materialData.PhysicalDescriptorTextureSet,
+                          specular ? transformIn(specular) : transformOf(gltfMaterial.pbr_metallic_roughness.metallic_roughness_texture.ext));
+                reference(materialData.NormalTexturePath, materialData.NormalTextureSet, transformOf(gltfMaterial.normal_texture.ext));
+                reference(materialData.OcclusionTexturePath, materialData.OcclusionTextureSet, transformOf(gltfMaterial.occlusion_texture.ext));
+                reference(materialData.EmissiveTexturePath, materialData.EmissiveTextureSet, transformOf(gltfMaterial.emissive_texture.ext));
+                if (const tg3_extension* transmission = FindExtension(gltfMaterial.ext, "KHR_materials_transmission"))
+                    reference(materialData.TransmissionTexturePath, materialData.TransmissionTextureSet,
+                              transformIn(FindMember(transmission->value, "transmissionTexture")));
+                for (const MaterialLobeTextureSlot& slot : MaterialLobeTextures)
+                {
+                    MaterialTexture& lobeTexture = materialData.*slot.Member;
+                    const auto info = std::find_if(textureInfos.begin(), textureInfos.end(), [&](const auto& entry) { return entry.first == &lobeTexture.Set; });
+                    reference(lobeTexture.Path, lobeTexture.Set, info != textureInfos.end() ? transformIn(info->second) : nullptr);
+                }
+
+                std::vector<MaterialUVChannel> channels;
+                for (Reference& r : references)
+                {
+                    auto found = std::find(channels.begin(), channels.end(), r.Channel);
+                    if (found == channels.end() && channels.size() < static_cast<size_t>(MaxMaterialUVChannels))
+                        found = channels.insert(channels.end(), r.Channel);
+                    if (found == channels.end())
+                    {
+                        // One (UV set, transform) more than there are channels: the channel on the same set, else the first, and said.
+                        found = std::find_if(channels.begin(), channels.end(), [&](const MaterialUVChannel& c) { return c.Source == r.Channel.Source; });
+                        if (found == channels.end())
+                            found = channels.begin();
+                        NOX_CORE_WARN("MeshImporter: material '{}' uses more than {} UV transforms; {} shares another's", materialData.Name,
+                                      MaxMaterialUVChannels, *r.Path);
+                    }
+                    *r.Set = static_cast<int32_t>(found - channels.begin());
+                }
+                for (size_t index = 0; index < channels.size(); ++index)
+                    materialData.UVChannels[index] = channels[index];
+            }
 
             // tiny_gltf_v3 exposes initialized metallic/roughness values but not whether the optional
             // pbrMetallicRoughness object existed. Its synthetic 1/1 defaults make a textureless

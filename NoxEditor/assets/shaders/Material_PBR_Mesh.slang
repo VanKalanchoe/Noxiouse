@@ -142,8 +142,8 @@ import Math;
 // or from the interpolated mesh normal and tangent attributes.
 float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
 {
-    return normal_from_map(SampleMaterialTexture(ubo, instance.normalTextureIndex, samplerState, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).xyz,
-                           vertIn.normal, vertIn.tangent);
+    return normal_from_map(SampleMaterialTexture(ubo, instance.normalTextureIndex, samplerState, instance_texture_uv(instance, instance.normalTextureSet, vertIn.uv0, vertIn.uv1)).xyz,
+                           vertIn.normal, vertIn.tangent, instance.normalScale);
 }
 
 // Calculation of the lighting contribution from an optional Image Based Light source.
@@ -269,7 +269,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
     {
         if(instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            baseColor = SampleMaterialTexture(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1) * instance.baseColorFactor;
+            baseColor = SampleMaterialTexture(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1)) * instance.baseColorFactor;
         }
         else
         {
@@ -292,7 +292,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         {
             // Roughness is stored in the 'g' channel, metallic is stored in the 'b' channel.
 			// This layout intentionally reserves the 'r' channel for (optional) occlusion map data
-            float4 mrSample = SampleMaterialTexture(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1);
+            float4 mrSample = SampleMaterialTexture(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1));
             perceptualRoughness = mrSample.g * perceptualRoughness;
 			metallic = mrSample.b * metallic;
         }
@@ -307,7 +307,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
 		// The albedo may be defined from a base texture or a flat color
         if(instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            baseColor = SampleMaterialTexture(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1) * instance.baseColorFactor;
+            baseColor = SampleMaterialTexture(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1)) * instance.baseColorFactor;
         }
         else
         {
@@ -320,7 +320,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         // Values from specular glossiness workflow are converted to metallic roughness
         if(instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
         {
-            perceptualRoughness = 1.0 - SampleMaterialTexture(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).a;
+            perceptualRoughness = 1.0 - SampleMaterialTexture(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1)).a;
         }
         else
         {
@@ -471,14 +471,14 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
 	// Apply optional PBR terms for additional (optional) shading
     if(instance.occlusionTextureIndex != 0xFFFFFFFF)
     {
-        float oa = SampleMaterialTexture(ubo, instance.occlusionTextureIndex, sampLinearHandle, instance.occlusionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).r;
+        float oa = SampleMaterialTexture(ubo, instance.occlusionTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.occlusionTextureSet, vertIn.uv0, vertIn.uv1)).r;
         color = lerp(color, color * oa, u_OcclusionStrength);
     }
 
     float3 emissive = instance.emissiveFactor.rgb * instance.emissiveStrength;
     if(instance.emissiveTextureIndex != 0xFFFFFFFF)
     {
-        emissive *= SampleMaterialTexture(ubo, instance.emissiveTextureIndex, sampLinearHandle, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1).rgb;
+        emissive *= SampleMaterialTexture(ubo, instance.emissiveTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1)).rgb;
     }
     color += emissive;
 

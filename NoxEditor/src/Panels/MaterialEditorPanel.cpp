@@ -155,7 +155,11 @@ namespace Nox
         drawTextureReference(specularGlossiness ? "Diffuse Texture" : "Base Color Texture", "BaseColor", data.BaseColorTexturePath);
         drawTextureReference(specularGlossiness ? "Specular Glossiness" : "Metallic Roughness", "MetallicRoughness", data.MetallicRoughnessTexturePath);
         drawTextureReference("Normal Texture", "Normal", data.NormalTexturePath);
+        changed |= ImGui::DragFloat("Normal Strength", &data.NormalScale, 0.01f, 0.0f, 4.0f);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("How strongly the normal map bends the surface (glTF's normal texture scale): 1 as authored, 0 flat.");
         drawTextureReference("Occlusion Texture", "Occlusion", data.OcclusionTexturePath);
+        changed |= ImGui::SliderFloat("Occlusion Strength", &data.OcclusionStrength, 0.0f, 1.0f);
         drawTextureReference("Emissive Texture", "Emissive", data.EmissiveTexturePath);
         drawTextureReference("Transmission Texture", "Transmission", data.TransmissionTexturePath);
 
@@ -170,6 +174,7 @@ namespace Nox
             drawTextureReference("Clear Coat Texture (R)", "Clearcoat", data.ClearcoatTexture.Path);
             drawTextureReference("Clear Coat Roughness (G)", "ClearcoatRoughness", data.ClearcoatRoughnessTexture.Path);
             drawTextureReference("Clear Coat Normal", "ClearcoatNormal", data.ClearcoatNormalTexture.Path);
+            changed |= ImGui::DragFloat("Clear Coat Normal Strength", &data.ClearcoatNormalScale, 0.01f, 0.0f, 4.0f);
 
             ImGui::SeparatorText("Sheen");
             changed |= ImGui::ColorEdit3("Sheen Color", glm::value_ptr(data.SheenColorFactor));
@@ -215,6 +220,28 @@ namespace Nox
             changed |= ImGui::DragFloat("Dispersion", &data.Dispersion, 0.01f, 0.0f, 3.0f);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("How far refraction splits the colors (20 / Abbe number: glass 0.33, diamond 0.36). Needs Transmission.");
+        }
+
+        // The UV channels the textures read (KHR_texture_transform): tiling, offset and rotation of a mesh UV set.
+        if (ImGui::CollapsingHeader("UV Channels"))
+        {
+            for (int index = 0; index < MaxMaterialUVChannels; ++index)
+            {
+                MaterialUVChannel& channel = data.UVChannels[index];
+                ImGui::PushID(index);
+                ImGui::SeparatorText(("Channel " + std::to_string(index)).c_str());
+                changed |= ImGui::SliderInt("Mesh UV Set", &channel.Source, 0, 1);
+                changed |= ImGui::DragFloat2("Tiling", glm::value_ptr(channel.Scale), 0.01f);
+                changed |= ImGui::DragFloat2("Offset", glm::value_ptr(channel.Offset), 0.01f);
+                float degrees = glm::degrees(channel.Rotation);
+                if (ImGui::DragFloat("Rotation", &degrees, 0.5f, -360.0f, 360.0f, "%.1f deg"))
+                {
+                    channel.Rotation = glm::radians(degrees);
+                    changed = true;
+                }
+                ImGui::PopID();
+            }
+            ImGui::TextDisabled("A texture reads the channel its set names (imported from glTF; 0 by default).");
         }
 
         int alphaMode = static_cast<int>(data.Mode);

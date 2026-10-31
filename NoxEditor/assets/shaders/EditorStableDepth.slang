@@ -110,7 +110,7 @@ StableOutput fragMain(VSOutput inVert, uniform PushConstantMeshlets pushConstant
         if (instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
             SamplerState samp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-            float2 uv = (instance.baseColorTextureSet == 0) ? inVert.uv0 : inVert.uv1;
+            float2 uv = instance_texture_uv(instance, instance.baseColorTextureSet, inVert.uv0, inVert.uv1);
             alpha *= SampleMaterialTexture(ubo, instance.baseColorTextureIndex, samp, uv).a;
         }
         if (alpha < instance.alphaMaskCutoff)

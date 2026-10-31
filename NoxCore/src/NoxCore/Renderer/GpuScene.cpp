@@ -839,6 +839,11 @@ namespace Nox
         record.pathTracerFlags = material.pathTracerFlags;
         record.materialIndex = instance.materialIndex;
         record.lobes = material.lobes;
+        // Hits read their textures through the base color's channel (from UV set 0: the hit shaders interpolate that one).
+        const uint32_t channel = glm::min(static_cast<uint32_t>(glm::max(material.baseColorTextureSet, 0)), shaderio::MaterialUVChannels - 1);
+        record.uvRow0 = material.uvRow0[channel];
+        record.uvRow1 = material.uvRow1[channel];
+        record.normalScale = material.normalScale;
     }
 
     void GpuScene::ReleaseMaterial(uint32_t materialSlot)

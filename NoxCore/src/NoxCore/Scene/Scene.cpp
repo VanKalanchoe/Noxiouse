@@ -2510,12 +2510,12 @@ namespace Nox
             const auto& camera = m_Registry.get<CameraComponent>(entity);
             if (!camera.Primary) continue;
             m_renderer->setAutoExposure(camera.AutoExposure, camera.ExposureCompensation,
-                                        camera.AutoExposureMinEV, camera.AutoExposureMaxEV);
+                                        camera.AutoExposureMinEV, camera.AutoExposureMaxEV, camera.ManualEV100);
             foundPrimaryCamera = true;
             break;
         }
         if (!foundPrimaryCamera)
-            m_renderer->setAutoExposure(false, 0.0f, -16.0f, 16.0f);
+            m_renderer->setAutoExposure(false, 0.0f, -16.0f, 16.0f, DefaultManualEV100);
 
         const EnvironmentLightComponent* environment = FindEnvironment(m_Registry);
         const bool proceduralSky = environment && environment->Source == EnvironmentSource::ProceduralSky;

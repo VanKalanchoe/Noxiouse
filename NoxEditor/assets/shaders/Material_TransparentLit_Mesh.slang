@@ -218,8 +218,8 @@ float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertI
 {
     // The G-buffer's decoding and tangent frame (normal_from_map): the per-pixel derivative frame and a blue channel taken as stored
     // flattened two-channel maps (the Bistro's headlight and spotlight lenses) into clear glass.
-    return normal_from_map(SampleMaterialTextureBias(ubo, instance.normalTextureIndex, samplerState, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).xyz,
-                           vertIn.normal, vertIn.tangent);
+    return normal_from_map(SampleMaterialTextureBias(ubo, instance.normalTextureIndex, samplerState, instance_texture_uv(instance, instance.normalTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).xyz,
+                           vertIn.normal, vertIn.tangent, instance.normalScale);
 }
 
 float convertMetallic(float3 diffuseCol, float3 specularCol, float maxSpecular)
@@ -287,12 +287,12 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     {
         const float2 ddxUV0 = ddx(vertIn.uv0), ddyUV0 = ddy(vertIn.uv0);
         const float2 ddxUV1 = ddx(vertIn.uv1), ddyUV1 = ddy(vertIn.uv1);
-        reportMipFeedback(ubo, instance.baseColorTextureIndex, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, instance.baseColorTextureSet == 0 ? ddxUV0 : ddxUV1, instance.baseColorTextureSet == 0 ? ddyUV0 : ddyUV1);
-        reportMipFeedback(ubo, instance.metallicRoughnessTextureIndex, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, instance.physicalDescriptorTextureSet == 0 ? ddxUV0 : ddxUV1, instance.physicalDescriptorTextureSet == 0 ? ddyUV0 : ddyUV1);
-        reportMipFeedback(ubo, instance.normalTextureIndex, instance.normalTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, instance.normalTextureSet == 0 ? ddxUV0 : ddxUV1, instance.normalTextureSet == 0 ? ddyUV0 : ddyUV1);
-        reportMipFeedback(ubo, instance.occlusionTextureIndex, instance.occlusionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, instance.occlusionTextureSet == 0 ? ddxUV0 : ddxUV1, instance.occlusionTextureSet == 0 ? ddyUV0 : ddyUV1);
-        reportMipFeedback(ubo, instance.emissiveTextureIndex, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, instance.emissiveTextureSet == 0 ? ddxUV0 : ddxUV1, instance.emissiveTextureSet == 0 ? ddyUV0 : ddyUV1);
-        reportMipFeedback(ubo, instance.transmissionTextureIndex, instance.transmissionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, instance.transmissionTextureSet == 0 ? ddxUV0 : ddxUV1, instance.transmissionTextureSet == 0 ? ddyUV0 : ddyUV1);
+        reportMipFeedback(ubo, instance.baseColorTextureIndex, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1), instance_texture_uv_delta(instance, instance.baseColorTextureSet, ddxUV0, ddxUV1), instance_texture_uv_delta(instance, instance.baseColorTextureSet, ddyUV0, ddyUV1));
+        reportMipFeedback(ubo, instance.metallicRoughnessTextureIndex, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1), instance_texture_uv_delta(instance, instance.physicalDescriptorTextureSet, ddxUV0, ddxUV1), instance_texture_uv_delta(instance, instance.physicalDescriptorTextureSet, ddyUV0, ddyUV1));
+        reportMipFeedback(ubo, instance.normalTextureIndex, instance_texture_uv(instance, instance.normalTextureSet, vertIn.uv0, vertIn.uv1), instance_texture_uv_delta(instance, instance.normalTextureSet, ddxUV0, ddxUV1), instance_texture_uv_delta(instance, instance.normalTextureSet, ddyUV0, ddyUV1));
+        reportMipFeedback(ubo, instance.occlusionTextureIndex, instance_texture_uv(instance, instance.occlusionTextureSet, vertIn.uv0, vertIn.uv1), instance_texture_uv_delta(instance, instance.occlusionTextureSet, ddxUV0, ddxUV1), instance_texture_uv_delta(instance, instance.occlusionTextureSet, ddyUV0, ddyUV1));
+        reportMipFeedback(ubo, instance.emissiveTextureIndex, instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1), instance_texture_uv_delta(instance, instance.emissiveTextureSet, ddxUV0, ddxUV1), instance_texture_uv_delta(instance, instance.emissiveTextureSet, ddyUV0, ddyUV1));
+        reportMipFeedback(ubo, instance.transmissionTextureIndex, instance_texture_uv(instance, instance.transmissionTextureSet, vertIn.uv0, vertIn.uv1), instance_texture_uv_delta(instance, instance.transmissionTextureSet, ddxUV0, ddxUV1), instance_texture_uv_delta(instance, instance.transmissionTextureSet, ddyUV0, ddyUV1));
     }
 
     float perceptualRoughness = 1.0;
@@ -309,7 +309,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         float4 maskBaseColor = instance.baseColorFactor;
         if (instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            maskBaseColor = SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias) * instance.baseColorFactor;
+            maskBaseColor = SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias) * instance.baseColorFactor;
         }
         if (maskBaseColor.a * vertIn.color.a < instance.alphaMaskCutoff)
         {
@@ -323,7 +323,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         metallic = instance.metallicFactor;
         if (instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
         {
-            float4 mrSample = SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias);
+            float4 mrSample = SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias);
             perceptualRoughness *= mrSample.g;
             metallic *= mrSample.b;
         }
@@ -332,7 +332,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
 
         if (instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            baseColor = SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias) * instance.baseColorFactor;
+            baseColor = SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias) * instance.baseColorFactor;
         }
         else
         {
@@ -354,7 +354,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             // Imported as SRGBA8 (EditorAssetManager::ImportMeshTextures): RGB (specular color) is hardware sRGB-decoded
             // on sample, alpha (glossiness) is always left linear by that format -- decoding either manually here on top
             // would be a double decode.
-            float4 specGlossSample = SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance.physicalDescriptorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias);
+            float4 specGlossSample = SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias);
             glossiness *= specGlossSample.a;
             specular *= specGlossSample.rgb;
         }
@@ -366,7 +366,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         {
             // Imported as SRGBA8 (EditorAssetManager::ImportMeshTextures: importTexture(BaseColorTexturePath, true)),
             // already hardware sRGB-decoded on sample -- decoding it again here was a double decode.
-            diffuseSample = SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, vertIn.uv0, ubo->textureLodBias) * instance.diffuseFactor;
+            diffuseSample = SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias) * instance.diffuseFactor;
         }
 
         float maxSpecular = max(max(specular.r, specular.g), specular.b);
@@ -381,7 +381,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     float transmission = instance.transmissionFactor;
     if (instance.transmissionTextureIndex != 0xFFFFFFFF)
     {
-        transmission *= SampleMaterialTextureBias(ubo, instance.transmissionTextureIndex, sampLinearHandle, instance.transmissionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).r;
+        transmission *= SampleMaterialTextureBias(ubo, instance.transmissionTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.transmissionTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).r;
     }
     // Opaque and masked surfaces drawn with this shader (the editor's extra views have no G-buffer, Renderer::addExtraViewPasses):
     // nothing shows through, whatever the base color's alpha or the transmission says.
@@ -408,6 +408,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     {
         const float lodScale = exp2(ubo->textureLodBias); // as SampleMaterialTextureBias reads the base textures
         MaterialSampleCoords coords;
+        coords.material = gpuMaterial;
         coords.uv[0] = vertIn.uv0; coords.ddx[0] = ddx(vertIn.uv0) * lodScale; coords.ddy[0] = ddy(vertIn.uv0) * lodScale;
         coords.uv[1] = vertIn.uv1; coords.ddx[1] = ddx(vertIn.uv1) * lodScale; coords.ddy[1] = ddy(vertIn.uv1) * lodScale;
         coords.lod = -1.0;
@@ -607,7 +608,8 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     float ao = 1.0;
     if (instance.occlusionTextureIndex != 0xFFFFFFFF)
     {
-        ao = SampleMaterialTextureBias(ubo, instance.occlusionTextureIndex, sampLinearHandle, instance.occlusionTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).r;
+        ao = 1.0 + instance.occlusionStrength *
+                   (SampleMaterialTextureBias(ubo, instance.occlusionTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.occlusionTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).r - 1.0);
     }
     // The screen-space AO at this pixel is the opaque surface's behind it: right for a decal lying on that surface, wrong for glass
     // or anything standing in front of it (the background's occlusion, noisy and sliding as the camera moves). Only where this
@@ -683,7 +685,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     float3 emissive = instance.emissiveFactor.rgb * instance.emissiveStrength;
     if (instance.emissiveTextureIndex != 0xFFFFFFFF)
     {
-        emissive *= SampleMaterialTextureBias(ubo, instance.emissiveTextureIndex, sampLinearHandle, instance.emissiveTextureSet == 0 ? vertIn.uv0 : vertIn.uv1, ubo->textureLodBias).rgb;
+        emissive *= SampleMaterialTextureBias(ubo, instance.emissiveTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).rgb;
     }
     if (hasLobes)
         emissive *= 1.0 - lobeShading.coatWeight; // the coat over the emission (the spec's coated_emission)

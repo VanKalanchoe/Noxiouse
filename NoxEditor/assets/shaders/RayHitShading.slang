@@ -34,7 +34,7 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
     float w1 = barycentrics.x;
     float w2 = barycentrics.y;
 
-    return w0 * uv0 + w1 * uv1 + w2 * uv2;
+    return ray_hit_uv(lut, w0 * uv0 + w1 * uv1 + w2 * uv2); // through the material's UV channel 0
 }
 
 // The light a ray lets through a surface it passes, the path tracer's rule (PathTracerBridge.slang Bridge::OccluderTransmittance):
@@ -167,7 +167,11 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     float w1 = committedBary.x;
     float w2 = committedBary.y;
 
-    float2 hitUV = w0 * vertex0.uv0 + w1 * vertex1.uv0 + w2 * vertex2.uv0;
+    // Each texture through its own UV channel (KHR_texture_transform: material_texture_uv).
+    GpuMaterial* hitMaterial = &((GpuMaterial*)ubo->sceneMaterialsReference)[hitLut.materialIndex];
+    const float2 meshUV0 = w0 * vertex0.uv0 + w1 * vertex1.uv0 + w2 * vertex2.uv0;
+    const float2 meshUV1 = w0 * vertex0.uv1 + w1 * vertex1.uv1 + w2 * vertex2.uv1;
+    float2 hitUV = material_texture_uv(hitMaterial, hitMaterial.baseColorTextureSet, meshUV0, meshUV1);
     // Zero vertex normals (imported meshes have them): the triangle's own normal instead of normalize(0) = NaN.
     float3 hitNormal = mul((float3x3)hitLut.normalMatrix, w0 * vertex0.normal + w1 * vertex1.normal + w2 * vertex2.normal);
     if (dot(hitNormal, hitNormal) <= 1e-20)
@@ -195,7 +199,8 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     // specular-glossiness ones converted). A metal is all specular: chrome's diffuse is near black.
     float3 albedo, specularF0;
     float roughness, metallic;
-    hit_material(ubo, hitLut, baseColor, hitUV, textureSampler, albedo, specularF0, roughness, metallic);
+    hit_material(ubo, hitLut, baseColor, material_texture_uv(hitMaterial, hitMaterial.physicalDescriptorTextureSet, meshUV0, meshUV1),
+                 textureSampler, albedo, specularF0, roughness, metallic);
     const float hitNdotV = clamp(dot(hitNormal, -R), 0.001, 1.0);
 
     // The hit's lobes (MaterialLobes.slang): the specular lobe's F0 and weight, the film's Fresnel as the environment's F0, and the
@@ -207,8 +212,9 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     {
         GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[hitLut.materialIndex];
         MaterialSampleCoords coords;
-        coords.uv[0] = hitUV;
-        coords.uv[1] = w0 * vertex0.uv1 + w1 * vertex1.uv1 + w2 * vertex2.uv1;
+        coords.material = material;
+        coords.uv[0] = meshUV0;
+        coords.uv[1] = meshUV1;
         coords.ddx[0] = coords.ddx[1] = coords.ddy[0] = coords.ddy[1] = float2(0.0);
         coords.lod = 0.0;
         float3 unusedDirection;
@@ -290,7 +296,8 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     // With its texture (a facade's emissive map is mostly dark windows: without it the whole facade glowed in reflections).
     if (hitLut.emissiveTextureIndex != 0xFFFFFFFF && any(emissiveLight > 0.0))
     {
-        emissiveLight *= SampleMaterialTextureLevel(ubo, hitLut.emissiveTextureIndex, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), hitUV, 2.0).rgb;
+        emissiveLight *= SampleMaterialTextureLevel(ubo, hitLut.emissiveTextureIndex, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)),
+                                                    material_texture_uv(hitMaterial, hitMaterial.emissiveTextureSet, meshUV0, meshUV1), 2.0).rgb;
     }
 
     // The coat over the emission (the spec's coated_emission).

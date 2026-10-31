@@ -201,16 +201,21 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         isMipFeedbackPixel(int2(path.id & 0xFFFFu, path.id >> 16), ubo->mipFeedbackFrame))
     {
         GpuRayTracingInstance lut = ((GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference)[InstanceID()];
+        GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[lut.materialIndex];
         const uint textures[5] = { lut.baseColorTextureIndex, lut.metallicRoughnessTextureIndex, lut.normalTextureIndex,
                                    lut.emissiveTextureIndex, lut.transmissionTextureIndex };
+        const int sets[5] = { material.baseColorTextureSet, material.physicalDescriptorTextureSet, material.normalTextureSet,
+                              material.emissiveTextureSet, material.transmissionTextureSet };
         for (uint t = 0; t < 5; ++t)
         {
             if (textures[t] == 0xFFFFFFFF)
                 continue;
             uint width, height;
             MaterialTextureSize(ubo, textures[t], width, height);
-            reportMaterialTextureLod(ubo, textures[t], surface.uv, log2(max(surface.uvFootprint, 1e-20)) + 0.5 * log2(float(width) * float(height)) +
-                                                                  ubo->pathTracerTexLodBias);
+            // Each texture where its UV channel reads it (KHR_texture_transform), its footprint scaled by the channel.
+            reportMaterialTextureLod(ubo, textures[t], material_texture_uv(material, sets[t], surface.meshUV0, surface.meshUV1),
+                                     log2(max(surface.uvFootprint * material_texture_uv_scale(material, sets[t]), 1e-20)) +
+                                         0.5 * log2(float(width) * float(height)) + ubo->pathTracerTexLodBias);
         }
     }
 

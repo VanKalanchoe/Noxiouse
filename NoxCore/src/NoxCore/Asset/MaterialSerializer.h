@@ -58,7 +58,9 @@ namespace Nox
             Write(stream, material.RoughnessFactor);
             WriteTexture(stream, material.MetallicRoughnessTexturePath, material.PhysicalDescriptorTextureSet);
             WriteTexture(stream, material.NormalTexturePath, material.NormalTextureSet);
+            Write(stream, material.NormalScale);
             WriteTexture(stream, material.OcclusionTexturePath, material.OcclusionTextureSet);
+            Write(stream, material.OcclusionStrength);
             Write(stream, material.EmissiveFactor);
             WriteTexture(stream, material.EmissiveTexturePath, material.EmissiveTextureSet);
             Write(stream, material.emissiveStrength);
@@ -75,12 +77,20 @@ namespace Nox
             Write(stream, material.AlphaMaskCutoff);
             Write(stream, static_cast<uint8_t>(material.DoubleSided ? 1 : 0));
             Write(stream, static_cast<uint8_t>(material.Unlit ? 1 : 0));
+            for (const MaterialUVChannel& channel : material.UVChannels)
+            {
+                Write(stream, channel.Source);
+                Write(stream, channel.Offset);
+                Write(stream, channel.Rotation);
+                Write(stream, channel.Scale);
+            }
 
             Write(stream, material.ClearcoatFactor);
             WriteTexture(stream, material.ClearcoatTexture);
             Write(stream, material.ClearcoatRoughnessFactor);
             WriteTexture(stream, material.ClearcoatRoughnessTexture);
             WriteTexture(stream, material.ClearcoatNormalTexture);
+            Write(stream, material.ClearcoatNormalScale);
             Write(stream, material.SheenColorFactor);
             WriteTexture(stream, material.SheenColorTexture);
             Write(stream, material.SheenRoughnessFactor);
@@ -113,7 +123,9 @@ namespace Nox
             Read(stream, material.RoughnessFactor);
             ReadTexture(stream, material.MetallicRoughnessTexturePath, material.PhysicalDescriptorTextureSet);
             ReadTexture(stream, material.NormalTexturePath, material.NormalTextureSet);
+            Read(stream, material.NormalScale);
             ReadTexture(stream, material.OcclusionTexturePath, material.OcclusionTextureSet);
+            Read(stream, material.OcclusionStrength);
             Read(stream, material.EmissiveFactor);
             ReadTexture(stream, material.EmissiveTexturePath, material.EmissiveTextureSet);
             Read(stream, material.emissiveStrength);
@@ -135,12 +147,20 @@ namespace Nox
             Read(stream, unlit);
             material.DoubleSided = doubleSided != 0;
             material.Unlit = unlit != 0;
+            for (MaterialUVChannel& channel : material.UVChannels)
+            {
+                Read(stream, channel.Source);
+                Read(stream, channel.Offset);
+                Read(stream, channel.Rotation);
+                Read(stream, channel.Scale);
+            }
 
             Read(stream, material.ClearcoatFactor);
             ReadTexture(stream, material.ClearcoatTexture);
             Read(stream, material.ClearcoatRoughnessFactor);
             ReadTexture(stream, material.ClearcoatRoughnessTexture);
             ReadTexture(stream, material.ClearcoatNormalTexture);
+            Read(stream, material.ClearcoatNormalScale);
             Read(stream, material.SheenColorFactor);
             ReadTexture(stream, material.SheenColorTexture);
             Read(stream, material.SheenRoughnessFactor);
@@ -162,8 +182,8 @@ namespace Nox
         }
 
     private:
-        // "NMA2": the layout with every field (lobes included); "NMAT" files from before are made again.
-        static constexpr char Magic[4] = { 'N', 'M', 'A', '2' };
+        // "NMA3": the layout with every field (lobes, UV channels, normal / occlusion strength); older files are made again.
+        static constexpr char Magic[4] = { 'N', 'M', 'A', '3' };
 
         template<typename T>
         static void Write(std::ostream& stream, const T& value)

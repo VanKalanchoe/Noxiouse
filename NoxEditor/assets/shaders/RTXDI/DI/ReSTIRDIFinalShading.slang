@@ -166,7 +166,7 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
     float w0 = 1.0 - barycentrics.x - barycentrics.y;
     float w1 = barycentrics.x;
     float w2 = barycentrics.y;
-    return w0 * vertices[i0].uv0 + w1 * vertices[i1].uv0 + w2 * vertices[i2].uv0;
+    return ray_hit_uv(lut, w0 * vertices[i0].uv0 + w1 * vertices[i1].uv0 + w2 * vertices[i2].uv0);
 }
 
 bool trace_visibility(float3 origin, float3 direction, float maxDist)

@@ -2255,6 +2255,13 @@ namespace Nox
 
             ImGui::Checkbox("Primary", &component.Primary);
             ImGui::Checkbox("Auto Exposure", &component.AutoExposure);
+            if (!component.AutoExposure)
+            {
+                ImGui::DragFloat("Manual EV100", &component.ManualEV100, 0.1f, -10.0f, 20.0f, "%.1f");
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("The exposure, as a camera's EV at ISO 100 (Unreal's Manual metering): higher is darker.\n"
+                                      "About 2 for the default sun, 0 overcast, -6 a moonlit night.");
+            }
             ImGui::DragFloat("Exposure Compensation", &component.ExposureCompensation, 0.05f, -12.0f, 12.0f);
             if (component.AutoExposure)
             {

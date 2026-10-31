@@ -45,7 +45,7 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
     const Vertex v1 = LoadRayTracingVertex(hit, i1);
     const Vertex v2 = LoadRayTracingVertex(hit, i2);
     const float w0 = 1.0 - barycentrics.x - barycentrics.y;
-    const float2 uv = w0 * v0.uv0 + barycentrics.x * v1.uv0 + barycentrics.y * v2.uv0;
+    const float2 uv = ray_hit_uv(hit, w0 * v0.uv0 + barycentrics.x * v1.uv0 + barycentrics.y * v2.uv0);
     const float3 localNormal = w0 * v0.normal + barycentrics.x * v1.normal + barycentrics.y * v2.normal;
     // Which side the ray came from, by the triangle's own plane (an interpolated normal leans away near silhouettes), turned to
     // the side the vertex normals say is the front. Zero vertex normals (imported meshes have them) or a degenerate triangle

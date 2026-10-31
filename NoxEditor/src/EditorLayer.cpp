@@ -1055,12 +1055,11 @@ namespace Nox
             m_Renderer->setTonemapMode(static_cast<uint32_t>(currentTonemap));
         }
         
-        float exposure = m_Renderer->getExposure();
-        // Logarithmic up to 1000 (+10 EV): a moonlit night is ~9 stops under daylight (or the camera's Auto Exposure).
-        if (ImGui::SliderFloat("Exposure", &exposure, 0.01f, 1000.0f, "%.2f", ImGuiSliderFlags_Logarithmic))
-        {
-            m_Renderer->setExposure(exposure);
-        }
+        float exposureStops = m_Renderer->getViewportExposureCompensation();
+        if (ImGui::SliderFloat("Exposure Compensation", &exposureStops, -10.0f, 10.0f, "%+.1f EV"))
+            m_Renderer->setViewportExposureCompensation(exposureStops);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Brighter or darker by stops, on top of the scene camera's exposure (its Manual EV100, or Auto Exposure).");
         bool autoExposure = m_Renderer->getViewportAutoExposure();
         if (ImGui::Checkbox("Auto Exposure", &autoExposure))
             m_Renderer->setViewportAutoExposure(autoExposure);

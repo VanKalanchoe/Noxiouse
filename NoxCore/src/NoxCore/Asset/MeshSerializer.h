@@ -343,9 +343,9 @@ namespace Nox
         // normal delta); 7 every mesh's material variants (KHR_materials_variants) at the end of its record (per mapping the variant's
         // name and index, then the materials); 8 every node's extras (key / value strings) and physics (NodePhysics) after its
         // submesh range; 9 a node's mesh collider, collision filter and joint; 10 the materials with every MaterialData field
-        // (MaterialSerializer::WriteFields: IOR, volume, the lobes). Only the current version is read: older cooks are cooked again
-        // from their source (MeshImporter).
-        static constexpr uint32_t CurrentVersion = 10;
+        // (MaterialSerializer::WriteFields: IOR, volume, the lobes); 11 the materials' UV channels (texture transforms) and normal /
+        // occlusion strengths. Only the current version is read: older cooks are cooked again from their source (MeshImporter).
+        static constexpr uint32_t CurrentVersion = 11;
         static constexpr uint32_t MeshFlagVertexColors = 1u << 0;
 
         struct MorphDelta

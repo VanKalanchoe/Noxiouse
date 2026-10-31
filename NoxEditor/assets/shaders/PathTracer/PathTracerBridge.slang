@@ -41,9 +41,12 @@ namespace Bridge
         // The hit triangle in the world: its area and the cosine between its face and the ray (emissive light MIS).
         float triangleArea;
         float cosFace;
-        // The ray cone's width in uv units here (texture LOD: times the texture's texels), for the path tracer's mip requests.
+        // The ray cone's width in mesh UV units here (texture LOD: times a texture's channel scale and texels), for the path tracer's
+        // mip requests; the mesh UV sets (each texture reads them through its channel, material_texture_uv).
         float uvFootprint;
-        float2 uv; // the textures' coordinates here (virtual texture tile requests)
+        float2 uv; // the base color's coordinates
+        float2 meshUV0;
+        float2 meshUV1;
     };
 
     // RTXPT's stateless uniform generator advances with Hash32. Effect-specific seed construction is
@@ -174,7 +177,12 @@ namespace Bridge
         float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
         float3 localPos = v0.pos * bary.x + v1.pos * bary.y + v2.pos * bary.z;
         float3 localNormal = normalize(v0.normal * bary.x + v1.normal * bary.y + v2.normal * bary.z);
-        float2 uv = v0.uv0 * bary.x + v1.uv0 * bary.y + v2.uv0 * bary.z;
+        // Each texture reads the mesh UVs through its own UV channel (KHR_texture_transform: material_texture_uv); `uv` is the base
+        // color's (alpha, the surface's footprint).
+        GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[lut.materialIndex];
+        const float2 meshUV0 = v0.uv0 * bary.x + v1.uv0 * bary.y + v2.uv0 * bary.z;
+        const float2 meshUV1 = v0.uv1 * bary.x + v1.uv1 * bary.y + v2.uv1 * bary.z;
+        float2 uv = material_texture_uv(material, material.baseColorTextureSet, meshUV0, meshUV1);
 
         // 3. Transform to world space using DXR intrinsics
         float3 posW = mul(objToWorld, float4(localPos, 1.0));
@@ -225,9 +233,12 @@ namespace Bridge
         float worldDoubleArea = length(cross(edge1, edge2));
         surface.triangleArea = 0.5 * worldDoubleArea;
         surface.cosFace = worldDoubleArea > 0.0 ? abs(dot(cross(edge1, edge2) / worldDoubleArea, rayDir)) : 0.0;
+        // The mesh UV set 0's footprint; each texture's through its channel (material_texture_uv_scale).
         float uvPerWorld = sqrt(abs(determinant) / max(worldDoubleArea, 1e-12));
         surface.uvFootprint = rayConeWidth * uvPerWorld;
         surface.uv = uv;
+        surface.meshUV0 = meshUV0;
+        surface.meshUV1 = meshUV1;
         if (abs(determinant) > 1e-10)
         {
             float3 tangent = (edge1 * duv2.y - edge2 * duv1.y) / determinant;
@@ -247,7 +258,8 @@ namespace Bridge
         float4 baseColor = lut.workflow == 1.0 ? lut.diffuseFactor : lut.baseColorFactor;
         if (lut.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            baseColor *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uv, textureLod(ubo, lut.baseColorTextureIndex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias));
+            baseColor *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, material_texture_uv(material, material.baseColorTextureSet, meshUV0, meshUV1),
+                textureLod(ubo, lut.baseColorTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.baseColorTextureSet), ubo->pathTracerTexLodBias));
         }
         baseColor *= RayTracingVertexColor(lut, idx, barycentrics); // glTF COLOR_0
 
@@ -259,7 +271,8 @@ namespace Bridge
         float3 diffuseAlbedo = baseColor.rgb * (1.0 - saturate(metallic));
         if (lut.metallicRoughnessTextureIndex != 0xFFFFFFFF)
         {
-            float4 mrSample = SampleMaterialTextureLevel(ubo, lut.metallicRoughnessTextureIndex, textureSampler, uv, textureLod(ubo, lut.metallicRoughnessTextureIndex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias));
+            float4 mrSample = SampleMaterialTextureLevel(ubo, lut.metallicRoughnessTextureIndex, textureSampler, material_texture_uv(material, material.physicalDescriptorTextureSet, meshUV0, meshUV1),
+                textureLod(ubo, lut.metallicRoughnessTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.physicalDescriptorTextureSet), ubo->pathTracerTexLodBias));
             if (lut.workflow == 1.0)
             {
                 roughness = 1.0 - lut.specularFactor.a * mrSample.a;
@@ -282,13 +295,15 @@ namespace Bridge
         // Normal mapping
         if (lut.normalTextureIndex != 0xFFFFFFFF)
         {
-            float3 tangentNormal = SampleMaterialTextureLevel(ubo, lut.normalTextureIndex, textureSampler, uv, textureLod(ubo, lut.normalTextureIndex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias)).xyz;
+            float3 tangentNormal = SampleMaterialTextureLevel(ubo, lut.normalTextureIndex, textureSampler, material_texture_uv(material, material.normalTextureSet, meshUV0, meshUV1),
+                textureLod(ubo, lut.normalTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.normalTextureSet), ubo->pathTracerTexLodBias)).xyz;
             // Match RTXPT's ApplyNormalMapRTXPT. Some Bistro DDNA maps omit Z and expect it to be
             // reconstructed; treating their stored zero as -1 bends highlights into the surface.
             tangentNormal.xy = tangentNormal.xy * 2.0 - 1.0;
             tangentNormal.z = tangentNormal.z <= 0.0
                 ? sqrt(saturate(1.0 - dot(tangentNormal.xy, tangentNormal.xy)))
                 : abs(tangentNormal.z * 2.0 - 1.0);
+            tangentNormal.xy *= lut.normalScale; // glTF's normal strength
             tangentNormal = dot(tangentNormal, tangentNormal) > 1e-12 ? normalize(tangentNormal) : float3(0.0, 0.0, 1.0);
             surface.shadingData.N = normalize(
                 surface.shadingData.T * tangentNormal.x +
@@ -301,7 +316,8 @@ namespace Bridge
         float transmission = lut.transmissionFactor;
         if (lut.transmissionTextureIndex != 0xFFFFFFFF)
         {
-            transmission *= SampleMaterialTextureLevel(ubo, lut.transmissionTextureIndex, textureSampler, uv, textureLod(ubo, lut.transmissionTextureIndex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias)).r;
+            transmission *= SampleMaterialTextureLevel(ubo, lut.transmissionTextureIndex, textureSampler, material_texture_uv(material, material.transmissionTextureSet, meshUV0, meshUV1),
+                textureLod(ubo, lut.transmissionTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.transmissionTextureSet), ubo->pathTracerTexLodBias)).r;
         }
 
         // 6. Setup BSDF data
@@ -335,7 +351,8 @@ namespace Bridge
         surface.emission = lut.emissiveFactor.rgb * lut.emissiveFactor.a;
         if (lut.emissiveTextureIndex != 0xFFFFFFFF)
         {
-            surface.emission *= SampleMaterialTextureLevel(ubo, lut.emissiveTextureIndex, textureSampler, uv, textureLod(ubo, lut.emissiveTextureIndex, rayConeWidth, uvPerWorld, ubo->pathTracerTexLodBias)).rgb;
+            surface.emission *= SampleMaterialTextureLevel(ubo, lut.emissiveTextureIndex, textureSampler, material_texture_uv(material, material.emissiveTextureSet, meshUV0, meshUV1),
+                textureLod(ubo, lut.emissiveTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.emissiveTextureSet), ubo->pathTracerTexLodBias)).rgb;
         }
         surface.ior = ior;
         surface.isOpaque = (lut.alphaMode == 0);
@@ -365,7 +382,7 @@ namespace Bridge
         Vertex v2 = LoadRayTracingVertex(lut, idx.z);
 
         float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
-        float2 uv = v0.uv0 * bary.x + v1.uv0 * bary.y + v2.uv0 * bary.z;
+        float2 uv = ray_hit_uv(lut, v0.uv0 * bary.x + v1.uv0 * bary.y + v2.uv0 * bary.z); // the material's UV channel 0
 
         SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
         float alpha = lut.baseColorFactor.a * RayTracingVertexColor(lut, idx, barycentrics).a;
@@ -410,7 +427,7 @@ namespace Bridge
         Vertex v1 = LoadRayTracingVertex(lut, idx.y);
         Vertex v2 = LoadRayTracingVertex(lut, idx.z);
         float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
-        float2 uv = v0.uv0 * bary.x + v1.uv0 * bary.y + v2.uv0 * bary.z;
+        float2 uv = ray_hit_uv(lut, v0.uv0 * bary.x + v1.uv0 * bary.y + v2.uv0 * bary.z); // the material's UV channel 0
         SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
         float alpha = lut.baseColorFactor.a * RayTracingVertexColor(lut, idx, barycentrics).a;
         if (lut.baseColorTextureIndex != 0xFFFFFFFF)

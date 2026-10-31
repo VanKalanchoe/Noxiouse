@@ -293,6 +293,19 @@ namespace Nox
         if (packed.anisotropyStrength > 0.0f)
             packed.lobes |= shaderio::MaterialLobeAnisotropy;
 
+        // The UV channels (KHR_texture_transform) and the normal / occlusion strengths.
+        packed.uvSources = 0;
+        for (int32_t channel = 0; channel < MaxMaterialUVChannels; ++channel)
+        {
+            packed.uvRow0[channel] = material.UVChannels[channel].Row0();
+            packed.uvRow1[channel] = material.UVChannels[channel].Row1();
+            if (material.UVChannels[channel].Source == 1)
+                packed.uvSources |= 1u << channel;
+        }
+        packed.normalScale = material.NormalScale;
+        packed.occlusionStrength = glm::clamp(material.OcclusionStrength, 0.0f, 1.0f);
+        packed.clearcoatNormalScale = material.ClearcoatNormalScale;
+
         // Dispersion only changes refraction: on for a transmissive material.
         packed.dispersion = glm::max(material.Dispersion, 0.0f);
         if (packed.dispersion > 0.0f && material.TransmissionFactor > 0.0f)
@@ -5433,7 +5446,9 @@ namespace Nox
         uniformData.prefilteredMapIndex = m_prefilteredEnvMap ? m_prefilteredEnvMap->GetDescriptorIndexSlot() : ~0u;
         uniformData.prefilteredCubeMipLevels = m_prefilteredEnvMap ? static_cast<float>(prefilterCubeMipLevels) : 0.0f;
         uniformData.brdfLutIndex = m_brdfLUT ? m_brdfLUT->GetDescriptorIndexSlot() : ~0u;
-        uniformData.exposure = m_exposure; // slider in the future in imgui
+        // The base exposure: the manual EV100's without auto exposure (which brings its own, scene_exposure), and the viewport's
+        // compensation on top.
+        uniformData.exposure = (m_autoExposure ? 1.0f : ExposureFromEV100(m_manualEV100)) * std::exp2(m_viewportExposureCompensation);
         uniformData.gamma = m_gamma; // slider in the future in imgui
         uniformData.scaleIBLAmbient = m_scaleIBLAmbient; // slider in the future in imgui
         uniformData.skyDiscs = m_proceduralSkyActive ? 1u : 0u;
@@ -7078,6 +7093,10 @@ namespace Nox
                 uniforms.enableRTShadows = 0;
                 uniforms.enableDDGI = 0;
             }
+            // An asset preview keeps its own brightness (the exposure its lighting was set up for), an unlit view shows base colors
+            // as they are: neither takes the scene camera's exposure.
+            if (view.Preview || (view.Flags & ExtraViewUnlit) != 0)
+                uniforms.exposure = 1.0f;
             memcpy(view.UniformBuffersMapped[frameIndex], &uniforms, sizeof(shaderio::UniformBufferObject));
         }
     }

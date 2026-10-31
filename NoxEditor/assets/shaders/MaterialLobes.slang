@@ -7,10 +7,11 @@
 
 #include "shaderIO.h"
 
-// Where a surface point samples its material's textures: both UV sets, with their screen gradients (raster passes) or one mip
-// level for every texture (ray hits: lod >= 0).
+// Where a surface point samples its material's textures: both mesh UV sets, with their screen gradients (raster passes) or one mip
+// level for every texture (ray hits: lod >= 0). A texture reads them through its UV channel (material_texture_uv).
 struct MaterialSampleCoords
 {
+    GpuMaterial* material;
     float2 uv[2];
     float2 ddx[2];
     float2 ddy[2];
@@ -19,9 +20,11 @@ struct MaterialSampleCoords
 
 float4 material_sample(UniformBufferObject* ubo, uint textureIndex, int set, MaterialSampleCoords coords, SamplerState samplerState)
 {
-    const uint s = set == 1 ? 1u : 0u;
-    return coords.lod < 0.0 ? SampleMaterialTextureGrad(ubo, textureIndex, samplerState, coords.uv[s], coords.ddx[s], coords.ddy[s])
-                            : SampleMaterialTextureLevel(ubo, textureIndex, samplerState, coords.uv[s], coords.lod);
+    const float2 uv = material_texture_uv(coords.material, set, coords.uv[0], coords.uv[1]);
+    if (coords.lod >= 0.0)
+        return SampleMaterialTextureLevel(ubo, textureIndex, samplerState, uv, coords.lod);
+    return SampleMaterialTextureGrad(ubo, textureIndex, samplerState, uv, material_texture_uv_delta(coords.material, set, coords.ddx[0], coords.ddx[1]),
+                                     material_texture_uv_delta(coords.material, set, coords.ddy[0], coords.ddy[1]));
 }
 
 // A texture's value where the material has one, else `fallback` (the spec's "a missing texture reads 1").
@@ -89,6 +92,7 @@ GBufferLobes evaluate_material_lobes(UniformBufferObject* ubo, GpuMaterial* mate
             tangentNormal.xy = texel.xy * 2.0 - 1.0;
             // A two-channel (BC5) normal map rebuilds its z, as the base's does.
             tangentNormal.z = texel.z <= 0.0 ? sqrt(saturate(1.0 - dot(tangentNormal.xy, tangentNormal.xy))) : abs(texel.z * 2.0 - 1.0);
+            tangentNormal.xy *= material.clearcoatNormalScale; // the coat normal map's strength (its textureInfo scale)
             coatNormal = normalize(T * tangentNormal.x + B * tangentNormal.y + N * tangentNormal.z);
         }
         lobes.coatNormal = backFace ? -coatNormal : coatNormal;

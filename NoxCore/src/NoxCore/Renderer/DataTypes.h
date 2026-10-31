@@ -65,11 +65,29 @@ namespace Nox
         Blend  = 2
     };
 
-    // A texture a material reads: its file (empty: none) and the glTF UV set it is sampled with.
+    // A texture a material reads: its file (empty: none) and the UV channel it is sampled with (MaterialData::UVChannels).
     struct MaterialTexture
     {
         std::string Path;
         int32_t Set = 0;
+    };
+
+    // A material's UV channel: the mesh UV set it reads and the transform applied to it (glTF KHR_texture_transform: offset, rotation
+    // counter-clockwise in radians, scale; uv' = T x R x S x uv). A texture names the channel it reads (its Set), so two textures on
+    // one UV set with different transforms read two channels -- each texture its own transform, as Unreal's per-texture UVs.
+    inline constexpr int32_t MaxMaterialUVChannels = 4;
+    static_assert(MaxMaterialUVChannels == static_cast<int32_t>(shaderio::MaterialUVChannels), "GpuMaterial carries every UV channel");
+    struct MaterialUVChannel
+    {
+        int32_t Source = 0;
+        glm::vec2 Offset = glm::vec2(0.0f);
+        float Rotation = 0.0f;
+        glm::vec2 Scale = glm::vec2(1.0f);
+
+        bool operator==(const MaterialUVChannel&) const = default;
+        // The transform's rows (u' = row0 . (u, v, 1), v' = row1 . (u, v, 1)), as the shaders apply it (uv_transform).
+        glm::vec3 Row0() const { return glm::vec3(std::cos(Rotation) * Scale.x, -std::sin(Rotation) * Scale.y, Offset.x); }
+        glm::vec3 Row1() const { return glm::vec3(std::sin(Rotation) * Scale.x, std::cos(Rotation) * Scale.y, Offset.y); }
     };
 
     struct MaterialData
@@ -104,9 +122,11 @@ namespace Nox
         // Additional Maps
         std::string NormalTexturePath;
         int32_t NormalTextureSet = 0;
+        float NormalScale = 1.0f;       // glTF normalTextureInfo.scale: the tangent-space X and Y scaled by it (the strength)
         
         std::string OcclusionTexturePath;
         int32_t OcclusionTextureSet = 0;
+        float OcclusionStrength = 1.0f; // glTF occlusionTextureInfo.strength: 1 + strength x (occlusion - 1)
         
         // Emission
         glm::vec3 EmissiveFactor = glm::vec3(0.0f);
@@ -151,6 +171,9 @@ namespace Nox
         bool DoubleSided = false;
         bool Unlit = false;
 
+        // The UV channels the textures read (their Set): by default channels 0 and 1 are UV sets 0 and 1 untransformed.
+        MaterialUVChannel UVChannels[MaxMaterialUVChannels] = { MaterialUVChannel{ 0 }, MaterialUVChannel{ 1 }, MaterialUVChannel{ 0 }, MaterialUVChannel{ 0 } };
+
         // The lobes past the core metallic-roughness model, one slab as UE5 Substrate's (each glTF extension's names and defaults;
         // a factor of 0 turns its lobe off). Textures multiply their factor; the channel each reads is noted.
         // Clear coat (KHR_materials_clearcoat): a smooth dielectric layer over everything else (car paint, varnish).
@@ -159,6 +182,7 @@ namespace Nox
         float ClearcoatRoughnessFactor = 0.0f;
         MaterialTexture ClearcoatRoughnessTexture; // G
         MaterialTexture ClearcoatNormalTexture;    // none: the coat is flat (the base's normal map stays below it)
+        float ClearcoatNormalScale = 1.0f;
         // Sheen (KHR_materials_sheen): the back-scatter of fibers at grazing angles (velvet, cloth).
         glm::vec3 SheenColorFactor = glm::vec3(0.0f);
         MaterialTexture SheenColorTexture;         // RGB, sRGB

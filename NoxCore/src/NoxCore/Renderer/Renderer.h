@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include <map>
 #include <algorithm>
 #include <array>
@@ -465,15 +466,22 @@ namespace Nox
         uint32_t getDebugMode() const { return m_debugMode; }
         void setTonemapMode(uint32_t mode) { m_tonemapMode = mode; }
         uint32_t getTonemapMode() const { return m_tonemapMode; }
-        float getExposure() const { return m_exposure; }
-        void setExposure(float exposure) { m_exposure = exposure; }
-        void setAutoExposure(bool enabled, float compensation, float minEV, float maxEV)
+        // The editor viewport's exposure compensation (stops), on top of the scene camera's.
+        float getViewportExposureCompensation() const { return m_viewportExposureCompensation; }
+        void setViewportExposureCompensation(float stops) { m_viewportExposureCompensation = stops; }
+        // The scene camera's exposure (Unreal's model): auto exposure meters the image (EV100, AutoExposureKey); without it the
+        // manual EV100. The compensation (stops) applies to both.
+        void setAutoExposure(bool enabled, float compensation, float minEV, float maxEV, float manualEV100)
         {
             m_autoExposure = enabled || m_viewportAutoExposure;
             m_exposureCompensation = compensation;
             m_autoExposureMinEV = minEV;
             m_autoExposureMaxEV = maxEV;
+            m_manualEV100 = manualEV100;
         }
+        float getManualEV100() const { return m_manualEV100; }
+        // A camera's exposure at an EV100 (Unreal's saturation-based convention, ISO 100: 1 / (1.2 x 2^EV100)).
+        static float ExposureFromEV100(float ev100) { return 1.0f / (1.2f * std::exp2(ev100)); }
         // The editor's Auto Exposure: on whatever the scene's camera says (a night scene is ~10 stops under daylight; without a primary
         // camera there is no camera setting at all). The camera's compensation and EV range still apply when it has them.
         void setViewportAutoExposure(bool enabled) { m_viewportAutoExposure = enabled; m_autoExposure = m_autoExposure || enabled; }
@@ -1344,7 +1352,8 @@ namespace Nox
         // EditorLayer Settings
         uint32_t m_debugMode = 0;
         uint32_t m_tonemapMode = 8; // RTXPT SampleUI explicitly defaults to Hable UC2
-        float m_exposure = 1.0f;
+        float m_viewportExposureCompensation = 0.0f;
+        float m_manualEV100 = 2.0f; // DefaultManualEV100 (Components.h)
         bool m_autoExposure = false;
         bool m_viewportAutoExposure = false;
         float m_exposureCompensation = 0.0f;

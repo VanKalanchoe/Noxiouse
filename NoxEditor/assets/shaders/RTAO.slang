@@ -88,7 +88,7 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
     float w1 = barycentrics.x;
     float w2 = barycentrics.y;
 
-    return w0 * uv0 + w1 * uv1 + w2 * uv2;
+    return ray_hit_uv(lut, w0 * uv0 + w1 * uv1 + w2 * uv2); // through the material's UV channel 0
 }
 
 // Any-hit-and-stop occlusion test with alpha evaluation. Returns the hit distance, or a negative value when the

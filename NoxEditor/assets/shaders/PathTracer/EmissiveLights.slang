@@ -95,7 +95,9 @@ namespace EmissiveLights
         result.radiance = instance.emissiveFactor.rgb * instance.emissiveFactor.a;
         if (instance.emissiveTextureIndex != 0xFFFFFFFF)
         {
-            const float2 uv = v0.uv0 * barycentrics.x + v1.uv0 * barycentrics.y + v2.uv0 * barycentrics.z;
+            GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
+            const float2 uv = material_texture_uv(material, material.emissiveTextureSet, v0.uv0 * barycentrics.x + v1.uv0 * barycentrics.y + v2.uv0 * barycentrics.z,
+                                                  v0.uv1 * barycentrics.x + v1.uv1 * barycentrics.y + v2.uv1 * barycentrics.z);
             result.radiance *= SampleMaterialTextureLevel(ubo, instance.emissiveTextureIndex, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), uv, textureLod).rgb;
         }
         const float areaPdf = areaProbability / (0.5 * doubleArea);

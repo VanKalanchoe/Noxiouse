@@ -106,7 +106,7 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
         float w1 = barycentrics.x;
         float w2 = barycentrics.y;
 
-        return w0 * uv0 + w1 * uv1 + w2 * uv2;
+        return ray_hit_uv(lut, w0 * uv0 + w1 * uv1 + w2 * uv2); // through the material's UV channel 0
     }
 
     bool trace_shadow_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist);

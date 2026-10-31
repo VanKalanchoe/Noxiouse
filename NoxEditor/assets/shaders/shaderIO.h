@@ -119,6 +119,9 @@ struct GpuTransform
     mat4 previousWorld; // world of the previous frame (per-object motion vectors)
 };
 
+// A material's UV channels (MaterialData::UVChannels, MaxMaterialUVChannels).
+STATIC_CONST uint32_t MaterialUVChannels = 4u;
+
 struct GpuMaterial
 {
     // Material Workflow & SpecGloss properties
@@ -203,6 +206,15 @@ struct GpuMaterial
     uint32_t anisotropyTextureIndex;         // RG direction, B strength
     int32_t anisotropyTextureSet;
     float dispersion;                        // 20 / Abbe number
+
+    // The UV channels a texture's set names (MaterialData::UVChannels: KHR_texture_transform): channel k reads mesh UV set
+    // (uvSources >> k) & 1 through the rows uvRow0[k] / uvRow1[k] (uv_transform; material_texture_uv).
+    vec3 uvRow0[MaterialUVChannels];
+    vec3 uvRow1[MaterialUVChannels];
+    uint32_t uvSources;
+    float normalScale;          // glTF normalTextureInfo.scale
+    float occlusionStrength;    // glTF occlusionTextureInfo.strength
+    float clearcoatNormalScale;
 };
 
 // GpuMaterial::lobes.
@@ -232,6 +244,18 @@ float gbuffer_back_light(float encoded)
 {
     const float diffuseTransmission = saturate((encoded - 0.25) / 0.75);
     return diffuseTransmission > 0.01 ? diffuseTransmission : 0.6;
+}
+
+// A UV through a material UV channel's transform rows (KHR_texture_transform: u' = row0 . (u, v, 1), v' = row1 . (u, v, 1)), and a UV
+// difference (a gradient, a triangle edge) through its linear part.
+float2 uv_transform(float3 row0, float3 row1, float2 uv)
+{
+    return float2(dot(row0.xy, uv) + row0.z, dot(row1.xy, uv) + row1.z);
+}
+
+float2 uv_transform_delta(float3 row0, float3 row1, float2 delta)
+{
+    return float2(dot(row0.xy, delta), dot(row1.xy, delta));
 }
 
 // The G-buffer material target's blue (RGBA8): the pixel's MaterialLobe* bits (which lobe targets hold data for it) and the unlit
@@ -453,7 +477,11 @@ struct GpuRayTracingInstance
     float diffuseTransmission;      // through a thin surface to its back (leaves, cloth); 0: none
     uint32_t pathTracerFlags;       // PathTracerThin...
     uint32_t materialIndex;         // GpuMaterial slot: the lobes (when lobes != 0) are read from there
-    uint32_t lobes;                 // GpuMaterial::lobes (the record stays a multiple of 8 bytes: its addresses)
+    uint32_t lobes;                 // GpuMaterial::lobes
+    vec3 uvRow0;                    // UV channel 0's transform (ray_hit_uv: hits read every texture through channel 0)
+    vec3 uvRow1;
+    float normalScale;              // GpuMaterial::normalScale
+    uint32_t padding;               // (the record stays a multiple of 8 bytes: its addresses)
 };
 
 struct GpuMesh
@@ -1660,6 +1688,10 @@ STATIC_CONST float SeeThroughTransmission = 0.5;
 
 // How much of the stops a dark scene is under mid-grey auto exposure makes up (1: all; the eye keeps a night darker).
 STATIC_CONST float AutoExposureDarkAdaptation = 0.6;
+// What auto exposure maps the image's average luminance to: Unreal's calibration, a reflected-light meter's EV100 = log2(L x 100 /
+// 12.5) shown at 1 / (1.2 x 2^EV100), so L becomes 1 / (1.2 x 8). (RTXPT's key, 0.042, put the average 2.3 stops lower: daylight
+// looked dim, a frame of sky alone dark.)
+STATIC_CONST float AutoExposureKey = 0.104167;
 
 // Path tracer material flags (GpuMaterial / GpuRayTracingInstance::pathTracerFlags), from RTXPT's material files when present.
 STATIC_CONST uint32_t PathTracerThinSet = 1u;         // the material says whether it is thin (else: thin when it has no thickness)
@@ -1683,19 +1715,21 @@ bool ray_see_through(float transmission, uint alphaMode)
 // A tangent-space normal map sample (0..1) as a unit tangent-space normal, as the G-buffer (GBufferMaterial.slang) and the path
 // tracer (PathTracerBridge.slang) decode it: X and Y from the texture, Z rebuilt when the texture stores none (two-channel BC5 maps
 // such as the Bistro's _ddna read 0 in blue -- taken as -1 it turned the normal into the surface).
-float3 tangent_normal_from_map(float3 sampled)
+// `scale`: glTF's normalTextureInfo.scale (the map's strength: X and Y scaled, then normalized).
+float3 tangent_normal_from_map(float3 sampled, float scale = 1.0)
 {
     float3 tangentNormal;
     tangentNormal.xy = sampled.xy * 2.0 - 1.0;
     tangentNormal.z = sampled.z <= 0.0 ? sqrt(saturate(1.0 - dot(tangentNormal.xy, tangentNormal.xy))) : abs(sampled.z * 2.0 - 1.0);
+    tangentNormal.xy *= scale;
     return dot(tangentNormal, tangentNormal) > 1e-12 ? normalize(tangentNormal) : float3(0.0, 0.0, 1.0);
 }
 
 // A normal map sample to a world-space normal in the mesh's stored tangent frame (xyz world tangent, w bitangent handedness),
 // Gram-Schmidt'ed against the interpolated normal, as the G-buffer does it.
-float3 normal_from_map(float3 sampled, float3 normal, float4 tangent)
+float3 normal_from_map(float3 sampled, float3 normal, float4 tangent, float scale = 1.0)
 {
-    const float3 tangentNormal = tangent_normal_from_map(sampled);
+    const float3 tangentNormal = tangent_normal_from_map(sampled, scale);
 
     const float3 N = normalize(normal);
     const float3 t = tangent.xyz - N * dot(N, tangent.xyz);
@@ -1735,7 +1769,7 @@ bool ray_shadow_passes(GpuRayTracingInstance instance)
 }
 
 // The exposure the post process applies (PostProcess.slang): the base exposure and compensation, and with auto exposure the stops
-// from the adapted log2 average luminance to the mid-grey key (0.042, RTXPT's TONEMAPPING_EXPOSURE_KEY), brightening only partly.
+// from the adapted log2 average luminance to the key (AutoExposureKey), brightening only partly.
 float scene_exposure(UniformBufferObject* ubo, uint autoExposureTextureIndex, float compensation, float minEV, float maxEV)
 {
     float exposure = ubo->exposure * exp2(compensation);
@@ -1747,7 +1781,7 @@ float scene_exposure(UniformBufferObject* ubo, uint autoExposureTextureIndex, fl
         const float logAverage = exposureTex.Load(int3(0, 0, int(levels) - 1));
         if (isfinite(logAverage))
         {
-            float stops = log2(0.042) - logAverage;
+            float stops = log2(AutoExposureKey) - logAverage;
             if (stops > 0.0)
                 stops *= AutoExposureDarkAdaptation;
             exposure *= exp2(clamp(stops, minEV, maxEV));
@@ -3007,6 +3041,35 @@ GBufferLobes gbuffer_load_lobes(UniformBufferObject* ubo, int2 pixel, float enco
     return gbuffer_decode_lobes(flags, lobesTex.Load(int3(pixel, 0)), specularTex.Load(int3(pixel, 0)));
 }
 
+// A ray hit's texture coordinate (its mesh UV set 0) as the material's textures read it: through UV channel 0.
+float2 ray_hit_uv(GpuRayTracingInstance lut, float2 uv)
+{
+    return uv_transform(lut.uvRow0, lut.uvRow1, uv);
+}
+
+// Where a texture is read (KHR_texture_transform): its set names one of the material's UV channels, which takes a mesh UV set (0 / 1)
+// through its transform. The _delta forms carry a UV gradient (or a triangle edge) through the same channel's linear part.
+float2 material_texture_uv(GpuMaterial* material, int set, float2 mesh0, float2 mesh1)
+{
+    const uint channel = min(uint(max(set, 0)), MaterialUVChannels - 1u);
+    return uv_transform(material.uvRow0[channel], material.uvRow1[channel], ((material.uvSources >> channel) & 1u) != 0u ? mesh1 : mesh0);
+}
+
+// How much a texture's UV channel scales lengths in UV (the square root of its linear part's determinant): a ray cone's footprint
+// (texture LOD) on that texture.
+float material_texture_uv_scale(GpuMaterial* material, int set)
+{
+    const uint channel = min(uint(max(set, 0)), MaterialUVChannels - 1u);
+    const float3 r0 = material.uvRow0[channel], r1 = material.uvRow1[channel];
+    return sqrt(abs(r0.x * r1.y - r0.y * r1.x));
+}
+
+float2 material_texture_uv_delta(GpuMaterial* material, int set, float2 mesh0, float2 mesh1)
+{
+    const uint channel = min(uint(max(set, 0)), MaterialUVChannels - 1u);
+    return uv_transform_delta(material.uvRow0[channel], material.uvRow1[channel], ((material.uvSources >> channel) & 1u) != 0u ? mesh1 : mesh0);
+}
+
 // Raster view of one GPU scene instance: the instance record joined with its transform, material and mesh (ray tracing
 // shaders read GpuRayTracingInstance instead).
 struct InstanceData
@@ -3052,11 +3115,28 @@ struct InstanceData
     uint32_t unlit;
     float diffuseTransmission;
     float depthBias; // GpuMaterial::depthBias
+    float3 uvRow0[MaterialUVChannels]; // GpuMaterial's UV channels (instance_texture_uv)
+    float3 uvRow1[MaterialUVChannels];
+    uint32_t uvSources;
+    float normalScale;
+    float occlusionStrength;
 
     uint32_t boneMatrixOffset;
     uint32_t skinnedVertexOffset;
     int entityID;
 };
+
+float2 instance_texture_uv(InstanceData instance, int set, float2 mesh0, float2 mesh1)
+{
+    const uint channel = min(uint(max(set, 0)), MaterialUVChannels - 1u);
+    return uv_transform(instance.uvRow0[channel], instance.uvRow1[channel], ((instance.uvSources >> channel) & 1u) != 0u ? mesh1 : mesh0);
+}
+
+float2 instance_texture_uv_delta(InstanceData instance, int set, float2 mesh0, float2 mesh1)
+{
+    const uint channel = min(uint(max(set, 0)), MaterialUVChannels - 1u);
+    return uv_transform_delta(instance.uvRow0[channel], instance.uvRow1[channel], ((instance.uvSources >> channel) & 1u) != 0u ? mesh1 : mesh0);
+}
 
 struct SceneInstances
 {
@@ -3132,6 +3212,11 @@ struct SceneInstances
             data.unlit = material.unlit;
             data.diffuseTransmission = material.diffuseTransmission;
             data.depthBias = material.depthBias;
+            data.uvRow0 = material.uvRow0;
+            data.uvRow1 = material.uvRow1;
+            data.uvSources = material.uvSources;
+            data.normalScale = material.normalScale;
+            data.occlusionStrength = material.occlusionStrength;
 
             data.boneMatrixOffset = instance.boneMatrixOffset;
             data.skinnedVertexOffset = instance.skinnedVertexOffset;

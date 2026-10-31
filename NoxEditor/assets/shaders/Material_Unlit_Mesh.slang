@@ -66,7 +66,7 @@
         // 1. Fetch Base Color (matches Sascha material_unlit.frag lines 76-80)
         if (instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            baseColor = SampleMaterialTexture(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance.baseColorTextureSet == 0 ? vertIn.uv0 : vertIn.uv1) * instance.baseColorFactor;
+            baseColor = SampleMaterialTexture(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1)) * instance.baseColorFactor;
         }
         else
         {

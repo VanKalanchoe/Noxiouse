@@ -1099,7 +1099,7 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
     float w0 = 1.0 - barycentrics.x - barycentrics.y;
     float w1 = barycentrics.x;
     float w2 = barycentrics.y;
-    return w0 * vertices[i0].uv0 + w1 * vertices[i1].uv0 + w2 * vertices[i2].uv0;
+    return ray_hit_uv(lut, w0 * vertices[i0].uv0 + w1 * vertices[i1].uv0 + w2 * vertices[i2].uv0);
 }
 
 float3 perturb_normal(GpuRayTracingInstance lut, Vertex v0, Vertex v1, Vertex v2, float3 geomNormal, float2 hitUV, SamplerState textureSampler)
@@ -1129,7 +1129,7 @@ float3 perturb_normal(GpuRayTracingInstance lut, Vertex v0, Vertex v1, Vertex v2
         B_ortho = -B_ortho;
 
     float3x3 TBN = float3x3(T, B_ortho, N);
-    float3 tangentNormal = tangent_normal_from_map(SampleMaterialTextureLevel(g_UBO, lut.normalTextureIndex, textureSampler, hitUV, 0).xyz);
+    float3 tangentNormal = tangent_normal_from_map(SampleMaterialTextureLevel(g_UBO, lut.normalTextureIndex, textureSampler, hitUV, 0).xyz, lut.normalScale);
     return normalize(mul(tangentNormal, TBN));
 }
 
@@ -1157,7 +1157,7 @@ RAB_Surface LoadSurfaceFromRayPayload(RAB_RayPayload rp, float3 rayOrigin, float
     float w0 = 1.0 - rp.barycentrics.x - rp.barycentrics.y;
     float w1 = rp.barycentrics.x;
     float w2 = rp.barycentrics.y;
-    float2 hitUV = w0 * vertex0.uv0 + w1 * vertex1.uv0 + w2 * vertex2.uv0;
+    float2 hitUV = ray_hit_uv(lut, w0 * vertex0.uv0 + w1 * vertex1.uv0 + w2 * vertex2.uv0);
 
     float3 localNormal = normalize(w0 * vertex0.normal + w1 * vertex1.normal + w2 * vertex2.normal);
     float3 hitNormal = normalize(mul((float3x3)lut.normalMatrix, localNormal));

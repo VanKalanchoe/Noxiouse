@@ -78,22 +78,10 @@ import Tonemapping;
 
         // Mode 0 (Full Lit PBR): Apply Tonemapping (Exposure + Khronos PBR Neutral + Gamma)
         TonemapParameters tonemapParams;
-        float exposureScale = exp2(pushConstant.exposureCompensation);
-        if (pushConstant.autoExposureEnabled != 0)
-        {
-            // The adapted average (one texel), or a luminance pyramid's last mip (extra views).
-            Texture2D<float> exposureTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.autoExposureTextureIndex, 0));
-            uint exposureWidth, exposureHeight, exposureLevels;
-            exposureTex.GetDimensions(0, exposureWidth, exposureHeight, exposureLevels);
-            const float logAverage = exposureTex.Load(int3(0, 0, int(exposureLevels) - 1));
-            // Stops to the mid-grey key. Brightening is only partly made up, as the eye does it: a night (~10 stops under daylight)
-            // still looks like night, about 4 stops darker, instead of a grey day. Darkening (bright scenes) is made up in full.
-            float stops = log2(0.042) - logAverage;
-            if (stops > 0.0)
-                stops *= AutoExposureDarkAdaptation;
-            exposureScale *= exp2(clamp(stops, pushConstant.autoExposureMinEV, pushConstant.autoExposureMaxEV));
-        }
-        tonemapParams.exposure = ubo->exposure * exposureScale;
+        // The adapted average (one texel), or a luminance pyramid's last mip (extra views), to the key (scene_exposure: brightening
+        // is only partly made up, as the eye does it -- a night still looks like night instead of a grey day).
+        tonemapParams.exposure = scene_exposure(ubo, pushConstant.autoExposureEnabled != 0 ? pushConstant.autoExposureTextureIndex : 0xFFFFFFFF,
+                                                pushConstant.exposureCompensation, pushConstant.autoExposureMinEV, pushConstant.autoExposureMaxEV);
         tonemapParams.gamma = ubo->gamma;
         tonemapParams.mode = (int)pushConstant.tonemapMode;;
 

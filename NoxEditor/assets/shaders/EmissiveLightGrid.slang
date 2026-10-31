@@ -73,13 +73,16 @@ void trianglesMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantEmissive
         {
             uint width, height, levels;
             MaterialTextureSize(ubo, instance.emissiveTextureIndex, width, height, levels);
-            const float2 e1 = v1.uv0 - v0.uv0;
-            const float2 e2 = v2.uv0 - v0.uv0;
+            // Through the emissive texture's UV channel (KHR_texture_transform), as it is read.
+            GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
+            const int set = material.emissiveTextureSet;
+            const float2 e1 = material_texture_uv_delta(material, set, v1.uv0 - v0.uv0, v1.uv1 - v0.uv1);
+            const float2 e2 = material_texture_uv_delta(material, set, v2.uv0 - v0.uv0, v2.uv1 - v0.uv1);
             const float uvArea = 0.5 * abs(e1.x * e2.y - e1.y * e2.x);
             // The mip whose texel covers the triangle: its average emission.
             const float lod = clamp(0.5 * log2(max(uvArea * float(width) * float(height), 1e-8)), 0.0, float(levels - 1));
             emission *= SampleMaterialTextureLevel(ubo, instance.emissiveTextureIndex, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)),
-                                             (v0.uv0 + v1.uv0 + v2.uv0) / 3.0, lod).rgb;
+                                             material_texture_uv(material, set, (v0.uv0 + v1.uv0 + v2.uv0) / 3.0, (v0.uv1 + v1.uv1 + v2.uv1) / 3.0), lod).rgb;
         }
         const float power = dot(max(emission, float3(0.0)), float3(0.2126, 0.7152, 0.0722)) * record.area;
         record.power = isfinite(power) ? power : 0.0;

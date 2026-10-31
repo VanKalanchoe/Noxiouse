@@ -208,7 +208,7 @@
             B_ortho = -B_ortho;
 
         float3x3 TBN = float3x3(T, B_ortho, N);
-        float3 tangentNormal = tangent_normal_from_map(SampleMaterialTextureLevel(ubo, lut.normalTextureIndex, textureSampler, hitUV, 0).xyz);
+        float3 tangentNormal = tangent_normal_from_map(SampleMaterialTextureLevel(ubo, lut.normalTextureIndex, textureSampler, hitUV, 0).xyz, lut.normalScale);
         return normalize(mul(tangentNormal, TBN));
     }
 
