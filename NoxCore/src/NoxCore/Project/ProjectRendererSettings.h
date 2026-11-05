@@ -19,6 +19,7 @@ namespace Nox
         int32_t SSAOMethod = -1;           // screen-space AO: 0 classic SSAO, 1 GTAO
         int32_t SSR = -1;                  // screen-space reflections (where RT reflections are off): 0 off, 1 on
         int32_t SSGI = -1;                 // screen-space GI (with the environment / raster probe volume GI): 0 off, 1 on
+        int32_t VolumetricFog = -1;        // the height fog in froxels with shadows: 0 off, 1 on
     };
 
     // The packaged game's window: "Windowed", "Borderless" (fullscreen at the desktop's resolution, the default) or "Fullscreen"

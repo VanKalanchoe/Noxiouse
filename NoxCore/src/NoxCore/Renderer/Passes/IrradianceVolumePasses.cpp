@@ -323,6 +323,7 @@ namespace Nox
                 uniforms.reflectionProbesReference = 0;
                 uniforms.reflectionProbeCount = 0;
                 uniforms.irradianceVolumeReference = 0;
+                uniforms.volumetricFogTextureIndex = 0xFFFFFFFF; // the main camera's froxels
                 memcpy(m_irradianceFaceUniformsMapped[frameIndex][k * 6 + face], &uniforms, sizeof(shaderio::UniformBufferObject));
             }
         }

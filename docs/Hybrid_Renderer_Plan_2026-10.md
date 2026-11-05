@@ -593,3 +593,16 @@ the mean radiance is irradiance / pi: the pass writes sum(hits) / rays and the h
 other ambient for the rest (`ssgi.rgb x diffuse + (1 - hits) x ambient`). Denoised by a 3x3 bilateral average (view depth within 2%,
 normals alike) and temporal accumulation (90% history, reprojected through the previous camera, clamped to the neighbourhood's range
 widened by itself). Multi-bounce over frames (the history holds last frame's GI too).
+
+**Volumetric fog (RS6, 2026-11-05, untested)** -- Settings > Volumetric Fog (project `VolumetricFog`), off by default; needs the
+Environment Light's Height Fog. UE5's volumetric fog (`VolumetricFog.slang`, `Passes/VolumetricFogPasses.cpp`):
+- **Froxels:** 8 x 8 pixels a cell, 64 slices along the view ray out to 64 m (slice z ends at d x ((z + 1) / 64)^2, as the aerial
+  perspective's), 2D-array textures of the renderer's own (the graph has no array textures; full barriers).
+- **Lighting** per froxel at a depth that moves every frame inside it (golden-ratio sequence): the height fog's density there times
+  Extinction Scale, Albedo for scattering; the sun (with its cascaded shadow maps when they run, else one ray when RT shadows run;
+  the clouds' shadow), point / spot lights (their atlas shadow maps when they have them, unshadowed otherwise), Henyey-Greenstein
+  phase (g 0.2), plus the sky's irradiance (isotropic). Blended 90% with last frame's froxel at the same place (reprojected through
+  the previous camera).
+- **Integration** front to back per column, energy-conserving per slice (Hillaire 2015: S (1 - T) / extinction).
+- **Applied** by HeightFog.slang wherever the height fog is (the lit scene, the sky, glass, particles): in front of it, the height
+  fog itself starting where the volume ends. Extra views and probe captures keep the analytic height fog (the volume is the camera's).

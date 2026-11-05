@@ -625,6 +625,23 @@ namespace Nox
         uint32_t getIrradianceProbesPerFrame() const { return m_irradianceProbesPerFrame; }
         uint32_t getIrradianceProbeCount() const { return m_irradianceVolume.ProbeCount; }
         uint32_t getIrradianceProbesCaptured() const { return m_irradianceVolume.Captured; }
+        // Volumetric fog (RS6; Passes/VolumetricFogPasses.cpp): the Environment Light's Height Fog in froxels, lit by the sun and the
+        // point / spot lights with their shadows, accumulated over frames (light shafts); the height fog continues beyond its range.
+        // Off by default; how far it reaches, its slices, Henyey-Greenstein anisotropy, extinction scale, albedo, local lights.
+        void setVolumetricFogEnabled(bool enabled) { m_volumetricFog = enabled; }
+        bool getVolumetricFogEnabled() const { return m_volumetricFog; }
+        void setVolumetricFogDistance(float distance) { m_volumetricFogDistanceMeters = std::clamp(WorldUnits::ToMeters(distance), 1.0f, 1000.0f); }
+        float getVolumetricFogDistance() const { return WorldUnits::FromMeters(m_volumetricFogDistanceMeters); }
+        void setVolumetricFogSlices(uint32_t slices) { m_volumetricFogSlices = std::clamp(slices, 16u, 128u); }
+        uint32_t getVolumetricFogSlices() const { return m_volumetricFogSlices; }
+        void setVolumetricFogAnisotropy(float g) { m_volumetricFogAnisotropy = std::clamp(g, -0.9f, 0.9f); }
+        float getVolumetricFogAnisotropy() const { return m_volumetricFogAnisotropy; }
+        void setVolumetricFogExtinctionScale(float scale) { m_volumetricFogExtinctionScale = std::clamp(scale, 0.0f, 100.0f); }
+        float getVolumetricFogExtinctionScale() const { return m_volumetricFogExtinctionScale; }
+        void setVolumetricFogAlbedo(const glm::vec3& albedo) { m_volumetricFogAlbedo = glm::clamp(albedo, glm::vec3(0.0f), glm::vec3(1.0f)); }
+        glm::vec3 getVolumetricFogAlbedo() const { return m_volumetricFogAlbedo; }
+        void setVolumetricFogLocalLights(bool enabled) { m_volumetricFogLocalLights = enabled; }
+        bool getVolumetricFogLocalLights() const { return m_volumetricFogLocalLights; }
         // This frame's local lights with a shadow map and their views (stats).
         uint32_t getLocalShadowLightCount() const { return m_localShadowLightCount; }
         uint32_t getLocalShadowViewCount() const { return m_localShadows.viewCount; }
@@ -1150,6 +1167,8 @@ namespace Nox
         void addSSRPass();
         void addSSRHistoryPass();
         void addSSGIPasses();
+        void createVolumetricFogPipelines(bool forceCompile = false);
+        void addVolumetricFogPass();
         // Reflection probes: the probe table of this frame and at most one probe's capture (six faces, assembled, prefiltered); after
         // Compile the capture faces' uniforms.
         void createReflectionProbePipelines(bool forceCompile = false);
@@ -1468,6 +1487,24 @@ namespace Nox
             std::array<glm::mat4, 6> Projections{};
         } m_probeCaptureFrame;
         bool m_reflectionProbesEnabled = true;
+        // Volumetric fog: the froxel lighting (two, last frame's read while this frame's is written), the integrated volume, their
+        // storage slots, the grid they were made for.
+        std::unique_ptr<NRI::Pipeline> m_volumetricFogLightPipeline;
+        std::unique_ptr<NRI::Pipeline> m_volumetricFogIntegratePipeline;
+        std::array<Ref<Texture2D>, 2> m_fogLighting;
+        std::array<uint32_t, 2> m_fogLightingStorage{ ~0u, ~0u };
+        Ref<Texture2D> m_fogIntegrated;
+        uint32_t m_fogIntegratedStorage = ~0u;
+        glm::uvec3 m_fogGrid{ 0 };
+        uint32_t m_fogHistoryIndex = 0;
+        bool m_fogHistoryValid = false;
+        bool m_volumetricFog = false;
+        float m_volumetricFogDistanceMeters = 64.0f;
+        uint32_t m_volumetricFogSlices = 64;
+        float m_volumetricFogAnisotropy = 0.2f;
+        float m_volumetricFogExtinctionScale = 1.0f;
+        glm::vec3 m_volumetricFogAlbedo{ 1.0f };
+        bool m_volumetricFogLocalLights = true;
         // The irradiance volume (RS5a): this frame's submission, the volume's probes and their SH, per frame slot the table, the probe
         // list of this frame's captures, the culling view, each capture face's uniforms.
         struct IrradianceVolumeSubmission

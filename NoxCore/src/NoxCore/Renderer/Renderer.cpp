@@ -374,6 +374,7 @@ namespace Nox
         watchShader("assets/shaders/SSGI.slang", "SSGI", [this]() { createSSRPipeline(true); });
         watchShader("assets/shaders/ReflectionProbe.slang", "ReflectionProbe", [this]() { createReflectionProbePipelines(true); });
         watchShader("assets/shaders/IrradianceProbeSH.slang", "IrradianceProbeSH", [this]() { createIrradianceVolumePipelines(true); });
+        watchShader("assets/shaders/VolumetricFog.slang", "VolumetricFog", [this]() { createVolumetricFogPipelines(true); });
         watchShader("assets/shaders/ComputeSkinning.slang", "ComputeSkinning", [this]() { createComputeSkinningPipeline(true); });
         // G-Buffer (Fix watcher to recompile m_gbufferPipeline)
         watchShader("assets/shaders/GBufferMaterial.slang", "GBuffer", [this]() { createGBufferPipeline(true); });
@@ -618,6 +619,7 @@ namespace Nox
         createSSRPipeline();
         createReflectionProbePipelines();
         createIrradianceVolumePipelines();
+        createVolumetricFogPipelines();
         createNRDGuidesPipeline();
         createReflectionPipeline();
         // Path Tracer
@@ -952,6 +954,8 @@ namespace Nox
             setSSREnabled(settings.SSR != 0);
         if (settings.SSGI >= 0)
             setSSGIEnabled(settings.SSGI != 0);
+        if (settings.VolumetricFog >= 0)
+            setVolumetricFogEnabled(settings.VolumetricFog != 0);
     }
 
     void Renderer::setDLSSEnabled(bool enabled)
@@ -4950,6 +4954,7 @@ namespace Nox
             addSSGIPasses(); // with the environment / raster probe volume GI (last frame's lit scene)
             addReflectionProbePasses(); // the probe table, and one probe's capture when one needs it
             addIrradianceVolumePasses(); // Diffuse GI: Raster Probe Volume (a few probes' captures a frame)
+            addVolumetricFogPass(); // after the shadow maps it samples, before everything that looks through the fog
             addLightPresamplingPasses();
             addReSTIRGIPasses();
             addReSTIRDIPasses();
@@ -7148,6 +7153,7 @@ namespace Nox
             uniforms.reflectionProbesReference = 0; // (its forward pass has no probe lookup; keep it out of a preview)
             uniforms.reflectionProbeCount = 0;
             uniforms.irradianceVolumeReference = 0;
+            uniforms.volumetricFogTextureIndex = 0xFFFFFFFF; // the main camera's froxels
             uniforms.localShadowLightViewsReference = 0;
             // The atlases are only read (and declared) when DDGI ran this frame.
             if (!m_frame.ddgiAdded)

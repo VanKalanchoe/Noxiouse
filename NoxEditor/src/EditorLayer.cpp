@@ -902,6 +902,7 @@ namespace Nox
                 choice("Screen-Space AO##Project", saved.SSAOMethod, { { 0, "Classic SSAO" }, { 1, "GTAO" } });
                 choice("Screen-Space Reflections##Project", saved.SSR, { { 0, "Off" }, { 1, "On" } });
                 choice("Screen-Space GI##Project", saved.SSGI, { { 0, "Off" }, { 1, "On" } });
+                choice("Volumetric Fog##Project", saved.VolumetricFog, { { 0, "Off" }, { 1, "On" } });
                 choice("Order-Independent Transparency##Project", saved.OIT, { { 0, "Off" }, { 1, "On" } });
                 choice("Temporal Anti-Aliasing##Project", saved.TAA, { { 0, "Off" }, { 1, "On" } });
 
@@ -1679,6 +1680,44 @@ namespace Nox
                 ImGui::SetNextItemWidth(160.0f);
                 if (ImGui::SliderFloat("Distance (m)##SSGI", &distance, 0.1f, 50.0f, "%.1f"))
                     m_Renderer->setSSGIDistance(WorldUnits::FromMeters(distance));
+                ImGui::Unindent();
+            }
+
+            // RS6: the height fog in froxels, lit with shadows (light shafts).
+            ImGui::SeparatorText("Volumetric Fog");
+            bool volumetricFog = m_Renderer->getVolumetricFogEnabled();
+            if (ImGui::Checkbox("Volumetric Fog", &volumetricFog))
+                m_Renderer->setVolumetricFogEnabled(volumetricFog);
+            ImGui::SetItemTooltip("The Environment Light's Height Fog as a volume (UE's volumetric fog): lit by the sun and point / spot\n"
+                                  "lights with their shadows -- light shafts through windows and trees -- and by the sky. Needs the\n"
+                                  "Height Fog on; beyond its distance the height fog goes on as before. Shadows from the shadow maps\n"
+                                  "(Sun / Local Light Shadows: Shadow Maps) or, for the sun, a ray when RT shadows are on.");
+            if (volumetricFog)
+            {
+                ImGui::Indent();
+                float distance = WorldUnits::ToMeters(m_Renderer->getVolumetricFogDistance());
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::DragFloat("Distance (m)##VolumetricFog", &distance, 1.0f, 1.0f, 1000.0f, "%.0f"))
+                    m_Renderer->setVolumetricFogDistance(WorldUnits::FromMeters(distance));
+                int slices = static_cast<int>(m_Renderer->getVolumetricFogSlices());
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderInt("Slices##VolumetricFog", &slices, 16, 128))
+                    m_Renderer->setVolumetricFogSlices(static_cast<uint32_t>(slices));
+                float anisotropy = m_Renderer->getVolumetricFogAnisotropy();
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderFloat("Scattering Distribution##VolumetricFog", &anisotropy, -0.9f, 0.9f, "%.2f"))
+                    m_Renderer->setVolumetricFogAnisotropy(anisotropy);
+                ImGui::SetItemTooltip("Henyey-Greenstein g: above 0 the fog glows most looking towards a light (haze), 0 the same every way.");
+                float extinction = m_Renderer->getVolumetricFogExtinctionScale();
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderFloat("Extinction Scale##VolumetricFog", &extinction, 0.0f, 10.0f, "%.2f"))
+                    m_Renderer->setVolumetricFogExtinctionScale(extinction);
+                glm::vec3 albedo = m_Renderer->getVolumetricFogAlbedo();
+                if (ImGui::ColorEdit3("Albedo##VolumetricFog", glm::value_ptr(albedo)))
+                    m_Renderer->setVolumetricFogAlbedo(albedo);
+                bool localLights = m_Renderer->getVolumetricFogLocalLights();
+                if (ImGui::Checkbox("Point / Spot Lights##VolumetricFog", &localLights))
+                    m_Renderer->setVolumetricFogLocalLights(localLights);
                 ImGui::Unindent();
             }
 

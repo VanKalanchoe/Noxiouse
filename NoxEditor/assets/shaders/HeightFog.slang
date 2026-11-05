@@ -10,14 +10,34 @@
 
 // The height fog along a view ray up to `distance`: rgb the light it scatters towards the camera, a the transmittance of what is
 // behind (fogged = color * a + rgb).
+// Volumetric fog (VolumetricFog.slang; UniformBufferObject::volumetricFogTextureIndex): the light its froxels scatter towards the camera
+// and their transmittance up to `distance` along the ray of screen position uv (rgb, a; nothing scattered, all transmitted without it).
+float4 volumetricFogTerms(UniformBufferObject* ubo, float2 uv, float distance)
+{
+    if (ubo->volumetricFogTextureIndex == 0xFFFFFFFF || ubo->volumetricFogSlices == 0 || ubo->volumetricFogDistance <= 0.0)
+        return float4(0.0, 0.0, 0.0, 1.0);
+    Texture2DArray volume = Texture2DArray.Handle(uint2(ubo->imageHeapIndexOffset + ubo->volumetricFogTextureIndex, 0));
+    SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+    const float slices = float(ubo->volumetricFogSlices);
+    const float slice = sqrt(saturate(distance / ubo->volumetricFogDistance)) * slices - 1.0;
+    if (slice < 0.0) // before the first slice ends: from nothing at the camera
+        return lerp(float4(0.0, 0.0, 0.0, 1.0), volume.SampleLevel(linearClamp, float3(uv, 0.0), 0.0), slice + 1.0);
+    const float lower = floor(slice);
+    const float upper = min(lower + 1.0, slices - 1.0);
+    return lerp(volume.SampleLevel(linearClamp, float3(uv, lower), 0.0), volume.SampleLevel(linearClamp, float3(uv, upper), 0.0), slice - lower);
+}
+
 float4 heightFogTerms(UniformBufferObject* ubo, float3 direction, float distance)
 {
-    if (ubo->heightFogDensity <= 0.0 || distance <= ubo->heightFogStartDistance)
+    // With the volumetric fog the height fog only starts where its volume ends (UE's volumetric fog distance).
+    const float startDistance = ubo->volumetricFogTextureIndex != 0xFFFFFFFF ? max(ubo->heightFogStartDistance, ubo->volumetricFogDistance)
+                                                                            : ubo->heightFogStartDistance;
+    if (ubo->heightFogDensity <= 0.0 || distance <= startDistance)
         return float4(0.0, 0.0, 0.0, 1.0);
 
     // From where the fog starts, along the ray: the integral of density * exp(-falloff * direction.y * t) over the rest.
-    const float3 origin = ubo->cameraWorldPos.xyz + direction * ubo->heightFogStartDistance;
-    const float travel = min(distance - ubo->heightFogStartDistance, 1e30);
+    const float3 origin = ubo->cameraWorldPos.xyz + direction * startDistance;
+    const float travel = min(distance - startDistance, 1e30);
     const float falloff = max(ubo->heightFogFalloff, 1e-9);
     const float densityAtOrigin = ubo->heightFogDensity * exp(-falloff * (origin.y - ubo->heightFogBaseY));
     const float k = falloff * direction.y;
@@ -40,10 +60,22 @@ float4 heightFogTerms(UniformBufferObject* ubo, float3 direction, float distance
     return float4(inscattered * fog, 1.0 - fog);
 }
 
+// The volumetric fog's terms along a view direction (its screen position from the camera's projection).
+float4 volumetricFogTermsAlong(UniformBufferObject* ubo, float3 direction, float distance)
+{
+    if (ubo->volumetricFogTextureIndex == 0xFFFFFFFF)
+        return float4(0.0, 0.0, 0.0, 1.0);
+    const float4 clip = mul(ubo->proj, mul(ubo->view, float4(ubo->cameraWorldPos.xyz + direction, 1.0)));
+    const float2 uv = clip.w > 0.0 ? saturate(clip.xy / clip.w * float2(0.5, -0.5) + 0.5) : float2(0.5);
+    return volumetricFogTerms(ubo, uv, distance);
+}
+
 float3 applyHeightFog(UniformBufferObject* ubo, float3 color, float3 direction, float distance)
 {
+    // The height fog beyond the volumetric fog's range, then the volumetric fog in front of it.
     const float4 fog = heightFogTerms(ubo, direction, distance);
-    return color * fog.a + fog.rgb;
+    const float4 volumetric = volumetricFogTermsAlong(ubo, direction, distance);
+    return (color * fog.a + fog.rgb) * volumetric.a + volumetric.rgb;
 }
 
 // Aerial perspective over a procedural sky (SkyAtmosphere.slang aerialPerspectiveMain): the air between the camera and a point at
@@ -88,5 +120,7 @@ float4 sceneFogTerms(UniformBufferObject* ubo, float3 worldPos)
         aerial = aerialPerspectiveTerms(ubo->imageHeapIndexOffset + ubo->aerialPerspectiveTextureIndex, ubo->aerialPerspectiveKmPerUnit, uv, distance);
     }
     const float4 fog = heightFogTerms(ubo, toPoint / distance, distance);
-    return float4(aerial.rgb * fog.a + fog.rgb, aerial.a * fog.a);
+    const float4 volumetric = volumetricFogTermsAlong(ubo, toPoint / distance, distance);
+    const float4 combined = float4(aerial.rgb * fog.a + fog.rgb, aerial.a * fog.a);
+    return float4(combined.rgb * volumetric.a + volumetric.rgb, combined.a * volumetric.a);
 }

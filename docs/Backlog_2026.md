@@ -28,7 +28,7 @@ default; the RT one stays the default otherwise (RT shadows may well win). Both 
 | RS3 | **GTAO** (ground-truth AO, Unreal / Godot) replacing the classic `SSAO.slang`. Vs RTAO. **Built 2026-11-05, untested** (Ambient Occlusion: SSAO > GTAO; classic stays selectable) |
 | RS4 | **SSR + reflection probes:** hierarchical screen-space reflections over the existing Hi-Z / color pyramid (`HiZBuild`, `ColorPyramid`), falling back to placed box-projected reflection probes (captured by rasterized cubemaps), then the sky. Vs RT reflections (`Reflection.slang`). **SSR built 2026-11-05, untested** (Settings > Screen-Space Reflections; linear perspective-correct march, not Hi-Z: the pyramid holds the farthest depth for culling). **Reflection probes built 2026-11-05, untested** (Add Component > Reflection Probe) |
 | RS5 | **GI without rays:** irradiance probe volumes captured by rasterized cubemaps (baked, or updated a few per frame), shared capture code with RS4's probes; SSGI on top for dynamic bounce. Vs the screen-probe GI and DDGI. **Probe volume built 2026-11-05, untested** (Diffuse GI: Raster Probe Volume + Irradiance Volume entity). **SSGI built 2026-11-05, untested** (Settings > Raster GI > Screen-Space GI) |
-| RS6 | **Volumetric fog in froxels:** lit fog with light shafts, sampling the shadows (RT shadow mask or RS1's maps) per froxel; extends the height fog (`HeightFog.slang`) |
+| RS6 | **Volumetric fog in froxels:** lit fog with light shafts, sampling the shadows (RT shadow mask or RS1's maps) per froxel; extends the height fog (`HeightFog.slang`). **Built 2026-11-05, untested** (Settings > Volumetric Fog) |
 
 ### Post effects (new features)
 

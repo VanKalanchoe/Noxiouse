@@ -758,6 +758,14 @@ struct UniformBufferObject
     uint32_t reflectionProbePadding;
     // The irradiance volume (RS5a, Diffuse GI: Raster Probe Volume; IrradianceVolumeCommon.slang): GpuIrradianceVolume, 0 without one.
     uint64_t irradianceVolumeReference;
+    // Volumetric fog (RS6, Settings > Volumetric Fog; VolumetricFog.slang): the integrated froxel volume (Texture2DArray: rgb the
+    // light scattered towards the camera up to each slice, a the transmittance), its slices (slice z ends at
+    // volumetricFogDistance x ((z + 1) / slices)^2 along the view ray, as the aerial perspective's). 0xFFFFFFFF: none -- the height
+    // fog alone (with it, the height fog starts where the volume ends).
+    uint32_t volumetricFogTextureIndex;
+    uint32_t volumetricFogSlices;
+    float volumetricFogDistance;
+    uint32_t volumetricFogPadding;
 };
 
 // An emissive mesh instance as a light for the path tracer's direct light sampling: picked by weight (its emission's luminance
@@ -2507,6 +2515,28 @@ struct PushConstantSSGIDenoise
     vec2 viewportSize;
     float historyWeight; // how much of the reprojected history stays (0.9: about 10 frames)
     uint32_t padding;
+};
+
+// Volumetric fog (RS6; VolumetricFog.slang): lightMain lights each froxel (the height fog's density, the sun and local lights with the
+// frame's shadow maps or a sun ray, the sky around) and blends it with last frame's; integrateMain accumulates along each column.
+struct PushConstantVolumetricFog
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    uint32_t lightingStorageIndex;  // lightMain: this frame's froxel lighting (RWTexture2DArray); integrateMain: read
+    uint32_t historyTextureIndex;   // lightMain: last frame's (sampled), 0xFFFFFFFF: none
+    uint32_t integratedStorageIndex; // integrateMain: the integrated volume
+    uint32_t gridWidth;
+    uint32_t gridHeight;
+    uint32_t slices;
+    float maxDistance;     // world units
+    float anisotropy;      // Henyey-Greenstein g
+    float extinctionScale; // times the height fog's density
+    float historyWeight;
+    vec3 previousCameraPos; // render space
+    float jitter;          // [0, 1): this frame's depth offset in each froxel
+    vec3 albedo;           // scattering / extinction
+    uint32_t localLights;  // 1: point / spot lights scatter too
 };
 
 struct PushConstantSSAOBlur
