@@ -1679,7 +1679,10 @@ namespace Nox
         float m_ssrMaxDistanceMeters = 50.0f;
         float m_ssrThicknessMeters = 0.3f;
         uint32_t m_ssrMaxSteps = 64;
-        float m_ssrMaxRoughness = 0.6f;
+        // SSR for the glossy surfaces (floors, glass, metal, wet): rougher ones keep the reflection probes. On rough cloth and plaster
+        // the lobe's rays scatter wide (grain) and what they find is mostly near the screen's edges (a visible hand-over); UE's SSR
+        // likewise leaves rough materials to the reflection captures.
+        float m_ssrMaxRoughness = 0.4f;
         uint32_t m_ssrHistoryIndex = 0; // the history slot last frame wrote (this frame reads it)
         bool m_ssrHistoryValid = false; // it holds a lit scene (written last frame at this size)
         std::unique_ptr<NRI::Pipeline> m_ssgiTracePipeline;

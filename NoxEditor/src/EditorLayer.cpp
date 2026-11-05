@@ -1699,6 +1699,9 @@ namespace Nox
                 ImGui::SetNextItemWidth(160.0f);
                 if (ImGui::SliderFloat("Max Roughness##SSR", &maxRoughness, 0.05f, 1.0f, "%.2f"))
                     m_Renderer->setSSRMaxRoughness(maxRoughness);
+                ImGui::SetItemTooltip("Surfaces up to this roughness get SSR (fading out over the last 0.15); rougher ones keep the\n"
+                                      "reflection probes. Higher: rough cloth and plaster reflect what is on screen too, but grainy, and\n"
+                                      "their reflections fade visibly where what they reflect leaves the screen.");
                 ImGui::Unindent();
             }
             // RS5a: the diffuse GI without rays (also in the Diffuse Global Illumination list under Hybrid Ray Tracing).

@@ -63,12 +63,12 @@ float3 ssr_sample_ggx_vndf(float3 Ve, float alpha, float2 u)
     return normalize(float3(alpha * Nh.x, alpha * Nh.y, max(0.0, Nh.z)));
 }
 
-// Towards the screen's edges SSR knows less and less (what is beyond is unknown): it fades out over the outer 15 % smoothly, so
-// the environment / probes take over without a visible line (UE's SSR edge fade).
+// Towards the screen's edges SSR knows less and less (what is beyond is unknown): it fades out over the outer 20 % smoothly, so
+// the environment / probes take over gradually, not at a line (UE's SSR edge fade).
 float ssr_edge_fade(float2 uv)
 {
     const float2 edge = min(uv, 1.0 - uv);
-    return smoothstep(0.0, 0.15, min(edge.x, edge.y));
+    return smoothstep(0.0, 0.2, min(edge.x, edge.y));
 }
 
 struct SSROutput
