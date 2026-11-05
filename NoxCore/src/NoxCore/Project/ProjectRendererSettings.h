@@ -9,7 +9,7 @@ namespace Nox
     struct ProjectRendererSettings
     {
         int32_t RayTracingResolution = -1; // 1 every pixel, 2 one of each 2 x 2 block
-        int32_t DiffuseGI = -1;            // 0 IBL, 1 DDGI, 2 ReSTIR GI, 3 screen probes
+        int32_t DiffuseGI = -1;            // 0 IBL, 1 DDGI, 2 ReSTIR GI, 3 screen probes, 4 raster probe volume
         int32_t ShadowedLights = -1;       // shadow rays a pixel: 0 every light, 1..8 the strongest
         int32_t OIT = -1;                  // order-independent transparency: 0 off, 1 on
         int32_t TAA = -1;                  // the engine's TAA where DLSS does not run: 0 off, 1 on

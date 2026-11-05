@@ -586,6 +586,19 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (entity.HasComponent<IrradianceVolumeComponent>())
+        {
+            out << YAML::Key << "IrradianceVolumeComponent";
+            out << YAML::BeginMap;
+
+            auto& ivc = entity.GetComponent<IrradianceVolumeComponent>();
+            out << YAML::Key << "Extents" << YAML::Value << ivc.Extents;
+            out << YAML::Key << "ProbeSpacing" << YAML::Value << ivc.ProbeSpacing;
+            out << YAML::Key << "Intensity" << YAML::Value << ivc.Intensity;
+
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<DiscLightComponent>())
         {
             out << YAML::Key << "DiscLightComponent";
@@ -1892,6 +1905,18 @@ namespace Nox
                 rpc.Intensity = reflectionProbeComponent["Intensity"].as<float>();
             if (reflectionProbeComponent["Resolution"])
                 rpc.Resolution = reflectionProbeComponent["Resolution"].as<uint32_t>();
+        }
+
+        auto irradianceVolumeComponent = entity["IrradianceVolumeComponent"];
+        if (irradianceVolumeComponent)
+        {
+            auto& ivc = deserializedEntity.AddComponent<IrradianceVolumeComponent>();
+            if (irradianceVolumeComponent["Extents"])
+                ivc.Extents = irradianceVolumeComponent["Extents"].as<glm::vec3>();
+            if (irradianceVolumeComponent["ProbeSpacing"])
+                ivc.ProbeSpacing = irradianceVolumeComponent["ProbeSpacing"].as<float>();
+            if (irradianceVolumeComponent["Intensity"])
+                ivc.Intensity = irradianceVolumeComponent["Intensity"].as<float>();
         }
 
         auto discLightComponent = entity["DiscLightComponent"];

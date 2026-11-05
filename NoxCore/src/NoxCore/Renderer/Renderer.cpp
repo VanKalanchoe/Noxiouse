@@ -372,6 +372,7 @@ namespace Nox
         watchShader("assets/shaders/ShadowMaps.slang", "ShadowMaps", [this]() { createShadowMapPipelines(true); });
         watchShader("assets/shaders/SSR.slang", "SSR", [this]() { createSSRPipeline(true); });
         watchShader("assets/shaders/ReflectionProbe.slang", "ReflectionProbe", [this]() { createReflectionProbePipelines(true); });
+        watchShader("assets/shaders/IrradianceProbeSH.slang", "IrradianceProbeSH", [this]() { createIrradianceVolumePipelines(true); });
         watchShader("assets/shaders/ComputeSkinning.slang", "ComputeSkinning", [this]() { createComputeSkinningPipeline(true); });
         // G-Buffer (Fix watcher to recompile m_gbufferPipeline)
         watchShader("assets/shaders/GBufferMaterial.slang", "GBuffer", [this]() { createGBufferPipeline(true); });
@@ -615,6 +616,7 @@ namespace Nox
         createShadowMapPipelines();
         createSSRPipeline();
         createReflectionProbePipelines();
+        createIrradianceVolumePipelines();
         createNRDGuidesPipeline();
         createReflectionPipeline();
         // Path Tracer
@@ -926,7 +928,7 @@ namespace Nox
     {
         if (settings.RayTracingResolution >= 1)
             setRayTracingResolutionDivisor(static_cast<uint32_t>(settings.RayTracingResolution));
-        if (settings.DiffuseGI >= 0 && settings.DiffuseGI <= 3)
+        if (settings.DiffuseGI >= 0 && settings.DiffuseGI <= 4)
         {
             setDiffuseGIMode(static_cast<uint32_t>(settings.DiffuseGI));
             setDDGIEnabled(settings.DiffuseGI == 1 || settings.DiffuseGI == 3); // screen probes keep DDGI underneath
@@ -4943,6 +4945,7 @@ namespace Nox
             addRTReflectionPasses();
             addSSRPass(); // where the RT reflections do not run (last frame's lit scene)
             addReflectionProbePasses(); // the probe table, and one probe's capture when one needs it
+            addIrradianceVolumePasses(); // Diffuse GI: Raster Probe Volume (a few probes' captures a frame)
             addLightPresamplingPasses();
             addReSTIRGIPasses();
             addReSTIRDIPasses();
@@ -4977,6 +4980,7 @@ namespace Nox
             updateShadowMapUniforms();
             updateLocalShadowUniforms();
             updateReflectionProbeUniforms();
+            updateIrradianceVolumeUniforms();
             updateExtraViewUniforms();
             // Read back only what this frame's inspector actually probes.
             m_inspectionProbePending[frameIndex] = m_frame.inspectionProbe && m_renderGraph.IsInspecting() ? 1 : 0;
@@ -6050,6 +6054,7 @@ namespace Nox
 
         m_lightBufferObjects.clear();
         m_probeSubmissions.clear();
+        m_irradianceVolumeSubmission.Valid = false;
         m_particles.clear();
         m_particleBatches.clear();
     }
@@ -7138,6 +7143,7 @@ namespace Nox
             uniforms.localShadowsReference = 0; // (its forward pass does not declare the atlas: the RT rays there)
             uniforms.reflectionProbesReference = 0; // (its forward pass has no probe lookup; keep it out of a preview)
             uniforms.reflectionProbeCount = 0;
+            uniforms.irradianceVolumeReference = 0;
             uniforms.localShadowLightViewsReference = 0;
             // The atlases are only read (and declared) when DDGI ran this frame.
             if (!m_frame.ddgiAdded)

@@ -567,3 +567,20 @@ PBRLighting.slang):
   (the reflection ray met with the box in its local space, the cubemap read from the capture point towards that hit) and fading in
   over the blend distance from the box's sides; the sky's map fills what they leave. SSR / RT reflections still go on top where they
   find something.
+
+**Raster probe volume GI (RS5a, 2026-11-05, untested)** -- Diffuse GI mode 4 "Raster Probe Volume" (Settings > Raster GI, or the
+Diffuse Global Illumination list; project `DiffuseGI` 4) with an Irradiance Volume entity (Extents, Probe Spacing, Intensity,
+Recapture). UE's volumetric lightmap, updated at runtime (`Passes/IrradianceVolumePasses.cpp`, `IrradianceProbeSH.slang`,
+`IrradianceVolumeCommon.slang`):
+- **Grid** over the entity's box, Probe Spacing apart (at most 32 per axis); moved / resized / Recapture clears it and captures again.
+- **Capture**, 8 probes a frame in turn (1-16): per probe six 16 x 16 faces drawn as the editor's extra views draw a camera (opaque lit
+  in the fragment shader -- with the sun's / local lights' shadow maps when they run, else the RT shadow rays when those run --
+  unlit, the sky), all of the frame's faces in one raster pass into an atlas (a viewport per face), one draw list for all of them (no
+  instance culling; each face's task stage culls clusters). Reflection probe captures now use the shadow maps the same way.
+- **SH**: each probe's faces projected onto L1 spherical harmonics of the radiance (texel solid angles); checked offline: a uniform
+  sky of radiance 1 gives exactly 1.000 (irradiance / pi, as every GI term here stores it); a cosine lobe shows L1's ringing (12% low
+  on its axis, slightly negative opposite, clamped) -- the same order as UE's L1 volumetric lightmap.
+- **Lookup** (deferred): the eight probes around the point (offset a quarter cell along the normal), trilinear x a wrap term for
+  probes behind the surface (DDGI's), evaluated as irradiance around the normal; fades into the environment over the outermost cell;
+  holds back the sky's reflection by its luminance like the other GI terms. No visibility test: light can leak through walls thinner
+  than a cell (place probes accordingly).

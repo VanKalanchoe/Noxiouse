@@ -374,6 +374,20 @@ namespace Nox
         ReflectionProbeComponent(const ReflectionProbeComponent&) = default;
     };
 
+    // An irradiance volume (RS5a; Diffuse GI: Raster Probe Volume): probes on a grid over the entity's box (Extents: half size along its
+    // axes, scaled with it), ProbeSpacing apart, each the scene around it rasterized and reduced to spherical harmonics, a few probes a
+    // frame -- diffuse light from around without ray tracing (UE's volumetric lightmap, updated at runtime). Revision: Recapture.
+    struct IrradianceVolumeComponent
+    {
+        glm::vec3 Extents{ WorldUnits::FromMeters(10.0f), WorldUnits::FromMeters(4.0f), WorldUnits::FromMeters(10.0f) };
+        float ProbeSpacing = WorldUnits::FromMeters(2.0f);
+        float Intensity = 1.0f;
+        uint32_t Revision = 0; // not saved
+
+        IrradianceVolumeComponent() = default;
+        IrradianceVolumeComponent(const IrradianceVolumeComponent&) = default;
+    };
+
     // Image-based environment lighting. The renderer will preprocess TexturePath into its
     // diffuse irradiance/specular IBL maps; this is deliberately separate from punctual
     // directional/point/spot lights.
@@ -1031,7 +1045,7 @@ namespace Nox
 
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
-        MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, EnvironmentLightComponent, AnimatorComponent,
+        MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent,
         TimelinePlayerComponent, ParticleEmitterComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,

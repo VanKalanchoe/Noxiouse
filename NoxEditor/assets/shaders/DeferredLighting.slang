@@ -4,6 +4,7 @@
 #include "PBRLighting.slang"
 #include "HeightFog.slang"
 #include "ShadowMaps.slang"
+#include "IrradianceVolumeCommon.slang"
 
     import Tonemapping;
     import Math;
@@ -668,6 +669,20 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
             float restirLuma = dot(restirDiffuse, float3(0.2126, 0.7152, 0.0722));
             specularOcclusion = saturate(restirLuma / skyIrradianceLuma(ubo, n) + 0.15);
             ambientSpecular *= specularOcclusion;
+        }
+        else if (pushConstant.diffuseGIMode == 4)
+        {
+            // The irradiance volume (Diffuse GI: Raster Probe Volume, no rays): inside its box, over the environment's irradiance.
+            float3 volumeIrradiance;
+            float volumeWeight;
+            if (irradiance_volume_lookup(ubo, worldPos, n, volumeIrradiance, volumeWeight))
+            {
+                ambientDiffuse = lerp(ambientDiffuse, volumeIrradiance * diffuseColor, volumeWeight);
+                // The sky's reflection only as far as the sky reaches this surface (as the other GI terms hold it back).
+                const float volumeLuma = dot(volumeIrradiance, float3(0.2126, 0.7152, 0.0722));
+                specularOcclusion = lerp(1.0, saturate(volumeLuma / skyIrradianceLuma(ubo, n)), volumeWeight);
+                ambientSpecular *= specularOcclusion;
+            }
         }
         else if ((pushConstant.diffuseGIMode == 1 || ubo->enableDDGI != 0) && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
         {

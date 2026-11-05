@@ -349,6 +349,7 @@ namespace Nox
                             ReadDDGI(builder, resources, ddgiIndex);
                         if (resources.TLAS.IsValid())
                             builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
+                        ReadShadowMaps(builder, resources); // the lit faces use the shadow maps the frame has
                         builder.SetRenderArea(faceExtent);
                         ReadGpuScene(builder, resources);
                         ReadViewDraws(builder, draws);
@@ -500,7 +501,7 @@ namespace Nox
         if (!m_probeCaptureFrame.Active)
             return;
         // Each capture face's copy of the frame's uniforms, as an extra view's: its camera, no jitter or history, nothing that is the
-        // main camera's pixels (screen-probe GI, the air's volume, the shadow maps' views), no probes inside the capture.
+        // main camera's pixels (screen-probe GI, the air's volume), no probes inside the capture; the shadow maps stay (declared).
         for (uint32_t face = 0; face < 6; ++face)
         {
             shaderio::UniformBufferObject uniforms = uniformData;
@@ -521,11 +522,9 @@ namespace Nox
             uniforms.screenGITextureIndex = 0xFFFFFFFF;
             uniforms.screenGIDistanceTextureIndex = 0xFFFFFFFF;
             uniforms.aerialPerspectiveTextureIndex = 0xFFFFFFFF;
-            uniforms.sunShadowCascadesReference = 0;
-            uniforms.localShadowsReference = 0;
-            uniforms.localShadowLightViewsReference = 0;
             uniforms.reflectionProbesReference = 0;
             uniforms.reflectionProbeCount = 0;
+            uniforms.irradianceVolumeReference = 0;
             memcpy(m_probeFaceUniformsMapped[frameIndex][face], &uniforms, sizeof(shaderio::UniformBufferObject));
         }
     }

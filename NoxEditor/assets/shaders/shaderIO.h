@@ -756,6 +756,8 @@ struct UniformBufferObject
     uint64_t reflectionProbesReference;
     uint32_t reflectionProbeCount;
     uint32_t reflectionProbePadding;
+    // The irradiance volume (RS5a, Diffuse GI: Raster Probe Volume; IrradianceVolumeCommon.slang): GpuIrradianceVolume, 0 without one.
+    uint64_t irradianceVolumeReference;
 };
 
 // An emissive mesh instance as a light for the path tracer's direct light sampling: picked by weight (its emission's luminance
@@ -2257,6 +2259,37 @@ struct GpuReflectionProbe
     vec4 center;            // xyz: where it was captured (render space)
     uint32_t cubeTextureIndex;
     uint32_t padding[3];
+};
+
+// An irradiance volume (RS5a, GI without rays; Renderer::addIrradianceVolumePasses): a grid of probes over the entity's box, each the
+// scene around it rendered into six small faces (rasterized, a few probes a frame) and projected onto L1 spherical harmonics --
+// UE's volumetric lightmap / Godot's LightmapGI probes, updated at runtime. probeSH: per probe 3 float4 (R, G, B: L00, L1-1, L10, L11
+// of the radiance).
+STATIC_CONST uint32_t IrradianceProbeFaceSize = 16; // texels per side of a capture face
+STATIC_CONST uint32_t MaxIrradianceProbesPerFrame = 16;
+
+struct GpuIrradianceVolume
+{
+    mat4 worldToLocal;      // render space -> the volume's box space
+    mat4 localToWorld;
+    vec4 extents;           // xyz: the box's half size (local units), w: intensity
+    uint32_t countX;
+    uint32_t countY;
+    uint32_t countZ;
+    uint32_t probeCount;
+    uint64_t probeSHReference; // float4[3] per probe, x fastest, then y, then z
+    float normalBias;       // local units the lookup moves along the normal (away from the surface's own probe gaps)
+    uint32_t padding;
+};
+
+// The capture atlas into the probes' SH (IrradianceProbeSH.slang): row k holds probe k's six faces (+X, -X, +Y, -Y, +Z, -Z).
+struct PushConstantIrradianceProbeSH
+{
+    uint64_t probeIndicesReference; // uint[probesThisFrame]: each row's probe in the volume
+    uint64_t probeSHReference;
+    uint32_t atlasTextureIndex;
+    uint32_t probesThisFrame;
+    uint32_t padding[2];
 };
 
 // The capture's six rendered faces into a probe's cubemap (ReflectionProbe.slang assembleMain): per cube texel, its direction, the

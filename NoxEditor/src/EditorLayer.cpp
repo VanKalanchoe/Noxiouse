@@ -894,7 +894,7 @@ namespace Nox
                     }
                 };
                 choice("Ray Tracing Resolution##Project", saved.RayTracingResolution, { { 1, "Full" }, { 2, "Half" } });
-                choice("Diffuse GI##Project", saved.DiffuseGI, { { 0, "Environment (IBL)" }, { 1, "DDGI" }, { 2, "ReSTIR GI" }, { 3, "Screen Probes" } });
+                choice("Diffuse GI##Project", saved.DiffuseGI, { { 0, "Environment (IBL)" }, { 1, "DDGI" }, { 2, "ReSTIR GI" }, { 3, "Screen Probes" }, { 4, "Raster Probe Volume" } });
                 choice("Shadowed Lights##Project", saved.ShadowedLights, { { 0, "All" }, { 1, "1" }, { 2, "2" }, { 4, "4" }, { 8, "8" } });
                 choice("Sun Shadows##Project", saved.SunShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
                 choice("Local Light Shadows##Project", saved.LocalShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
@@ -1631,6 +1631,32 @@ namespace Nox
                     m_Renderer->setSSRMaxRoughness(maxRoughness);
                 ImGui::Unindent();
             }
+            // RS5a: the diffuse GI without rays (also in the Diffuse Global Illumination list under Hybrid Ray Tracing).
+            ImGui::SeparatorText("Raster GI");
+            bool rasterProbeGI = m_Renderer->getDiffuseGIMode() == 4;
+            if (ImGui::Checkbox("Raster Probe Volume (Diffuse GI)", &rasterProbeGI))
+            {
+                m_Renderer->setDiffuseGIMode(rasterProbeGI ? 4u : 0u);
+                m_Renderer->setDDGIEnabled(false);
+            }
+            ImGui::SetItemTooltip("Diffuse light from around without ray tracing: an Irradiance Volume entity's probes (Add Component >\n"
+                                  "Irradiance Volume), each the scene rasterized around it into six small faces and reduced to\n"
+                                  "spherical harmonics, a few probes a frame. Inside the volume's box; the environment outside it.\n"
+                                  "To compare with the screen-probe GI and DDGI (Diffuse Global Illumination, under Hybrid Ray Tracing).");
+            if (rasterProbeGI)
+            {
+                ImGui::Indent();
+                int perFrame = static_cast<int>(m_Renderer->getIrradianceProbesPerFrame());
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderInt("Probes per Frame##RasterGI", &perFrame, 1, static_cast<int>(shaderio::MaxIrradianceProbesPerFrame)))
+                    m_Renderer->setIrradianceProbesPerFrame(static_cast<uint32_t>(perFrame));
+                if (m_Renderer->getIrradianceProbeCount() > 0)
+                    ImGui::TextDisabled("%u probes, %u captured", m_Renderer->getIrradianceProbeCount(), m_Renderer->getIrradianceProbesCaptured());
+                else
+                    ImGui::TextDisabled("No Irradiance Volume in the scene");
+                ImGui::Unindent();
+            }
+
             bool reflectionProbes = m_Renderer->getReflectionProbesEnabled();
             if (ImGui::Checkbox("Reflection Probes", &reflectionProbes))
                 m_Renderer->setReflectionProbesEnabled(reflectionProbes);
@@ -1746,7 +1772,8 @@ namespace Nox
                     "Off (IBL Ambient)",
                     "DDGI (Probe Volumes)",
                     "ReSTIR GI (Screen-Space Resampling via RTXDI)",
-                    "Screen Probes (Lumen-style final gather)"
+                    "Screen Probes (Lumen-style final gather)",
+                    "Raster Probe Volume (no rays: Irradiance Volume entity)"
                 };
                 int currentGIMode = static_cast<int>(m_Renderer->getDiffuseGIMode());
                 if (ImGui::Combo("Diffuse Global Illumination", &currentGIMode, giModeNames, IM_ARRAYSIZE(giModeNames)))
@@ -2579,6 +2606,22 @@ namespace Nox
                     corners[i] = glm::vec3(world * glm::vec4((i & 1) ? probe.Extents.x : -probe.Extents.x, (i & 2) ? probe.Extents.y : -probe.Extents.y,
                                                              (i & 4) ? probe.Extents.z : -probe.Extents.z, 1.0f));
                 const glm::vec4 colour(0.4f, 0.8f, 1.0f, 1.0f);
+                for (int i = 0; i < 8; ++i)
+                    for (int axis = 1; axis < 8; axis <<= 1)
+                        if (!(i & axis))
+                            m_Renderer2D->DrawXRayLine(corners[i], corners[i | axis], colour);
+            }
+            // Irradiance volumes: their box.
+            auto volumes = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, IrradianceVolumeComponent>();
+            for (auto entity : volumes)
+            {
+                auto [wtc, volume] = volumes.get<WorldTransformComponent, IrradianceVolumeComponent>(entity);
+                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+                glm::vec3 corners[8];
+                for (int i = 0; i < 8; ++i)
+                    corners[i] = glm::vec3(world * glm::vec4((i & 1) ? volume.Extents.x : -volume.Extents.x, (i & 2) ? volume.Extents.y : -volume.Extents.y,
+                                                             (i & 4) ? volume.Extents.z : -volume.Extents.z, 1.0f));
+                const glm::vec4 colour(1.0f, 0.75f, 0.3f, 1.0f);
                 for (int i = 0; i < 8; ++i)
                     for (int axis = 1; axis < 8; axis <<= 1)
                         if (!(i & axis))

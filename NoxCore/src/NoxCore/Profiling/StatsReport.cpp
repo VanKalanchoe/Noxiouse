@@ -144,6 +144,10 @@ namespace Nox
                                   renderer.getReSTIRGINumSpatialSamples(), renderer.getReSTIRGIMaxHistoryLength(),
                                   DenoiserName(static_cast<uint8_t>(renderer.getNRDGIDenoiser())));
                     break;
+                case 4:
+                    AppendSetting(out, "Diffuse GI: Raster Probe Volume | {} probes, {} captured | {} per frame", renderer.getIrradianceProbeCount(),
+                                  renderer.getIrradianceProbesCaptured(), renderer.getIrradianceProbesPerFrame());
+                    break;
                 default:
                     AppendSetting(out, "Diffuse GI: Off (IBL ambient)");
                     break;

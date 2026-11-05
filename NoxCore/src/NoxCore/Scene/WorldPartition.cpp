@@ -95,7 +95,7 @@ namespace Nox
             return entity.HasComponent<MeshComponent>() || entity.HasComponent<ModelInstanceComponent>() ||
                    entity.HasComponent<PrefabInstanceComponent>() || entity.HasComponent<PointLightComponent>() ||
                    entity.HasComponent<SpotLightComponent>() || entity.HasComponent<RectLightComponent>() ||
-                   entity.HasComponent<DiscLightComponent>() || entity.HasComponent<ReflectionProbeComponent>() || entity.HasComponent<SpriteRendererComponent>() ||
+                   entity.HasComponent<DiscLightComponent>() || entity.HasComponent<ReflectionProbeComponent>() || entity.HasComponent<IrradianceVolumeComponent>() || entity.HasComponent<SpriteRendererComponent>() ||
                    entity.HasComponent<CircleRendererComponent>() || entity.HasComponent<ParticleEmitterComponent>() ||
                    entity.HasComponent<TextComponent>() || entity.HasComponent<RigidBody3DComponent>() ||
                    entity.HasComponent<RigidBody2DComponent>() || entity.HasComponent<BoxCollider3DComponent>() ||

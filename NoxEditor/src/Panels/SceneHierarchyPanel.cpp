@@ -989,6 +989,7 @@ namespace Nox
             DisplayAddComponentEntry<SpotLightComponent>("Spot Light");
             DisplayAddComponentEntry<RectLightComponent>("Rect Light");
             DisplayAddComponentEntry<ReflectionProbeComponent>("Reflection Probe");
+            DisplayAddComponentEntry<IrradianceVolumeComponent>("Irradiance Volume");
             DisplayAddComponentEntry<DiscLightComponent>("Disc Light");
             DisplayAddComponentEntry<EnvironmentLightComponent>("Environment Light");
 
@@ -1680,6 +1681,23 @@ namespace Nox
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Captures the scene again (it is captured when added, moved or changed; not when the scene around\n"
                                   "it changes).");
+        });
+
+        DrawComponent<IrradianceVolumeComponent>("Irradiance Volume", entity, [](auto& component)
+        {
+            DrawLengthControl("Extent X", component.Extents.x, 0.0f, 0.0f);
+            DrawLengthControl("Extent Y", component.Extents.y, 0.0f, 0.0f);
+            DrawLengthControl("Extent Z", component.Extents.z, 0.0f, 0.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Half the box's size along the entity's axes (scaled with it). Used with Diffuse GI: Raster Probe\n"
+                                  "Volume (Settings).");
+            DrawLengthControl("Probe Spacing", component.ProbeSpacing, 0.0f, 0.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("How far apart its probes are (at most 32 along each axis). Closer: finer light, more probes to\n"
+                                  "capture (a few each frame).");
+            ImGui::DragFloat("Intensity", &component.Intensity, 0.01f, 0.0f, 16.0f);
+            if (ImGui::Button("Recapture"))
+                ++component.Revision;
         });
 
         DrawComponent<DiscLightComponent>("Disc Light", entity, [](auto& component)

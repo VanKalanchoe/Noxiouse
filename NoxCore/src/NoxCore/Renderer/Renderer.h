@@ -358,6 +358,9 @@ namespace Nox
         void SubmitLight(const glm::dmat4& transform, const RectLightComponent& light);
         // Reflection probes (RS4b; Passes/ReflectionPasses.cpp): `id` keeps its capture (the entity's ID) from frame to frame.
         void SubmitReflectionProbe(uint64_t id, const glm::dmat4& worldTransform, const ReflectionProbeComponent& probe);
+        // The irradiance volume (RS5a; Passes/IrradianceVolumePasses.cpp) for Diffuse GI mode 4 (Raster Probe Volume): the first one
+        // submitted in a frame is used.
+        void SubmitIrradianceVolume(uint64_t id, const glm::dmat4& worldTransform, const IrradianceVolumeComponent& volume);
         void SubmitLight(const glm::dmat4& transform, const DiscLightComponent& light);
 
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
@@ -605,6 +608,12 @@ namespace Nox
         void setReflectionProbesEnabled(bool enabled) { m_reflectionProbesEnabled = enabled; }
         bool getReflectionProbesEnabled() const { return m_reflectionProbesEnabled; }
         uint32_t getReflectionProbeCount() const { return uniformData.reflectionProbeCount; }
+        // Diffuse GI mode 4 (Raster Probe Volume, RS5a): how many of the irradiance volume's probes are captured each frame; its probe
+        // count and how many have been captured since it last changed (stats).
+        void setIrradianceProbesPerFrame(uint32_t count) { m_irradianceProbesPerFrame = std::clamp(count, 1u, shaderio::MaxIrradianceProbesPerFrame); }
+        uint32_t getIrradianceProbesPerFrame() const { return m_irradianceProbesPerFrame; }
+        uint32_t getIrradianceProbeCount() const { return m_irradianceVolume.ProbeCount; }
+        uint32_t getIrradianceProbesCaptured() const { return m_irradianceVolume.Captured; }
         // This frame's local lights with a shadow map and their views (stats).
         uint32_t getLocalShadowLightCount() const { return m_localShadowLightCount; }
         uint32_t getLocalShadowViewCount() const { return m_localShadows.viewCount; }
@@ -1134,6 +1143,11 @@ namespace Nox
         void createReflectionProbePipelines(bool forceCompile = false);
         void addReflectionProbePasses();
         void updateReflectionProbeUniforms();
+        // The irradiance volume: its table, a few probes' captures (one culling for all, one raster pass into a face atlas) and their
+        // spherical harmonics; after Compile the capture faces' uniforms.
+        void createIrradianceVolumePipelines(bool forceCompile = false);
+        void addIrradianceVolumePasses();
+        void updateIrradianceVolumeUniforms();
         void updateLocalShadowUniforms();
         // After Compile: the cascades' bindless slots into GpuShadowCascades, each cascade's copy of the frame's uniforms.
         void updateShadowMapUniforms();
@@ -1442,6 +1456,46 @@ namespace Nox
             std::array<glm::mat4, 6> Projections{};
         } m_probeCaptureFrame;
         bool m_reflectionProbesEnabled = true;
+        // The irradiance volume (RS5a): this frame's submission, the volume's probes and their SH, per frame slot the table, the probe
+        // list of this frame's captures, the culling view, each capture face's uniforms.
+        struct IrradianceVolumeSubmission
+        {
+            bool Valid = false;
+            uint64_t Id = 0;
+            glm::dmat4 World{ 1.0 };
+            glm::vec3 Extents{ 1.0f };
+            float Spacing = 1.0f;
+            float Intensity = 1.0f;
+            uint32_t Revision = 0;
+        } m_irradianceVolumeSubmission;
+        struct IrradianceVolumeState
+        {
+            uint64_t Id = 0;
+            glm::dmat4 World{ 0.0 };
+            glm::vec3 Extents{ 0.0f };
+            float Spacing = 0.0f;
+            uint32_t Revision = ~0u;
+            glm::uvec3 Counts{ 0 };
+            uint32_t ProbeCount = 0;
+            uint32_t Cursor = 0;
+            uint32_t Captured = 0;
+            bool NeedsClear = false;
+            std::unique_ptr<NRI::Buffer> SH;
+        } m_irradianceVolume;
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceTableBuffers;
+        std::array<void*, MAX_FRAMES_IN_FLIGHT> m_irradianceTableBuffersMapped{};
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceProbeListBuffers;
+        std::array<void*, MAX_FRAMES_IN_FLIGHT> m_irradianceProbeListBuffersMapped{};
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceCullViews;
+        std::array<std::array<std::unique_ptr<NRI::Buffer>, 6 * shaderio::MaxIrradianceProbesPerFrame>, MAX_FRAMES_IN_FLIGHT> m_irradianceFaceUniforms;
+        std::array<std::array<void*, 6 * shaderio::MaxIrradianceProbesPerFrame>, MAX_FRAMES_IN_FLIGHT> m_irradianceFaceUniformsMapped{};
+        std::unique_ptr<NRI::Pipeline> m_irradianceSHPipeline;
+        struct IrradianceCaptureFrame
+        {
+            uint32_t Count = 0; // probes captured this frame
+            std::array<glm::vec3, shaderio::MaxIrradianceProbesPerFrame> Centers{};
+        } m_irradianceCaptureFrame;
+        uint32_t m_irradianceProbesPerFrame = 8;
         std::unique_ptr<NRI::Pipeline> m_ssrPipeline;
         bool m_ssrEnabled = false;
         float m_ssrMaxDistanceMeters = 50.0f;
