@@ -22,12 +22,22 @@ namespace Nox
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/SSR.slang" });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/SSR.slang" });
         m_ssrPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+
+        // Screen-space GI (RS5b): its rays, then its denoiser.
+        for (NRI::ShaderStageDesc& stage : desc.shaders)
+            stage.sourcePath = "assets/shaders/SSGI.slang";
+        desc.shaders.back().entryPoint = "traceMain";
+        m_ssgiTracePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.back().entryPoint = "denoiseMain";
+        m_ssgiDenoisePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::addSSRPass()
     {
+        // The lit scene history serves SSR and the screen-space GI (addSSGIPasses).
         const bool pathTracing = m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19;
-        if (!m_ssrEnabled || pathTracing || !m_ssrPipeline || !m_colorPyramidCopyPipeline || !m_colorPyramidDownsamplePipeline)
+        const bool ssgiWanted = m_ssgiEnabled && (m_diffuseGIMode == 0 || m_diffuseGIMode == 4);
+        if ((!m_ssrEnabled && !ssgiWanted) || pathTracing || !m_ssrPipeline || !m_colorPyramidCopyPipeline || !m_colorPyramidDownsamplePipeline)
         {
             m_ssrHistoryValid = false;
             return;
@@ -49,7 +59,7 @@ namespace Nox
             m_ssrHistoryValid = false;
 
         // Nothing to reflect yet (the first frame, a new size), or the RT reflections run: only the history is written this frame.
-        if (!m_ssrHistoryValid || m_frame.rtReflectionsAdded)
+        if (!m_ssrHistoryValid || m_frame.rtReflectionsAdded || !m_ssrEnabled)
             return;
 
         RGTextureDesc ssrDesc;
@@ -91,6 +101,103 @@ namespace Nox
                 push.thickness = WorldUnits::FromMeters(m_ssrThicknessMeters);
                 push.maxRoughness = m_ssrMaxRoughness;
                 push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                cmd.pushData(&push, sizeof(push));
+                cmd.drawMeshTasks(1, 1, 1);
+            });
+    }
+
+    void Renderer::addSSGIPasses()
+    {
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const bool run = m_ssgiEnabled && (m_diffuseGIMode == 0 || m_diffuseGIMode == 4) && m_ssrHistoryValid && resources.SSRHistory[0].IsValid() &&
+                         m_ssgiTracePipeline && m_ssgiDenoisePipeline;
+        if (!run)
+        {
+            m_ssgiRanLastFrame = false;
+            return;
+        }
+
+        // The rays (raw, noisy), then the denoised result accumulated over frames (two history slots: last frame's read, this one's
+        // written -- what the deferred lighting reads).
+        RGTextureDesc desc;
+        desc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        const RGTexture raw = m_renderGraph.CreateTexture("SSGI Raw", desc);
+        const RGTextureHistory history = m_renderGraph.GetHistoryTexture("SSGI Accumulation", desc, 2);
+        const uint32_t readIndex = m_ssgiHistoryIndex;
+        const uint32_t writeIndex = 1 - readIndex;
+        m_ssgiHistoryIndex = writeIndex;
+        const bool historyValid = m_ssgiRanLastFrame && !history.WasReset;
+        m_ssgiRanLastFrame = true;
+        const RGTexture historyRead = history.Textures[readIndex];
+        const RGTexture historyWrite = history.Textures[writeIndex];
+        const RGTexture sceneHistory = resources.SSRHistory[m_ssrHistoryIndex];
+        resources.SSGI = historyWrite;
+        m_frame.ssgiAdded = true;
+
+        m_renderGraph.AddPass("SSGI", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.Depth);
+                builder.Read(resources.GBufferNormal);
+                builder.Read(sceneHistory);
+                builder.ColorTarget(raw, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(m_frame.renderExtent);
+            },
+            [this, res = &resources, raw, sceneHistory, mips = m_frame.ssrHistoryMips](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ssgiTracePipeline);
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, false);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                shaderio::PushConstantSSGI push{};
+                push.invViewProj = uniformData.invViewProj;
+                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.depthTextureIndex = context.Slot(res->Depth);
+                push.normalTextureIndex = context.Slot(res->GBufferNormal);
+                push.historyTextureIndex = context.Slot(sceneHistory);
+                push.historyMipCount = mips;
+                push.rayCount = m_ssgiRays;
+                push.steps = m_ssgiSteps;
+                push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
+                push.maxDistance = WorldUnits::FromMeters(m_ssgiDistanceMeters);
+                push.thickness = WorldUnits::FromMeters(m_ssrThicknessMeters);
+                push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                cmd.pushData(&push, sizeof(push));
+                cmd.drawMeshTasks(1, 1, 1);
+            });
+
+        m_renderGraph.AddPass("SSGI Denoise", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(raw);
+                builder.Read(resources.Depth);
+                builder.Read(resources.GBufferNormal);
+                if (historyValid)
+                    builder.Read(historyRead);
+                builder.ColorTarget(historyWrite, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(m_frame.renderExtent);
+            },
+            [this, res = &resources, raw, historyRead, historyValid](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ssgiDenoisePipeline);
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, false);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                shaderio::PushConstantSSGIDenoise push{};
+                push.invViewProj = uniformData.invViewProj;
+                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.rawTextureIndex = context.Slot(raw);
+                push.depthTextureIndex = context.Slot(res->Depth);
+                push.normalTextureIndex = context.Slot(res->GBufferNormal);
+                push.historyTextureIndex = historyValid ? context.Slot(historyRead) : 0xFFFFFFFF;
+                push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
+                push.historyWeight = 0.9f;
                 cmd.pushData(&push, sizeof(push));
                 cmd.drawMeshTasks(1, 1, 1);
             });

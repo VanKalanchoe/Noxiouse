@@ -901,6 +901,7 @@ namespace Nox
                 choice("Contact Shadows##Project", saved.ContactShadows, { { 0, "Off" }, { 1, "On" } });
                 choice("Screen-Space AO##Project", saved.SSAOMethod, { { 0, "Classic SSAO" }, { 1, "GTAO" } });
                 choice("Screen-Space Reflections##Project", saved.SSR, { { 0, "Off" }, { 1, "On" } });
+                choice("Screen-Space GI##Project", saved.SSGI, { { 0, "Off" }, { 1, "On" } });
                 choice("Order-Independent Transparency##Project", saved.OIT, { { 0, "Off" }, { 1, "On" } });
                 choice("Temporal Anti-Aliasing##Project", saved.TAA, { { 0, "Off" }, { 1, "On" } });
 
@@ -1654,6 +1655,30 @@ namespace Nox
                     ImGui::TextDisabled("%u probes, %u captured", m_Renderer->getIrradianceProbeCount(), m_Renderer->getIrradianceProbesCaptured());
                 else
                     ImGui::TextDisabled("No Irradiance Volume in the scene");
+                ImGui::Unindent();
+            }
+
+            bool ssgi = m_Renderer->getSSGIEnabled();
+            if (ImGui::Checkbox("Screen-Space GI (SSGI)", &ssgi))
+                m_Renderer->setSSGIEnabled(ssgi);
+            ImGui::SetItemTooltip("A few rays per pixel marched through the depth buffer: the light bouncing off what is on screen\n"
+                                  "(last frame's image at their hits), denoised over frames. Adds to the environment or the Raster\n"
+                                  "Probe Volume for what the rays find; not used with the RT GI modes (they have it).");
+            if (ssgi)
+            {
+                ImGui::Indent();
+                int rays = static_cast<int>(m_Renderer->getSSGIRays());
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderInt("Rays per Pixel##SSGI", &rays, 1, 8))
+                    m_Renderer->setSSGIRays(static_cast<uint32_t>(rays));
+                int steps = static_cast<int>(m_Renderer->getSSGISteps());
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderInt("Steps per Ray##SSGI", &steps, 4, 64))
+                    m_Renderer->setSSGISteps(static_cast<uint32_t>(steps));
+                float distance = WorldUnits::ToMeters(m_Renderer->getSSGIDistance());
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderFloat("Distance (m)##SSGI", &distance, 0.1f, 50.0f, "%.1f"))
+                    m_Renderer->setSSGIDistance(WorldUnits::FromMeters(distance));
                 ImGui::Unindent();
             }
 

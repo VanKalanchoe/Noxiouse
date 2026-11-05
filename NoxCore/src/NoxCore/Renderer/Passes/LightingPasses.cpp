@@ -607,6 +607,8 @@ namespace Nox
                     builder.Read(resources.RawShadowMask);
                 if (frame.ssrAdded)
                     builder.Read(resources.SSR);
+                if (frame.ssgiAdded)
+                    builder.Read(resources.SSGI);
                 // Local lights' shadow maps (ShadowMaps.slang, through the uniforms).
                 if (resources.LocalShadowAtlas.IsValid())
                     builder.Read(resources.LocalShadowAtlas);
@@ -702,6 +704,7 @@ namespace Nox
                 lightingPush.screenProbeGITextureIndex = frame.screenProbeGIAdded ? context.Slot(res->ScreenProbeGI[frame.screenProbeGIWriteIndex])
                                                                                   : 0xFFFFFFFF;
                 lightingPush.ssrTextureIndex = frame.ssrAdded ? context.Slot(res->SSR) : 0xFFFFFFFF;
+                lightingPush.ssgiTextureIndex = frame.ssgiAdded ? context.Slot(res->SSGI) : 0xFFFFFFFF;
                 cmd.pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 
                 cmd.drawMeshTasks(1, 1, 1);

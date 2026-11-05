@@ -65,6 +65,8 @@ namespace Nox
         // last frame's (read) and this frame's (written at the end of the lighting); invalid without SSR.
         RGTexture SSR;
         RGTexture SSRHistory[2];
+        // Screen-space GI, denoised (Renderer::addSSGIPasses): this frame's result; invalid without it.
+        RGTexture SSGI;
 
         // Hybrid RT + NRD
         RGTexture RawShadowMask;

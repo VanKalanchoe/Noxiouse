@@ -371,6 +371,7 @@ namespace Nox
         watchShader("assets/shaders/ShadowMapResolve.slang", "ShadowMapResolve", [this]() { createShadowMapPipelines(true); });
         watchShader("assets/shaders/ShadowMaps.slang", "ShadowMaps", [this]() { createShadowMapPipelines(true); });
         watchShader("assets/shaders/SSR.slang", "SSR", [this]() { createSSRPipeline(true); });
+        watchShader("assets/shaders/SSGI.slang", "SSGI", [this]() { createSSRPipeline(true); });
         watchShader("assets/shaders/ReflectionProbe.slang", "ReflectionProbe", [this]() { createReflectionProbePipelines(true); });
         watchShader("assets/shaders/IrradianceProbeSH.slang", "IrradianceProbeSH", [this]() { createIrradianceVolumePipelines(true); });
         watchShader("assets/shaders/ComputeSkinning.slang", "ComputeSkinning", [this]() { createComputeSkinningPipeline(true); });
@@ -949,6 +950,8 @@ namespace Nox
             setSSAOMethod(static_cast<SSAOMethod>(settings.SSAOMethod));
         if (settings.SSR >= 0)
             setSSREnabled(settings.SSR != 0);
+        if (settings.SSGI >= 0)
+            setSSGIEnabled(settings.SSGI != 0);
     }
 
     void Renderer::setDLSSEnabled(bool enabled)
@@ -4944,6 +4947,7 @@ namespace Nox
             // After the GI: reflection hits on screen take its light (SceneGI.slang), off screen this frame's DDGI.
             addRTReflectionPasses();
             addSSRPass(); // where the RT reflections do not run (last frame's lit scene)
+            addSSGIPasses(); // with the environment / raster probe volume GI (last frame's lit scene)
             addReflectionProbePasses(); // the probe table, and one probe's capture when one needs it
             addIrradianceVolumePasses(); // Diffuse GI: Raster Probe Volume (a few probes' captures a frame)
             addLightPresamplingPasses();

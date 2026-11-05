@@ -584,3 +584,12 @@ Recapture). UE's volumetric lightmap, updated at runtime (`Passes/IrradianceVolu
   probes behind the surface (DDGI's), evaluated as irradiance around the normal; fades into the environment over the outermost cell;
   holds back the sky's reflection by its luminance like the other GI terms. No visibility test: light can leak through walls thinner
   than a cell (place probes accordingly).
+
+**Screen-space GI (RS5b, 2026-11-05, untested)** -- Settings > Raster GI > Screen-Space GI (project `SSGI`), off by default; with
+Diffuse GI Off (environment) or Raster Probe Volume (the RT GI modes have their own). UE5's SSGI (`SSGI.slang`): 2 rays per pixel,
+cosine-distributed around the normal (IGN + R2 per frame), 16 steps each (denser near the pixel) through the depth buffer as SSR
+marches; a hit on a front face takes last frame's lit scene there (the SSR history, reprojected; mip 1). With cosine-distributed rays
+the mean radiance is irradiance / pi: the pass writes sum(hits) / rays and the hit share; the deferred lighting adds the frame's
+other ambient for the rest (`ssgi.rgb x diffuse + (1 - hits) x ambient`). Denoised by a 3x3 bilateral average (view depth within 2%,
+normals alike) and temporal accumulation (90% history, reprojected through the previous camera, clamped to the neighbourhood's range
+widened by itself). Multi-bounce over frames (the history holds last frame's GI too).

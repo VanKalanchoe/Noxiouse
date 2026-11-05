@@ -201,6 +201,10 @@ namespace Nox
                     AppendSetting(out, "Screen-space reflections: ON{} | {:.0f} m | {} steps | roughness < {:.2f}",
                                   renderer.getRayTracingEnabled() && renderer.getRayTracingReflections() ? " (RT reflections take precedence)" : "",
                                   WorldUnits::ToMeters(renderer.getSSRMaxDistance()), renderer.getSSRMaxSteps(), renderer.getSSRMaxRoughness());
+                if (renderer.getSSGIEnabled())
+                    AppendSetting(out, "Screen-space GI: ON | {} rays x {} steps | {:.1f} m{}", renderer.getSSGIRays(), renderer.getSSGISteps(),
+                                  WorldUnits::ToMeters(renderer.getSSGIDistance()),
+                                  (renderer.getDiffuseGIMode() == 0 || renderer.getDiffuseGIMode() == 4) ? "" : " (not with this Diffuse GI mode)");
                 if (renderer.getReflectionProbesEnabled() && renderer.getReflectionProbeCount() > 0)
                     AppendSetting(out, "Reflection probes: {} in use", renderer.getReflectionProbeCount());
                 if (renderer.getContactShadowsEnabled())

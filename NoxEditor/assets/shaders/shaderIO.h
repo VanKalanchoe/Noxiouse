@@ -2411,6 +2411,9 @@ struct PushConstantDeferredLighting
     // Screen-space reflections (SSR.slang: rgb the reflected radiance, a its confidence), 0xFFFFFFFF when they did not run (RT
     // reflections take precedence).
     uint32_t ssrTextureIndex;
+    // Screen-space GI (SSGI.slang, denoised: rgb the irradiance / pi its rays found on screen, a the share of rays that found
+    // something), 0xFFFFFFFF when it did not run. The rest keeps the frame's other diffuse ambient.
+    uint32_t ssgiTextureIndex;
 };
 
 // Raster-only ambient occlusion (SSAO.slang): hemisphere-kernel, world-space reprojection, one fullscreen pass.
@@ -2470,6 +2473,40 @@ struct PushConstantSSR
     float maxRoughness; // rougher surfaces keep the environment / probes
     uint32_t frameIndex;
     uint32_t padding[2];
+};
+
+// Screen-space GI (RS5b; SSGI.slang traceMain): a few cosine-distributed rays per pixel marched through the depth buffer, the light
+// at their hits from last frame's lit scene (the SSR history).
+struct PushConstantSSGI
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    uint32_t depthTextureIndex;
+    uint32_t normalTextureIndex;
+    uint32_t historyTextureIndex; // last frame's lit scene with blur mips (as SSR's)
+    uint32_t historyMipCount;
+    uint32_t rayCount;
+    uint32_t steps;
+    vec2 viewportSize;
+    float maxDistance; // world units
+    float thickness;   // world units
+    uint32_t frameIndex;
+    uint32_t padding[3];
+};
+
+// SSGI's denoiser (SSGI.slang denoiseMain): a 3x3 bilateral average of the raw rays, then last frame's result reprojected, clamped to
+// the neighbourhood and blended in.
+struct PushConstantSSGIDenoise
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    uint32_t rawTextureIndex;
+    uint32_t depthTextureIndex;
+    uint32_t normalTextureIndex;
+    uint32_t historyTextureIndex; // last frame's denoised result (0xFFFFFFFF: none, start over)
+    vec2 viewportSize;
+    float historyWeight; // how much of the reprojected history stays (0.9: about 10 frames)
+    uint32_t padding;
 };
 
 struct PushConstantSSAOBlur

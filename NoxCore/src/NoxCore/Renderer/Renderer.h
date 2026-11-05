@@ -603,6 +603,17 @@ namespace Nox
         uint32_t getSSRMaxSteps() const { return m_ssrMaxSteps; }
         void setSSRMaxRoughness(float roughness) { m_ssrMaxRoughness = std::clamp(roughness, 0.05f, 1.0f); }
         float getSSRMaxRoughness() const { return m_ssrMaxRoughness; }
+        // Screen-space GI (RS5b; Passes/ReflectionPasses.cpp): a few rays per pixel through the depth buffer, last frame's lit scene at
+        // their hits, denoised; over the environment / the raster probe volume (Diffuse GI modes 0 and 4 -- the RT GI modes have their
+        // own). Off by default; rays per pixel, steps per ray, how far they go.
+        void setSSGIEnabled(bool enabled) { m_ssgiEnabled = enabled; }
+        bool getSSGIEnabled() const { return m_ssgiEnabled; }
+        void setSSGIRays(uint32_t rays) { m_ssgiRays = std::clamp(rays, 1u, 8u); }
+        uint32_t getSSGIRays() const { return m_ssgiRays; }
+        void setSSGISteps(uint32_t steps) { m_ssgiSteps = std::clamp(steps, 4u, 64u); }
+        uint32_t getSSGISteps() const { return m_ssgiSteps; }
+        void setSSGIDistance(float distance) { m_ssgiDistanceMeters = std::clamp(WorldUnits::ToMeters(distance), 0.1f, 100.0f); }
+        float getSSGIDistance() const { return WorldUnits::FromMeters(m_ssgiDistanceMeters); }
         // Reflection probes (RS4b): placed probes' captures used for the specular environment inside their boxes (on by default: there
         // are none until probes are placed); captured probes this frame (stats).
         void setReflectionProbesEnabled(bool enabled) { m_reflectionProbesEnabled = enabled; }
@@ -1138,6 +1149,7 @@ namespace Nox
         void createSSRPipeline(bool forceCompile = false);
         void addSSRPass();
         void addSSRHistoryPass();
+        void addSSGIPasses();
         // Reflection probes: the probe table of this frame and at most one probe's capture (six faces, assembled, prefiltered); after
         // Compile the capture faces' uniforms.
         void createReflectionProbePipelines(bool forceCompile = false);
@@ -1504,6 +1516,14 @@ namespace Nox
         float m_ssrMaxRoughness = 0.6f;
         uint32_t m_ssrHistoryIndex = 0; // the history slot last frame wrote (this frame reads it)
         bool m_ssrHistoryValid = false; // it holds a lit scene (written last frame at this size)
+        std::unique_ptr<NRI::Pipeline> m_ssgiTracePipeline;
+        std::unique_ptr<NRI::Pipeline> m_ssgiDenoisePipeline;
+        bool m_ssgiEnabled = false;
+        uint32_t m_ssgiRays = 2;
+        uint32_t m_ssgiSteps = 16;
+        float m_ssgiDistanceMeters = 5.0f;
+        uint32_t m_ssgiHistoryIndex = 0;
+        bool m_ssgiRanLastFrame = false;
         bool m_contactShadows = false;
         float m_contactShadowLengthMeters = 0.3f;
         uint32_t m_contactShadowSamples = 12;
@@ -1575,6 +1595,7 @@ namespace Nox
             bool shadowMapsAdded = false; // the sun's cascaded shadow maps, resolved into RawShadowMask
             bool localShadowsAdded = false; // local lights' shadow atlas
             bool ssrAdded = false;          // screen-space reflections (resources.SSR)
+            bool ssgiAdded = false;         // screen-space GI (resources.SSGI)
             uint32_t ssrHistoryMips = 0;
             uint32_t shadowCascadeCount = 0;
             bool rtReflectionsAdded = false;

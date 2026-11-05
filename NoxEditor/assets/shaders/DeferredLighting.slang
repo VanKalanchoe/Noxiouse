@@ -702,6 +702,15 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
             ambientSpecular *= specularOcclusion;
         }
 
+        // Screen-space GI (Settings > Screen-Space GI): the light its rays found on screen, the frame's other ambient for the share
+        // that found nothing (SSGI.slang: rgb is already irradiance / pi times the hit share).
+        if (pushConstant.ssgiTextureIndex != 0xFFFFFFFF)
+        {
+            Texture2D ssgiTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssgiTextureIndex, 0));
+            const float4 ssgi = ssgiTex.Load(int3(pixelCoord, 0));
+            ambientDiffuse = ssgi.rgb * diffuseColor + saturate(1.0 - ssgi.a) * ambientDiffuse;
+        }
+
         // Sample Decoupled RT Reflection (Denoised via NRD REBLUR/RELAX or Raw 1-SPP)
         float3 reflColor = float3(0.0);
         float3 rtRadiance = float3(0.0); // the reflection's radiance, its sky share held back as the environment's (for the coat too)
