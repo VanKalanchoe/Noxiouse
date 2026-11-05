@@ -26,6 +26,7 @@
 #include "MipFeedback.slang"
 #include "RayHitShading.slang"
 #include "HeightFog.slang"
+#include "ShadowMaps.slang"
 
 import Math;
 
@@ -520,6 +521,12 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         shadowedWeight[slot] = 0.0;
     }
 
+    // The sun's shadow maps (Settings > Sun Shadows: Shadow Maps) instead of its shadow ray: looked up here, per pixel, with the
+    // noise the resolve uses (ShadowMapResolve.slang) for the kernel's rotation.
+    GpuShadowCascades* sunCascades = (GpuShadowCascades*)ubo->sunShadowCascadesReference;
+    const float2 noisePixel = floor(vertIn.pos.xy) + float(ubo->frameIndex % 64u) * float2(5.588238, 3.45367);
+    const float shadowNoise = frac(52.9829189 * frac(0.06711056 * noisePixel.x + 0.00583715 * noisePixel.y));
+
     for (uint i = 0; i < ubo->lightCount; i++)
     {
         LightData light = lights[i];
@@ -527,6 +534,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
 
         float3 l;
         float attenuation = 1.0;
+        bool shadowMapped = false;
         float lightDistance = 100000.0 * ubo->unitsPerMeter; // a directional light: as far as a shadow ray needs to go
         float3 contribution;
 
@@ -552,6 +560,11 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             {
                 l = normalize(light.direction.xyz);
                 attenuation = cloud_shadow(ubo, vertIn.worldPos, i, l);
+                if (i == ubo->shadowMaskLightIndex && sunCascades != nullptr && dot(n, l) > 0.0)
+                {
+                    attenuation *= sun_shadow_map(ubo, sunCascades, vertIn.worldPos, n, shadowNoise);
+                    shadowMapped = true;
+                }
             }
             else
             {
@@ -588,7 +601,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         }
         directLighting += contribution;
 
-        if (traceShadows)
+        if (traceShadows && !shadowMapped)
         {
             float weight = dot(contribution, float3(0.2126, 0.7152, 0.0722));
             uint weakest = 0;

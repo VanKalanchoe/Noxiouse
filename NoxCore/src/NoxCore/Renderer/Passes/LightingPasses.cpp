@@ -563,7 +563,7 @@ namespace Nox
                 // Entity ID debug view (through the uniforms).
                 builder.Read(resources.Entity);
                 // Only the outputs of features that run this frame.
-                if (frame.rtShadowsAdded)
+                if (frame.rtShadowsAdded || frame.shadowMapsAdded)
                     builder.Read(resources.RawShadowMask);
                 if (frame.nrdShadowsAdded)
                     builder.Read(resources.DenoisedShadowMask);
@@ -636,7 +636,7 @@ namespace Nox
                 // RGB, and reporting the denoiser would make the shader wrongly YCoCg-decode it.
                 lightingPush.shadowMaskTextureIndex = frame.nrdShadowsAdded
                     ? context.Slot(res->DenoisedShadowMask)
-                    : (frame.rtShadowsAdded ? context.Slot(res->RawShadowMask) : 0);
+                    : ((frame.rtShadowsAdded || frame.shadowMapsAdded) ? context.Slot(res->RawShadowMask) : 0);
                 const uint32_t nrdShadowBit = frame.nrdShadowsAdded ? 1 : 0;
                 const uint32_t nrdReflMode = frame.nrdReflectionsAdded ? static_cast<uint32_t>(m_nrdReflectionDenoiser) : 0;
                 lightingPush.nrdShadowsEnabled = nrdShadowBit | (nrdReflMode << 1);

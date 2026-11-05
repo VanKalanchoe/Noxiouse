@@ -518,6 +518,41 @@ namespace Nox
             }
         }
         bool getRayTracingShadows() const { return m_rayTracingShadows; }
+        // The sun's shadows (RS1; Passes/ShadowMapPasses.cpp): ray traced (the RT shadow mask, with Ray Traced Shadows on) or cascaded
+        // shadow maps resolved into the same mask -- raster, with or without ray tracing, measured against the RT version. Other lights
+        // keep their RT shadow rays.
+        enum class SunShadowMode : uint32_t { RayTraced = 0, ShadowMaps = 1 };
+        void setSunShadowMode(SunShadowMode mode) { m_sunShadowMode = mode; }
+        SunShadowMode getSunShadowMode() const { return m_sunShadowMode; }
+        // UE5 CSM's settings: texels per cascade side, cascade count, how far they reach (world units), how the cascades split that
+        // distance (UE's Cascade Distribution Exponent: each cascade this many times longer than the one before), the part of each that
+        // blends into the next.
+        void setShadowMapResolution(uint32_t texels) { m_shadowMapResolution = std::clamp(texels, 512u, 8192u); }
+        uint32_t getShadowMapResolution() const { return m_shadowMapResolution; }
+        void setShadowCascadeCount(uint32_t count) { m_shadowCascadeCount = std::clamp(count, 1u, shaderio::MaxShadowCascades); }
+        uint32_t getShadowCascadeCount() const { return m_shadowCascadeCount; }
+        void setShadowDistance(float distance) { m_shadowDistanceMeters = std::max(WorldUnits::ToMeters(distance), 1.0f); }
+        float getShadowDistance() const { return WorldUnits::FromMeters(m_shadowDistanceMeters); }
+        void setShadowCascadeExponent(float exponent) { m_shadowCascadeExponent = std::clamp(exponent, 1.0f, 6.0f); }
+        float getShadowCascadeExponent() const { return m_shadowCascadeExponent; }
+        void setShadowCascadeBlend(float fraction) { m_shadowCascadeBlend = std::clamp(fraction, 0.0f, 0.5f); }
+        float getShadowCascadeBlend() const { return m_shadowCascadeBlend; }
+        // Filtering: PCSS (the penumbra grows with the distance to the caster by the sun's angular radius, as the RT shadows' cone of
+        // rays) or a fixed PCF kernel; its radius in texels (PCSS: the smallest), PCSS's largest.
+        void setShadowFilter(uint32_t filter) { m_shadowFilter = std::min(filter, shaderio::SHADOW_FILTER_PCSS); }
+        uint32_t getShadowFilter() const { return m_shadowFilter; }
+        void setShadowFilterTexels(float texels) { m_shadowFilterTexels = std::clamp(texels, 0.0f, 8.0f); }
+        float getShadowFilterTexels() const { return m_shadowFilterTexels; }
+        void setShadowMaxFilterTexels(float texels) { m_shadowMaxFilterTexels = std::clamp(texels, 1.0f, 64.0f); }
+        float getShadowMaxFilterTexels() const { return m_shadowMaxFilterTexels; }
+        // Bias against self shadowing, in texels of each cascade (UE's Shadow Bias / Shadow Slope Bias / normal offset): the receiver
+        // moves towards the sun and along its normal; the casters' depth moves away from the sun by their slope.
+        void setShadowDepthBias(float texels) { m_shadowDepthBias = std::clamp(texels, 0.0f, 16.0f); }
+        float getShadowDepthBias() const { return m_shadowDepthBias; }
+        void setShadowNormalBias(float texels) { m_shadowNormalBias = std::clamp(texels, 0.0f, 16.0f); }
+        float getShadowNormalBias() const { return m_shadowNormalBias; }
+        void setShadowSlopeBias(float slope) { m_shadowSlopeBias = std::clamp(slope, 0.0f, 16.0f); }
+        float getShadowSlopeBias() const { return m_shadowSlopeBias; }
         // Same reasoning as setRayTracingShadows above -- the NRD reflection denoiser pass is gated on
         // this flag, so toggling it needs a clean history reset too.
         void setRayTracingReflections(bool enabled)
@@ -1027,6 +1062,12 @@ namespace Nox
         void addGeometryFeedbackPass();
         void createGeometryStreamingPipelines();
         void addRTShadowPasses();
+        // The sun's cascaded shadow maps (Passes/ShadowMapPasses.cpp): culling and a depth pass per cascade, then the resolve into the
+        // shadow mask; replaces addRTShadowPasses' sun mask (SunShadowMode::ShadowMaps).
+        void addShadowMapPasses();
+        void createShadowMapPipelines(bool forceCompile = false);
+        // After Compile: the cascades' bindless slots into GpuShadowCascades, each cascade's copy of the frame's uniforms.
+        void updateShadowMapUniforms();
         void addRTReflectionPasses();
         // Decides whether DDGI runs and declares its atlases up front: RT reflections and forward shading, which come
         // earlier in the frame, sample them too.
@@ -1231,6 +1272,32 @@ namespace Nox
         bool m_rtRefractionEnabled = true;
         // NRD
         std::unique_ptr<NRI::Pipeline> m_shadowMaskPipeline = nullptr;
+        // The sun's cascaded shadow maps (Passes/ShadowMapPasses.cpp): depth of opaque and of alpha-tested casters, the resolve into
+        // the shadow mask; per frame slot and cascade a copy of the uniforms (the cascade's view) and its culling view, the
+        // GpuShadowCascades buffer. m_shadowCascades / Views / Projections: this frame's, from addShadowMapPasses.
+        std::unique_ptr<NRI::Pipeline> m_shadowDepthPipeline;
+        std::unique_ptr<NRI::Pipeline> m_shadowDepthMaskPipeline;
+        std::unique_ptr<NRI::Pipeline> m_shadowMapResolvePipeline;
+        std::array<std::array<std::unique_ptr<NRI::Buffer>, shaderio::MaxShadowCascades>, MAX_FRAMES_IN_FLIGHT> m_shadowCascadeUniforms;
+        std::array<std::array<void*, shaderio::MaxShadowCascades>, MAX_FRAMES_IN_FLIGHT> m_shadowCascadeUniformsMapped{};
+        std::array<std::array<std::unique_ptr<NRI::Buffer>, shaderio::MaxShadowCascades>, MAX_FRAMES_IN_FLIGHT> m_shadowCascadeCullViews;
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_shadowCascadeBuffers;
+        std::array<void*, MAX_FRAMES_IN_FLIGHT> m_shadowCascadeBuffersMapped{};
+        shaderio::GpuShadowCascades m_shadowCascades{};
+        std::array<glm::mat4, shaderio::MaxShadowCascades> m_shadowCascadeViews{};
+        std::array<glm::mat4, shaderio::MaxShadowCascades> m_shadowCascadeProjections{};
+        SunShadowMode m_sunShadowMode = SunShadowMode::RayTraced;
+        uint32_t m_shadowMapResolution = 2048;
+        uint32_t m_shadowCascadeCount = 4;
+        float m_shadowDistanceMeters = 150.0f;
+        float m_shadowCascadeExponent = 3.0f;
+        float m_shadowCascadeBlend = 0.1f;
+        uint32_t m_shadowFilter = shaderio::SHADOW_FILTER_PCSS;
+        float m_shadowFilterTexels = 1.5f;
+        float m_shadowMaxFilterTexels = 24.0f;
+        float m_shadowDepthBias = 0.5f;
+        float m_shadowNormalBias = 1.5f;
+        float m_shadowSlopeBias = 2.0f;
         std::unique_ptr<NRI::Pipeline> m_nrdGuidesPipeline = nullptr; // NRD view Z + normal/roughness (NRDGuides.slang)
         std::unique_ptr<NRI::Pipeline> m_reflectionPipeline = nullptr;
         // Path Tracer
@@ -1296,6 +1363,8 @@ namespace Nox
             // Which passes were added this frame: consumers declare (and bind) only outputs that are produced.
             bool rtShadowsAdded = false;
             bool nrdShadowsAdded = false;
+            bool shadowMapsAdded = false; // the sun's cascaded shadow maps, resolved into RawShadowMask
+            uint32_t shadowCascadeCount = 0;
             bool rtReflectionsAdded = false;
             bool nrdReflectionsAdded = false;
             bool ddgiAdded = false;

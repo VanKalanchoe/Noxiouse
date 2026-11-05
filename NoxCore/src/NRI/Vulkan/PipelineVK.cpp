@@ -494,6 +494,7 @@ namespace NRI
                     vk::DynamicState::eCullMode,
                     vk::DynamicState::eFrontFace,
                     vk::DynamicState::eDepthBiasEnable,
+                    vk::DynamicState::eDepthBias,
                     vk::DynamicState::eDepthClampEnableEXT,
 
                     // Multisampling

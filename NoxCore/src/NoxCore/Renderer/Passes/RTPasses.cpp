@@ -114,7 +114,8 @@ namespace Nox
         // pay for a full-resolution ray-query pass.
         // The soft shadow mask is the sun's (updateLightBuffer); without a directional light every light traces its own rays in the
         // deferred lighting.
-        if (uniformData.enableRTShadows == 0 || !m_shadowMaskPipeline || m_shadowMaskLightIndex == ~0u)
+        // With the sun's cascaded shadow maps the mask is theirs (addShadowMapPasses).
+        if (uniformData.enableRTShadows == 0 || !m_shadowMaskPipeline || m_shadowMaskLightIndex == ~0u || m_frame.shadowMapsAdded)
             return;
 
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();

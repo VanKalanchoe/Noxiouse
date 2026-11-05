@@ -56,6 +56,10 @@ namespace Nox
         RGTexture SSAORaw;  // SSAO.slang's hash-dithered output, before SSAOBlur.slang denoises it
         RGTexture SSAO;
 
+        // The sun's cascaded shadow maps (Renderer::addShadowMapPasses): depth per cascade, invalid past the cascade count or when the
+        // sun is shadowed by ray tracing.
+        std::array<RGTexture, shaderio::MaxShadowCascades> SunShadowMaps;
+
         // Hybrid RT + NRD
         RGTexture RawShadowMask;
         RGTexture DenoisedShadowMask;
@@ -153,6 +157,14 @@ namespace Nox
         builder.Read(resources.DDGIDistance[index]);
         if (resources.DDGIProbeOffsets[index].IsValid())
             builder.Read(resources.DDGIProbeOffsets[index]);
+    }
+
+    // A pass that looks up the sun's shadow maps (through UniformBufferObject::sunShadowCascadesReference; ShadowMaps.slang).
+    inline void ReadSunShadowMaps(RGBuilder& builder, const FrameGraphResources& resources)
+    {
+        for (const RGTexture& map : resources.SunShadowMaps)
+            if (map.IsValid())
+                builder.Read(map);
     }
 
     inline void ReadIfValid(RGBuilder& builder, RGBuffer buffer)

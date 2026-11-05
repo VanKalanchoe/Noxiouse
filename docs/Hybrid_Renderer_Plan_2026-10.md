@@ -469,3 +469,36 @@ entity's X / Y, range; it shines along -Z; an outline and direction stroke in th
 - GI / reflection hits: the exact diffuse with a shadow ray to a random point; path tracers and ReSTIR: area sampling
   (radiance x area x cos / distance^2). Rect lights are not geometry: they are not seen directly or in mirrors (an emissive
   plane in front of one shows it).
+
+## 9. Raster sun shadows: cascaded shadow maps (RS1, 2026-11-05, untested)
+
+The first of the raster versions in `Backlog_2026.md` ("Raster versions of the RT features"): built to be measured against the RT
+shadow mask, both selectable (Settings > Sun Shadows: Ray Traced / Shadow Maps; the project's Renderer map `SunShadows`). Every
+preset stays Ray Traced until the two are measured side by side.
+
+How it is built (UE5's directional light without virtual shadow maps; `Passes/ShadowMapPasses.cpp`, `ShadowMaps.slang`,
+`ShadowMapResolve.slang`):
+- **Stable cascades.** Up to 4 over the shadow distance (150 m), split by UE's cascade distribution exponent (3: 1/40, 4/40, 13/40,
+  40/40). Each cascade is the bounding sphere of its slice of the view -- its size depends only on the slice's depths and the field
+  of view, so turning the camera does not change it -- snapped to whole texels in the light's space counted from the world origin
+  (not the render origin: no pop at a large-world rebase). Checked offline: the slice corners land within +-0.99 of each cascade,
+  moving the camera moves a world point by whole texels only, a caster 5 m towards the sun reads back as 5.000 m of depth.
+- **Depth.** Orthographic, reverse Z like the cameras, 2048^2 per cascade (1024-4096), depth clamp ("pancaking": casters in front of
+  the near plane flatten onto it, so the depth range stays 100 m + the cascade), slope-scaled raster bias (new NRI
+  `setDepthBias`; `depthClamp` / `depthBiasClamp` device features). Per cascade the camera's GPU instance culling (side planes
+  only, so casters between the cascade and the sun stay) and the visibility pass's meshlet draws: opaque, masked (alpha tested)
+  and unlit buckets, both faces -- what the RT shadow rays hit. The cluster LOD stays the camera's, so a surface shadows the
+  triangles it is drawn with.
+- **Lookup.** Bilinear 2x2 comparisons (a comparison sampler's PCF) on 16 Vogel-disk taps turned per pixel and frame (IGN), which
+  TAA / DLSS average. PCSS (default): the casters' average depth in the widest penumbra, then the kernel sized by the distance to
+  them x tan(sun angular radius) -- the same penumbra as the RT cone of rays, hard at contact. PCF: a fixed kernel. Receiver bias:
+  a step towards the sun, a normal offset growing at grazing angles, and the receiver plane's rise over the kernel. The last 10% of
+  each cascade dithers into the next; the last fades out.
+- **Consumers.** The resolve writes the RT shadow mask's format into RawShadowMask (NRD does not run on it), so the deferred
+  lighting shades the sun the same way whichever made it (`shadowMaskValid && (rtShadows || sunShadowMaps)`). The forward
+  transparent and particle passes look the cascades up themselves (`UniformBufferObject::sunShadowCascadesReference`) instead of
+  their sun shadow ray. The editor's extra views keep the RT rays (the cascades cover the camera's view). Other lights keep their RT
+  shadow rays until the local-light shadow atlas (RS1's second half) exists.
+
+To measure (Bistro, the streaming test world): GPU time of the "Sun Shadow Cascade n" + "Sun Shadow Map Resolve" passes vs "RT
+Shadows" + "NRD Shadows", VRAM (4 x 16 MB at 2048^2), and the image (contact hardening, thin casters, foliage, acne / peter panning).

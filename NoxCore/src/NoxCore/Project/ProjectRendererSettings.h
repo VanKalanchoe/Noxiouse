@@ -13,6 +13,7 @@ namespace Nox
         int32_t ShadowedLights = -1;       // shadow rays a pixel: 0 every light, 1..8 the strongest
         int32_t OIT = -1;                  // order-independent transparency: 0 off, 1 on
         int32_t TAA = -1;                  // the engine's TAA where DLSS does not run: 0 off, 1 on
+        int32_t SunShadows = -1;           // 0 ray traced (the RT shadow mask), 1 cascaded shadow maps
     };
 
     // The packaged game's window: "Windowed", "Borderless" (fullscreen at the desktop's resolution, the default) or "Fullscreen"

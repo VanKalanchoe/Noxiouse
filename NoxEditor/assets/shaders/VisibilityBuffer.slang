@@ -149,3 +149,34 @@
         output.visibility = uint2(inVert.drawID + 1, (inVert.meshletID << 8) | (primitiveID & 0xFF));
         return output;
     }
+
+    // =========================================================================
+    // SHADOW MAP DEPTH (Renderer::addShadowMapPasses): the same geometry from a cascade's view, depth only
+    // =========================================================================
+    // Opaque casters: nothing to compute (an empty fragment stage keeps early depth testing).
+    [shader("fragment")]
+    void depthFragMain(VSOutput inVert)
+    {
+    }
+
+    // Masked casters: the visibility pass's alpha test, so leaves cast the shape of their texture as with the RT shadows.
+    [shader("fragment")]
+    void depthMaskFragMain(VSOutput inVert, uniform PushConstantMeshlets pushConstant)
+    {
+        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        SceneInstances instances = SceneInstances(ubo);
+        InstanceData instance = instances[inVert.drawID];
+
+        if (instance.alphaMode == 1 && (instance.baseColorTextureIndex != 0xFFFFFFFF || instance.vertexColors != 0))
+        {
+            float alpha = instance.baseColorFactor.a * inVert.vertexAlpha;
+            if (instance.baseColorTextureIndex != 0xFFFFFFFF)
+            {
+                SamplerState samp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+                float2 uv = instance_texture_uv(instance, instance.baseColorTextureSet, inVert.uv0, inVert.uv1);
+                alpha *= SampleMaterialTexture(ubo, instance.baseColorTextureIndex, samp, uv).a;
+            }
+            if (alpha < instance.alphaMaskCutoff)
+                discard;
+        }
+    }

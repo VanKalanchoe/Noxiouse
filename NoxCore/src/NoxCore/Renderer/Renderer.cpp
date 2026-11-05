@@ -354,7 +354,9 @@ namespace Nox
         watchShader("assets/shaders/PBRLighting.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); });
         watchShader("assets/shaders/PBRLighting.slang", "DeferredLighting", [this]() { createDeferredLightingPipeline(true); });
         // Visibility Buffer
-        watchShader("assets/shaders/VisibilityBuffer.slang", "VisBuffer", [this]() { createVisibilityPipeline(true); });
+        watchShader("assets/shaders/VisibilityBuffer.slang", "VisBuffer", [this]() { createVisibilityPipeline(true); createShadowMapPipelines(true); });
+        watchShader("assets/shaders/ShadowMapResolve.slang", "ShadowMapResolve", [this]() { createShadowMapPipelines(true); });
+        watchShader("assets/shaders/ShadowMaps.slang", "ShadowMaps", [this]() { createShadowMapPipelines(true); });
         watchShader("assets/shaders/ComputeSkinning.slang", "ComputeSkinning", [this]() { createComputeSkinningPipeline(true); });
         // G-Buffer (Fix watcher to recompile m_gbufferPipeline)
         watchShader("assets/shaders/GBufferMaterial.slang", "GBuffer", [this]() { createGBufferPipeline(true); });
@@ -594,6 +596,7 @@ namespace Nox
         createEditorRaycastPipeline(false);
         //NRD
         createShadowMaskPipeline();
+        createShadowMapPipelines();
         createNRDGuidesPipeline();
         createReflectionPipeline();
         // Path Tracer
@@ -768,6 +771,8 @@ namespace Nox
             bool RTRefraction;       // smooth glass traced (H3); else the screen-space refraction only
             uint32_t RTDivisor;      // ray tracing resolution: 1 every pixel, 2 one of each 2 x 2 block
             uint32_t ShadowRayLights; // the shadow-ray budget a pixel (strongest lights); 0 every light
+            // The sun's shadows: ray traced on every rung until the shadow maps (RS1) are measured against them.
+            Renderer::SunShadowMode SunShadows = Renderer::SunShadowMode::RayTraced;
         };
 
         QualityPresetSettings GetQualityPresetSettings(Renderer::RenderQuality quality)
@@ -816,6 +821,7 @@ namespace Nox
         setRTRefractionEnabled(preset.RTRefraction);
         setRayTracingResolutionDivisor(preset.RTDivisor);
         setShadowRayLightLimit(preset.ShadowRayLights);
+        setSunShadowMode(preset.SunShadows);
         // DDGI's probes trace in turn: a quarter a frame on the fallback rung, half on the others; two cascades on the fallback rung.
         // Under the screen probes DDGI is only the second bounce: a quarter of its probes a frame is plenty.
         m_ddgiUpdateStride = (quality == RenderQuality::Low || preset.DiffuseGI == 3) ? 4u : 2u;
@@ -832,7 +838,8 @@ namespace Nox
             if (!m_pathTracingEnabled && m_rayTracingEnabled && m_rayTracingShadows == preset.RTShadows &&
                 m_rayTracingReflections == preset.RTReflections && m_rtaoEnabled == preset.RTAO && m_diffuseGIMode == preset.DiffuseGI &&
                 m_directLightingMode == preset.DirectLighting && m_rtRefractionEnabled == preset.RTRefraction && upscaleMatches &&
-                m_rtSubsample == preset.RTDivisor && m_shadowRayLightLimit == preset.ShadowRayLights)
+                m_rtSubsample == preset.RTDivisor && m_shadowRayLightLimit == preset.ShadowRayLights &&
+                m_sunShadowMode == preset.SunShadows)
                 return quality;
         }
         return RenderQuality::Custom;
@@ -910,6 +917,8 @@ namespace Nox
             setOITEnabled(settings.OIT != 0);
         if (settings.TAA >= 0)
             setTAAEnabled(settings.TAA != 0);
+        if (settings.SunShadows >= 0 && settings.SunShadows <= 1)
+            setSunShadowMode(static_cast<SunShadowMode>(settings.SunShadows));
     }
 
     void Renderer::setDLSSEnabled(bool enabled)
@@ -4891,6 +4900,8 @@ namespace Nox
             addRTAOPass();
             addOcclusionBlurPass();
             addNRDGuidesPass();
+            // The sun's shadow mask: its cascaded shadow maps (Settings > Sun Shadows) or, without them, its RT shadow rays.
+            addShadowMapPasses();
             addRTShadowPasses();
             // After the GI: reflection hits on screen take its light (SceneGI.slang), off screen this frame's DDGI.
             addRTReflectionPasses();
@@ -4924,6 +4935,7 @@ namespace Nox
             NOX_PROFILE_SCOPE("Compile Frame Graph");
             m_renderGraph.Compile();
             resolveFrameUniforms();
+            updateShadowMapUniforms();
             updateExtraViewUniforms();
             // Read back only what this frame's inspector actually probes.
             m_inspectionProbePending[frameIndex] = m_frame.inspectionProbe && m_renderGraph.IsInspecting() ? 1 : 0;
@@ -7079,6 +7091,8 @@ namespace Nox
             // Texture streaming feedback is shared (what a viewport or an asset preview shows is streamed in too); cluster statistics
             // are the camera's.
             uniforms.clusterStatsReference = 0;
+            // The sun's shadow cascades cover the camera's view, not this one's (its forward pass keeps the RT shadow rays).
+            uniforms.sunShadowCascadesReference = 0;
             // The atlases are only read (and declared) when DDGI ran this frame.
             if (!m_frame.ddgiAdded)
                 uniforms.enableDDGI = 0;

@@ -391,6 +391,11 @@ namespace NRI
         m_commandBuffers[m_currentFrameIndex].setDepthBiasEnable(enable);
     }
     
+    void CommandBufferVK::setDepthBias(float constantFactor, float clamp, float slopeFactor)
+    {
+        m_commandBuffers[m_currentFrameIndex].setDepthBias(constantFactor, clamp, slopeFactor);
+    }
+
     void CommandBufferVK::setDepthClampEnable(bool enable)
     {
         m_commandBuffers[m_currentFrameIndex].setDepthClampEnableEXT(enable);

@@ -814,6 +814,8 @@ namespace NRI
                         .tessellationShader = true,
                         .sampleRateShading = true,
                         .multiDrawIndirect = true,
+                        .depthClamp = true,     // shadow map depth passes: casters in front of the near plane flatten onto it
+                        .depthBiasClamp = true, // shadow map depth passes: the slope-scaled bias is clamped
                         .fillModeNonSolid = true, // the editor's wireframe overlay (lines)
                         .wideLines = true,
                         .samplerAnisotropy = true,

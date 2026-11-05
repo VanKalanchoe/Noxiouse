@@ -205,6 +205,9 @@ namespace NRI
         virtual void setCullMode(const CullMode& cullMode) = 0;
         virtual void setFrontFace(const FrontFace& frontFace) = 0;
         virtual void setDepthBiasEnable(bool enable) = 0;
+        // Slope-scaled depth bias (shadow map depth passes): constant in units of the depth format's resolution, slope times the
+        // triangle's depth slope, the sum clamped to `clamp` (0: no clamp). Applies while setDepthBiasEnable(true).
+        virtual void setDepthBias(float constantFactor, float clamp, float slopeFactor) = 0;
         virtual void setDepthClampEnable(bool enable) = 0;
         virtual void setLineWidth(float lineWidth) = 0;
         virtual void setRasterizationSamples(uint32_t sampleCount) = 0;

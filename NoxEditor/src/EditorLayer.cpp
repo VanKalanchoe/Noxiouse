@@ -896,6 +896,7 @@ namespace Nox
                 choice("Ray Tracing Resolution##Project", saved.RayTracingResolution, { { 1, "Full" }, { 2, "Half" } });
                 choice("Diffuse GI##Project", saved.DiffuseGI, { { 0, "Environment (IBL)" }, { 1, "DDGI" }, { 2, "ReSTIR GI" }, { 3, "Screen Probes" } });
                 choice("Shadowed Lights##Project", saved.ShadowedLights, { { 0, "All" }, { 1, "1" }, { 2, "2" }, { 4, "4" }, { 8, "8" } });
+                choice("Sun Shadows##Project", saved.SunShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
                 choice("Order-Independent Transparency##Project", saved.OIT, { { 0, "Off" }, { 1, "On" } });
                 choice("Temporal Anti-Aliasing##Project", saved.TAA, { { 0, "Off" }, { 1, "On" } });
 
@@ -1245,6 +1246,87 @@ namespace Nox
                 NRI::Extent2D outputSize = m_Renderer->getViewPortSize();
                 ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Rendering %ux%u -> %ux%u",
                     renderSize.width, renderSize.height, outputSize.width, outputSize.height);
+            }
+        }
+
+        // The sun's shadows: the RT shadow mask or its raster version (RS1), to measure one against the other.
+        ImGui::Separator();
+        ImGui::Text("Sun Shadows");
+        {
+            const char* sunShadowModes[] = { "Ray Traced", "Shadow Maps" };
+            int sunShadowMode = static_cast<int>(m_Renderer->getSunShadowMode());
+            ImGui::SetNextItemWidth(180.0f);
+            if (ImGui::Combo("Sun Shadows", &sunShadowMode, sunShadowModes, IM_ARRAYSIZE(sunShadowModes)))
+                m_Renderer->setSunShadowMode(static_cast<Renderer::SunShadowMode>(sunShadowMode));
+            ImGui::SetItemTooltip("Ray Traced: the sun's soft shadow from one ray a pixel towards its disc, denoised by NRD SIGMA\n"
+                                  "(needs Ray Tracing Shadows). Shadow Maps: cascaded shadow maps (UE5's directional light without\n"
+                                  "virtual shadow maps), raster, with or without ray tracing. Both write the same shadow mask, so\n"
+                                  "they compare directly. Other lights keep their RT shadow rays either way.");
+            if (m_Renderer->getSunShadowMode() == Renderer::SunShadowMode::ShadowMaps)
+            {
+                ImGui::Indent();
+                const uint32_t resolutions[] = { 1024, 2048, 4096 };
+                const char* resolutionNames[] = { "1024", "2048", "4096" };
+                int resolution = 1;
+                for (int i = 0; i < 3; ++i)
+                    if (resolutions[i] == m_Renderer->getShadowMapResolution()) resolution = i;
+                ImGui::SetNextItemWidth(180.0f);
+                if (ImGui::Combo("Resolution##SunShadows", &resolution, resolutionNames, IM_ARRAYSIZE(resolutionNames)))
+                    m_Renderer->setShadowMapResolution(resolutions[resolution]);
+                ImGui::SetItemTooltip("Texels per side of each cascade.");
+
+                int cascades = static_cast<int>(m_Renderer->getShadowCascadeCount());
+                if (ImGui::SliderInt("Cascades##SunShadows", &cascades, 1, static_cast<int>(shaderio::MaxShadowCascades)))
+                    m_Renderer->setShadowCascadeCount(static_cast<uint32_t>(cascades));
+
+                float distanceMeters = WorldUnits::ToMeters(m_Renderer->getShadowDistance());
+                if (ImGui::DragFloat("Distance (m)##SunShadows", &distanceMeters, 1.0f, 1.0f, 2000.0f, "%.0f"))
+                    m_Renderer->setShadowDistance(WorldUnits::FromMeters(distanceMeters));
+                ImGui::SetItemTooltip("How far from the camera the cascades reach; past it the sun is unshadowed.");
+
+                float exponent = m_Renderer->getShadowCascadeExponent();
+                if (ImGui::SliderFloat("Distribution Exponent##SunShadows", &exponent, 1.0f, 6.0f, "%.1f"))
+                    m_Renderer->setShadowCascadeExponent(exponent);
+                ImGui::SetItemTooltip("UE's Cascade Distribution Exponent: each cascade this many times longer than the one before\n"
+                                      "(3: 1/40, 4/40, 13/40, 40/40 of the distance with 4 cascades); 1 splits it evenly.");
+
+                float blend = m_Renderer->getShadowCascadeBlend();
+                if (ImGui::SliderFloat("Transition##SunShadows", &blend, 0.0f, 0.5f, "%.2f"))
+                    m_Renderer->setShadowCascadeBlend(blend);
+                ImGui::SetItemTooltip("The last part of each cascade that dithers into the next one (the last fades out).");
+
+                const char* filters[] = { "PCF", "PCSS (Contact Hardening)" };
+                int filter = static_cast<int>(m_Renderer->getShadowFilter());
+                ImGui::SetNextItemWidth(180.0f);
+                if (ImGui::Combo("Filter##SunShadows", &filter, filters, IM_ARRAYSIZE(filters)))
+                    m_Renderer->setShadowFilter(static_cast<uint32_t>(filter));
+                ImGui::SetItemTooltip("PCF: a fixed kernel. PCSS: the penumbra grows with the distance to the caster by the sun's\n"
+                                      "angular radius (Source Radius), hard where things touch -- the RT shadows' look.");
+
+                float filterTexels = m_Renderer->getShadowFilterTexels();
+                if (ImGui::SliderFloat("Filter Radius (texels)##SunShadows", &filterTexels, 0.0f, 8.0f, "%.1f"))
+                    m_Renderer->setShadowFilterTexels(filterTexels);
+                if (filter == 1)
+                {
+                    float maxTexels = m_Renderer->getShadowMaxFilterTexels();
+                    if (ImGui::SliderFloat("Max Penumbra (texels)##SunShadows", &maxTexels, 1.0f, 64.0f, "%.0f"))
+                        m_Renderer->setShadowMaxFilterTexels(maxTexels);
+                    ImGui::SetItemTooltip("The widest penumbra PCSS searches and filters, in texels of each cascade.");
+                }
+
+                float depthBias = m_Renderer->getShadowDepthBias();
+                if (ImGui::SliderFloat("Depth Bias##SunShadows", &depthBias, 0.0f, 4.0f, "%.2f"))
+                    m_Renderer->setShadowDepthBias(depthBias);
+                float normalBias = m_Renderer->getShadowNormalBias();
+                if (ImGui::SliderFloat("Normal Bias##SunShadows", &normalBias, 0.0f, 4.0f, "%.2f"))
+                    m_Renderer->setShadowNormalBias(normalBias);
+                float slopeBias = m_Renderer->getShadowSlopeBias();
+                if (ImGui::SliderFloat("Slope Bias##SunShadows", &slopeBias, 0.0f, 8.0f, "%.2f"))
+                    m_Renderer->setShadowSlopeBias(slopeBias);
+                ImGui::SetItemTooltip("Against shadow acne, in texels of each cascade: the shaded point moves towards the sun (Depth)\n"
+                                      "and along its normal (Normal); the casters' depth moves away by their slope (Slope).\n"
+                                      "Too much detaches shadows from their casters (peter panning).");
+                ImGui::Unindent();
             }
         }
 

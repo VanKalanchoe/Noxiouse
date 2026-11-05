@@ -334,9 +334,12 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
         float4 materialSample = materialTex.Load(int3(pixelCoord, 0));
         float4 emissionSample = emissionTex.Load(int3(pixelCoord, 0));
 
-        // Fetch Decoupled RT Shadow Mask (computed in Pass 2.5 / 2.6 for primary sun)
+        // The sun's shadow mask: ray traced (ShadowMask.slang, denoised by NRD SIGMA when it runs) or its cascaded shadow maps
+        // resolved into the same format (ShadowMapResolve.slang).
+        const bool sunShadowMaps = ubo->sunShadowCascadesReference != 0;
+        const bool shadowMaskValid = pushConstant.shadowMaskTextureIndex != 0 && pushConstant.shadowMaskTextureIndex != 0xFFFFFFFF;
         float shadowFactor = 1.0;
-        if (ubo->enableRTShadows != 0 && pushConstant.shadowMaskTextureIndex != 0 && pushConstant.shadowMaskTextureIndex != 0xFFFFFFFF)
+        if ((ubo->enableRTShadows != 0 || sunShadowMaps) && shadowMaskValid)
         {
             Texture2D shadowMaskTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.shadowMaskTextureIndex, 0));
             float2 shadowData = shadowMaskTex.Load(int3(pixelCoord, 0)).rg;
@@ -515,15 +518,15 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
                 }
 
                 float lightShadow = 1.0;
-                if (rtShadows)
+                if (i == ubo->shadowMaskLightIndex && shadowMaskValid && (rtShadows || sunShadowMaps))
                 {
-                    if (i == ubo->shadowMaskLightIndex && pushConstant.shadowMaskTextureIndex != 0 && pushConstant.shadowMaskTextureIndex != 0xFFFFFFFF)
-                    {
-                        // The sun (the first directional light) uses the decoupled shadow mask / NRD SIGMA if available -- behind a
-                        // leaf too: the mask traces a double-sided surface from the side the sun is on (ShadowMask.slang).
-                        lightShadow = shadowFactor;
-                    }
-                    else if (backLit && i == ubo->shadowMaskLightIndex)
+                    // The sun (the first directional light) uses the shadow mask -- behind a leaf too: the mask looks a double-sided
+                    // surface up from the side the sun is on (ShadowMask.slang, ShadowMapResolve.slang).
+                    lightShadow = shadowFactor;
+                }
+                else if (rtShadows)
+                {
+                    if (backLit && i == ubo->shadowMaskLightIndex)
                     {
                         // The sun behind a leaf without the mask: its own ray from the back side, whatever the shadow-ray budget.
                         if (trace_shadow_ray(ubo, worldPos - n * (0.02 * ubo->unitsPerMeter), l, maxDist))

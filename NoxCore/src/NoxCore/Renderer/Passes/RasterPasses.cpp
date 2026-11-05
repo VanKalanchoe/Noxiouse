@@ -1124,6 +1124,8 @@ namespace Nox
                 {
                     ReadDDGI(builder, resources, m_frame.ddgiWriteIndex);
                 }
+                // The sun's shadow maps (ShadowMaps.slang, through the uniforms).
+                ReadSunShadowMaps(builder, resources);
                 if (shadows && resources.TLAS.IsValid())
                 {
                     builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
@@ -1552,9 +1554,10 @@ namespace Nox
             // Transparent lit shading's specular occlusion approximation (Material_TransparentLit_Mesh.slang).
             if (m_frame.ssaoAdded)
                 builder.Read(resources.SSAO);
-            // Transparent lit shading traces its own shadow rays (ray query) against the scene.
+            // Transparent lit shading traces its own shadow rays (ray query) against the scene, and looks up the sun's shadow maps.
             if (resources.TLAS.IsValid())
                 builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
+            ReadSunShadowMaps(builder, resources);
         }
         builder.SetRenderArea(m_frame.renderExtent);
         ReadGpuScene(builder, resources);

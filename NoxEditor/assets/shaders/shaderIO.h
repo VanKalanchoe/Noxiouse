@@ -737,6 +737,10 @@ struct UniformBufferObject
     uint64_t virtualPageTableReference;
     uint64_t virtualFeedbackReference;
     uint64_t virtualTileStampsReference;
+    // The sun's cascaded shadow maps (Settings > Sun Shadows: Shadow Maps; Renderer::addShadowMapPasses): GpuShadowCascades of this
+    // frame for the passes that shade in their own pixels (the forward and particle passes; ShadowMaps.slang). 0: the sun is
+    // shadowed by ray tracing, or not at all. The deferred lighting reads the shadow mask the cascades are resolved into instead.
+    uint64_t sunShadowCascadesReference;
 };
 
 // An emissive mesh instance as a light for the path tracer's direct light sampling: picked by weight (its emission's luminance
@@ -2195,6 +2199,46 @@ struct PushConstantShadowMask
     vec2 viewportSize;
     uint32_t frameIndex;
     uint32_t gbufferMaterialIndex; // its alpha: double-sided (foliage, cloth), shadowed from the side the light is on
+};
+
+// The sun's cascaded shadow maps (RS1; Renderer::addShadowMapPasses, ShadowMaps.slang), written by the CPU per frame slot. Stable
+// cascades (UE5's directional light CSM): each covers a bounding sphere of its slice of the camera's view, its texels snapped to the
+// world so the shadow edges stand still as the camera moves. Orthographic, reverse Z (1 towards the sun); casters in front of the
+// near plane are flattened onto it (depth clamp).
+STATIC_CONST uint32_t MaxShadowCascades = 4;
+STATIC_CONST uint32_t SHADOW_FILTER_PCF = 0;  // a fixed kernel of shadowFilterTexels
+STATIC_CONST uint32_t SHADOW_FILTER_PCSS = 1; // contact hardening: the kernel grows with the distance to the caster by the sun's angular radius
+
+struct GpuShadowCascades
+{
+    mat4 viewProj[4];       // MaxShadowCascades: render space -> the cascade's clip space
+    vec4 splitFar;          // the view depth (world units along the camera's forward axis) where each cascade ends
+    vec4 texelWorldSize;    // world units per texel of each cascade
+    vec4 depthRangeWorld;   // world units its depth range [0, 1] spans
+    vec4 lightDirection;    // xyz: towards the sun; w: tan of its angular radius (PCSS)
+    uint32_t textureIndex[4]; // MaxShadowCascades: bindless slots of the depth maps
+    uint32_t count;
+    uint32_t filter;        // SHADOW_FILTER_*
+    uint32_t resolution;    // texels per side
+    float normalBias;       // texels the receiver moves along its normal before the lookup
+    float depthBias;        // texels (of world size) the receiver moves towards the sun
+    float blendFraction;    // the last part of each cascade's depth range that dithers into the next one; the last cascade fades out
+    float filterTexels;     // PCF kernel radius / PCSS minimum
+    float maxFilterTexels;  // PCSS kernel radius limit
+    uint32_t padding[3];
+};
+
+// The shadow maps resolved into the screen's shadow mask (ShadowMapResolve.slang), the RT shadow mask's format.
+struct PushConstantShadowMapResolve
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    uint64_t cascadesReference; // GpuShadowCascades
+    uint32_t depthTextureIndex;
+    uint32_t gbufferNormalIndex;
+    uint32_t gbufferMaterialIndex;
+    uint32_t frameIndex;
+    vec2 viewportSize;
 };
 
 struct PushConstantReflection

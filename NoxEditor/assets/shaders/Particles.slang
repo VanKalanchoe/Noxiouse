@@ -12,6 +12,7 @@
 #include "shaderIO.h"
 #include "DDGICommon.slang"
 #include "HeightFog.slang"
+#include "ShadowMaps.slang"
 
 static const uint ParticlesPerGroup = 32;
 
@@ -89,7 +90,12 @@ float3 litParticle(UniformBufferObject* ubo, float3 albedo, float3 position, flo
         if (lightType == 0)
             irradiance *= cloud_shadow(ubo, position, i, sample.direction);
         const float3 l = sample.direction;
-        if (lightType == 0 && traceShadow && !sunTested)
+        if (lightType == 0 && i == ubo->shadowMaskLightIndex && ubo->sunShadowCascadesReference != 0)
+        {
+            // The sun's shadow maps (Settings > Sun Shadows: Shadow Maps), looked up at the particle's middle facing the sun.
+            irradiance *= sun_shadow_map(ubo, (GpuShadowCascades*)ubo->sunShadowCascadesReference, position, l, 0.5);
+        }
+        else if (lightType == 0 && traceShadow && !sunTested)
         {
             sunTested = true;
             if (particleShadowed(ubo, position, l))
