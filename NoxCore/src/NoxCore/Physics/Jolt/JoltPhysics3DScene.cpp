@@ -214,8 +214,10 @@ namespace Nox {
 
     void JoltPhysics3DScene::Init()
     {
-        m_GroupFilter = new NoxCollisionGroupFilter();
+        // Jolt first: its objects (the group filter is a JPH::GroupFilter) allocate through JPH::Allocate, which is null until
+        // PhysicsEngine::Init registers the allocator.
         PhysicsEngine::Init();
+        m_GroupFilter = new NoxCollisionGroupFilter();
 
         m_TempAllocator = std::make_unique<JPH::TempAllocatorImpl>(10 * 1024 * 1024);
         m_JobSystem = std::make_unique<NoxJoltJobSystem>(1024, 128);
