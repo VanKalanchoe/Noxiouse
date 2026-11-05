@@ -27,6 +27,7 @@
 #include "RayHitShading.slang"
 #include "HeightFog.slang"
 #include "ShadowMaps.slang"
+#include "IrradianceVolumeCommon.slang"
 
 import Math;
 
@@ -690,7 +691,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         }
     }
 
-    IBLResult ibl = getIBLContribution(ubo, iblInputs, n, environmentReflection, ao);
+    IBLResult ibl = getIBLContributionAt(ubo, iblInputs, n, environmentReflection, ao, vertIn.worldPos); // the reflection probes too
     float3 ambientDiffuse = ibl.diffuse;
     float3 ambientSpecular = ibl.specular;
 
@@ -703,6 +704,39 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         ambientDiffuse = sceneIrradiance * diffuseColor;
         sceneSpecularOcclusion = scene_gi_specular_occlusion(ubo, sceneIrradiance, n);
         ambientSpecular *= sceneSpecularOcclusion;
+    }
+    else
+    {
+        // The raster probe volume (Diffuse GI: Raster Probe Volume), as the deferred lighting takes it: its light over the
+        // environment's, the sky's reflection held back as far as the sky does not reach. A decal had the bare sky's ambient over a
+        // wall lit by the volume: white patches on every wall.
+        float3 volumeIrradiance;
+        float volumeWeight;
+        if (irradiance_volume_lookup(ubo, vertIn.worldPos, n, volumeIrradiance, volumeWeight))
+        {
+            ambientDiffuse = lerp(ambientDiffuse, volumeIrradiance * diffuseColor, volumeWeight);
+            const float volumeLuma = dot(volumeIrradiance, float3(0.2126, 0.7152, 0.0722));
+            sceneSpecularOcclusion = lerp(1.0, saturate(volumeLuma / skyIrradianceLuma(ubo, n)), volumeWeight);
+            ambientSpecular *= sceneSpecularOcclusion;
+        }
+    }
+    // Screen-space GI: what its rays found for the opaque surface right behind -- a decal's wall (the same point along the pixel's
+    // ray: 1 %, at least 3 cm), as the deferred lighting applies it there; glass and what stands in front keeps the above.
+    if (ubo->ssgiTextureIndex != 0xFFFFFFFF && ubo->ssgiDepthTextureIndex != 0xFFFFFFFF && transmission <= 0.0)
+    {
+        const int2 pixel = int2(vertIn.pos.xy);
+        Texture2D<float2> ssgiDepthTex = Texture2D<float2>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ssgiDepthTextureIndex, 0));
+        const float surfaceViewZ = ssgiDepthTex.Load(int3(pixel, 0)).x;
+        const float viewZ = mul(ubo->proj, mul(ubo->view, float4(vertIn.worldPos, 1.0))).w;
+        if (surfaceViewZ > 0.0 && abs(viewZ - surfaceViewZ) <= max(0.01 * viewZ, 0.03 * ubo->unitsPerMeter))
+        {
+            Texture2D ssgiTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ssgiTextureIndex, 0));
+            const float4 ssgi = ssgiTex.Load(int3(pixel, 0));
+            ambientDiffuse = ssgi.rgb * diffuseColor + saturate(1.0 - ssgi.a) * ambientDiffuse;
+            const float skyOcclusion = 1.0 - 0.85 * saturate(ssgi.a);
+            sceneSpecularOcclusion *= skyOcclusion;
+            ambientSpecular *= skyOcclusion;
+        }
     }
 
     // Smooth glass with ray traced glass on: its reflection traced like its refraction (the room around a jar on a counter, not

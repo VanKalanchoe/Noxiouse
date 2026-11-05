@@ -15,19 +15,7 @@
     };
     groupshared DeferredLightingPayload gPayload;
 
-    // The sky's irradiance at a normal, unoccluded (luminance; the same units as the GI's irradiance / pi): what the GI is compared
-// with to know how much of the sky a point sees, so its reflection of the sky is held back as much (indoors, under awnings). It used
-// to be compared with the Radiance Scale slider's value (1), which a lit surface's GI exceeds at once: no occlusion, everything
-// reflected the whole sky and looked wet.
-float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
-{
-    if (ubo->irradianceMapIndex == 0xFFFFFFFF)
-        return max(ubo->scaleIBLAmbient, 0.01);
-    TextureCube irradiance = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
-    SamplerState irradianceSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
-    return max(dot(irradiance.SampleLevel(irradianceSampler, n, 0).rgb * ubo->scaleIBLAmbient, float3(0.2126, 0.7152, 0.0722)), 1e-4);
-}
-
+    
 [shader("task")]
     [numthreads(1, 1, 1)]
     void taskMain()

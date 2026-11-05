@@ -4,8 +4,9 @@
 // around the normal (turned per pixel and frame), marched through this frame's depth buffer as SSR.slang marches its mirror ray; a ray
 // that hits takes last frame's lit scene there (reprojected; the SSR history). Monte Carlo: with cosine-distributed rays the mean
 // radiance is the irradiance / pi, so traceMain writes the sum of the hits' radiance / rayCount (rgb) and the share of rays that hit
-// (a) -- the deferred lighting adds the frame's other ambient for the rest. denoiseMain averages 3x3 neighbours of the same surface
-// and accumulates over frames (reprojected, clamped to the neighbourhood). Perspective cameras only.
+// (a) -- the deferred lighting adds the frame's other ambient for the rest. A ray reads the lit scene at the mip its cone covers where
+// it lands, each hit held below a firefly limit. denoiseMain averages 5x5 neighbours of the same surface (brightness-weighted) and
+// accumulates over frames where last frame saw the same surface. Perspective cameras only.
 
 struct SSGIPayload
 {
@@ -82,6 +83,14 @@ float4 traceMain(MSOutput input, uniform PushConstantSSGI pushConstant) : SV_Tar
     const float ign = frac(52.9829189 * frac(0.06711056 * noisePixel.x + 0.00583715 * noisePixel.y));
     const uint rays = clamp(pushConstant.rayCount, 1u, 8u);
     const uint steps = clamp(pushConstant.steps, 4u, 64u);
+    // Fireflies: a hit's radiance at most SSGIMaxMiddleGreys x middle grey at this frame's exposure (luminance; the color kept).
+    const float exposure = scene_exposure(ubo, pushConstant.autoExposureTextureIndex, pushConstant.exposureCompensation,
+                                          pushConstant.autoExposureMinEV, pushConstant.autoExposureMaxEV);
+    const float maxLuminance = SSGIMaxMiddleGreys * 0.18 / exposure;
+    // The share of the hemisphere one ray stands for, as a cone: what it sees of the scene is that wide where it lands (UE's SSGI
+    // reads its color pyramid the same way). A small bright lamp is then its surroundings' average, not a speck.
+    const float coneTan = 0.75 / sqrt(float(rays));
+    const float maxMip = max(float(pushConstant.historyMipCount) - 1.0, 0.0);
     float3 radianceSum = float3(0.0);
     float hits = 0.0;
     for (uint ray = 0; ray < rays; ++ray)
@@ -132,7 +141,14 @@ float4 traceMain(MSOutput input, uniform PushConstantSSGI pushConstant) : SV_Tar
                         const float2 previousUV = ssgi_clip_to_uv(previousClip);
                         if (previousClip.w > 0.0 && all(previousUV > 0.0) && all(previousUV < 1.0))
                         {
-                            radianceSum += max(historyTex.SampleLevel(linearClamp, previousUV, min(1.0, float(pushConstant.historyMipCount) - 1.0)).rgb, float3(0.0));
+                            // The cone's width where it lands, in pixels: the mip of the lit scene to read.
+                            const float travelPixels = length((sampleUV - uv0) * viewportSize);
+                            const float mip = clamp(log2(max(travelPixels * coneTan, 1.0)), min(1.0, maxMip), maxMip);
+                            float3 radiance = max(historyTex.SampleLevel(linearClamp, previousUV, mip).rgb, float3(0.0));
+                            const float luminance = dot(radiance, float3(0.2126, 0.7152, 0.0722));
+                            if (luminance > maxLuminance)
+                                radiance *= maxLuminance / luminance;
+                            radianceSum += radiance;
                             hits += 1.0;
                         }
                     }
@@ -170,7 +186,10 @@ SSGIDenoiseOutput denoiseMain(MSOutput input, uniform PushConstantSSGIDenoise pu
     const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
     const float viewZ = nearPlane / depth;
 
-    // 5x5 neighbours on the same surface (view depth within 2%, normals alike), Gaussian falloff.
+    // 5x5 neighbours on the same surface (view depth within 2%, normals alike), Gaussian falloff -- each also by its brightness on
+    // screen, 1 / (1 + luminance x exposure) (Karis' average): one bright outlier among them counts as little as it deserves.
+    const float exposure = scene_exposure(ubo, pushConstant.autoExposureTextureIndex, pushConstant.exposureCompensation,
+                                          pushConstant.autoExposureMinEV, pushConstant.autoExposureMaxEV);
     float4 sum = float4(0.0);
     float weightSum = 0.0;
     for (int y = -2; y <= 2; ++y)
@@ -183,8 +202,10 @@ SSGIDenoiseOutput denoiseMain(MSOutput input, uniform PushConstantSSGIDenoise pu
                 continue;
             const float zWeight = saturate(1.0 - abs(nearPlane / d - viewZ) / (0.02 * viewZ));
             const float nWeight = pow(saturate(dot(normalize(normalTex.Load(int3(p, 0)).rgb + float3(0.0, 1e-6, 0.0)), normal)), 8.0);
-            const float w = zWeight * nWeight * exp(-0.25 * float(x * x + y * y));
-            sum += rawTex.Load(int3(p, 0)) * w;
+            const float4 sample = rawTex.Load(int3(p, 0));
+            const float w = zWeight * nWeight * exp(-0.25 * float(x * x + y * y)) /
+                            (1.0 + dot(sample.rgb, float3(0.2126, 0.7152, 0.0722)) * exposure);
+            sum += sample * w;
             weightSum += w;
         }
     }

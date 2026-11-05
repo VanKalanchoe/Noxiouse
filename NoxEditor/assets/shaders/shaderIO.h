@@ -765,7 +765,11 @@ struct UniformBufferObject
     uint32_t volumetricFogTextureIndex;
     uint32_t volumetricFogSlices;
     float volumetricFogDistance;
-    uint32_t volumetricFogPadding;
+    // Screen-space GI (Settings > Screen-Space GI; SSGI.slang), for the forward passes (a decal takes its wall's): the denoised result
+    // (rgb irradiance / pi x the hit share, a the hit share) and its view depth (x) per pixel. 0xFFFFFFFF: none.
+    uint32_t ssgiTextureIndex;
+    uint32_t ssgiDepthTextureIndex;
+    uint32_t ssgiPadding[3];
 };
 
 // An emissive mesh instance as a light for the path tracer's direct light sampling: picked by weight (its emission's luminance
@@ -2529,8 +2533,16 @@ struct PushConstantSSGI
     float maxDistance; // world units
     float thickness;   // world units
     uint32_t frameIndex;
+    // The exposure the post process applies (scene_exposure): a hit's radiance is held to SSGIMaxMiddleGreys x middle grey at it.
+    uint32_t autoExposureTextureIndex; // last frame's adapted luminance (0xFFFFFFFF: none)
+    float exposureCompensation;
+    float autoExposureMinEV;
+    float autoExposureMaxEV;
     uint32_t padding[3];
 };
+// SSGI's firefly limit: a hit brighter than this many times middle grey on screen counts as this bright (a lamp's bulb a ray of two
+// happens to hit would otherwise light the wall in specks).
+STATIC_CONST float SSGIMaxMiddleGreys = 32.0;
 
 // SSGI's denoiser (SSGI.slang denoiseMain): a 5x5 bilateral average of the raw rays, then last frame's result where this surface was
 // (the previous camera; kept only where last frame's view depth there matches), accumulated over up to maxHistory frames.
@@ -2545,6 +2557,12 @@ struct PushConstantSSGIDenoise
     uint32_t historyDepthTextureIndex; // last frame's (view depth, frames accumulated)
     float maxHistory;                  // frames at most (the blend is 1 / frames)
     vec2 viewportSize;
+    // The exposure (as PushConstantSSGI's): the neighbours are averaged by their brightness on screen (Karis), outliers count less.
+    uint32_t autoExposureTextureIndex;
+    float exposureCompensation;
+    float autoExposureMinEV;
+    float autoExposureMaxEV;
+    uint32_t padding[2];
 };
 
 // Volumetric fog (RS6; VolumetricFog.slang): lightMain lights each froxel (the height fog's density, the sun and local lights with the

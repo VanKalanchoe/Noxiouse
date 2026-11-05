@@ -137,7 +137,11 @@ namespace Nox
         const RGTexture depthRead = depthHistory.Textures[readIndex];
         const RGTexture depthWrite = depthHistory.Textures[writeIndex];
         const RGTexture sceneHistory = resources.SSRHistory[m_ssrHistoryIndex];
+        // The exposure the post process applies (last frame's adapted luminance, as the path tracer's firefly filter reads it).
+        const RGTexture exposureTexture = m_autoExposure && resources.AutoExposureAdapted.IsValid() && !resources.AutoExposureAdaptedReset
+                                              ? resources.AutoExposureAdapted : RGTexture{};
         resources.SSGI = historyWrite;
+        resources.SSGIDepth = depthWrite;
         m_frame.ssgiAdded = true;
 
         m_renderGraph.AddPass("SSGI", RGPassFlags::Raster,
@@ -146,10 +150,12 @@ namespace Nox
                 builder.Read(resources.Depth);
                 builder.Read(resources.GBufferNormal);
                 builder.Read(sceneHistory);
+                if (exposureTexture.IsValid())
+                    builder.Read(exposureTexture);
                 builder.ColorTarget(raw, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
-            [this, res = &resources, raw, sceneHistory, mips = m_frame.ssrHistoryMips](RGPassContext& context)
+            [this, res = &resources, raw, sceneHistory, exposureTexture, mips = m_frame.ssrHistoryMips](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ssgiTracePipeline);
@@ -171,6 +177,10 @@ namespace Nox
                 push.maxDistance = WorldUnits::FromMeters(m_ssgiDistanceMeters);
                 push.thickness = WorldUnits::FromMeters(m_ssrThicknessMeters);
                 push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                push.autoExposureTextureIndex = exposureTexture.IsValid() ? context.Slot(exposureTexture) : 0xFFFFFFFF;
+                push.exposureCompensation = m_exposureCompensation;
+                push.autoExposureMinEV = m_autoExposureMinEV;
+                push.autoExposureMaxEV = m_autoExposureMaxEV;
                 cmd.pushData(&push, sizeof(push));
                 cmd.drawMeshTasks(1, 1, 1);
             });
@@ -186,11 +196,13 @@ namespace Nox
                     builder.Read(historyRead);
                     builder.Read(depthRead);
                 }
+                if (exposureTexture.IsValid())
+                    builder.Read(exposureTexture);
                 builder.ColorTarget(historyWrite, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.ColorTarget(depthWrite, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
-            [this, res = &resources, raw, historyRead, depthRead, historyValid](RGPassContext& context)
+            [this, res = &resources, raw, historyRead, depthRead, historyValid, exposureTexture](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ssgiDenoisePipeline);
@@ -211,6 +223,10 @@ namespace Nox
                 push.historyTextureIndex = historyValid ? context.Slot(historyRead) : 0xFFFFFFFF;
                 push.historyDepthTextureIndex = historyValid ? context.Slot(depthRead) : 0xFFFFFFFF;
                 push.maxHistory = 32.0f;
+                push.autoExposureTextureIndex = exposureTexture.IsValid() ? context.Slot(exposureTexture) : 0xFFFFFFFF;
+                push.exposureCompensation = m_exposureCompensation;
+                push.autoExposureMinEV = m_autoExposureMinEV;
+                push.autoExposureMaxEV = m_autoExposureMaxEV;
                 push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
                 cmd.pushData(&push, sizeof(push));
                 cmd.drawMeshTasks(1, 1, 1);
@@ -642,6 +658,8 @@ namespace Nox
                 uniforms.enableDDGI = 0;
             uniforms.screenGITextureIndex = 0xFFFFFFFF;
             uniforms.screenGIDistanceTextureIndex = 0xFFFFFFFF;
+            uniforms.ssgiTextureIndex = 0xFFFFFFFF;
+            uniforms.ssgiDepthTextureIndex = 0xFFFFFFFF;
             uniforms.aerialPerspectiveTextureIndex = 0xFFFFFFFF;
             uniforms.reflectionProbesReference = 0;
             uniforms.reflectionProbeCount = 0;

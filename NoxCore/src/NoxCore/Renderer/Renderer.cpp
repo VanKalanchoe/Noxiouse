@@ -5419,6 +5419,12 @@ namespace Nox
         uniformData.screenGITextureIndex = frame.screenProbeGIAdded ? graph.GetSlotOr(resources.ScreenProbeGI[frame.screenProbeGIWriteIndex], NoTexture)
                                                                     : NoTexture;
         uniformData.screenGIDistanceTextureIndex = frame.screenProbeGIAdded ? graph.GetSlotOr(resources.ScreenProbeGIDistance, NoTexture) : NoTexture;
+        // The SSGI for the forward passes (a decal takes its wall's).
+        const bool ssgi = frame.ssgiAdded && resources.SSGI.IsValid() && resources.SSGIDepth.IsValid();
+        uniformData.ssgiTextureIndex = ssgi ? graph.GetSlotOr(resources.SSGI, NoTexture) : NoTexture;
+        uniformData.ssgiDepthTextureIndex = ssgi ? graph.GetSlotOr(resources.SSGIDepth, NoTexture) : NoTexture;
+        if (uniformData.ssgiTextureIndex == NoTexture || uniformData.ssgiDepthTextureIndex == NoTexture)
+            uniformData.ssgiTextureIndex = uniformData.ssgiDepthTextureIndex = NoTexture;
         // The air's camera volume, for the forward passes' fog (deferred lighting gets it in its push constants).
         uniformData.aerialPerspectiveTextureIndex = resources.AerialPerspective.IsValid() ? graph.GetSlotOr(resources.AerialPerspective, NoTexture) : NoTexture;
         uniformData.aerialPerspectiveKmPerUnit = WorldUnits::ToMeters(1.0f) / 1000.0f * glm::max(m_proceduralSky.AerialPerspectiveScale, 0.0f);
@@ -7241,6 +7247,8 @@ namespace Nox
             // The screen-probe GI is the camera's pixels: another view's points would land on the wrong ones.
             uniforms.screenGITextureIndex = 0xFFFFFFFF;
             uniforms.screenGIDistanceTextureIndex = 0xFFFFFFFF;
+            uniforms.ssgiTextureIndex = 0xFFFFFFFF;
+            uniforms.ssgiDepthTextureIndex = 0xFFFFFFFF;
             // So is the air's volume (built along the camera's rays): another view's forward fog is the height fog alone.
             uniforms.aerialPerspectiveTextureIndex = 0xFFFFFFFF;
             // An asset preview stands far below the scene: its shadow rays would hit the world above, its DDGI lookups the grid's edge.

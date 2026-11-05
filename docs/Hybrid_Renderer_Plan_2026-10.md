@@ -672,3 +672,11 @@ those engines do it:
   and the volume's own light at the surface (each relight adds a bounce). Time of day and moving lights no longer need a capture;
   Continuous Update is gone. To measure: "Irradiance Probe Relight", "Irradiance Volume Sun Shadow", the cascades with a still and a
   moving camera.
+
+**Decals white with the raster probe volume; SSGI specks (2026-11-05).** The forward pass (decals, glass) knew only the RT GI terms
+(screen probes, DDGI): with Raster Probe Volume a decal kept the bare sky's ambient and reflection over a wall lit by the volume --
+white patches on every wall. It now takes the volume (and its sky-reflection hold-back), the reflection probes, and the SSGI of the
+opaque surface right behind it (`UniformBufferObject::ssgiTextureIndex` / `ssgiDepthTextureIndex`, the same point along the pixel's
+ray: a decal on its wall), as the deferred lighting does there. SSGI's specks around lamps were fireflies (one of two rays hitting a
+small bright bulb): a ray now reads the lit scene at the mip its cone covers where it lands (UE's SSGI), a hit is held to 32 x middle
+grey at the frame's exposure (as the path tracer's firefly filter), and the 5 x 5 denoise averages by brightness on screen (Karis).

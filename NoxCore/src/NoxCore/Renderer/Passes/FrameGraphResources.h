@@ -67,6 +67,7 @@ namespace Nox
         RGTexture SSRHistory[2];
         // Screen-space GI, denoised (Renderer::addSSGIPasses): this frame's result; invalid without it.
         RGTexture SSGI;
+        RGTexture SSGIDepth; // its view depth per pixel (x)
 
         // Hybrid RT + NRD
         RGTexture RawShadowMask;
