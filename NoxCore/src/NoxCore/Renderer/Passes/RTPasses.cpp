@@ -362,8 +362,6 @@ namespace Nox
         const bool runDDGI = !frame.runPathTracer &&
                              m_rayTracingEnabled &&
                              (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17) &&
-                             // The screen probes' Surface Cache hit lighting takes the irradiance volume for the light around instead.
-                             (!usesScreenProbeSurfaceCache() || m_debugMode == 17) &&
                              m_ddgiRadiancePipeline && m_ddgiBlendIrradiancePipeline && m_ddgiBlendDistancePipeline &&
                              (totalDDGIProbes > 0);
         if (!runDDGI)
@@ -657,7 +655,6 @@ namespace Nox
         common.tileSize = tile;
         common.historyValid = historyValid ? 1u : 0u;
         common.maxHistory = std::clamp(m_screenProbeMaxHistory, 1u, 256u);
-        common.hitLighting = usesScreenProbeSurfaceCache() ? 1u : 0u;
         common.emissiveTextureIndex = 0xFFFFFFFF;
 
         // Every pass is a compute dispatch over its target, 8 x 8 texels a group (ScreenProbeCommon.slang), writing every texel.
@@ -708,12 +705,6 @@ namespace Nox
                 {
                     ReadDDGI(builder, resources, ddgiIndex);
                 }
-                // Surface Cache hit lighting: the irradiance volume's sun shadow map and probes (through the uniforms), relit earlier
-                // this frame on the graphics queue (this pass may run on the compute queue).
-                if (m_irradianceSunMap.IsValid())
-                    builder.Read(m_irradianceSunMap);
-                if (m_irradianceSHBuffer.IsValid())
-                    builder.Read(m_irradianceSHBuffer);
                 builder.Write(resources.ScreenProbeRays, RGTextureAccess::StorageWrite);
                 builder.Write(emissiveSamples, RGTextureAccess::StorageWrite);
             },

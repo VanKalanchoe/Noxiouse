@@ -88,13 +88,10 @@ namespace Nox
         uniformData.irradianceVolumeReference = 0;
         m_irradianceCaptureFrame.Count = 0;
         m_irradianceSunMap = RGTexture{};
-        m_irradianceSHBuffer = RGBuffer{};
         m_irradianceSunDrawn = false;
         state.Automatic = false;
         const bool pathTracing = m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19;
-        // Diffuse GI: Raster Probe Volume, or the screen probes' Surface Cache hit lighting (the volume is their radiance cache).
-        const bool wanted = m_diffuseGIMode == 4 || usesScreenProbeSurfaceCache();
-        if (!wanted || pathTracing || !m_irradianceCapturePipeline || !m_irradiancePackPipeline || !m_irradianceRelightPipeline)
+        if (m_diffuseGIMode != 4 || pathTracing || !m_irradianceCapturePipeline || !m_irradiancePackPipeline || !m_irradianceRelightPipeline)
         {
             // Scene changes go untracked meanwhile: every probe is captured again (in turn) when the volume comes back.
             state.RequeueAll = true;
@@ -269,19 +266,14 @@ namespace Nox
         const uint64_t tableAddress = m_irradianceTableBuffers[frameIndex]->getDeviceAddress();
         uniformData.irradianceVolumeReference = tableAddress;
 
-        // The SH into the graph: its writers and the passes on other queues that read it are ordered by it (the screen probes'
-        // Surface Cache hit lighting traces on the compute queue).
-        NRI::Buffer* shBuffer = state.SH.get();
-        m_irradianceSHBuffer = m_renderGraph.ImportBuffer("Irradiance Volume SH", shBuffer);
-        const RGBuffer shGraphBuffer = m_irradianceSHBuffer;
-
         // A cleared volume (zero SH: nothing lit) before its first probes are.
+        NRI::Buffer* shBuffer = state.SH.get();
         if (state.NeedsClear)
         {
             state.NeedsClear = false;
             const uint64_t bytes = sizeof(glm::vec4) * 6 * state.ProbeCount;
             m_renderGraph.AddPass("Irradiance Volume Clear", RGPassFlags::NeverCull,
-                [shGraphBuffer](RGBuilder& builder) { builder.Write(shGraphBuffer, RGBufferAccess::CopyDestination); },
+                [](RGBuilder&) {},
                 [shBuffer, bytes](RGPassContext& context)
                 {
                     context.Cmd().fillBuffer(*shBuffer, 0, bytes, 0);
@@ -495,7 +487,6 @@ namespace Nox
                     builder.Read(albedo);
                     builder.Read(emission);
                     builder.Read(depth);
-                    builder.Write(shGraphBuffer);
                 },
                 [this, albedo, emission, depth, count, tableAddress, probeListBuffer, maxDistance](RGPassContext& context)
                 {
@@ -539,8 +530,6 @@ namespace Nox
                 if (sunMap.IsValid())
                     builder.Read(sunMap);
                 ReadShadowMaps(builder, resources); // the local lights' atlas (and the sun's cascades) when they run
-                builder.Read(shGraphBuffer); // the bounce: the volume's own light
-                builder.Write(shGraphBuffer);
             },
             [this, relightCount, tableAddress, relightListBuffer](RGPassContext& context)
             {

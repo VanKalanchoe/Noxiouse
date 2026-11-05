@@ -805,15 +805,6 @@ namespace Nox
         uint32_t& getScreenProbeFilterPasses() { return m_screenProbeFilterPasses; }
         uint32_t& getScreenProbeMaxHistory() { return m_screenProbeMaxHistory; }
         void resetScreenProbeHistory() { m_renderGraph.ResetHistory(ScreenProbeHistoryKey); }
-        // How the screen probes' rays light their hits (Lumen's two modes). Full (Lumen's Hit Lighting): every selected light behind
-        // its shadow ray, the DDGI cascades for the light around. Surface Cache (Lumen's default): the sun through the irradiance
-        // volume's cached sun shadow map, the relit irradiance volume (RS5a: the probes captured once, relit every frame) for the
-        // light around -- no DDGI, fewer rays.
-        enum class ScreenProbeHitLighting : uint32_t { Full = 0, SurfaceCache = 1 };
-        void setScreenProbeHitLighting(ScreenProbeHitLighting mode) { m_screenProbeHitLighting = mode; }
-        ScreenProbeHitLighting getScreenProbeHitLighting() const { return m_screenProbeHitLighting; }
-        // The screen probes run with Surface Cache hit lighting (the irradiance volume runs for them, DDGI does not).
-        bool usesScreenProbeSurfaceCache() const { return m_diffuseGIMode == 3 && m_screenProbeHitLighting == ScreenProbeHitLighting::SurfaceCache; }
         // Probes over the render resolution (the tile size's grid).
         NRI::Extent2D getScreenProbeCounts() const;
 
@@ -1651,7 +1642,6 @@ namespace Nox
         } m_irradianceVolume;
         shaderio::GpuIrradianceVolume m_irradianceTable{};
         RGTexture m_irradianceSunMap;      // this frame's handle (invalid: no sun map)
-        RGBuffer m_irradianceSHBuffer;     // this frame's handle of the SH (imported; invalid: no volume)
         bool m_irradianceSunDrawn = false; // drawn this frame (its view's uniforms are written)
         std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceTableBuffers;
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_irradianceTableBuffersMapped{};
@@ -1886,7 +1876,6 @@ namespace Nox
         // Screen-probe GI
         uint32_t m_screenProbeTileSize = 16;
         uint32_t m_screenProbeFilterPasses = 2;
-        ScreenProbeHitLighting m_screenProbeHitLighting = ScreenProbeHitLighting::SurfaceCache;
         uint32_t m_screenProbeMaxHistory = 24;
         uint32_t m_screenProbeHistoryIndex = 0; // which of the two results is last frame's
         uint64_t m_screenProbeLastFrame = ~0ull; // scene frame it last ran (its history is only good for the next one)

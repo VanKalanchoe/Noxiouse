@@ -2929,10 +2929,7 @@ struct PushConstantScreenProbe
     // The pass's targets (storage slots, RGPassContext::StorageSlot): the compute passes write them as storage images.
     uint32_t outputStorageIndex0;
     uint32_t outputStorageIndex1;
-    // Trace: how a ray's hit is lit. 0 Full (Lumen's Hit Lighting): every selected light behind its shadow ray, the DDGI cascades
-    // around. 1 Surface Cache (Lumen's default): the sun through the irradiance volume's cached sun shadow map (a ray only where it
-    // does not reach), the relit irradiance volume around -- no DDGI.
-    uint32_t hitLighting;
+    uint32_t screenProbePadding;
 };
 
 struct PushConstantDDGIDebug

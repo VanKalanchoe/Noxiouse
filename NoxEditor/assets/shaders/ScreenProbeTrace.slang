@@ -26,7 +26,7 @@ bool screen_probe_candidate_blocks(UniformBufferObject* ubo, GpuRayTracingInstan
 // The radiance leaving a hit back along the ray (diffuse). The back of single-sided geometry (the ray got through a crack, or the
 // probe's surface is a sliver inside something) gives no light.
 float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, float2 barycentrics, float3 origin, float3 direction,
-                              float hitT, uint seed, bool surfaceCache)
+                              float hitT, uint seed)
 {
     GpuRayTracingInstance* instances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
     const GpuRayTracingInstance hit = instances[instanceSlot];
@@ -101,28 +101,12 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
     const LightSelection lights = select_lights(ubo, position, normal, 0.1 * ubo->unitsPerMeter, rng);
     float3 irradiance = float3(0.0);
     for (uint i = 0; i < lights.count; ++i)
-    {
-        // Surface Cache hit lighting: the sun through the volume's cached shadow map, its shadow ray only where the map ends.
-        float visibility = -1.0; // -1: a shadow ray
-        if (surfaceCache && lights.lightIndex[i] == ubo->shadowMaskLightIndex)
-        {
-            float mapVisibility;
-            if (irradiance_volume_sun_visibility(ubo, position, faceNormal, lights.direction[i], mapVisibility))
-                visibility = mapVisibility;
-        }
-        if (visibility < 0.0)
-            irradiance += lights.irradiance[i] *
-                          ray_transmittance(ubo, shadowOrigin, lights.direction[i], 0.0, max(lights.distance[i] - 0.02 * ubo->unitsPerMeter, 0.0));
-        else
-            irradiance += lights.irradiance[i] * visibility;
-    }
+        irradiance += lights.irradiance[i] *
+                      ray_transmittance(ubo, shadowOrigin, lights.direction[i], 0.0, max(lights.distance[i] - 0.02 * ubo->unitsPerMeter, 0.0));
     const float3 direct = albedo / ScreenProbePi * irradiance;
 
-    // The light around the hit: the DDGI cascades (seen from the probe), else the relit irradiance volume (Surface Cache hit lighting:
-    // Lumen's radiance cache), else the environment's irradiance.
+    // The light around the hit: the DDGI cascades (seen from the probe), else the environment's irradiance.
     float3 bounce = float3(0.0);
-    float3 volumeIrradiance;
-    float volumeWeight;
     if (ubo->enableDDGI != 0 && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
     {
         Texture2D irradianceAtlas = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiIrradianceTextureIndex, 0));
@@ -130,16 +114,11 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
         SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
         bounce = sample_ddgi_diffuse_surface(ubo, position, normal, normal, -direction, irradianceAtlas, distanceAtlas, linearClamp);
     }
-    else
+    else if (ubo->irradianceMapIndex != 0xFFFFFFFF)
     {
-        if (ubo->irradianceMapIndex != 0xFFFFFFFF)
-        {
-            TextureCube irradiance = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
-            SamplerState irradianceSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
-            bounce = irradiance.SampleLevel(irradianceSampler, normal, 0).rgb * ubo->scaleIBLAmbient;
-        }
-        if (irradiance_volume_lookup(ubo, position, normal, volumeIrradiance, volumeWeight))
-            bounce = lerp(bounce, volumeIrradiance, volumeWeight);
+        TextureCube irradiance = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
+        SamplerState irradianceSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
+        bounce = irradiance.SampleLevel(irradianceSampler, normal, 0).rgb * ubo->scaleIBLAmbient;
     }
 
     return direct + emission + albedo * bounce;
@@ -302,8 +281,7 @@ float4 screen_probe_trace_ray(uint2 texel, PushConstantScreenProbe pushConstant)
     const float hitT = query.CommittedRayT();
     const uint seed = screen_probe_hash((probe.x * 9781u + probe.y * 6271u) ^ (ray * 26699u) ^ (pushConstant.frameIndex * 7919u));
     float3 radiance = screen_probe_shade_hit(ubo, query.CommittedRayInstanceCustomIndex(), query.CommittedPrimitiveIndex(),
-                                             query.CommittedTriangleBarycentrics(), origin, direction, hitT, seed,
-                                             pushConstant.hitLighting != 0) * throughGlass;
+                                             query.CommittedTriangleBarycentrics(), origin, direction, hitT, seed) * throughGlass;
     // Half floats end at 65504: an overflow becomes Inf, then NaN in the history.
     radiance = all(isfinite(radiance)) ? min(radiance, float3(30000.0)) : float3(0.0);
     return float4(radiance, min(hitT / max(ubo->unitsPerMeter, 1e-6), 60000.0));

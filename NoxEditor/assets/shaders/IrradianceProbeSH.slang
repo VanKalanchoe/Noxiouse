@@ -178,11 +178,25 @@ void packMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
 
 // --- relightMain -------------------------------------------------------------------------------------------------------------------
 
-// The sun at a cache texel's surface: the volume's sun shadow map (IrradianceVolumeCommon.slang); outside it, lit.
-float relight_sun_visibility(UniformBufferObject* ubo, float3 position, float3 n, float3 L)
+// The sun at a cache texel's surface through the volume's sun shadow map (one bilinear comparison: the probes' light is soft
+// anyway). Normal offset and a step towards the sun of a texel or so against the averaged surface's self shadowing.
+float relight_sun_visibility(UniformBufferObject* ubo, GpuIrradianceVolume* volume, float3 position, float3 n, float3 L)
 {
-    float visibility;
-    return irradiance_volume_sun_visibility(ubo, position, n, L, visibility) ? visibility : 1.0;
+    if (volume->sunShadowTextureIndex == 0xFFFFFFFF)
+        return 1.0;
+    const float texel = volume->sunTexelWorld;
+    const float NoL = saturate(dot(n, L));
+    const float sinTheta = sqrt(saturate(1.0 - NoL * NoL));
+    const float3 receiver = position + n * (2.0 * texel * sinTheta) + L * texel;
+    const float4 clip = mul(volume->sunViewProj, float4(receiver, 1.0));
+    const float2 uv = float2(clip.x * 0.5 + 0.5, 0.5 - clip.y * 0.5);
+    if (any(uv <= 0.0) || any(uv >= 1.0) || clip.z <= 0.0 || clip.z > 1.0)
+        return 1.0;
+    Texture2D<float> map = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + volume->sunShadowTextureIndex, 0));
+    SamplerState pointClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_NEAREST_CLAMP, 0));
+    const float slope = min(sinTheta / max(NoL, 0.05), 4.0);
+    const float bias = (1.0 + slope) * texel / max(volume->sunDepthRange, 1e-6);
+    return shadow_map_bilinear(map, pointClamp, uv, clip.z + bias, float(volume->sunShadowResolution));
 }
 
 // The direct light's irradiance at a surface (E, not yet / pi), every light of the frame.
@@ -203,7 +217,7 @@ float3 relight_direct(UniformBufferObject* ubo, GpuIrradianceVolume* volume, flo
                 continue;
             float visibility = cloud_shadow(ubo, position, i, L);
             if (i == ubo->shadowMaskLightIndex && visibility > 0.0)
-                visibility *= relight_sun_visibility(ubo, position, n, L);
+                visibility *= relight_sun_visibility(ubo, volume, position, n, L);
             irradiance += radiance * (NoL * visibility);
             continue;
         }

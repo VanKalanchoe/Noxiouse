@@ -4,36 +4,6 @@
 // colour x this = the diffuse light).
 #pragma once
 
-#include "ShadowMaps.slang"
-
-// The sun at a surface through the irradiance volume's own sun shadow map (one orthographic view over the whole box, cached:
-// Renderer::addIrradianceVolumePasses) -- what the volume's probes are lit by, and the screen probes' hits in their Surface Cache hit
-// lighting (no shadow ray). One bilinear comparison: GI light is soft anyway. Normal offset and a step towards the sun of a texel or
-// so against an averaged or coarse surface shadowing itself. false: no map, or the point is outside it (the caller decides).
-bool irradiance_volume_sun_visibility(UniformBufferObject* ubo, float3 position, float3 n, float3 L, out float visibility)
-{
-    visibility = 1.0;
-    if (ubo->irradianceVolumeReference == 0)
-        return false;
-    GpuIrradianceVolume* volume = (GpuIrradianceVolume*)ubo->irradianceVolumeReference;
-    if (volume->sunShadowTextureIndex == 0xFFFFFFFF)
-        return false;
-    const float texel = volume->sunTexelWorld;
-    const float NoL = saturate(dot(n, L));
-    const float sinTheta = sqrt(saturate(1.0 - NoL * NoL));
-    const float3 receiver = position + n * (2.0 * texel * sinTheta) + L * texel;
-    const float4 clip = mul(volume->sunViewProj, float4(receiver, 1.0));
-    const float2 uv = float2(clip.x * 0.5 + 0.5, 0.5 - clip.y * 0.5);
-    if (any(uv <= 0.0) || any(uv >= 1.0) || clip.z <= 0.0 || clip.z > 1.0)
-        return false;
-    Texture2D<float> map = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + volume->sunShadowTextureIndex, 0));
-    SamplerState pointClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_NEAREST_CLAMP, 0));
-    const float slope = min(sinTheta / max(NoL, 0.05), 4.0);
-    const float bias = (1.0 + slope) * texel / max(volume->sunDepthRange, 1e-6);
-    visibility = shadow_map_bilinear(map, pointClamp, uv, clip.z + bias, float(volume->sunShadowResolution));
-    return true;
-}
-
 // false outside the volume's box (the caller keeps its other ambient); `irradiance` = E(n) / pi.
 bool irradiance_volume_lookup(UniformBufferObject* ubo, float3 worldPos, float3 n, out float3 irradiance, out float weight)
 {
