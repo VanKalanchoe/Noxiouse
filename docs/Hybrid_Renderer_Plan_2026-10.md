@@ -745,3 +745,7 @@ every frame, forward transparent 1.0. For 120 fps: the reflections at half resol
 2 x 2 block a frame, in turn, NRD reconstructs -- the Low rung's setting), and the emissive light grid cached when only the RT
 reflections sample it: built again when its place (the camera's cell), the emissive lights or anything in the scene changed; the path
 tracer, the screen probes and DDGI keep a new one every frame (their per-frame candidates are part of how they converge).
+Measured: half resolution was slower (RT reflections 0.67 + upsample 0.10 + the full-resolution smooth pass 1.54 + NRD 0.87 = 3.18 ms
+vs 1.81 + 1.09 = 2.90 at full): smooth reflections (roughness < 0.35) are always traced at full resolution and the reflections end at
+0.4, so half resolution only covers 0.35-0.4. Reverted to full resolution. The cached emissive grid saved its ~0.7 ms: Raster (All)
+now 8.44 ms (118 fps) in the editor; without the editor's passes (Stable Entity/Depth 0.41, ImGui 0.16) ~7.9 ms (~127 fps).

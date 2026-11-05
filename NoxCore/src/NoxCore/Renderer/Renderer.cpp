@@ -847,7 +847,8 @@ namespace Nox
                 preset.RayTracing = true;
                 preset.RTShadows = false;
                 preset.RTReflections = true;
-                preset.RTDivisor = 2; // the reflections traced in one pixel of each 2 x 2 block, in turn (NRD reconstructs the rest)
+                // Full resolution: at half, the smooth reflections (roughness < 0.35, RTFullResolutionSmoothRoughness) are traced at full
+                // resolution anyway and the reflections stop at 0.4 -- measured slower (3.18 ms vs 2.90).
                 preset.DiffuseGI = 4;
                 preset.SunShadows = Renderer::SunShadowMode::ShadowMaps;
                 preset.LocalShadows = Renderer::LocalShadowMode::ShadowMaps;
