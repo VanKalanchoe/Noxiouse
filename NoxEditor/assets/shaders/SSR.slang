@@ -117,7 +117,7 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant, out float h
     // The ray: a direction of the roughness' GGX lobe, a different one every pixel and frame (UE's stochastic SSR), not the mirror
     // direction alone -- on a glossy, normal-mapped surface (an awning's cloth) the mirror direction swings with the slightest move of
     // the camera and its reflection jumped around; the lobe's directions, averaged over frames by temporalMain, are the glossy
-    // reflection the RT reflections give. The lobe's grazing tail is trimmed (UE's BRDF bias): less noise for little light.
+    // reflection the RT reflections give. The lobe's tail is trimmed (u.x x 0.5, UE's default BRDF bias): less noise for little light.
     const float2 noisePixel = float2(pixelCoord) + float(pushConstant.frameIndex % 64u) * float2(5.588238, 3.45367);
     const float noise = frac(52.9829189 * frac(0.06711056 * noisePixel.x + 0.00583715 * noisePixel.y));
     float3 R = reflect(-V, N);
@@ -128,7 +128,7 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant, out float h
         const float3 bitangent = cross(N, tangent);
         const float3 Ve = float3(dot(V, tangent), dot(V, bitangent), dot(V, N));
         const float2 u = frac(float2(noise, frac(noise * 1.6180339887 + 0.5)) + float(pushConstant.frameIndex % 64u) * float2(0.7548776662, 0.5698402910));
-        const float3 H = ssr_sample_ggx_vndf(Ve, alpha, float2(u.x * 0.7, u.y));
+        const float3 H = ssr_sample_ggx_vndf(Ve, alpha, float2(u.x * 0.5, u.y));
         const float3 sampled = reflect(-V, tangent * H.x + bitangent * H.y + N * H.z);
         if (dot(sampled, N) > 0.02)
             R = normalize(sampled);
@@ -284,6 +284,8 @@ float4 temporalMain(MSOutput input, uniform PushConstantSSRTemporal pushConstant
     //     for a wide one), so a mirror keeps its detail.
     //   - what last frame's value may be: its mean +- 1.5 standard deviations (variance clipping, Salvi 2016), within its range. A
     //     min / max box of a noisy input would let the history through or throw it away by chance.
+    // Rough lobes reach further: every other pixel (9 x 9) -- FidelityFX SSSR's wider kernel for wider lobes.
+    const int stride = roughness > 0.3 ? 2 : 1;
     const float spread = lerp(0.6, 2.5, saturate(roughness / 0.5));
     float3 m1 = float3(0.0), m2 = float3(0.0);
     float a1 = 0.0, a2 = 0.0;
@@ -295,12 +297,14 @@ float4 temporalMain(MSOutput input, uniform PushConstantSSRTemporal pushConstant
     {
         for (int x = -2; x <= 2; ++x)
         {
-            const int2 p = clamp(pixelCoord + int2(x, y), int2(0), int2(viewportSize) - 1);
+            const int2 p = clamp(pixelCoord + int2(x, y) * stride, int2(0), int2(viewportSize) - 1);
             const float d = depthTex.Load(int3(p, 0)).r;
             if (d <= 0.0)
                 continue;
+            // The same surface by depth; the normals only loosely (a normal map's bumps differ pixel to pixel: weighted hard, the
+            // bumpy cloth the noise is worst on kept almost no neighbours).
             const float sameSurface = saturate(1.0 - abs(nearPlane / d - viewZ) / (0.02 * viewZ)) *
-                                      pow(saturate(dot(normalize(normalTex.Load(int3(p, 0)).rgb + float3(0.0, 1e-6, 0.0)), normal)), 8.0);
+                                      saturate(dot(normalize(normalTex.Load(int3(p, 0)).rgb + float3(0.0, 1e-6, 0.0)), normal) * 2.0 - 0.6);
             if (sameSurface <= 0.0)
                 continue;
             const float4 s = rawTex.Load(int3(p, 0));
