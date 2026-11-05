@@ -63,15 +63,17 @@ float3 ssr_sample_ggx_vndf(float3 Ve, float alpha, float2 u)
     return normalize(float3(alpha * Nh.x, alpha * Nh.y, max(0.0, Nh.z)));
 }
 
+// Towards the screen's edges SSR knows less and less (what is beyond is unknown): it fades out over the outer 15 % smoothly, so
+// the environment / probes take over without a visible line (UE's SSR edge fade).
 float ssr_edge_fade(float2 uv)
 {
     const float2 edge = min(uv, 1.0 - uv);
-    return saturate(min(edge.x, edge.y) / 0.08);
+    return smoothstep(0.0, 0.15, min(edge.x, edge.y));
 }
 
 struct SSROutput
 {
-    float4 reflection : SV_Target0; // rgb radiance, a confidence
+    float4 reflection : SV_Target0; // rgb radiance x confidence (premultiplied), a confidence
     float hitDistance : SV_Target1; // world units, 0: no hit
 };
 
@@ -84,6 +86,10 @@ SSROutput fragMain(MSOutput input, uniform PushConstantSSR pushConstant)
     output.reflection = traceReflection(input, pushConstant, output.hitDistance);
     if (output.reflection.a <= 0.0)
         output.hitDistance = 0.0;
+    // Premultiplied: the filters average hits and misses (a miss is 0 confidence, 0 light) and the lighting blends once. Stored
+    // apart, a miss's black was averaged into the light and the confidence applied to it again -- the reflection came out too dark
+    // wherever hits and misses mix (rough surfaces, edges) and flickered with the mix.
+    output.reflection.rgb *= output.reflection.a;
     return output;
 }
 
@@ -277,6 +283,7 @@ float4 temporalMain(MSOutput input, uniform PushConstantSSRTemporal pushConstant
     const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
     const float viewZ = nearPlane / depth;
 
+    // (Everything here is premultiplied: rgb = light x confidence.)
     // This frame's neighbourhood (5 x 5, YCoCg: luminance and chroma apart), on this pixel's surface (view depth within 2 %, normals
     // alike: AMD FidelityFX SSSR's / Frostbite's spatial filter of stochastic reflections), two uses:
     //   - the spatial filter: the neighbours' rays sampled other directions of the same lobe, so their average is this pixel's

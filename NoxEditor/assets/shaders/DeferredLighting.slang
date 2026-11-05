@@ -746,7 +746,8 @@
         }
 
         // Screen-space reflections (Settings > Screen-Space Reflections) where the RT ones do not run: the reflected scene where SSR
-        // found it, the environment / probes where its confidence is low (SSR.slang). Its radiance is the lit scene: no sky occlusion.
+        // found it, the environment / probes where its confidence is low (SSR.slang; premultiplied: rgb is light x confidence). Its
+        // radiance is the lit scene: no sky occlusion.
         if (!hasRTReflection && pushConstant.ssrTextureIndex != 0xFFFFFFFF && ubo->brdfLutIndex != 0xFFFFFFFF)
         {
             Texture2D ssrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssrTextureIndex, 0));
@@ -757,7 +758,7 @@
                 Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
                 const float3 brdf = brdfTex.Sample(samplerBrdf, float2(NdotV, 1.0 - perceptualRoughness)).rgb;
                 const float3 specularFactor = specularColor * brdf.x + specularEnvironmentR90 * brdf.y;
-                ambientSpecular = lerp(ambientSpecular, ssr.rgb * specularFactor, saturate(ssr.a));
+                ambientSpecular = ambientSpecular * (1.0 - saturate(ssr.a)) + ssr.rgb * specularFactor;
             }
         }
 

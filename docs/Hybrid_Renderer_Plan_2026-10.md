@@ -706,3 +706,12 @@ Then stable when moving but grainy (the sampled lobe, one ray a pixel). Now the 
 SSSR / Frostbite's stochastic SSR do: the 5 x 5 neighbours on the same surface (view depth within 2 %, normals alike), Gaussian
 weighted with a width that follows the lobe (about a pixel for a near mirror, the whole 5 x 5 for a wide lobe); the variance clip uses
 the same surface-weighted moments.
+Reverted (2026-11-05): the Surface Cache hit lighting above -- the user's comparison showed interiors brighter and light leaking
+around plants (the irradiance volume's probes ~7 m apart as the light around the hits, the sun through a 2048^2 map over the whole
+scene); RT mode stays as it was.
+
+**SSR still wrong (2026-11-05): it was not premultiplied.** SSR stored its light and its confidence apart; every filter (the spatial
+filter, the temporal blend) then averaged a miss's black into the light, and the lighting applied the confidence to that again --
+too dark and unstable wherever hits and misses mix (rough surfaces, the edges of what SSR finds), whatever the filtering. Now rgb is
+light x confidence through every stage and the lighting blends once (environment x (1 - a) + rgb). The screen-edge fade is a
+smoothstep over the outer 15 % (was linear over 8 %: a visible line where SSR handed over to the probes).
