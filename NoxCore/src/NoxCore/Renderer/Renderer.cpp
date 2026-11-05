@@ -847,6 +847,7 @@ namespace Nox
                 preset.RayTracing = true;
                 preset.RTShadows = false;
                 preset.RTReflections = true;
+                preset.RTDivisor = 2; // the reflections traced in one pixel of each 2 x 2 block, in turn (NRD reconstructs the rest)
                 preset.DiffuseGI = 4;
                 preset.SunShadows = Renderer::SunShadowMode::ShadowMaps;
                 preset.LocalShadows = Renderer::LocalShadowMode::ShadowMaps;

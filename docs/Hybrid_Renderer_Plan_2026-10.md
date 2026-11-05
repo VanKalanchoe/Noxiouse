@@ -740,3 +740,8 @@ their reflections where the GPU can (every Nox GPU can). Raster (All) now keeps 
 reflections (NRD REBLUR; DLSS SR without Ray Reconstruction), SSR off (still selectable). Their hits take the light around from the
 raster probe volume where DDGI does not run (SceneGI.slang; DDGI and the screen probes take precedence as before). To measure: "RT
 Reflections" + its NRD pass + TLAS, against SSR's ~0.4 ms.
+Measured (Raster (All) with RT reflections): 9.0 ms, 111 fps -- RT reflections 1.91 + NRD 0.85, the emissive light grid ~0.7 rebuilt
+every frame, forward transparent 1.0. For 120 fps: the reflections at half resolution (Ray Tracing Resolution 1/2: one pixel of each
+2 x 2 block a frame, in turn, NRD reconstructs -- the Low rung's setting), and the emissive light grid cached when only the RT
+reflections sample it: built again when its place (the camera's cell), the emissive lights or anything in the scene changed; the path
+tracer, the screen probes and DDGI keep a new one every frame (their per-frame candidates are part of how they converge).

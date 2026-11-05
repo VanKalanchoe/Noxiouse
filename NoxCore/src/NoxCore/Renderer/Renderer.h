@@ -1500,6 +1500,10 @@ namespace Nox
         uint32_t m_frameChangedBoundsStatic = 0;
         bool m_frameOriginMoved = false; // the render origin moved (every render-space position did)
         bool m_frameBoundsLost = true;   // more changed than was tracked: anything may have
+        // The emissive light grid as last built (cached when nothing that feeds it changed: addEmissiveLightGridPass).
+        glm::vec4 m_emissiveGridKey{ 0.0f }; // origin, total weight
+        uint32_t m_emissiveGridTriangles = 0;
+        bool m_emissiveGridValid = false;
         // Local lights' shadow maps: per frame slot a copy of the uniforms per view and a culling view per light, the GpuLocalShadows
         // and the per-light view table (grown with the light count); this frame's views, lights and their draws.
         struct LocalShadowLight

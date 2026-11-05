@@ -14,6 +14,23 @@ namespace Nox
         if (!m_emissiveGridPipeline || !m_emissiveTrianglesPipeline || !m_emissiveScanPipeline || !resources.EmissiveLightGrid.IsValid() ||
             !resources.EmissiveTriangles.IsValid() || !resources.EmissiveTriangleCdf.IsValid() || uniformData.emissiveGridReference == 0 ||
             uniformData.emissiveTriangleCount == 0)
+        {
+            m_emissiveGridValid = false;
+            return;
+        }
+
+        // Cached when only the RT reflections sample it (Raster (All)): built again when the grid's place, the emissive lights or
+        // anything in the scene changed (the triangles' records follow the transforms and materials). The path tracer and the
+        // screen-probe GI take a new one every frame -- their per-frame candidates are part of how they converge.
+        const bool perFrame = m_frame.runPathTracer || m_frame.restirPTActive || m_diffuseGIMode == 3 || m_diffuseGIMode == 1 || m_ddgiEnabled;
+        const glm::vec4 key(uniformData.emissiveGridOrigin, uniformData.emissiveLightTotalWeight);
+        const bool unchanged = m_emissiveGridValid && !perFrame && key == m_emissiveGridKey &&
+                               uniformData.emissiveTriangleCount == m_emissiveGridTriangles && m_frameChangedBounds.empty() &&
+                               !m_frameOriginMoved && !m_frameBoundsLost;
+        m_emissiveGridKey = key;
+        m_emissiveGridTriangles = uniformData.emissiveTriangleCount;
+        m_emissiveGridValid = true;
+        if (unchanged)
             return;
 
         // Each emissive triangle's record and power, then their running sum, then the cells' picks.
