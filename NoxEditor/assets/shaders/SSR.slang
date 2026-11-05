@@ -88,8 +88,8 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant, out float h
         return float4(0.0);
 
     Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.materialTextureIndex, 0));
-    const float roughness = clamp(materialTex.Load(int3(pixelCoord, 0)).r, 0.0, 1.0);
-    if (roughness >= pushConstant.maxRoughness)
+    const float materialRoughness = clamp(materialTex.Load(int3(pixelCoord, 0)).r, 0.0, 1.0);
+    if (materialRoughness >= pushConstant.maxRoughness)
         return float4(0.0);
 
     const float2 uv = (float2(pixelCoord) + 0.5) / viewportSize;
@@ -100,8 +100,46 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant, out float h
     const float lenN = length(rawNormal);
     if (lenN < 1e-6)
         return float4(0.0);
-    const float3 N = rawNormal / lenN;
+    const float3 pixelNormal = rawNormal / lenN;
     const float3 V = normalize(ubo->cameraWorldPos.xyz - worldPos);
+
+    // Toksvig normal filtering (Toksvig 2004; UE's / Frostbite's roughness from normal variance, Godot 4's roughness limiter): the
+    // reflection of a bumpy surface (a normal map's waves, cloth folds) is its average normal's, blurred by how much its normals
+    // disagree. The 9 x 9 neighbours on this surface (every other pixel, view depth within 2 %): their mean normal is the ray's,
+    // and its shortening (|mean| < 1) the variance added to the roughness: sigma^2 ~ 2 (1 - |mean|). The pixel's own mapped normal
+    // made a mirror that swung with the slightest move of the camera on a wavy glossy awning; this one holds still and blurs as the
+    // real reflection does. Flat glossy surfaces keep their mirror (their normals agree); curvature over 9 pixels adds little.
+    const float nearPlaneZ = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
+    const float viewZ = nearPlaneZ / depth;
+    float3 normalSum = float3(0.0);
+    float normalCount = 0.0;
+    for (int y = -2; y <= 2; ++y)
+    {
+        for (int x = -2; x <= 2; ++x)
+        {
+            const int2 p = clamp(pixelCoord + int2(x, y) * 2, int2(0), int2(viewportSize) - 1);
+            const float d = depthTex.Load(int3(p, 0)).r;
+            if (d <= 0.0 || abs(nearPlaneZ / d - viewZ) > 0.02 * viewZ)
+                continue;
+            const float3 n = normalTex.Load(int3(p, 0)).rgb;
+            const float len = length(n);
+            if (len > 1e-6)
+            {
+                normalSum += n / len;
+                normalCount += 1.0;
+            }
+        }
+    }
+    float3 N = pixelNormal;
+    float roughness = materialRoughness;
+    if (normalCount > 0.0 && dot(normalSum, normalSum) > 1e-8)
+    {
+        const float meanLength = saturate(length(normalSum) / normalCount);
+        N = normalize(normalSum);
+        roughness = sqrt(min(1.0, materialRoughness * materialRoughness + 2.0 * (1.0 - meanLength)));
+    }
+    if (roughness >= pushConstant.maxRoughness)
+        return float4(0.0);
 
     // The ray: the mirror direction, the same every frame (Godot's SSR): roughness is the blur of what it finds (the cone's mip of the
     // lit scene, below), not random directions. A sampled lobe (stochastic SSR, UE4 / Frostbite / FidelityFX) needs a heavy denoiser

@@ -721,3 +721,8 @@ Godot traces the mirror ray only and turns roughness into blur (cone-traced blur
 a pixel, the step offset fixed per pixel (no per-frame noise: a still camera gives the same result every frame), the roughness cone's
 mip of the lit scene; the temporal pass (mirror-image reprojection, variance clip) and its surface-aware spatial filter stay, on a
 noise-free input.
+Then noise-free but the reflection swam again when moving: the mirror ray followed the awning's wavy normal map pixel by pixel. Now
+Toksvig normal filtering (Toksvig 2004; roughness from normal variance as UE / Frostbite / Godot 4's roughness limiter): the ray
+reflects off the mean normal of the 9 x 9 neighbours on the same surface (every other pixel, view depth within 2 %), and the mean's
+shortening becomes roughness (sigma^2 ~ 2 (1 - |mean|)): a wavy glossy surface gets a steady, blurred reflection (or, past the SSR's
+maximum roughness, the probes); flat glossy surfaces keep their mirror.
