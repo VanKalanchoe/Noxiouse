@@ -193,6 +193,10 @@ namespace Nox
                     AppendSetting(out, "Ambient occlusion: SSAO | radius {:.0f} cm", WorldUnits::ToCentimeters(renderer.getSSAORadius()));
                 else
                     AppendSetting(out, "Ambient occlusion: off");
+                if (renderer.getSSREnabled())
+                    AppendSetting(out, "Screen-space reflections: ON{} | {:.0f} m | {} steps | roughness < {:.2f}",
+                                  renderer.getRayTracingEnabled() && renderer.getRayTracingReflections() ? " (RT reflections take precedence)" : "",
+                                  WorldUnits::ToMeters(renderer.getSSRMaxDistance()), renderer.getSSRMaxSteps(), renderer.getSSRMaxRoughness());
                 if (renderer.getContactShadowsEnabled())
                     AppendSetting(out, "Contact shadows: ON | {:.2f} m | {} steps (on shadow-mapped lights)",
                                   WorldUnits::ToMeters(renderer.getContactShadowLength()), renderer.getContactShadowSamples());

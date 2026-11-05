@@ -584,6 +584,19 @@ namespace Nox
         float getContactShadowLength() const { return WorldUnits::FromMeters(m_contactShadowLengthMeters); }
         void setContactShadowSamples(uint32_t samples) { m_contactShadowSamples = std::clamp(samples, 4u, 64u); }
         uint32_t getContactShadowSamples() const { return m_contactShadowSamples; }
+        // Screen-space reflections (RS4; Passes/ReflectionPasses.cpp): where the RT reflections do not run, the mirror ray marched
+        // through the depth buffer, last frame's lit scene at the hit; the environment where it finds nothing. Off by default; how
+        // far rays go, how thick surfaces count, steps at most, the roughness up to which they run.
+        void setSSREnabled(bool enabled) { m_ssrEnabled = enabled; }
+        bool getSSREnabled() const { return m_ssrEnabled; }
+        void setSSRMaxDistance(float distance) { m_ssrMaxDistanceMeters = std::clamp(WorldUnits::ToMeters(distance), 0.5f, 1000.0f); }
+        float getSSRMaxDistance() const { return WorldUnits::FromMeters(m_ssrMaxDistanceMeters); }
+        void setSSRThickness(float thickness) { m_ssrThicknessMeters = std::clamp(WorldUnits::ToMeters(thickness), 0.01f, 10.0f); }
+        float getSSRThickness() const { return WorldUnits::FromMeters(m_ssrThicknessMeters); }
+        void setSSRMaxSteps(uint32_t steps) { m_ssrMaxSteps = std::clamp(steps, 8u, 256u); }
+        uint32_t getSSRMaxSteps() const { return m_ssrMaxSteps; }
+        void setSSRMaxRoughness(float roughness) { m_ssrMaxRoughness = std::clamp(roughness, 0.05f, 1.0f); }
+        float getSSRMaxRoughness() const { return m_ssrMaxRoughness; }
         // This frame's local lights with a shadow map and their views (stats).
         uint32_t getLocalShadowLightCount() const { return m_localShadowLightCount; }
         uint32_t getLocalShadowViewCount() const { return m_localShadows.viewCount; }
@@ -1103,6 +1116,11 @@ namespace Nox
         // Local lights' shadow maps (Passes/ShadowMapPasses.cpp): which lights, their views and tiles, culling per light, one depth pass
         // into the atlas; after Compile the atlas slot, the per-light view table and each view's copy of the uniforms.
         void addLocalShadowPasses();
+        // Screen-space reflections (Passes/ReflectionPasses.cpp): the trace before the deferred lighting, and the lit scene with blur
+        // mips it reflects next frame, after the forward passes.
+        void createSSRPipeline(bool forceCompile = false);
+        void addSSRPass();
+        void addSSRHistoryPass();
         void updateLocalShadowUniforms();
         // After Compile: the cascades' bindless slots into GpuShadowCascades, each cascade's copy of the frame's uniforms.
         void updateShadowMapUniforms();
@@ -1365,6 +1383,14 @@ namespace Nox
         uint32_t m_localShadowMaxLights = 8;
         uint32_t m_localShadowAtlasSize = 4096;
         uint32_t m_localShadowMaxResolution = 1024;
+        std::unique_ptr<NRI::Pipeline> m_ssrPipeline;
+        bool m_ssrEnabled = false;
+        float m_ssrMaxDistanceMeters = 50.0f;
+        float m_ssrThicknessMeters = 0.3f;
+        uint32_t m_ssrMaxSteps = 64;
+        float m_ssrMaxRoughness = 0.6f;
+        uint32_t m_ssrHistoryIndex = 0; // the history slot last frame wrote (this frame reads it)
+        bool m_ssrHistoryValid = false; // it holds a lit scene (written last frame at this size)
         bool m_contactShadows = false;
         float m_contactShadowLengthMeters = 0.3f;
         uint32_t m_contactShadowSamples = 12;
@@ -1435,6 +1461,8 @@ namespace Nox
             bool nrdShadowsAdded = false;
             bool shadowMapsAdded = false; // the sun's cascaded shadow maps, resolved into RawShadowMask
             bool localShadowsAdded = false; // local lights' shadow atlas
+            bool ssrAdded = false;          // screen-space reflections (resources.SSR)
+            uint32_t ssrHistoryMips = 0;
             uint32_t shadowCascadeCount = 0;
             bool rtReflectionsAdded = false;
             bool nrdReflectionsAdded = false;

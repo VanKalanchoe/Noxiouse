@@ -32,7 +32,7 @@ namespace Nox
                 const ProjectRendererSettings& renderer = config.Renderer;
                 if (renderer.RayTracingResolution >= 0 || renderer.DiffuseGI >= 0 || renderer.ShadowedLights >= 0 || renderer.OIT >= 0 || renderer.TAA >= 0 ||
                     renderer.SunShadows >= 0 || renderer.LocalShadows >= 0 || renderer.ContactShadows >= 0 ||
-                    renderer.SSAOMethod >= 0)
+                    renderer.SSAOMethod >= 0 || renderer.SSR >= 0)
                 {
                     out << YAML::Key << "Renderer" << YAML::Value << YAML::BeginMap;
                     if (renderer.RayTracingResolution >= 0) out << YAML::Key << "RayTracingResolution" << YAML::Value << renderer.RayTracingResolution;
@@ -44,6 +44,7 @@ namespace Nox
                     if (renderer.LocalShadows >= 0) out << YAML::Key << "LocalShadows" << YAML::Value << renderer.LocalShadows;
                     if (renderer.ContactShadows >= 0) out << YAML::Key << "ContactShadows" << YAML::Value << renderer.ContactShadows;
                     if (renderer.SSAOMethod >= 0) out << YAML::Key << "SSAOMethod" << YAML::Value << renderer.SSAOMethod;
+                    if (renderer.SSR >= 0) out << YAML::Key << "SSR" << YAML::Value << renderer.SSR;
                     out << YAML::EndMap;
                 }
                 out << YAML::EndMap; // Project
@@ -100,6 +101,7 @@ namespace Nox
             read("LocalShadows", config.Renderer.LocalShadows);
             read("ContactShadows", config.Renderer.ContactShadows);
             read("SSAOMethod", config.Renderer.SSAOMethod);
+            read("SSR", config.Renderer.SSR);
         }
 
         return true;

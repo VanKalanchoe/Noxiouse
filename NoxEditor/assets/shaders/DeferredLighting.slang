@@ -727,6 +727,22 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
             ambientSpecular = lerp(ambientSpecular, rtSpecular, rtWeight);
         }
 
+        // Screen-space reflections (Settings > Screen-Space Reflections) where the RT ones do not run: the reflected scene where SSR
+        // found it, the environment / probes where its confidence is low (SSR.slang). Its radiance is the lit scene: no sky occlusion.
+        if (!hasRTReflection && pushConstant.ssrTextureIndex != 0xFFFFFFFF && ubo->brdfLutIndex != 0xFFFFFFFF)
+        {
+            Texture2D ssrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssrTextureIndex, 0));
+            const float4 ssr = ssrTex.Load(int3(pixelCoord, 0));
+            if (ssr.a > 0.0)
+            {
+                SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
+                Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+                const float3 brdf = brdfTex.Sample(samplerBrdf, float2(NdotV, 1.0 - perceptualRoughness)).rgb;
+                const float3 specularFactor = specularColor * brdf.x + specularEnvironmentR90 * brdf.y;
+                ambientSpecular = lerp(ambientSpecular, ssr.rgb * specularFactor, saturate(ssr.a));
+            }
+        }
+
         // The coat's and the sheen's ambient over the base's (lobe_ambient): each lobe's environment at its own roughness, held back
         // as the base's is (the specular occlusion; rough ones take the screen probes' GI), the coat the traced reflection where
         // there is one.

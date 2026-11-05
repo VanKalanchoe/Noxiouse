@@ -2342,7 +2342,9 @@ struct PushConstantDeferredLighting
     float aerialPerspectiveKmPerUnit;
     // Screen-probe GI's result (ScreenProbeIntegrate.slang: irradiance / pi), 0xFFFFFFFF when it did not run (diffuseGIMode 3).
     uint32_t screenProbeGITextureIndex;
-    float aerialPerspectivePadding1;
+    // Screen-space reflections (SSR.slang: rgb the reflected radiance, a its confidence), 0xFFFFFFFF when they did not run (RT
+    // reflections take precedence).
+    uint32_t ssrTextureIndex;
 };
 
 // Raster-only ambient occlusion (SSAO.slang): hemisphere-kernel, world-space reprojection, one fullscreen pass.
@@ -2382,6 +2384,26 @@ struct PushConstantGTAO
     vec2 viewportSize;
     float shortRangePixels; // > 0: the radius at most this many pixels' width at the surface (ambient_occlusion_radius)
     uint32_t frameIndex;
+};
+
+// Screen-space reflections (RS4; SSR.slang): the mirror ray marched through this frame's depth buffer, the radiance at its hit taken
+// from last frame's lit scene (reprojected) at a blur mip for the roughness' cone.
+struct PushConstantSSR
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    uint32_t depthTextureIndex;
+    uint32_t normalTextureIndex;
+    uint32_t materialTextureIndex;
+    uint32_t historyTextureIndex; // last frame's lit scene with blur mips
+    uint32_t historyMipCount;
+    uint32_t maxSteps;
+    vec2 viewportSize;
+    float maxDistance;  // world units
+    float thickness;    // world units: how far behind a surface the ray may be and still hit it
+    float maxRoughness; // rougher surfaces keep the environment / probes
+    uint32_t frameIndex;
+    uint32_t padding[2];
 };
 
 struct PushConstantSSAOBlur

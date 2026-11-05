@@ -543,3 +543,13 @@ default; vs RTAO. Jimenez et al. 2016 in XeGTAO's formulation (`GTAO.slang`): pe
 over the radius' last 40%), the arc between them integrated cosine-weighted around the normal projected into the slice. View space;
 the same radius / power / short-range rule (`ambient_occlusion_radius`) as SSAO and RTAO, the same raw target and blur. Checked
 offline: an unoccluded surface integrates to exactly 1 at any tilt (0-85 degrees), so open ground is not darkened.
+
+**Screen-space reflections (RS4a, 2026-11-05, untested)** -- Settings > Screen-Space Reflections (project `SSR`), off by default;
+the RT reflections take precedence when they run. `SSR.slang` / `Passes/ReflectionPasses.cpp`: the mirror ray (up to 50 m, clipped
+at the screen's edge and in front of the near plane) marched in screen space with perspective-correct depth (McGuire & Mara 2014),
+steps = the pixels it crosses (at most 64, offset by IGN), a hit where it passes behind the depth buffer within a thickness (0.3 m, or
+the step's own depth span), refined by 5 bisections, back faces rejected. The radiance at the hit is **last frame's lit scene**
+reprojected through the previous camera: a two-slot history of the HDR scene (after the forward passes and particles) with a 2x2
+blur mip chain (ColorPyramid.slang), sampled at the mip the GGX cone (2 x hit distance x alpha) covers at the hit. Confidence fades
+at the screen edges (both frames), towards the camera, with roughness (up to 0.6) and near the ray's end; the deferred lighting
+blends `ssr x (F0 x A + F90 x B)` over the environment by it. Perspective cameras only.

@@ -605,6 +605,8 @@ namespace Nox
                 // Only the outputs of features that run this frame.
                 if (frame.rtShadowsAdded || frame.shadowMapsAdded)
                     builder.Read(resources.RawShadowMask);
+                if (frame.ssrAdded)
+                    builder.Read(resources.SSR);
                 // Local lights' shadow maps (ShadowMaps.slang, through the uniforms).
                 if (resources.LocalShadowAtlas.IsValid())
                     builder.Read(resources.LocalShadowAtlas);
@@ -699,6 +701,7 @@ namespace Nox
                 lightingPush.aerialPerspectiveKmPerUnit = aerialKmPerUnit;
                 lightingPush.screenProbeGITextureIndex = frame.screenProbeGIAdded ? context.Slot(res->ScreenProbeGI[frame.screenProbeGIWriteIndex])
                                                                                   : 0xFFFFFFFF;
+                lightingPush.ssrTextureIndex = frame.ssrAdded ? context.Slot(res->SSR) : 0xFFFFFFFF;
                 cmd.pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
 
                 cmd.drawMeshTasks(1, 1, 1);

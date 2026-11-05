@@ -61,6 +61,10 @@ namespace Nox
         std::array<RGTexture, shaderio::MaxShadowCascades> SunShadowMaps;
         // Local lights' shadow atlas (Renderer::addLocalShadowPasses); invalid without it.
         RGTexture LocalShadowAtlas;
+        // Screen-space reflections (Renderer::addSSRPass: rgb radiance, a confidence) and the lit scene they reflect, with blur mips:
+        // last frame's (read) and this frame's (written at the end of the lighting); invalid without SSR.
+        RGTexture SSR;
+        RGTexture SSRHistory[2];
 
         // Hybrid RT + NRD
         RGTexture RawShadowMask;

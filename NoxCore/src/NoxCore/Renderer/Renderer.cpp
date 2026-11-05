@@ -370,6 +370,7 @@ namespace Nox
         watchShader("assets/shaders/VisibilityBuffer.slang", "VisBuffer", [this]() { createVisibilityPipeline(true); createShadowMapPipelines(true); });
         watchShader("assets/shaders/ShadowMapResolve.slang", "ShadowMapResolve", [this]() { createShadowMapPipelines(true); });
         watchShader("assets/shaders/ShadowMaps.slang", "ShadowMaps", [this]() { createShadowMapPipelines(true); });
+        watchShader("assets/shaders/SSR.slang", "SSR", [this]() { createSSRPipeline(true); });
         watchShader("assets/shaders/ComputeSkinning.slang", "ComputeSkinning", [this]() { createComputeSkinningPipeline(true); });
         // G-Buffer (Fix watcher to recompile m_gbufferPipeline)
         watchShader("assets/shaders/GBufferMaterial.slang", "GBuffer", [this]() { createGBufferPipeline(true); });
@@ -611,6 +612,7 @@ namespace Nox
         //NRD
         createShadowMaskPipeline();
         createShadowMapPipelines();
+        createSSRPipeline();
         createNRDGuidesPipeline();
         createReflectionPipeline();
         // Path Tracer
@@ -941,6 +943,8 @@ namespace Nox
             setContactShadowsEnabled(settings.ContactShadows != 0);
         if (settings.SSAOMethod >= 0 && settings.SSAOMethod <= 1)
             setSSAOMethod(static_cast<SSAOMethod>(settings.SSAOMethod));
+        if (settings.SSR >= 0)
+            setSSREnabled(settings.SSR != 0);
     }
 
     void Renderer::setDLSSEnabled(bool enabled)
@@ -4935,6 +4939,7 @@ namespace Nox
             addRTShadowPasses();
             // After the GI: reflection hits on screen take its light (SceneGI.slang), off screen this frame's DDGI.
             addRTReflectionPasses();
+            addSSRPass(); // where the RT reflections do not run (last frame's lit scene)
             addLightPresamplingPasses();
             addReSTIRGIPasses();
             addReSTIRDIPasses();
@@ -4945,6 +4950,7 @@ namespace Nox
             addDeferredLightingPass();
             addForward3DPass();
             addParticlePass(); // the alpha-blended ones into the OIT targets (with OIT), then their resolve, then the rest
+            addSSRHistoryPass(); // the lit scene the SSR reflect next frame
             addDLSSPass();
             addTAAPass();
             addEntityDepthBlitPass();

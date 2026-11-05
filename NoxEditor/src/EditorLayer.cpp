@@ -900,6 +900,7 @@ namespace Nox
                 choice("Local Light Shadows##Project", saved.LocalShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
                 choice("Contact Shadows##Project", saved.ContactShadows, { { 0, "Off" }, { 1, "On" } });
                 choice("Screen-Space AO##Project", saved.SSAOMethod, { { 0, "Classic SSAO" }, { 1, "GTAO" } });
+                choice("Screen-Space Reflections##Project", saved.SSR, { { 0, "Off" }, { 1, "On" } });
                 choice("Order-Independent Transparency##Project", saved.OIT, { { 0, "Off" }, { 1, "On" } });
                 choice("Temporal Anti-Aliasing##Project", saved.TAA, { { 0, "Off" }, { 1, "On" } });
 
@@ -1595,6 +1596,39 @@ namespace Nox
                 ImGui::SetNextItemWidth(160.0f);
                 if (ImGui::SliderFloat("Power", &aoPower, 0.5f, 4.0f, "%.2f"))
                     m_Renderer->setSSAOPower(aoPower);
+                ImGui::Unindent();
+            }
+            ImGui::Separator();
+
+            // Screen-space reflections (RS4): the raster version of the RT reflections (which take precedence when on).
+            ImGui::SeparatorText("Screen-Space Reflections");
+            bool ssrEnabled = m_Renderer->getSSREnabled();
+            if (ImGui::Checkbox("Screen-Space Reflections (SSR)", &ssrEnabled))
+                m_Renderer->setSSREnabled(ssrEnabled);
+            ImGui::SetItemTooltip("The mirror reflection marched through the depth buffer; what it hits is taken from last frame's\n"
+                                  "image (blurred for rough surfaces). Where it finds nothing on screen (off screen, behind\n"
+                                  "objects, towards the camera) the environment shows. Used where Ray Tracing Reflections are off\n"
+                                  "(they take precedence) -- to compare the two.");
+            if (ssrEnabled)
+            {
+                ImGui::Indent();
+                float distanceMeters = WorldUnits::ToMeters(m_Renderer->getSSRMaxDistance());
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::DragFloat("Max Distance (m)##SSR", &distanceMeters, 0.5f, 0.5f, 1000.0f, "%.1f"))
+                    m_Renderer->setSSRMaxDistance(WorldUnits::FromMeters(distanceMeters));
+                float thicknessMeters = WorldUnits::ToMeters(m_Renderer->getSSRThickness());
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderFloat("Thickness (m)##SSR", &thicknessMeters, 0.01f, 2.0f, "%.2f"))
+                    m_Renderer->setSSRThickness(WorldUnits::FromMeters(thicknessMeters));
+                ImGui::SetItemTooltip("How far behind a surface on screen the ray may pass and still count as hitting it.");
+                int steps = static_cast<int>(m_Renderer->getSSRMaxSteps());
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderInt("Max Steps##SSR", &steps, 8, 256))
+                    m_Renderer->setSSRMaxSteps(static_cast<uint32_t>(steps));
+                float maxRoughness = m_Renderer->getSSRMaxRoughness();
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderFloat("Max Roughness##SSR", &maxRoughness, 0.05f, 1.0f, "%.2f"))
+                    m_Renderer->setSSRMaxRoughness(maxRoughness);
                 ImGui::Unindent();
             }
             ImGui::Separator();
