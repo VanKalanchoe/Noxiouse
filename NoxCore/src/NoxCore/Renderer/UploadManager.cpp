@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "NoxCore/Core/core.h"
+#include "NoxCore/Profiling/Profiler.h"
 
 namespace Nox
 {
@@ -124,6 +125,7 @@ namespace Nox
         if (!m_recording)
             return m_submittedValue;
 
+        Profiler::Get().EndTransferSubmission(*m_recording, m_recordingQuery);
         m_recording->end(0);
         const uint64_t value = ++m_submittedValue;
         NRI::CommandBuffer* commandBuffer = m_recording.get();
@@ -135,8 +137,9 @@ namespace Nox
         m_device->submit(NRI::QueueType::Transfer, std::span<NRI::CommandBuffer* const>(&commandBuffer, 1), waits,
                          std::span<const NRI::TimelinePoint>(&signal, 1));
 
-        m_inFlight.push_back(Submission{ value, std::move(m_recording), std::move(m_retained) });
+        m_inFlight.push_back(Submission{ value, std::move(m_recording), std::move(m_retained), m_recordingQuery });
         m_retained.clear();
+        m_recordingQuery = ~0u;
         return value;
     }
 
@@ -145,6 +148,7 @@ namespace Nox
         m_completedValue = m_timeline->getValue();
         while (!m_inFlight.empty() && m_inFlight.front().value <= m_completedValue)
         {
+            Profiler::Get().CompleteTransferSubmission(m_inFlight.front().profilerQuery);
             m_freeCommandBuffers.push_back(std::move(m_inFlight.front().commandBuffer));
             m_inFlight.pop_front();
         }
@@ -169,6 +173,7 @@ namespace Nox
             // Copies of one submission may write what an earlier one wrote (a stream grown there, a range reused after
             // its copy): a barrier's first scope covers everything submitted to the queue before it.
             m_recording->transferBarrier();
+            m_recordingQuery = Profiler::Get().BeginTransferSubmission(*m_recording);
         }
         return *m_recording;
     }

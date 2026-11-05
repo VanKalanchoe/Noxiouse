@@ -66,5 +66,18 @@ namespace NRI
         virtual void beginStatistics(CommandBuffer& cmd, uint32_t queryId) = 0;
         virtual void endStatistics(CommandBuffer& cmd, uint32_t queryId) = 0;
         virtual std::span<const GpuPipelineStatistics> getReadbackStatistics() const = 0;
+
+        // Transfer queue submissions (QueueType::Transfer, the upload manager's copies). They are not tied to a frame slot, so each
+        // gets its own query pair, reset on the host (Vulkan 1.2 hostQueryReset) when handed out. Main thread only: begin after the
+        // command buffer's begin, end before its end, read once the submission completed (that frees the pair). Supported where the
+        // device has a dedicated transfer family whose timestampValidBits is not 0.
+        virtual bool isTransferQueueSupported() const { return false; }
+        virtual uint32_t beginTransferQuery(CommandBuffer& cmd) { (void)cmd; return InvalidQueryId; }
+        virtual void endTransferQuery(CommandBuffer& cmd, uint32_t queryId) { (void)cmd; (void)queryId; }
+        virtual bool readTransferQuery(uint32_t queryId, uint64_t& outBeginTicks, uint64_t& outEndTicks)
+        {
+            (void)queryId; (void)outBeginTicks; (void)outEndTicks;
+            return false;
+        }
     };
 }

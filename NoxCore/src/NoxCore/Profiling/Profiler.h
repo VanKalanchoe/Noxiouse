@@ -94,7 +94,7 @@ namespace Nox
     {
         uint32_t ScopeId = 0;
         uint32_t Depth = 0; // nesting in its lane (0: outermost)
-        uint32_t Lane = 0;  // CPU: Profiler::GetTimelineThreadName's index; GPU: 0 the graphics queue, 1 the async compute queue
+        uint32_t Lane = 0;  // CPU: Profiler::GetTimelineThreadName's index; GPU: 0 the graphics queue, 1 async compute, 2 transfer
         int64_t StartNs = 0;
         int64_t EndNs = 0;
     };
@@ -109,8 +109,32 @@ namespace Nox
         // GPU scopes placed with calibrated timestamps; otherwise (no VK_KHR_calibrated_timestamps) the GPU frame is drawn from StartNs.
         bool GpuCalibrated = false;
         uint32_t DroppedScopes = 0; // beyond MaxTimelineScopesPerFrame
+        // Memory at the frame's end (the newest SubmitMemoryStats sample, taken a few times a second): device-local heap usage and the
+        // process' private bytes, in MB; -1 before the first sample.
+        float VramMB = -1.0f;
+        float RamMB = -1.0f;
         std::vector<TimelineScope> Cpu; // in completion order
         std::vector<TimelineScope> Gpu;
+    };
+
+    // A saved frame timeline (Profiler::SaveTimeline, like an Unreal Insights .utrace or a Tracy capture): the frames, the slow
+    // frames kept apart, and the names their scope ids and lanes refer to.
+    struct ProfileCaptureScope
+    {
+        std::string Name;
+        std::string Function;
+        std::string File;
+        uint32_t Line = 0;
+        bool IsWait = false;
+    };
+
+    struct ProfileCapture
+    {
+        std::vector<ProfileCaptureScope> Scopes; // by scope id
+        std::vector<std::string> ThreadNames;    // by CPU lane
+        std::vector<TimelineFrame> Frames;       // oldest first
+        std::vector<TimelineFrame> Spikes;       // oldest first
+        float SpikeThresholdMs = 0.0f;
     };
 
     // GPU scope state of one command buffer while it is recorded (Profiler::BeginGpuScope). A frame's command buffers can
@@ -159,6 +183,10 @@ namespace Nox
         // Frame timeline: the frames kept, and the CPU scopes kept of one frame.
         static constexpr uint32_t TimelineFrames = 300;
         static constexpr uint32_t MaxTimelineScopesPerFrame = 65536;
+        // Slow frames kept apart from the ring, so a hitch stays to be looked at after it scrolled out (Unreal Insights' and
+        // PIX's "find the spikes"); a frame is copied once its GPU timings are in.
+        static constexpr uint32_t MaxSpikeFrames = 64;
+        static constexpr uint32_t SpikeCopyDelayFrames = 16;
 
         static Profiler& Get();
 
@@ -198,6 +226,13 @@ namespace Nox
         // Main thread, after recording: takes the contexts' scopes in submission order and closes the frame.
         void EndGpuFrame(std::span<GpuScopeContext> contexts);
 
+        // Transfer queue submissions (the upload manager, main thread), on the frame timeline's transfer track while it captures and
+        // the device places GPU time on the CPU clock: begin after the command buffer's begin, end before its end, complete once the
+        // submission finished. Returns / takes NRI::GpuProfiler::InvalidQueryId when not timed.
+        uint32_t BeginTransferSubmission(NRI::CommandBuffer& cmd);
+        void EndTransferSubmission(NRI::CommandBuffer& cmd, uint32_t query);
+        void CompleteTransferSubmission(uint32_t query);
+
         // Main thread.
         void SetCounter(uint32_t scopeId, double value);
         void SubmitMemoryStats(std::span<const NRI::MemoryHeapStats> heaps, bool budgetFromDriver, const Platform::ProcessMemory& process,
@@ -222,6 +257,14 @@ namespace Nox
         uint32_t GetTimelineFrameCount() const { return m_TimelineCount; }
         const TimelineFrame& GetTimelineFrame(uint32_t index) const; // 0: the oldest kept
         void ClearTimeline();
+        // Frames whose frame or GPU time went above the threshold, oldest first (at most MaxSpikeFrames, the oldest dropped).
+        void SetSpikeThresholdMs(float milliseconds) { m_SpikeThresholdMs = milliseconds; }
+        float GetSpikeThresholdMs() const { return m_SpikeThresholdMs; }
+        uint32_t GetSpikeFrameCount() const { return static_cast<uint32_t>(m_SpikeFrames.size()); }
+        const TimelineFrame& GetSpikeFrame(uint32_t index) const { return m_SpikeFrames[index]; }
+        // The kept frames, spikes and the names they use to a binary file (.noxprof); false when it cannot be written.
+        bool SaveTimeline(const std::string& path) const;
+        static bool LoadCapture(const std::string& path, ProfileCapture& outCapture);
         // The CPU lanes: "Main Thread", the task system's workers by their names, other threads "Thread n".
         uint32_t GetTimelineThreadCount() const { return static_cast<uint32_t>(m_TimelineThreadNames.size()); }
         const std::string& GetTimelineThreadName(uint32_t lane) const { return m_TimelineThreadNames[lane]; }
@@ -248,6 +291,8 @@ namespace Nox
         void AppendSubtree(const std::vector<ScopeHistory>& histories, const std::vector<std::vector<uint32_t>>& children,
                            uint32_t scopeId, uint32_t depth, std::vector<bool>& listed, std::vector<ProfileScopeStats>& outScopes) const;
         bool IsRecent(uint64_t lastSampleFrame) const;
+        void CopySpikeFrame();
+        int64_t CalibratedNs(uint64_t ticks) const; // GPU ticks on the steady_clock through the calibration pair
 
         static void PushSample(History& history, float value, uint64_t frame);
         static ProfileTiming Summarize(const History& history);
@@ -355,6 +400,15 @@ namespace Nox
         uint64_t m_GpuCalibrationTicks = 0;
         int64_t m_GpuCalibrationHostNs = 0;
         std::chrono::steady_clock::time_point m_LastGpuCalibration{};
+        std::deque<TimelineFrame> m_SpikeFrames;
+        float m_SpikeThresholdMs = 1000.0f / 60.0f;
+        struct PendingTransfer
+        {
+            uint32_t Query;
+            uint64_t FrameNumber; // the frame that submitted it
+        };
+        std::vector<PendingTransfer> m_PendingTransfers;
+        uint32_t m_TransferScopeId = InvalidScopeId;
 
         // Counters + memory
         std::vector<CounterValue> m_Counters;

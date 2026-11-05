@@ -843,6 +843,7 @@ namespace NRI
                     .descriptorBindingVariableDescriptorCount = true,
                     .runtimeDescriptorArray = true,
                     .scalarBlockLayout = true,
+                    .hostQueryReset = true, // the profiler's transfer queue timestamps (vkCmdResetQueryPool is not allowed there)
                     .timelineSemaphore = true, // <-- Required by Streamline
                     .bufferDeviceAddress = true // <-- Required by Streamline
                 },

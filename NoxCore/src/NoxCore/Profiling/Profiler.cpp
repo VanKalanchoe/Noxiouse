@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <fstream>
 #include <limits>
 
 #include "NRI/GpuProfiler.h"
@@ -201,6 +202,22 @@ namespace Nox
                 const CompletedCpuScope& scope = m_DrainScratch[index];
                 frame.Cpu.push_back({ scope.ScopeId, scope.Depth, scope.Lane, scope.StartNs, scope.StartNs + scope.DurationNs });
             }
+
+            frame.VramMB = -1.0f;
+            frame.RamMB = -1.0f;
+            if (!m_MemoryStats.Heaps.empty())
+            {
+                uint64_t deviceLocalUsage = 0;
+                for (const NRI::MemoryHeapStats& heap : m_MemoryStats.Heaps)
+                {
+                    if (heap.deviceLocal)
+                        deviceLocalUsage += heap.usage;
+                }
+                frame.VramMB = static_cast<float>(static_cast<double>(deviceLocalUsage) / BytesPerMegabyte);
+                frame.RamMB = static_cast<float>(static_cast<double>(m_MemoryStats.Process.PrivateBytes) / BytesPerMegabyte);
+            }
+
+            CopySpikeFrame();
         }
         m_DrainScratch.clear();
 
@@ -222,6 +239,7 @@ namespace Nox
         m_GpuCurrentSlot = NoGpuSlot;
         m_GpuCalibrated = false;
         m_LastGpuCalibration = {};
+        m_PendingTransfers.clear();
     }
 
     void Profiler::BeginGpuFrame(uint32_t frameSlot)
@@ -585,7 +603,8 @@ namespace Nox
             timelineFrame = nullptr;
         if (timelineFrame)
         {
-            timelineFrame->Gpu.clear();
+            // Transfer submissions (lane 2) complete on their own and may already be in.
+            std::erase_if(timelineFrame->Gpu, [](const TimelineScope& scope) { return scope.Lane < 2; });
             timelineFrame->GpuCalibrated = m_GpuCalibrated;
         }
         const double nanosecondsPerTick = static_cast<double>(m_GpuProfiler->getTimestampPeriod());
@@ -593,11 +612,7 @@ namespace Nox
         {
             if (!m_GpuCalibrated)
                 return timelineFrame->StartNs + std::llround(static_cast<double>((ticks - frameBeginTicks) & tickMask) * nanosecondsPerTick);
-            // Ticks before the calibration sample are a negative difference (modulo the valid bits).
-            const uint64_t difference = (ticks - m_GpuCalibrationTicks) & tickMask;
-            const int64_t signedDifference = difference > tickMask / 2 ? -static_cast<int64_t>(tickMask - difference) - 1
-                                                                       : static_cast<int64_t>(difference);
-            return m_GpuCalibrationHostNs + std::llround(static_cast<double>(signedDifference) * nanosecondsPerTick);
+            return CalibratedNs(ticks);
         };
 
         for (const GpuScopeContext::Scope& record : frame.Scopes)
@@ -634,6 +649,65 @@ namespace Nox
 #endif
     }
 
+    int64_t Profiler::CalibratedNs(uint64_t ticks) const
+    {
+        const uint32_t validBits = m_GpuProfiler->getTimestampValidBits();
+        const uint64_t tickMask = validBits >= 64 ? std::numeric_limits<uint64_t>::max() : (uint64_t{1} << validBits) - 1;
+        // Ticks before the calibration sample are a negative difference (modulo the valid bits).
+        const uint64_t difference = (ticks - m_GpuCalibrationTicks) & tickMask;
+        const int64_t signedDifference = difference > tickMask / 2 ? -static_cast<int64_t>(tickMask - difference) - 1
+                                                                   : static_cast<int64_t>(difference);
+        return m_GpuCalibrationHostNs + std::llround(static_cast<double>(signedDifference) * static_cast<double>(m_GpuProfiler->getTimestampPeriod()));
+    }
+
+    uint32_t Profiler::BeginTransferSubmission(NRI::CommandBuffer& cmd)
+    {
+#if NOX_PROFILE_STATS
+        // Placed only on the CPU clock: a transfer submission belongs to no GPU frame to be drawn from.
+        if (m_TimelineCapture && m_GpuCalibrated && m_GpuProfiler && m_GpuProfiler->isTransferQueueSupported())
+            return m_GpuProfiler->beginTransferQuery(cmd);
+#endif
+        (void)cmd;
+        return NRI::GpuProfiler::InvalidQueryId;
+    }
+
+    void Profiler::EndTransferSubmission(NRI::CommandBuffer& cmd, uint32_t query)
+    {
+        if (query == NRI::GpuProfiler::InvalidQueryId || !m_GpuProfiler)
+            return;
+        m_GpuProfiler->endTransferQuery(cmd, query);
+        m_PendingTransfers.push_back({ query, m_FrameNumber });
+    }
+
+    void Profiler::CompleteTransferSubmission(uint32_t query)
+    {
+        if (query == NRI::GpuProfiler::InvalidQueryId || !m_GpuProfiler)
+            return;
+        const auto pending = std::find_if(m_PendingTransfers.begin(), m_PendingTransfers.end(),
+                                          [query](const PendingTransfer& entry) { return entry.Query == query; });
+        if (pending == m_PendingTransfers.end())
+            return;
+        const uint64_t frameNumber = pending->FrameNumber;
+        m_PendingTransfers.erase(pending);
+
+        // Read even when the timeline no longer captures: reading frees the pair.
+        uint64_t beginTicks = 0;
+        uint64_t endTicks = 0;
+        if (!m_GpuProfiler->readTransferQuery(query, beginTicks, endTicks) || !m_GpuCalibrated)
+            return;
+#if NOX_PROFILE_STATS
+        TimelineFrame* frame = FindTimelineFrame(frameNumber);
+        if (!frame)
+            return;
+        static const ProfileScopeInfo s_TransferScope{ "Transfer Submission", __FUNCTION__, __FILE__, static_cast<uint32_t>(__LINE__) };
+        if (m_TransferScopeId == InvalidScopeId)
+            m_TransferScopeId = RegisterScope(s_TransferScope);
+        frame->Gpu.push_back({ m_TransferScopeId, 0, 2, CalibratedNs(beginTicks), CalibratedNs(endTicks) });
+#else
+        (void)frameNumber;
+#endif
+    }
+
     const TimelineFrame& Profiler::GetTimelineFrame(uint32_t index) const
     {
         return m_Timeline[(m_TimelineNext + TimelineFrames - m_TimelineCount + index) % TimelineFrames];
@@ -642,6 +716,212 @@ namespace Nox
     void Profiler::ClearTimeline()
     {
         m_TimelineCount = 0;
+        m_SpikeFrames.clear();
+    }
+
+    void Profiler::CopySpikeFrame()
+    {
+        // Each new frame checks the one SpikeCopyDelayFrames older, whose GPU timings have come back by now.
+        if (m_TimelineCount <= SpikeCopyDelayFrames)
+            return;
+        const TimelineFrame& frame = GetTimelineFrame(m_TimelineCount - 1 - SpikeCopyDelayFrames);
+        const double frameMs = static_cast<double>(frame.EndNs - frame.StartNs) / NanosecondsPerMillisecond;
+        if (frameMs <= m_SpikeThresholdMs && frame.GpuMs <= m_SpikeThresholdMs)
+            return;
+        if (!m_SpikeFrames.empty() && m_SpikeFrames.back().Number >= frame.Number)
+            return;
+        m_SpikeFrames.push_back(frame);
+        if (m_SpikeFrames.size() > MaxSpikeFrames)
+            m_SpikeFrames.pop_front();
+    }
+
+    namespace
+    {
+        constexpr char CaptureMagic[8] = { 'N', 'O', 'X', 'P', 'R', 'O', 'F', '\0' };
+        constexpr uint32_t CaptureVersion = 1;
+        // Sanity limits for reading: a damaged file fails instead of allocating without bound.
+        constexpr uint32_t MaxCaptureCount = 1u << 24;
+        constexpr uint32_t MaxCaptureString = 1u << 16;
+
+        class CaptureWriter
+        {
+        public:
+            explicit CaptureWriter(std::ofstream& stream) : m_Stream(stream) {}
+
+            template<typename T>
+            void Value(const T& value) { m_Stream.write(reinterpret_cast<const char*>(&value), sizeof(T)); }
+            void String(std::string_view text)
+            {
+                const uint32_t size = static_cast<uint32_t>(std::min<size_t>(text.size(), MaxCaptureString));
+                Value(size);
+                m_Stream.write(text.data(), size);
+            }
+            void Frame(const TimelineFrame& frame)
+            {
+                Value(frame.Number);
+                Value(frame.StartNs);
+                Value(frame.EndNs);
+                Value(frame.CpuMs);
+                Value(frame.GpuMs);
+                Value(static_cast<uint8_t>(frame.GpuCalibrated ? 1 : 0));
+                Value(frame.DroppedScopes);
+                Value(frame.VramMB);
+                Value(frame.RamMB);
+                for (const std::vector<TimelineScope>* scopes : { &frame.Cpu, &frame.Gpu })
+                {
+                    Value(static_cast<uint32_t>(scopes->size()));
+                    for (const TimelineScope& scope : *scopes)
+                    {
+                        Value(scope.ScopeId);
+                        Value(scope.Depth);
+                        Value(scope.Lane);
+                        Value(scope.StartNs);
+                        Value(scope.EndNs);
+                    }
+                }
+            }
+
+        private:
+            std::ofstream& m_Stream;
+        };
+
+        class CaptureReader
+        {
+        public:
+            explicit CaptureReader(std::ifstream& stream) : m_Stream(stream) {}
+
+            template<typename T>
+            bool Value(T& value) { return static_cast<bool>(m_Stream.read(reinterpret_cast<char*>(&value), sizeof(T))); }
+            bool Count(uint32_t& count) { return Value(count) && count <= MaxCaptureCount; }
+            bool String(std::string& text)
+            {
+                uint32_t size = 0;
+                if (!Value(size) || size > MaxCaptureString)
+                    return false;
+                text.resize(size);
+                return size == 0 || static_cast<bool>(m_Stream.read(text.data(), size));
+            }
+            bool Frame(TimelineFrame& frame)
+            {
+                uint8_t calibrated = 0;
+                if (!Value(frame.Number) || !Value(frame.StartNs) || !Value(frame.EndNs) || !Value(frame.CpuMs) || !Value(frame.GpuMs) ||
+                    !Value(calibrated) || !Value(frame.DroppedScopes) || !Value(frame.VramMB) || !Value(frame.RamMB))
+                    return false;
+                frame.GpuCalibrated = calibrated != 0;
+                for (std::vector<TimelineScope>* scopes : { &frame.Cpu, &frame.Gpu })
+                {
+                    uint32_t count = 0;
+                    if (!Count(count))
+                        return false;
+                    scopes->resize(count);
+                    for (TimelineScope& scope : *scopes)
+                    {
+                        if (!Value(scope.ScopeId) || !Value(scope.Depth) || !Value(scope.Lane) || !Value(scope.StartNs) || !Value(scope.EndNs))
+                            return false;
+                    }
+                }
+                return true;
+            }
+            bool Frames(std::vector<TimelineFrame>& frames)
+            {
+                uint32_t count = 0;
+                if (!Count(count))
+                    return false;
+                frames.resize(count);
+                for (TimelineFrame& frame : frames)
+                {
+                    if (!Frame(frame))
+                        return false;
+                }
+                return true;
+            }
+
+        private:
+            std::ifstream& m_Stream;
+        };
+    }
+
+    bool Profiler::SaveTimeline(const std::string& path) const
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        if (!stream)
+            return false;
+
+        CaptureWriter writer(stream);
+        stream.write(CaptureMagic, sizeof(CaptureMagic));
+        writer.Value(CaptureVersion);
+        writer.Value(m_SpikeThresholdMs);
+
+        const uint32_t scopeCount = m_ScopeCount.load(std::memory_order_relaxed);
+        writer.Value(scopeCount);
+        for (uint32_t scopeId = 0; scopeId < scopeCount; ++scopeId)
+        {
+            const ProfileScopeInfo& info = *m_Scopes[scopeId];
+            writer.String(info.Name ? info.Name : "");
+            writer.String(info.Function ? info.Function : "");
+            writer.String(info.File ? info.File : "");
+            writer.Value(info.Line);
+            writer.Value(static_cast<uint8_t>(info.IsWait ? 1 : 0));
+        }
+
+        writer.Value(static_cast<uint32_t>(m_TimelineThreadNames.size()));
+        for (const std::string& name : m_TimelineThreadNames)
+            writer.String(name);
+
+        writer.Value(m_TimelineCount);
+        for (uint32_t index = 0; index < m_TimelineCount; ++index)
+            writer.Frame(GetTimelineFrame(index));
+        writer.Value(static_cast<uint32_t>(m_SpikeFrames.size()));
+        for (const TimelineFrame& frame : m_SpikeFrames)
+            writer.Frame(frame);
+
+        stream.flush();
+        return static_cast<bool>(stream);
+    }
+
+    bool Profiler::LoadCapture(const std::string& path, ProfileCapture& outCapture)
+    {
+        outCapture = {};
+        std::ifstream stream(path, std::ios::binary);
+        if (!stream)
+            return false;
+
+        CaptureReader reader(stream);
+        char magic[sizeof(CaptureMagic)] = {};
+        uint32_t version = 0;
+        if (!stream.read(magic, sizeof(magic)) || !std::equal(std::begin(magic), std::end(magic), std::begin(CaptureMagic)) ||
+            !reader.Value(version) || version != CaptureVersion || !reader.Value(outCapture.SpikeThresholdMs))
+            return false;
+
+        uint32_t scopeCount = 0;
+        if (!reader.Count(scopeCount))
+            return false;
+        outCapture.Scopes.resize(scopeCount);
+        for (ProfileCaptureScope& scope : outCapture.Scopes)
+        {
+            uint8_t isWait = 0;
+            if (!reader.String(scope.Name) || !reader.String(scope.Function) || !reader.String(scope.File) || !reader.Value(scope.Line) ||
+                !reader.Value(isWait))
+                return false;
+            scope.IsWait = isWait != 0;
+        }
+
+        uint32_t threadCount = 0;
+        if (!reader.Count(threadCount))
+            return false;
+        outCapture.ThreadNames.resize(threadCount);
+        for (std::string& name : outCapture.ThreadNames)
+        {
+            if (!reader.String(name))
+                return false;
+        }
+
+        if (!reader.Frames(outCapture.Frames) || !reader.Frames(outCapture.Spikes))
+        {
+            outCapture = {};
+            return false;
+        }
+        return true;
     }
 
     TimelineFrame* Profiler::FindTimelineFrame(uint64_t frameNumber)

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <filesystem>
 #include <format>
 #include <string>
 #include <string_view>
@@ -11,6 +12,7 @@
 #include <imgui.h>
 
 #include "NoxCore/Profiling/Profiler.h"
+#include "NoxCore/Utils/Utils.h"
 
 namespace Nox
 {
@@ -18,6 +20,9 @@ namespace Nox
     {
         constexpr double NanosecondsPerMillisecond = 1'000'000.0;
         constexpr float FrameGraphHeight = 80.0f;
+        constexpr float MemoryGraphHeight = 46.0f;
+        constexpr ImU32 VramColor = IM_COL32(110, 170, 255, 255);
+        constexpr ImU32 RamColor = IM_COL32(235, 160, 80, 255);
         constexpr float LaneLabelWidth = 130.0f;
         constexpr double MinViewNs = 10'000.0;          // 10 us
         constexpr double MaxViewNs = 2'000'000'000.0;   // 2 s
@@ -76,18 +81,6 @@ namespace Nox
                                [&lower](char a, char b) { return lower(a) == lower(b); }) != text.end();
         }
 
-        const char* ScopeName(uint32_t scopeId)
-        {
-            const ProfileScopeInfo* info = Profiler::Get().GetScopeInfo(scopeId);
-            return info ? info->Name : "?";
-        }
-
-        bool IsWaitScope(uint32_t scopeId)
-        {
-            const ProfileScopeInfo* info = Profiler::Get().GetScopeInfo(scopeId);
-            return info && info->IsWait;
-        }
-
         // The frame and the GPU work it recorded.
         void FrameSpan(const TimelineFrame& frame, int64_t& outStart, int64_t& outEnd)
         {
@@ -100,26 +93,84 @@ namespace Nox
             }
         }
 
-        void ScopeTooltip(const TimelineScope& scope, const TimelineFrame& frame, bool gpu)
+        const char* GpuQueueName(uint32_t lane)
         {
-            const ProfileScopeInfo* info = Profiler::Get().GetScopeInfo(scope.ScopeId);
-            ImGui::BeginTooltip();
-            ImGui::TextUnformatted(info ? info->Name : "?");
-            ImGui::Separator();
-            ImGui::Text("Duration: %s", FormatDuration(static_cast<double>(scope.EndNs - scope.StartNs)).c_str());
-            ImGui::Text("Start: %s after frame %llu began", FormatDuration(static_cast<double>(scope.StartNs - frame.StartNs)).c_str(),
-                        static_cast<unsigned long long>(frame.Number));
-            ImGui::Text("%s, depth %u", gpu ? (scope.Lane == 1 ? "GPU, async compute queue" : "GPU, graphics queue")
-                                            : Profiler::Get().GetTimelineThreadName(scope.Lane).c_str(), scope.Depth);
-            if (info && info->File && info->File[0] != '\0')
-            {
-                std::string_view file(info->File);
-                if (const size_t slash = file.find_last_of("/\\"); slash != std::string_view::npos)
-                    file.remove_prefix(slash + 1);
-                ImGui::TextDisabled("%s  %.*s:%u", info->Function, static_cast<int>(file.size()), file.data(), info->Line);
-            }
-            ImGui::EndTooltip();
+            return lane == 2 ? "GPU, transfer queue" : lane == 1 ? "GPU, async compute queue" : "GPU, graphics queue";
         }
+    }
+
+    ProfilerPanel::ProfilerPanel() = default;
+    ProfilerPanel::~ProfilerPanel() = default;
+
+    uint32_t ProfilerPanel::FrameCount() const
+    {
+        if (m_Capture)
+            return static_cast<uint32_t>(m_Source == FrameSource::Spikes ? m_Capture->Spikes.size() : m_Capture->Frames.size());
+        const Profiler& profiler = Profiler::Get();
+        return m_Source == FrameSource::Spikes ? profiler.GetSpikeFrameCount() : profiler.GetTimelineFrameCount();
+    }
+
+    const TimelineFrame& ProfilerPanel::Frame(uint32_t index) const
+    {
+        if (m_Capture)
+            return m_Source == FrameSource::Spikes ? m_Capture->Spikes[index] : m_Capture->Frames[index];
+        const Profiler& profiler = Profiler::Get();
+        return m_Source == FrameSource::Spikes ? profiler.GetSpikeFrame(index) : profiler.GetTimelineFrame(index);
+    }
+
+    uint32_t ProfilerPanel::FrameSlots() const
+    {
+        const uint32_t capacity = m_Source == FrameSource::Spikes ? Profiler::MaxSpikeFrames : Profiler::TimelineFrames;
+        return std::max({ capacity, FrameCount(), 1u });
+    }
+
+    uint32_t ProfilerPanel::ThreadCount() const
+    {
+        return m_Capture ? static_cast<uint32_t>(m_Capture->ThreadNames.size()) : Profiler::Get().GetTimelineThreadCount();
+    }
+
+    const std::string& ProfilerPanel::ThreadName(uint32_t lane) const
+    {
+        return m_Capture ? m_Capture->ThreadNames[lane] : Profiler::Get().GetTimelineThreadName(lane);
+    }
+
+    ProfilerPanel::ScopeDetails ProfilerPanel::Scope(uint32_t scopeId) const
+    {
+        ScopeDetails details;
+        if (m_Capture)
+        {
+            if (scopeId < m_Capture->Scopes.size())
+            {
+                const ProfileCaptureScope& scope = m_Capture->Scopes[scopeId];
+                details = { scope.Name.c_str(), scope.Function.c_str(), scope.File.c_str(), scope.Line, scope.IsWait };
+            }
+        }
+        else if (const ProfileScopeInfo* info = Profiler::Get().GetScopeInfo(scopeId))
+        {
+            details = { info->Name ? info->Name : "?", info->Function ? info->Function : "", info->File ? info->File : "", info->Line, info->IsWait };
+        }
+        return details;
+    }
+
+    void ProfilerPanel::ScopeTooltip(const TimelineScope& scope, const TimelineFrame& frame, bool gpu) const
+    {
+        const ScopeDetails details = Scope(scope.ScopeId);
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(details.Name);
+        ImGui::Separator();
+        ImGui::Text("Duration: %s", FormatDuration(static_cast<double>(scope.EndNs - scope.StartNs)).c_str());
+        ImGui::Text("Start: %s after frame %llu began", FormatDuration(static_cast<double>(scope.StartNs - frame.StartNs)).c_str(),
+                    static_cast<unsigned long long>(frame.Number));
+        ImGui::Text("%s, depth %u", gpu ? GpuQueueName(scope.Lane) : (scope.Lane < ThreadCount() ? ThreadName(scope.Lane).c_str() : "?"),
+                    scope.Depth);
+        if (details.File[0] != '\0')
+        {
+            std::string_view file(details.File);
+            if (const size_t slash = file.find_last_of("/\\"); slash != std::string_view::npos)
+                file.remove_prefix(slash + 1);
+            ImGui::TextDisabled("%s  %.*s:%u", details.Function, static_cast<int>(file.size()), file.data(), details.Line);
+        }
+        ImGui::EndTooltip();
     }
 
     void ProfilerPanel::OnImGuiRender()
@@ -134,7 +185,7 @@ namespace Nox
         ImGui::SetNextWindowSize(ImVec2(1100.0f, 650.0f), ImGuiCond_FirstUseEver);
         const bool visible = ImGui::Begin("Profiler", &m_Open);
         // Kept only while someone looks at it: the copies cost a little every frame.
-        profiler.SetTimelineCapture(visible && m_Open && !m_Paused);
+        profiler.SetTimelineCapture(visible && m_Open && !m_Paused && !m_Capture);
         if (!visible)
         {
             ImGui::End();
@@ -142,11 +193,13 @@ namespace Nox
         }
 
 #if NOX_PROFILE_STATS
-        if (m_Follow && !m_Paused)
+        if (m_Follow && (!m_Paused || m_Source == FrameSource::Spikes) && !m_Capture)
             FollowNewest();
 
         DrawToolbar();
         DrawFrameGraph();
+        if (m_ShowMemory)
+            DrawMemoryGraph();
 
         const float available = ImGui::GetContentRegionAvail().y;
         const float tableHeight = std::max(140.0f, available * 0.3f);
@@ -164,10 +217,9 @@ namespace Nox
 
     int32_t ProfilerPanel::FindFrame(uint64_t number) const
     {
-        const Profiler& profiler = Profiler::Get();
-        for (int32_t index = static_cast<int32_t>(profiler.GetTimelineFrameCount()) - 1; index >= 0; --index)
+        for (int32_t index = static_cast<int32_t>(FrameCount()) - 1; index >= 0; --index)
         {
-            const uint64_t frameNumber = profiler.GetTimelineFrame(static_cast<uint32_t>(index)).Number;
+            const uint64_t frameNumber = Frame(static_cast<uint32_t>(index)).Number;
             if (frameNumber == number)
                 return index;
             if (frameNumber < number)
@@ -178,7 +230,7 @@ namespace Nox
 
     void ProfilerPanel::SelectFrame(uint32_t index)
     {
-        const TimelineFrame& frame = Profiler::Get().GetTimelineFrame(index);
+        const TimelineFrame& frame = Frame(index);
         m_SelectedFrame = frame.Number;
         m_HasSelection = true;
         int64_t start = 0;
@@ -192,12 +244,11 @@ namespace Nox
     void ProfilerPanel::FollowNewest()
     {
         // The newest frame whose GPU timings came back (they arrive a few frames late), the newest one without a GPU profiler.
-        const Profiler& profiler = Profiler::Get();
-        const uint32_t count = profiler.GetTimelineFrameCount();
-        const bool gpu = profiler.IsGpuTimingAvailable();
+        const uint32_t count = FrameCount();
+        const bool gpu = Profiler::Get().IsGpuTimingAvailable();
         for (int32_t index = static_cast<int32_t>(count) - 1; index >= 0 && index >= static_cast<int32_t>(count) - 8; --index)
         {
-            if (!gpu || profiler.GetTimelineFrame(static_cast<uint32_t>(index)).GpuMs >= 0.0)
+            if (!gpu || Frame(static_cast<uint32_t>(index)).GpuMs >= 0.0)
             {
                 SelectFrame(static_cast<uint32_t>(index));
                 return;
@@ -210,32 +261,111 @@ namespace Nox
     void ProfilerPanel::DrawToolbar()
     {
         Profiler& profiler = Profiler::Get();
-        if (ImGui::Button(m_Paused ? "Record" : "Pause", ImVec2(70.0f, 0.0f)))
-            m_Paused = !m_Paused;
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip(m_Paused ? "Keep the frames again" : "Stop keeping frames, to look at the ones kept");
-        ImGui::SameLine();
-        ImGui::Checkbox("Follow", &m_Follow);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Shows the newest frame (zooming, panning or picking a frame turns this off)");
-        ImGui::SameLine();
-        if (ImGui::Button("Clear"))
+        if (m_Capture)
         {
-            profiler.ClearTimeline();
-            m_HasSelection = false;
+            if (ImGui::Button("Close Capture"))
+            {
+                m_Capture.reset();
+                m_HasSelection = false;
+                m_Follow = true;
+                m_Message.clear();
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Back to the live frames");
+            ImGui::SameLine();
+            ImGui::TextColored(WarningColor, "Capture: %s", m_CaptureName.c_str());
+        }
+        else
+        {
+            if (ImGui::Button(m_Paused ? "Record" : "Pause", ImVec2(70.0f, 0.0f)))
+                m_Paused = !m_Paused;
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(m_Paused ? "Keep the frames again" : "Stop keeping frames, to look at the ones kept");
+            ImGui::SameLine();
+            ImGui::Checkbox("Follow", &m_Follow);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Shows the newest frame (zooming, panning or picking a frame turns this off)");
+            ImGui::SameLine();
+            if (ImGui::Button("Clear"))
+            {
+                profiler.ClearTimeline();
+                m_HasSelection = false;
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Drops the kept frames and spikes");
+            ImGui::SameLine();
+            if (ImGui::Button("Save"))
+                SaveCapture();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Writes the kept frames and spikes to a .noxprof file");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Load"))
+            LoadCapture();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Opens a .noxprof file (shown instead of the live frames until closed)");
+
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(150.0f);
+        const uint32_t spikeCount = m_Capture ? static_cast<uint32_t>(m_Capture->Spikes.size()) : profiler.GetSpikeFrameCount();
+        const std::string spikesLabel = std::format("Spikes ({})", spikeCount);
+        if (ImGui::BeginCombo("##Source", m_Source == FrameSource::Spikes ? spikesLabel.c_str() : "Recent Frames"))
+        {
+            if (ImGui::Selectable("Recent Frames", m_Source == FrameSource::Recent))
+            {
+                m_Source = FrameSource::Recent;
+                m_HasSelection = false;
+            }
+            if (ImGui::Selectable(spikesLabel.c_str(), m_Source == FrameSource::Spikes))
+            {
+                m_Source = FrameSource::Spikes;
+                m_HasSelection = false;
+            }
+            ImGui::EndCombo();
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Spikes: the last %u frames whose frame or GPU time went above the threshold, kept after they\n"
+                              "scrolled out of the recent frames", Profiler::MaxSpikeFrames);
+        ImGui::SameLine();
+        if (m_Capture)
+        {
+            ImGui::TextDisabled("(spike threshold %.1f ms)", m_Capture->SpikeThresholdMs);
+        }
+        else
+        {
+            float threshold = profiler.GetSpikeThresholdMs();
+            ImGui::SetNextItemWidth(110.0f);
+            if (ImGui::DragFloat("##SpikeThreshold", &threshold, 0.1f, 1.0f, 1000.0f, "Spike > %.1f ms"))
+                profiler.SetSpikeThresholdMs(std::clamp(threshold, 1.0f, 1000.0f));
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("A frame slower than this (frame or GPU time) is kept as a spike");
+        }
+        ImGui::SameLine();
+        ImGui::Checkbox("Memory", &m_ShowMemory);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("VRAM (device-local heaps) and process RAM under the frame graph");
+
+        if (!m_Message.empty())
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled("| %s", m_Message.c_str());
         }
 
         const int32_t selected = m_HasSelection ? FindFrame(m_SelectedFrame) : -1;
         if (selected >= 0)
         {
-            const TimelineFrame& frame = profiler.GetTimelineFrame(static_cast<uint32_t>(selected));
+            const TimelineFrame& frame = Frame(static_cast<uint32_t>(selected));
             const double frameMs = static_cast<double>(frame.EndNs - frame.StartNs) / NanosecondsPerMillisecond;
-            ImGui::SameLine();
             if (frame.GpuMs >= 0.0)
-                ImGui::Text("| Frame %llu: %.2f ms (CPU %.2f ms, GPU %.2f ms)", static_cast<unsigned long long>(frame.Number), frameMs,
+                ImGui::Text("Frame %llu: %.2f ms (CPU %.2f ms, GPU %.2f ms)", static_cast<unsigned long long>(frame.Number), frameMs,
                             frame.CpuMs, frame.GpuMs);
             else
-                ImGui::Text("| Frame %llu: %.2f ms (CPU %.2f ms)", static_cast<unsigned long long>(frame.Number), frameMs, frame.CpuMs);
+                ImGui::Text("Frame %llu: %.2f ms (CPU %.2f ms)", static_cast<unsigned long long>(frame.Number), frameMs, frame.CpuMs);
+            if (frame.VramMB >= 0.0f)
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled("| VRAM %.0f MB, RAM %.0f MB", frame.VramMB, frame.RamMB);
+            }
             if (frame.DroppedScopes > 0)
             {
                 ImGui::SameLine();
@@ -250,19 +380,55 @@ namespace Nox
                                       "from the frame's start, so its durations are right but not where it lies against the CPU.");
             }
         }
+        else
+        {
+            ImGui::TextDisabled("No frame picked");
+        }
 
         ImGui::SameLine();
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Graph: click a frame to show it.\nTimeline: wheel zooms, drag pans, click a scope to mark it in the\n"
-                              "timeline and the table, double-click zooms to it.\nOn the GPU track a pass sits where the GPU ran it: "
-                              "usually after\nthe CPU frame that recorded it.");
+                              "timeline and the table, double-click zooms to it.\nOn the GPU tracks a pass sits where the GPU ran it: "
+                              "usually after\nthe CPU frame that recorded it. The transfer track shows the upload submissions\n"
+                              "(texture / geometry streaming) under the frame that submitted them.");
+    }
+
+    void ProfilerPanel::SaveCapture()
+    {
+        std::filesystem::path path = Utility::SaveFile("Nox Profiler Capture\0noxprof\0");
+        if (path.empty())
+            return;
+        if (path.extension() != ".noxprof")
+            path += ".noxprof";
+        m_Message = Profiler::Get().SaveTimeline(path.string()) ? std::format("Saved {}", path.filename().string())
+                                                                 : std::format("Could not write {}", path.string());
+    }
+
+    void ProfilerPanel::LoadCapture()
+    {
+        const std::string path = Utility::OpenFile("Nox Profiler Capture\0noxprof\0");
+        if (path.empty())
+            return;
+        auto capture = std::make_unique<ProfileCapture>();
+        if (!Profiler::LoadCapture(path, *capture))
+        {
+            m_Message = std::format("Not a Nox profiler capture: {}", path);
+            return;
+        }
+        m_Capture = std::move(capture);
+        m_CaptureName = std::filesystem::path(path).filename().string();
+        m_Message.clear();
+        m_HasSelection = false;
+        m_Follow = false;
+        m_HighlightScope = ~0u;
+        if (const uint32_t count = FrameCount(); count > 0)
+            SelectFrame(count - 1);
     }
 
     void ProfilerPanel::DrawFrameGraph()
     {
-        const Profiler& profiler = Profiler::Get();
-        const uint32_t count = profiler.GetTimelineFrameCount();
+        const uint32_t count = FrameCount();
         const ImVec2 origin = ImGui::GetCursorScreenPos();
         const float width = std::max(ImGui::GetContentRegionAvail().x, 100.0f);
         ImGui::InvisibleButton("##FrameGraph", ImVec2(width, FrameGraphHeight));
@@ -274,7 +440,7 @@ namespace Nox
         double maxMs = 1000.0 / 30.0;
         for (uint32_t index = 0; index < count; ++index)
         {
-            const TimelineFrame& frame = profiler.GetTimelineFrame(index);
+            const TimelineFrame& frame = Frame(index);
             maxMs = std::max({ maxMs, static_cast<double>(frame.EndNs - frame.StartNs) / NanosecondsPerMillisecond, frame.GpuMs });
         }
         maxMs *= 1.05;
@@ -289,11 +455,11 @@ namespace Nox
         }
 
         // Fixed slots, newest on the right.
-        const float slot = width / static_cast<float>(Profiler::TimelineFrames);
+        const float slot = width / static_cast<float>(FrameSlots());
         const int32_t selected = m_HasSelection ? FindFrame(m_SelectedFrame) : -1;
         for (uint32_t index = 0; index < count; ++index)
         {
-            const TimelineFrame& frame = profiler.GetTimelineFrame(index);
+            const TimelineFrame& frame = Frame(index);
             const double frameMs = static_cast<double>(frame.EndNs - frame.StartNs) / NanosecondsPerMillisecond;
             const float x0 = origin.x + width - static_cast<float>(count - index) * slot;
             const float x1 = x0 + std::max(slot - 1.0f, 1.0f);
@@ -313,13 +479,15 @@ namespace Nox
             const int32_t index = static_cast<int32_t>(count) - 1 - static_cast<int32_t>(fromRight / slot);
             if (index >= 0 && index < static_cast<int32_t>(count))
             {
-                const TimelineFrame& frame = profiler.GetTimelineFrame(static_cast<uint32_t>(index));
+                const TimelineFrame& frame = Frame(static_cast<uint32_t>(index));
                 ImGui::BeginTooltip();
                 ImGui::Text("Frame %llu", static_cast<unsigned long long>(frame.Number));
                 ImGui::Text("Frame: %.2f ms", static_cast<double>(frame.EndNs - frame.StartNs) / NanosecondsPerMillisecond);
                 ImGui::Text("CPU: %.2f ms", frame.CpuMs);
                 if (frame.GpuMs >= 0.0)
                     ImGui::TextColored(ImVec4(0.45f, 0.67f, 1.0f, 1.0f), "GPU: %.2f ms", frame.GpuMs);
+                if (frame.VramMB >= 0.0f)
+                    ImGui::TextDisabled("VRAM %.0f MB, RAM %.0f MB", frame.VramMB, frame.RamMB);
                 ImGui::EndTooltip();
                 if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
                 {
@@ -330,36 +498,100 @@ namespace Nox
         }
     }
 
+    void ProfilerPanel::DrawMemoryGraph()
+    {
+        // VRAM and RAM per frame, on the frame graph's slots (Unreal Insights' memory track; Tracy plots the same two values).
+        const uint32_t count = FrameCount();
+        float maxMB = 0.0f;
+        for (uint32_t index = 0; index < count; ++index)
+            maxMB = std::max({ maxMB, Frame(index).VramMB, Frame(index).RamMB });
+        if (maxMB <= 0.0f)
+            return;
+        maxMB *= 1.1f;
+
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const float width = std::max(ImGui::GetContentRegionAvail().x, 100.0f);
+        ImGui::InvisibleButton("##MemoryGraph", ImVec2(width, MemoryGraphHeight));
+        const bool hovered = ImGui::IsItemHovered();
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        drawList->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + MemoryGraphHeight), IM_COL32(25, 25, 28, 255));
+
+        const float slot = width / static_cast<float>(FrameSlots());
+        auto mbToY = [&](float mb) { return origin.y + MemoryGraphHeight - std::min(mb / maxMB, 1.0f) * (MemoryGraphHeight - 2.0f); };
+        auto slotX = [&](uint32_t index) { return origin.x + width - (static_cast<float>(count - index) - 0.5f) * slot; };
+        const ImU32 colors[2] = { VramColor, RamColor };
+        for (uint32_t series = 0; series < 2; ++series)
+        {
+            bool hasPrevious = false;
+            ImVec2 previous;
+            for (uint32_t index = 0; index < count; ++index)
+            {
+                const float mb = series == 0 ? Frame(index).VramMB : Frame(index).RamMB;
+                if (mb < 0.0f)
+                {
+                    hasPrevious = false;
+                    continue;
+                }
+                const ImVec2 point(slotX(index), mbToY(mb));
+                if (hasPrevious)
+                    drawList->AddLine(previous, point, colors[series], 1.5f);
+                previous = point;
+                hasPrevious = true;
+            }
+        }
+        const std::string scale = std::format("{:.0f} MB", maxMB);
+        drawList->AddText(ImVec2(origin.x + 2.0f, origin.y), IM_COL32(255, 255, 255, 90), scale.c_str());
+        drawList->AddText(ImVec2(origin.x + 2.0f, origin.y + MemoryGraphHeight - ImGui::GetTextLineHeight()), VramColor, "VRAM");
+        drawList->AddText(ImVec2(origin.x + 40.0f, origin.y + MemoryGraphHeight - ImGui::GetTextLineHeight()), RamColor, "RAM");
+
+        if (hovered && count > 0)
+        {
+            const float fromRight = origin.x + width - ImGui::GetIO().MousePos.x;
+            const int32_t index = static_cast<int32_t>(count) - 1 - static_cast<int32_t>(fromRight / slot);
+            if (index >= 0 && index < static_cast<int32_t>(count) && Frame(static_cast<uint32_t>(index)).VramMB >= 0.0f)
+            {
+                const TimelineFrame& frame = Frame(static_cast<uint32_t>(index));
+                ImGui::BeginTooltip();
+                ImGui::Text("Frame %llu", static_cast<unsigned long long>(frame.Number));
+                ImGui::TextColored(ImColor(VramColor).Value, "VRAM: %.0f MB", frame.VramMB);
+                ImGui::TextColored(ImColor(RamColor).Value, "RAM: %.0f MB", frame.RamMB);
+                ImGui::EndTooltip();
+            }
+        }
+    }
+
     void ProfilerPanel::DrawTimeline()
     {
-        const Profiler& profiler = Profiler::Get();
-        const uint32_t frameCount = profiler.GetTimelineFrameCount();
+        const uint32_t frameCount = FrameCount();
         const int32_t selected = m_HasSelection ? FindFrame(m_SelectedFrame) : -1;
         if (frameCount == 0 || selected < 0 || m_ViewDurationNs <= 0.0)
         {
-            ImGui::TextDisabled(m_Paused ? "Paused with no frame kept." : "Waiting for frames...");
+            ImGui::TextDisabled(m_Capture ? "The capture has no frames here." : m_Source == FrameSource::Spikes ? "No frame above the spike threshold yet."
+                                : m_Paused ? "Paused with no frame kept." : "Waiting for frames...");
             return;
         }
-        const TimelineFrame& selectedFrame = profiler.GetTimelineFrame(static_cast<uint32_t>(selected));
+        const TimelineFrame& selectedFrame = Frame(static_cast<uint32_t>(selected));
 
         // The frames with something in view (GPU work lies after its frame).
         const double viewEnd = m_ViewStartNs + m_ViewDurationNs;
         std::vector<const TimelineFrame*> frames;
         for (uint32_t index = 0; index < frameCount; ++index)
         {
-            const TimelineFrame& frame = profiler.GetTimelineFrame(index);
+            const TimelineFrame& frame = Frame(index);
             if (static_cast<double>(frame.EndNs + GpuSpillNs) >= m_ViewStartNs && static_cast<double>(frame.StartNs - GpuSpillNs) <= viewEnd)
                 frames.push_back(&frame);
         }
 
         // Lanes: the GPU, then the main thread, then the other threads; as many rows as their deepest scope in view.
-        const uint32_t threadCount = profiler.GetTimelineThreadCount();
+        const uint32_t threadCount = ThreadCount();
         std::vector<uint32_t> laneDepth(threadCount, 0);
-        // GPU tracks: the graphics queue, and the async compute queue (its scopes have no "GPU Frame" around them: one level less).
-        static constexpr const char* GpuTrackNames[2] = { "GPU", "GPU Async Compute" };
-        uint32_t gpuDepth[2] = { 0, 0 };
-        bool hasGpu[2] = { false, false };
-        auto gpuTrack = [](const TimelineScope& scope) { return std::min(scope.Lane, 1u); };
+        // GPU tracks: the graphics queue, the async compute queue (its scopes have no "GPU Frame" around them: one level less) and the
+        // transfer queue (one scope per upload submission).
+        constexpr uint32_t GpuTracks = 3;
+        static constexpr const char* GpuTrackNames[GpuTracks] = { "GPU", "GPU Async Compute", "GPU Transfer" };
+        uint32_t gpuDepth[GpuTracks] = {};
+        bool hasGpu[GpuTracks] = {};
+        auto gpuTrack = [](const TimelineScope& scope) { return std::min(scope.Lane, GpuTracks - 1); };
         auto gpuRow = [&](const TimelineScope& scope) { return gpuTrack(scope) == 1 && scope.Depth > 0 ? scope.Depth - 1 : scope.Depth; };
         for (const TimelineFrame* frame : frames)
         {
@@ -377,7 +609,7 @@ namespace Nox
         std::vector<uint32_t> laneOrder;
         for (uint32_t lane = 0; lane < threadCount; ++lane)
         {
-            if (profiler.GetTimelineThreadName(lane) == "Main Thread")
+            if (ThreadName(lane) == "Main Thread")
                 laneOrder.insert(laneOrder.begin(), lane);
             else
                 laneOrder.push_back(lane);
@@ -393,8 +625,8 @@ namespace Nox
         // Lane tops, from below the ruler.
         std::vector<float> laneTop(threadCount, 0.0f);
         float y = rowHeight + laneGap;
-        float gpuTop[2] = { 0.0f, 0.0f };
-        for (uint32_t track = 0; track < 2; ++track)
+        float gpuTop[GpuTracks] = {};
+        for (uint32_t track = 0; track < GpuTracks; ++track)
         {
             gpuTop[track] = y;
             if (hasGpu[track])
@@ -446,13 +678,14 @@ namespace Nox
             drawList->AddText(ImVec2(canvas.x + 4.0f, canvas.y + top + 2.0f), textColor, name);
             drawList->PopClipRect();
         };
-        for (uint32_t track = 0; track < 2; ++track)
+        static constexpr ImU32 GpuTrackBackgrounds[GpuTracks] = { IM_COL32(40, 48, 64, 255), IM_COL32(52, 44, 64, 255), IM_COL32(40, 56, 50, 255) };
+        for (uint32_t track = 0; track < GpuTracks; ++track)
         {
             if (hasGpu[track])
-                drawLane(gpuTop[track], gpuDepth[track], GpuTrackNames[track], track == 0 ? IM_COL32(40, 48, 64, 255) : IM_COL32(52, 44, 64, 255));
+                drawLane(gpuTop[track], gpuDepth[track], GpuTrackNames[track], GpuTrackBackgrounds[track]);
         }
         for (uint32_t lane : laneOrder)
-            drawLane(laneTop[lane], laneDepth[lane], profiler.GetTimelineThreadName(lane).c_str(), IM_COL32(36, 36, 40, 255));
+            drawLane(laneTop[lane], laneDepth[lane], ThreadName(lane).c_str(), IM_COL32(36, 36, 40, 255));
 
         drawList->PushClipRect(ImVec2(trackX, canvas.y), ImVec2(trackX + trackWidth, bottom), true);
 
@@ -488,7 +721,7 @@ namespace Nox
             float x1 = std::max(toX(static_cast<double>(scope.EndNs)), x0 + 1.0f);
             const float y0 = canvas.y + laneY + static_cast<float>(gpu ? gpuRow(scope) : scope.Depth) * rowHeight;
             const float y1 = y0 + rowHeight - 1.0f;
-            drawList->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), ScopeColor(scope.ScopeId, !gpu && IsWaitScope(scope.ScopeId), gpu));
+            drawList->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), ScopeColor(scope.ScopeId, !gpu && Scope(scope.ScopeId).IsWait, gpu));
             if (scope.ScopeId == m_HighlightScope)
                 drawList->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), IM_COL32(255, 255, 255, 255), 0.0f, 0, 2.0f);
             x0 = std::max(x0, trackX);
@@ -536,7 +769,6 @@ namespace Nox
 
     void ProfilerPanel::DrawScopeTable()
     {
-        const Profiler& profiler = Profiler::Get();
         const int32_t selected = m_HasSelection ? FindFrame(m_SelectedFrame) : -1;
         ImGui::SetNextItemWidth(220.0f);
         ImGui::InputTextWithHint("##Filter", "Filter scopes", m_Filter, sizeof(m_Filter));
@@ -550,13 +782,13 @@ namespace Nox
         }
         if (selected < 0)
             return;
-        const TimelineFrame& frame = profiler.GetTimelineFrame(static_cast<uint32_t>(selected));
+        const TimelineFrame& frame = Frame(static_cast<uint32_t>(selected));
 
         // The frame's scopes summed per scope and track (inclusive times).
         struct Row
         {
             uint32_t ScopeId;
-            uint32_t Track; // 0 CPU, 1 GPU (graphics queue), 2 GPU (async compute queue)
+            uint32_t Track; // 0 CPU, 1 GPU (graphics queue), 2 GPU (async compute queue), 3 GPU (transfer queue)
             uint32_t Calls = 0;
             double TotalMs = 0.0;
             double MaxMs = 0.0;
@@ -578,7 +810,7 @@ namespace Nox
         for (const TimelineScope& scope : frame.Cpu)
             add(scope, 0);
         for (const TimelineScope& scope : frame.Gpu)
-            add(scope, scope.Lane == 1 ? 2u : 1u);
+            add(scope, std::min(scope.Lane, 2u) + 1u);
         std::erase_if(rows, [this](const Row& row) { return !ContainsCaseInsensitive(ScopeName(row.ScopeId), m_Filter); });
 
         const double frameMs = static_cast<double>(frame.EndNs - frame.StartNs) / NanosecondsPerMillisecond;
@@ -625,7 +857,8 @@ namespace Nox
                 m_HighlightScope = row.ScopeId == m_HighlightScope ? ~0u : row.ScopeId;
             ImGui::PopID();
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(row.Track == 2 ? "GPU (async compute)" : row.Track == 1 ? "GPU" : (IsWaitScope(row.ScopeId) ? "CPU (wait)" : "CPU"));
+            ImGui::TextUnformatted(row.Track == 3 ? "GPU (transfer)" : row.Track == 2 ? "GPU (async compute)" : row.Track == 1 ? "GPU"
+                                   : (Scope(row.ScopeId).IsWait ? "CPU (wait)" : "CPU"));
             ImGui::TableNextColumn();
             ImGui::Text("%u", row.Calls);
             ImGui::TableNextColumn();

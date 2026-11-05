@@ -92,6 +92,7 @@ namespace Nox
             uint64_t value = 0;
             std::unique_ptr<NRI::CommandBuffer> commandBuffer;
             std::vector<std::unique_ptr<NRI::Buffer>> retained; // oversized staging it reads
+            uint32_t profilerQuery = ~0u;                         // its timestamps on the profiler's transfer track
         };
 
         NRI::CommandBuffer& recording();
@@ -118,6 +119,7 @@ namespace Nox
         uint64_t m_nextTicket = 1;
 
         std::unique_ptr<NRI::CommandBuffer> m_recording;      // copies queued since the last Flush
+        uint32_t m_recordingQuery = ~0u;                      // Profiler::BeginTransferSubmission
         std::vector<std::unique_ptr<NRI::Buffer>> m_retained; // oversized staging m_recording reads
         std::vector<std::unique_ptr<NRI::CommandBuffer>> m_freeCommandBuffers;
         std::deque<Submission> m_inFlight;

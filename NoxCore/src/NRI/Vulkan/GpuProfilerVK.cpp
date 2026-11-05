@@ -36,6 +36,15 @@ namespace NRI
             if (m_computeQueueTimestamps)
                 m_timestampValidBits = std::min(m_timestampValidBits, computeBits);
         }
+        // The transfer queue's likewise, in a pool of its own reset on the host: vkCmdResetQueryPool is not allowed on a transfer-only
+        // queue, vkResetQueryPool (hostQueryReset, enabled by the device) is.
+        if (m_deviceVK.hasDedicatedTransferQueue() && m_timestampValidBits != 0)
+        {
+            const uint32_t transferBits = queueFamilies[m_deviceVK.getQueueFamily(QueueType::Transfer)].timestampValidBits;
+            m_transferQueueTimestamps = transferBits != 0;
+            if (m_transferQueueTimestamps)
+                m_timestampValidBits = std::min(m_timestampValidBits, transferBits);
+        }
         m_timestampPeriod = m_deviceVK.getPhysicalDevice().getProperties().limits.timestampPeriod;
 
         if (!isSupported())
@@ -68,6 +77,17 @@ namespace NRI
                     .pipelineStatistics = StatisticFlags
                 });
             }
+        }
+
+        if (m_transferQueueTimestamps)
+        {
+            m_transferPool = vk::raii::QueryPool(m_deviceVK.getDevice(), vk::QueryPoolCreateInfo{
+                .queryType = vk::QueryType::eTimestamp,
+                .queryCount = TransferQueryPairs * 2
+            });
+            m_freeTransferPairs.reserve(TransferQueryPairs);
+            for (uint32_t pair = TransferQueryPairs; pair-- > 0;)
+                m_freeTransferPairs.push_back(pair);
         }
 
         m_readback.reserve(QueriesPerFrame);
@@ -185,6 +205,44 @@ namespace NRI
         // Single stage bit (VUID-vkCmdWriteTimestamp2-stage-03859); same stage TracyVulkan uses.
         static_cast<CommandBufferVK&>(cmd).getActiveNativeBuffer().writeTimestamp2(
             vk::PipelineStageFlagBits2::eBottomOfPipe, *m_frames[queryId / QueriesPerFrame].pool, queryId % QueriesPerFrame);
+    }
+
+    uint32_t GpuProfilerVK::beginTransferQuery(CommandBuffer& cmd)
+    {
+        if (!m_transferQueueTimestamps || m_freeTransferPairs.empty())
+            return InvalidQueryId;
+
+        const uint32_t pair = m_freeTransferPairs.back();
+        m_freeTransferPairs.pop_back();
+        // The pair's previous submission completed and was read (readTransferQuery), so the host may reset it
+        // (VUID-vkResetQueryPool-firstQuery-02741: no pending command uses it).
+        m_transferPool.reset(pair * 2, 2);
+        static_cast<CommandBufferVK&>(cmd).getActiveNativeBuffer().writeTimestamp2(vk::PipelineStageFlagBits2::eTopOfPipe, *m_transferPool, pair * 2);
+        return pair;
+    }
+
+    void GpuProfilerVK::endTransferQuery(CommandBuffer& cmd, uint32_t queryId)
+    {
+        if (queryId == InvalidQueryId)
+            return;
+        static_cast<CommandBufferVK&>(cmd).getActiveNativeBuffer().writeTimestamp2(vk::PipelineStageFlagBits2::eBottomOfPipe, *m_transferPool,
+                                                                                   queryId * 2 + 1);
+    }
+
+    bool GpuProfilerVK::readTransferQuery(uint32_t queryId, uint64_t& outBeginTicks, uint64_t& outEndTicks)
+    {
+        if (queryId == InvalidQueryId || queryId >= TransferQueryPairs)
+            return false;
+
+        std::array<uint64_t, 4> values{}; // (value, availability) x 2
+        const vk::Result result = m_transferPool.getResults(queryId * 2, 2, sizeof(values), values.data(), sizeof(uint64_t) * 2,
+                                                            vk::QueryResultFlagBits::e64 | vk::QueryResultFlagBits::eWithAvailability);
+        m_freeTransferPairs.push_back(queryId);
+        if ((result != vk::Result::eSuccess && result != vk::Result::eNotReady) || values[1] == 0 || values[3] == 0)
+            return false;
+        outBeginTicks = values[0];
+        outEndTicks = values[2];
+        return true;
     }
 
     void GpuProfilerVK::readSlotResults(uint32_t frameSlot)

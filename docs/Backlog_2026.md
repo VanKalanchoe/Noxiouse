@@ -12,7 +12,7 @@
 |---|---|
 | R10 | DLSS "WorldToScreenMatrix not invertible" every frame (seen 2026-10-29 after a DLSS recreate in LevelStreamingTest). A one-time log names the degenerate camera input (`addDLSSPass`): needs that log line to fix |
 
-| R11 | **More async compute:** besides the screen-probe GI, now on the compute queue: the NRD denoisers' shadows and reflections (NRD README: it only dispatches compute work, `queueType = GRAPHICS; // or COMPUTE`; NRD is created with both queue families, and each call passes its command buffer's queue type with compute-only stages on the compute queue), the DDGI blends and the emissive light grid. **Built 2026-11-06, untested**: to measure ("Async Compute Passes" in the stats; the frame time in RT mode and Raster (All)). Not moved: the sky / cloud / fog passes (tiny, or read through the uniforms without a graph dependency) |
+| R11 | **More async compute:** besides the screen-probe GI, now on the compute queue: the NRD denoisers' shadows and reflections (NRD README: it only dispatches compute work, `queueType = GRAPHICS; // or COMPUTE`; NRD is created with both queue families, and each call passes its command buffer's queue type with compute-only stages on the compute queue), the DDGI blends and the emissive light grid. **Built 2026-11-05, untested**: to measure ("Async Compute Passes" in the stats; the frame time in RT mode and Raster (All)). Not moved: the sky / cloud / fog passes (tiny, or read through the uniforms without a graph dependency) |
 
 ### Raster versions of the RT features (decided 2026-10-31)
 
@@ -48,7 +48,7 @@ default; the RT one stays the default otherwise (RT shadows may well win). Both 
 
 | # | Item |
 |---|---|
-| P1 | **Frame profiler extras:** save / load a capture; keep frames slower than N ms on their own (spikes); memory over time (the fly-through test logs it to a file, the panel has no graph); a track for the transfer queue (the GPU and async compute queues have theirs) |
+| P1 | **Frame profiler extras:** save / load a capture (`.noxprof`: the kept frames, the spikes and the scope / thread names; a loaded capture is shown instead of the live frames until closed); frames slower than a threshold (frame or GPU time, default 16.7 ms) kept apart, the last 64, picked in the panel's frame combo; VRAM and RAM per frame drawn under the frame graph; a "GPU Transfer" track with one scope per upload submission (timestamps of the dedicated transfer family, query pairs reset on the host with `hostQueryReset`, placed on the CPU clock through the calibrated timestamps). **Built 2026-11-05, untested** (Window > Profiler) |
 
 ### Import / glTF (plan: `Animation_Graph_Architecture_Plan_2026.md` section 8)
 

@@ -35,6 +35,11 @@ namespace NRI
         void endStatistics(CommandBuffer& cmd, uint32_t queryId) override;
         std::span<const GpuPipelineStatistics> getReadbackStatistics() const override { return m_statisticsReadback; }
 
+        bool isTransferQueueSupported() const override { return m_transferQueueTimestamps; }
+        uint32_t beginTransferQuery(CommandBuffer& cmd) override;
+        void endTransferQuery(CommandBuffer& cmd, uint32_t queryId) override;
+        bool readTransferQuery(uint32_t queryId, uint64_t& outBeginTicks, uint64_t& outEndTicks) override;
+
     private:
         void readSlotResults(uint32_t frameSlot);
 
@@ -64,5 +69,11 @@ namespace NRI
         uint32_t m_timestampValidBits = 0;
         int64_t m_hostFrequency = 1; // QueryPerformanceFrequency (Windows)
         bool m_computeQueueTimestamps = false;
+
+        // Transfer queue: pairs (2i, 2i + 1) of their own pool, free ones listed (main thread only).
+        static constexpr uint32_t TransferQueryPairs = 64;
+        vk::raii::QueryPool m_transferPool = nullptr;
+        std::vector<uint32_t> m_freeTransferPairs;
+        bool m_transferQueueTimestamps = false;
     };
 }
