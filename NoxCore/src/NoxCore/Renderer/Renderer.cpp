@@ -784,33 +784,80 @@ namespace Nox
 
     namespace
     {
+        // A preset sets every renderer feature it covers, on or off (what it does not name is left as it is).
         struct QualityPresetSettings
         {
-            bool RTShadows;
-            bool RTReflections;
-            bool RTAO;               // else SSAO
-            uint32_t DiffuseGI;      // 1 DDGI, 2 ReSTIR GI, 3 screen probes (DDGI underneath)
-            uint32_t ScreenProbeTile; // pixels per screen probe
-            uint32_t DirectLighting; // 0 the loop (a shadow ray per light in range), 1 ReSTIR DI (one resampled light per pixel)
-            NRI::UpscaleMode Upscale;
-            bool RTRefraction;       // smooth glass traced (H3); else the screen-space refraction only
-            uint32_t RTDivisor;      // ray tracing resolution: 1 every pixel, 2 one of each 2 x 2 block
-            uint32_t ShadowRayLights; // the shadow-ray budget a pixel (strongest lights); 0 every light
-            // The sun's shadows: ray traced on every rung until the shadow maps (RS1) are measured against them.
+            bool RayTracing = true;   // the hybrid RT master switch (off: nothing traced, the TLAS not built)
+            bool RTShadows = true;
+            bool RTReflections = true;
+            bool RTAO = false;        // else SSAO (SSAOMethod)
+            uint32_t DiffuseGI = 3;   // 0 IBL, 1 DDGI, 2 ReSTIR GI, 3 screen probes (DDGI underneath), 4 raster probe volume
+            uint32_t ScreenProbeTile = 16; // pixels per screen probe
+            uint32_t DirectLighting = 0; // 0 the loop (a shadow ray per light in range), 1 ReSTIR DI (one resampled light per pixel)
+            NRI::UpscaleMode Upscale = NRI::UpscaleMode::Quality;
+            bool RTRefraction = false; // smooth glass traced (H3); else the screen-space refraction only
+            uint32_t RTDivisor = 1;    // ray tracing resolution: 1 every pixel, 2 one of each 2 x 2 block
+            uint32_t ShadowRayLights = 0; // the shadow-ray budget a pixel (strongest lights); 0 every light
             Renderer::SunShadowMode SunShadows = Renderer::SunShadowMode::RayTraced;
             Renderer::LocalShadowMode LocalShadows = Renderer::LocalShadowMode::RayTraced;
+            // The raster versions (RS1-RS5): off on the RT rungs.
+            bool ContactShadows = false;
+            Renderer::SSAOMethod AmbientOcclusion = Renderer::SSAOMethod::Classic;
+            bool SSR = false;
+            bool SSGI = false;
+            bool RayReconstruction = true; // DLSS Ray Reconstruction denoises the RT effects (where the GPU has it)
+            int AutoExposure = -1;         // the viewport's Auto Exposure: 1 on, -1 left as it is
         };
 
         QualityPresetSettings GetQualityPresetSettings(Renderer::RenderQuality quality)
         {
+            QualityPresetSettings preset;
             switch (quality)
             {
             // Direct light: the loop on every rung (ReSTIR DI stays selectable; the user found it broken, 2026-10-19).
-            case Renderer::RenderQuality::Low: return { true, false, false, 3, 24, 0, NRI::UpscaleMode::Performance, false, 2, 4 };
-            case Renderer::RenderQuality::Medium: return { true, true, false, 3, 16, 0, NRI::UpscaleMode::Balanced, false, 1, 8 };
-            default: return { true, true, true, 3, 16, 0, NRI::UpscaleMode::Quality, true, 1, 0 };
+            case Renderer::RenderQuality::Low:
+                preset.RTReflections = false;
+                preset.ScreenProbeTile = 24;
+                preset.Upscale = NRI::UpscaleMode::Performance;
+                preset.RTDivisor = 2;
+                preset.ShadowRayLights = 4;
+                break;
+            case Renderer::RenderQuality::Medium:
+                preset.Upscale = NRI::UpscaleMode::Balanced;
+                preset.ShadowRayLights = 8;
+                break;
+            case Renderer::RenderQuality::High:
+                preset.RTAO = true;
+                preset.RTRefraction = true;
+                break;
+            case Renderer::RenderQuality::RayTracedAll:
+                // Everything traced at full resolution, DLSS Ray Reconstruction, Auto Exposure (High's features, every light shadowed).
+                preset.RTAO = true;
+                preset.RTRefraction = true;
+                preset.AutoExposure = 1;
+                break;
+            case Renderer::RenderQuality::RasterAll:
+                // Nothing traced: every raster version (shadow maps + contact shadows, GTAO, SSR + reflection probes, the raster probe
+                // volume + SSGI), DLSS Super Resolution (Ray Reconstruction is for ray traced noise), Auto Exposure.
+                preset.RayTracing = false;
+                preset.RTShadows = false;
+                preset.RTReflections = false;
+                preset.DiffuseGI = 4;
+                preset.SunShadows = Renderer::SunShadowMode::ShadowMaps;
+                preset.LocalShadows = Renderer::LocalShadowMode::ShadowMaps;
+                preset.ContactShadows = true;
+                preset.AmbientOcclusion = Renderer::SSAOMethod::GTAO;
+                preset.SSR = true;
+                preset.SSGI = true;
+                preset.RayReconstruction = false;
+                preset.AutoExposure = 1;
+                break;
+            default:
+                break;
             }
+            return preset;
         }
+
     }
 
     void Renderer::ApplyQualityPreset(RenderQuality quality)
@@ -820,7 +867,7 @@ namespace Nox
 
         const QualityPresetSettings preset = GetQualityPresetSettings(quality);
         setPathTracingEnabled(false);
-        setRayTracingEnabled(true);
+        setRayTracingEnabled(preset.RayTracing);
         setRayTracingShadows(preset.RTShadows);
         setNRDShadowsEnabled(true);
         setRayTracingReflections(preset.RTReflections);
@@ -830,6 +877,7 @@ namespace Nox
             setRTAOEnabled(true);
         else
             setSSAOEnabled(true);
+        setSSAOMethod(preset.AmbientOcclusion);
         setDiffuseGIMode(preset.DiffuseGI);
         setDDGIEnabled(preset.DiffuseGI == 1 || preset.DiffuseGI == 3);
         m_screenProbeTileSize = preset.ScreenProbeTile;
@@ -842,6 +890,8 @@ namespace Nox
         {
             setDLSSEnabled(true);
             setUpscaleMode(preset.Upscale);
+            if (isDLSSRayReconstructionSupported())
+                setDLSSRayReconstructionEnabled(preset.RayReconstruction);
         }
         setRefractionEnabled(true);
         setRTRefractionEnabled(preset.RTRefraction);
@@ -849,6 +899,11 @@ namespace Nox
         setShadowRayLightLimit(preset.ShadowRayLights);
         setSunShadowMode(preset.SunShadows);
         setLocalShadowMode(preset.LocalShadows);
+        setContactShadowsEnabled(preset.ContactShadows);
+        setSSREnabled(preset.SSR);
+        setSSGIEnabled(preset.SSGI);
+        if (preset.AutoExposure >= 0)
+            setViewportAutoExposure(preset.AutoExposure != 0);
         // DDGI's probes trace in turn: a quarter a frame on the fallback rung, half on the others; two cascades on the fallback rung.
         // Under the screen probes DDGI is only the second bounce: a quarter of its probes a frame is plenty.
         m_ddgiUpdateStride = (quality == RenderQuality::Low || preset.DiffuseGI == 3) ? 4u : 2u;
@@ -858,15 +913,20 @@ namespace Nox
 
     Renderer::RenderQuality Renderer::GetCurrentQuality() const
     {
-        for (RenderQuality quality : { RenderQuality::Low, RenderQuality::Medium, RenderQuality::High })
+        // The most specific first (Ray Traced (All) differs from High only by Ray Reconstruction and Auto Exposure).
+        for (RenderQuality quality : { RenderQuality::RayTracedAll, RenderQuality::RasterAll, RenderQuality::Low, RenderQuality::Medium, RenderQuality::High })
         {
             const QualityPresetSettings preset = GetQualityPresetSettings(quality);
             const bool upscaleMatches = !isDLSSSupported() || (m_dlssEnabled && m_dlssMode == preset.Upscale);
-            if (!m_pathTracingEnabled && m_rayTracingEnabled && m_rayTracingShadows == preset.RTShadows &&
-                m_rayTracingReflections == preset.RTReflections && m_rtaoEnabled == preset.RTAO && m_diffuseGIMode == preset.DiffuseGI &&
+            const bool rrMatches = !isDLSSSupported() || !isDLSSRayReconstructionSupported() || m_dlssRayReconstructionEnabled == preset.RayReconstruction;
+            const bool ssaoMatches = preset.RTAO ? m_rtaoEnabled : (m_ssaoEnabled && m_ssaoMethod == preset.AmbientOcclusion);
+            const bool exposureMatches = preset.AutoExposure < 0 || m_viewportAutoExposure == (preset.AutoExposure != 0);
+            if (!m_pathTracingEnabled && m_rayTracingEnabled == preset.RayTracing && m_rayTracingShadows == preset.RTShadows &&
+                m_rayTracingReflections == preset.RTReflections && ssaoMatches && m_diffuseGIMode == preset.DiffuseGI &&
                 m_directLightingMode == preset.DirectLighting && m_rtRefractionEnabled == preset.RTRefraction && upscaleMatches &&
                 m_rtSubsample == preset.RTDivisor && m_shadowRayLightLimit == preset.ShadowRayLights &&
-                m_sunShadowMode == preset.SunShadows && m_localShadowMode == preset.LocalShadows)
+                m_sunShadowMode == preset.SunShadows && m_localShadowMode == preset.LocalShadows && m_contactShadows == preset.ContactShadows &&
+                m_ssrEnabled == preset.SSR && m_ssgiEnabled == preset.SSGI && rrMatches && exposureMatches)
                 return quality;
         }
         return RenderQuality::Custom;
@@ -907,13 +967,16 @@ namespace Nox
         case RenderQuality::Low: return "Low";
         case RenderQuality::Medium: return "Medium";
         case RenderQuality::High: return "High";
+        case RenderQuality::RayTracedAll: return "Ray Traced (All)";
+        case RenderQuality::RasterAll: return "Raster (All)";
         default: return "Custom";
         }
     }
 
     Renderer::RenderQuality Renderer::ParseQualityName(const std::string& name, RenderQuality fallback)
     {
-        for (RenderQuality quality : { RenderQuality::Low, RenderQuality::Medium, RenderQuality::High, RenderQuality::Custom })
+        for (RenderQuality quality : { RenderQuality::Low, RenderQuality::Medium, RenderQuality::High, RenderQuality::RayTracedAll,
+                                       RenderQuality::RasterAll, RenderQuality::Custom })
         {
             if (name == GetQualityName(quality))
                 return quality;

@@ -625,6 +625,14 @@ namespace Nox
         uint32_t getIrradianceProbesPerFrame() const { return m_irradianceProbesPerFrame; }
         uint32_t getIrradianceProbeCount() const { return m_irradianceVolume.ProbeCount; }
         uint32_t getIrradianceProbesCaptured() const { return m_irradianceVolume.Captured; }
+        // Captured once (each probe in turn) and again only when the volume changes or Recapture is pressed; Continuous keeps
+        // recapturing in turn (changing light: time of day, moving lights). Without an Irradiance Volume entity an automatic one
+        // covers the whole scene (its bounds; probes as close as 32 per axis allow, at least 2 m apart).
+        void setIrradianceContinuous(bool continuous) { m_irradianceContinuous = continuous; }
+        bool getIrradianceContinuous() const { return m_irradianceContinuous; }
+        bool isIrradianceVolumeAutomatic() const { return m_irradianceVolumeAutomatic; }
+        // Captures every probe again, in turn (the old light stays until each probe's turn: no black frames).
+        void recaptureIrradianceVolume() { m_irradianceVolume.Captured = 0; m_irradianceVolume.Cursor = 0; }
         // Volumetric fog (RS6; Passes/VolumetricFogPasses.cpp): the Environment Light's Height Fog in froxels, lit by the sun and the
         // point / spot lights with their shadows, accumulated over frames (light shafts); the height fog continues beyond its range.
         // Off by default; how far it reaches, its slices, Henyey-Greenstein anisotropy, extinction scale, albedo, local lights.
@@ -871,7 +879,9 @@ namespace Nox
         // resolution; screen probes, SSAO, DLSS Performance), High the closest
         // to the path tracer (RT shadows of every light through ReSTIR DI, RT reflections, RTAO, ReSTIR GI, DLSS Quality). Custom: the
         // settings were changed one by one.
-        enum class RenderQuality : uint8_t { Low, Medium, High, Custom };
+        // Low / Medium / High: the ray traced rungs. Ray Traced (All): every RT feature, Ray Reconstruction, Auto Exposure. Raster (All): no
+        // ray tracing, every raster version on -- the two to compare. Custom: whatever the settings are.
+        enum class RenderQuality : uint8_t { Low, Medium, High, RayTracedAll, RasterAll, Custom };
         void ApplyQualityPreset(RenderQuality quality);
         RenderQuality GetCurrentQuality() const; // the preset the settings equal now, or Custom
         RenderQuality GetRecommendedQuality() const; // from this GPU's memory budget, its output resolution and DLSS
@@ -1591,6 +1601,12 @@ namespace Nox
             std::array<glm::vec3, shaderio::MaxIrradianceProbesPerFrame> Centers{};
         } m_irradianceCaptureFrame;
         uint32_t m_irradianceProbesPerFrame = 8;
+        bool m_irradianceContinuous = false;
+        bool m_irradianceVolumeAutomatic = false; // this frame's volume is the automatic one (no entity)
+        glm::vec3 m_sceneBoundsMin{ 0.0f };      // the automatic volume's box (render space), refreshed now and then
+        glm::vec3 m_sceneBoundsMax{ 0.0f };
+        uint64_t m_sceneBoundsFrame = 0;
+        bool m_sceneBoundsValid = false;
         std::unique_ptr<NRI::Pipeline> m_ssrPipeline;
         bool m_ssrEnabled = false;
         float m_ssrMaxDistanceMeters = 50.0f;

@@ -1,3 +1,4 @@
+#include <limits>
 #include "GpuScene.h"
 
 #include "NoxCore/Math/Math.h"
@@ -726,6 +727,23 @@ namespace Nox
                 outInstances[written++] = record;
             }
         }
+    }
+
+    bool GpuScene::ComputeWorldBounds(glm::vec3& outMin, glm::vec3& outMax) const
+    {
+        outMin = glm::vec3(std::numeric_limits<float>::max());
+        outMax = glm::vec3(-std::numeric_limits<float>::max());
+        bool any = false;
+        for (const InstanceState& state : m_InstanceStates)
+        {
+            if (state.Mesh == InvalidSlot || state.Bucket == RenderBucket::Count || state.WorldSphere.w <= 0.0f)
+                continue;
+            const glm::vec3 center(state.WorldSphere);
+            outMin = glm::min(outMin, center - state.WorldSphere.w);
+            outMax = glm::max(outMax, center + state.WorldSphere.w);
+            any = true;
+        }
+        return any;
     }
 
     void GpuScene::UpdateTlasCulling(const TlasCulling& culling)

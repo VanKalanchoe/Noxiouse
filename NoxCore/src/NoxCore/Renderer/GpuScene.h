@@ -182,6 +182,8 @@ namespace Nox
         void SetInstanceRayTracingGeometry(uint32_t instanceSlot, uint64_t blasAddressOverride, uint64_t skinnedVertexAddress);
         int32_t GetInstanceEntity(uint32_t instanceSlot) const { return m_Instances.Get(instanceSlot).entityID; }
         uint32_t GetInstanceCount() const { return m_InstanceCount; }
+        // The box around every drawn instance's world bounding sphere (render space); false without any.
+        bool ComputeWorldBounds(glm::vec3& outMin, glm::vec3& outMax) const;
 
         // Per frame, main thread before recording.
         // The draw list every view culls: instance slots in bucket order (transparent buckets back to front), outBucketStarts

@@ -851,7 +851,8 @@ namespace Nox
                     applyQuality(recommended);
                     Project::SaveActive();
                 }
-                for (Renderer::RenderQuality quality : { Renderer::RenderQuality::Low, Renderer::RenderQuality::Medium, Renderer::RenderQuality::High })
+                for (Renderer::RenderQuality quality : { Renderer::RenderQuality::Low, Renderer::RenderQuality::Medium, Renderer::RenderQuality::High,
+                                                         Renderer::RenderQuality::RayTracedAll, Renderer::RenderQuality::RasterAll })
                 {
                     if (ImGui::Selectable(Renderer::GetQualityName(quality), !automatic && config.RenderQuality == Renderer::GetQualityName(quality)))
                     {
@@ -868,10 +869,14 @@ namespace Nox
                 ImGui::EndCombo();
             }
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Every preset is ray traced (no shadow maps):\n"
+                ImGui::SetTooltip("Each preset sets every feature on or off:\n"
                                   "  Low: RT shadows of the sun, screen-probe GI (24 px probes), SSAO, DLSS Performance (the fallback for smaller RT GPUs)\n"
                                   "  Medium: + RT reflections, screen-probe GI (16 px), DLSS Balanced\n"
                                   "  High: + RTAO, RT glass, DLSS Quality (the closest to the path tracer)\n"
+                                  "  Ray Traced (All): High with every light shadowed, DLSS Ray Reconstruction, Auto Exposure\n"
+                                  "  Raster (All): no ray tracing -- shadow maps + contact shadows, GTAO, SSR + reflection probes, raster probe\n"
+                                  "    volume GI + SSGI, DLSS Quality (no Ray Reconstruction: nothing traced to denoise), Auto Exposure\n"
+                                  "The two '(All)' ones are for comparing ray traced against raster. Volumetric fog and post effects are left as they are.\n"
                                   "The project opens with it (saved in the .nproj). Changing a setting below makes it Custom for this session.");
 
             // Saved on top of the preset (the .nproj's Renderer map): the game starts with them too.
@@ -1697,10 +1702,10 @@ namespace Nox
                 m_Renderer->setDiffuseGIMode(rasterProbeGI ? 4u : 0u);
                 m_Renderer->setDDGIEnabled(false);
             }
-            ImGui::SetItemTooltip("Diffuse light from around without ray tracing: an Irradiance Volume entity's probes (Add Component >\n"
-                                  "Irradiance Volume), each the scene rasterized around it into six small faces and reduced to\n"
-                                  "spherical harmonics, a few probes a frame. Inside the volume's box; the environment outside it.\n"
-                                  "To compare with the screen-probe GI and DDGI (Diffuse Global Illumination, under Hybrid Ray Tracing).");
+            ImGui::SetItemTooltip("Diffuse light from around without ray tracing: probes, each the scene rasterized around it into six\n"
+                                  "small faces and reduced to spherical harmonics, a few a frame, then kept. Works on its own: without an\n"
+                                  "Irradiance Volume entity the probes cover the whole scene (coarse in big scenes). Place an Irradiance\n"
+                                  "Volume (Add Component) over an area for closer probes there.");
             if (rasterProbeGI)
             {
                 ImGui::Indent();
@@ -1708,10 +1713,17 @@ namespace Nox
                 ImGui::SetNextItemWidth(160.0f);
                 if (ImGui::SliderInt("Probes per Frame##RasterGI", &perFrame, 1, static_cast<int>(shaderio::MaxIrradianceProbesPerFrame)))
                     m_Renderer->setIrradianceProbesPerFrame(static_cast<uint32_t>(perFrame));
+                bool continuous = m_Renderer->getIrradianceContinuous();
+                if (ImGui::Checkbox("Continuous Update##RasterGI", &continuous))
+                    m_Renderer->setIrradianceContinuous(continuous);
+                ImGui::SetItemTooltip("Keep capturing the probes in turn (for changing light: time of day, moving lights). Off: each probe\n"
+                                      "is captured once, again only when the volume changes or with Recapture -- no cost after that.");
+                if (ImGui::Button("Recapture##RasterGI"))
+                    m_Renderer->recaptureIrradianceVolume();
+                ImGui::SetItemTooltip("Capture every probe again (after the scene or its lighting changed).");
                 if (m_Renderer->getIrradianceProbeCount() > 0)
-                    ImGui::TextDisabled("%u probes, %u captured", m_Renderer->getIrradianceProbeCount(), m_Renderer->getIrradianceProbesCaptured());
-                else
-                    ImGui::TextDisabled("No Irradiance Volume in the scene");
+                    ImGui::TextDisabled("%s: %u probes, %u captured", m_Renderer->isIrradianceVolumeAutomatic() ? "Automatic (whole scene)" : "Irradiance Volume entity",
+                                        m_Renderer->getIrradianceProbeCount(), m_Renderer->getIrradianceProbesCaptured());
                 ImGui::Unindent();
             }
 

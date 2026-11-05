@@ -623,3 +623,15 @@ In the tonemap pass (`PostProcess.slang`): chromatic aberration (red / blue pull
 space around mid grey) before the tonemapper; after it CAS sharpening (FidelityFX's formula on the tonemapped cross of neighbours, its
 change added), a colour grading LUT strip (UE's N slices of N x N, blue across the slices; loaded without sRGB decode or mips),
 vignette and film grain (mid tones). The extra views stay neutral.
+
+**Presets and the irradiance volume after the first measurement (2026-11-05).** The user's comparison (Bistro-like scene, 1211x620 ->
+1816x930, DLSS Quality): baseline hybrid 20.4 ms; with the raster versions on (RT reflections still taking precedence) 30.8 ms --
+13.7 ms of it "Irradiance Probe Capture", which kept re-capturing all 605 probes in turn after they were done. Without it ~17 ms: GTAO
+0.17 ms vs RTAO 1.84, no screen-probe GI / DDGI (~7 ms); the shadow maps cost more than the RT shadows (sun ~2.1 ms, one local
+light's cube 1.9 ms vs RT shadows + SIGMA 1.0 ms). Changes:
+- The irradiance volume captures each probe once, again only when it changes or with Recapture (Settings > Raster GI); Continuous
+  Update keeps cycling for changing light. Without an Irradiance Volume entity an automatic one covers the scene's bounds (whole
+  meters; probes >= 2 m apart, <= 32 per axis), so Raster Probe Volume works by just turning it on.
+- Presets set every feature on or off. New: **Ray Traced (All)** (High + every light shadowed, DLSS Ray Reconstruction, Auto
+  Exposure) and **Raster (All)** (ray tracing off; shadow maps + contact shadows, GTAO, SSR + probes, raster probe volume + SSGI, DLSS
+  Quality without RR, Auto Exposure). Low / Medium / High turn the raster versions off.

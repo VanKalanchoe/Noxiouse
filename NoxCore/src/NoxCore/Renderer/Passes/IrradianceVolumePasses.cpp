@@ -52,10 +52,37 @@ namespace Nox
     {
         uniformData.irradianceVolumeReference = 0;
         m_irradianceCaptureFrame.Count = 0;
+        m_irradianceVolumeAutomatic = false;
         const bool pathTracing = m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19;
-        const IrradianceVolumeSubmission& submission = m_irradianceVolumeSubmission;
-        if (m_diffuseGIMode != 4 || pathTracing || !submission.Valid || !m_irradianceSHPipeline)
+        if (m_diffuseGIMode != 4 || pathTracing || !m_irradianceSHPipeline)
             return;
+
+        // No Irradiance Volume entity: an automatic one over the scene's bounds (refreshed every second; snapped to whole meters so
+        // small changes do not capture it again). Probes at least 2 m apart, at most 32 per axis.
+        IrradianceVolumeSubmission automatic;
+        if (!m_irradianceVolumeSubmission.Valid)
+        {
+            if (!m_sceneBoundsValid || m_sceneFrameCounter - m_sceneBoundsFrame > 60)
+            {
+                m_sceneBoundsValid = m_gpuScene.ComputeWorldBounds(m_sceneBoundsMin, m_sceneBoundsMax);
+                m_sceneBoundsFrame = m_sceneFrameCounter;
+            }
+            if (!m_sceneBoundsValid)
+                return;
+            const double meter = static_cast<double>(WorldUnits::FromMeters(1.0f));
+            const glm::dvec3 worldMin = glm::floor((m_renderOrigin + glm::dvec3(m_sceneBoundsMin)) / meter) * meter;
+            const glm::dvec3 worldMax = glm::ceil((m_renderOrigin + glm::dvec3(m_sceneBoundsMax)) / meter) * meter;
+            const glm::vec3 extents = glm::max(glm::vec3(0.5 * (worldMax - worldMin)), glm::vec3(WorldUnits::FromMeters(1.0f)));
+            automatic.Valid = true;
+            automatic.Id = ~0ull;
+            automatic.World = glm::translate(glm::dmat4(1.0), 0.5 * (worldMin + worldMax));
+            automatic.Extents = extents;
+            automatic.Spacing = std::max(WorldUnits::FromMeters(2.0f), 2.0f * std::max({ extents.x, extents.y, extents.z }) / 31.0f);
+            automatic.Intensity = 1.0f;
+            automatic.Revision = m_irradianceVolume.Id == ~0ull ? m_irradianceVolume.Revision : 0u;
+            m_irradianceVolumeAutomatic = true;
+        }
+        const IrradianceVolumeSubmission& submission = m_irradianceVolumeSubmission.Valid ? m_irradianceVolumeSubmission : automatic;
 
         // The grid: probes spacing apart over the box (world size: the extents times the entity's scale), at most 32 per axis.
         IrradianceVolumeState& state = m_irradianceVolume;
@@ -135,7 +162,9 @@ namespace Nox
         if (!drawReady)
             return;
 
-        // This frame's probes, in turn over the grid.
+        // This frame's probes, in turn over the grid -- none once every probe has been captured, unless Continuous.
+        if (state.Captured >= state.ProbeCount && !m_irradianceContinuous)
+            return;
         const uint32_t count = std::min(m_irradianceProbesPerFrame, state.ProbeCount);
         uint32_t* probeList = static_cast<uint32_t*>(m_irradianceProbeListBuffersMapped[frameIndex]);
         const glm::vec3 cell = 2.0f * submission.Extents / glm::vec3(state.Counts - 1u);
