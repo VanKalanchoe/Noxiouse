@@ -1,0 +1,12 @@
+/* Custom overrides for Sphinx Read the Docs theme (Godot Docs style) */
+.wy-side-nav-search {
+    background-color: #2980b9;
+}
+.wy-nav-content {
+    max-width: 1050px !important;
+}
+.rst-content table.docutils td,
+.rst-content table.docutils th {
+    white-space: normal !important;
+    vertical-align: top;
+}

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noxiouse Engine — User Manual & Gameplay Programming Guide</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/rtd-custom.css">
+</head>
+<body class="wy-body-for-nav">
+
+    <div class="wy-grid-for-nav">
+        <!-- Sidebar Navigation (Godot / Read the Docs Style) -->
+        <nav class="wy-nav-side" aria-label="Navigation menu">
+            <div class="wy-side-scroll">
+                <!-- Top Brand & Search Header -->
+                <div class="wy-side-nav-search">
+                    <a href="#intro" class="brand-link">
+                        <span class="brand-logo" style="background:#0284c7;">📖</span>
+                        <span>Noxiouse Manual</span>
+                    </a>
+                    <div class="version-badge">
+                        <span>User Guide &amp; C# API (2026.10)</span>
+                    </div>
+                    <div class="search-box-wrap">
+                        <input type="text" id="global-search-input" placeholder="Search guides & C# APIs..." aria-label="Search docs">
+                    </div>
+                </div>
+
+                <!-- Navigation Tree (Pre-rendered for instant local display) -->
+                <div class="wy-menu wy-menu-vertical" id="rtd-menu" role="navigation" aria-label="Page navigation">
+                    <p class="wy-menu-caption">Getting Started</p>
+                    <ul class="nav-list">
+                        <li class="nav-item active"><a href="#intro"><span>Introduction &amp; Engine Overview</span><span class="nav-badge">Start Here</span></a></li>
+                        <li class="nav-item"><a href="#first-game"><span>Step-by-Step: Your First 3D Game</span><span class="nav-badge">Tutorial</span></a></li>
+                    </ul>
+
+                    <p class="wy-menu-caption">Editor Guide</p>
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="#editor-interface"><span>Viewport Navigation &amp; Gizmos</span><span class="nav-badge">Core</span></a></li>
+                        <li class="nav-item"><a href="#editor-panels-guide"><span>The 11 Specialized Panels</span><span class="nav-badge">Tooling</span></a></li>
+                    </ul>
+
+                    <p class="wy-menu-caption">World &amp; Entities</p>
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="#entities-components"><span>Entities, Components &amp; Hierarchy</span><span class="nav-badge">ECS</span></a></li>
+                        <li class="nav-item"><a href="#prefabs"><span>Prefabs &amp; Prefab Variants</span><span class="nav-badge">Assets</span></a></li>
+                        <li class="nav-item"><a href="#world-partition"><span>Large Worlds, Partition &amp; HLOD</span><span class="nav-badge">Open World</span></a></li>
+                    </ul>
+
+                    <p class="wy-menu-caption">C# Scripting &amp; Gameplay</p>
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="#csharp-scripting-guide"><span>C# Scripting Fundamentals</span><span class="nav-badge">Scripting</span></a></li>
+                        <li class="nav-item"><a href="#csharp-entities"><span>Entities &amp; Components in C#</span><span class="nav-badge">Scripting</span></a></li>
+                        <li class="nav-item"><a href="#csharp-input"><span>Input &amp; Camera Controls</span><span class="nav-badge">Input</span></a></li>
+                        <li class="nav-item"><a href="#csharp-physics"><span>Physics &amp; Character Movement</span><span class="nav-badge">Movement</span></a></li>
+                        <li class="nav-item"><a href="#csharp-procedural-mesh"><span>Procedural Meshes &amp; Voxels</span><span class="nav-badge">Meshes</span></a></li>
+                        <li class="nav-item"><a href="#csharp-jobs"><span>Multithreading with Jobs API</span><span class="nav-badge">Jobs</span></a></li>
+                    </ul>
+
+                    <p class="wy-menu-caption">Graphics &amp; Visuals</p>
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="#materials-authoring"><span>Material Authoring &amp; OpenPBR</span><span class="nav-badge">Shading</span></a></li>
+                        <li class="nav-item"><a href="#lighting-environment"><span>Lighting, Physical Sky &amp; Clouds</span><span class="nav-badge">Lighting</span></a></li>
+                    </ul>
+
+                    <p class="wy-menu-caption">Physics Simulation</p>
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="#physics-simulation"><span>3D Jolt Physics &amp; 2D Box2D</span><span class="nav-badge">Simulation</span></a></li>
+                    </ul>
+
+                    <p class="wy-menu-caption">Animation &amp; Cinematics</p>
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="#animation-guide"><span>Skeletal Animation &amp; Anim Graphs</span><span class="nav-badge">Animation</span></a></li>
+                    </ul>
+
+                    <p class="wy-menu-caption">Packaging &amp; Releasing</p>
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="#packaging-shipping"><span>1-Click Game Packaging &amp; Shipping</span><span class="nav-badge">Distribution</span></a></li>
+                    </ul>
+
+                    <p class="wy-menu-caption">Class Reference</p>
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="#csharp-api-reference"><span>C# Scripting API Reference</span><span class="nav-badge">API</span></a></li>
+                    </ul>
+                </div>
+
+                <!-- Bottom Read the Docs Version Panel -->
+                <div class="rst-versions" role="note" aria-label="versions">
+                    <span class="rst-current-version">
+                        <span class="v-label">v: 2026.10</span> (User Manual)
+                    </span>
+                    <span style="font-size:0.75rem; color:#888;">Noxiouse Engine</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <section class="wy-nav-content-wrap">
+            <div class="wy-nav-content">
+                <!-- Breadcrumb Bar with Switcher Button -->
+                <div class="wy-breadcrumbs" role="navigation" aria-label="Page navigation">
+                    <div class="breadcrumb-trail" id="breadcrumb-trail">
+                        <a href="#intro">Manual</a> &raquo; <span>Getting Started</span> &raquo; <span>Introduction &amp; Engine Overview</span>
+                    </div>
+                    <div class="top-actions">
+                        <a href="index.html" class="btn-top" style="background:var(--border-subtle); color:var(--text-main); font-weight:700;">⚙️ Engine Architecture &amp; 489 Files</a>
+                        <button class="btn-top" id="theme-toggle-btn">&#9728; Light Mode</button>
+                    </div>
+                </div>
+
+                <!-- Dynamic Page Markdown Body (Pre-rendered default home page) -->
+                <article role="main" class="rst-content" id="doc-content-body">
+                    <h1>Introduction to Noxiouse Engine</h1>
+                    <p>Welcome to the <strong>Noxiouse Engine User Manual &amp; Gameplay Programming Guide</strong>. Whether you are building an atmospheric action game, a massive open-world RPG, or a high-fidelity cinematic simulation, this guide teaches you how to use Noxiouse's editor, visual tools, and C# scripting API to bring your game to life.</p>
+
+                    <div class="admonition tip">
+                        <div class="admonition-title">TIP</div>
+                        <div class="admonition-body">
+                            <p><strong>Looking for low-level engine internals?</strong></p>
+                            <p>If you are contributing to the engine's C++20 / Vulkan 1.4 core or inspecting the 489 source files, click the <strong><a href="index.html">⚙️ Engine Architecture &amp; 489 Files</a></strong> button in the top right. This manual focuses purely on <strong>creating games, authoring content, and writing gameplay code</strong>.</p>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <h2>What Makes Noxiouse Unique?</h2>
+                    <ol>
+                        <li><strong>GPU-Driven Visibility Buffer &amp; Unified Geometry Arena</strong>: Traditional engines choke on thousands of draw calls and material switches. Noxiouse uses a 64-bit Visibility Buffer with Nanite-style Cluster LOD DAG streaming, drawing millions of triangles with near-zero CPU driver overhead.</li>
+                        <li><strong>Large World Coordinates (LWC)</strong>: Every entity translation is stored in 64-bit <code>double</code> precision. You can build worlds thousands of kilometers across with millimeter-level physics precision, with zero floating-point camera jitter.</li>
+                        <li><strong>Stateful C# Hot Reload</strong>: Gameplay scripts are written in standard <strong>C# (.NET 9)</strong>. Save your script in VS Code or Visual Studio, and Noxiouse reloads the code live in the editor in milliseconds while preserving your player position and component state.</li>
+                        <li><strong>Decoupled Real-Time Hardware Ray Tracing &amp; ReSTIR</strong>: Enjoy soft ray-traced sun shadows (denoised by NVIDIA NRD SIGMA), specular reflections (REBLUR / RELAX), and dynamic Global Illumination (Screen-Probe GI, Cascaded DDGI, and RTXDI ReSTIR DI/GI) alongside full NVIDIA DLSS Super Resolution and Ray Reconstruction.</li>
+                        <li><strong>Jolt 3D Physics Built-in</strong>: Industry-leading multi-threaded 3D physics with double-precision Large World Coordinates, rolling resistance for spheres/cylinders, virtual character controllers, and 7 constraint types.</li>
+                        <li><strong>Visual Animation Graphs &amp; Sequencer</strong>: Author state machines, 1D/2D blend spaces with footstep phase synchronization, montage slots, and cinematic cutscenes with an 11-track curve editor.</li>
+                    </ol>
+
+                    <hr>
+
+                    <h2>Quick Links for Creators</h2>
+                    <ul>
+                        <li><a href="#first-game"><strong>Step-by-Step: Your First 3D Game</strong></a> — Build a playable character and room in 10 minutes.</li>
+                        <li><a href="#editor-interface"><strong>Editor Viewport &amp; Gizmos</strong></a> — Master navigation, snapping tools, and hotkeys.</li>
+                        <li><a href="#csharp-scripting-guide"><strong>C# Scripting Fundamentals</strong></a> — Learn <code>EntityBehaviour</code>, lifecycle hooks, and Inspector attributes.</li>
+                        <li><a href="#csharp-api-reference"><strong>Complete C# API Reference</strong></a> — Copy-pasteable code examples for all <code>Nox</code> gameplay classes.</li>
+                        <li><a href="#materials-authoring"><strong>Material Authoring &amp; OpenPBR</strong></a> — Create glass, car paint, cloth, iridescence, and metals.</li>
+                        <li><a href="#packaging-shipping"><strong>Packaging &amp; Shipping</strong></a> — Export your standalone <code>.npak</code> and executable with 1 click.</li>
+                    </ul>
+                </article>
+
+                <!-- Prev / Next Footer Buttons -->
+                <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+                    <a href="#" class="btn-neutral" id="btn-prev-page" style="display:none;">&laquo; Previous</a>
+                    <a href="#first-game" class="btn-neutral" id="btn-next-page">Next (Step-by-Step: Your First 3D Game) &raquo;</a>
+                </div>
+
+                <!-- Footer -->
+                <footer class="rtd-footer">
+                    <p>&copy; Copyright 2026, Noxiouse Contributors. Official User Manual &amp; Gameplay Programming Guide.</p>
+                    <p>Modeled after Godot Docs and Unreal Engine Documentation.</p>
+                </footer>
+            </div>
+        </section>
+    </div>
+
+    <!-- Data and App Scripts -->
+    <script src="assets/manual-pages.js"></script>
+    <script src="assets/file-db.js"></script>
+    <script src="assets/app.js"></script>
+</body>
+</html>

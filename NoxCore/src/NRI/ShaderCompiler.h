@@ -7,6 +7,8 @@
 
 namespace NRI
 {
+    enum class GraphicsAPI : uint8_t;
+
     // Startup progress (the renderer's splash while shaders compile): who is told when a source really compiles (a cached binary is
     // not a compile) and when a pipeline has been created. Main thread; null outside the renderer's start.
     struct ShaderProgress
@@ -27,6 +29,8 @@ namespace NRI
         virtual uint64_t sourceHash(const std::string& path) = 0;
         // Whether compile() can run here: false in a packaged game shipped without the compiler (precompiled shaders only).
         virtual bool canCompile() = 0;
+        virtual void setTargetAPI(GraphicsAPI api) {}
+        virtual GraphicsAPI getTargetAPI() const { return static_cast<GraphicsAPI>(0); }
     };
     
     std::unique_ptr<ShaderCompiler> CreateSlangCompiler();

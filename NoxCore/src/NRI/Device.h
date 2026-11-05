@@ -24,7 +24,8 @@ namespace NRI
     enum class GraphicsAPI : uint8_t
     {
         Vulkan,
-        Metal
+        Metal,
+        D3D12
     };
     
     enum class UpscaleMode : uint8_t
@@ -267,6 +268,7 @@ namespace NRI
         
         virtual uint32_t getShaderGroupHandleSize() const { return 32; }
         virtual uint32_t getShaderGroupBaseAlignment() const { return 64; }
+        virtual GraphicsAPI getAPI() const = 0;
         
         virtual ~Device() = default;
     };

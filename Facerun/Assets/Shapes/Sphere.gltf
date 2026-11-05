@@ -1,0 +1,21 @@
+{
+  "asset": { "version": "2.0", "generator": "Nox PrimitiveShapes" },
+  "scene": 0,
+  "scenes": [ { "nodes": [ 0 ] } ],
+  "nodes": [ { "name": "Sphere", "mesh": 0 } ],
+  "meshes": [ { "name": "Sphere", "primitives": [ { "attributes": { "POSITION": 1, "NORMAL": 2, "TEXCOORD_0": 3 }, "indices": 0, "material": 0 } ] } ],
+  "materials": [ { "name": "Sphere_Material", "pbrMetallicRoughness": { "baseColorFactor": [0.8, 0.8, 0.8, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.6 } } ],
+  "accessors": [
+    { "bufferView": 0, "componentType": 5125, "count": 2880, "type": "SCALAR" },
+    { "bufferView": 1, "componentType": 5126, "count": 561, "type": "VEC3", "min": [-0.5, -0.5, -0.5], "max": [0.5, 0.5, 0.5] },
+    { "bufferView": 2, "componentType": 5126, "count": 561, "type": "VEC3" },
+    { "bufferView": 3, "componentType": 5126, "count": 561, "type": "VEC2" }
+  ],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": 0, "byteLength": 11520, "target": 34963 },
+    { "buffer": 0, "byteOffset": 11520, "byteLength": 6732, "target": 34962 },
+    { "buffer": 0, "byteOffset": 18252, "byteLength": 6732, "target": 34962 },
+    { "buffer": 0, "byteOffset": 24984, "byteLength": 4488, "target": 34962 }
+  ],
+  "buffers": [ { "uri": "Sphere.bin", "byteLength": 29472 } ]
+}

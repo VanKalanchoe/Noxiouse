@@ -74,6 +74,7 @@ set(IMGUI_SOURCES
     # Add the specific backends matching your engine tech!
     ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
     ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_dx12.cpp
 
     ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
 )
@@ -194,6 +195,12 @@ if(MSVC)
 endif()
 
 target_link_libraries (${PROJECT_NAME} PUBLIC Coral.Native Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader "${STREAMLINE_LIB}" ${NRD_LIBS} Jolt)
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PUBLIC d3d12 dxgi dxguid)
+    if(TARGET D3D12MemoryAllocator)
+        target_link_libraries(${PROJECT_NAME} PUBLIC D3D12MemoryAllocator)
+    endif()
+endif()
 # Add here vendors
 target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)
 

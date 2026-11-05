@@ -13,7 +13,10 @@ namespace Nox
         }
         
         float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-        m_window = SDL_CreateWindow(m_Specification.Ttile.empty() ? "Nox" : m_Specification.Ttile.c_str(), m_Specification.Width * main_scale, m_Specification.Height * main_scale, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+        SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+        if (m_Specification.IsVulkan)
+            flags |= SDL_WINDOW_VULKAN;
+        m_window = SDL_CreateWindow(m_Specification.Ttile.empty() ? "Nox" : m_Specification.Ttile.c_str(), m_Specification.Width * main_scale, m_Specification.Height * main_scale, flags);
         if (!m_window)
         {
             SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
