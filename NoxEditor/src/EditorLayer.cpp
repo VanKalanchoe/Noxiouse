@@ -1362,6 +1362,13 @@ namespace Nox
                     m_Renderer->setShadowCascadeBlend(blend);
                 ImGui::SetItemTooltip("The last part of each cascade that dithers into the next one (the last fades out).");
 
+                bool caching = m_Renderer->getShadowCascadeCaching();
+                if (ImGui::Checkbox("Cache Cascades##SunShadows", &caching))
+                    m_Renderer->setShadowCascadeCaching(caching);
+                ImGui::SetItemTooltip("UE's cached shadow maps: a cascade is drawn again only when its view or the sun moved, or\n"
+                                      "something inside it moved, changed or streamed in; the nearest at once, the farther ones in\n"
+                                      "turn (one a frame). A still camera and scene draw no cascade. Off: every cascade every frame.");
+
                 const char* filters[] = { "PCF", "PCSS (Contact Hardening)" };
                 int filter = static_cast<int>(m_Renderer->getShadowFilter());
                 ImGui::SetNextItemWidth(180.0f);

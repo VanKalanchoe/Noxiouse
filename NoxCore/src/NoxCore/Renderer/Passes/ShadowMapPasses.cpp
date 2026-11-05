@@ -8,6 +8,13 @@
 //   - Per cascade the camera's GPU culling (frustum only) and the visibility pass's meshlet draws into a depth target: opaque and
 //     masked surfaces (alpha tested), unlit ones too, both faces -- what the RT shadow rays hit (ray_shadow_passes skips the
 //     transparent ones). The cluster LOD stays the camera's, so a surface shadows the same triangles it is drawn with.
+//   - Cached (Settings > Sun Shadows > Cache Cascades; UE's cached shadow maps): each cascade's map persists with the view it was
+//     drawn with. It is drawn again only when that view changes (its snapped position, its size, the sun), something drawn inside
+//     it changed (an instance added, removed, moved, deformed or given another material: GpuScene::TakeChangedBounds against the
+//     cascade's box, open towards the sun) or streamed geometry changed. The nearest cascade then draws at once; of the farther
+//     ones at most one a frame, the one waiting longest for its interval (the second every other frame, the rest every fourth).
+//     A cascade not drawn this frame is looked up through its own older view (consistent with its map); where that no longer
+//     reaches, the lookup takes the next cascade (ShadowMaps.slang). A still camera and scene draw nothing.
 //   - The resolve (ShadowMapResolve.slang) writes the RT shadow mask's format into RawShadowMask; the deferred lighting reads it as
 //     it reads the ray traced one. The forward and particle passes look the cascades up themselves (ShadowMaps.slang).
 #include "NoxCore/Renderer/Renderer.h"
@@ -63,10 +70,16 @@ namespace Nox
         const bool pathTracing = m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19;
         const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
         const bool cullingReady = std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return pipeline != nullptr; });
+        m_shadowCascadesDrawn = 0;
         if (m_sunShadowMode != SunShadowMode::ShadowMaps || pathTracing || m_shadowMaskLightIndex == ~0u ||
             m_shadowMaskLightIndex >= m_lightBufferObjects.size() || entryCount == 0 || !cullingReady ||
             !m_shadowDepthPipeline || !m_shadowDepthMaskPipeline || !m_shadowMapResolvePipeline)
+        {
+            // Changes go untracked meanwhile: the maps are drawn again when the cascades come back.
+            for (SunCascadeCache& cache : m_sunCascadeCache)
+                cache.Valid = false;
             return;
+        }
 
         // Per frame slot: each cascade's uniforms and culling view, the cascade table.
         if (!m_shadowCascadeBuffers[frameIndex])
@@ -179,7 +192,6 @@ namespace Nox
             m_shadowCascadeViews[cascade] = view;
             m_shadowCascadeProjections[cascade] = projection;
 
-            cascades.viewProj[cascade] = projection * view;
             cascades.splitFar[cascade] = splitFar;
             cascades.texelWorldSize[cascade] = texelWorld;
             cascades.depthRangeWorld[cascade] = depthRange;
@@ -202,8 +214,88 @@ namespace Nox
         const uint32_t blockCount = (entryCount + shaderio::CULL_BLOCK_SIZE - 1) / shaderio::CULL_BLOCK_SIZE;
         const float slopeBias = m_shadowSlopeBias;
 
+        // Which cascades draw this frame (see the top of the file). What the maps were drawn with besides their views: another value
+        // draws them all again, as does a new render origin (the cached views are in the old render space).
+        const uint64_t frame = ++m_sunCascadeFrame;
+        const uint64_t settings = (static_cast<uint64_t>(resolution) << 32) | std::bit_cast<uint32_t>(slopeBias);
+        const bool invalidateAll = std::exchange(m_sunCascadeSettings, settings) != settings || m_frameAllBoundsChanged;
+        const GeometryStreamer::Stats& streaming = m_geometryStreamer.GetStats();
+        const uint64_t pageEvents = streaming.PageLoads + streaming.PageEvictions;
+        const bool geometryChanged = std::exchange(m_sunCascadePageEvents, pageEvents) != pageEvents;
+        std::array<RGTexture, shaderio::MaxShadowCascades> maps{};
+        std::array<bool, shaderio::MaxShadowCascades> draw{};
         for (uint32_t cascade = 0; cascade < count; ++cascade)
         {
+            SunCascadeCache& cache = m_sunCascadeCache[cascade];
+            const RGTextureHistory history = m_renderGraph.GetHistoryTexture(kMapNames[cascade], mapDesc, 1);
+            maps[cascade] = history.Textures[0];
+            if (history.WasReset || invalidateAll)
+                cache.Valid = false;
+            if (!m_shadowCascadeCaching || !cache.Valid)
+            {
+                cache.Dirty = true;
+                draw[cascade] = true;
+                continue;
+            }
+            if (cache.Dirty)
+                continue;
+            cache.Dirty = geometryChanged || m_shadowCascadeViews[cascade] != cache.View || m_shadowCascadeProjections[cascade] != cache.Projection;
+            // Something drawn inside its box changed (the box open towards the sun: casters in front of it are flattened onto it).
+            const float halfSize = 1.0f / cache.Projection[0][0];
+            for (size_t index = 0; index < m_frameChangedBounds.size() && !cache.Dirty; ++index)
+            {
+                const glm::vec4& sphere = m_frameChangedBounds[index];
+                const glm::vec3 p(cache.View * glm::vec4(glm::vec3(sphere), 1.0f));
+                cache.Dirty = std::abs(p.x) - sphere.w <= halfSize && std::abs(p.y) - sphere.w <= halfSize && p.z - sphere.w <= cache.DepthRange;
+            }
+        }
+        if (m_shadowCascadeCaching)
+        {
+            if (m_sunCascadeCache[0].Dirty)
+                draw[0] = true;
+            // One farther cascade a frame: the one longest past its interval (the second every other frame, the rest every fourth).
+            uint32_t best = count;
+            float bestScore = 0.0f;
+            for (uint32_t cascade = 1; cascade < count; ++cascade)
+            {
+                const SunCascadeCache& cache = m_sunCascadeCache[cascade];
+                if (draw[cascade] || !cache.Dirty)
+                    continue;
+                const float score = static_cast<float>(frame - cache.DrawnFrame) / (cascade == 1 ? 2.0f : 4.0f);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = cascade;
+                }
+            }
+            if (best < count)
+                draw[best] = true;
+        }
+        for (uint32_t cascade = 0; cascade < count; ++cascade)
+        {
+            SunCascadeCache& cache = m_sunCascadeCache[cascade];
+            if (draw[cascade])
+            {
+                cache.View = m_shadowCascadeViews[cascade];
+                cache.Projection = m_shadowCascadeProjections[cascade];
+                cache.TexelWorld = cascades.texelWorldSize[cascade];
+                cache.DepthRange = cascades.depthRangeWorld[cascade];
+                cache.DrawnFrame = frame;
+                cache.Valid = true;
+                cache.Dirty = false;
+                ++m_shadowCascadesDrawn;
+            }
+            // The lookup goes through the view the map holds (this frame's split distances choose the cascade).
+            cascades.viewProj[cascade] = cache.Projection * cache.View;
+            cascades.texelWorldSize[cascade] = cache.TexelWorld;
+            cascades.depthRangeWorld[cascade] = cache.DepthRange;
+            resources.SunShadowMaps[cascade] = maps[cascade];
+        }
+
+        for (uint32_t cascade = 0; cascade < count; ++cascade)
+        {
+            if (!draw[cascade])
+                continue;
             NRI::Buffer* uniformBuffer = m_shadowCascadeUniforms[frameIndex][cascade].get();
             NRI::Buffer* cullViewBuffer = m_shadowCascadeCullViews[frameIndex][cascade].get();
 
@@ -229,9 +321,9 @@ namespace Nox
             const RGBuffer blocks = m_renderGraph.CreateBuffer("Sun Shadow Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI::BufferUsage::Storage });
             addCullingDispatchPass(kCullNames[cascade], draws, flags, blocks, entryCount, RGTexture{}, uniformBuffer, cullViewBuffer);
 
-            const RGTexture map = m_renderGraph.CreateTexture(kMapNames[cascade], mapDesc);
-            resources.SunShadowMaps[cascade] = map;
-            m_renderGraph.AddPass(kDepthNames[cascade], RGPassFlags::Raster,
+            const RGTexture map = maps[cascade];
+            // Never culled: the cache counts it as drawn.
+            m_renderGraph.AddPass(kDepthNames[cascade], RGPassFlags::Raster | RGPassFlags::NeverCull,
                 [&](RGBuilder& builder)
                 {
                     builder.DepthTarget(map, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 }); // reverse Z

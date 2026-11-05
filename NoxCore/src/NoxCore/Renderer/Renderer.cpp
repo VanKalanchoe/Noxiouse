@@ -5627,6 +5627,9 @@ namespace Nox
         memcpy(m_cullViewBuffers[currentImage]->map(0, sizeof(view)), &view, sizeof(view));
         m_cullViewBuffers[currentImage]->unmap();
 
+        // What changed in the drawn scene since last frame (the views that keep what they drew redraw there).
+        m_gpuScene.TakeChangedBounds(m_frameChangedBounds, m_frameAllBoundsChanged);
+
         std::vector<std::unique_ptr<NRI::Buffer>> releasedBuffers;
         m_gpuScene.PrepareUploads(currentImage, releasedBuffers);
         for (std::unique_ptr<NRI::Buffer>& buffer : releasedBuffers)

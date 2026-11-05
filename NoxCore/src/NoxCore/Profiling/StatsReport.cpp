@@ -183,11 +183,12 @@ namespace Nox
             if (!renderer.isPathTracingEnabled())
             {
                 if (renderer.getSunShadowMode() == Renderer::SunShadowMode::ShadowMaps)
-                    AppendSetting(out, "Sun shadows: Shadow Maps | {} cascades of {} | {:.0f} m | {} | filter {:.1f} - {:.0f} texels",
+                    AppendSetting(out, "Sun shadows: Shadow Maps | {} cascades of {} | {:.0f} m | {} | filter {:.1f} - {:.0f} texels | cached {} ({} drawn this frame)",
                                   renderer.getShadowCascadeCount(), renderer.getShadowMapResolution(),
                                   WorldUnits::ToMeters(renderer.getShadowDistance()),
                                   renderer.getShadowFilter() == 1 ? "PCSS" : "PCF", renderer.getShadowFilterTexels(),
-                                  renderer.getShadowMaxFilterTexels());
+                                  renderer.getShadowMaxFilterTexels(), OnOff(renderer.getShadowCascadeCaching()),
+                                  renderer.getShadowCascadesDrawn());
                 else
                     AppendSetting(out, "Sun shadows: Ray Traced{}", renderer.getRayTracingEnabled() && renderer.getRayTracingShadows() ? "" : " (off: Ray Tracing Shadows is off)");
                 if (renderer.getLocalShadowMode() == Renderer::LocalShadowMode::ShadowMaps)

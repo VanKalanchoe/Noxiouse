@@ -64,19 +64,30 @@ float sun_shadow_map(UniformBufferObject* ubo, GpuShadowCascades* cascades, floa
         fade = 1.0 - transition;
     }
 
-    const float texelWorld = cascades->texelWorldSize[cascade];
-    const float depthRange = max(cascades->depthRangeWorld[cascade], 1e-6);
     const float3 L = cascades->lightDirection.xyz;
     const float NoL = saturate(dot(n, L));
     const float sinTheta = sqrt(saturate(1.0 - NoL * NoL));
 
-    // Normal offset (more at grazing angles, where a texel covers more of the surface's depth), then a constant step towards the sun.
-    const float3 receiverPos = worldPos + n * (cascades->normalBias * texelWorld * sinTheta) + L * (cascades->depthBias * texelWorld);
-    const float4 clip = mul(cascades->viewProj[cascade], float4(receiverPos, 1.0));
-    const float2 uv = float2(clip.x * 0.5 + 0.5, 0.5 - clip.y * 0.5);
-    if (any(uv <= 0.0) || any(uv >= 1.0))
-        return 1.0;
-    const float receiverDepth = clip.z;
+    // A cached cascade (Renderer::addShadowMapPasses) was drawn around an earlier camera: where its map does not reach the point,
+    // the next cascade (larger, around the camera too) takes it.
+    float texelWorld;
+    float depthRange;
+    float2 uv;
+    float receiverDepth;
+    for (;;)
+    {
+        texelWorld = cascades->texelWorldSize[cascade];
+        depthRange = max(cascades->depthRangeWorld[cascade], 1e-6);
+        // Normal offset (more at grazing angles, where a texel covers more of the surface's depth), then a constant step towards the sun.
+        const float3 receiverPos = worldPos + n * (cascades->normalBias * texelWorld * sinTheta) + L * (cascades->depthBias * texelWorld);
+        const float4 clip = mul(cascades->viewProj[cascade], float4(receiverPos, 1.0));
+        uv = float2(clip.x * 0.5 + 0.5, 0.5 - clip.y * 0.5);
+        receiverDepth = clip.z;
+        if (all(uv > 0.0) && all(uv < 1.0) && receiverDepth > 0.0 && receiverDepth <= 1.0)
+            break;
+        if (++cascade >= count)
+            return 1.0;
+    }
 
     Texture2D<float> map = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + cascades->textureIndex[cascade], 0));
     SamplerState pointClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_NEAREST_CLAMP, 0));

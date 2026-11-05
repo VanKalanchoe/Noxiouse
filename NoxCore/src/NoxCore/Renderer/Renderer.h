@@ -568,6 +568,13 @@ namespace Nox
         float getShadowNormalBias() const { return m_shadowNormalBias; }
         void setShadowSlopeBias(float slope) { m_shadowSlopeBias = std::clamp(slope, 0.0f, 16.0f); }
         float getShadowSlopeBias() const { return m_shadowSlopeBias; }
+        // Cached cascades (UE's cached shadow maps: what did not change is not drawn again): a cascade keeps its map and view and is
+        // drawn again only when its snapped view or the sun moved, or something drawn inside it changed (GpuScene::TakeChangedBounds,
+        // streamed geometry); the nearest every such frame, the farther ones in turn (at most one of them a frame). Off: all every frame.
+        void setShadowCascadeCaching(bool enabled) { m_shadowCascadeCaching = enabled; }
+        bool getShadowCascadeCaching() const { return m_shadowCascadeCaching; }
+        // Cascades drawn this frame (stats).
+        uint32_t getShadowCascadesDrawn() const { return m_shadowCascadesDrawn; }
         // Local lights' shadows (RS1b; Passes/ShadowMapPasses.cpp): their RT shadow rays, or shadow maps in one atlas for the most
         // important ones (a spot light one view, point / rect / disc lights a cube) -- the rest keep their rays. The filter and bias
         // settings are the sun's. How many lights get a map, the atlas's size, the largest tile (texels per face side; each light's
@@ -1465,6 +1472,26 @@ namespace Nox
         float m_shadowDepthBias = 0.5f;
         float m_shadowNormalBias = 1.5f;
         float m_shadowSlopeBias = 2.0f;
+        // Cached cascades: per cascade the view its map was drawn with, and whether something since needs it drawn again.
+        struct SunCascadeCache
+        {
+            glm::mat4 View{ 1.0f };
+            glm::mat4 Projection{ 1.0f };
+            float TexelWorld = 0.0f;
+            float DepthRange = 0.0f;
+            uint64_t DrawnFrame = 0;
+            bool Valid = false; // its map holds what View shows
+            bool Dirty = true;  // drawn again when its turn comes
+        };
+        std::array<SunCascadeCache, shaderio::MaxShadowCascades> m_sunCascadeCache{};
+        uint64_t m_sunCascadeSettings = 0; // what the maps were drawn with (resolution, slope bias, count, ...)
+        uint64_t m_sunCascadeFrame = 0;
+        uint64_t m_sunCascadePageEvents = 0; // geometry pages loaded + evicted when last checked
+        bool m_shadowCascadeCaching = true;
+        uint32_t m_shadowCascadesDrawn = 0;
+        // This frame's changed regions of the drawn scene (GpuScene::TakeChangedBounds, in updateGpuScene).
+        std::vector<glm::vec4> m_frameChangedBounds;
+        bool m_frameAllBoundsChanged = true;
         // Local lights' shadow maps: per frame slot a copy of the uniforms per view and a culling view per light, the GpuLocalShadows
         // and the per-light view table (grown with the light count); this frame's views, lights and their draws.
         struct LocalShadowLight

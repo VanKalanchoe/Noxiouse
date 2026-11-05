@@ -283,6 +283,7 @@ namespace Nox
             if (state.Mesh != meshSlot)
                 continue;
 
+            MarkChanged(state.WorldSphere);
             RemoveFromBucket(instanceSlot);
             state.Mesh = InvalidSlot;
             WriteTlasInstance(instanceSlot);
@@ -330,6 +331,8 @@ namespace Nox
             if (state.Material != materialSlot)
                 continue;
 
+            if (state.Mesh != InvalidSlot)
+                MarkChanged(state.WorldSphere); // (alpha cutout, double-sidedness: what a shadow map drew)
             WriteRayTracingInstance(instanceSlot);
             if (!bucketsChange || state.Mesh == InvalidSlot)
                 continue;
@@ -384,6 +387,7 @@ namespace Nox
 
         m_InstanceStates[slot] = InstanceState{ .Mesh = meshSlot, .Material = materialSlot,
                                                 .WorldSphere = WorldBoundingSphere(m_Meshes.Get(meshSlot), world) };
+        MarkChanged(m_InstanceStates[slot].WorldSphere);
         ++m_MaterialReferences[materialSlot];
         ++m_InstanceCount;
         WriteRayTracingInstance(slot);
@@ -410,6 +414,8 @@ namespace Nox
         if (state.Mesh == InvalidSlot && state.Material == InvalidSlot)
             return;
 
+        if (state.Mesh != InvalidSlot)
+            MarkChanged(state.WorldSphere);
         RemoveFromBucket(instanceSlot);
         ReleaseMaterial(state.Material);
         state = InstanceState{};
@@ -447,7 +453,11 @@ namespace Nox
         transform.world = world;
         transform.normal = glm::transpose(glm::inverse(world));
         if (state.Mesh != InvalidSlot)
+        {
+            MarkChanged(state.WorldSphere); // where it was
             state.WorldSphere = WorldBoundingSphere(m_Meshes.Get(state.Mesh), world);
+            MarkChanged(state.WorldSphere);
+        }
 
         m_RayTracingInstances.Edit(instanceSlot).normalMatrix = transform.normal;
         WriteTlasInstance(instanceSlot);
@@ -461,6 +471,7 @@ namespace Nox
         // grid (Renderer::updateRenderOrigin), so the shift is exact in float.
         const glm::vec3 shift = glm::vec3(m_RenderOrigin - origin);
         m_RenderOrigin = origin;
+        m_AllChanged = true;
         for (uint32_t instanceSlot = 0; instanceSlot < m_InstanceStates.size(); ++instanceSlot)
         {
             InstanceState& state = m_InstanceStates[instanceSlot];
@@ -535,6 +546,20 @@ namespace Nox
         {
             state.SkinnedVertexAddress = skinnedVertexAddress;
             WriteRayTracingInstance(instanceSlot);
+        }
+    }
+
+    void GpuScene::TakeChangedBounds(std::vector<glm::vec4>& outSpheres, bool& outAll)
+    {
+        outSpheres.swap(m_ChangedSpheres);
+        m_ChangedSpheres.clear();
+        outAll = std::exchange(m_AllChanged, false);
+        // Deformed every frame (compute skinning): a pose may reach past the bind pose's bounds, so twice their radius.
+        for (uint32_t instanceSlot : m_SkinnedInstances)
+        {
+            const InstanceState& state = m_InstanceStates[instanceSlot];
+            if (state.Mesh != InvalidSlot && state.Bucket != RenderBucket::Count)
+                outSpheres.push_back(glm::vec4(glm::vec3(state.WorldSphere), 2.0f * state.WorldSphere.w));
         }
     }
 
