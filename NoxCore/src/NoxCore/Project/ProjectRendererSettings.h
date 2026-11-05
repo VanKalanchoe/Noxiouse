@@ -20,6 +20,9 @@ namespace Nox
         int32_t SSR = -1;                  // screen-space reflections (where RT reflections are off): 0 off, 1 on
         int32_t SSGI = -1;                 // screen-space GI (with the environment / raster probe volume GI): 0 off, 1 on
         int32_t VolumetricFog = -1;        // the height fog in froxels with shadows: 0 off, 1 on
+        int32_t Bloom = -1;                // post effects: 0 off, 1 on (their amounts are the renderer's defaults)
+        int32_t DepthOfField = -1;
+        int32_t MotionBlur = -1;
     };
 
     // The packaged game's window: "Windowed", "Borderless" (fullscreen at the desktop's resolution, the default) or "Fullscreen"

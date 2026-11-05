@@ -91,23 +91,29 @@ namespace Nox
                 });
         }
         const RGTexture exposureSource = adaptedExposure.IsValid() ? adaptedExposure : resources.AutoExposure;
+        // Depth of field, motion blur and bloom's chain before the tonemapper (Passes/PostEffectPasses.cpp; each off by default).
+        const PostEffectOutputs post = addPostEffectPasses(hdrSource);
 
         // HDR scene (or DLSS output / path tracer result) -> LDR scene.
         m_renderGraph.AddPass("Post Process", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
-                if (frame.dlssAdded)
+                if (post.HdrChanged)
+                    builder.Read(post.Hdr);
+                else if (frame.dlssAdded)
                     builder.Read(resources.DLSSOutput);
                 else if (frame.taaAdded)
                     builder.Read(resources.TAAHistory[frame.taaWriteIndex]);
                 else
                     ReadLitScene(builder, resources, frame.restirPTActive, frame.pathTracerActive, frame.ptNRDAdded, frame.pathTracerWriteIndex);
+                if (post.Bloom.IsValid())
+                    builder.Read(post.Bloom);
                 if (m_autoExposure)
                     builder.Read(exposureSource);
                 builder.ColorTarget(resources.Scene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                 builder.SetRenderArea(frame.outputExtent);
             },
-            [this, res = &resources, exposureSource](RGPassContext& context)
+            [this, res = &resources, exposureSource, post](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 const FrameGraphState& frame = m_frame;
@@ -123,7 +129,9 @@ namespace Nox
                 postPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
 
                 uint32_t activeHdrSlot = 0;
-                if (frame.dlssAdded)
+                if (post.HdrChanged)
+                    activeHdrSlot = context.Slot(post.Hdr);
+                else if (frame.dlssAdded)
                     activeHdrSlot = context.Slot(res->DLSSOutput);
                 else if (frame.taaAdded)
                     activeHdrSlot = context.Slot(res->TAAHistory[frame.taaWriteIndex]);
@@ -142,6 +150,19 @@ namespace Nox
                 postPush.exposureCompensation = m_exposureCompensation;
                 postPush.autoExposureMinEV = m_autoExposureMinEV;
                 postPush.autoExposureMaxEV = m_autoExposureMaxEV;
+                const PostEffectSettings& effects = m_postEffects;
+                postPush.bloomTextureIndex = post.Bloom.IsValid() ? context.Slot(post.Bloom) : 0xFFFFFFFF;
+                postPush.bloomIntensity = effects.BloomIntensity;
+                postPush.lensFlareIntensity = effects.LensFlares;
+                postPush.vignetteIntensity = effects.Vignette;
+                postPush.filmGrainIntensity = effects.FilmGrain;
+                postPush.chromaticAberration = effects.ChromaticAberration;
+                postPush.sharpen = effects.Sharpen;
+                postPush.saturation = effects.Saturation;
+                postPush.contrast = effects.Contrast;
+                postPush.lutTextureIndex = m_postLut ? m_postLut->GetDescriptorIndexSlot() : 0xFFFFFFFF;
+                postPush.lutStrength = effects.LutStrength;
+                postPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 cmd.pushData(&postPush, sizeof(shaderio::PushConstantPostProcess));
 
                 cmd.drawMeshTasks(1, 1, 1);

@@ -606,3 +606,20 @@ Environment Light's Height Fog. UE5's volumetric fog (`VolumetricFog.slang`, `Pa
 - **Integration** front to back per column, energy-conserving per slice (Hillaire 2015: S (1 - T) / extinction).
 - **Applied** by HeightFog.slang wherever the height fog is (the lit scene, the sky, glass, particles): in front of it, the height
   fog itself starting where the volume ends. Extra views and probe captures keep the analytic height fog (the volume is the camera's).
+
+## 10. Post effects (PP1, 2026-11-05, untested)
+
+Settings > Post Effects, every one off by default (bloom, depth of field and motion blur also as project settings). Before the
+tonemapper, on the HDR image at the display resolution (`Passes/PostEffectPasses.cpp`, `PostEffects.slang`):
+- **Depth of field**: a thin lens -- sharp at Focus Distance, the circle of confusion from the f-number and the focal length the
+  camera's field of view gives on a 24 mm-tall sensor (A f |z - S| / (z S) over the sensor height); a 48-tap scatter-as-gather (a
+  neighbour counts where its circle reaches the pixel; a farther one no blurrier than the pixel: no background halo over a sharp edge).
+- **Motion blur**: 12 taps along the G-buffer's motion vectors times the shutter (0.5), at most 32 px; turning it on makes the G-buffer
+  write motion vectors.
+- **Bloom**: Call of Duty's (Jimenez 2014) -- six 13-tap downsamples from half size (the first with Karis' average against fireflies),
+  then 3 x 3 tent upsamples, each mip averaged with the one below (so the chain keeps the image's energy); lerped into the image by
+  Intensity (0.04), no threshold (as UE). Lens flares: the bloom mirrored through the centre at four scales (tinted ghosts) and a halo.
+In the tonemap pass (`PostProcess.slang`): chromatic aberration (red / blue pulled apart radially), saturation and contrast (log
+space around mid grey) before the tonemapper; after it CAS sharpening (FidelityFX's formula on the tonemapped cross of neighbours, its
+change added), a colour grading LUT strip (UE's N slices of N x N, blue across the slices; loaded without sRGB decode or mips),
+vignette and film grain (mid tones). The extra views stay neutral.

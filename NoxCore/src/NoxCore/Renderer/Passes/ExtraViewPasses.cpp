@@ -323,6 +323,11 @@ namespace Nox
                     postPush.exposureCompensation = unlit ? 0.0f : m_exposureCompensation;
                     postPush.autoExposureMinEV = m_autoExposureMinEV;
                     postPush.autoExposureMaxEV = m_autoExposureMaxEV;
+                    // No post effects in the extra views (neutral grading).
+                    postPush.bloomTextureIndex = 0xFFFFFFFF;
+                    postPush.lutTextureIndex = 0xFFFFFFFF;
+                    postPush.saturation = 1.0f;
+                    postPush.contrast = 1.0f;
                     cmd.pushData(&postPush, sizeof(shaderio::PushConstantPostProcess));
                     cmd.drawMeshTasks(1, 1, 1);
                 });

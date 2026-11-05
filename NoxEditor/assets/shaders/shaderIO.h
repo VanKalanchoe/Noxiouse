@@ -2684,6 +2684,33 @@ struct PushConstantPostProcess
     float exposureCompensation;
     float autoExposureMinEV;
     float autoExposureMaxEV;
+    // Post effects (PP1; Renderer::addPostEffectPasses, PostProcess.slang): 0 / 0xFFFFFFFF where off.
+    uint32_t bloomTextureIndex;   // the bloom chain's top (PostEffects.slang), its mips for the lens flares
+    float bloomIntensity;         // how much of the bloom the image becomes (lerp)
+    float lensFlareIntensity;
+    float vignetteIntensity;
+    float filmGrainIntensity;
+    float chromaticAberration;    // radial colour fringes towards the edges, in % of the screen
+    float sharpen;                // CAS sharpness 0..1 (0: off)
+    float saturation;             // colour grading before the tonemapper (1: unchanged)
+    float contrast;               // around mid grey, in log space (1: unchanged)
+    uint32_t lutTextureIndex;     // a colour grading LUT strip (size^2 x size), applied after the tonemapper; 0xFFFFFFFF: none
+    float lutStrength;
+    uint32_t frameIndex;
+};
+
+// The post effects' compute passes (PP1; PostEffects.slang): bloom's chain, depth of field, motion blur. Sizes are the written image's.
+struct PushConstantPostEffect
+{
+    uint64_t matrixReference;
+    uint32_t sourceIndex;  // sampled (heap offset included)
+    uint32_t outputIndex;  // storage slot
+    uint32_t auxIndex;     // sampled: the bloom chain's next mip (upsample), the depth (DOF), the motion vectors (motion blur)
+    uint32_t sourceMip;
+    uint32_t width;
+    uint32_t height;
+    vec4 params;           // per pass (PostEffects.slang)
+    vec4 params2;
 };
 
 struct PushConstantAutoExposure

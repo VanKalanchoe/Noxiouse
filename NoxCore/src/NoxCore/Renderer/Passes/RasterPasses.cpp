@@ -715,7 +715,7 @@ namespace Nox
         const bool inspectVelocity = m_textureInspection.Name == "GBuffer Velocity";
         const bool writeVelocity = dlssNeedsVelocity || nrdShadowsNeedVelocity || nrdReflectionsNeedVelocity ||
                                    restirGINeedsVelocity || screenProbeGINeedsVelocity || restirDINeedsVelocity || restirPTNeedsVelocity ||
-                                   pathTracerNRDNeedsVelocity || m_debugMode == 15 || inspectVelocity;
+                                   pathTracerNRDNeedsVelocity || m_debugMode == 15 || inspectVelocity || m_postEffects.MotionBlur;
         m_frame.gbufferVelocityWritten = writeVelocity;
 
         NRI::Pipeline* gbufferPipeline = writeVelocity ? m_gbufferPipeline.get() : m_gbufferPipelineNoVelocity.get();

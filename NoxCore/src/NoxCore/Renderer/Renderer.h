@@ -642,6 +642,35 @@ namespace Nox
         glm::vec3 getVolumetricFogAlbedo() const { return m_volumetricFogAlbedo; }
         void setVolumetricFogLocalLights(bool enabled) { m_volumetricFogLocalLights = enabled; }
         bool getVolumetricFogLocalLights() const { return m_volumetricFogLocalLights; }
+        // Post effects (PP1; Passes/PostEffectPasses.cpp, PostProcess.slang): every one off by default. Bloom (Call of Duty's chain:
+        // how much of the image becomes its blur, its radius) with image-based lens flares; depth of field (a thin lens: focus distance,
+        // f-number, the focal length from the camera's field of view on a 24 mm sensor, the largest blur); motion blur (the motion
+        // vectors over the shutter); colour grading (saturation, contrast, a LUT strip file) and vignette, film grain, chromatic
+        // aberration, sharpening (CAS).
+        struct PostEffectSettings
+        {
+            bool Bloom = false;
+            float BloomIntensity = 0.04f;
+            float BloomRadius = 1.0f;
+            float LensFlares = 0.0f;
+            bool DepthOfField = false;
+            float FocusDistanceMeters = 10.0f;
+            float FStop = 2.8f;
+            float MaxBlurPixels = 16.0f;
+            bool MotionBlur = false;
+            float MotionBlurShutter = 0.5f; // fraction of the frame (UE's Motion Blur Amount)
+            float MotionBlurMaxPixels = 32.0f;
+            float Saturation = 1.0f;
+            float Contrast = 1.0f;
+            float Vignette = 0.0f;
+            float FilmGrain = 0.0f;
+            float ChromaticAberration = 0.0f;
+            float Sharpen = 0.0f;
+            std::string LutPath;
+            float LutStrength = 1.0f;
+        };
+        PostEffectSettings& getPostEffects() { return m_postEffects; }
+        const PostEffectSettings& getPostEffects() const { return m_postEffects; }
         // This frame's local lights with a shadow map and their views (stats).
         uint32_t getLocalShadowLightCount() const { return m_localShadowLightCount; }
         uint32_t getLocalShadowViewCount() const { return m_localShadows.viewCount; }
@@ -1169,6 +1198,16 @@ namespace Nox
         void addSSGIPasses();
         void createVolumetricFogPipelines(bool forceCompile = false);
         void addVolumetricFogPass();
+        // Post effects before the tonemapper: depth of field, motion blur, bloom's chain. Returns the image the tonemapper reads (the
+        // input when neither runs) and the bloom (invalid without it).
+        struct PostEffectOutputs
+        {
+            RGTexture Hdr;
+            RGTexture Bloom;
+            bool HdrChanged = false; // depth of field or motion blur ran: Hdr is theirs
+        };
+        void createPostEffectPipelines(bool forceCompile = false);
+        PostEffectOutputs addPostEffectPasses(RGTexture hdrSource);
         // Reflection probes: the probe table of this frame and at most one probe's capture (six faces, assembled, prefiltered); after
         // Compile the capture faces' uniforms.
         void createReflectionProbePipelines(bool forceCompile = false);
@@ -1487,6 +1526,13 @@ namespace Nox
             std::array<glm::mat4, 6> Projections{};
         } m_probeCaptureFrame;
         bool m_reflectionProbesEnabled = true;
+        PostEffectSettings m_postEffects;
+        std::unique_ptr<NRI::Pipeline> m_dofPipeline;
+        std::unique_ptr<NRI::Pipeline> m_motionBlurPipeline;
+        std::unique_ptr<NRI::Pipeline> m_bloomDownsamplePipeline;
+        std::unique_ptr<NRI::Pipeline> m_bloomUpsamplePipeline;
+        Ref<Texture2D> m_postLut;          // the grading LUT loaded from m_postLutLoadedPath
+        std::string m_postLutLoadedPath;
         // Volumetric fog: the froxel lighting (two, last frame's read while this frame's is written), the integrated volume, their
         // storage slots, the grid they were made for.
         std::unique_ptr<NRI::Pipeline> m_volumetricFogLightPipeline;

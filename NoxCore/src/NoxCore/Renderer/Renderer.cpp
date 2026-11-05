@@ -375,6 +375,7 @@ namespace Nox
         watchShader("assets/shaders/ReflectionProbe.slang", "ReflectionProbe", [this]() { createReflectionProbePipelines(true); });
         watchShader("assets/shaders/IrradianceProbeSH.slang", "IrradianceProbeSH", [this]() { createIrradianceVolumePipelines(true); });
         watchShader("assets/shaders/VolumetricFog.slang", "VolumetricFog", [this]() { createVolumetricFogPipelines(true); });
+        watchShader("assets/shaders/PostEffects.slang", "PostEffects", [this]() { createPostEffectPipelines(true); });
         watchShader("assets/shaders/ComputeSkinning.slang", "ComputeSkinning", [this]() { createComputeSkinningPipeline(true); });
         // G-Buffer (Fix watcher to recompile m_gbufferPipeline)
         watchShader("assets/shaders/GBufferMaterial.slang", "GBuffer", [this]() { createGBufferPipeline(true); });
@@ -620,6 +621,7 @@ namespace Nox
         createReflectionProbePipelines();
         createIrradianceVolumePipelines();
         createVolumetricFogPipelines();
+        createPostEffectPipelines();
         createNRDGuidesPipeline();
         createReflectionPipeline();
         // Path Tracer
@@ -956,6 +958,12 @@ namespace Nox
             setSSGIEnabled(settings.SSGI != 0);
         if (settings.VolumetricFog >= 0)
             setVolumetricFogEnabled(settings.VolumetricFog != 0);
+        if (settings.Bloom >= 0)
+            m_postEffects.Bloom = settings.Bloom != 0;
+        if (settings.DepthOfField >= 0)
+            m_postEffects.DepthOfField = settings.DepthOfField != 0;
+        if (settings.MotionBlur >= 0)
+            m_postEffects.MotionBlur = settings.MotionBlur != 0;
     }
 
     void Renderer::setDLSSEnabled(bool enabled)

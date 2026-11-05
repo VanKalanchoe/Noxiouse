@@ -216,6 +216,16 @@ namespace Nox
                                   WorldUnits::ToMeters(renderer.getContactShadowLength()), renderer.getContactShadowSamples());
             }
 
+            // Post effects that cost passes (bloom, depth of field, motion blur) and the per-pixel ones.
+            {
+                const Renderer::PostEffectSettings& post = renderer.getPostEffects();
+                if (post.Bloom || post.DepthOfField || post.MotionBlur || post.Sharpen > 0.0f || post.Vignette > 0.0f || post.FilmGrain > 0.0f ||
+                    post.ChromaticAberration > 0.0f || !post.LutPath.empty())
+                    AppendSetting(out, "Post effects:{}{}{}{}{}{}{}{}", post.Bloom ? " bloom" : "", post.Bloom && post.LensFlares > 0.0f ? " flares" : "",
+                                  post.DepthOfField ? " DOF" : "", post.MotionBlur ? " motion-blur" : "", post.Sharpen > 0.0f ? " CAS" : "",
+                                  post.Vignette > 0.0f ? " vignette" : "", post.FilmGrain > 0.0f ? " grain" : "", !post.LutPath.empty() ? " LUT" : "");
+            }
+
             // Debug views replace the lit output and change what runs, so a report taken with one is not comparable.
             if (renderer.getDebugMode() != 0)
                 AppendSetting(out, "Debug view: {} (not a normal lit frame)", renderer.getDebugMode());

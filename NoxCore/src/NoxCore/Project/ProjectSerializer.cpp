@@ -32,7 +32,8 @@ namespace Nox
                 const ProjectRendererSettings& renderer = config.Renderer;
                 if (renderer.RayTracingResolution >= 0 || renderer.DiffuseGI >= 0 || renderer.ShadowedLights >= 0 || renderer.OIT >= 0 || renderer.TAA >= 0 ||
                     renderer.SunShadows >= 0 || renderer.LocalShadows >= 0 || renderer.ContactShadows >= 0 ||
-                    renderer.SSAOMethod >= 0 || renderer.SSR >= 0 || renderer.SSGI >= 0 || renderer.VolumetricFog >= 0)
+                    renderer.SSAOMethod >= 0 || renderer.SSR >= 0 || renderer.SSGI >= 0 || renderer.VolumetricFog >= 0 ||
+                    renderer.Bloom >= 0 || renderer.DepthOfField >= 0 || renderer.MotionBlur >= 0)
                 {
                     out << YAML::Key << "Renderer" << YAML::Value << YAML::BeginMap;
                     if (renderer.RayTracingResolution >= 0) out << YAML::Key << "RayTracingResolution" << YAML::Value << renderer.RayTracingResolution;
@@ -47,6 +48,9 @@ namespace Nox
                     if (renderer.SSR >= 0) out << YAML::Key << "SSR" << YAML::Value << renderer.SSR;
                     if (renderer.SSGI >= 0) out << YAML::Key << "SSGI" << YAML::Value << renderer.SSGI;
                     if (renderer.VolumetricFog >= 0) out << YAML::Key << "VolumetricFog" << YAML::Value << renderer.VolumetricFog;
+                    if (renderer.Bloom >= 0) out << YAML::Key << "Bloom" << YAML::Value << renderer.Bloom;
+                    if (renderer.DepthOfField >= 0) out << YAML::Key << "DepthOfField" << YAML::Value << renderer.DepthOfField;
+                    if (renderer.MotionBlur >= 0) out << YAML::Key << "MotionBlur" << YAML::Value << renderer.MotionBlur;
                     out << YAML::EndMap;
                 }
                 out << YAML::EndMap; // Project
@@ -106,6 +110,9 @@ namespace Nox
             read("SSR", config.Renderer.SSR);
             read("SSGI", config.Renderer.SSGI);
             read("VolumetricFog", config.Renderer.VolumetricFog);
+            read("Bloom", config.Renderer.Bloom);
+            read("DepthOfField", config.Renderer.DepthOfField);
+            read("MotionBlur", config.Renderer.MotionBlur);
         }
 
         return true;

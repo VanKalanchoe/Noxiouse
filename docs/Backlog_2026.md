@@ -34,7 +34,7 @@ default; the RT one stays the default otherwise (RT shadows may well win). Both 
 
 | # | Item |
 |---|---|
-| PP1 | **Bloom** (downsample / upsample chain, Call of Duty style), **depth of field** (bokeh, from the camera's aperture and focus distance), **motion blur** (per-pixel, from the motion vectors TAA / DLSS already have), **color grading LUT**, **vignette / film grain / chromatic aberration / lens flares**, **sharpening** (CAS). Settings on the camera / project like the existing exposure and tonemapping |
+| PP1 | **Bloom** (downsample / upsample chain, Call of Duty style), **depth of field** (bokeh, from the camera's aperture and focus distance), **motion blur** (per-pixel, from the motion vectors TAA / DLSS already have), **color grading LUT**, **vignette / film grain / chromatic aberration / lens flares**, **sharpening** (CAS). Settings on the camera / project like the existing exposure and tonemapping. **Built 2026-11-05, untested** (Settings > Post Effects; `Hybrid_Renderer_Plan_2026-10.md` §10) |
 
 ### Levels and streaming (plan: `Engine_Architecture_Plan_2026.md` §6c)
 

@@ -903,6 +903,9 @@ namespace Nox
                 choice("Screen-Space Reflections##Project", saved.SSR, { { 0, "Off" }, { 1, "On" } });
                 choice("Screen-Space GI##Project", saved.SSGI, { { 0, "Off" }, { 1, "On" } });
                 choice("Volumetric Fog##Project", saved.VolumetricFog, { { 0, "Off" }, { 1, "On" } });
+                choice("Bloom##Project", saved.Bloom, { { 0, "Off" }, { 1, "On" } });
+                choice("Depth of Field##Project", saved.DepthOfField, { { 0, "Off" }, { 1, "On" } });
+                choice("Motion Blur##Project", saved.MotionBlur, { { 0, "Off" }, { 1, "On" } });
                 choice("Order-Independent Transparency##Project", saved.OIT, { { 0, "Off" }, { 1, "On" } });
                 choice("Temporal Anti-Aliasing##Project", saved.TAA, { { 0, "Off" }, { 1, "On" } });
 
@@ -1185,6 +1188,59 @@ namespace Nox
         {
             glm::vec2 j = m_Renderer->getCurrentJitter(); // or expose m_currentJitter
             ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Jitter Offset: (%.3f, %.3f) px", j.x, j.y);
+        }
+
+        ImGui::Separator();
+        ImGui::Text("Post Effects");
+        {
+            // PP1: each off by default (UE's Post Process Volume settings, on the renderer).
+            Renderer::PostEffectSettings& post = m_Renderer->getPostEffects();
+            ImGui::Checkbox("Bloom", &post.Bloom);
+            ImGui::SetItemTooltip("Bright light bleeding into its surroundings (Call of Duty's bloom: a blur chain over the whole image,\n"
+                                  "blended in by Intensity; no threshold, as in UE).");
+            if (post.Bloom)
+            {
+                ImGui::Indent();
+                ImGui::SliderFloat("Intensity##Bloom", &post.BloomIntensity, 0.0f, 0.3f, "%.3f");
+                ImGui::SliderFloat("Radius##Bloom", &post.BloomRadius, 0.25f, 3.0f, "%.2f");
+                ImGui::SliderFloat("Lens Flares##Bloom", &post.LensFlares, 0.0f, 2.0f, "%.2f");
+                ImGui::SetItemTooltip("Ghosts of bright areas mirrored through the centre, and a halo (UE's image-based flares).");
+                ImGui::Unindent();
+            }
+            ImGui::Checkbox("Depth of Field", &post.DepthOfField);
+            ImGui::SetItemTooltip("A thin lens: sharp at Focus Distance, blurred before and behind it by the f-number (smaller: more\n"
+                                  "blur) and the camera's field of view (the focal length on a 24 mm-tall sensor).");
+            if (post.DepthOfField)
+            {
+                ImGui::Indent();
+                ImGui::DragFloat("Focus Distance (m)##DOF", &post.FocusDistanceMeters, 0.05f, 0.05f, 10000.0f, "%.2f");
+                ImGui::SliderFloat("F-Stop##DOF", &post.FStop, 0.7f, 32.0f, "f/%.1f", ImGuiSliderFlags_Logarithmic);
+                ImGui::SliderFloat("Max Blur (px)##DOF", &post.MaxBlurPixels, 1.0f, 48.0f, "%.0f");
+                ImGui::Unindent();
+            }
+            ImGui::Checkbox("Motion Blur", &post.MotionBlur);
+            ImGui::SetItemTooltip("Along each pixel's motion (camera and objects) over the open shutter.");
+            if (post.MotionBlur)
+            {
+                ImGui::Indent();
+                ImGui::SliderFloat("Shutter##MotionBlur", &post.MotionBlurShutter, 0.0f, 1.0f, "%.2f");
+                ImGui::SliderFloat("Max Blur (px)##MotionBlur", &post.MotionBlurMaxPixels, 4.0f, 96.0f, "%.0f");
+                ImGui::Unindent();
+            }
+            ImGui::SliderFloat("Saturation", &post.Saturation, 0.0f, 2.0f, "%.2f");
+            ImGui::SliderFloat("Contrast", &post.Contrast, 0.5f, 2.0f, "%.2f");
+            ImGui::SliderFloat("Vignette", &post.Vignette, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Film Grain", &post.FilmGrain, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Chromatic Aberration", &post.ChromaticAberration, 0.0f, 2.0f, "%.2f");
+            ImGui::SliderFloat("Sharpen (CAS)", &post.Sharpen, 0.0f, 1.0f, "%.2f");
+            char lutPath[512];
+            std::snprintf(lutPath, sizeof(lutPath), "%s", post.LutPath.c_str());
+            if (ImGui::InputText("Color LUT", lutPath, sizeof(lutPath), ImGuiInputTextFlags_EnterReturnsTrue))
+                post.LutPath = lutPath;
+            ImGui::SetItemTooltip("A colour grading LUT image (a strip of N slices of N x N, e.g. 256 x 16 or 1024 x 32, blue across the\n"
+                                  "slices; UE's format), applied after the tonemapper. Enter a file path; empty: none.");
+            if (!post.LutPath.empty())
+                ImGui::SliderFloat("LUT Strength", &post.LutStrength, 0.0f, 1.0f, "%.2f");
         }
 
         ImGui::Separator();
