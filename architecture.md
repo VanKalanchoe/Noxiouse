@@ -251,5 +251,6 @@ them:
   - Directory layout: the graph is `NoxCore/src/NoxCore/RenderGraph/`, the job system `NoxCore/src/NoxCore/Tasks/`, the
     backend folder `NRI/Vulkan/`.
   - C++23 -> the build is C++20.
+- **DirectX 12 backend:** deferred pending Shader Model 7.0 (native SPIR-V & physical storage buffer pointers in D3D12); Vulkan 1.4 is the sole active backend.
 - The visibility-buffer migration record (forward -> visibility buffer + G-buffer, steps 0-7) is summarized in
   `PROJECT_CONTEXT.md` §7.

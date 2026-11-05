@@ -12,6 +12,7 @@ namespace Nox
         uint32_t Height = 720;
         bool IsResizeable = true;
         bool VSync = true;
+        bool IsVulkan = true;
     };
     
     // Windowed; Borderless: covering the display at the desktop's resolution (no mode change, alt-tab is instant); Fullscreen:

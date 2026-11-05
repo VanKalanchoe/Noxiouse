@@ -1,0 +1,93 @@
+Scene: Untitled
+Entities:
+  - Entity: 10164295155778938699
+    TagComponent:
+      Tag: Sun
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [-0.94095683, 0.5404196, 0]
+      Scale: [1, 1, 1]
+    DirectionalLightComponent:
+      Color: [1, 1, 1]
+      Intensity: 10
+      AngularDiameter: 0.5357
+      ShadowSamples: 1
+  - Entity: 3037525512513421486
+    TagComponent:
+      Tag: Empty Entity
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    EnvironmentLightComponent:
+      Source: ProceduralSky
+      TexturePath: ""
+      RadianceScale: [1, 1, 1]
+      Rotation: 0
+      Enabled: true
+      RayleighScale: 1
+      MieScale: 1
+      OzoneScale: 1
+      MieAnisotropy: 0.8
+      GroundAlbedo: [0.3, 0.3, 0.3]
+      AltitudeKm: 0
+      AerialPerspectiveScale: 1
+      Clouds: true
+      CloudCoverage: 0.35
+      CloudDensity: 1
+      CloudBottomKm: 1.5
+      CloudThicknessKm: 2
+      CloudScaleKm: 8
+      CloudOffsetKm: [0, 0]
+      CloudWind: [0, 0]
+      SunThroughAtmosphere: true
+      Moon: true
+      MoonIntensity: 0.004
+      MoonColor: [0.75, 0.85, 1]
+      MoonAngularDiameter: 0.53
+      MoonOppositeSun: true
+      MoonElevation: 40
+      MoonAzimuth: 200
+      Stars: true
+      StarIntensity: 1
+      HeightFog: false
+      FogDensity: 0.5
+      FogHeightFalloff: 5
+      FogHeight: 0
+      FogStartDistance: 0
+      FogMaxOpacity: 1
+      FogColor: [1, 1, 1]
+      FogFromEnvironment: true
+      FogSunScattering: 0.05
+      FogSunExponent: 8
+  - Entity: 6185409932487328791
+    TagComponent:
+      Tag: Empty Entity
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    CameraComponent:
+      Camera:
+        ProjectionType: 0
+        PerspectiveFOV: 0.7853982
+        PerspectiveNear: 10
+        PerspectiveFar: 100000
+        OrthographicSize: 10
+        OrthographicNear: -1
+        OrthographicFar: 1
+      Primary: true
+      FixedAspectRatio: false
+      AutoExposure: false
+      ExposureCompensation: 0
+      AutoExposureMinEV: -16
+      AutoExposureMaxEV: 16
+WorldPartition:
+  CellSize: 20
+  LoadingRange: 40
+  CellDirectory: E:/dev/noxiouse/Facerun/Assets/Scenes/WPEditorTest2_Cells
+  Cells:
+    - [0, 0, 1, 1, -50, -50, 3110, 50, 50, 3210]
+    - [0, 0, 3, 1, 50, -50, 6050, 150, 50, 6150]
+    - [0, 1, 0, 1, 2950, -50, -50, 3050, 50, 50]
+    - [0, 3, 0, 1, 5950, -50, -50, 6050, 50, 50]

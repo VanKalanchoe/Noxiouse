@@ -290,3 +290,6 @@ NoxStats_*.txt
 Facerun/Cache/
 Facerun/Build/
 *.nthumb
+Facerun/Intermediate
+Facerun/Assets/StreamingDense
+Facerun/Assets/StreamingTest

@@ -1,0 +1,64 @@
+# Asset Pipeline, Cooking & Streaming (`NoxCore/Asset` — 44 Files)
+
+The asset subsystem in `NoxCore/src/NoxCore/Asset/` manages the entire lifecycle of engine assets: importing raw source files (`.gltf`, `.glb`, `.png`, `.jpg`, `.hdr`, `.dds`, `.ktx2`), cooking them into fast binary formats (`.nsmesh`, `.nmesh`, `.ntex`, `.nskel`, `.nanim`, `.nmat`), streaming mips and geometry pages within a **64 MB/frame upload budget**, hot-reloading modified source files on disk, and tracking transitive dependencies for `.npak` game packaging.
+
+---
+
+## 1. Plain-English Tour of the Asset & Streaming Pipeline
+
+### A. Editor vs. Runtime Asset Managers
+- **`EditorAssetManager` ([`EditorAssetManager.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/EditorAssetManager.cpp))**:
+  - Maintains `AssetRegistry.nxr` (serialized asynchronously on a background worker at most once per second via atomic `.nxr.tmp` rename).
+  - Watches `Assets/` with `Utils::NOXWatcher`, checks 128-bit `XXH3_128bits` content hashes to ignore no-op saves, and hot-reloads modified textures, meshes, materials, skeletons, clips, and animation graphs live in the viewport.
+  - Provides Content Browser operations (`RenameAsset`, `MoveAsset` with `FormerPaths` redirectors, `DeleteAsset`, `FindReferences`, `ReplaceReferences`, `FindUnusedAssets`, `CollectDependencies`, and `UnloadUnusedAssets`).
+- **`RuntimeAssetManager` ([`RuntimeAssetManager.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/RuntimeAssetManager.cpp))**:
+  - Inherits all async loading, upload budgeting, and mip/geometry streaming from `EditorAssetManager`, but runs in strict `ReadOnly` mode (no filesystem watchers, no cooking, no `.nxr` writes) reading directly from `.npak` via `VirtualFileSystem`.
+
+### B. Zero-Copy Async Asset Loader & 64 MB/Frame Upload Budget (`AssetLoader`)
+- [`AssetLoader.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/AssetLoader.cpp) coordinates background loading across `JobSystem` IO and Background workers while enforcing a shared **64 MB/frame** GPU staging budget (`UploadBytesPerFrame = 64 MB`) and a cap of **64 submesh publishes/frame** (`MeshPublishesPerFrame = 64`).
+- **Zero-Copy Texture Tail Upload**: When a texture is requested, an IO worker reads its `.ntex` header, allocates GPU staging memory for only the coarse `64x64` mip tail (`TailSize = 64`), and reads the compressed texel bytes **directly from disk/`.npak` into the mapped GPU staging buffer** (zero intermediate CPU heap allocation!).
+- **Root-Only Mesh Page Upload**: When a static mesh loads with Geometry Streaming active, `AssetLoader` reads and uploads only the coarse **root Cluster DAG pages**, leaving finer pages on disk until requested by the GPU.
+
+### C. Block-Compressed Texture Cooking (`.ntex` / `NTV1`) & Mip Streaming
+- **`TextureImporter` ([`TextureImporter.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/TextureImporter.cpp))**:
+  - Decodes PNG/JPG/TGA/BMP (`stb_image`), HDR (packed to `R16G16B16A16_SFLOAT`), DDS (`tinyddsloader`), and KTX2/BasisU (`libktx`).
+  - Generates box-filter mipmaps (in linear light for sRGB textures, re-normalizing XYZ for normal maps) and compresses blocks in parallel across worker threads using **`bc7enc`** (BC7 for color/PBR) and **`rgbcx`** (BC5 for normal maps, BC4 for single-channel masks).
+  - Writes either standard mip-major **`.ntex` (`NTX1`)** files or tiled **Virtual Texture `.ntex` (`NTV1`)** files (`128x128` tiles with a 4-texel border = `136x136` texels/tile, auto-enabled for $\ge 4096\times 4096$ textures in `VirtualTextureMode::Auto`).
+- **`TextureStreamer` ([`TextureStreamer.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/TextureStreamer.cpp))**:
+  - Reads the renderer's GPU mip feedback buffer every frame, plans target mip residency within the VRAM texture pool budget, copies existing coarse mips GPU-to-GPU while streaming newly requested finer mips from `.ntex` on IO workers, and atomically swaps the upgraded `Texture2D` once the transfer fence signals.
+
+### D. glTF 2.0 Importer & Nanite-Style Cluster LOD Cooker (`MeshImporter`)
+- [`MeshImporter.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/MeshImporter.cpp) parses `.gltf` and `.glb` files (`tiny_gltf_v3.h`) with **19 glTF extensions**:
+  - Lighting & Cameras: `KHR_lights_punctual` (lux/candela converted via `/ 683.0f`)
+  - Materials: `KHR_materials_unlit`, `KHR_materials_emissive_strength`, `KHR_materials_pbrSpecularGlossiness`, `KHR_materials_transmission`, `KHR_materials_ior`, `KHR_materials_volume`, `KHR_materials_diffuse_transmission`, `KHR_materials_clearcoat`, `KHR_materials_sheen`, `KHR_materials_specular`, `KHR_materials_iridescence`, `KHR_materials_anisotropy`, `KHR_materials_dispersion`, `KHR_texture_transform`, `KHR_texture_basisu`, `MSFT_texture_dds`, `KHR_materials_variants`
+  - Scene & Physics: `KHR_node_visibility`, `EXT_mesh_gpu_instancing`, `KHR_implicit_shapes`, and `KHR_physics_rigid_bodies` (rigid bodies, colliders, triggers, collision filters, and 6-DOF joints).
+- **Cluster LOD DAG Construction (`buildClusterLod`)**: Uses `meshoptimizer` + `clusterlod.h` to partition static meshes into a hierarchy of 64-vertex / 124-triangle meshlets with locked seam boundaries (normals, UV0, UV1, colors) and packs them into 16-byte aligned **128 KB streaming pages**.
+- **Skin Unification (`UnifySkins`)**: Merges multi-skin characters and rigid bone-parented attachments into a single unified skeleton skin so the entire character animates in one `AnimatorComponent`.
+
+---
+
+## 2. File-by-File Reference: `NoxCore/src/NoxCore/Asset/` (44 Files)
+
+| File | Plain-English Summary & Key Types |
+| :--- | :--- |
+| [`Asset.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/Asset.h) & [`Asset.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/Asset.cpp) | Defines `AssetHandle` (`UUID`), `AssetType` (14 asset types), `AssetState` (`Unloaded`, `Loading`, `Ready`, `Failed`), and base class `Asset : public RefCounted`. |
+| [`AssetMetadata.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/AssetMetadata.h) | Defines `AssetMetadata`, `TextureSpecification` (`TextureCompression`: `Default` BC7, `Normalmap` BC5, `Grayscale` BC4; `VirtualTextureMode`: `Auto`, `Off`, `On`), and `MeshImportSettings` (`MeshCombineMode`, `ImportScale`, `ImportIntoLevel`). |
+| [`AssetManagerBase.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/AssetManagerBase.h) & [`AssetManagerBase.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/AssetManagerBase.cpp) | Abstract asset manager interface (`GetAsset`, `RequestAsset`, worker-safe `FindLoadedAsset`, `AddMemoryAsset`, etc.). |
+| [`AssetManager.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/AssetManager.h) & [`AssetManager.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/AssetManager.cpp) | Static convenience wrapper forwarding templated calls (`AssetManager::GetAsset<T>`, `RequestAsset<T>`, `FindLoadedAsset<T>`) to the active project's asset manager. |
+| [`AssetImporter.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/AssetImporter.h) & [`AssetImporter.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/AssetImporter.cpp) | Dispatches synchronous `ImportAsset` calls by `AssetType` to the specialized importers below. |
+| [`EditorAssetManager.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/EditorAssetManager.h) & [`EditorAssetManager.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/EditorAssetManager.cpp) | Full authoring asset manager: manages `AssetRegistry.nxr`, `NOXWatcher` hot-reloading, glTF model/texture/material extraction (`ImportModel`), reference tracking, `.npak` dependency collection, and unused-asset garbage collection. |
+| [`RuntimeAssetManager.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/RuntimeAssetManager.h) & [`RuntimeAssetManager.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/RuntimeAssetManager.cpp) | Read-only shipping asset manager subclassing `EditorAssetManager` (`ReadOnlyTag{}`) for packaged `.npak` builds. |
+| [`AssetLoader.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/AssetLoader.h) & [`AssetLoader.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/AssetLoader.cpp) | Asynchronous multi-stage asset loader and 64 MB/frame GPU upload budgeter (`TextureLoad`, `MeshLoad`, `ImportLoad`). |
+| [`TextureImporter.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/TextureImporter.h) & [`TextureImporter.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/TextureImporter.cpp) | Decodes PNG/JPG/HDR/DDS/KTX2, generates linear-correct mipmaps, compresses BC7/BC5/BC4/BC1 in parallel, and writes `.ntex` (`NTX1` mip-major or `NTV1` virtual texture tiles). |
+| [`TextureStreamer.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/TextureStreamer.h) & [`TextureStreamer.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/TextureStreamer.cpp) | GPU feedback-driven texture mip streamer with VRAM pool budgeting, GPU-to-GPU coarse mip copy, and async `.ntex` fine mip reads. |
+| [`MeshImporter.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/MeshImporter.h) & [`MeshImporter.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/MeshImporter.cpp) | Full glTF 2.0 importer, MikkTSpace tangent generator, Nanite Cluster LOD DAG builder (`buildClusterLod`), 128 KB page packer, multi-skin unifier (`UnifySkins`), and split-mesh cooker (`CookSplitMeshes`). |
+| [`MeshSerializer.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/MeshSerializer.h) | Binary serializers for `.nskel` (`SkeletonSerializer`, `NSKL`), `.nanim` (`AnimationSerializer`, `NAN2`), and `.nsmesh`/`.nmesh` (`MeshSerializer`, `NSM;`/`NMS;` v11 with 16B-aligned page blobs and `ReadPagePayloads`). |
+| [`Material.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/Material.h), [`MaterialImporter.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/MaterialImporter.h) & [`MaterialImporter.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/MaterialImporter.cpp), [`MaterialSerializer.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/MaterialSerializer.h) | Defines `Material` (all PBR, UV transform, transmission/volume, and OpenPBR/glTF multi-lobe properties) plus YAML (`.nmat`) and binary (`NMA3`) serialization. |
+| [`PrimitiveShapes.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/PrimitiveShapes.h) & [`PrimitiveShapes.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/PrimitiveShapes.cpp) | Generates procedural 1m `Cube`, `Sphere`, `Cylinder`, `Cone`, `Pyramid`, `Plane`, and `Capsule` meshes and writes `.gltf`/`.bin` files for cooking. |
+| [`SkeletalMeshImporter.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/SkeletalMeshImporter.h) & [`SkeletalMeshImporter.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/SkeletalMeshImporter.cpp) | Deserializes `.nmesh`/`.nskmesh` files into a `Mesh` asset and uploads submeshes to the renderer. |
+| [`SkeletonImporter.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/SkeletonImporter.h) & [`SkeletonImporter.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/SkeletonImporter.cpp) | Deserializes `.nskel` skeleton files via `SkeletonSerializer`. |
+| [`AnimationImporter.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/AnimationImporter.h) & [`AnimationImporter.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/AnimationImporter.cpp) | Loads `.nanim` animation clips and reads/writes `<clip>.nanim.notifies` YAML sidecar files (`LoadNotifies`, `SaveNotifies`). |
+| [`NodeGraphImporter.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/NodeGraphImporter.h) & [`NodeGraphImporter.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/NodeGraphImporter.cpp), [`NodeGraphSerializer.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/NodeGraphSerializer.h) & [`NodeGraphSerializer.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/NodeGraphSerializer.cpp) | Reads and writes `.nanimgraph` YAML node graph assets (including nested state machines, transition rules, and parameters) and invokes `Recompile()`. |
+| [`PrefabImporter.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/PrefabImporter.h) & [`PrefabImporter.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/PrefabImporter.cpp) | Loads and saves `.nprefab` YAML assets and Prefab Variants (`CreateVariantFile`). |
+| [`SceneImporter.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/SceneImporter.h) & [`SceneImporter.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/SceneImporter.cpp) | Loads and saves `.nox` scene assets via `SceneSerializer`. |
+| [`TimelineImporter.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/TimelineImporter.h) & [`TimelineImporter.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Asset/TimelineImporter.cpp) | Loads and saves `.ntimeline` Sequencer YAML assets (`ImportTimeline`, `SaveTimeline`). |

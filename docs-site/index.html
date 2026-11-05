@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noxiouse Engine Documentation — Read the Docs</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/rtd-custom.css">
+</head>
+<body class="wy-body-for-nav">
+
+    <div class="wy-grid-for-nav">
+        <!-- Sidebar Navigation (Read the Docs / Godot Style) -->
+        <nav class="wy-nav-side" aria-label="Navigation menu">
+            <div class="wy-side-scroll">
+                <!-- Top Brand & Search Header -->
+                <div class="wy-side-nav-search">
+                    <a href="#index" class="brand-link">
+                        <span class="brand-logo">N</span>
+                        <span>Noxiouse Engine</span>
+                    </a>
+                    <div class="version-badge">
+                        <span>latest (2026.10)</span>
+                    </div>
+                    <div class="search-box-wrap">
+                        <input type="text" id="global-search-input" placeholder="Search docs & 489 files..." aria-label="Search docs">
+                    </div>
+                </div>
+
+                <!-- Navigation Tree (Pre-rendered for instant local display & enhanced by app.js) -->
+                <div class="wy-menu wy-menu-vertical" id="rtd-menu" role="navigation" aria-label="Page navigation">
+                    <p class="wy-menu-caption">Overview</p>
+                    <ul class="nav-list">
+                        <li class="nav-item active"><a href="#index"><span>Noxiouse Engine Documentation</span><span class="nav-badge">Home</span></a></li>
+                    </ul>
+
+                    <p class="wy-menu-caption">Getting Started & Core</p>
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="#getting-started"><span>Getting Started, Build System & Project Structure</span><span class="nav-badge">8 files</span></a></li>
+                        <li class="nav-item"><a href="#core-tasks-profiling"><span>Core Engine, Multithreading, Project & Profiling</span><span class="nav-badge">61 files</span></a></li>
+                    </ul>
+
+                    <p class="wy-menu-caption">Graphics & Rendering</p>
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="#nri-vulkan"><span>NRI Graphics Abstraction & Vulkan 1.4 Backend</span><span class="nav-badge">47 files</span></a></li>
+                        <li class="nav-item"><a href="#render-graph"><span>Frame-Compiled Render Graph</span><span class="nav-badge">9 files</span></a></li>
+                        <li class="nav-item"><a href="#renderer"><span>Hybrid Visibility-Buffer Renderer & Passes</span><span class="nav-badge">38 files</span></a></li>
+                        <li class="nav-item"><a href="#shaders"><span>Slang & HLSL Shaders Catalog</span><span class="nav-badge">113 files</span></a></li>
+                    </ul>
+
+                    <p class="wy-menu-caption">World, Assets & Physics</p>
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="#scene-ecs-world"><span>Scene, 47 ECS Components & World Partition</span><span class="nav-badge">33 files</span></a></li>
+                        <li class="nav-item"><a href="#assets-streaming"><span>Asset Pipeline, Streaming & Importers</span><span class="nav-badge">44 files</span></a></li>
+                        <li class="nav-item"><a href="#physics"><span>3D Jolt Physics & 2D Box2D Physics</span><span class="nav-badge">13 files</span></a></li>
+                    </ul>
+
+                    <p class="wy-menu-caption">Animation & Scripting</p>
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="#animation-nodegraph"><span>Animation Graphs, Sequencer & NodeGraph</span><span class="nav-badge">22 files</span></a></li>
+                        <li class="nav-item"><a href="#scripting"><span>C# Scripting, Coral Interop & NoxScriptCore</span><span class="nav-badge">35 files</span></a></li>
+                    </ul>
+
+                    <p class="wy-menu-caption">Authoring & Tools</p>
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="#editor-runtime-sample"><span>NoxEditor, NoxRuntime & Facerun Sample</span><span class="nav-badge">65 files</span></a></li>
+                        <li class="nav-item"><a href="#file-reference"><span>Interactive 489-File Master Explorer</span><span class="nav-badge">489 files</span></a></li>
+                    </ul>
+                </div>
+
+                <!-- Bottom Read the Docs Version Panel -->
+                <div class="rst-versions" role="note" aria-label="versions">
+                    <span class="rst-current-version">
+                        <span class="v-label">v: latest</span> (2026.10)
+                    </span>
+                    <span style="font-size:0.75rem; color:#888;">Read the Docs</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <section class="wy-nav-content-wrap">
+            <div class="wy-nav-content">
+                <!-- Breadcrumb Bar -->
+                <div class="wy-breadcrumbs" role="navigation" aria-label="Page navigation">
+                    <div class="breadcrumb-trail" id="breadcrumb-trail">
+                        <a href="#index">Docs</a> &raquo; <span>Overview</span> &raquo; <span>Noxiouse Engine Documentation</span>
+                    </div>
+                    <div class="top-actions">
+                        <a href="manual.html" class="btn-top" style="background:#0284c7; color:#fff; font-weight:700;">📘 User Manual &amp; C# Guide</a>
+                        <button class="btn-top" id="theme-toggle-btn">&#9728; Light Mode</button>
+                        <a href="#file-reference" class="btn-top">&#128194; 489 Files</a>
+                    </div>
+                </div>
+
+                <!-- Dynamic Page Markdown Body (Pre-rendered default home page) -->
+                <article role="main" class="rst-content" id="doc-content-body">
+                    <h1>Noxiouse Engine Documentation</h1>
+                    <p>Welcome to the official documentation for <strong>Noxiouse Engine</strong> — a modern <strong>C++20 / Vulkan 1.4 / .NET 9</strong> 3D game engine and editor built around a <strong>bindless GPU-driven visibility-buffer renderer</strong>, a <strong>frame-compiled Render Graph</strong>, <strong>decoupled hardware Ray Tracing & ReSTIR</strong>, <strong>Large World Coordinates (64-bit <code>double</code>)</strong>, <strong>World Partition & HLOD streaming</strong>, <strong>Jolt 3D / Box2D v3 physics</strong>, <strong>Skeletal Animation Graphs & Sequencer</strong>, and <strong>C# Hot-Reload Scripting</strong>.</p>
+
+                    <div class="admonition tip">
+                        <div class="admonition-title">TIP</div>
+                        <div class="admonition-body">
+                            <p><strong>Dual-Mode Read the Docs Website</strong></p>
+                            <p>1. <strong>Zero-Install Local Browser Mode</strong>: You are viewing this website locally! Click any section in the left sidebar to navigate, search features and all <strong>489 repository files</strong> instantly via the search bar above, or toggle between Dark and Light mode.</p>
+                            <p>2. <strong>Sphinx / Read the Docs Cloud Hosting</strong>: The repository includes <code>.readthedocs.yaml</code>, <code>docs-site/conf.py</code>, and <code>docs-site/requirements.txt</code> configured with <code>sphinx_rtd_theme</code> + <code>myst-parser</code> just like Godot Docs.</p>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <h2 id="high-level-engine-architecture">High-Level Engine Architecture</h2>
+                    <p>Noxiouse is organized into four build targets plus a sample game project:</p>
+
+                    <div class="table-wrap">
+                        <table class="docutils">
+                            <thead>
+                                <tr>
+                                    <th>Target / Folder</th>
+                                    <th>Type</th>
+                                    <th>Files</th>
+                                    <th>Plain-English Purpose</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><strong><a href="#core-tasks-profiling">NoxCore/</a></strong></td>
+                                    <td>Static Library (<code>C++20</code>)</td>
+                                    <td>295</td>
+                                    <td>The core engine: <code>NRI</code> graphics abstraction, Vulkan 1.4 backend, frame-compiled <code>RenderGraph</code>, hybrid visibility-buffer + RT + path-traced <code>Renderer</code>, <code>Scene</code> ECS (47 components), <code>Asset</code> cooking & streaming pipeline, <code>Physics</code> (Jolt 3D + Box2D 2D), <code>Animation</code> & <code>NodeGraph</code>, <code>Scripting</code> (.NET 9 / Coral), <code>Tasks</code> (<code>JobSystem</code>), and <code>Profiling</code>.</td>
+                                </tr>
+                                <tr>
+                                    <td><strong><a href="#scripting">NoxScriptCore/</a></strong></td>
+                                    <td>Managed Class Library (<code>C# / net9.0</code>)</td>
+                                    <td>28</td>
+                                    <td>The <code>Nox</code> C# API (<code>Nox.ScriptCore.dll</code>) providing <code>EntityBehaviour</code>, <code>Entity</code>, component wrappers, <code>Physics</code>, <code>Mesh</code> / <code>MeshBuilder</code>, <code>Jobs</code>, <code>Scene</code>, <code>Input</code>, <code>WorldUnits</code>, and <code>Vector3d</code>.</td>
+                                </tr>
+                                <tr>
+                                    <td><strong><a href="#editor-runtime-sample">NoxEditor/</a></strong></td>
+                                    <td>Executable (<code>C++20</code>) + Shaders</td>
+                                    <td>31 C++ + 113 Shaders</td>
+                                    <td>The full authoring environment with multi-viewport layout, gizmos, Undo/Redo, 11 specialized panels, and 1-click <code>.npak</code> Game Packager. Also houses all <strong>113 Slang/HLSL shaders</strong> in <code>NoxEditor/assets/shaders/</code>.</td>
+                                </tr>
+                                <tr>
+                                    <td><strong><a href="#editor-runtime-sample">NoxRuntime/</a></strong></td>
+                                    <td>Executable (<code>C++20</code>)</td>
+                                    <td>3</td>
+                                    <td>The lightweight shipping game player that mounts a cooked <code>.npak</code> archive, boots the startup scene in <code>RuntimeAssetManager</code> read-only mode, and runs the game loop without editor overhead.</td>
+                                </tr>
+                                <tr>
+                                    <td><strong><a href="#editor-runtime-sample">Facerun/</a></strong></td>
+                                    <td>Sample Project (<code>.nproj</code> + <code>C#</code>)</td>
+                                    <td>18</td>
+                                    <td>A playable testbed project showcasing character controllers, weapons/projectiles, multithreaded voxel terrain generation, additive level streaming, and World Partition streaming.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <hr>
+
+                    <h2 id="six-golden-architectural-rules">Six Golden Architectural Rules</h2>
+                    <ol>
+                        <li><strong>Zero Graphics API Leak</strong>: Vulkan headers (<code>vulkan.hpp</code>, <code>vk_mem_alloc.h</code>, NVIDIA Streamline, NRD) live strictly inside <code>NoxCore/src/NRI/Vulkan/</code>. The rest of the engine talks exclusively to abstract <code>NRI::*</code> interfaces.</li>
+                        <li><strong>100% Bindless (<code>VK_EXT_descriptor_heap</code>)</strong>: No <code>VkDescriptorSet</code>s exist in engine rendering code. All textures, storage image mips, buffers, Acceleration Structures, and samplers live in a persistently mapped descriptor heap buffer indexed by <code>uint32_t</code> slot IDs, while buffers are accessed via 64-bit <code>BufferDeviceAddress</code> (BDA) pointers pushed via <code>vkCmdPushDataEXT</code>.</li>
+                        <li><strong>Unified Image Layouts (<code>VK_KHR_unified_image_layouts</code>)</strong>: Every GPU texture is transitioned to <code>VK_IMAGE_LAYOUT_GENERAL</code> once upon creation or upload and remains in <code>GENERAL</code> for its entire lifetime. Synchronization uses pure execution/memory stage+access masks (<code>VkMemoryBarrier2</code>).</li>
+                        <li><strong>Reverse-Z Projection</strong>: Near plane is mapped to <code>1.0</code> and far plane / infinity to <code>0.0</code>, paired with floating-point depth (<code>D32_SFLOAT</code>) and <code>CompareOp::Greater</code> or <code>GreaterOrEqual</code> for superior depth precision at kilometer distances.</li>
+                        <li><strong>Large World Coordinates (LWC)</strong>: Entity world translations (<code>TransformComponent::Translation</code>, <code>WorldTransformComponent::WorldPosition</code>) are stored in 64-bit <code>glm::dvec3</code> (<code>double</code>). Before uploading to the GPU, the renderer subtracts the camera's <code>glm::dvec3</code> world position on the CPU so every shader operates in high-precision <strong>camera-relative <code>float</code> space</strong>.</li>
+                        <li><strong>Declarative Render Graph</strong>: Every GPU pass is registered via <code>RenderGraph::AddPass(name, flags, setup, execute)</code>. The graph automatically culls unused passes, schedules Async Compute queues, aliases transient VRAM, synthesizes exact <code>Synchronization2</code> barriers, and records command buffers in parallel across worker threads.</li>
+                    </ol>
+
+                    <hr>
+
+                    <h2 id="complete-frame-lifecycle-step-by-step">Complete Frame Lifecycle (Step-by-Step)</h2>
+                    <div class="pipeline-diagram">
+                        <div class="pipeline-step">
+                            <div class="pipeline-step-num">Step 1</div>
+                            <div class="pipeline-step-title">Window &amp; Input Poll</div>
+                            <div class="pipeline-step-desc">SDL3 polls OS window/keyboard/mouse events, updates relative mouse deltas, and checks swapchain resize.</div>
+                        </div>
+                        <div class="pipeline-step">
+                            <div class="pipeline-step-num">Step 2</div>
+                            <div class="pipeline-step-title">Async Streaming Tick</div>
+                            <div class="pipeline-step-desc">AssetLoader::Update &amp; TextureStreamer::Update process cooked textures and mesh pages within a shared 64 MB/frame upload budget.</div>
+                        </div>
+                        <div class="pipeline-step">
+                            <div class="pipeline-step-num">Step 3</div>
+                            <div class="pipeline-step-title">Sequencer &amp; C# Update</div>
+                            <div class="pipeline-step-desc">Scene evaluates TimelinePlayerComponent tracks (11 track types) and invokes C# EntityBehaviour.OnUpdate(dt).</div>
+                        </div>
+                        <div class="pipeline-step">
+                            <div class="pipeline-step-num">Step 4</div>
+                            <div class="pipeline-step-title">Fixed 60 Hz Physics</div>
+                            <div class="pipeline-step-desc">Runs C# OnFixedUpdate(1/60s), steps Box2D v3 (2D) &amp; Jolt (3D LWC double-precision), and interpolates PhysicsPoseComponent.</div>
+                        </div>
+                        <div class="pipeline-step">
+                            <div class="pipeline-step-num">Step 5</div>
+                            <div class="pipeline-step-title">Parallel Animations</div>
+                            <div class="pipeline-step-desc">Evaluates Animators &amp; 11-node AnimationGraphs across JobSystem workers, fires Notifies, and extracts Root Motion.</div>
+                        </div>
+                        <div class="pipeline-step">
+                            <div class="pipeline-step-num">Step 6</div>
+                            <div class="pipeline-step-title">Late Update &amp; Transforms</div>
+                            <div class="pipeline-step-desc">Updates BoneSockets, runs C# OnLateUpdate(dt), and propagates WorldTransformComponent in parallel via SceneGraph.</div>
+                        </div>
+                        <div class="pipeline-step">
+                            <div class="pipeline-step-num">Step 7</div>
+                            <div class="pipeline-step-title">World &amp; GPU Scene Sync</div>
+                            <div class="pipeline-step-desc">Ticks CPU Particles, Level Streaming, and WorldPartition cells, then incrementally patches dirty instances into GpuScene.</div>
+                        </div>
+                        <div class="pipeline-step">
+                            <div class="pipeline-step-num">Step 8</div>
+                            <div class="pipeline-step-title">RenderGraph Compile &amp; Run</div>
+                            <div class="pipeline-step-desc">Compiles 40+ passes (Culling, Visibility Buffer, G-Buffer, RT/GI/ReSTIR/PathTracer, Deferred Lighting, DLSS/TAA, Post), aliases VRAM, and records Vulkan command buffers across worker threads.</div>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- Prev / Next Footer Buttons -->
+                <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+                    <a href="#" class="btn-neutral" id="btn-prev-page" style="display:none;">&laquo; Previous</a>
+                    <a href="#getting-started" class="btn-neutral" id="btn-next-page">Next (Getting Started, Build System &amp; Project Structure) &raquo;</a>
+                </div>
+
+                <!-- Footer -->
+                <footer class="rtd-footer">
+                    <p>&copy; Copyright 2026, Noxiouse Contributors. Built with Sphinx &amp; Read the Docs (Godot Docs theme).</p>
+                    <p>489 files documented across NRI, Vulkan 1.4, RenderGraph, Renderer, Shaders, Core, Jolt Physics, Animation, Scripting &amp; Editor.</p>
+                </footer>
+            </div>
+        </section>
+    </div>
+
+    <!-- Data and App Scripts -->
+    <script src="assets/docs-pages.js"></script>
+    <script src="assets/file-db.js"></script>
+    <script src="assets/app.js"></script>
+</body>
+</html>

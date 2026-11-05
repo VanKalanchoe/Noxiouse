@@ -69,3 +69,27 @@ add_subdirectory("${coral_SOURCE_DIR}/cmake" "${coral_BINARY_DIR}")
 
 set(NOX_CORAL_RUNTIME_DIR "${coral_BINARY_DIR}" CACHE INTERNAL
     "Directory containing Coral.Managed runtime artifacts")
+
+
+# D3D12MemoryAllocator (GPUOpen) for Direct3D 12 suballocation and memory budgeting
+if(WIN32)
+    FetchContent_Declare(
+        D3D12MemoryAllocator
+        GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
+        GIT_TAG v3.1.0
+        GIT_SHALLOW TRUE
+        SYSTEM
+        EXCLUDE_FROM_ALL
+    )
+    FetchContent_MakeAvailable(D3D12MemoryAllocator)
+
+    if(NOT TARGET D3D12MemoryAllocator AND EXISTS "${d3d12memoryallocator_SOURCE_DIR}/src/D3D12MemAlloc.cpp")
+        add_library(D3D12MemoryAllocator STATIC
+            "${d3d12memoryallocator_SOURCE_DIR}/src/D3D12MemAlloc.cpp"
+        )
+        target_include_directories(D3D12MemoryAllocator SYSTEM PUBLIC
+            "${d3d12memoryallocator_SOURCE_DIR}/include"
+        )
+        target_link_libraries(D3D12MemoryAllocator PUBLIC d3d12 dxgi)
+    endif()
+endif()

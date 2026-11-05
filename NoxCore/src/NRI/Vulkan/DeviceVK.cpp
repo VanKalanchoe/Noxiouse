@@ -387,7 +387,7 @@ namespace NRI
             }
             else if (type == sl::LogType::eWarn)
             {
-                NOX_CORE_WARN("[Streamline] {}", msg);
+                std::string_view sv(msg); if (sv.find("before slInit()") != std::string_view::npos) return; NOX_CORE_WARN("[Streamline] {}", msg);
             }
             else if (type == sl::LogType::eInfo)
             {

@@ -164,7 +164,7 @@ counting the per-view and per-mip names).
    are recorded, and the render graph derives them.
 4. **Slang integration.** Shaders are Slang, compiled to SPIR-V by `NRI/SlangCompiler.cpp` (scalar layout, SPIR-V 1.6),
    cached on disk and hot-reloaded. GPU structs shared with C++ go in `NoxEditor/assets/shaders/shaderIO.h` and must have the
-   same layout on both sides.
+   same layout on both sides. (DirectX 12 / HLSL DXIL support is deferred pending Shader Model 7.0 / native SPIR-V; Vulkan 1.4 SPIR-V 1.6 is the sole active target).
 5. **Reverse-Z, infinite far plane.** Near is depth 1.0, infinity is 0.0; depth tests use `GREATER` / `GREATER_OR_EQUAL`.
 6. **Render graph passes.** New GPU work is a render graph pass: declare every resource access in the setup callback; the
    execute callback only records (it may run on any worker thread).

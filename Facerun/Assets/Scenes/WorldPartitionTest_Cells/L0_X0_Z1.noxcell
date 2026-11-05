@@ -7,9 +7,13 @@ Entities:
       Translation: [1000, -10, 3000]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
+    WorldPartitionComponent:
+      Mode: Spatial
     ScriptComponent:
-      Classes: [Facerun.LevelStreamingTestBox]
-      EntityReferences: []
+      Classes:
+        - Facerun.LevelStreamingTestBox
+      EntityReferences:
+        []
       FieldOverrides:
         - Class: Facerun.LevelStreamingTestBox
           Field: Size
@@ -19,8 +23,6 @@ Entities:
           Field: Color
           Type: Vector3
           Value: [0.55, 0.57, 0.6]
-    WorldPartitionComponent:
-      Mode: Spatial
   - Entity: 12894818029395051957
     TagComponent:
       Tag: WPT_Cell_0_1
@@ -28,10 +30,18 @@ Entities:
       Translation: [1000, 150, 3000]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
+    WorldPartitionComponent:
+      Mode: Spatial
     ScriptComponent:
-      Classes: [Facerun.LevelStreamingTestBox]
-      EntityReferences: []
+      Classes:
+        - Facerun.LevelStreamingTestBox
+      EntityReferences:
+        []
       FieldOverrides:
+        - Class: Facerun.LevelStreamingTestBox
+          Field: SpinSpeed
+          Type: Float
+          Value: 1
         - Class: Facerun.LevelStreamingTestBox
           Field: Size
           Type: Vector3
@@ -40,9 +50,3 @@ Entities:
           Field: Color
           Type: Vector3
           Value: [0.2, 0.3, 0.32]
-        - Class: Facerun.LevelStreamingTestBox
-          Field: SpinSpeed
-          Type: Float
-          Value: 1
-    WorldPartitionComponent:
-      Mode: Spatial

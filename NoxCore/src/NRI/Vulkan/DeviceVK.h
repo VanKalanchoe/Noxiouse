@@ -75,6 +75,7 @@ namespace NRI
         // no frame that may have drawn it is on the GPU: a texture can go while the frame that showed it (a thumbnail, a preview)
         // is still in flight (VUID-vkFreeDescriptorSets-pDescriptorSets-00309, VUID-vkDestroyImageView-imageView-01026). Any thread.
         void releaseImGuiTexture(VkDescriptorSet set, ImageResource&& image);
+        GraphicsAPI getAPI() const override { return GraphicsAPI::Vulkan; }
         vk::raii::SurfaceKHR& getSurface() { return m_surface; }
         vk::Format& getDepthFormat() { return m_depthFormat; }
         vk::SurfaceFormatKHR& getSurfaceFormat() { return m_surfaceFormat; }

@@ -1,4 +1,5 @@
 #include "Renderer.h"
+#include "NoxCore/Core/Application.h"
 #include "NoxCore/Math/Math.h"
 #include "ShaderCompileSplash.h"
 #include <SDL3/SDL_filesystem.h>
@@ -319,7 +320,19 @@ namespace Nox
 
         s_Instance = this;
 
-        m_device = NRI::Device::create(NRI::GraphicsAPI::Vulkan, *m_window);
+        NRI::GraphicsAPI api = NRI::GraphicsAPI::Vulkan;
+#ifdef _WIN32
+        const auto& args = Application::Get().GetSpecification().CommandLineArgs;
+        for (int i = 1; i < args.Count; ++i)
+        {
+            if (std::string_view(args[i]) == "--d3d12" || std::string_view(args[i]) == "--dx12")
+            {
+                api = NRI::GraphicsAPI::D3D12;
+                break;
+            }
+        }
+#endif
+        m_device = NRI::Device::create(api, *m_window);
         NOX_CORE_ASSERT(m_device, "Failed to create NRI device");
 
         // Staging for every upload, right after the device: startup already uploads (textures, IBL inputs). A ring on
@@ -1895,6 +1908,8 @@ namespace Nox
     void Renderer::createCompiler()
     {
         m_shaderCompiler = NRI::CreateSlangCompiler();
+        if (m_device)
+            m_shaderCompiler->setTargetAPI(m_device->getAPI());
     }
 
     void Renderer::watchShader(const std::filesystem::path& path, const std::string& pipelineKey, std::function<void()> reloadFn)

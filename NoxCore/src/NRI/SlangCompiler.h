@@ -16,11 +16,14 @@ namespace NRI
         std::vector<char> compile(const std::string& path) override;
         uint64_t sourceHash(const std::string& path) override;
         bool canCompile() override;
+        void setTargetAPI(GraphicsAPI api) override { m_targetAPI = api; }
+        GraphicsAPI getTargetAPI() const override { return m_targetAPI; }
         
     private:
         // Created on the first compile: slang.dll is delay-loaded (CMake), so a game whose shader cache is complete never loads it.
         bool ensureSession();
         Slang::ComPtr<slang::IGlobalSession> m_globalSession;
         int m_available = -1; // -1 not checked yet, 0 / 1
+        GraphicsAPI m_targetAPI = static_cast<GraphicsAPI>(0);
     };
 }

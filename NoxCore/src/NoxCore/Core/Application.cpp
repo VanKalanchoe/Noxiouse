@@ -35,6 +35,17 @@ namespace Nox
         if (m_Specification.WindowSpec.Ttile.empty())
             m_Specification.WindowSpec.Ttile = m_Specification.Name;
 
+#ifdef _WIN32
+        for (int i = 1; i < m_Specification.CommandLineArgs.Count; ++i)
+        {
+            if (std::string_view(m_Specification.CommandLineArgs[i]) == "--d3d12" ||
+                std::string_view(m_Specification.CommandLineArgs[i]) == "--dx12")
+            {
+                m_Specification.WindowSpec.IsVulkan = false;
+                break;
+            }
+        }
+#endif
         m_Window = std::make_shared<Window>(m_Specification.WindowSpec);
 
         renderer = std::make_unique<Renderer>(m_Window, m_Specification.isEditor);

@@ -1,5 +1,32 @@
 Scene: L0_X0_Z2
 Entities:
+  - Entity: 16897175147139713981
+    TagComponent:
+      Tag: WPT_Cell_0_2
+    TransformComponent:
+      Translation: [1000, 150, 5000]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    WorldPartitionComponent:
+      Mode: Spatial
+    ScriptComponent:
+      Classes:
+        - Facerun.LevelStreamingTestBox
+      EntityReferences:
+        []
+      FieldOverrides:
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Size
+          Type: Vector3
+          Value: [300, 300, 300]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: SpinSpeed
+          Type: Float
+          Value: 1
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Color
+          Type: Vector3
+          Value: [0.2, 0.3, 0.44]
   - Entity: 17567760409186836289
     TagComponent:
       Tag: WPT_Tile_0_2
@@ -7,9 +34,13 @@ Entities:
       Translation: [1000, -10, 5000]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
+    WorldPartitionComponent:
+      Mode: Spatial
     ScriptComponent:
-      Classes: [Facerun.LevelStreamingTestBox]
-      EntityReferences: []
+      Classes:
+        - Facerun.LevelStreamingTestBox
+      EntityReferences:
+        []
       FieldOverrides:
         - Class: Facerun.LevelStreamingTestBox
           Field: Size
@@ -19,30 +50,3 @@ Entities:
           Field: Color
           Type: Vector3
           Value: [0.25, 0.27, 0.3]
-    WorldPartitionComponent:
-      Mode: Spatial
-  - Entity: 16897175147139713981
-    TagComponent:
-      Tag: WPT_Cell_0_2
-    TransformComponent:
-      Translation: [1000, 150, 5000]
-      Rotation: [0, 0, 0]
-      Scale: [1, 1, 1]
-    ScriptComponent:
-      Classes: [Facerun.LevelStreamingTestBox]
-      EntityReferences: []
-      FieldOverrides:
-        - Class: Facerun.LevelStreamingTestBox
-          Field: Size
-          Type: Vector3
-          Value: [300, 300, 300]
-        - Class: Facerun.LevelStreamingTestBox
-          Field: Color
-          Type: Vector3
-          Value: [0.2, 0.3, 0.44]
-        - Class: Facerun.LevelStreamingTestBox
-          Field: SpinSpeed
-          Type: Float
-          Value: 1
-    WorldPartitionComponent:
-      Mode: Spatial

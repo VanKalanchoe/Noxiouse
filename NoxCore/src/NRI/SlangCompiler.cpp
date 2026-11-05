@@ -152,20 +152,60 @@ namespace NRI
         auto slangTargets{
             std::to_array<slang::TargetDesc>({
                 {
-                    .format{SLANG_SPIRV},
-                    .profile{m_globalSession->findProfile("spirv_1_6")}
+                    .format{m_targetAPI == static_cast<GraphicsAPI>(2) ? SLANG_DXIL : SLANG_SPIRV},
+                    .profile{m_globalSession->findProfile(m_targetAPI == static_cast<GraphicsAPI>(2) ? "sm_6_6" : "spirv_1_6")}
                 }
             })
         };
-        auto slangOptions{
-            std::to_array<slang::CompilerOptionEntry>({
-                { slang::CompilerOptionName::EmitSpirvDirectly, { slang::CompilerOptionValueKind::Int, 1 } },
-                { slang::CompilerOptionName::VulkanUseEntryPointName, { slang::CompilerOptionValueKind::Int, 1 } },
-                { slang::CompilerOptionName::GLSLForceScalarLayout,  { slang::CompilerOptionValueKind::Int, 1  } },
-                { slang::CompilerOptionName::Capability, { slang::CompilerOptionValueKind::Int, m_globalSession->findCapability("spvDescriptorHeapEXT") } },
-                { slang::CompilerOptionName::Capability, { slang::CompilerOptionValueKind::Int, m_globalSession->findCapability("spvRayQueryKHR") } },
-            })
-        };
+
+
+        std::vector<slang::CompilerOptionEntry> slangOptions;
+        slangOptions.push_back({ slang::CompilerOptionName::GLSLForceScalarLayout, { slang::CompilerOptionValueKind::Int, 1 } });
+        if (m_targetAPI != static_cast<GraphicsAPI>(2))
+        {
+            slangOptions.push_back({
+                slang::CompilerOptionName::MacroDefine,
+                {
+                    .kind = slang::CompilerOptionValueKind::String,
+                    .stringValue0 = "NOX_VULKAN",
+                    .stringValue1 = "1"
+                }
+            });
+            slangOptions.push_back({ slang::CompilerOptionName::EmitSpirvDirectly, { slang::CompilerOptionValueKind::Int, 1 } });
+            slangOptions.push_back({ slang::CompilerOptionName::VulkanUseEntryPointName, { slang::CompilerOptionValueKind::Int, 1 } });
+            slangOptions.push_back({ slang::CompilerOptionName::Capability, { slang::CompilerOptionValueKind::Int, m_globalSession->findCapability("spvDescriptorHeapEXT") } });
+            slangOptions.push_back({ slang::CompilerOptionName::Capability, { slang::CompilerOptionValueKind::Int, m_globalSession->findCapability("spvRayQueryKHR") } });
+        }
+        else
+        {
+            slangOptions.push_back({
+                slang::CompilerOptionName::MacroDefine,
+                {
+                    .kind = slang::CompilerOptionValueKind::String,
+                    .stringValue0 = "NOX_DX12",
+                    .stringValue1 = "1"
+                }
+            });
+            slangOptions.push_back({
+                slang::CompilerOptionName::DownstreamArgs,
+                {
+                    .kind = slang::CompilerOptionValueKind::String,
+                    .intValue0 = 0,
+                    .intValue1 = 0,
+                    .stringValue0 = "dxc",
+                    .stringValue1 = "-enable-16bit-types\n-HV\n2021"
+                }
+            });
+        }
+
+
+
+
+
+
+
+
+
         
         /*NOX_CORE_INFO("Slang current working directory: {}", std::filesystem::current_path().string());
         NOX_CORE_INFO("Slang search paths being checked:");
@@ -187,6 +227,7 @@ namespace NRI
             .compilerOptionEntries{slangOptions.data()},
             .compilerOptionEntryCount{uint32_t(slangOptions.size())},
         };
+
         m_globalSession->createSession(slangSessionDesc, session.writeRef());
         
         std::string moduleName = std::filesystem::path(path).stem().string();
@@ -196,6 +237,7 @@ namespace NRI
         {
             session->loadModuleFromSource(moduleName.c_str(), path.c_str(), nullptr, diagnostics.writeRef())
         };
+
         
         if (diagnostics)
         {
