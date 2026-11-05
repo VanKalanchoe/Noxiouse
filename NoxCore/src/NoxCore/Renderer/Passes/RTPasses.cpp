@@ -179,7 +179,9 @@ namespace Nox
         m_frame.nrdShadowsAdded = true;
 
         // NRD SIGMA: raw shadow mask -> denoised shadow mask.
-        m_renderGraph.AddPass("NRD Shadows", RGPassFlags::None,
+        // On the compute queue (async compute: NRD dispatches compute work only, its README's "queueType = GRAPHICS; // or COMPUTE"),
+        // beside the graphics passes until the lighting needs the denoised mask.
+        m_renderGraph.AddPass("NRD Shadows", RGPassFlags::AsyncCompute,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.RawShadowMask);
@@ -318,7 +320,8 @@ namespace Nox
         m_frame.nrdReflectionsAdded = true;
 
         // NRD REBLUR / RELAX specular: raw reflection -> denoised reflection.
-        m_renderGraph.AddPass("NRD Reflections", RGPassFlags::None,
+        // On the compute queue (async compute, as NRD Shadows), beside SSGI and the other graphics passes until the lighting needs it.
+        m_renderGraph.AddPass("NRD Reflections", RGPassFlags::AsyncCompute,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.RawReflection);
@@ -514,7 +517,8 @@ namespace Nox
         }
 
         // 2. Blend irradiance atlas: one workgroup per probe (DDGIBlendIrradiance.slang).
-        m_renderGraph.AddPass("DDGI Blend Irradiance", RGPassFlags::None,
+        // The blends on the compute queue (async compute): compute dispatches over the rays, until the screen probes / lighting read them.
+        m_renderGraph.AddPass("DDGI Blend Irradiance", RGPassFlags::AsyncCompute,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.DDGIRayData);
@@ -542,7 +546,7 @@ namespace Nox
             });
 
         // 3. Blend distance atlas: one workgroup per probe (DDGIBlendDistance.slang).
-        m_renderGraph.AddPass("DDGI Blend Distance", RGPassFlags::None,
+        m_renderGraph.AddPass("DDGI Blend Distance", RGPassFlags::AsyncCompute,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.DDGIRayData);

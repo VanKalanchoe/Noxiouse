@@ -24,6 +24,7 @@ constexpr bool enableValidationLayers = true;
 namespace NRI
 {
     class MemoryAllocatorVK;
+    class CommandBufferVK;
     class ShaderCompiler;
     struct ImageResource;
 
@@ -99,6 +100,8 @@ namespace NRI
             const glm::vec2& cameraJitter = glm::vec2(0.0f),
             const glm::vec2& cameraJitterPrev = glm::vec2(0.0f)) override;
         bool evaluateNRDShadows(const NRDShadowParams& params) override;
+        // Whether a command buffer records for the compute-only queue (NRD's dispatches then go to it: QueueType::COMPUTE).
+        bool isNRDComputeQueue(const CommandBufferVK& commandBuffer) const;
         bool evaluateNRDReflections(const NRDReflectionParams& params, NRDReflectionDenoiser denoiser) override;
         bool evaluateNRDDiffuse(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) override;
         bool evaluateNRDDirectLighting(const NRDDiffuseParams& params, NRDDiffuseDenoiser denoiser) override;

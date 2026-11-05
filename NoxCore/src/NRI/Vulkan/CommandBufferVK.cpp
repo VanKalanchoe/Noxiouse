@@ -92,7 +92,7 @@ namespace NRI
     }
     
     CommandBufferVK::CommandBufferVK(DeviceVK& device, CommandAllocatorVK& allocator, uint32_t cbCount)
-        : m_deviceVK(device), m_resetOnBegin(allocator.getResetMode() == CommandBufferReset::PerCommandBuffer)
+        : m_deviceVK(device), m_resetOnBegin(allocator.getResetMode() == CommandBufferReset::PerCommandBuffer), m_queueFamily(allocator.getQueueFamily())
     {
         vk::CommandBufferAllocateInfo allocInfo
         {

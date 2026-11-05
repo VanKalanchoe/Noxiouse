@@ -16,10 +16,12 @@ namespace NRI
         void reset() override;
         vk::raii::CommandPool& getNativePool() { return m_commandPool; }
         CommandBufferReset getResetMode() const { return m_resetMode; }
+        uint32_t getQueueFamily() const { return m_queueFamily; }
 
     private:
         DeviceVK& m_deviceVK;
         vk::raii::CommandPool m_commandPool = nullptr;
         CommandBufferReset m_resetMode;
+        uint32_t m_queueFamily = 0;
     };
 };

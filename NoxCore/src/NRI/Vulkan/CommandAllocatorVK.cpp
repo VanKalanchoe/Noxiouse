@@ -5,7 +5,8 @@
 
 namespace NRI
 {
-    CommandAllocatorVK::CommandAllocatorVK(DeviceVK& device, CommandBufferReset resetMode, uint32_t queueFamily) : m_deviceVK(device), m_resetMode(resetMode)
+    CommandAllocatorVK::CommandAllocatorVK(DeviceVK& device, CommandBufferReset resetMode, uint32_t queueFamily)
+        : m_deviceVK(device), m_resetMode(resetMode), m_queueFamily(queueFamily)
     {
         vk::CommandPoolCreateInfo poolInfo
         {

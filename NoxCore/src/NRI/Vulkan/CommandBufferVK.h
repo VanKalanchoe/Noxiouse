@@ -95,10 +95,15 @@ namespace NRI
         void buildOrUpdateAccelerationStructure(vk::BuildAccelerationStructureModeKHR mode, const AccelerationStructureBuildDesc& buildDesc, uint64_t scratchAddress, AccelerationStructure* srcAS,
   AccelerationStructure& dstAS);
         
+    public:
+        // The queue family its pool belongs to (the compute-only family for async compute).
+        uint32_t getQueueFamily() const { return m_queueFamily; }
+
     private:
         DeviceVK& m_deviceVK;
         std::vector<vk::raii::CommandBuffer> m_commandBuffers;
         bool m_resetOnBegin;
+        uint32_t m_queueFamily = 0;
         // resourceBarriers scratch (a command buffer is recorded by one thread at a time)
         std::vector<vk::ImageMemoryBarrier2> m_imageBarrierScratch;
         std::vector<vk::BufferMemoryBarrier2> m_bufferBarrierScratch;

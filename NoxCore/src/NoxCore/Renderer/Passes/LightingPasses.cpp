@@ -33,9 +33,10 @@ namespace Nox
         if (unchanged)
             return;
 
-        // Each emissive triangle's record and power, then their running sum, then the cells' picks.
+        // Each emissive triangle's record and power, then their running sum, then the cells' picks -- on the compute queue (async
+        // compute: dispatches only), beside the graphics passes until a pass that samples the lights reads them.
         const uint32_t triangleCount = uniformData.emissiveTriangleCount;
-        m_renderGraph.AddPass("Emissive Triangles", RGPassFlags::NeverCull,
+        m_renderGraph.AddPass("Emissive Triangles", RGPassFlags::NeverCull | RGPassFlags::AsyncCompute,
             [&](RGBuilder& builder)
             {
                 ReadIfValid(builder, resources.SceneTransforms);
@@ -52,7 +53,7 @@ namespace Nox
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch((triangleCount + 63) / 64, 1, 1);
             });
-        m_renderGraph.AddPass("Emissive Power Sum", RGPassFlags::NeverCull,
+        m_renderGraph.AddPass("Emissive Power Sum", RGPassFlags::NeverCull | RGPassFlags::AsyncCompute,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.EmissiveTriangles);
@@ -69,7 +70,7 @@ namespace Nox
                 cmd.dispatch(1, 1, 1);
             });
 
-        m_renderGraph.AddPass("Emissive Light Grid", RGPassFlags::NeverCull,
+        m_renderGraph.AddPass("Emissive Light Grid", RGPassFlags::NeverCull | RGPassFlags::AsyncCompute,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.EmissiveTriangles);

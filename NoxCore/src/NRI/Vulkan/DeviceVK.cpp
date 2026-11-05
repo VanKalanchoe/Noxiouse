@@ -1861,17 +1861,28 @@ namespace NRI
         instanceDesc.denoisersNum = 11;
 
         // 3. Native Vulkan Device Creation Desc
-        ::nri::QueueFamilyVKDesc queueFamily{};
-        queueFamily.familyIndex = m_queueIndex;
-        queueFamily.queueType = ::nri::QueueType::GRAPHICS;
-        queueFamily.queueNum = 1;
+        // The queues NRD's dispatches are recorded for (NRD README: "queueType = GRAPHICS; // or COMPUTE" -- NRD only dispatches
+        // compute work): the graphics queue, and the compute-only queue when async compute has one (the render graph may put the
+        // NRD passes there). With both, NRD's own resources are shared across them.
+        ::nri::QueueFamilyVKDesc queueFamilies[2]{};
+        queueFamilies[0].familyIndex = m_queueIndex;
+        queueFamilies[0].queueType = ::nri::QueueType::GRAPHICS;
+        queueFamilies[0].queueNum = 1;
+        uint32_t queueFamilyCount = 1;
+        if (hasAsyncComputeQueue())
+        {
+            queueFamilies[1].familyIndex = m_computeQueueIndex;
+            queueFamilies[1].queueType = ::nri::QueueType::COMPUTE;
+            queueFamilies[1].queueNum = 1;
+            queueFamilyCount = 2;
+        }
 
         ::nri::DeviceCreationVKDesc vkDesc{};
         vkDesc.vkInstance = static_cast<VKHandle>(static_cast<VkInstance>(*m_instance));
         vkDesc.vkDevice = static_cast<VKHandle>(static_cast<VkDevice>(*m_device));
         vkDesc.vkPhysicalDevice = static_cast<VKHandle>(static_cast<VkPhysicalDevice>(*m_physicalDevice));
-        vkDesc.queueFamilies = &queueFamily;
-        vkDesc.queueFamilyNum = 1;
+        vkDesc.queueFamilies = queueFamilies;
+        vkDesc.queueFamilyNum = queueFamilyCount;
         vkDesc.minorVersion = 4; // Vulkan 1.4
 
         ::nrd::Result res = m_nrdContext->integration.RecreateVK(integrationDesc, instanceDesc, vkDesc);
@@ -1885,6 +1896,11 @@ namespace NRI
         NOX_CORE_INFO("[NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse ({}x{})", width, height);
         m_nrdContext->initialized = true;
         return true;
+    }
+
+    bool DeviceVK::isNRDComputeQueue(const CommandBufferVK& commandBuffer) const
+    {
+        return hasAsyncComputeQueue() && commandBuffer.getQueueFamily() == m_computeQueueIndex && m_computeQueueIndex != m_queueIndex;
     }
 
     bool DeviceVK::evaluateNRDShadows(const NRDShadowParams& params)
@@ -1928,7 +1944,11 @@ namespace NRI
             snap.SetResource(slot, res);
         };
 
-        constexpr auto commonStages = ::nri::StageBits::COMPUTE_SHADER | ::nri::StageBits::FRAGMENT_SHADER | ::nri::StageBits::COLOR_ATTACHMENT;
+        // The states the render graph leaves the textures in, by the stages of this command buffer's queue: a compute-only queue has
+        // no fragment or attachment stages (Vulkan rejects them in its barriers).
+        const bool computeQueue = isNRDComputeQueue(*cmdBufferVK);
+        const auto commonStages = computeQueue ? ::nri::StageBits::COMPUTE_SHADER
+                                               : ::nri::StageBits::COMPUTE_SHADER | ::nri::StageBits::FRAGMENT_SHADER | ::nri::StageBits::COLOR_ATTACHMENT;
 
         // IN_PENUMBRA: raw 1-SPP shadow mask (RG16F)
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_PENUMBRA, params.inShadowData, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
@@ -1948,7 +1968,7 @@ namespace NRI
         // 4. Dispatch NRD DenoiseVK
         ::nri::CommandBufferVKDesc cmdDesc{};
         cmdDesc.vkCommandBuffer = static_cast<VKHandle>(vkCmd);
-        cmdDesc.queueType = ::nri::QueueType::GRAPHICS;
+        cmdDesc.queueType = computeQueue ? ::nri::QueueType::COMPUTE : ::nri::QueueType::GRAPHICS;
 
         const ::nrd::Identifier denoiserId = NRDContext::SIGMA_DENOISER;
         m_nrdContext->Denoise(denoiserId, cmdDesc, snapshot);
@@ -2013,7 +2033,11 @@ namespace NRI
             snap.SetResource(slot, res);
         };
 
-        constexpr auto commonStages = ::nri::StageBits::COMPUTE_SHADER | ::nri::StageBits::FRAGMENT_SHADER | ::nri::StageBits::COLOR_ATTACHMENT;
+        // The states the render graph leaves the textures in, by the stages of this command buffer's queue: a compute-only queue has
+        // no fragment or attachment stages (Vulkan rejects them in its barriers).
+        const bool computeQueue = isNRDComputeQueue(*cmdBufferVK);
+        const auto commonStages = computeQueue ? ::nri::StageBits::COMPUTE_SHADER
+                                               : ::nri::StageBits::COMPUTE_SHADER | ::nri::StageBits::FRAGMENT_SHADER | ::nri::StageBits::COLOR_ATTACHMENT;
 
         // IN_SPEC_RADIANCE_HITDIST: raw 1-SPP specular reflection + hit distance (RGBA16F)
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_SPEC_RADIANCE_HITDIST, params.inSpecularRadianceHitDist, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
@@ -2033,7 +2057,7 @@ namespace NRI
         // 4. Dispatch NRD DenoiseVK
         ::nri::CommandBufferVKDesc cmdDesc{};
         cmdDesc.vkCommandBuffer = static_cast<VKHandle>(vkCmd);
-        cmdDesc.queueType = ::nri::QueueType::GRAPHICS;
+        cmdDesc.queueType = computeQueue ? ::nri::QueueType::COMPUTE : ::nri::QueueType::GRAPHICS;
 
         m_nrdContext->Denoise(activeDenoiserId, cmdDesc, snapshot);
 
@@ -2097,7 +2121,11 @@ namespace NRI
             snap.SetResource(slot, res);
         };
 
-        constexpr auto commonStages = ::nri::StageBits::COMPUTE_SHADER | ::nri::StageBits::FRAGMENT_SHADER | ::nri::StageBits::COLOR_ATTACHMENT;
+        // The states the render graph leaves the textures in, by the stages of this command buffer's queue: a compute-only queue has
+        // no fragment or attachment stages (Vulkan rejects them in its barriers).
+        const bool computeQueue = isNRDComputeQueue(*cmdBufferVK);
+        const auto commonStages = computeQueue ? ::nri::StageBits::COMPUTE_SHADER
+                                               : ::nri::StageBits::COMPUTE_SHADER | ::nri::StageBits::FRAGMENT_SHADER | ::nri::StageBits::COLOR_ATTACHMENT;
 
         // IN_DIFF_RADIANCE_HITDIST: raw 1-SPP diffuse GI radiance + normalized hit distance (RGBA16F)
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST, params.inDiffuseRadianceHitDist, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
@@ -2117,7 +2145,7 @@ namespace NRI
         // 4. Dispatch NRD DenoiseVK
         ::nri::CommandBufferVKDesc cmdDesc{};
         cmdDesc.vkCommandBuffer = static_cast<VKHandle>(vkCmd);
-        cmdDesc.queueType = ::nri::QueueType::GRAPHICS;
+        cmdDesc.queueType = computeQueue ? ::nri::QueueType::COMPUTE : ::nri::QueueType::GRAPHICS;
 
         m_nrdContext->Denoise(activeDenoiserId, cmdDesc, snapshot);
 
@@ -2194,7 +2222,11 @@ namespace NRI
             snap.SetResource(slot, res);
         };
 
-        constexpr auto commonStages = ::nri::StageBits::COMPUTE_SHADER | ::nri::StageBits::FRAGMENT_SHADER | ::nri::StageBits::COLOR_ATTACHMENT;
+        // The states the render graph leaves the textures in, by the stages of this command buffer's queue: a compute-only queue has
+        // no fragment or attachment stages (Vulkan rejects them in its barriers).
+        const bool computeQueue = isNRDComputeQueue(*cmdBufferVK);
+        const auto commonStages = computeQueue ? ::nri::StageBits::COMPUTE_SHADER
+                                               : ::nri::StageBits::COMPUTE_SHADER | ::nri::StageBits::FRAGMENT_SHADER | ::nri::StageBits::COLOR_ATTACHMENT;
 
         // IN_DIFF / IN_SPEC_RADIANCE_HITDIST: de-modulated 1-SPP signal + hit distance (RGBA16F, NRDFrontEnd.slang)
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST, params.inDiffuseRadianceHitDist, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
@@ -2216,7 +2248,7 @@ namespace NRI
         // 4. Dispatch NRD DenoiseVK
         ::nri::CommandBufferVKDesc cmdDesc{};
         cmdDesc.vkCommandBuffer = static_cast<VKHandle>(vkCmd);
-        cmdDesc.queueType = ::nri::QueueType::GRAPHICS;
+        cmdDesc.queueType = computeQueue ? ::nri::QueueType::COMPUTE : ::nri::QueueType::GRAPHICS;
 
         m_nrdContext->Denoise(activeDenoiserId, cmdDesc, snapshot);
 
@@ -2282,7 +2314,11 @@ namespace NRI
             snap.SetResource(slot, res);
         };
 
-        constexpr auto commonStages = ::nri::StageBits::COMPUTE_SHADER | ::nri::StageBits::FRAGMENT_SHADER | ::nri::StageBits::COLOR_ATTACHMENT;
+        // The states the render graph leaves the textures in, by the stages of this command buffer's queue: a compute-only queue has
+        // no fragment or attachment stages (Vulkan rejects them in its barriers).
+        const bool computeQueue = isNRDComputeQueue(*cmdBufferVK);
+        const auto commonStages = computeQueue ? ::nri::StageBits::COMPUTE_SHADER
+                                               : ::nri::StageBits::COMPUTE_SHADER | ::nri::StageBits::FRAGMENT_SHADER | ::nri::StageBits::COLOR_ATTACHMENT;
 
         // IN_DIFF_RADIANCE_HITDIST: raw 1-SPP path-traced radiance + normalized hit distance (RGBA16F)
         bindVKTexture(snapshot, ::nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST, params.inDiffuseRadianceHitDist, ::nri::AccessBits::SHADER_RESOURCE_STORAGE, ::nri::Layout::GENERAL, commonStages);
@@ -2302,7 +2338,7 @@ namespace NRI
         // 4. Dispatch NRD DenoiseVK
         ::nri::CommandBufferVKDesc cmdDesc{};
         cmdDesc.vkCommandBuffer = static_cast<VKHandle>(vkCmd);
-        cmdDesc.queueType = ::nri::QueueType::GRAPHICS;
+        cmdDesc.queueType = computeQueue ? ::nri::QueueType::COMPUTE : ::nri::QueueType::GRAPHICS;
 
         m_nrdContext->Denoise(activeDenoiserId, cmdDesc, snapshot);
 

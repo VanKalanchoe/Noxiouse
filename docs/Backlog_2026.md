@@ -12,7 +12,7 @@
 |---|---|
 | R10 | DLSS "WorldToScreenMatrix not invertible" every frame (seen 2026-10-29 after a DLSS recreate in LevelStreamingTest). A one-time log names the degenerate camera input (`addDLSSPass`): needs that log line to fix |
 
-| R11 | **More async compute:** only the screen-probe GI passes are marked `RGPassFlags::AsyncCompute` (`RTPasses.cpp`). Candidates: the sky lookup tables, particles, skinning and the light grid -- the queue, fork/join and submissions are built; each is mostly marking the pass and measuring it |
+| R11 | **More async compute:** besides the screen-probe GI, now on the compute queue: the NRD denoisers' shadows and reflections (NRD README: it only dispatches compute work, `queueType = GRAPHICS; // or COMPUTE`; NRD is created with both queue families, and each call passes its command buffer's queue type with compute-only stages on the compute queue), the DDGI blends and the emissive light grid. **Built 2026-11-06, untested**: to measure ("Async Compute Passes" in the stats; the frame time in RT mode and Raster (All)). Not moved: the sky / cloud / fog passes (tiny, or read through the uniforms without a graph dependency) |
 
 ### Raster versions of the RT features (decided 2026-10-31)
 
@@ -58,14 +58,13 @@ default; the RT one stays the default otherwise (RT shadows may well win). Both 
 
 ### Materials (decided 2026-10-31: OpenPBR as the reference model, not the runtime shader -- Unreal's way)
 
-Nox keeps its own material model (glTF PBR and its extensions) and does not run MaterialX graphs or the full OpenPBR shader at run
+Nox keeps its own material model (glTF PBR and its extensions) and does not run material graphs or the full OpenPBR shader at run
 time. Where glTF leaves room, a lobe follows OpenPBR's definition, so materials authored for OpenPBR / Standard Surface convert
 faithfully. Each lobe costs nothing for materials that do not use it.
 
 | # | Item |
 |---|---|
 | M1 | **The missing material lobes**: `KHR_materials_clearcoat`, `_sheen`, `_specular`, `_iridescence`, `_anisotropy`, `_dispersion`. **Done 2026-10-31:** data, import, material editor, G-buffer, deferred, forward, ray hits, reflections and guides, the path tracer's BSDF (`Engine_Architecture_Plan_2026.md` §5.8.2). ReSTIR DI's mode shades the base lobes only (ignored for now) |
-| M2 | **MaterialX (.mtlx) material importer** (Unreal's Interchange MaterialX): a .mtlx file is a material only (no meshes) -- e.g. AMD's MaterialX library (Apache 2.0: keep attribution). Reads the surface shader (Standard Surface or OpenPBR Surface) and maps it onto a .nmat plus its textures (M1's lobes where they apply); procedural node graphs (noise, mixing) are baked to textures. Assigned to glTF meshes like any material. After M1 |
 
 ### Characters and animation (plan: `Animation_Graph_Architecture_Plan_2026.md`)
 
