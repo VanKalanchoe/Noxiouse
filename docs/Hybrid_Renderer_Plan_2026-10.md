@@ -733,3 +733,10 @@ accumulate: the temporal pass is gone, replaced by Godot's roughness filter alon
 (2) The hit test accepted any surface within 1.5 x the step's depth span behind the ray, unbounded: long grazing steps "hit" thin
 things the ray passed behind (fixtures, cables, an awning's housing), which RT does not reflect and which changed as the camera moved.
 The tolerance is now clamp(1.5 x step span, 2 cm, Thickness).
+**Raster (All) traces its reflections (2026-11-05).** After the math audit the remaining complaint was SSR's own nature: it reflects only
+what is on screen, so its reflections change as the camera moves and vanish towards the edges -- most at the top, looking down at
+floors and awnings that reflect what is above the screen. Commercial games hide this with probes and SSR on floors only, and trace
+their reflections where the GPU can (every Nox GPU can). Raster (All) now keeps everything raster except the reflections: the RT
+reflections (NRD REBLUR; DLSS SR without Ray Reconstruction), SSR off (still selectable). Their hits take the light around from the
+raster probe volume where DDGI does not run (SceneGI.slang; DDGI and the screen probes take precedence as before). To measure: "RT
+Reflections" + its NRD pass + TLAS, against SSR's ~0.4 ms.

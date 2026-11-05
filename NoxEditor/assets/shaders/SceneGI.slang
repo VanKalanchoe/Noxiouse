@@ -8,6 +8,7 @@
 #pragma once
 
 #include "DDGICommon.slang"
+#include "IrradianceVolumeCommon.slang"
 
 // The screen-probe GI of the surface at worldPos, if the camera sees that surface at the pixel worldPos lands on.
 bool sample_screen_gi(UniformBufferObject* ubo, float3 worldPos, out float3 irradiance)
@@ -57,15 +58,22 @@ bool sample_scene_gi(UniformBufferObject* ubo, float3 worldPos, float3 shadingNo
         irradiance = sample_ddgi_diffuse_surface(ubo, worldPos, shadingNormal, geometricNormal, toViewer, irradianceAtlas, distanceAtlas, linearClamp);
         return true;
     }
+    // Without DDGI: the raster probe volume where it covers the point (Diffuse GI: Raster Probe Volume, e.g. Raster (All) with RT
+    // reflections: their hits lit as the screen is), over the environment's irradiance.
+    float3 volumeIrradiance;
+    float volumeWeight;
+    const bool inVolume = irradiance_volume_lookup(ubo, worldPos, shadingNormal, volumeIrradiance, volumeWeight);
     if (ubo->irradianceMapIndex != 0xFFFFFFFF)
     {
         TextureCube irradianceTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
         SamplerState irradianceSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
         irradiance = irradianceTex.SampleLevel(irradianceSampler, shadingNormal, 0).rgb * ubo->scaleIBLAmbient;
+        if (inVolume)
+            irradiance = lerp(irradiance, volumeIrradiance, volumeWeight);
         return true;
     }
-    irradiance = float3(0.0);
-    return false;
+    irradiance = inVolume ? volumeIrradiance * volumeWeight : float3(0.0);
+    return inVolume;
 }
 
 // How much of the sky's reflection reaches a surface, judged by its diffuse light against the sky's at its normal (the irradiance

@@ -839,17 +839,20 @@ namespace Nox
                 preset.OIT = 1;
                 break;
             case Renderer::RenderQuality::RasterAll:
-                // Nothing traced: every raster version (shadow maps + contact shadows, GTAO, SSR + reflection probes, the raster probe
-                // volume + SSGI), DLSS Super Resolution (Ray Reconstruction is for ray traced noise), Auto Exposure.
-                preset.RayTracing = false;
+                // Every raster version (shadow maps + contact shadows, GTAO, the raster probe volume + SSGI), DLSS Super Resolution,
+                // Auto Exposure -- and the RT reflections (denoised by NRD REBLUR): SSR reflects only what is on screen, so its
+                // reflections change as the camera moves and vanish towards the screen's edges (most at the top, looking down at floors
+                // and awnings that reflect what is above). Every Nox GPU traces rays; commercial PC games with good reflections trace them.
+                // SSR stays selectable.
+                preset.RayTracing = true;
                 preset.RTShadows = false;
-                preset.RTReflections = false;
+                preset.RTReflections = true;
                 preset.DiffuseGI = 4;
                 preset.SunShadows = Renderer::SunShadowMode::ShadowMaps;
                 preset.LocalShadows = Renderer::LocalShadowMode::ShadowMaps;
                 preset.ContactShadows = true;
                 preset.AmbientOcclusion = Renderer::SSAOMethod::GTAO;
-                preset.SSR = true;
+                preset.SSR = false;
                 preset.SSGI = true;
                 preset.RayReconstruction = false;
                 preset.AutoExposure = 1;
