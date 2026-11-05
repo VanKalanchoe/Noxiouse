@@ -5628,7 +5628,7 @@ namespace Nox
         m_cullViewBuffers[currentImage]->unmap();
 
         // What changed in the drawn scene since last frame (the views that keep what they drew redraw there).
-        m_gpuScene.TakeChangedBounds(m_frameChangedBounds, m_frameAllBoundsChanged);
+        m_gpuScene.TakeChangedBounds(m_frameChangedBounds, m_frameChangedBoundsStatic, m_frameOriginMoved, m_frameBoundsLost);
 
         std::vector<std::unique_ptr<NRI::Buffer>> releasedBuffers;
         m_gpuScene.PrepareUploads(currentImage, releasedBuffers);

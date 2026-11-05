@@ -652,3 +652,23 @@ and that bright irradiance did not hold the sky's reflection back. Now: each pro
 square, and the lookup weights a probe by DDGI's Chebyshev visibility (a point farther than the probe sees towards it is likely behind
 a wall: weight^3, at least 0.02); SSGI's hit share holds the environment's reflection back (1 - 0.85 x hits), as the RT GI modes do
 with their irradiance -- SSR then puts back what it really finds. OIT is on in both "(All)" presets.
+
+**Toward 120 fps without continuous capture (2026-11-05).** The user asked whether moving needs Continuous Update (no: the probes are
+in the world, captured once; only changing light or geometry needed it) and how engines reach 200 fps raster. Two changes, the way
+those engines do it:
+- **Cached sun cascades** (Settings > Sun Shadows > Cache Cascades, on): each cascade's map persists (graph history texture) with the
+  view it was drawn with and is drawn again only when that view changes (snapped position, size, the sun), something inside its box
+  changed (`GpuScene::TakeChangedBounds`: instances added, removed, moved, deformed or re-materialed; the box open towards the sun) or
+  streamed geometry changed. The nearest cascade then draws at once, the farther ones at most one a frame (the second every other
+  frame, the rest every fourth). A cascade not drawn is looked up through its own older view; where that no longer reaches a point
+  the lookup takes the next cascade. A still camera and scene draw no cascade (was ~2.6 ms + 0.45 ms of culling every frame).
+- **Relightable irradiance probes** (Enlighten / Frostbite: precomputed visibility, runtime lighting): a probe's capture is now an
+  unlit G-buffer (albedo, emission, normal, depth; `captureFragMain`), each probe culling the draw list to what lies within its reach
+  (8 cells, at least 30 m; was every instance for every face), packed into a surface cache of 8 x 8 texels a face (4 x 4 above 4096
+  probes) plus the distance SH. Captured once, nearest the camera first, and again only for probes within two cells of a change in
+  the scene. Every frame Relights per Frame probes (256) are lit again from their caches: the sun through the volume's own sun
+  shadow map (one 2048^2 orthographic view over the whole box, cached like a cascade, redrawn at most every fourth frame while the
+  sun moves), the local lights (their atlas shadow maps when they have one this frame), the sky (prefiltered environment), emission
+  and the volume's own light at the surface (each relight adds a bounce). Time of day and moving lights no longer need a capture;
+  Continuous Update is gone. To measure: "Irradiance Probe Relight", "Irradiance Volume Sun Shadow", the cascades with a still and a
+  moving camera.

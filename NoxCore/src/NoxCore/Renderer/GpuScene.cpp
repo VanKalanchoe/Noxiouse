@@ -471,7 +471,7 @@ namespace Nox
         // grid (Renderer::updateRenderOrigin), so the shift is exact in float.
         const glm::vec3 shift = glm::vec3(m_RenderOrigin - origin);
         m_RenderOrigin = origin;
-        m_AllChanged = true;
+        m_OriginMoved = true;
         for (uint32_t instanceSlot = 0; instanceSlot < m_InstanceStates.size(); ++instanceSlot)
         {
             InstanceState& state = m_InstanceStates[instanceSlot];
@@ -549,11 +549,13 @@ namespace Nox
         }
     }
 
-    void GpuScene::TakeChangedBounds(std::vector<glm::vec4>& outSpheres, bool& outAll)
+    void GpuScene::TakeChangedBounds(std::vector<glm::vec4>& outSpheres, uint32_t& outChangedCount, bool& outMoved, bool& outLost)
     {
         outSpheres.swap(m_ChangedSpheres);
         m_ChangedSpheres.clear();
-        outAll = std::exchange(m_AllChanged, false);
+        outChangedCount = static_cast<uint32_t>(outSpheres.size());
+        outMoved = std::exchange(m_OriginMoved, false);
+        outLost = std::exchange(m_ChangesLost, false);
         // Deformed every frame (compute skinning): a pose may reach past the bind pose's bounds, so twice their radius.
         for (uint32_t instanceSlot : m_SkinnedInstances)
         {

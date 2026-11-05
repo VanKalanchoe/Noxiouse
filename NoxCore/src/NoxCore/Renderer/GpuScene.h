@@ -186,9 +186,10 @@ namespace Nox
         bool ComputeWorldBounds(glm::vec3& outMin, glm::vec3& outMax) const;
         // Where the drawn scene changed since the last call, for views that keep what they drew (the sun's cached shadow cascades):
         // world bounding spheres (render space) of instances added, removed, moved (their old and new place) or given another material,
-        // plus every deformed (skinned / morphed) instance's, inflated (its mesh's bounds are the bind pose's). outAll: everything may
-        // have changed (a new render origin moves every position). Once a frame, before the views decide what to redraw.
-        void TakeChangedBounds(std::vector<glm::vec4>& outSpheres, bool& outAll);
+        // then (from outChangedCount on) every deformed (skinned / morphed) instance's, inflated (its mesh's bounds are the bind pose's;
+        // what only shadows need, not what a GI capture keeps). outMoved: every position moved (a new render origin); outLost: more
+        // changed than was tracked (or nothing was yet), so anything may have. Once a frame, before the views decide what to redraw.
+        void TakeChangedBounds(std::vector<glm::vec4>& outSpheres, uint32_t& outChangedCount, bool& outMoved, bool& outLost);
 
         // Per frame, main thread before recording.
         // The draw list every view culls: instance slots in bucket order (transparent buckets back to front), outBucketStarts
@@ -259,9 +260,9 @@ namespace Nox
             if (m_ChangedSpheres.size() >= 65536)
             {
                 m_ChangedSpheres.clear();
-                m_AllChanged = true;
+                m_ChangesLost = true;
             }
-            if (!m_AllChanged)
+            if (!m_ChangesLost)
                 m_ChangedSpheres.push_back(sphere);
         }
 
@@ -301,9 +302,10 @@ namespace Nox
         uint64_t m_Frame = 0;
         std::vector<uint32_t> m_MovedInstances;
 
-        // TakeChangedBounds: this frame's changed spheres so far, and whether the render origin moved.
+        // TakeChangedBounds: this frame's changed spheres so far, whether the render origin moved, whether changes were lost.
         std::vector<glm::vec4> m_ChangedSpheres;
-        bool m_AllChanged = true;
+        bool m_OriginMoved = false;
+        bool m_ChangesLost = true;
 
         // Large world coordinates: each instance's world translation in double precision (by slot; the rotation and scale are
         // the tables' own), and the origin the tables are relative to.

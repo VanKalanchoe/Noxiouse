@@ -1709,28 +1709,31 @@ namespace Nox
                 m_Renderer->setDiffuseGIMode(rasterProbeGI ? 4u : 0u);
                 m_Renderer->setDDGIEnabled(false);
             }
-            ImGui::SetItemTooltip("Diffuse light from around without ray tracing: probes, each the scene rasterized around it into six\n"
-                                  "small faces and reduced to spherical harmonics, a few a frame, then kept. Works on its own: without an\n"
-                                  "Irradiance Volume entity the probes cover the whole scene (coarse in big scenes). Place an Irradiance\n"
-                                  "Volume (Add Component) over an area for closer probes there.");
+            ImGui::SetItemTooltip("Diffuse light from around without ray tracing: probes, each capturing what surrounds it once (a small\n"
+                                  "G-buffer), lit again every frame from that (sun, lights, sky, bounces) -- time of day and moving lights\n"
+                                  "cost no capture; a probe is captured again only when the scene near it changes. Works on its own:\n"
+                                  "without an Irradiance Volume entity the probes cover the whole scene (coarse in big scenes). Place an\n"
+                                  "Irradiance Volume (Add Component) over an area for closer probes there.");
             if (rasterProbeGI)
             {
                 ImGui::Indent();
                 int perFrame = static_cast<int>(m_Renderer->getIrradianceProbesPerFrame());
                 ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderInt("Probes per Frame##RasterGI", &perFrame, 1, static_cast<int>(shaderio::MaxIrradianceProbesPerFrame)))
+                if (ImGui::SliderInt("Captures per Frame##RasterGI", &perFrame, 1, static_cast<int>(shaderio::MaxIrradianceProbesPerFrame)))
                     m_Renderer->setIrradianceProbesPerFrame(static_cast<uint32_t>(perFrame));
-                bool continuous = m_Renderer->getIrradianceContinuous();
-                if (ImGui::Checkbox("Continuous Update##RasterGI", &continuous))
-                    m_Renderer->setIrradianceContinuous(continuous);
-                ImGui::SetItemTooltip("Keep capturing the probes in turn (for changing light: time of day, moving lights). Off: each probe\n"
-                                      "is captured once, again only when the volume changes or with Recapture -- no cost after that.");
+                ImGui::SetItemTooltip("Probes captured at most a frame (the first fill, and probes near a change in the scene).");
+                int relights = static_cast<int>(m_Renderer->getIrradianceRelightsPerFrame());
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderInt("Relights per Frame##RasterGI", &relights, 16, static_cast<int>(shaderio::MaxIrradianceRelightsPerFrame)))
+                    m_Renderer->setIrradianceRelightsPerFrame(static_cast<uint32_t>(relights));
+                ImGui::SetItemTooltip("Probes lit again a frame, in turn: how fast the volume follows a change of light (all of them in\n"
+                                      "probes / this frames), and each relight adds a bounce.");
                 if (ImGui::Button("Recapture##RasterGI"))
                     m_Renderer->recaptureIrradianceVolume();
-                ImGui::SetItemTooltip("Capture every probe again (after the scene or its lighting changed).");
+                ImGui::SetItemTooltip("Capture every probe again, in turn (changes in the scene are found on their own).");
                 if (m_Renderer->getIrradianceProbeCount() > 0)
-                    ImGui::TextDisabled("%s: %u probes, %u captured", m_Renderer->isIrradianceVolumeAutomatic() ? "Automatic (whole scene)" : "Irradiance Volume entity",
-                                        m_Renderer->getIrradianceProbeCount(), m_Renderer->getIrradianceProbesCaptured());
+                    ImGui::TextDisabled("%s: %u probes, %u captured, %u waiting", m_Renderer->isIrradianceVolumeAutomatic() ? "Automatic (whole scene)" : "Irradiance Volume entity",
+                                        m_Renderer->getIrradianceProbeCount(), m_Renderer->getIrradianceProbesCaptured(), m_Renderer->getIrradianceProbesQueued());
                 ImGui::Unindent();
             }
 

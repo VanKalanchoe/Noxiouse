@@ -861,3 +861,66 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
 
     return output;
 }
+
+// --- The irradiance volume's probe capture (Renderer::addIrradianceVolumePasses) -------------------------------------------------
+// What each texel of a capture face sees, unlit: the surface's diffuse albedo, its emission and its normal. IrradianceProbeSH.slang
+// keeps them per probe (packMain) and lights them again every frame (relightMain), so the light can change without drawing the
+// scene again. Opaque, masked and unlit surfaces (an unlit one is its color, emitted).
+struct FSOutputProbeCapture
+{
+    float4 albedo : SV_TARGET0;   // rgb: diffuse albedo, a: the normal's octahedral x
+    float4 emission : SV_TARGET1; // rgb: emitted radiance, a: the normal's octahedral y
+};
+
+[shader("fragment")]
+FSOutputProbeCapture captureFragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
+{
+    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    SceneInstances instances = SceneInstances(ubo);
+    InstanceData instance = instances[vertIn.drawID];
+    SamplerState sampLinearHandle = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+
+    float4 baseColor = instance.workflow == PBR_WORKFLOW_METALLIC_ROUGHNESS ? instance.baseColorFactor : instance.diffuseFactor;
+    if (instance.baseColorTextureIndex != 0xFFFFFFFF)
+        baseColor *= SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias);
+    baseColor *= vertIn.color;
+    if (instance.alphaMode == 1 && baseColor.a < instance.alphaMaskCutoff)
+        discard;
+
+    float metallic = 0.0;
+    if (instance.workflow == PBR_WORKFLOW_METALLIC_ROUGHNESS)
+    {
+        metallic = instance.metallicFactor;
+        if (instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
+            metallic *= SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).b;
+        metallic = saturate(metallic);
+    }
+    else
+    {
+        // Specular-glossiness: the diffuse color is the albedo (what the specular color takes is not diffuse).
+        float3 specular = instance.specularFactor.rgb;
+        if (instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
+            specular *= SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).rgb;
+        baseColor.rgb *= 1.0 - max(max(specular.r, specular.g), specular.b);
+    }
+
+    float3 n = (instance.normalTextureIndex != 0xFFFFFFFF) ? getNormal(ubo, instance, vertIn, sampLinearHandle) : normalize(vertIn.normal);
+    if (instance.doubleSided != 0 && !isFrontFace)
+        n = -n;
+
+    float3 emission = instance.emissiveFactor.rgb * instance.emissiveStrength;
+    if (instance.emissiveTextureIndex != 0xFFFFFFFF)
+        emission *= SampleMaterialTextureBias(ubo, instance.emissiveTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).rgb;
+    float3 albedo = baseColor.rgb * (1.0 - metallic);
+    if (instance.unlit != 0)
+    {
+        emission = baseColor.rgb;
+        albedo = float3(0.0);
+    }
+
+    const float2 octahedral = oct_encode(n);
+    FSOutputProbeCapture output;
+    output.albedo = float4(albedo, octahedral.x);
+    output.emission = float4(emission, octahedral.y);
+    return output;
+}

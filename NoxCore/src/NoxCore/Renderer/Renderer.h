@@ -626,20 +626,21 @@ namespace Nox
         void setReflectionProbesEnabled(bool enabled) { m_reflectionProbesEnabled = enabled; }
         bool getReflectionProbesEnabled() const { return m_reflectionProbesEnabled; }
         uint32_t getReflectionProbeCount() const { return uniformData.reflectionProbeCount; }
-        // Diffuse GI mode 4 (Raster Probe Volume, RS5a): how many of the irradiance volume's probes are captured each frame; its probe
-        // count and how many have been captured since it last changed (stats).
+        // Diffuse GI mode 4 (Raster Probe Volume, RS5a): each probe's surroundings are captured once (a small G-buffer: its surface
+        // cache) and again only where the scene near it changed (GpuScene::TakeChangedBounds), at most this many a frame; every frame
+        // this many probes are lit again from their caches (the light may change freely: time of day, moving lights, at no capture
+        // cost). Without an Irradiance Volume entity an automatic one covers the whole scene (its bounds; probes as close as 32 per
+        // axis allow, at least 2 m apart). Stats: probes, captured, waiting for a capture.
         void setIrradianceProbesPerFrame(uint32_t count) { m_irradianceProbesPerFrame = std::clamp(count, 1u, shaderio::MaxIrradianceProbesPerFrame); }
         uint32_t getIrradianceProbesPerFrame() const { return m_irradianceProbesPerFrame; }
+        void setIrradianceRelightsPerFrame(uint32_t count) { m_irradianceRelightsPerFrame = std::clamp(count, 16u, shaderio::MaxIrradianceRelightsPerFrame); }
+        uint32_t getIrradianceRelightsPerFrame() const { return m_irradianceRelightsPerFrame; }
         uint32_t getIrradianceProbeCount() const { return m_irradianceVolume.ProbeCount; }
-        uint32_t getIrradianceProbesCaptured() const { return m_irradianceVolume.Captured; }
-        // Captured once (each probe in turn) and again only when the volume changes or Recapture is pressed; Continuous keeps
-        // recapturing in turn (changing light: time of day, moving lights). Without an Irradiance Volume entity an automatic one
-        // covers the whole scene (its bounds; probes as close as 32 per axis allow, at least 2 m apart).
-        void setIrradianceContinuous(bool continuous) { m_irradianceContinuous = continuous; }
-        bool getIrradianceContinuous() const { return m_irradianceContinuous; }
-        bool isIrradianceVolumeAutomatic() const { return m_irradianceVolumeAutomatic; }
-        // Captures every probe again, in turn (the old light stays until each probe's turn: no black frames).
-        void recaptureIrradianceVolume() { m_irradianceVolume.Captured = 0; m_irradianceVolume.Cursor = 0; }
+        uint32_t getIrradianceProbesCaptured() const { return m_irradianceVolume.CachedCount; }
+        uint32_t getIrradianceProbesQueued() const { return static_cast<uint32_t>(m_irradianceVolume.CaptureQueue.size() - m_irradianceVolume.QueueHead); }
+        bool isIrradianceVolumeAutomatic() const { return m_irradianceVolume.Automatic; }
+        // Captures every probe again, in turn (each keeps its light until its turn: no black frames).
+        void recaptureIrradianceVolume() { m_irradianceVolume.RequeueAll = true; }
         // Volumetric fog (RS6; Passes/VolumetricFogPasses.cpp): the Environment Light's Height Fog in froxels, lit by the sun and the
         // point / spot lights with their shadows, accumulated over frames (light shafts); the height fog continues beyond its range.
         // Off by default; how far it reaches, its slices, Henyey-Greenstein anisotropy, extinction scale, albedo, local lights.
@@ -1203,6 +1204,10 @@ namespace Nox
         // The sun's cascaded shadow maps (Passes/ShadowMapPasses.cpp): culling and a depth pass per cascade, then the resolve into the
         // shadow mask; replaces addRTShadowPasses' sun mask (SunShadowMode::ShadowMaps).
         void addShadowMapPasses();
+        // An orthographic depth view of the shadow casters from the sun (a cascade, the irradiance volume's sun map): its culling (the
+        // view's side planes) and its depth pass into `map`, through `uniformBuffer` (the view's copy of the uniforms).
+        void addSunDepthPasses(const char* cullName, const char* depthName, RGTexture map, uint32_t resolution, const glm::mat4& viewProj,
+                               NRI::Buffer* uniformBuffer, NRI::Buffer* cullViewBuffer, float slopeBiasClamp);
         void createShadowMapPipelines(bool forceCompile = false);
         // Local lights' shadow maps (Passes/ShadowMapPasses.cpp): which lights, their views and tiles, culling per light, one depth pass
         // into the atlas; after Compile the atlas slot, the per-light view table and each view's copy of the uniforms.
@@ -1489,9 +1494,12 @@ namespace Nox
         uint64_t m_sunCascadePageEvents = 0; // geometry pages loaded + evicted when last checked
         bool m_shadowCascadeCaching = true;
         uint32_t m_shadowCascadesDrawn = 0;
-        // This frame's changed regions of the drawn scene (GpuScene::TakeChangedBounds, in updateGpuScene).
+        // This frame's changed regions of the drawn scene (GpuScene::TakeChangedBounds, in updateGpuScene): the first
+        // m_frameChangedBoundsStatic changed, the rest are deformed instances.
         std::vector<glm::vec4> m_frameChangedBounds;
-        bool m_frameAllBoundsChanged = true;
+        uint32_t m_frameChangedBoundsStatic = 0;
+        bool m_frameOriginMoved = false; // the render origin moved (every render-space position did)
+        bool m_frameBoundsLost = true;   // more changed than was tracked: anything may have
         // Local lights' shadow maps: per frame slot a copy of the uniforms per view and a culling view per light, the GpuLocalShadows
         // and the per-light view table (grown with the light count); this frame's views, lights and their draws.
         struct LocalShadowLight
@@ -1609,27 +1617,54 @@ namespace Nox
             uint32_t Revision = ~0u;
             glm::uvec3 Counts{ 0 };
             uint32_t ProbeCount = 0;
-            uint32_t Cursor = 0;
-            uint32_t Captured = 0;
+            uint32_t CacheFaceSize = 0;
             bool NeedsClear = false;
+            bool RequeueAll = false;
+            bool Automatic = false; // this frame's volume is the automatic one (no entity)
             std::unique_ptr<NRI::Buffer> SH;
+            std::unique_ptr<NRI::Buffer> SurfaceCache;
+            // Per probe: captured (its cache holds what it sees), waiting in the capture queue.
+            std::vector<uint8_t> Cached;
+            std::vector<uint8_t> Queued;
+            std::vector<uint32_t> CaptureQueue; // from QueueHead on
+            size_t QueueHead = 0;
+            uint32_t CachedCount = 0;
+            uint32_t RelightCursor = 0;
+            // The volume's sun shadow map (the whole box, cached like a cascade): the view it was drawn with.
+            glm::mat4 SunView{ 1.0f };
+            glm::mat4 SunProjection{ 1.0f };
+            float SunTexelWorld = 0.0f;
+            float SunDepthRange = 0.0f;
+            uint64_t SunDrawnFrame = 0;
+            uint64_t SunPageEvents = 0;
+            bool SunValid = false;
+            bool SunDirty = true;
         } m_irradianceVolume;
+        shaderio::GpuIrradianceVolume m_irradianceTable{};
+        RGTexture m_irradianceSunMap;      // this frame's handle (invalid: no sun map)
+        bool m_irradianceSunDrawn = false; // drawn this frame (its view's uniforms are written)
         std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceTableBuffers;
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_irradianceTableBuffersMapped{};
         std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceProbeListBuffers;
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_irradianceProbeListBuffersMapped{};
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceCullViews;
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceRelightListBuffers;
+        std::array<void*, MAX_FRAMES_IN_FLIGHT> m_irradianceRelightListBuffersMapped{};
+        std::array<std::array<std::unique_ptr<NRI::Buffer>, shaderio::MaxIrradianceProbesPerFrame>, MAX_FRAMES_IN_FLIGHT> m_irradianceCullViews;
         std::array<std::array<std::unique_ptr<NRI::Buffer>, 6 * shaderio::MaxIrradianceProbesPerFrame>, MAX_FRAMES_IN_FLIGHT> m_irradianceFaceUniforms;
         std::array<std::array<void*, 6 * shaderio::MaxIrradianceProbesPerFrame>, MAX_FRAMES_IN_FLIGHT> m_irradianceFaceUniformsMapped{};
-        std::unique_ptr<NRI::Pipeline> m_irradianceSHPipeline;
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceSunUniforms;
+        std::array<void*, MAX_FRAMES_IN_FLIGHT> m_irradianceSunUniformsMapped{};
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceSunCullViews;
+        std::unique_ptr<NRI::Pipeline> m_irradianceCapturePipeline;
+        std::unique_ptr<NRI::Pipeline> m_irradiancePackPipeline;
+        std::unique_ptr<NRI::Pipeline> m_irradianceRelightPipeline;
         struct IrradianceCaptureFrame
         {
             uint32_t Count = 0; // probes captured this frame
             std::array<glm::vec3, shaderio::MaxIrradianceProbesPerFrame> Centers{};
         } m_irradianceCaptureFrame;
         uint32_t m_irradianceProbesPerFrame = 8;
-        bool m_irradianceContinuous = false;
-        bool m_irradianceVolumeAutomatic = false; // this frame's volume is the automatic one (no entity)
+        uint32_t m_irradianceRelightsPerFrame = 256;
         glm::vec3 m_sceneBoundsMin{ 0.0f };      // the automatic volume's box (render space), refreshed now and then
         glm::vec3 m_sceneBoundsMax{ 0.0f };
         uint64_t m_sceneBoundsFrame = 0;

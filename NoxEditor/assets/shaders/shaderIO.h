@@ -2269,39 +2269,65 @@ struct GpuReflectionProbe
     uint32_t padding[3];
 };
 
-// An irradiance volume (RS5a, GI without rays; Renderer::addIrradianceVolumePasses): a grid of probes over the entity's box, each the
-// scene around it rendered into six small faces (rasterized, a few probes a frame) and projected onto L1 spherical harmonics --
-// UE's volumetric lightmap / Godot's LightmapGI probes, updated at runtime. probeSH: per probe 3 float4 (R, G, B: L00, L1-1, L10, L11
-// of the radiance), a fourth: x 1 once captured (0: not yet -- the lookup leaves it out), then L1 SH of the distance to what the
-// probe sees and of its square (visibility: DDGI's Chebyshev test against walls between a probe and the point).
-STATIC_CONST uint32_t IrradianceProbeFaceSize = 16; // texels per side of a capture face
-STATIC_CONST uint32_t MaxIrradianceProbesPerFrame = 16;
+// An irradiance volume (RS5a, GI without rays; Renderer::addIrradianceVolumePasses): a grid of probes over the entity's box. Each
+// probe's surroundings are rasterized once into six small faces as a G-buffer (diffuse albedo, emission, normal, distance: the
+// probe's surface cache, IrradianceProbeSH.slang packMain), captured again only where the scene changed; every frame a share of the
+// probes is lit again from it (relightMain: the sun through the volume's own shadow map, the local lights, the sky, emission, and
+// the volume itself for further bounces) and projected onto L1 spherical harmonics -- the light changes without drawing the scene
+// (Enlighten's / Frostbite's precomputed-visibility relighting; UE's volumetric lightmap, lit at runtime). probeSH: per probe 3
+// float4 (R, G, B: L00, L1-1, L10, L11 of the radiance), a fourth: x 1 once lit (0: not yet -- the lookup leaves it out), then L1
+// SH of the distance to what the probe sees and of its square (visibility: DDGI's Chebyshev test against walls between a probe and
+// the point).
+STATIC_CONST uint32_t IrradianceProbeFaceSize = 16;          // texels per side of a capture face
+STATIC_CONST uint32_t MaxIrradianceProbesPerFrame = 16;      // captures a frame
+STATIC_CONST uint32_t MaxIrradianceRelightsPerFrame = 4096;  // probes lit again a frame
 
 struct GpuIrradianceVolume
 {
     mat4 worldToLocal;      // render space -> the volume's box space
     mat4 localToWorld;
+    mat4 sunViewProj;       // the volume's sun shadow map (orthographic over the whole box, reverse Z)
     vec4 extents;           // xyz: the box's half size (local units), w: intensity
     uint32_t countX;
     uint32_t countY;
     uint32_t countZ;
     uint32_t probeCount;
-    uint64_t probeSHReference; // float4[6] per probe (R, G, B SH, x = captured, distance SH, distance^2 SH), x fastest, then y, then z
+    uint64_t probeSHReference; // float4[6] per probe (R, G, B SH, x = lit, distance SH, distance^2 SH), x fastest, then y, then z
+    // uint4[6 x cacheFaceSize^2] per probe, face by face (+X, -X, +Y, -Y, +Z, -Z), rows down: x albedo rgb + sky fraction (unorm8 x4),
+    // y emission rg (half x2), z emission b + distance (half x2), w the normal (octahedral, snorm16 x2).
+    uint64_t surfaceCacheReference;
     float normalBias;       // local units the lookup moves along the normal (away from the surface's own probe gaps)
-    uint32_t padding;
+    uint32_t cacheFaceSize; // texels per side of a face in the surface cache
+    uint32_t sunShadowTextureIndex; // sampled slot of the sun shadow map (~0: none -- unshadowed)
+    uint32_t sunShadowResolution;
+    float sunTexelWorld;    // world units per texel of the sun shadow map
+    float sunDepthRange;    // world units its depth spans
+    uint32_t padding0;
+    uint32_t padding1;
 };
 
-// The capture atlas into the probes' SH (IrradianceProbeSH.slang): row k holds probe k's six faces (+X, -X, +Y, -Y, +Z, -Z).
-struct PushConstantIrradianceProbeSH
+// A frame's captured faces into the probes' surface caches and distance SH (IrradianceProbeSH.slang packMain): row k of the atlases
+// holds probe k's six faces (+X, -X, +Y, -Y, +Z, -Z).
+struct PushConstantIrradianceProbePack
 {
     uint64_t probeIndicesReference; // uint[probesThisFrame]: each row's probe in the volume
-    uint64_t probeSHReference;
-    uint32_t atlasTextureIndex;
+    uint64_t volumeReference;       // GpuIrradianceVolume
+    uint32_t albedoTextureIndex;    // rgb diffuse albedo, a the normal's octahedral x
+    uint32_t emissionTextureIndex;  // rgb emission, a the normal's octahedral y
+    uint32_t depthTextureIndex;     // the faces' depth (reverse Z, infinite: view depth = nearPlane / depth; 0 the sky)
     uint32_t probesThisFrame;
-    uint32_t depthTextureIndex; // the faces' depth (reverse Z, infinite: view depth = nearPlane / depth)
     float nearPlane;
-    float maxDistance;          // distances are clamped here (the sky: this far)
-    uint32_t padding;
+    float maxDistance;              // distances are clamped here (the sky: this far)
+};
+
+// Probes lit again from their surface caches (IrradianceProbeSH.slang relightMain): one group per probe.
+struct PushConstantIrradianceRelight
+{
+    uint64_t matrixReference;       // the frame's uniforms: lights, shadow maps, the volume itself (the bounce)
+    uint64_t probeIndicesReference; // uint[probeCount]
+    uint64_t volumeReference;       // GpuIrradianceVolume
+    uint32_t probeCount;
+    uint32_t frameIndex;
 };
 
 // The capture's six rendered faces into a probe's cubemap (ReflectionProbe.slang assembleMain): per cube texel, its direction, the

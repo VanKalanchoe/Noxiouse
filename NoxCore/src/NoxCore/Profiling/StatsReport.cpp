@@ -145,10 +145,10 @@ namespace Nox
                                   DenoiserName(static_cast<uint8_t>(renderer.getNRDGIDenoiser())));
                     break;
                 case 4:
-                    AppendSetting(out, "Diffuse GI: Raster Probe Volume ({}) | {} probes, {} captured | {} per frame{}",
+                    AppendSetting(out, "Diffuse GI: Raster Probe Volume ({}) | {} probes, {} captured, {} waiting | captures {} / relights {} per frame",
                                   renderer.isIrradianceVolumeAutomatic() ? "automatic" : "entity", renderer.getIrradianceProbeCount(),
-                                  renderer.getIrradianceProbesCaptured(), renderer.getIrradianceProbesPerFrame(),
-                                  renderer.getIrradianceContinuous() ? " | continuous" : "");
+                                  renderer.getIrradianceProbesCaptured(), renderer.getIrradianceProbesQueued(),
+                                  renderer.getIrradianceProbesPerFrame(), renderer.getIrradianceRelightsPerFrame());
                     break;
                 default:
                     AppendSetting(out, "Diffuse GI: Off (IBL ambient)");
@@ -171,10 +171,10 @@ namespace Nox
             {
                 AppendSetting(out, "Pipeline: Raster");
                 if (renderer.getDiffuseGIMode() == 4)
-                    AppendSetting(out, "Diffuse GI: Raster Probe Volume ({}) | {} probes, {} captured | {} per frame{}",
+                    AppendSetting(out, "Diffuse GI: Raster Probe Volume ({}) | {} probes, {} captured, {} waiting | captures {} / relights {} per frame",
                                   renderer.isIrradianceVolumeAutomatic() ? "automatic" : "entity", renderer.getIrradianceProbeCount(),
-                                  renderer.getIrradianceProbesCaptured(), renderer.getIrradianceProbesPerFrame(),
-                                  renderer.getIrradianceContinuous() ? " | continuous" : "");
+                                  renderer.getIrradianceProbesCaptured(), renderer.getIrradianceProbesQueued(),
+                                  renderer.getIrradianceProbesPerFrame(), renderer.getIrradianceRelightsPerFrame());
                 else
                     AppendSetting(out, "Diffuse GI: Off (IBL ambient)");
             }

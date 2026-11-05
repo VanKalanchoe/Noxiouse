@@ -210,15 +210,13 @@ namespace Nox
         mapDesc.Height = resolution;
         mapDesc.Format = NRI::ImageFormat::None; // the device's depth format
         mapDesc.Usage = NRI::TextureUsage::DepthStencilAttachment;
-        const NRI::Extent2D mapExtent{ resolution, resolution };
-        const uint32_t blockCount = (entryCount + shaderio::CULL_BLOCK_SIZE - 1) / shaderio::CULL_BLOCK_SIZE;
         const float slopeBias = m_shadowSlopeBias;
 
         // Which cascades draw this frame (see the top of the file). What the maps were drawn with besides their views: another value
         // draws them all again, as does a new render origin (the cached views are in the old render space).
         const uint64_t frame = ++m_sunCascadeFrame;
         const uint64_t settings = (static_cast<uint64_t>(resolution) << 32) | std::bit_cast<uint32_t>(slopeBias);
-        const bool invalidateAll = std::exchange(m_sunCascadeSettings, settings) != settings || m_frameAllBoundsChanged;
+        const bool invalidateAll = std::exchange(m_sunCascadeSettings, settings) != settings || m_frameOriginMoved || m_frameBoundsLost;
         const GeometryStreamer::Stats& streaming = m_geometryStreamer.GetStats();
         const uint64_t pageEvents = streaming.PageLoads + streaming.PageEvictions;
         const bool geometryChanged = std::exchange(m_sunCascadePageEvents, pageEvents) != pageEvents;
@@ -294,70 +292,10 @@ namespace Nox
 
         for (uint32_t cascade = 0; cascade < count; ++cascade)
         {
-            if (!draw[cascade])
-                continue;
-            NRI::Buffer* uniformBuffer = m_shadowCascadeUniforms[frameIndex][cascade].get();
-            NRI::Buffer* cullViewBuffer = m_shadowCascadeCullViews[frameIndex][cascade].get();
-
-            // What the cascade sees of the draw list: its side planes only (the culling has no near or far plane), so casters between
-            // it and the sun stay.
-            shaderio::CullView cull{};
-            cull.frustum = shaderio::Frustum{ cascades.viewProj[cascade] };
-            cull.viewProj = cascades.viewProj[cascade];
-            cull.previousViewProj = cascades.viewProj[cascade];
-            std::copy(m_drawBucketStarts.begin(), m_drawBucketStarts.end(), cull.bucketStart);
-            cull.entryCount = entryCount;
-            cull.blockCount = blockCount;
-            cull.flags = m_instanceCullingEnabled ? shaderio::CULL_INSTANCES : 0u;
-            memcpy(cullViewBuffer->map(0, sizeof(cull)), &cull, sizeof(cull));
-            cullViewBuffer->unmap();
-
-            ViewDrawResources draws;
-            draws.VisibleInstances = m_renderGraph.CreateBuffer("Sun Shadow Visible Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-            draws.Commands = m_renderGraph.CreateBuffer("Sun Shadow Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI::BufferUsage::Indirect });
-            draws.Counts = m_renderGraph.CreateBuffer("Sun Shadow Draw Counts", { sizeof(shaderio::CullCounts), NRI::BufferUsage::Indirect });
-            draws.LateInstances = m_renderGraph.CreateBuffer("Sun Shadow Late Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-            const RGBuffer flags = m_renderGraph.CreateBuffer("Sun Shadow Cull Flags", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-            const RGBuffer blocks = m_renderGraph.CreateBuffer("Sun Shadow Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI::BufferUsage::Storage });
-            addCullingDispatchPass(kCullNames[cascade], draws, flags, blocks, entryCount, RGTexture{}, uniformBuffer, cullViewBuffer);
-
-            const RGTexture map = maps[cascade];
-            // Never culled: the cache counts it as drawn.
-            m_renderGraph.AddPass(kDepthNames[cascade], RGPassFlags::Raster | RGPassFlags::NeverCull,
-                [&](RGBuilder& builder)
-                {
-                    builder.DepthTarget(map, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 }); // reverse Z
-                    builder.SetRenderArea(mapExtent);
-                    ReadGpuScene(builder, resources);
-                    ReadIfValid(builder, resources.SkinnedVertices);
-                    ReadViewDraws(builder, draws);
-                },
-                [this, draws, uniformBuffer, slopeBias, biasClamp = slopeBiasClamp[cascade]](RGPassContext& context)
-                {
-                    NRI::CommandBuffer& cmd = context.Cmd();
-                    MeshletDrawCursor cursor = beginMeshletDraws(context, draws);
-                    cursor.references.matrixReference = uniformBuffer->getDeviceAddress();
-                    // ClusterStats count the camera's clusters only.
-                    cursor.taskFlags &= ~shaderio::MESHLET_COUNT_TRIANGLES;
-
-                    cmd.setDepthTestEnable(true);
-                    cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
-                    cmd.setDepthClampEnable(true);
-                    // Away from the sun is towards depth 0: a negative slope bias, clamped.
-                    cmd.setDepthBiasEnable(slopeBias > 0.0f);
-                    cmd.setDepthBias(0.0f, biasClamp, -slopeBias);
-
-                    // Both faces of everything the RT shadow rays hit (ShadowMask.slang): opaque, masked (alpha tested), unlit.
-                    drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_shadowDepthPipeline, NRI::CullMode::None, true, false);
-                    drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_shadowDepthPipeline, NRI::CullMode::None, true, false);
-                    drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
-                    drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
-                    drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
-                    drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
-
-                    cmd.setDepthBiasEnable(false);
-                    cmd.setDepthClampEnable(false);
-                });
+            if (draw[cascade])
+                addSunDepthPasses(kCullNames[cascade], kDepthNames[cascade], maps[cascade], resolution, cascades.viewProj[cascade],
+                                  m_shadowCascadeUniforms[frameIndex][cascade].get(), m_shadowCascadeCullViews[frameIndex][cascade].get(),
+                                  slopeBiasClamp[cascade]);
         }
 
         // The cascades into the shadow mask (the RT shadow mask's format; NRD does not run on it).
@@ -392,6 +330,75 @@ namespace Nox
                 push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
                 cmd.pushData(&push, sizeof(push));
                 cmd.drawMeshTasks(1, 1, 1);
+            });
+    }
+
+    void Renderer::addSunDepthPasses(const char* cullName, const char* depthName, RGTexture map, uint32_t resolution, const glm::mat4& viewProj,
+                                     NRI::Buffer* uniformBuffer, NRI::Buffer* cullViewBuffer, float slopeBiasClamp)
+    {
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
+        const uint32_t blockCount = (entryCount + shaderio::CULL_BLOCK_SIZE - 1) / shaderio::CULL_BLOCK_SIZE;
+        const NRI::Extent2D mapExtent{ resolution, resolution };
+        const float slopeBias = m_shadowSlopeBias;
+
+        // What the view sees of the draw list: its side planes only (the culling has no near or far plane), so casters between it and
+        // the sun stay.
+        shaderio::CullView cull{};
+        cull.frustum = shaderio::Frustum{ viewProj };
+        cull.viewProj = viewProj;
+        cull.previousViewProj = viewProj;
+        std::copy(m_drawBucketStarts.begin(), m_drawBucketStarts.end(), cull.bucketStart);
+        cull.entryCount = entryCount;
+        cull.blockCount = blockCount;
+        cull.flags = m_instanceCullingEnabled ? shaderio::CULL_INSTANCES : 0u;
+        memcpy(cullViewBuffer->map(0, sizeof(cull)), &cull, sizeof(cull));
+        cullViewBuffer->unmap();
+
+        ViewDrawResources draws;
+        draws.VisibleInstances = m_renderGraph.CreateBuffer("Sun Shadow Visible Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
+        draws.Commands = m_renderGraph.CreateBuffer("Sun Shadow Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI::BufferUsage::Indirect });
+        draws.Counts = m_renderGraph.CreateBuffer("Sun Shadow Draw Counts", { sizeof(shaderio::CullCounts), NRI::BufferUsage::Indirect });
+        draws.LateInstances = m_renderGraph.CreateBuffer("Sun Shadow Late Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
+        const RGBuffer flags = m_renderGraph.CreateBuffer("Sun Shadow Cull Flags", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
+        const RGBuffer blocks = m_renderGraph.CreateBuffer("Sun Shadow Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI::BufferUsage::Storage });
+        addCullingDispatchPass(cullName, draws, flags, blocks, entryCount, RGTexture{}, uniformBuffer, cullViewBuffer);
+
+        // Never culled: the callers keep the map (cached) and count it as drawn.
+        m_renderGraph.AddPass(depthName, RGPassFlags::Raster | RGPassFlags::NeverCull,
+            [&](RGBuilder& builder)
+            {
+                builder.DepthTarget(map, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 }); // reverse Z
+                builder.SetRenderArea(mapExtent);
+                ReadGpuScene(builder, resources);
+                ReadIfValid(builder, resources.SkinnedVertices);
+                ReadViewDraws(builder, draws);
+            },
+            [this, draws, uniformBuffer, slopeBias, slopeBiasClamp](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                MeshletDrawCursor cursor = beginMeshletDraws(context, draws);
+                cursor.references.matrixReference = uniformBuffer->getDeviceAddress();
+                // ClusterStats count the camera's clusters only.
+                cursor.taskFlags &= ~shaderio::MESHLET_COUNT_TRIANGLES;
+
+                cmd.setDepthTestEnable(true);
+                cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                cmd.setDepthClampEnable(true);
+                // Away from the sun is towards depth 0: a negative slope bias, clamped.
+                cmd.setDepthBiasEnable(slopeBias > 0.0f);
+                cmd.setDepthBias(0.0f, slopeBiasClamp, -slopeBias);
+
+                // Both faces of everything the RT shadow rays hit (ShadowMask.slang): opaque, masked (alpha tested), unlit.
+                drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_shadowDepthPipeline, NRI::CullMode::None, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_shadowDepthPipeline, NRI::CullMode::None, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
+
+                cmd.setDepthBiasEnable(false);
+                cmd.setDepthClampEnable(false);
             });
     }
 
