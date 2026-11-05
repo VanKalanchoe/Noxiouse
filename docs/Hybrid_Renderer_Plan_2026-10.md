@@ -706,3 +706,16 @@ Then stable when moving but grainy (the sampled lobe, one ray a pixel). Now the 
 SSSR / Frostbite's stochastic SSR do: the 5 x 5 neighbours on the same surface (view depth within 2 %, normals alike), Gaussian
 weighted with a width that follows the lobe (about a pixel for a near mirror, the whole 5 x 5 for a wide lobe); the variance clip uses
 the same surface-weighted moments.
+
+**Toward 120 fps in RT mode: Lumen's Surface Cache hit lighting (2026-11-05).** Ray Traced (All) measured 19.4 ms: DLSS RR 5.35,
+Screen Probe Trace 3.2 (each hit: the selected lights' shadow rays, the emissive sample's), DDGI 2.2 (the screen probes' world radiance
+cache), RT reflections 1.9, RTAO 1.6. Plan, step by step, as Lumen-based games reach their frame rates: (1) the screen probes' hits
+lit from caches instead of shadow rays and DDGI; (2) rough RT reflections from the same caches; (3) GTAO instead of RTAO in the fast
+preset; (4) DLSS Super Resolution instead of Ray Reconstruction in the fast preset. Estimated ~8.6 ms together.
+Step 1 built: Settings > Diffuse GI > Screen Probes > Hit Lighting: **Full** (Lumen's Hit Lighting: what it was) or **Surface Cache**
+(Lumen's default, now the default): the sun at a hit through the irradiance volume's cached sun shadow map (a shadow ray only where
+the map does not reach; `irradiance_volume_sun_visibility`, IrradianceVolumeCommon.slang), the light around a hit from the relit
+irradiance volume instead of DDGI (DDGI is not run). The volume runs for the screen probes in this mode; the shadow maps and the
+volume now come before the GI in the frame, and the volume's SH is imported into the graph (the probes' trace may run on the compute
+queue). Local lights keep their shadow rays. Reflection hits and forward surfaces (SceneGI.slang) take the volume where DDGI is off.
+To measure: "Screen Probe Trace", DDGI gone, the volume's passes ("Irradiance Probe Relight", "Irradiance Volume Sun Shadow").

@@ -1979,9 +1979,22 @@ namespace Nox
                         ImGui::SetTooltip("Frames accumulated at most per pixel: more is smoother and slower to follow changes in the light\n"
                                           "(a large change still shortens it on its own).");
 
+                    const char* hitLightingModes[] = { "Full (Hit Lighting)", "Surface Cache" };
+                    int hitLighting = static_cast<int>(m_Renderer->getScreenProbeHitLighting());
+                    if (ImGui::Combo("Hit Lighting", &hitLighting, hitLightingModes, IM_ARRAYSIZE(hitLightingModes)))
+                        m_Renderer->setScreenProbeHitLighting(static_cast<Renderer::ScreenProbeHitLighting>(hitLighting));
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("How a probe ray's hit is lit (Lumen's two modes).\n"
+                                          "Full (Hit Lighting): every selected light behind its own shadow ray, the DDGI cascades for the\n"
+                                          "light around -- the most exact, the most expensive (~6.5 ms with DDGI in Bistro).\n"
+                                          "Surface Cache (Lumen's default): the sun through the irradiance volume's cached sun shadow map,\n"
+                                          "the relit irradiance volume (probes captured once, relit every frame) for the light around -- no\n"
+                                          "DDGI, fewer rays. Slightly softer light at the hits; the visible image keeps its own RT shadows.");
+
                     if (ImGui::Button("Reset Screen Probe History"))
                         m_Renderer->resetScreenProbeHistory();
-                    ImGui::TextDisabled("Second bounce: the DDGI cascades (settings below)");
+                    ImGui::TextDisabled(m_Renderer->usesScreenProbeSurfaceCache() ? "Light around the hits: the irradiance volume (Raster GI settings)"
+                                                                                  : "Second bounce: the DDGI cascades (settings below)");
                     ImGui::Unindent();
                 }
 

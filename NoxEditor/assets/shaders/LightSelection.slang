@@ -17,6 +17,7 @@ struct LightSelection
     float3 irradiance[LightSelectionMax];
     float3 direction[LightSelectionMax];
     float distance[LightSelectionMax];
+    uint lightIndex[LightSelectionMax]; // which light (the rest's pick: the one picked)
 };
 
 float light_selection_random(inout uint state)
@@ -40,6 +41,7 @@ LightSelection select_lights(UniformBufferObject* ubo, float3 position, float3 n
         selection.irradiance[slot] = float3(0.0);
         selection.direction[slot] = float3(0.0, 1.0, 0.0);
         selection.distance[slot] = 0.0;
+        selection.lightIndex[slot] = 0xFFFFFFFF;
     }
     for (uint slot = 0; slot < LightSelectionExact; ++slot)
         keys[slot] = 0.0;
@@ -50,6 +52,7 @@ LightSelection select_lights(UniformBufferObject* ubo, float3 position, float3 n
     float3 restIrradiance = float3(0.0);
     float3 restDirection = float3(0.0, 1.0, 0.0);
     float restDistance = 0.0;
+    uint restIndex = 0xFFFFFFFF;
     const float3 luma = float3(0.2126, 0.7152, 0.0722);
 
     LightData* lights = (LightData*)ubo->lightDataReference;
@@ -77,6 +80,7 @@ LightSelection select_lights(UniformBufferObject* ubo, float3 position, float3 n
         float3 outIrradiance = irradiance;
         float3 outDirection = sample.direction;
         float outDistance = sample.distance;
+        uint outIndex = i;
         float outWeight = weight;
         bool spilled = true;
         if (selection.count < LightSelectionExact)
@@ -85,6 +89,7 @@ LightSelection select_lights(UniformBufferObject* ubo, float3 position, float3 n
             selection.irradiance[slot] = irradiance;
             selection.direction[slot] = sample.direction;
             selection.distance[slot] = sample.distance;
+            selection.lightIndex[slot] = i;
             keys[slot] = key;
             spilled = false;
         }
@@ -101,10 +106,12 @@ LightSelection select_lights(UniformBufferObject* ubo, float3 position, float3 n
                 outIrradiance = selection.irradiance[weakest];
                 outDirection = selection.direction[weakest];
                 outDistance = selection.distance[weakest];
+                outIndex = selection.lightIndex[weakest];
                 outWeight = dot(outIrradiance, luma);
                 selection.irradiance[weakest] = irradiance;
                 selection.direction[weakest] = sample.direction;
                 selection.distance[weakest] = sample.distance;
+                selection.lightIndex[weakest] = i;
                 keys[weakest] = key;
             }
         }
@@ -117,6 +124,7 @@ LightSelection select_lights(UniformBufferObject* ubo, float3 position, float3 n
                 restIrradiance = outIrradiance;
                 restDirection = outDirection;
                 restDistance = outDistance;
+                restIndex = outIndex;
             }
         }
     }
@@ -128,6 +136,7 @@ LightSelection select_lights(UniformBufferObject* ubo, float3 position, float3 n
         selection.irradiance[slot] = restIrradiance * (restSum / restWeight);
         selection.direction[slot] = restDirection;
         selection.distance[slot] = restDistance;
+        selection.lightIndex[slot] = restIndex;
     }
     return selection;
 }

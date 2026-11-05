@@ -135,9 +135,15 @@ namespace Nox
                                   renderer.getDDGIProbeCountY(), renderer.getDDGIProbeCountZ(), renderer.getDDGIRaysPerProbe());
                     break;
                 case 3:
-                    AppendSetting(out, "Diffuse GI: Screen Probes | {} px per probe | filter passes {} | max history {} | DDGI cascades {}",
-                                  renderer.getScreenProbeTileSize(), renderer.getScreenProbeFilterPasses(), renderer.getScreenProbeMaxHistory(),
-                                  renderer.getDDGICascadeCount());
+                    if (renderer.usesScreenProbeSurfaceCache())
+                        AppendSetting(out, "Diffuse GI: Screen Probes | {} px per probe | filter passes {} | max history {} | hit lighting Surface Cache "
+                                           "(irradiance volume: {} probes, {} captured, {} waiting)",
+                                      renderer.getScreenProbeTileSize(), renderer.getScreenProbeFilterPasses(), renderer.getScreenProbeMaxHistory(),
+                                      renderer.getIrradianceProbeCount(), renderer.getIrradianceProbesCaptured(), renderer.getIrradianceProbesQueued());
+                    else
+                        AppendSetting(out, "Diffuse GI: Screen Probes | {} px per probe | filter passes {} | max history {} | hit lighting Full | DDGI cascades {}",
+                                      renderer.getScreenProbeTileSize(), renderer.getScreenProbeFilterPasses(), renderer.getScreenProbeMaxHistory(),
+                                      renderer.getDDGICascadeCount());
                     break;
                 case 2:
                     AppendSetting(out, "Diffuse GI: ReSTIR GI | spatial samples {} | max history {} | denoiser {}",

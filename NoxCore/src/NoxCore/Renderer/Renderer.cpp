@@ -5013,6 +5013,12 @@ namespace Nox
             addVisibilityLatePass();
             addClusterStatsReadbackPass();
             addGBufferPass();
+            // The shadow maps and the irradiance volume before the GI: the screen probes' Surface Cache hit lighting reads the volume
+            // (its sun shadow map, its relit probes), and the volume's relight reads the shadow maps.
+            // The sun's shadow mask: its cascaded shadow maps (Settings > Sun Shadows) or, without them, its RT shadow rays.
+            addShadowMapPasses();
+            addLocalShadowPasses(); // local lights' shadow maps (the rest keep their rays in the lighting passes)
+            addIrradianceVolumePasses(); // Raster Probe Volume, or the screen probes' surface cache (a few captures, relights a frame)
             // The GI right after what it reads (the G-buffer, the TLAS, DDGI's atlases for its second bounce): with async compute the
             // screen probes then run on the compute queue beside the passes below, which neither read nor write what they use.
             addDDGIPasses();
@@ -5021,16 +5027,12 @@ namespace Nox
             addRTAOPass();
             addOcclusionBlurPass();
             addNRDGuidesPass();
-            // The sun's shadow mask: its cascaded shadow maps (Settings > Sun Shadows) or, without them, its RT shadow rays.
-            addShadowMapPasses();
-            addLocalShadowPasses(); // local lights' shadow maps (the rest keep their rays in the lighting passes)
             addRTShadowPasses();
             // After the GI: reflection hits on screen take its light (SceneGI.slang), off screen this frame's DDGI.
             addRTReflectionPasses();
             addSSRPass(); // where the RT reflections do not run (last frame's lit scene)
             addSSGIPasses(); // with the environment / raster probe volume GI (last frame's lit scene)
             addReflectionProbePasses(); // the probe table, and one probe's capture when one needs it
-            addIrradianceVolumePasses(); // Diffuse GI: Raster Probe Volume (a few probes' captures a frame)
             addVolumetricFogPass(); // after the shadow maps it samples, before everything that looks through the fog
             addLightPresamplingPasses();
             addReSTIRGIPasses();
@@ -6937,7 +6939,7 @@ namespace Nox
         uniformData.frustum = shaderio::Frustum{uniformData.proj * uniformData.view};
 
         // DDGI
-        uniformData.enableDDGI = m_ddgiEnabled ? 1 : 0;
+        uniformData.enableDDGI = m_ddgiEnabled && !usesScreenProbeSurfaceCache() ? 1 : 0;
         uniformData.ddgiGridOrigin = glm::vec4(m_ddgiGridOrigin, static_cast<float>(m_ddgiProbeCountX));
         uniformData.ddgiGridSpacing = glm::vec4(m_ddgiGridSpacing, static_cast<float>(m_ddgiProbeCountY));
         uniformData.ddgiGridParams = glm::vec4(
@@ -7074,7 +7076,7 @@ namespace Nox
         uniformData.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
 
         // DDGI
-        uniformData.enableDDGI = m_ddgiEnabled ? 1 : 0;
+        uniformData.enableDDGI = m_ddgiEnabled && !usesScreenProbeSurfaceCache() ? 1 : 0;
         uniformData.ddgiGridOrigin = glm::vec4(m_ddgiGridOrigin, static_cast<float>(m_ddgiProbeCountX));
         uniformData.ddgiGridSpacing = glm::vec4(m_ddgiGridSpacing, static_cast<float>(m_ddgiProbeCountY));
         uniformData.ddgiGridParams = glm::vec4(
