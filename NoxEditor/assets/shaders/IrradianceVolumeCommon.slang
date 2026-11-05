@@ -41,12 +41,33 @@ bool irradiance_volume_lookup(UniformBufferObject* ubo, float3 worldPos, float3 
         const float facing = 0.5 * (dot(toProbe, localNormal) + 1.0);
         const uint index = (probe.z * counts.y + probe.y) * counts.x + probe.x;
         // A probe not captured yet (the volume is still filling) is left out.
-        const float captured = saturate(sh[index * 4 + 3].x);
+        const float captured = saturate(sh[index * 6 + 3].x);
         const float trilinearWeight = trilinear.x * trilinear.y * trilinear.z;
-        const float w = trilinearWeight * (facing * facing + 0.05) * captured;
-        shR += sh[index * 4 + 0] * w;
-        shG += sh[index * 4 + 1] * w;
-        shB += sh[index * 4 + 2] * w;
+        // Visibility (DDGI's Chebyshev test): how far this probe sees towards the point (its distance SH, mean and square); a point
+        // beyond that is likely behind a wall from it.
+        float visibility = 1.0;
+        {
+            const float3 probeToPoint = mul(volume->localToWorld, float4(local - (float3(probe) * cell - extents), 0.0)).xyz;
+            const float distance = length(probeToPoint);
+            if (distance > 1e-4 && captured > 0.0)
+            {
+                const float3 d = probeToPoint / distance;
+                const float4 basisD = float4(0.282095, 0.488603 * d.y, 0.488603 * d.z, 0.488603 * d.x);
+                const float mean = max(dot(sh[index * 6 + 4], basisD), 0.0);
+                const float meanSquared = max(dot(sh[index * 6 + 5], basisD), 0.0);
+                if (distance > mean)
+                {
+                    const float variance = max(abs(meanSquared - mean * mean), 1e-4 * mean * mean + 1e-6);
+                    const float excess = distance - mean;
+                    const float chebyshev = variance / (variance + excess * excess);
+                    visibility = max(chebyshev * chebyshev * chebyshev, 0.02);
+                }
+            }
+        }
+        const float w = trilinearWeight * (facing * facing + 0.05) * visibility * captured;
+        shR += sh[index * 6 + 0] * w;
+        shG += sh[index * 6 + 1] * w;
+        shB += sh[index * 6 + 2] * w;
         total += w;
         coverage += trilinearWeight * captured;
     }

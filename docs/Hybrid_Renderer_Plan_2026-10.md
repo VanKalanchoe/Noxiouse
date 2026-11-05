@@ -644,3 +644,11 @@ capped at ~2048 probes. SSGI's noise came from its denoiser's neighbourhood clam
 clamped away); it now keeps the history where last frame's view depth at the reprojected pixel matches (a second history: view depth,
 frames accumulated), accumulates up to 32 frames (blend 1 / frames), after a 5 x 5 bilateral average. Without the fill, Raster (All)
 is ~8.5 ms of GPU work vs ~19.4 ms for Ray Traced (All) in that view (the stats report now prints the raster pipeline's GI line).
+
+**After the image comparison (2026-11-05).** Raster (All) measured 8.7 ms against Ray Traced (All) 19.4 ms once the volume was filled
+(Continuous Update: 22.6 ms -- 13.8 ms of capture a frame, as expected). Indoors the raster image was brighter and the floor and walls
+mirrored the sky: the automatic volume's probes (~7 m apart over Bistro) out in the sunlit street lit the interior through its walls,
+and that bright irradiance did not hold the sky's reflection back. Now: each probe also stores L1 SH of the distance it sees and its
+square, and the lookup weights a probe by DDGI's Chebyshev visibility (a point farther than the probe sees towards it is likely behind
+a wall: weight^3, at least 0.02); SSGI's hit share holds the environment's reflection back (1 - 0.85 x hits), as the RT GI modes do
+with their irradiance -- SSR then puts back what it really finds. OIT is on in both "(All)" presets.

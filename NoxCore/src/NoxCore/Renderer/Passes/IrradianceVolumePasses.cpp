@@ -105,7 +105,7 @@ namespace Nox
                     std::scoped_lock lock(m_deferredReleasesMutex);
                     m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(state.SH) });
                 }
-                state.SH = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(glm::vec4) * 4 * probeCount, .usage = NRI::BufferUsage::Storage });
+                state.SH = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(glm::vec4) * 6 * probeCount, .usage = NRI::BufferUsage::Storage });
             }
             // Moved, resized or asked to: captured again from the start (the lookup leaves each probe out until its turn comes).
             state.NeedsClear = true;
@@ -149,7 +149,7 @@ namespace Nox
         if (state.NeedsClear)
         {
             state.NeedsClear = false;
-            const uint64_t bytes = sizeof(glm::vec4) * 4 * state.ProbeCount;
+            const uint64_t bytes = sizeof(glm::vec4) * 6 * state.ProbeCount;
             m_renderGraph.AddPass("Irradiance Volume Clear", RGPassFlags::NeverCull,
                 [](RGBuilder&) {},
                 [shBuffer, bytes](RGPassContext& context)
@@ -303,12 +303,14 @@ namespace Nox
 
         // The faces into each probe's spherical harmonics (the volume's buffer is outside the graph: a full barrier after).
         NRI::Buffer* probeListBuffer = m_irradianceProbeListBuffers[frameIndex].get();
+        const float maxDistance = 2.0f * glm::length(glm::vec3(world * glm::vec4(cell, 0.0f))); // two cells' diagonals (world units)
         m_renderGraph.AddPass("Irradiance Probe SH", RGPassFlags::NeverCull,
             [&](RGBuilder& builder)
             {
                 builder.Read(atlas);
+                builder.Read(depth);
             },
-            [this, atlas, count, shBuffer, probeListBuffer](RGPassContext& context)
+            [this, atlas, depth, count, shBuffer, probeListBuffer, maxDistance](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 shaderio::PushConstantIrradianceProbeSH push{};
@@ -316,6 +318,9 @@ namespace Nox
                 push.probeSHReference = shBuffer->getDeviceAddress();
                 push.atlasTextureIndex = uniformData.imageHeapIndexOffset + context.Slot(atlas);
                 push.probesThisFrame = count;
+                push.depthTextureIndex = uniformData.imageHeapIndexOffset + context.Slot(depth);
+                push.nearPlane = WorldUnits::FromMeters(0.05f); // the faces' projection (updateIrradianceVolumeUniforms)
+                push.maxDistance = maxDistance;
                 cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_irradianceSHPipeline);
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch(count, 1, 1);

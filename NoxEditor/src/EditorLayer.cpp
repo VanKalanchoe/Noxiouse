@@ -873,9 +873,9 @@ namespace Nox
                                   "  Low: RT shadows of the sun, screen-probe GI (24 px probes), SSAO, DLSS Performance (the fallback for smaller RT GPUs)\n"
                                   "  Medium: + RT reflections, screen-probe GI (16 px), DLSS Balanced\n"
                                   "  High: + RTAO, RT glass, DLSS Quality (the closest to the path tracer)\n"
-                                  "  Ray Traced (All): High with every light shadowed, DLSS Ray Reconstruction, Auto Exposure\n"
+                                  "  Ray Traced (All): High with every light shadowed, DLSS Ray Reconstruction, Auto Exposure, OIT\n"
                                   "  Raster (All): no ray tracing -- shadow maps + contact shadows, GTAO, SSR + reflection probes, raster probe\n"
-                                  "    volume GI + SSGI, DLSS Quality (no Ray Reconstruction: nothing traced to denoise), Auto Exposure\n"
+                                  "    volume GI + SSGI, DLSS Quality (no Ray Reconstruction: nothing traced to denoise), Auto Exposure, OIT\n"
                                   "The two '(All)' ones are for comparing ray traced against raster. Volumetric fog and post effects are left as they are.\n"
                                   "The project opens with it (saved in the .nproj). Changing a setting below makes it Custom for this session.");
 

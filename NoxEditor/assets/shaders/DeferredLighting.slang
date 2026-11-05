@@ -709,6 +709,12 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
             Texture2D ssgiTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssgiTextureIndex, 0));
             const float4 ssgi = ssgiTex.Load(int3(pixelCoord, 0));
             ambientDiffuse = ssgi.rgb * diffuseColor + saturate(1.0 - ssgi.a) * ambientDiffuse;
+            // Its rays that hit something close by did not reach the sky: the environment's reflection held back as much (indoors most
+            // do -- the walls and floors no longer mirror the sky), as the RT GI modes hold it back by their irradiance. SSR, below,
+            // puts back what is really reflected where it finds it.
+            const float skyOcclusion = 1.0 - 0.85 * saturate(ssgi.a);
+            specularOcclusion *= skyOcclusion;
+            ambientSpecular *= skyOcclusion;
         }
 
         // Sample Decoupled RT Reflection (Denoised via NRD REBLUR/RELAX or Raw 1-SPP)

@@ -807,6 +807,7 @@ namespace Nox
             bool SSGI = false;
             bool RayReconstruction = true; // DLSS Ray Reconstruction denoises the RT effects (where the GPU has it)
             int AutoExposure = -1;         // the viewport's Auto Exposure: 1 on, -1 left as it is
+            int OIT = -1;                  // order-independent transparency: 1 on, 0 off, -1 left as it is
         };
 
         QualityPresetSettings GetQualityPresetSettings(Renderer::RenderQuality quality)
@@ -835,6 +836,7 @@ namespace Nox
                 preset.RTAO = true;
                 preset.RTRefraction = true;
                 preset.AutoExposure = 1;
+                preset.OIT = 1;
                 break;
             case Renderer::RenderQuality::RasterAll:
                 // Nothing traced: every raster version (shadow maps + contact shadows, GTAO, SSR + reflection probes, the raster probe
@@ -851,6 +853,7 @@ namespace Nox
                 preset.SSGI = true;
                 preset.RayReconstruction = false;
                 preset.AutoExposure = 1;
+                preset.OIT = 1;
                 break;
             default:
                 break;
@@ -904,6 +907,8 @@ namespace Nox
         setSSGIEnabled(preset.SSGI);
         if (preset.AutoExposure >= 0)
             setViewportAutoExposure(preset.AutoExposure != 0);
+        if (preset.OIT >= 0)
+            setOITEnabled(preset.OIT != 0);
         // DDGI's probes trace in turn: a quarter a frame on the fallback rung, half on the others; two cascades on the fallback rung.
         // Under the screen probes DDGI is only the second bounce: a quarter of its probes a frame is plenty.
         m_ddgiUpdateStride = (quality == RenderQuality::Low || preset.DiffuseGI == 3) ? 4u : 2u;
@@ -920,7 +925,8 @@ namespace Nox
             const bool upscaleMatches = !isDLSSSupported() || (m_dlssEnabled && m_dlssMode == preset.Upscale);
             const bool rrMatches = !isDLSSSupported() || !isDLSSRayReconstructionSupported() || m_dlssRayReconstructionEnabled == preset.RayReconstruction;
             const bool ssaoMatches = preset.RTAO ? m_rtaoEnabled : (m_ssaoEnabled && m_ssaoMethod == preset.AmbientOcclusion);
-            const bool exposureMatches = preset.AutoExposure < 0 || m_viewportAutoExposure == (preset.AutoExposure != 0);
+            const bool exposureMatches = (preset.AutoExposure < 0 || m_viewportAutoExposure == (preset.AutoExposure != 0)) &&
+                                         (preset.OIT < 0 || m_oitEnabled == (preset.OIT != 0));
             if (!m_pathTracingEnabled && m_rayTracingEnabled == preset.RayTracing && m_rayTracingShadows == preset.RTShadows &&
                 m_rayTracingReflections == preset.RTReflections && ssaoMatches && m_diffuseGIMode == preset.DiffuseGI &&
                 m_directLightingMode == preset.DirectLighting && m_rtRefractionEnabled == preset.RTRefraction && upscaleMatches &&

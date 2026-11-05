@@ -2272,7 +2272,8 @@ struct GpuReflectionProbe
 // An irradiance volume (RS5a, GI without rays; Renderer::addIrradianceVolumePasses): a grid of probes over the entity's box, each the
 // scene around it rendered into six small faces (rasterized, a few probes a frame) and projected onto L1 spherical harmonics --
 // UE's volumetric lightmap / Godot's LightmapGI probes, updated at runtime. probeSH: per probe 3 float4 (R, G, B: L00, L1-1, L10, L11
-// of the radiance), then a fourth: x 1 once captured (0: not yet -- the lookup leaves it out).
+// of the radiance), a fourth: x 1 once captured (0: not yet -- the lookup leaves it out), then L1 SH of the distance to what the
+// probe sees and of its square (visibility: DDGI's Chebyshev test against walls between a probe and the point).
 STATIC_CONST uint32_t IrradianceProbeFaceSize = 16; // texels per side of a capture face
 STATIC_CONST uint32_t MaxIrradianceProbesPerFrame = 16;
 
@@ -2285,7 +2286,7 @@ struct GpuIrradianceVolume
     uint32_t countY;
     uint32_t countZ;
     uint32_t probeCount;
-    uint64_t probeSHReference; // float4[4] per probe (R, G, B SH, then x = captured), x fastest, then y, then z
+    uint64_t probeSHReference; // float4[6] per probe (R, G, B SH, x = captured, distance SH, distance^2 SH), x fastest, then y, then z
     float normalBias;       // local units the lookup moves along the normal (away from the surface's own probe gaps)
     uint32_t padding;
 };
@@ -2297,7 +2298,10 @@ struct PushConstantIrradianceProbeSH
     uint64_t probeSHReference;
     uint32_t atlasTextureIndex;
     uint32_t probesThisFrame;
-    uint32_t padding[2];
+    uint32_t depthTextureIndex; // the faces' depth (reverse Z, infinite: view depth = nearPlane / depth)
+    float nearPlane;
+    float maxDistance;          // distances are clamped here (the sky: this far)
+    uint32_t padding;
 };
 
 // The capture's six rendered faces into a probe's cubemap (ReflectionProbe.slang assembleMain): per cube texel, its direction, the

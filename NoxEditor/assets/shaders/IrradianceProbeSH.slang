@@ -8,7 +8,7 @@
 static const float3 kFaceDirections[6] = { float3(1, 0, 0), float3(-1, 0, 0), float3(0, 1, 0), float3(0, -1, 0), float3(0, 0, 1), float3(0, 0, -1) };
 static const float3 kFaceUps[6] = { float3(0, 1, 0), float3(0, 1, 0), float3(0, 0, 1), float3(0, 0, -1), float3(0, 1, 0), float3(0, 1, 0) };
 
-groupshared float4 gSH[256][3];
+groupshared float4 gSH[256][5];
 
 [shader("compute")]
 [numthreads(16, 16, 1)]
@@ -17,8 +17,9 @@ void compMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
 {
     const uint row = groupId.x;
     Texture2D atlas = Texture2D.Handle(uint2(pushConstant.atlasTextureIndex, 0));
+    Texture2D<float> depthAtlas = Texture2D<float>.Handle(uint2(pushConstant.depthTextureIndex, 0));
     const float faceSize = float(IrradianceProbeFaceSize);
-    float4 shR = float4(0.0), shG = float4(0.0), shB = float4(0.0);
+    float4 shR = float4(0.0), shG = float4(0.0), shB = float4(0.0), shD = float4(0.0), shD2 = float4(0.0);
     for (uint face = 0; face < 6; ++face)
     {
         const float2 ndc = float2((float(threadId.x) + 0.5) / faceSize * 2.0 - 1.0, 1.0 - (float(threadId.y) + 0.5) / faceSize * 2.0);
@@ -28,15 +29,23 @@ void compMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
         const float3 direction = normalize(ndc.x * side + ndc.y * up + forward);
         // The texel's solid angle: (2 / size)^2 / (1 + x^2 + y^2)^(3/2).
         const float solidAngle = (4.0 / (faceSize * faceSize)) / pow(1.0 + dot(ndc, ndc), 1.5);
-        const float3 radiance = atlas.Load(int3(int(face * IrradianceProbeFaceSize + threadId.x), int(row * IrradianceProbeFaceSize + threadId.y), 0)).rgb;
+        const int3 texel = int3(int(face * IrradianceProbeFaceSize + threadId.x), int(row * IrradianceProbeFaceSize + threadId.y), 0);
+        const float3 radiance = atlas.Load(texel).rgb;
         const float4 basis = float4(0.282095, 0.488603 * direction.y, 0.488603 * direction.z, 0.488603 * direction.x) * solidAngle;
         shR += basis * radiance.r;
         shG += basis * radiance.g;
         shB += basis * radiance.b;
+        // How far the probe sees this way: view depth along the face's axis, out along the texel's ray (the sky: as far as counts).
+        const float depth = depthAtlas.Load(texel);
+        const float distance = depth > 0.0 ? min(pushConstant.nearPlane / depth * sqrt(1.0 + dot(ndc, ndc)), pushConstant.maxDistance) : pushConstant.maxDistance;
+        shD += basis * distance;
+        shD2 += basis * (distance * distance);
     }
     gSH[threadIndex][0] = shR;
     gSH[threadIndex][1] = shG;
     gSH[threadIndex][2] = shB;
+    gSH[threadIndex][3] = shD;
+    gSH[threadIndex][4] = shD2;
     GroupMemoryBarrierWithGroupSync();
     for (uint stride = 128; stride > 0; stride >>= 1)
     {
@@ -45,6 +54,8 @@ void compMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
             gSH[threadIndex][0] += gSH[threadIndex + stride][0];
             gSH[threadIndex][1] += gSH[threadIndex + stride][1];
             gSH[threadIndex][2] += gSH[threadIndex + stride][2];
+            gSH[threadIndex][3] += gSH[threadIndex + stride][3];
+            gSH[threadIndex][4] += gSH[threadIndex + stride][4];
         }
         GroupMemoryBarrierWithGroupSync();
     }
@@ -52,9 +63,11 @@ void compMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
     {
         const uint probe = ((uint*)pushConstant.probeIndicesReference)[row];
         float4* sh = (float4*)pushConstant.probeSHReference;
-        sh[probe * 4 + 0] = gSH[0][0];
-        sh[probe * 4 + 1] = gSH[0][1];
-        sh[probe * 4 + 2] = gSH[0][2];
-        sh[probe * 4 + 3] = float4(1.0, 0.0, 0.0, 0.0); // captured
+        sh[probe * 6 + 0] = gSH[0][0];
+        sh[probe * 6 + 1] = gSH[0][1];
+        sh[probe * 6 + 2] = gSH[0][2];
+        sh[probe * 6 + 3] = float4(1.0, 0.0, 0.0, 0.0); // captured
+        sh[probe * 6 + 4] = gSH[0][3];
+        sh[probe * 6 + 5] = gSH[0][4];
     }
 }
