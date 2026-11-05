@@ -78,24 +78,6 @@ namespace Nox
             return;
 
         const auto extension = path.extension().string();
-        // A MaterialX document: its materials made where it is (inside the project), else into the folder shown, read from where it
-        // lies (its images are copied in by the import).
-        if (extension == ".mtlx")
-        {
-            std::error_code error;
-            const auto assetRoot = std::filesystem::weakly_canonical(m_BaseDirectory, error);
-            const auto sourcePath = std::filesystem::weakly_canonical(path, error);
-            if (error)
-                return;
-            const auto relativePath = sourcePath.lexically_relative(assetRoot);
-            const bool isInsideProject = !relativePath.empty() && relativePath != "." && relativePath.generic_string().rfind("..", 0) != 0;
-            if (isInsideProject)
-                m_Project->GetEditorAssetManager()->ImportAsset(relativePath, std::filesystem::path());
-            else
-                m_Project->GetEditorAssetManager()->ImportAsset(sourcePath, (m_CurrentDirectory / (path.stem().string() + "_mtlx")).lexically_relative(m_BaseDirectory));
-            RefreshAssetTree();
-            return;
-        }
         if (extension == ".nox")
         {
             std::error_code error;
@@ -933,7 +915,7 @@ namespace Nox
         ImGui::SameLine();
         if (ImGui::Button("Import"))
         {
-            static constexpr char filter[] = "Scene, glTF and MaterialX files\0nox;gltf;glb;mtlx";
+            static constexpr char filter[] = "Scene and glTF files\0nox;gltf;glb";
             const std::string selectedFile = Utility::OpenFile(filter);
             if (!selectedFile.empty())
             {
