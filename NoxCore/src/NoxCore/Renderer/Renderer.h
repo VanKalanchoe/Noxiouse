@@ -314,9 +314,11 @@ namespace Nox
         // One instance per drawn submesh, appended to outInstances. Returns false when an asset is not loaded yet (appended
         // to outMissingAssets, request it on the main thread): the entity is registered with what is loaded and has to be
         // registered again once it is.
+        // hidden: registered but neither drawn nor ray traced until SetMeshInstancesHidden(false) (a streamed level being added).
         bool AddMeshInstances(const glm::dmat4& world, const MeshComponent& mesh, const MaterialComponent* material, int32_t entityID,
-                              std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets);
+                              std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets, bool hidden = false);
         void RemoveMeshInstances(std::span<const uint32_t> instances);
+        void SetMeshInstancesHidden(std::span<const uint32_t> instances, bool hidden);
         void SetMeshInstancesTransform(std::span<const uint32_t> instances, const glm::dmat4& world);
         // Skinned instances, every frame: this frame's joint matrices.
         void SetMeshInstancesBones(std::span<const uint32_t> instances, std::span<const glm::mat4> bones);
@@ -1049,7 +1051,7 @@ namespace Nox
     private:
         template <typename MeshAsset>
         bool addSubmeshInstances(const glm::dmat4& world, const MeshAsset& mesh, const MeshComponent& component, const MaterialComponent* material,
-                                 int32_t entityID, std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets);
+                                 int32_t entityID, std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets, bool hidden);
         // Shared material record of a submesh: its material asset when loaded, else the mesh's embedded material.
         MaterialData entityMaterialData(const MaterialData& meshMaterial, AssetHandle materialAsset, const MaterialComponent& component,
                                         uint32_t submesh, bool& outComplete, std::vector<AssetHandle>& outMissingAssets);

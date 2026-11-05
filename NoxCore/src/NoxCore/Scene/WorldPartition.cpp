@@ -244,6 +244,7 @@ namespace Nox
             streamed.Cell = cell;
             streamed.Name = WorldGrid::CellName(cell);
             streamed.Loaded = true;
+            streamed.Shown = true; // (in the world already)
         }
     }
 
@@ -545,6 +546,7 @@ namespace Nox
         streamed.ActivateNext = 0;
         streamed.HeldPhysics.clear();
         streamed.Loaded = false;
+        streamed.Shown = false;
     }
 
     void Scene::LoadWorldCells(const std::vector<WorldCellCoord>& cells)
@@ -714,41 +716,92 @@ namespace Nox
             UnloadWorldCells(GetLoadedWorldCells(true, WorldGrid::HLODGridIndex));
     }
 
+    void Scene::CollectLevelsNotReady(std::unordered_set<uint64_t>& outLevels) const
+    {
+        // A level's mesh entity waiting to be registered with the GPU scene (its assets, the registrations' per-frame budget, its
+        // transform), or its model and prefab instances not spawned yet.
+        for (entt::entity pending : m_PendingMeshEntities)
+        {
+            if (const LevelComponent* level = m_Registry.valid(pending) ? m_Registry.try_get<LevelComponent>(pending) : nullptr)
+                outLevels.insert(level->Level);
+        }
+        for (auto handle : m_Registry.view<ModelInstanceComponent, LevelComponent>())
+        {
+            if (!m_Registry.get<ModelInstanceComponent>(handle).Spawned)
+                outLevels.insert(m_Registry.get<LevelComponent>(handle).Level);
+        }
+    }
+
+    // How long a complete level stays hidden waiting for its meshes' assets before it is shown with what is in (a reference that
+    // fails to load must not hold the whole level back); as long as a cell's activation waits for its assets.
+    static constexpr float MaxLevelShowWaitSeconds = 2.0f;
+
+    void Scene::UpdateStreamedLevelVisibility()
+    {
+        // Unreal's ULevel::bRequireFullVisibilityToRender: a level's meshes are registered hidden while it comes in (over several frames,
+        // within the streaming and registration budgets), and all of it shows in one frame once it is complete -- no level seen half built.
+        std::vector<StreamedLevel*> complete;
+        for (StreamedLevel& streamed : m_Levels)
+        {
+            if (streamed.Loaded && !streamed.Shown && !streamed.Failed)
+                complete.push_back(&streamed);
+        }
+        if (complete.empty())
+            return;
+
+        std::unordered_set<uint64_t> notReady;
+        CollectLevelsNotReady(notReady);
+        const auto now = std::chrono::steady_clock::now();
+        std::unordered_set<uint64_t> shown;
+        for (StreamedLevel* streamed : complete)
+        {
+            const bool waitedLongEnough = std::chrono::duration<float>(now - streamed->CompletedAt).count() >= MaxLevelShowWaitSeconds;
+            if (notReady.contains(streamed->Level) && !waitedLongEnough)
+                continue;
+            streamed->Shown = true;
+            shown.insert(streamed->Level);
+        }
+        if (shown.empty())
+            return;
+
+        for (auto handle : m_Registry.view<LevelComponent>())
+        {
+            if (!shown.contains(m_Registry.get<LevelComponent>(handle).Level))
+                continue;
+            auto found = m_MeshRegistrations.find(handle);
+            if (found == m_MeshRegistrations.end() || !found->second.Hidden)
+                continue;
+            m_renderer->SetMeshInstancesHidden(found->second.Instances, false);
+            found->second.Hidden = false;
+        }
+    }
+
     void Scene::UpdateHLODVisibility()
     {
-        // An HLOD is drawn until its cell is loaded and drawn: loaded, its model and prefab instances spawned and none of its entities
-        // waiting to be registered with the GPU scene -- so no frame shows neither. Hidden HLODs are not registered (nor traced).
+        // An HLOD is drawn until its cell is shown (UpdateStreamedLevelVisibility, just before) and drawn whole: its model and prefab
+        // instances spawned and none of its entities waiting to be registered with the GPU scene -- so no frame shows neither. Hidden
+        // HLODs are not registered (nor traced).
         auto hlods = m_Registry.view<HLODComponent>();
         if (hlods.begin() == hlods.end())
             return;
-        std::set<WorldCellCoord> drawn;
-        for (const WorldCellCoord& cell : GetLoadedWorldCells(false, WorldGrid::WorldGridIndex))
-            drawn.insert(cell);
+        std::unordered_set<uint64_t> drawn; // cell IDs
+        for (const StreamedLevel& streamed : m_Levels)
+        {
+            if (streamed.IsCell && streamed.Cell.Grid == WorldGrid::WorldGridIndex && streamed.Loaded && streamed.Shown && !streamed.UnloadQueued &&
+                !streamed.Failed)
+                drawn.insert(streamed.Level);
+        }
         if (!drawn.empty())
         {
-            std::unordered_set<uint64_t> notReady; // cell IDs
-            for (entt::entity pending : m_PendingMeshEntities)
-            {
-                if (const LevelComponent* level = m_Registry.valid(pending) ? m_Registry.try_get<LevelComponent>(pending) : nullptr)
-                    notReady.insert(level->Level);
-            }
-            for (auto handle : m_Registry.view<ModelInstanceComponent, LevelComponent>())
-            {
-                if (!m_Registry.get<ModelInstanceComponent>(handle).Spawned)
-                    notReady.insert(m_Registry.get<LevelComponent>(handle).Level);
-            }
-            for (auto it = drawn.begin(); it != drawn.end();)
-            {
-                if (notReady.contains(WorldGrid::CellID(*it)))
-                    it = drawn.erase(it);
-                else
-                    ++it;
-            }
+            std::unordered_set<uint64_t> notReady;
+            CollectLevelsNotReady(notReady);
+            for (uint64_t level : notReady)
+                drawn.erase(level);
         }
         for (auto handle : hlods)
         {
             HLODComponent& hlod = hlods.get<HLODComponent>(handle);
-            const bool hidden = drawn.contains(hlod.Source);
+            const bool hidden = drawn.contains(WorldGrid::CellID(hlod.Source));
             if (hidden == hlod.Hidden)
                 continue;
             hlod.Hidden = hidden;
@@ -830,6 +883,7 @@ namespace Nox
                 streamed.Name = name;
                 streamed.Activate = true;
                 streamed.Loaded = true;
+                streamed.Shown = true; // (stays in the world as it is)
                 continue;
             }
             std::string fileText;
@@ -1070,6 +1124,7 @@ namespace Nox
             streamed.Cell = cell;
             streamed.Name = WorldGrid::CellName(cell);
             streamed.Loaded = true;
+            streamed.Shown = true;
         }
     }
 }

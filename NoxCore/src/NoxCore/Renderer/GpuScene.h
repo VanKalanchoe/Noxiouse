@@ -150,7 +150,10 @@ namespace Nox
 
         // Instances. AddInstance references the material, RemoveInstance releases it. World transforms are double precision
         // (large world coordinates, Engine_Architecture_Plan_2026.md §5.14a); the tables hold them relative to the render origin.
-        uint32_t AddInstance(uint32_t meshSlot, uint32_t materialSlot, const glm::dmat4& world, int32_t entityID);
+        // A hidden instance keeps its records (uploaded, ready) but is neither drawn nor ray traced: a streamed level's instances are
+        // added hidden over several frames and shown together once all of it is in (Unreal's ULevel::bRequireFullVisibilityToRender).
+        uint32_t AddInstance(uint32_t meshSlot, uint32_t materialSlot, const glm::dmat4& world, int32_t entityID, bool hidden = false);
+        void SetInstanceHidden(uint32_t instanceSlot, bool hidden);
         void RemoveInstance(uint32_t instanceSlot);
         void RemoveAllInstances();
         void SetTransform(uint32_t instanceSlot, const glm::dmat4& world);
@@ -243,6 +246,7 @@ namespace Nox
             uint64_t SkinnedVertexAddress = 0;
             std::shared_ptr<const MorphTargetInfo> Morphs;
             uint32_t MorphWeightOffset = shaderio::NoMorphWeights;
+            bool Hidden = false; // SetInstanceHidden: in no bucket, not in the TLAS
             // The world bounding sphere of its mesh's box (center, radius), kept with its transform: the ray tracing culling reads
             // it every frame for every instance (Unreal keeps a primitive's world bounds the same way).
             glm::vec4 WorldSphere{ 0.0f };

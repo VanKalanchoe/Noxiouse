@@ -992,8 +992,8 @@ namespace Nox
         AssetHandle Level = 0;
     };
 
-    // A Level Streaming Volume (Unreal's): while the streaming source -- the primary camera in Play, the editor camera in Simulate --
-    // is inside this box, its levels (scene assets) are loaded into the running scene (Scene::LoadLevel); once it has been outside
+    // A Level Streaming Volume (Unreal's): while a streaming source -- the primary camera in Play, the editor camera in Simulate, and
+    // every enabled WorldStreamingSourceComponent whose target is Activated -- is inside this box, its levels (scene assets) are loaded into the running scene (Scene::LoadLevel); once it has been outside
     // every volume naming a level for UnloadDelay seconds, that level is unloaded. The box is HalfExtents in the entity's space,
     // scaled by its transform (as BoxCollider3DComponent). A level a volume names is left to its volumes.
     struct LevelStreamingVolumeComponent

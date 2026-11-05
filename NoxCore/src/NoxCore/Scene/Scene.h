@@ -107,7 +107,7 @@ namespace Nox
         // Level streaming (Unreal's): a level is another scene file (a scene asset) loaded into this running scene, its entities
         // marked with LevelComponent, and unloaded again (its entities destroyed). It is read on a thread and its entities created a
         // slice a frame (SceneLoader); its scripts, particles, timelines and physics start once the whole level is in, as if the scene
-        // had begun with them. Both happen at the start of the next frame (UpdateLevelStreaming), so a script may call them. Play and
+        // had begun with them, and it is drawn once its meshes are all in too (StreamedLevel::Shown). Both happen at the start of the next frame (UpdateLevelStreaming), so a script may call them. Play and
         // Simulate; Level Streaming Volumes call them too. A level whose entity IDs are already in the scene (a scene saved as a copy
         // of another) is refused.
         enum class LevelState : uint8_t
@@ -250,6 +250,10 @@ namespace Nox
         void UpdateEditorHLODs(const glm::dvec3& camera);
         // HLODs whose cell is loaded and drawn are hidden (left out of the GPU scene), the others shown (SyncGpuScene).
         void UpdateHLODVisibility();
+        // Streamed levels complete and ready are shown (SyncGpuScene, before the HLODs: no frame shows neither a cell nor its HLOD).
+        void UpdateStreamedLevelVisibility();
+        // The levels (asset handles, world cell IDs) with a mesh entity not registered with all its assets yet.
+        void CollectLevelsNotReady(std::unordered_set<uint64_t>& outLevels) const;
         glm::dvec3 ComposedWorldPosition(Entity entity);
         void QueueWorldCellLoad(const WorldCellCoord& cell, bool activate = true);
         // A cell built from its file (or a Play session's text) into a scene of its own: the loader, a slice a frame.
@@ -333,6 +337,10 @@ namespace Nox
             bool Failed = false;                // refused or unreadable: volumes leave it until the source has left them
             bool UnloadQueued = false;
             float OutsideTime = 0.0f;           // seconds no volume naming it has held the streaming source
+            // Drawn (Unreal's ULevel::bRequireFullVisibilityToRender): until then its meshes are registered hidden, and once it is complete
+            // and every one of them is registered with its assets (or MaxLevelShowWaitSeconds after completion), all show in one frame.
+            bool Shown = false;
+            std::chrono::steady_clock::time_point CompletedAt{};
 
             // World cells (§5.13.3): built into a scene of their own first (Loaded), then copied into this one (Activated).
             bool Activate = true;                 // the target: in the world, or only loaded
@@ -384,6 +392,7 @@ namespace Nox
             bool Skinned = false;
             bool Morphed = false; // an instance has morph targets: its weights are handed over every frame
             bool Parameterized = false; // material parameters (MaterialComponent::Parameters): its records are refreshed every frame
+            bool Hidden = false; // its streamed level is not shown yet (StreamedLevel::Shown)
         };
         uint64_t m_SceneID = 0;
         std::unordered_map<entt::entity, MeshRegistration> m_MeshRegistrations;

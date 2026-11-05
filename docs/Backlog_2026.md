@@ -41,8 +41,8 @@ default; the RT one stays the default otherwise (RT shadows may well win). Both 
 | # | Item |
 |---|---|
 | L1 | **Editing several levels together** (Unreal's Levels window): today each level is edited as its own scene |
-| L2 | **A streamed level shows once complete:** its entities are activated within a 3 ms budget per frame (`ActivateStreamedLevel`), so a big level appears over several frames; Unreal makes a level visible only when all of it was added |
-| L3 | **Level streaming volumes use every streaming source:** the world partition streams around the camera and every World Streaming Source; volumes (`UpdateLevelStreaming`) still test the camera alone |
+| L2 | **A streamed level shows once complete:** its entities are activated within a 3 ms budget per frame, so a big level used to appear over several frames. Now (Unreal's `ULevel::bRequireFullVisibilityToRender`) a level's and a world cell's meshes are registered with the GPU scene hidden (their records uploaded, in no draw bucket and not in the TLAS) and all shown in one frame once the level is complete and every mesh is registered with its assets, or 2 s after completion (as long as a cell's activation waits for its assets: a reference that fails to load does not hold the level back). The HLOD swap follows the same state. **Built 2026-11-05, untested** |
+| L3 | **Level streaming volumes use every streaming source:** volumes (`UpdateLevelStreaming`) now test the camera and every enabled World Streaming Source whose target is Activated (a Loaded target prepares world cells without putting them in the world; a level has no such stage), in Play (also without a primary camera) and Simulate. **Built 2026-11-05, untested** |
 
 ### Tools (plan: `Engine_Architecture_Plan_2026.md`)
 

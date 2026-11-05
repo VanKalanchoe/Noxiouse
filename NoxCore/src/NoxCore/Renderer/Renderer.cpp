@@ -7291,7 +7291,7 @@ namespace Nox
     }
 
     bool Renderer::AddMeshInstances(const glm::dmat4& world, const MeshComponent& component, const MaterialComponent* material, int32_t entityID,
-                                    std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets)
+                                    std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets, bool hidden)
     {
         if (component.Mesh == 0)
             return true;
@@ -7300,12 +7300,12 @@ namespace Nox
         if (type == AssetType::Mesh)
         {
             if (const Mesh* mesh = AssetManager::FindLoadedAsset<Mesh>(component.Mesh))
-                return addSubmeshInstances(world, *mesh, component, material, entityID, outInstances, outMissingAssets);
+                return addSubmeshInstances(world, *mesh, component, material, entityID, outInstances, outMissingAssets, hidden);
         }
         else if (type == AssetType::StaticMesh)
         {
             if (const StaticMesh* mesh = AssetManager::FindLoadedAsset<StaticMesh>(component.Mesh))
-                return addSubmeshInstances(world, *mesh, component, material, entityID, outInstances, outMissingAssets);
+                return addSubmeshInstances(world, *mesh, component, material, entityID, outInstances, outMissingAssets, hidden);
         }
         else
         {
@@ -7320,6 +7320,12 @@ namespace Nox
     {
         for (uint32_t instance : instances)
             m_gpuScene.RemoveInstance(instance);
+    }
+
+    void Renderer::SetMeshInstancesHidden(std::span<const uint32_t> instances, bool hidden)
+    {
+        for (uint32_t instance : instances)
+            m_gpuScene.SetInstanceHidden(instance, hidden);
     }
 
     void Renderer::SetMeshInstancesTransform(std::span<const uint32_t> instances, const glm::dmat4& world)
@@ -7373,7 +7379,7 @@ namespace Nox
 
     template <typename MeshAsset>
     bool Renderer::addSubmeshInstances(const glm::dmat4& world, const MeshAsset& mesh, const MeshComponent& component, const MaterialComponent* material,
-                                       int32_t entityID, std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets)
+                                       int32_t entityID, std::vector<uint32_t>& outInstances, std::vector<AssetHandle>& outMissingAssets, bool hidden)
     {
         // Per slot: the entity's override when it has one, the mesh's imported .nmat otherwise.
         const std::vector<AssetHandle>& meshMaterials = mesh.GetMaterialAssets();
@@ -7400,7 +7406,7 @@ namespace Nox
                                                                                                    static_cast<uint32_t>(submesh), complete, outMissingAssets))
                 : acquireGpuMaterial(static_cast<uint64_t>(component.Mesh), static_cast<uint32_t>(submesh), mesh.GetMaterial(submesh),
                                      materialAsset, complete, outMissingAssets);
-            outInstances.push_back(m_gpuScene.AddInstance(handle.gpuSceneMesh, materialSlot, world, entityID));
+            outInstances.push_back(m_gpuScene.AddInstance(handle.gpuSceneMesh, materialSlot, world, entityID, hidden));
             if (handle.morphs)
                 m_gpuScene.SetInstanceMorphs(outInstances.back(), handle.morphs);
         }

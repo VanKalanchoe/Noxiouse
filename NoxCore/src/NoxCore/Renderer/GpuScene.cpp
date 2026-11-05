@@ -316,7 +316,8 @@ namespace Nox
             if (state.Mesh != meshSlot)
                 continue;
 
-            MarkChanged(state.WorldSphere);
+            if (!state.Hidden)
+                MarkChanged(state.WorldSphere);
             RemoveFromBucket(instanceSlot);
             state.Mesh = InvalidSlot;
             WriteTlasInstance(instanceSlot);
@@ -365,10 +366,10 @@ namespace Nox
             if (state.Material != materialSlot)
                 continue;
 
-            if (state.Mesh != InvalidSlot && lookChanges)
+            if (state.Mesh != InvalidSlot && !state.Hidden && lookChanges)
                 MarkChanged(state.WorldSphere); // (its colors, alpha cutout, double-sidedness: what a capture or shadow map drew)
             WriteRayTracingInstance(instanceSlot);
-            if (!bucketsChange || state.Mesh == InvalidSlot)
+            if (!bucketsChange || state.Mesh == InvalidSlot || state.Hidden)
                 continue;
 
             RemoveFromBucket(instanceSlot);
@@ -394,7 +395,7 @@ namespace Nox
         }
     }
 
-    uint32_t GpuScene::AddInstance(uint32_t meshSlot, uint32_t materialSlot, const glm::dmat4& worldTransform, int32_t entityID)
+    uint32_t GpuScene::AddInstance(uint32_t meshSlot, uint32_t materialSlot, const glm::dmat4& worldTransform, int32_t entityID, bool hidden)
     {
         const uint32_t slot = m_Instances.Allocate();
         m_Transforms.Grow(slot + 1);
@@ -419,13 +420,16 @@ namespace Nox
         transform.normal = glm::transpose(glm::inverse(world));
         transform.previousWorld = world;
 
-        m_InstanceStates[slot] = InstanceState{ .Mesh = meshSlot, .Material = materialSlot,
+        m_InstanceStates[slot] = InstanceState{ .Mesh = meshSlot, .Material = materialSlot, .Hidden = hidden,
                                                 .WorldSphere = WorldBoundingSphere(m_Meshes.Get(meshSlot), world) };
-        MarkChanged(m_InstanceStates[slot].WorldSphere);
         ++m_MaterialReferences[materialSlot];
         ++m_InstanceCount;
         WriteRayTracingInstance(slot);
-        InsertIntoBucket(slot);
+        if (!hidden)
+        {
+            MarkChanged(m_InstanceStates[slot].WorldSphere);
+            InsertIntoBucket(slot);
+        }
 
         if (m_TlasInstances.size() <= slot)
         {
@@ -448,7 +452,7 @@ namespace Nox
         if (state.Mesh == InvalidSlot && state.Material == InvalidSlot)
             return;
 
-        if (state.Mesh != InvalidSlot)
+        if (state.Mesh != InvalidSlot && !state.Hidden)
             MarkChanged(state.WorldSphere);
         RemoveFromBucket(instanceSlot);
         ReleaseMaterial(state.Material);
@@ -458,6 +462,25 @@ namespace Nox
 
         m_Instances.Free(instanceSlot);
         --m_InstanceCount;
+    }
+
+    void GpuScene::SetInstanceHidden(uint32_t instanceSlot, bool hidden)
+    {
+        if (instanceSlot >= m_InstanceStates.size())
+            return;
+        InstanceState& state = m_InstanceStates[instanceSlot];
+        if (state.Material == InvalidSlot || state.Hidden == hidden)
+            return;
+
+        state.Hidden = hidden;
+        if (state.Mesh == InvalidSlot)
+            return; // deactivated (its mesh went): registered again by its owner
+        MarkChanged(state.WorldSphere);
+        if (hidden)
+            RemoveFromBucket(instanceSlot);
+        else
+            InsertIntoBucket(instanceSlot);
+        WriteTlasInstance(instanceSlot);
     }
 
     void GpuScene::RemoveAllInstances()
@@ -488,9 +511,11 @@ namespace Nox
         transform.normal = glm::transpose(glm::inverse(world));
         if (state.Mesh != InvalidSlot)
         {
-            MarkChanged(state.WorldSphere); // where it was
+            if (!state.Hidden)
+                MarkChanged(state.WorldSphere); // where it was
             state.WorldSphere = WorldBoundingSphere(m_Meshes.Get(state.Mesh), world);
-            MarkChanged(state.WorldSphere);
+            if (!state.Hidden)
+                MarkChanged(state.WorldSphere);
         }
 
         m_RayTracingInstances.Edit(instanceSlot).normalMatrix = transform.normal;

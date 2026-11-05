@@ -705,6 +705,8 @@ namespace Nox
             if (streamed.IsCell && (!entity.HasComponent<RelationshipComponent>() || entity.GetComponent<RelationshipComponent>().Parent == 0))
                 m_World.Origins[id] = streamed.Cell;
         }
+        streamed.CompletedAt = std::chrono::steady_clock::now();
+        streamed.Shown = false; // (shown once its meshes are in: UpdateStreamedLevelVisibility)
         if (streamed.IsCell)
             NOX_CORE_TRACE("World cell `{}` loaded ({} entities)", streamed.Name, created.size());
         else
@@ -766,17 +768,30 @@ namespace Nox
         // 0. The world partition's cells around the sources (Play / Simulate of a world).
         UpdateWorldStreaming(source);
 
-        // 1. The volumes: a level any volume holding the source names is wanted; one only volumes name, and none holds the source, goes
-        //    after the shortest of their unload delays.
-        if (source)
+        // 1. The volumes: a level any volume holding a streaming source names is wanted; one only volumes name, and none holds a source,
+        //    goes after the shortest of their unload delays. The sources: the camera and every enabled World Streaming Source whose target
+        //    is Activated (the ones the world partition streams around; a Loaded target prepares cells without putting them in the world,
+        //    which a level has no stage for). Not while editing (no camera source then): the editor loads levels by hand.
+        std::vector<StreamingSource> sources;
+        if (source || m_IsRunning)
+        {
+            CollectStreamingSources(source, sources, false);
+            std::erase_if(sources, [](const StreamingSource& candidate) { return !candidate.Activate; });
+        }
+        if (!sources.empty())
         {
             std::unordered_map<AssetHandle, float> unloadDelays; // the levels volumes name, and the shortest delay among them
             std::unordered_set<AssetHandle> wanted;
             for (auto handle : m_Registry.view<WorldTransformComponent, LevelStreamingVolumeComponent>())
             {
                 const auto& volume = m_Registry.get<LevelStreamingVolumeComponent>(handle);
-                const glm::vec3 local = glm::vec3(glm::inverse(m_Registry.get<WorldTransformComponent>(handle).WorldMatrix) * glm::dvec4(*source, 1.0));
-                const bool inside = glm::all(glm::lessThanEqual(glm::abs(local), volume.HalfExtents));
+                const glm::dmat4 toLocal = glm::inverse(m_Registry.get<WorldTransformComponent>(handle).WorldMatrix);
+                bool inside = false;
+                for (const StreamingSource& streamingSource : sources)
+                {
+                    const glm::vec3 local = glm::vec3(toLocal * glm::dvec4(streamingSource.Position, 1.0));
+                    inside |= glm::all(glm::lessThanEqual(glm::abs(local), volume.HalfExtents));
+                }
                 for (AssetHandle level : volume.Levels)
                 {
                     if (level == 0)
@@ -1249,8 +1264,16 @@ namespace Nox
             }
         }
 
-        // 2b. HLODs shown or hidden by their cells (§5.13.2).
+        // 2a. Streamed levels complete and ready shown in one frame; 2b. HLODs shown or hidden by their cells (§5.13.2).
+        UpdateStreamedLevelVisibility();
         UpdateHLODVisibility();
+        // The levels not shown yet: their meshes are registered hidden.
+        std::unordered_set<uint64_t> hiddenLevels;
+        for (const StreamedLevel& streamed : m_Levels)
+        {
+            if (!streamed.Shown)
+                hiddenLevels.insert(streamed.Level);
+        }
 
         // 3. Added, changed and removed mesh entities. An entity whose assets are not loaded yet stays pending (the
         // sync point requests them).
@@ -1302,8 +1325,13 @@ namespace Nox
                 --registrationBudget;
 
                 MeshRegistration registration;
+                if (!hiddenLevels.empty())
+                {
+                    const LevelComponent* level = m_Registry.try_get<LevelComponent>(entity);
+                    registration.Hidden = level && hiddenLevels.contains(level->Level);
+                }
                 if (!m_renderer->AddMeshInstances(world->WorldMatrix, *mesh, m_Registry.try_get<MaterialComponent>(entity),
-                                                  static_cast<int32_t>(entity), registration.Instances, missingAssets))
+                                                  static_cast<int32_t>(entity), registration.Instances, missingAssets, registration.Hidden))
                     m_PendingMeshEntities.push_back(entity);
                 if (registration.Instances.empty())
                     continue;
