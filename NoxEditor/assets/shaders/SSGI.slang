@@ -137,9 +137,9 @@ float4 traceMain(MSOutput input, uniform PushConstantSSGI pushConstant) : SV_Tar
                     if (dot(hitNormal, direction) < 0.0)
                     {
                         const float3 hitWorld = ssgi_world_position(pushConstant.invViewProj, sampleUV, sceneDepth);
-                        const float4 previousClip = mul(ubo->prevProj, mul(ubo->prevView, float4(hitWorld, 1.0)));
-                        const float2 previousUV = ssgi_clip_to_uv(previousClip);
-                        if (previousClip.w > 0.0 && all(previousUV > 0.0) && all(previousUV < 1.0))
+                        const float4 previous = prev_frame_uv(ubo, hitWorld, viewportSize);
+                        const float2 previousUV = previous.xy;
+                        if (previous.w > 0.0 && all(previousUV > 0.0) && all(previousUV < 1.0))
                         {
                             // The cone's width where it lands, in pixels: the mip of the lit scene to read.
                             const float travelPixels = length((sampleUV - uv0) * viewportSize);
@@ -220,9 +220,9 @@ SSGIDenoiseOutput denoiseMain(MSOutput input, uniform PushConstantSSGIDenoise pu
         const float2 uv = (float2(pixelCoord) + 0.5) / viewportSize;
         const float4 worldH = mul(pushConstant.invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0));
         const float3 worldPos = worldH.xyz / worldH.w;
-        const float4 previousClip = mul(ubo->prevProj, mul(ubo->prevView, float4(worldPos, 1.0)));
-        const float2 previousUV = float2(previousClip.x / previousClip.w * 0.5 + 0.5, 0.5 - previousClip.y / previousClip.w * 0.5);
-        if (previousClip.w > 0.0 && all(previousUV > 0.0) && all(previousUV < 1.0))
+        const float4 previousFrame = prev_frame_uv(ubo, worldPos, viewportSize);
+        const float2 previousUV = previousFrame.xy;
+        if (previousFrame.w > 0.0 && all(previousUV > 0.0) && all(previousUV < 1.0))
         {
             Texture2D<float2> historyDepth = Texture2D<float2>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.historyDepthTextureIndex, 0));
             const float2 previous = historyDepth.Load(int3(int2(previousUV * viewportSize), 0));

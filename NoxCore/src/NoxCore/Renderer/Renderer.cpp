@@ -5536,6 +5536,7 @@ namespace Nox
         uniformData.proj[1][1] *= -1;*/
 
         uniformData.jitterOffset = m_currentJitter;
+        uniformData.prevJitterOffset = m_prevJitter;
         uniformData.samplerIndex = selectedSampler;
         uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
         uniformData.mipFeedbackReference = m_mipFeedbackBuffer->getDeviceAddress();

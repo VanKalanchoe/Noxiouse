@@ -553,8 +553,8 @@ struct UniformBufferObject
     Frustum frozenFrustum;
 
     // --- Temporal & Motion Vector Matrices ---
-    vec2 jitterOffset;     // Subpixel jitter in pixels
-    vec2 prevJitterOffset; // Previous frame jitter in pixels
+    vec2 jitterOffset;     // Subpixel jitter in pixels (render resolution, x right, y down)
+    vec2 prevJitterOffset; // Previous frame jitter in pixels: last frame's image was drawn with it (prev_clip_to_uv)
     //
 
     uint samplerIndex;
@@ -1267,6 +1267,18 @@ float raster_surface_bias(UniformBufferObject* ubo, float3 worldPos, float minBi
     const bool orthographic = ubo->nonJitteredProj[3][3] > 0.5;
     const float height = orthographic ? 2.0 / yScale : 2.0 * length(worldPos - ubo->cameraWorldPos.xyz) / yScale;
     return max(minBias, height * ubo->lodErrorThreshold);
+}
+
+// Where a point was in last frame's image (render-resolution textures drawn last frame: the SSR history, SSGI's and SSR's own
+// accumulations): through the previous camera with last frame's jitter, as that image was drawn. Without the jitter the lookup lands
+// up to half a pixel off, in another direction every frame -- sharp reflections shimmered on a still camera. w <= 0: behind it.
+float4 prev_frame_uv(UniformBufferObject* ubo, float3 worldPos, float2 viewportSize)
+{
+    const float4 clip = mul(ubo->prevProj, mul(ubo->prevView, float4(worldPos, 1.0)));
+    if (clip.w <= 0.0)
+        return float4(0.0, 0.0, 0.0, -1.0);
+    const float2 ndc = clip.xy / clip.w + float2(2.0, -2.0) * ubo->prevJitterOffset / viewportSize;
+    return float4(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5, clip.z / clip.w, clip.w);
 }
 
 // How much of a light the clouds let through above worldPos: the cloud shadow map's transmittance for the shadow mask's light (the
@@ -2514,6 +2526,23 @@ struct PushConstantSSR
     float thickness;    // world units: how far behind a surface the ray may be and still hit it
     float maxRoughness; // rougher surfaces keep the environment / probes
     uint32_t frameIndex;
+    uint32_t padding[2];
+};
+
+// SSR's temporal filter (SSR.slang temporalMain; UE's SSR temporal accumulation): this frame's reflection blended with last frame's
+// where the reflection was -- a mirror's reflection moves as its mirror image behind the surface does (the hit distance further
+// along the view ray), a rough one with the surface -- clamped to this frame's neighbourhood. What the deferred lighting reads.
+struct PushConstantSSRTemporal
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    uint32_t rawTextureIndex;         // this frame's trace (rgb radiance, a confidence)
+    uint32_t hitDistanceTextureIndex; // its hit distance (world units; 0: no hit)
+    uint32_t depthTextureIndex;
+    uint32_t materialTextureIndex;    // r: roughness
+    uint32_t historyTextureIndex;     // last frame's result (0xFFFFFFFF: none, start over)
+    float currentWeight;              // this frame's share of the blend
+    vec2 viewportSize;
     uint32_t padding[2];
 };
 

@@ -687,3 +687,12 @@ texture moves between slots, and every material update counted as a change of ev
 invalidated the probes and cascades all over the scene. Now a material counts as changed only when its look does (anything but a
 texture's slot; a texture appearing or going still counts). Captures are also budgeted for a steady frame rate (as engines
 time-slice their probe updates): 2 a frame by default, each probe drawing only what lies within 4 cells (at least 20 m).
+
+**SSR: shimmer when still, swimming when moving (2026-11-05).** Two causes. (1) The SSR / SSGI lookups into last frame's lit image
+went through the previous camera without its jitter (that image was drawn jittered): up to half a pixel off in another direction
+every frame -- sharp reflections shimmered on a still camera. `prev_frame_uv` (shaderIO.h) adds last frame's jitter
+(`UniformBufferObject::prevJitterOffset`, now set). (2) SSR went to the deferred lighting raw, and DLSS reprojects the surface, not
+what it reflects: a reflection moves as its mirror image behind the surface does, so the upscaler kept dragging it with the floor
+and letting go. Now a temporal pass (UE's SSR temporal accumulation; `SSR.slang temporalMain`): the trace also writes its hit
+distance; last frame's result is read where the reflection was (the mirror image: the hit distance further along the view ray; rough
+reflections with the surface), clamped to this frame's 3 x 3 neighbourhood in YCoCg, blended 15 % new.

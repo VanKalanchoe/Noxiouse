@@ -17,11 +17,14 @@ namespace Nox
     {
         NRI::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT };
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32_SFLOAT }; // reflection, hit distance
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/SSR.slang" });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/SSR.slang" });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/SSR.slang" });
         m_ssrPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT };
+        desc.shaders.back().entryPoint = "temporalMain";
+        m_ssrTemporalPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
 
         // Screen-space GI (RS5b): its rays, then its denoiser.
         for (NRI::ShaderStageDesc& stage : desc.shaders)
@@ -60,12 +63,26 @@ namespace Nox
             m_ssrHistoryValid = false;
 
         // Nothing to reflect yet (the first frame, a new size), or the RT reflections run: only the history is written this frame.
-        if (!m_ssrHistoryValid || m_frame.rtReflectionsAdded || !m_ssrEnabled)
+        if (!m_ssrHistoryValid || m_frame.rtReflectionsAdded || !m_ssrEnabled || !m_ssrTemporalPipeline)
+        {
+            m_ssrRanLastFrame = false;
             return;
+        }
 
         RGTextureDesc ssrDesc;
         ssrDesc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
-        resources.SSR = m_renderGraph.CreateTexture("SSR", ssrDesc);
+        const RGTexture rawSSR = m_renderGraph.CreateTexture("SSR Raw", ssrDesc);
+        RGTextureDesc hitDesc;
+        hitDesc.Format = NRI::ImageFormat::R32_SFLOAT;
+        const RGTexture hitDistance = m_renderGraph.CreateTexture("SSR Hit Distance", hitDesc);
+        // The temporal filter's two slots: last frame's result read, this frame's written (what the deferred lighting reads).
+        const RGTextureHistory temporal = m_renderGraph.GetHistoryTexture("SSR Temporal", ssrDesc, 2);
+        const uint32_t temporalRead = m_ssrTemporalIndex;
+        const uint32_t temporalWrite = 1 - temporalRead;
+        m_ssrTemporalIndex = temporalWrite;
+        const bool temporalValid = m_ssrRanLastFrame && !temporal.WasReset;
+        m_ssrRanLastFrame = true;
+        resources.SSR = temporal.Textures[temporalWrite];
         m_frame.ssrAdded = true;
         const RGTexture historyRead = resources.SSRHistory[m_ssrHistoryIndex];
         m_renderGraph.AddPass("SSR", RGPassFlags::Raster,
@@ -75,7 +92,8 @@ namespace Nox
                 builder.Read(resources.GBufferNormal);
                 builder.Read(resources.GBufferMaterial);
                 builder.Read(historyRead);
-                builder.ColorTarget(resources.SSR, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.ColorTarget(rawSSR, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.ColorTarget(hitDistance, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
             [this, res = &resources, historyRead, mips = historyDesc.MipLevels](RGPassContext& context)
@@ -85,8 +103,11 @@ namespace Nox
                 cmd.setCullMode(NRI::CullMode::None);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
-                cmd.setColorBlendEnable(0, false);
-                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                for (uint32_t attachment = 0; attachment < 2; ++attachment)
+                {
+                    cmd.setColorBlendEnable(attachment, false);
+                    cmd.setColorWriteMask(attachment, NRI::ColorComponent::All);
+                }
 
                 shaderio::PushConstantSSR push{};
                 push.invViewProj = uniformData.invViewProj;
@@ -102,6 +123,43 @@ namespace Nox
                 push.thickness = WorldUnits::FromMeters(m_ssrThicknessMeters);
                 push.maxRoughness = m_ssrMaxRoughness;
                 push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                cmd.pushData(&push, sizeof(push));
+                cmd.drawMeshTasks(1, 1, 1);
+            });
+
+        // The temporal filter: this frame's trace with last frame's result where the reflection was (SSR.slang temporalMain).
+        const RGTexture historyTemporal = temporal.Textures[temporalRead];
+        m_renderGraph.AddPass("SSR Temporal", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(rawSSR);
+                builder.Read(hitDistance);
+                builder.Read(resources.Depth);
+                builder.Read(resources.GBufferMaterial);
+                if (temporalValid)
+                    builder.Read(historyTemporal);
+                builder.ColorTarget(resources.SSR, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.SetRenderArea(m_frame.renderExtent);
+            },
+            [this, res = &resources, rawSSR, hitDistance, historyTemporal, temporalValid](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ssrTemporalPipeline);
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, false);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                shaderio::PushConstantSSRTemporal push{};
+                push.invViewProj = uniformData.invViewProj;
+                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.rawTextureIndex = context.Slot(rawSSR);
+                push.hitDistanceTextureIndex = context.Slot(hitDistance);
+                push.depthTextureIndex = context.Slot(res->Depth);
+                push.materialTextureIndex = context.Slot(res->GBufferMaterial);
+                push.historyTextureIndex = temporalValid ? context.Slot(historyTemporal) : 0xFFFFFFFF;
+                push.currentWeight = 0.15f; // ~6 frames of history; the neighbourhood clamp keeps it from lagging
+                push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
                 cmd.pushData(&push, sizeof(push));
                 cmd.drawMeshTasks(1, 1, 1);
             });
