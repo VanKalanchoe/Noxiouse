@@ -2529,22 +2529,16 @@ struct PushConstantSSR
     uint32_t padding[2];
 };
 
-// SSR's temporal filter (SSR.slang temporalMain; UE's SSR temporal accumulation): this frame's reflection blended with last frame's
-// where the reflection was -- a mirror's reflection moves as its mirror image behind the surface does (the hit distance further
-// along the view ray), a rough one with the surface -- clamped to this frame's neighbourhood. What the deferred lighting reads.
-struct PushConstantSSRTemporal
+// SSR's roughness filter (SSR.slang filterMain; Godot's SSR filter): the trace blurred on its own surface by roughness, this frame
+// only. What the deferred lighting reads.
+struct PushConstantSSRFilter
 {
-    mat4 invViewProj;
     uint64_t matrixReference;
-    uint32_t rawTextureIndex;         // this frame's trace (rgb radiance, a confidence)
-    uint32_t hitDistanceTextureIndex; // its hit distance (world units; 0: no hit)
+    uint32_t rawTextureIndex;      // the trace (premultiplied: rgb light x confidence, a confidence)
     uint32_t depthTextureIndex;
-    uint32_t materialTextureIndex;    // r: roughness
-    uint32_t historyTextureIndex;     // last frame's result (0xFFFFFFFF: none, start over)
-    float currentWeight;              // this frame's share of the blend
-    vec2 viewportSize;
-    uint32_t normalTextureIndex;      // the G-buffer's normals (the spatial filter keeps to one surface)
+    uint32_t materialTextureIndex; // r: roughness
     uint32_t padding;
+    vec2 viewportSize;
 };
 
 // Screen-space GI (RS5b; SSGI.slang traceMain): a few cosine-distributed rays per pixel marched through the depth buffer, the light

@@ -5,9 +5,8 @@
 // segment, McGuire & Mara 2014), refined by bisection at the first crossing within a thickness; the radiance at the hit is last
 // frame's lit scene (reprojected through the previous camera) at the blur mip the roughness' cone covers there. The confidence fades
 // at the screen's edges, towards the camera, with roughness and near the ray's end; the deferred lighting blends the environment /
-// reflection probes in where it is low. temporalMain then blends it with last frame's result where the reflection was (its mirror
-// image's motion), clamped to this frame's neighbourhood: stable on a still camera, following the reflection when the camera moves
-// (DLSS / TAA reproject the surface, not what it reflects). Only perspective cameras.
+// reflection probes in where it is low. filterMain then blurs it by roughness on its own surface (Godot's SSR filter). Only
+// perspective cameras.
 
 struct SSRPayload
 {
@@ -54,31 +53,18 @@ float ssr_edge_fade(float2 uv)
     return smoothstep(0.0, 0.2, min(edge.x, edge.y));
 }
 
-struct SSROutput
-{
-    float4 reflection : SV_Target0; // rgb radiance x confidence (premultiplied), a confidence
-    float hitDistance : SV_Target1; // world units, 0: no hit
-};
-
-float4 traceReflection(MSOutput input, PushConstantSSR pushConstant, out float hitDistanceOut);
+float4 traceReflection(MSOutput input, PushConstantSSR pushConstant);
 
 [shader("fragment")]
-SSROutput fragMain(MSOutput input, uniform PushConstantSSR pushConstant)
+float4 fragMain(MSOutput input, uniform PushConstantSSR pushConstant) : SV_Target0
 {
-    SSROutput output;
-    output.reflection = traceReflection(input, pushConstant, output.hitDistance);
-    if (output.reflection.a <= 0.0)
-        output.hitDistance = 0.0;
-    // Premultiplied: the filters average hits and misses (a miss is 0 confidence, 0 light) and the lighting blends once. Stored
-    // apart, a miss's black was averaged into the light and the confidence applied to it again -- the reflection came out too dark
-    // wherever hits and misses mix (rough surfaces, edges) and flickered with the mix.
-    output.reflection.rgb *= output.reflection.a;
-    return output;
+    // Premultiplied: rgb = light x confidence (a), so the filter averages hits and misses correctly and the lighting blends once.
+    const float4 reflection = traceReflection(input, pushConstant);
+    return float4(reflection.rgb * reflection.a, reflection.a);
 }
 
-float4 traceReflection(MSOutput input, PushConstantSSR pushConstant, out float hitDistanceOut)
+float4 traceReflection(MSOutput input, PushConstantSSR pushConstant)
 {
-    hitDistanceOut = 0.0;
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     const int2 pixelCoord = int2(input.pos.xy);
     const float2 viewportSize = pushConstant.viewportSize;
@@ -191,9 +177,13 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant, out float h
         if (sceneDepth > 0.0)
         {
             const float behind = rayZ - nearPlane / sceneDepth;
-            // The step's own depth span counts as thickness too (long steps at grazing angles would jump over thin surfaces).
+            // A hit: the ray just behind what the pixel shows, within the step's own depth span (it may have crossed the surface
+            // anywhere along the step: UE's ray cast tolerance), never more than the thickness. Unbounded, a long step at a grazing
+            // angle counted anything the ray passed behind as a hit -- thin fixtures, cables, an awning's housing -- reflections
+            // the RT reflections do not have, which moved as the camera changed what covered what.
             const float stepZ = abs(rayZ - 1.0 / lerp(invW0, invW1, previousT));
-            if (behind > 0.0 && behind < max(pushConstant.thickness, 1.5 * stepZ))
+            const float tolerance = clamp(1.5 * stepZ, 0.02 * ubo->unitsPerMeter, pushConstant.thickness);
+            if (behind > 0.0 && behind < tolerance)
             {
                 hitT = t;
                 break;
@@ -240,7 +230,6 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant, out float h
 
     // The roughness' cone at the hit, in pixels: its blur mip (ColorPyramid.slang's 2x2 averages).
     const float hitDistance = length(hitWorld - start);
-    hitDistanceOut = hitDistance;
     const float hitZ = max(mul(ubo->view, float4(hitWorld, 1.0)).z, nearPlane);
     const float focal = mul(ubo->proj, float4(0.0, 1.0, 0.0, 0.0)).y;
     // The roughness' cone where the ray lands: the blur that stands for the glossy lobe (Godot's cone of mips).
@@ -257,118 +246,47 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant, out float h
     return float4(max(radiance, float3(0.0)), confidence);
 }
 
-// --- temporalMain ----------------------------------------------------------------------------------------------------------------
-
-float3 ssr_rgb_to_ycocg(float3 c)
-{
-    return float3(0.25 * c.r + 0.5 * c.g + 0.25 * c.b, 0.5 * c.r - 0.5 * c.b, -0.25 * c.r + 0.5 * c.g - 0.25 * c.b);
-}
-
-float3 ssr_ycocg_to_rgb(float3 c)
-{
-    return float3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z);
-}
+// --- filterMain ------------------------------------------------------------------------------------------------------------------
+// Godot's SSR filter: the trace blurred by roughness on its own surface, this frame only. No temporal accumulation: the trace has no
+// noise to average (one mirror ray, a fixed step offset), and reusing last frame's reflection, wherever it is reprojected to, makes it
+// trail behind the camera.
 
 [shader("fragment")]
-float4 temporalMain(MSOutput input, uniform PushConstantSSRTemporal pushConstant) : SV_Target0
+float4 filterMain(MSOutput input, uniform PushConstantSSRFilter pushConstant) : SV_Target0
 {
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     const int2 pixelCoord = int2(input.pos.xy);
     const float2 viewportSize = pushConstant.viewportSize;
     Texture2D rawTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rawTextureIndex, 0));
     const float4 raw = rawTex.Load(int3(pixelCoord, 0));
-    if (pushConstant.historyTextureIndex == 0xFFFFFFFF)
-        return raw;
     Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     const float depth = depthTex.Load(int3(pixelCoord, 0)).r;
     if (depth <= 0.0)
         return float4(0.0);
-
     Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.materialTextureIndex, 0));
     const float roughness = saturate(materialTex.Load(int3(pixelCoord, 0)).r);
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
-    const float3 normal = normalize(normalTex.Load(int3(pixelCoord, 0)).rgb + float3(0.0, 1e-6, 0.0));
+    if (roughness < 0.05)
+        return raw; // a mirror: as traced
     const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
     const float viewZ = nearPlane / depth;
 
-    // (Everything here is premultiplied: rgb = light x confidence.)
-    // This frame's neighbourhood (5 x 5, YCoCg: luminance and chroma apart), on this pixel's surface (view depth within 2 %, normals
-    // alike: AMD FidelityFX SSSR's / Frostbite's spatial filter of stochastic reflections), two uses:
-    //   - the spatial filter: the neighbours' rays sampled other directions of the same lobe, so their average is this pixel's
-    //     reflection with less noise. Its width follows the lobe (a Gaussian from about a pixel for a near mirror to the whole 5 x 5
-    //     for a wide one), so a mirror keeps its detail.
-    //   - what last frame's value may be: its mean +- 1.5 standard deviations (variance clipping, Salvi 2016), within its range. A
-    //     min / max box of a noisy input would let the history through or throw it away by chance.
-    // Rough lobes reach further: every other pixel (9 x 9) -- FidelityFX SSSR's wider kernel for wider lobes.
-    const int stride = roughness > 0.3 ? 2 : 1;
+    // 5 x 5 neighbours on this surface (view depth within 2 %), Gaussian, wider for a rougher surface (about a pixel at roughness
+    // 0.05, the whole 5 x 5 from 0.5 on); premultiplied, so hits and misses average correctly.
     const float spread = lerp(0.6, 2.5, saturate(roughness / 0.5));
-    float3 m1 = float3(0.0), m2 = float3(0.0);
-    float a1 = 0.0, a2 = 0.0;
-    float3 lo = float3(1e30), hi = float3(-1e30);
-    float4 filtered = float4(0.0);
-    float filterWeight = 0.0;
-    float momentWeight = 0.0;
+    float4 sum = float4(0.0);
+    float weightSum = 0.0;
     for (int y = -2; y <= 2; ++y)
     {
         for (int x = -2; x <= 2; ++x)
         {
-            const int2 p = clamp(pixelCoord + int2(x, y) * stride, int2(0), int2(viewportSize) - 1);
+            const int2 p = clamp(pixelCoord + int2(x, y), int2(0), int2(viewportSize) - 1);
             const float d = depthTex.Load(int3(p, 0)).r;
             if (d <= 0.0)
                 continue;
-            // The same surface by depth; the normals only loosely (a normal map's bumps differ pixel to pixel: weighted hard, the
-            // bumpy cloth the noise is worst on kept almost no neighbours).
-            const float sameSurface = saturate(1.0 - abs(nearPlane / d - viewZ) / (0.02 * viewZ)) *
-                                      saturate(dot(normalize(normalTex.Load(int3(p, 0)).rgb + float3(0.0, 1e-6, 0.0)), normal) * 2.0 - 0.6);
-            if (sameSurface <= 0.0)
-                continue;
-            const float4 s = rawTex.Load(int3(p, 0));
-            const float3 c = ssr_rgb_to_ycocg(s.rgb);
-            m1 += c * sameSurface;
-            m2 += c * c * sameSurface;
-            a1 += s.a * sameSurface;
-            a2 += s.a * s.a * sameSurface;
-            momentWeight += sameSurface;
-            lo = min(lo, c);
-            hi = max(hi, c);
-            const float w = sameSurface * exp(-float(x * x + y * y) / (2.0 * spread * spread));
-            filtered += s * w;
-            filterWeight += w;
+            const float w = saturate(1.0 - abs(nearPlane / d - viewZ) / (0.02 * viewZ)) * exp(-float(x * x + y * y) / (2.0 * spread * spread));
+            sum += rawTex.Load(int3(p, 0)) * w;
+            weightSum += w;
         }
     }
-    if (momentWeight <= 0.0)
-        return raw;
-    m1 /= momentWeight;
-    m2 /= momentWeight;
-    a1 /= momentWeight;
-    a2 /= momentWeight;
-    const float4 current = filterWeight > 0.0 ? filtered / filterWeight : raw;
-    const float3 sigma = sqrt(max(m2 - m1 * m1, float3(0.0)));
-    lo = max(lo, m1 - 1.5 * sigma);
-    hi = min(hi, m1 + 1.5 * sigma);
-    const float aSigma = sqrt(max(a2 - a1 * a1, 0.0));
-    const float aLo = saturate(a1 - 1.5 * aSigma);
-    const float aHi = saturate(a1 + 1.5 * aSigma);
-
-    // Where the reflection was last frame: a mirror's is its mirror image, the hit distance further along the view ray (it moves as if
-    // behind the surface); a rough one's blur moves with the surface.
-    const float2 uv = (float2(pixelCoord) + 0.5) / viewportSize;
-    const float4 worldH = mul(pushConstant.invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0));
-    const float3 worldPos = worldH.xyz / worldH.w;
-    const float3 camera = ubo->cameraWorldPos.xyz;
-    const float surfaceDistance = max(length(worldPos - camera), 1e-4);
-    Texture2D<float> hitTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.hitDistanceTextureIndex, 0));
-    const float hitDistance = hitTex.Load(int3(pixelCoord, 0));
-    const float mirror = hitDistance > 0.0 ? 1.0 - smoothstep(0.2, 0.45, roughness) : 0.0;
-    const float3 mirrorImage = camera + (worldPos - camera) * ((surfaceDistance + hitDistance) / surfaceDistance);
-    const float4 previous = prev_frame_uv(ubo, lerp(worldPos, mirrorImage, mirror), viewportSize);
-    if (previous.w <= 0.0 || any(previous.xy <= 0.0) || any(previous.xy >= 1.0))
-        return current;
-
-    Texture2D historyTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.historyTextureIndex, 0));
-    SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
-    float4 history = max(historyTex.SampleLevel(linearClamp, previous.xy, 0.0), float4(0.0));
-    history.rgb = ssr_ycocg_to_rgb(clamp(ssr_rgb_to_ycocg(history.rgb), lo, hi));
-    history.a = clamp(history.a, aLo, aHi);
-    return lerp(history, current, saturate(pushConstant.currentWeight));
+    return weightSum > 0.0 ? sum / weightSum : raw;
 }

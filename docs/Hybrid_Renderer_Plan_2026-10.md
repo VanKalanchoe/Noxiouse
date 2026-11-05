@@ -726,3 +726,10 @@ Toksvig normal filtering (Toksvig 2004; roughness from normal variance as UE / F
 reflects off the mean normal of the 9 x 9 neighbours on the same surface (every other pixel, view depth within 2 %), and the mean's
 shortening becomes roughness (sigma^2 ~ 2 (1 - |mean|)): a wavy glossy surface gets a steady, blurred reflection (or, past the SSR's
 maximum roughness, the probes); flat glossy surfaces keep their mirror.
+Then (user: hybrid's RT reflections fine, SSR's reflection moves): two errors in the SSR itself. (1) Its temporal pass reused last
+frame's reflection reprojected through a blend of the surface's and the mirror image's positions -- neither for a medium roughness:
+the history came from the wrong place and the reflection trailed the camera. With the trace now noise-free, there is nothing to
+accumulate: the temporal pass is gone, replaced by Godot's roughness filter alone (the 5 x 5 same-surface Gaussian, this frame only).
+(2) The hit test accepted any surface within 1.5 x the step's depth span behind the ray, unbounded: long grazing steps "hit" thin
+things the ray passed behind (fixtures, cables, an awning's housing), which RT does not reflect and which changed as the camera moved.
+The tolerance is now clamp(1.5 x step span, 2 cm, Thickness).

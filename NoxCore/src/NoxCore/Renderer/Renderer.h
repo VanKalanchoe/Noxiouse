@@ -1672,9 +1672,7 @@ namespace Nox
         uint64_t m_sceneBoundsFrame = 0;
         bool m_sceneBoundsValid = false;
         std::unique_ptr<NRI::Pipeline> m_ssrPipeline;
-        std::unique_ptr<NRI::Pipeline> m_ssrTemporalPipeline; // SSR.slang temporalMain
-        uint32_t m_ssrTemporalIndex = 0;   // its history slot last frame wrote
-        bool m_ssrRanLastFrame = false;    // SSR ran last frame (its temporal history holds a result)
+        std::unique_ptr<NRI::Pipeline> m_ssrFilterPipeline; // SSR.slang filterMain (the roughness blur)
         bool m_ssrEnabled = false;
         float m_ssrMaxDistanceMeters = 50.0f;
         float m_ssrThicknessMeters = 0.3f;
