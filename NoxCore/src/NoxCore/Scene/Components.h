@@ -358,6 +358,22 @@ namespace Nox
         DiscLightComponent(const DiscLightComponent&) = default;
     };
 
+    // A reflection probe (RS4b; UE5's box reflection capture, Godot's ReflectionProbe): the scene captured from the entity's position into a
+    // cubemap; inside its box (Extents: half size along the entity's axes, scaled with it) the specular environment comes from it,
+    // box-projected, fading in over BlendDistance from the box's sides. Captured when added, moved or changed, or with Recapture (one
+    // probe a frame); Resolution texels per cube face.
+    struct ReflectionProbeComponent
+    {
+        glm::vec3 Extents{ WorldUnits::FromMeters(5.0f), WorldUnits::FromMeters(3.0f), WorldUnits::FromMeters(5.0f) };
+        float BlendDistance = WorldUnits::FromMeters(1.0f);
+        float Intensity = 1.0f;
+        uint32_t Resolution = 128;
+        uint32_t Revision = 0; // not saved: Recapture bumps it
+
+        ReflectionProbeComponent() = default;
+        ReflectionProbeComponent(const ReflectionProbeComponent&) = default;
+    };
+
     // Image-based environment lighting. The renderer will preprocess TexturePath into its
     // diffuse irradiance/specular IBL maps; this is deliberately separate from punctual
     // directional/point/spot lights.
@@ -1015,7 +1031,7 @@ namespace Nox
 
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
-        MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, EnvironmentLightComponent, AnimatorComponent,
+        MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, EnvironmentLightComponent, AnimatorComponent,
         TimelinePlayerComponent, ParticleEmitterComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,

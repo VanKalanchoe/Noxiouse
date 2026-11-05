@@ -572,6 +572,20 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (entity.HasComponent<ReflectionProbeComponent>())
+        {
+            out << YAML::Key << "ReflectionProbeComponent";
+            out << YAML::BeginMap;
+
+            auto& rpc = entity.GetComponent<ReflectionProbeComponent>();
+            out << YAML::Key << "Extents" << YAML::Value << rpc.Extents;
+            out << YAML::Key << "BlendDistance" << YAML::Value << rpc.BlendDistance;
+            out << YAML::Key << "Intensity" << YAML::Value << rpc.Intensity;
+            out << YAML::Key << "Resolution" << YAML::Value << rpc.Resolution;
+
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<DiscLightComponent>())
         {
             out << YAML::Key << "DiscLightComponent";
@@ -1864,6 +1878,20 @@ namespace Nox
                 rlc.Height = rectLightComponent["Height"].as<float>();
             if (rectLightComponent["Range"])
                 rlc.Range = rectLightComponent["Range"].as<float>();
+        }
+
+        auto reflectionProbeComponent = entity["ReflectionProbeComponent"];
+        if (reflectionProbeComponent)
+        {
+            auto& rpc = deserializedEntity.AddComponent<ReflectionProbeComponent>();
+            if (reflectionProbeComponent["Extents"])
+                rpc.Extents = reflectionProbeComponent["Extents"].as<glm::vec3>();
+            if (reflectionProbeComponent["BlendDistance"])
+                rpc.BlendDistance = reflectionProbeComponent["BlendDistance"].as<float>();
+            if (reflectionProbeComponent["Intensity"])
+                rpc.Intensity = reflectionProbeComponent["Intensity"].as<float>();
+            if (reflectionProbeComponent["Resolution"])
+                rpc.Resolution = reflectionProbeComponent["Resolution"].as<uint32_t>();
         }
 
         auto discLightComponent = entity["DiscLightComponent"];

@@ -751,6 +751,11 @@ struct UniformBufferObject
     // their texels miss). 0: off.
     float contactShadowLength;
     uint32_t contactShadowSamples;
+    // Reflection probes (RS4b; Renderer::addReflectionProbePasses, reflection_probe_radiance in PBRLighting.slang): GpuReflectionProbe
+    // [reflectionProbeCount], the smallest boxes first, each with a captured prefiltered cubemap. 0: none (the sky's map alone).
+    uint64_t reflectionProbesReference;
+    uint32_t reflectionProbeCount;
+    uint32_t reflectionProbePadding;
 };
 
 // An emissive mesh instance as a light for the path tracer's direct light sampling: picked by weight (its emission's luminance
@@ -2236,6 +2241,34 @@ struct GpuShadowCascades
     float filterTexels;     // PCF kernel radius / PCSS minimum
     float maxFilterTexels;  // PCSS kernel radius limit
     uint32_t padding[3];
+};
+
+// A reflection probe (RS4b, UE5's box reflection capture / Godot's ReflectionProbe): the scene seen from its position, captured into a
+// cubemap and prefiltered like the sky's; inside its box (the entity's transform, Extents) the specular environment comes from it,
+// box-projected (the reflection ray met with the box, looked up from the capture point), fading out over the blend distance.
+STATIC_CONST uint32_t MaxReflectionProbes = 32;
+
+struct GpuReflectionProbe
+{
+    mat4 worldToLocal;      // render space -> the probe's box space (the entity's transform inverted)
+    mat4 localToWorld;
+    vec4 extents;           // xyz: the box's half size (local units), w: intensity
+    vec4 blend;             // xyz: the blend distance per axis (local units), w: the cubemap's mip count
+    vec4 center;            // xyz: where it was captured (render space)
+    uint32_t cubeTextureIndex;
+    uint32_t padding[3];
+};
+
+// The capture's six rendered faces into a probe's cubemap (ReflectionProbe.slang assembleMain): per cube texel, its direction, the
+// face rendered towards it and that face's pixel.
+struct PushConstantProbeAssemble
+{
+    uint64_t facesReference;   // mat4 viewProj[6] (+X, -X, +Y, -Y, +Z, -Z), then vec4 center (render space)
+    uint32_t faceTextureIndex[6];
+    uint32_t outputStorageIndex; // the cubemap's mip being written (RWTexture2DArray)
+    uint32_t outputSize;
+    uint32_t sourceTextureIndex; // downsampleMain: the cubemap (sampled), its mip outputMip - 1
+    uint32_t outputMip;
 };
 
 // Local lights' shadow maps (RS1b; Renderer::addLocalShadowPasses): perspective views in one depth atlas, UE5's local light shadows

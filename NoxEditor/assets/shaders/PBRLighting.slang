@@ -150,7 +150,51 @@ float iblSpecularOcclusion(float NdotV, float ao, float roughness)
 // only the specular term uses it here, through iblSpecularOcclusion above -- diffuse AO is applied once, by the
 // caller, the same way it always was (baked-texture AO folded into occlusion further up, multiplied into the
 // pixel's whole lit result at the very end).
+// The specular environment at worldPos along `direction` (RS4b): the reflection probes whose boxes hold the point -- box-projected (the
+// ray met with the box, looked up from where the probe was captured), the smaller boxes first, each fading in over its blend
+// distance -- over `skyRadiance`, the sky's prefiltered map, where they leave room.
+float3 reflection_probe_radiance(UniformBufferObject* ubo, float3 worldPos, float3 direction, float perceptualRoughness, float3 skyRadiance)
+{
+    if (ubo->reflectionProbesReference == 0 || ubo->reflectionProbeCount == 0)
+        return skyRadiance;
+    GpuReflectionProbe* probes = (GpuReflectionProbe*)ubo->reflectionProbesReference;
+    SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
+    float3 radiance = float3(0.0);
+    float coverage = 0.0;
+    const uint count = min(ubo->reflectionProbeCount, MaxReflectionProbes);
+    for (uint i = 0; i < count && coverage < 0.999; ++i)
+    {
+        const GpuReflectionProbe probe = probes[i];
+        const float3 local = mul(probe.worldToLocal, float4(worldPos, 1.0)).xyz;
+        const float3 inside = probe.extents.xyz - abs(local);
+        if (any(inside <= 0.0))
+            continue;
+        const float3 fade = saturate(inside / max(probe.blend.xyz, float3(1e-4)));
+        const float weight = fade.x * fade.y * fade.z;
+        // Box projection: where the ray leaves the box, seen from the capture point.
+        float3 localDirection = mul(probe.worldToLocal, float4(direction, 0.0)).xyz;
+        localDirection = select(abs(localDirection) < 1e-6, float3(1e-6), localDirection);
+        const float3 tFar = max((probe.extents.xyz - local) / localDirection, (-probe.extents.xyz - local) / localDirection);
+        const float t = min(min(tFar.x, tFar.y), tFar.z);
+        const float3 boxHit = mul(probe.localToWorld, float4(local + localDirection * t, 1.0)).xyz;
+        TextureCube cube = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + probe.cubeTextureIndex, 0));
+        const float3 probeRadiance = cube.SampleLevel(samplerPrefiltered, boxHit - probe.center.xyz, perceptualRoughness * max(probe.blend.w - 1.0, 0.0)).rgb *
+                                     probe.extents.w;
+        radiance += probeRadiance * weight * (1.0 - coverage);
+        coverage += weight * (1.0 - coverage);
+    }
+    return radiance + skyRadiance * (1.0 - coverage);
+}
+
+// getIBLContribution with the reflection probes at worldPos over the sky's specular map.
+IBLResult getIBLContributionAt(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos);
+
 IBLResult getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao)
+{
+    return getIBLContributionAt(ubo, pbrInputs, n, reflection, ao, float3(1e30));
+}
+
+IBLResult getIBLContributionAt(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos)
 {
     if (ubo->irradianceMapIndex == 0xFFFFFFFF || ubo->prefilteredMapIndex == 0xFFFFFFFF || ubo->brdfLutIndex == 0xFFFFFFFF)
     {
@@ -175,6 +219,8 @@ IBLResult getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, float3
     TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
     float4 prefilteredSample = prefilteredTex.SampleLevel(samplerPrefiltered, reflection, lod);
     float3 specularLight = prefilteredSample.rgb * ubo->scaleIBLAmbient;
+    if (worldPos.x < 1e29)
+        specularLight = reflection_probe_radiance(ubo, worldPos, reflection, pbrInputs.perceptualRoughness, specularLight);
 
     IBLResult result;
     result.diffuse = diffuseLight * pbrInputs.diffuseColor * ubo->scaleIBLAmbient;

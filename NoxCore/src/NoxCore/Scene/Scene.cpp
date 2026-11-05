@@ -1171,7 +1171,7 @@ namespace Nox
         // them (SyncGpuScene).
         m_SubmitSystems.AddSystem("Submit Lights",
             ComponentAccess().Read<WorldTransformComponent, CameraComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent,
-                                   RectLightComponent, DiscLightComponent>().Write<LightSubmission>(),
+                                   RectLightComponent, DiscLightComponent, ReflectionProbeComponent>().Write<LightSubmission>(),
             [this]() { SubmitLights(); });
         m_SubmitSystems.AddSystem("Submit 2D",
             ComponentAccess().Read<WorldTransformComponent, SpriteRendererComponent, CircleRendererComponent, TextComponent>().Write<Renderer2DSubmission>(),
@@ -2229,7 +2229,7 @@ namespace Nox
         // them directly makes duplicated glTF hierarchies share their children.
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
-            PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent,
+            PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent,
             FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
@@ -2592,6 +2592,15 @@ namespace Nox
                 m_renderer->SubmitLight(wtc.WorldMatrix, light);
             }
         }
+        {
+            // Reflection probes (the renderer keeps each one's capture by its entity's ID).
+            auto view = m_Registry.view<WorldTransformComponent, ReflectionProbeComponent, IDComponent>();
+            for (auto entity : view)
+            {
+                auto [wtc, probe, id] = view.get<WorldTransformComponent, ReflectionProbeComponent, IDComponent>(entity);
+                m_renderer->SubmitReflectionProbe(static_cast<uint64_t>(id.ID), wtc.WorldMatrix, probe);
+            }
+        }
         // The environment itself is applied by SetRenderer (main thread); this system may run on a worker.
         if (environment)
             m_renderer->setScaleIBLAmbient(environment->RadianceScale.x);
@@ -2762,6 +2771,11 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<DiscLightComponent>(Entity entity, DiscLightComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<ReflectionProbeComponent>(Entity entity, ReflectionProbeComponent& component)
     {
     }
 

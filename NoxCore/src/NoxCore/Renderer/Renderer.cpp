@@ -371,6 +371,7 @@ namespace Nox
         watchShader("assets/shaders/ShadowMapResolve.slang", "ShadowMapResolve", [this]() { createShadowMapPipelines(true); });
         watchShader("assets/shaders/ShadowMaps.slang", "ShadowMaps", [this]() { createShadowMapPipelines(true); });
         watchShader("assets/shaders/SSR.slang", "SSR", [this]() { createSSRPipeline(true); });
+        watchShader("assets/shaders/ReflectionProbe.slang", "ReflectionProbe", [this]() { createReflectionProbePipelines(true); });
         watchShader("assets/shaders/ComputeSkinning.slang", "ComputeSkinning", [this]() { createComputeSkinningPipeline(true); });
         // G-Buffer (Fix watcher to recompile m_gbufferPipeline)
         watchShader("assets/shaders/GBufferMaterial.slang", "GBuffer", [this]() { createGBufferPipeline(true); });
@@ -613,6 +614,7 @@ namespace Nox
         createShadowMaskPipeline();
         createShadowMapPipelines();
         createSSRPipeline();
+        createReflectionProbePipelines();
         createNRDGuidesPipeline();
         createReflectionPipeline();
         // Path Tracer
@@ -4940,6 +4942,7 @@ namespace Nox
             // After the GI: reflection hits on screen take its light (SceneGI.slang), off screen this frame's DDGI.
             addRTReflectionPasses();
             addSSRPass(); // where the RT reflections do not run (last frame's lit scene)
+            addReflectionProbePasses(); // the probe table, and one probe's capture when one needs it
             addLightPresamplingPasses();
             addReSTIRGIPasses();
             addReSTIRDIPasses();
@@ -4973,6 +4976,7 @@ namespace Nox
             resolveFrameUniforms();
             updateShadowMapUniforms();
             updateLocalShadowUniforms();
+            updateReflectionProbeUniforms();
             updateExtraViewUniforms();
             // Read back only what this frame's inspector actually probes.
             m_inspectionProbePending[frameIndex] = m_frame.inspectionProbe && m_renderGraph.IsInspecting() ? 1 : 0;
@@ -6045,6 +6049,7 @@ namespace Nox
         m_sceneFrameCounter++;
 
         m_lightBufferObjects.clear();
+        m_probeSubmissions.clear();
         m_particles.clear();
         m_particleBatches.clear();
     }
@@ -7131,6 +7136,8 @@ namespace Nox
             // The sun's shadow cascades cover the camera's view, not this one's (its forward pass keeps the RT shadow rays).
             uniforms.sunShadowCascadesReference = 0;
             uniforms.localShadowsReference = 0; // (its forward pass does not declare the atlas: the RT rays there)
+            uniforms.reflectionProbesReference = 0; // (its forward pass has no probe lookup; keep it out of a preview)
+            uniforms.reflectionProbeCount = 0;
             uniforms.localShadowLightViewsReference = 0;
             // The atlases are only read (and declared) when DDGI ran this frame.
             if (!m_frame.ddgiAdded)

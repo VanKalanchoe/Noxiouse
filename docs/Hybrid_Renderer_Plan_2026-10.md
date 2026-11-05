@@ -553,3 +553,17 @@ reprojected through the previous camera: a two-slot history of the HDR scene (af
 blur mip chain (ColorPyramid.slang), sampled at the mip the GGX cone (2 x hit distance x alpha) covers at the hit. Confidence fades
 at the screen edges (both frames), towards the camera, with roughness (up to 0.6) and near the ray's end; the deferred lighting
 blends `ssr x (F0 x A + F90 x B)` over the environment by it. Perspective cameras only.
+
+**Reflection probes (RS4b, 2026-11-05, untested)** -- Add Component > Reflection Probe (Extents, Blend Distance, Intensity,
+Resolution 64-512, Recapture); Settings > Reflection Probes (on: nothing changes until probes are placed). UE5's box reflection
+captures / Godot's ReflectionProbe (`Passes/ReflectionPasses.cpp`, `ReflectionProbe.slang`, `reflection_probe_radiance` in
+PBRLighting.slang):
+- **Capture** when a probe is new, moved, resized or asked to (one a frame): six 90-degree faces from its position, each culled
+  and drawn as the editor's extra views draw a camera (opaque / masked lit in the fragment shader with the RT shadow rays, unlit,
+  the sky), assembled into a cubemap per texel direction (the face its largest axis points at, through that face's projection --
+  no face-orientation conventions to match), mipped, then prefiltered by PrefilterEnv.slang like the sky's map (roughness by mip).
+  Captures not submitted for 120 frames are released.
+- **Lookup** (deferred lighting's IBL specular): the probes whose boxes hold the point, the smallest boxes first, each box-projected
+  (the reflection ray met with the box in its local space, the cubemap read from the capture point towards that hit) and fading in
+  over the blend distance from the box's sides; the sky's map fills what they leave. SSR / RT reflections still go on top where they
+  find something.

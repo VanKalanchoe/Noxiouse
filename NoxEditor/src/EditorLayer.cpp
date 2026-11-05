@@ -1631,6 +1631,14 @@ namespace Nox
                     m_Renderer->setSSRMaxRoughness(maxRoughness);
                 ImGui::Unindent();
             }
+            bool reflectionProbes = m_Renderer->getReflectionProbesEnabled();
+            if (ImGui::Checkbox("Reflection Probes", &reflectionProbes))
+                m_Renderer->setReflectionProbesEnabled(reflectionProbes);
+            ImGui::SetItemTooltip("Placed probes (Add Component > Reflection Probe): inside their boxes the environment reflection\n"
+                                  "comes from the probe's capture of its surroundings instead of the sky (under SSR / RT reflections,\n"
+                                  "where they find nothing). Captured when placed, moved or changed (one a frame).");
+            ImGui::SameLine();
+            ImGui::TextDisabled("(%u in use)", m_Renderer->getReflectionProbeCount());
             ImGui::Separator();
 
             // Hybrid Ray Tracing options (only visible when not in full Path Tracing)
@@ -2559,6 +2567,22 @@ namespace Nox
                 const glm::vec3 forward = -glm::vec3(world[2]);
                 if (glm::length(forward) > 1e-6f)
                     m_Renderer2D->DrawXRayLine(centre, centre + glm::normalize(forward) * 0.5f * (glm::length(halfX) + glm::length(halfY)), colour);
+            }
+            // Reflection probes: their box.
+            auto probes = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, ReflectionProbeComponent>();
+            for (auto entity : probes)
+            {
+                auto [wtc, probe] = probes.get<WorldTransformComponent, ReflectionProbeComponent>(entity);
+                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+                glm::vec3 corners[8];
+                for (int i = 0; i < 8; ++i)
+                    corners[i] = glm::vec3(world * glm::vec4((i & 1) ? probe.Extents.x : -probe.Extents.x, (i & 2) ? probe.Extents.y : -probe.Extents.y,
+                                                             (i & 4) ? probe.Extents.z : -probe.Extents.z, 1.0f));
+                const glm::vec4 colour(0.4f, 0.8f, 1.0f, 1.0f);
+                for (int i = 0; i < 8; ++i)
+                    for (int axis = 1; axis < 8; axis <<= 1)
+                        if (!(i & axis))
+                            m_Renderer2D->DrawXRayLine(corners[i], corners[i | axis], colour);
             }
             // Disc lights likewise: their circle and the way they shine.
             auto discLights = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, DiscLightComponent>();

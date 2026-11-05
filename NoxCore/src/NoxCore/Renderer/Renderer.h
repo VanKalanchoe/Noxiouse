@@ -12,6 +12,7 @@
 #include "Mesh.h"
 #include <mutex>
 #include <variant>
+#include <unordered_map>
 
 #include "GeometryArena.h"
 #include "MemoryBudget.h"
@@ -355,6 +356,8 @@ namespace Nox
         void SubmitLight(const glm::dmat4& transform, const PointLightComponent& light);
         void SubmitLight(const glm::dmat4& transform, const SpotLightComponent& light);
         void SubmitLight(const glm::dmat4& transform, const RectLightComponent& light);
+        // Reflection probes (RS4b; Passes/ReflectionPasses.cpp): `id` keeps its capture (the entity's ID) from frame to frame.
+        void SubmitReflectionProbe(uint64_t id, const glm::dmat4& worldTransform, const ReflectionProbeComponent& probe);
         void SubmitLight(const glm::dmat4& transform, const DiscLightComponent& light);
 
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
@@ -597,6 +600,11 @@ namespace Nox
         uint32_t getSSRMaxSteps() const { return m_ssrMaxSteps; }
         void setSSRMaxRoughness(float roughness) { m_ssrMaxRoughness = std::clamp(roughness, 0.05f, 1.0f); }
         float getSSRMaxRoughness() const { return m_ssrMaxRoughness; }
+        // Reflection probes (RS4b): placed probes' captures used for the specular environment inside their boxes (on by default: there
+        // are none until probes are placed); captured probes this frame (stats).
+        void setReflectionProbesEnabled(bool enabled) { m_reflectionProbesEnabled = enabled; }
+        bool getReflectionProbesEnabled() const { return m_reflectionProbesEnabled; }
+        uint32_t getReflectionProbeCount() const { return uniformData.reflectionProbeCount; }
         // This frame's local lights with a shadow map and their views (stats).
         uint32_t getLocalShadowLightCount() const { return m_localShadowLightCount; }
         uint32_t getLocalShadowViewCount() const { return m_localShadows.viewCount; }
@@ -1121,6 +1129,11 @@ namespace Nox
         void createSSRPipeline(bool forceCompile = false);
         void addSSRPass();
         void addSSRHistoryPass();
+        // Reflection probes: the probe table of this frame and at most one probe's capture (six faces, assembled, prefiltered); after
+        // Compile the capture faces' uniforms.
+        void createReflectionProbePipelines(bool forceCompile = false);
+        void addReflectionProbePasses();
+        void updateReflectionProbeUniforms();
         void updateLocalShadowUniforms();
         // After Compile: the cascades' bindless slots into GpuShadowCascades, each cascade's copy of the frame's uniforms.
         void updateShadowMapUniforms();
@@ -1383,6 +1396,52 @@ namespace Nox
         uint32_t m_localShadowMaxLights = 8;
         uint32_t m_localShadowAtlasSize = 4096;
         uint32_t m_localShadowMaxResolution = 1024;
+        // Reflection probes: this frame's submissions, each probe's capture (kept by ID; dropped when no longer submitted), the table
+        // and the capture's per-face uniforms / culling views / face matrices per frame slot.
+        struct ReflectionProbeSubmission
+        {
+            uint64_t Id = 0;
+            glm::dmat4 World{ 1.0 };
+            glm::vec3 Extents{ 1.0f };
+            float BlendDistance = 0.0f;
+            float Intensity = 1.0f;
+            uint32_t Resolution = 128;
+            uint32_t Revision = 0;
+        };
+        struct ReflectionProbeCapture
+        {
+            Ref<Texture2D> Raw;         // the six faces assembled, with a mip chain (the prefilter's source)
+            Ref<Texture2D> Prefiltered; // what the lighting samples: roughness by mip
+            std::vector<uint32_t> RawStorage;
+            std::vector<uint32_t> PrefilteredStorage;
+            uint32_t Resolution = 0;
+            bool Captured = false;
+            glm::dmat4 CapturedWorld{ 0.0 };
+            glm::vec3 CapturedExtents{ 0.0f };
+            uint32_t CapturedRevision = ~0u;
+            uint64_t LastSubmittedFrame = 0;
+        };
+        std::vector<ReflectionProbeSubmission> m_probeSubmissions;
+        std::unordered_map<uint64_t, ReflectionProbeCapture> m_probeCaptures;
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_probeTableBuffers;
+        std::array<void*, MAX_FRAMES_IN_FLIGHT> m_probeTableBuffersMapped{};
+        std::array<std::array<std::unique_ptr<NRI::Buffer>, 6>, MAX_FRAMES_IN_FLIGHT> m_probeFaceUniforms;
+        std::array<std::array<void*, 6>, MAX_FRAMES_IN_FLIGHT> m_probeFaceUniformsMapped{};
+        std::array<std::array<std::unique_ptr<NRI::Buffer>, 6>, MAX_FRAMES_IN_FLIGHT> m_probeFaceCullViews;
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_probeFaceBuffers; // mat4 viewProj[6], vec4 center
+        std::array<void*, MAX_FRAMES_IN_FLIGHT> m_probeFaceBuffersMapped{};
+        std::unique_ptr<NRI::Pipeline> m_probeAssemblePipeline;
+        std::unique_ptr<NRI::Pipeline> m_probeDownsamplePipeline;
+        std::unique_ptr<NRI::Pipeline> m_probePrefilterPipeline;
+        struct ProbeCaptureFrame
+        {
+            bool Active = false;
+            glm::vec3 Center{ 0.0f };
+            uint32_t Resolution = 0;
+            std::array<glm::mat4, 6> Views{};
+            std::array<glm::mat4, 6> Projections{};
+        } m_probeCaptureFrame;
+        bool m_reflectionProbesEnabled = true;
         std::unique_ptr<NRI::Pipeline> m_ssrPipeline;
         bool m_ssrEnabled = false;
         float m_ssrMaxDistanceMeters = 50.0f;

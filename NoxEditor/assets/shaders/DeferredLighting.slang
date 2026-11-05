@@ -627,7 +627,7 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
             diffuseColor,
             specularColor
         );
-        IBLResult ibl = getIBLContribution(ubo, iblInputs, n, environmentReflection, occlusion);
+        IBLResult ibl = getIBLContributionAt(ubo, iblInputs, n, environmentReflection, occlusion, worldPos); // the reflection probes too
         float3 ambientDiffuse = ibl.diffuse;
         float3 ambientSpecular = ibl.specular;
 

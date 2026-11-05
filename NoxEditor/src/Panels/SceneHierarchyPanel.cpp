@@ -988,6 +988,7 @@ namespace Nox
             DisplayAddComponentEntry<PointLightComponent>("Point Light");
             DisplayAddComponentEntry<SpotLightComponent>("Spot Light");
             DisplayAddComponentEntry<RectLightComponent>("Rect Light");
+            DisplayAddComponentEntry<ReflectionProbeComponent>("Reflection Probe");
             DisplayAddComponentEntry<DiscLightComponent>("Disc Light");
             DisplayAddComponentEntry<EnvironmentLightComponent>("Environment Light");
 
@@ -1653,6 +1654,32 @@ namespace Nox
             DrawLengthControl("Range", component.Range, 0.0f, 0.0f);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Where its light fades out (0: no limit). It shines from its front, the entity's -Z.");
+        });
+
+        DrawComponent<ReflectionProbeComponent>("Reflection Probe", entity, [](auto& component)
+        {
+            DrawLengthControl("Extent X", component.Extents.x, 0.0f, 0.0f);
+            DrawLengthControl("Extent Y", component.Extents.y, 0.0f, 0.0f);
+            DrawLengthControl("Extent Z", component.Extents.z, 0.0f, 0.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Half the box's size along the entity's axes (scaled with it): inside it, reflections come from\n"
+                                  "this probe, projected onto the box (a room's walls line up with what they reflect).");
+            DrawLengthControl("Blend Distance", component.BlendDistance, 0.0f, 0.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("How far in from the box's sides it fades in over the probes around it or the sky.");
+            ImGui::DragFloat("Intensity", &component.Intensity, 0.01f, 0.0f, 16.0f);
+            const uint32_t resolutions[] = { 64, 128, 256, 512 };
+            const char* resolutionNames[] = { "64", "128", "256", "512" };
+            int resolution = 1;
+            for (int i = 0; i < 4; ++i)
+                if (resolutions[i] == component.Resolution) resolution = i;
+            if (ImGui::Combo("Resolution", &resolution, resolutionNames, IM_ARRAYSIZE(resolutionNames)))
+                component.Resolution = resolutions[resolution];
+            if (ImGui::Button("Recapture"))
+                ++component.Revision;
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Captures the scene again (it is captured when added, moved or changed; not when the scene around\n"
+                                  "it changes).");
         });
 
         DrawComponent<DiscLightComponent>("Disc Light", entity, [](auto& component)

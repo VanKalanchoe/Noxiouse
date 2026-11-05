@@ -197,6 +197,8 @@ namespace Nox
                     AppendSetting(out, "Screen-space reflections: ON{} | {:.0f} m | {} steps | roughness < {:.2f}",
                                   renderer.getRayTracingEnabled() && renderer.getRayTracingReflections() ? " (RT reflections take precedence)" : "",
                                   WorldUnits::ToMeters(renderer.getSSRMaxDistance()), renderer.getSSRMaxSteps(), renderer.getSSRMaxRoughness());
+                if (renderer.getReflectionProbesEnabled() && renderer.getReflectionProbeCount() > 0)
+                    AppendSetting(out, "Reflection probes: {} in use", renderer.getReflectionProbeCount());
                 if (renderer.getContactShadowsEnabled())
                     AppendSetting(out, "Contact shadows: ON | {:.2f} m | {} steps (on shadow-mapped lights)",
                                   WorldUnits::ToMeters(renderer.getContactShadowLength()), renderer.getContactShadowSamples());
