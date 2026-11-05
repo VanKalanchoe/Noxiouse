@@ -502,3 +502,11 @@ How it is built (UE5's directional light without virtual shadow maps; `Passes/Sh
 
 To measure (Bistro, the streaming test world): GPU time of the "Sun Shadow Cascade n" + "Sun Shadow Map Resolve" passes vs "RT
 Shadows" + "NRD Shadows", VRAM (4 x 16 MB at 2048^2), and the image (contact hardening, thin casters, foliage, acne / peter panning).
+
+**First measurement (2026-11-05, the user's scene, 1211x620 render -> 1816x930, DLSS Quality + RR, hybrid on, 1 light):**
+RT: RT Shadows 0.30 + NRD Shadows 0.34 = **0.64 ms**. Shadow maps (4 x 2048, PCSS): culling 0.15 + 0.16 + 0.19 + 0.11, depth
+0.43 + 0.61 + 0.58 + 0.23, resolve 0.15 = **2.61 ms** of pass time. The passes overlap the async-compute screen probes (which
+slowed 3.48 -> 3.76 ms), so the frame grew only 15.18 -> 15.44 ms: net about 0.26 + 0.64 = **0.9 ms** for the maps vs 0.64 ms for
+RT. Transient VRAM +55 MB. Image: the user saw them "almost identical". **RT stays the default** for the sun. If the maps are to
+compete: cache the far cascades (UE's static shadow caching / redraw only what moved), cheaper per-cascade culling (each 0.15 ms
+for 2909 entries vs 0.09 for the camera), lower resolution for the far cascades.

@@ -166,6 +166,19 @@ namespace Nox
                 AppendSetting(out, "Pipeline: Raster");
             }
 
+            // The sun's shadows (deferred and forward lighting, both pipelines above but the path tracer): the RT mask or the cascades.
+            if (!renderer.isPathTracingEnabled())
+            {
+                if (renderer.getSunShadowMode() == Renderer::SunShadowMode::ShadowMaps)
+                    AppendSetting(out, "Sun shadows: Shadow Maps | {} cascades of {} | {:.0f} m | {} | filter {:.1f} - {:.0f} texels",
+                                  renderer.getShadowCascadeCount(), renderer.getShadowMapResolution(),
+                                  WorldUnits::ToMeters(renderer.getShadowDistance()),
+                                  renderer.getShadowFilter() == 1 ? "PCSS" : "PCF", renderer.getShadowFilterTexels(),
+                                  renderer.getShadowMaxFilterTexels());
+                else
+                    AppendSetting(out, "Sun shadows: Ray Traced{}", renderer.getRayTracingEnabled() && renderer.getRayTracingShadows() ? "" : " (off: Ray Tracing Shadows is off)");
+            }
+
             // Debug views replace the lit output and change what runs, so a report taken with one is not comparable.
             if (renderer.getDebugMode() != 0)
                 AppendSetting(out, "Debug view: {} (not a normal lit frame)", renderer.getDebugMode());
