@@ -696,3 +696,9 @@ what it reflects: a reflection moves as its mirror image behind the surface does
 and letting go. Now a temporal pass (UE's SSR temporal accumulation; `SSR.slang temporalMain`): the trace also writes its hit
 distance; last frame's result is read where the reflection was (the mirror image: the hit distance further along the view ray; rough
 reflections with the surface), clamped to this frame's 3 x 3 neighbourhood in YCoCg, blended 15 % new.
+Measured after (video, same build): the awnings' reflection of the ivy wall still jumped between frames 1/30 s apart. SSR traced the
+mirror direction alone: on glossy normal-mapped cloth the mirror direction swings with the slightest camera move, and the temporal
+filter's min/max clamp of such an input could not hold a history. Now the ray samples the roughness' GGX lobe (visible normals, Heitz
+2018; the grazing tail trimmed as UE's BRDF bias), a different direction every pixel and frame (UE's stochastic SSR), with only a
+little cone blur on top; the temporal filter clips the history to the 5 x 5 neighbourhood's mean +- 1.5 sigma (variance clipping)
+and blends 10 % of this frame (its spatial mean where the lobe is wide): the glossy reflection the RT reflections give, averaged.

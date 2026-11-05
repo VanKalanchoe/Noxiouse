@@ -158,7 +158,7 @@ namespace Nox
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.materialTextureIndex = context.Slot(res->GBufferMaterial);
                 push.historyTextureIndex = temporalValid ? context.Slot(historyTemporal) : 0xFFFFFFFF;
-                push.currentWeight = 0.15f; // ~6 frames of history; the neighbourhood clamp keeps it from lagging
+                push.currentWeight = 0.1f; // ~10 frames of the sampled lobe; the variance clip keeps it from lagging
                 push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
                 cmd.pushData(&push, sizeof(push));
                 cmd.drawMeshTasks(1, 1, 1);
