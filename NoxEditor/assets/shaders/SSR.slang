@@ -1,7 +1,7 @@
 #include "shaderIO.h"
 
 // Screen-space reflections (RS4, Settings > Screen-Space Reflections; vs the RT reflections, Reflection.slang). UE5's / Godot's
-// approach: the reflection ray marched in screen space through this frame's depth buffer (perspective-correct depth along the
+// approach: the mirror reflection ray marched in screen space through this frame's depth buffer (perspective-correct depth along the
 // segment, McGuire & Mara 2014), refined by bisection at the first crossing within a thickness; the radiance at the hit is last
 // frame's lit scene (reprojected through the previous camera) at the blur mip the roughness' cone covers there. The confidence fades
 // at the screen's edges, towards the camera, with roughness and near the ray's end; the deferred lighting blends the environment /
@@ -44,23 +44,6 @@ void meshMain(out indices uint3 triangles[1], out vertices MSOutput vertices[3],
 float2 ssr_clip_to_uv(float4 clip)
 {
     return float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5);
-}
-
-// A microfacet normal of the GGX lobe around +z, seen from Ve (tangent space): Heitz 2018, "Sampling the GGX Distribution of Visible
-// Normals". u in [0, 1)^2.
-float3 ssr_sample_ggx_vndf(float3 Ve, float alpha, float2 u)
-{
-    const float3 Vh = normalize(float3(alpha * Ve.x, alpha * Ve.y, Ve.z));
-    const float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
-    const float3 T1 = lensq > 0.0 ? float3(-Vh.y, Vh.x, 0.0) * rsqrt(lensq) : float3(1.0, 0.0, 0.0);
-    const float3 T2 = cross(Vh, T1);
-    const float r = sqrt(u.x);
-    const float phi = 6.283185307 * u.y;
-    const float t1 = r * cos(phi);
-    const float s = 0.5 * (1.0 + Vh.z);
-    const float t2 = (1.0 - s) * sqrt(max(1.0 - t1 * t1, 0.0)) + s * r * sin(phi);
-    const float3 Nh = t1 * T1 + t2 * T2 + sqrt(max(0.0, 1.0 - t1 * t1 - t2 * t2)) * Vh;
-    return normalize(float3(alpha * Nh.x, alpha * Nh.y, max(0.0, Nh.z)));
 }
 
 // Towards the screen's edges SSR knows less and less (what is beyond is unknown): it fades out over the outer 20 % smoothly, so
@@ -120,25 +103,12 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant, out float h
     const float3 N = rawNormal / lenN;
     const float3 V = normalize(ubo->cameraWorldPos.xyz - worldPos);
 
-    // The ray: a direction of the roughness' GGX lobe, a different one every pixel and frame (UE's stochastic SSR), not the mirror
-    // direction alone -- on a glossy, normal-mapped surface (an awning's cloth) the mirror direction swings with the slightest move of
-    // the camera and its reflection jumped around; the lobe's directions, averaged over frames by temporalMain, are the glossy
-    // reflection the RT reflections give. The lobe's tail is trimmed (u.x x 0.5, UE's default BRDF bias): less noise for little light.
-    const float2 noisePixel = float2(pixelCoord) + float(pushConstant.frameIndex % 64u) * float2(5.588238, 3.45367);
-    const float noise = frac(52.9829189 * frac(0.06711056 * noisePixel.x + 0.00583715 * noisePixel.y));
-    float3 R = reflect(-V, N);
-    const float alpha = roughness * roughness;
-    if (alpha > 0.0025)
-    {
-        const float3 tangent = normalize(cross(abs(N.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0), N));
-        const float3 bitangent = cross(N, tangent);
-        const float3 Ve = float3(dot(V, tangent), dot(V, bitangent), dot(V, N));
-        const float2 u = frac(float2(noise, frac(noise * 1.6180339887 + 0.5)) + float(pushConstant.frameIndex % 64u) * float2(0.7548776662, 0.5698402910));
-        const float3 H = ssr_sample_ggx_vndf(Ve, alpha, float2(u.x * 0.5, u.y));
-        const float3 sampled = reflect(-V, tangent * H.x + bitangent * H.y + N * H.z);
-        if (dot(sampled, N) > 0.02)
-            R = normalize(sampled);
-    }
+    // The ray: the mirror direction, the same every frame (Godot's SSR): roughness is the blur of what it finds (the cone's mip of the
+    // lit scene, below), not random directions. A sampled lobe (stochastic SSR, UE4 / Frostbite / FidelityFX) needs a heavy denoiser
+    // and still showed as grain; this has no noise to remove. The steps' offset is fixed per pixel: a still camera gives the same
+    // reflection every frame.
+    const float noise = frac(52.9829189 * frac(0.06711056 * float(pixelCoord.x) + 0.00583715 * float(pixelCoord.y)));
+    const float3 R = reflect(-V, N);
 
     // Towards the camera the ray soon goes behind what the screen shows: faded out (the view's +z is forward).
     const float3 viewR = mul(ubo->view, float4(R, 0.0)).xyz;
@@ -235,8 +205,8 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant, out float h
     hitDistanceOut = hitDistance;
     const float hitZ = max(mul(ubo->view, float4(hitWorld, 1.0)).z, nearPlane);
     const float focal = mul(ubo->proj, float4(0.0, 1.0, 0.0, 0.0)).y;
-    // The lobe is sampled by the ray itself: only a little blur on top, against the leftover noise.
-    const float coneDiameter = 0.5 * hitDistance * roughness * roughness;
+    // The roughness' cone where the ray lands: the blur that stands for the glossy lobe (Godot's cone of mips).
+    const float coneDiameter = 2.0 * hitDistance * roughness * roughness;
     const float conePixels = coneDiameter * focal * viewportSize.y / (2.0 * hitZ);
     const float mip = clamp(log2(max(conePixels, 1.0)), 0.0, float(max(pushConstant.historyMipCount, 1u) - 1u));
     Texture2D historyTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.historyTextureIndex, 0));

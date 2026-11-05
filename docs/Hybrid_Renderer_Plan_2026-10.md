@@ -715,3 +715,9 @@ filter, the temporal blend) then averaged a miss's black into the light, and the
 too dark and unstable wherever hits and misses mix (rough surfaces, the edges of what SSR finds), whatever the filtering. Now rgb is
 light x confidence through every stage and the lighting blends once (environment x (1 - a) + rgb). The screen-edge fade is a
 smoothstep over the outer 15 % (was linear over 8 %: a visible line where SSR handed over to the probes).
+**SSR: back to a deterministic mirror ray (Godot's SSR), 2026-11-05.** The sampled lobe (stochastic SSR: UE4 / Frostbite /
+FidelityFX) stayed grainy whatever the filter: it needs a dedicated denoiser to be clean, and UE4's own SSR is known for that noise.
+Godot traces the mirror ray only and turns roughness into blur (cone-traced blurred mips of the screen). Now the same: one mirror ray
+a pixel, the step offset fixed per pixel (no per-frame noise: a still camera gives the same result every frame), the roughness cone's
+mip of the lit scene; the temporal pass (mirror-image reprojection, variance clip) and its surface-aware spatial filter stay, on a
+noise-free input.
