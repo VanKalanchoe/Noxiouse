@@ -2246,12 +2246,14 @@ namespace Nox
                 ImGui::EndDragDropTarget();
             }
             ImGui::SetItemTooltip("Drop scenes from the Content Browser. A level is another scene, made and saved on its own; in Play it is\n"
-                                  "loaded into the running scene while the primary camera is inside this box (the editor camera in Simulate).");
+                                  "loaded into the running scene while a streaming source is inside this box: the primary camera (the editor\n"
+                                  "camera in Simulate) or an enabled World Streaming Source whose target is Activated. It is drawn once\n"
+                                  "all of it is in.");
 
             ImGui::DragFloat3("Half Extents", glm::value_ptr(component.HalfExtents), 0.05f, 0.0f, FLT_MAX);
             ImGui::SetItemTooltip("Half the box's size in the entity's space, scaled by its transform (as a Box Collider 3D).");
             ImGui::DragFloat("Unload Delay", &component.UnloadDelay, 0.1f, 0.0f, 600.0f, "%.1f s");
-            ImGui::SetItemTooltip("Seconds the camera must have been outside every volume naming a level before it unloads:\n"
+            ImGui::SetItemTooltip("Seconds every streaming source must have been outside every volume naming a level before it unloads:\n"
                                   "walking along the edge does not load and unload it every frame.");
         });
 
@@ -2283,7 +2285,8 @@ namespace Nox
         {
             ImGui::Checkbox("Enabled", &component.Enabled);
             ImGui::SetItemTooltip("In Play and Simulate the world's cells within the loading range of this entity are loaded, besides the\n"
-                                  "ones around the camera (a vehicle, another player, a cutscene's target).");
+                                  "ones around the camera (a vehicle, another player, a cutscene's target). Activated: Level Streaming\n"
+                                  "Volumes it stands in load their levels too.");
             int target = component.Target == WorldStreamingSourceComponent::TargetState::Loaded ? 1 : 0;
             if (ImGui::Combo("Target State", &target, "Activated\0Loaded\0"))
                 component.Target = target == 1 ? WorldStreamingSourceComponent::TargetState::Loaded : WorldStreamingSourceComponent::TargetState::Activated;
