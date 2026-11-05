@@ -37,6 +37,9 @@ namespace NRI
         void setCullMode(const CullMode& cullMode) override {}
         void setFrontFace(const FrontFace& frontFace) override {}
         void setDepthBiasEnable(bool enable) override {}
+        // D3D12 keeps depth bias in the pipeline's rasterizer state (ID3D12GraphicsCommandList9::RSSetDepthBias is the dynamic form);
+        // like setDepthBiasEnable above, not wired yet: the shadow map passes draw without the raster slope bias here.
+        void setDepthBias(float constantFactor, float clamp, float slopeFactor) override {}
         void setDepthClampEnable(bool enable) override {}
         void setLineWidth(float lineWidth) override {}
         void setRasterizationSamples(uint32_t sampleCount) override {}
