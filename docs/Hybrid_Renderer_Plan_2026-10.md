@@ -702,3 +702,7 @@ filter's min/max clamp of such an input could not hold a history. Now the ray sa
 2018; the grazing tail trimmed as UE's BRDF bias), a different direction every pixel and frame (UE's stochastic SSR), with only a
 little cone blur on top; the temporal filter clips the history to the 5 x 5 neighbourhood's mean +- 1.5 sigma (variance clipping)
 and blends 10 % of this frame (its spatial mean where the lobe is wide): the glossy reflection the RT reflections give, averaged.
+Then stable when moving but grainy (the sampled lobe, one ray a pixel). Now the temporal pass first filters spatially as AMD FidelityFX
+SSSR / Frostbite's stochastic SSR do: the 5 x 5 neighbours on the same surface (view depth within 2 %, normals alike), Gaussian
+weighted with a width that follows the lobe (about a pixel for a near mirror, the whole 5 x 5 for a wide lobe); the variance clip uses
+the same surface-weighted moments.

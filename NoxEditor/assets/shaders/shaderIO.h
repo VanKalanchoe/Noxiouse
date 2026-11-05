@@ -2543,7 +2543,8 @@ struct PushConstantSSRTemporal
     uint32_t historyTextureIndex;     // last frame's result (0xFFFFFFFF: none, start over)
     float currentWeight;              // this frame's share of the blend
     vec2 viewportSize;
-    uint32_t padding[2];
+    uint32_t normalTextureIndex;      // the G-buffer's normals (the spatial filter keeps to one surface)
+    uint32_t padding;
 };
 
 // Screen-space GI (RS5b; SSGI.slang traceMain): a few cosine-distributed rays per pixel marched through the depth buffer, the light

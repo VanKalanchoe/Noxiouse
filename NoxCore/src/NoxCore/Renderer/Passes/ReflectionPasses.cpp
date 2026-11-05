@@ -136,6 +136,7 @@ namespace Nox
                 builder.Read(hitDistance);
                 builder.Read(resources.Depth);
                 builder.Read(resources.GBufferMaterial);
+                builder.Read(resources.GBufferNormal);
                 if (temporalValid)
                     builder.Read(historyTemporal);
                 builder.ColorTarget(resources.SSR, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
@@ -157,6 +158,7 @@ namespace Nox
                 push.hitDistanceTextureIndex = context.Slot(hitDistance);
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.materialTextureIndex = context.Slot(res->GBufferMaterial);
+                push.normalTextureIndex = context.Slot(res->GBufferNormal);
                 push.historyTextureIndex = temporalValid ? context.Slot(historyTemporal) : 0xFFFFFFFF;
                 push.currentWeight = 0.1f; // ~10 frames of the sampled lobe; the variance clip keeps it from lagging
                 push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));

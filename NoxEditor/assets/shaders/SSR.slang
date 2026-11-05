@@ -270,31 +270,60 @@ float4 temporalMain(MSOutput input, uniform PushConstantSSRTemporal pushConstant
     if (depth <= 0.0)
         return float4(0.0);
 
-    // This frame's neighbourhood (5 x 5, YCoCg: luminance and chroma apart): what last frame's value may be -- its mean +- 1.5
-    // standard deviations (variance clipping, Salvi 2016), within its range. With the lobe sampled every pixel's ray differs: a
-    // min / max box of a noisy input would let the history through or throw it away by chance.
+    Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.materialTextureIndex, 0));
+    const float roughness = saturate(materialTex.Load(int3(pixelCoord, 0)).r);
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
+    const float3 normal = normalize(normalTex.Load(int3(pixelCoord, 0)).rgb + float3(0.0, 1e-6, 0.0));
+    const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
+    const float viewZ = nearPlane / depth;
+
+    // This frame's neighbourhood (5 x 5, YCoCg: luminance and chroma apart), on this pixel's surface (view depth within 2 %, normals
+    // alike: AMD FidelityFX SSSR's / Frostbite's spatial filter of stochastic reflections), two uses:
+    //   - the spatial filter: the neighbours' rays sampled other directions of the same lobe, so their average is this pixel's
+    //     reflection with less noise. Its width follows the lobe (a Gaussian from about a pixel for a near mirror to the whole 5 x 5
+    //     for a wide one), so a mirror keeps its detail.
+    //   - what last frame's value may be: its mean +- 1.5 standard deviations (variance clipping, Salvi 2016), within its range. A
+    //     min / max box of a noisy input would let the history through or throw it away by chance.
+    const float spread = lerp(0.6, 2.5, saturate(roughness / 0.5));
     float3 m1 = float3(0.0), m2 = float3(0.0);
     float a1 = 0.0, a2 = 0.0;
     float3 lo = float3(1e30), hi = float3(-1e30);
+    float4 filtered = float4(0.0);
+    float filterWeight = 0.0;
+    float momentWeight = 0.0;
     for (int y = -2; y <= 2; ++y)
     {
         for (int x = -2; x <= 2; ++x)
         {
             const int2 p = clamp(pixelCoord + int2(x, y), int2(0), int2(viewportSize) - 1);
+            const float d = depthTex.Load(int3(p, 0)).r;
+            if (d <= 0.0)
+                continue;
+            const float sameSurface = saturate(1.0 - abs(nearPlane / d - viewZ) / (0.02 * viewZ)) *
+                                      pow(saturate(dot(normalize(normalTex.Load(int3(p, 0)).rgb + float3(0.0, 1e-6, 0.0)), normal)), 8.0);
+            if (sameSurface <= 0.0)
+                continue;
             const float4 s = rawTex.Load(int3(p, 0));
             const float3 c = ssr_rgb_to_ycocg(s.rgb);
-            m1 += c;
-            m2 += c * c;
-            a1 += s.a;
-            a2 += s.a * s.a;
+            m1 += c * sameSurface;
+            m2 += c * c * sameSurface;
+            a1 += s.a * sameSurface;
+            a2 += s.a * s.a * sameSurface;
+            momentWeight += sameSurface;
             lo = min(lo, c);
             hi = max(hi, c);
+            const float w = sameSurface * exp(-float(x * x + y * y) / (2.0 * spread * spread));
+            filtered += s * w;
+            filterWeight += w;
         }
     }
-    m1 /= 25.0;
-    m2 /= 25.0;
-    a1 /= 25.0;
-    a2 /= 25.0;
+    if (momentWeight <= 0.0)
+        return raw;
+    m1 /= momentWeight;
+    m2 /= momentWeight;
+    a1 /= momentWeight;
+    a2 /= momentWeight;
+    const float4 current = filterWeight > 0.0 ? filtered / filterWeight : raw;
     const float3 sigma = sqrt(max(m2 - m1 * m1, float3(0.0)));
     lo = max(lo, m1 - 1.5 * sigma);
     hi = min(hi, m1 + 1.5 * sigma);
@@ -311,21 +340,16 @@ float4 temporalMain(MSOutput input, uniform PushConstantSSRTemporal pushConstant
     const float surfaceDistance = max(length(worldPos - camera), 1e-4);
     Texture2D<float> hitTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.hitDistanceTextureIndex, 0));
     const float hitDistance = hitTex.Load(int3(pixelCoord, 0));
-    Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.materialTextureIndex, 0));
-    const float roughness = saturate(materialTex.Load(int3(pixelCoord, 0)).r);
     const float mirror = hitDistance > 0.0 ? 1.0 - smoothstep(0.2, 0.45, roughness) : 0.0;
     const float3 mirrorImage = camera + (worldPos - camera) * ((surfaceDistance + hitDistance) / surfaceDistance);
     const float4 previous = prev_frame_uv(ubo, lerp(worldPos, mirrorImage, mirror), viewportSize);
     if (previous.w <= 0.0 || any(previous.xy <= 0.0) || any(previous.xy >= 1.0))
-        return raw;
+        return current;
 
     Texture2D historyTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.historyTextureIndex, 0));
     SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
     float4 history = max(historyTex.SampleLevel(linearClamp, previous.xy, 0.0), float4(0.0));
     history.rgb = ssr_ycocg_to_rgb(clamp(ssr_rgb_to_ycocg(history.rgb), lo, hi));
     history.a = clamp(history.a, aLo, aHi);
-    // This frame's share: the spatial mean of the noisy trace rather than its own pixel where the lobe is wide (less noise in, the
-    // detail of a mirror kept).
-    const float4 current = lerp(raw, float4(ssr_ycocg_to_rgb(m1), a1), saturate((roughness - 0.1) / 0.3) * 0.5);
     return lerp(history, current, saturate(pushConstant.currentWeight));
 }
