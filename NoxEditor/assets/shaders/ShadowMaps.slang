@@ -212,3 +212,39 @@ bool local_light_shadow_map(UniformBufferObject* ubo, uint lightIndex, LightData
     visibility = lit / float(SHADOW_MAP_TAPS);
     return true;
 }
+
+// --- Contact shadows (RS2; UE5's screen space contact shadows) ------------------------------------------------------------------
+
+// A short ray from the surface towards the light (L, at most maxLength) marched through the camera's depth buffer: 0 where something
+// on screen covers it within a thickness, else 1. The detail a shadow map's texels miss (a hand on a table, grass blades, creases);
+// what is off screen or behind the visible surface casts nothing here. Perspective views only (the depth's view distance:
+// near / depth for the cameras' infinite reverse-Z projection). noise in [0, 1): the steps' offset, averaged by the temporal upscale.
+float contact_shadow(UniformBufferObject* ubo, Texture2D<float> depthTex, float2 viewportSize, float3 worldPos, float3 n, float3 L, float maxLength, float noise)
+{
+    const float rayLength = min(ubo->contactShadowLength, maxLength);
+    if (rayLength <= 0.0 || mul(ubo->proj, float4(0.0, 0.0, 2.0, 1.0)).w < 1.5) // off, or an orthographic camera (w = 1)
+        return 1.0;
+    const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z; // depth x view distance (reverse-Z infinite projection)
+    const float4x4 viewProj = mul(ubo->proj, ubo->view); // jittered, as the depth buffer
+    const uint steps = clamp(ubo->contactShadowSamples, 1u, 64u);
+    // A covering surface counts within this distance behind it (thinner than the ray: no shadow from a far wall behind an edge).
+    const float thickness = max(0.5 * rayLength, 0.02 * ubo->unitsPerMeter);
+    const float3 start = worldPos + n * raster_surface_bias(ubo, worldPos, 0.01 * ubo->unitsPerMeter);
+    for (uint i = 0; i < steps; ++i)
+    {
+        const float t = (float(i) + noise) / float(steps);
+        const float4 clip = mul(viewProj, float4(start + L * (rayLength * t), 1.0));
+        if (clip.w <= nearPlane)
+            break;
+        const float2 uv = float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5);
+        if (any(uv <= 0.0) || any(uv >= 1.0))
+            break;
+        const float sceneDepth = depthTex.Load(int3(int2(uv * viewportSize), 0)).r;
+        if (sceneDepth <= 0.0) // the sky
+            continue;
+        const float behind = clip.w - nearPlane / sceneDepth; // how far the ray is behind what the pixel shows
+        if (behind > 0.002 * clip.w && behind < thickness)
+            return 0.0;
+    }
+    return 1.0;
+}

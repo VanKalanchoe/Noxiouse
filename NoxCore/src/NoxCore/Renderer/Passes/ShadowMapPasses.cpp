@@ -305,6 +305,9 @@ namespace Nox
 
     void Renderer::updateShadowMapUniforms()
     {
+        // Contact shadows (the lighting applies them where a shadow map shadowed).
+        uniformData.contactShadowLength = m_contactShadows ? WorldUnits::FromMeters(m_contactShadowLengthMeters) : 0.0f;
+        uniformData.contactShadowSamples = m_contactShadowSamples;
         uniformData.sunShadowCascadesReference = 0;
         if (!m_frame.shadowMapsAdded)
             return;

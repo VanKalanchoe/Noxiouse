@@ -936,6 +936,8 @@ namespace Nox
             setSunShadowMode(static_cast<SunShadowMode>(settings.SunShadows));
         if (settings.LocalShadows >= 0 && settings.LocalShadows <= 1)
             setLocalShadowMode(static_cast<LocalShadowMode>(settings.LocalShadows));
+        if (settings.ContactShadows >= 0)
+            setContactShadowsEnabled(settings.ContactShadows != 0);
     }
 
     void Renderer::setDLSSEnabled(bool enabled)

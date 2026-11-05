@@ -746,6 +746,11 @@ struct UniformBufferObject
     // LOCAL_SHADOW_NONE -- a light without a map keeps its RT shadow rays. 0: no local light has a shadow map.
     uint64_t localShadowsReference;
     uint64_t localShadowLightViewsReference;
+    // Contact shadows (RS2, Settings > Contact Shadows; ShadowMaps.slang contact_shadow): a ray this long (world units) marched
+    // towards the light through the depth buffer in contactShadowSamples steps, for the lights shadowed by shadow maps (the detail
+    // their texels miss). 0: off.
+    float contactShadowLength;
+    uint32_t contactShadowSamples;
 };
 
 // An emissive mesh instance as a light for the path tracer's direct light sampling: picked by weight (its emission's luminance

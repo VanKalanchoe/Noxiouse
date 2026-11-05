@@ -479,7 +479,9 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
                     float rectMapVisibility;
                     if (any(rectLight > 0.0) && local_light_shadow_map(ubo, i, light, worldPos, n, normalize(light.position.xyz - worldPos),
                                                                        shadowMapNoise, rectMapVisibility))
-                        directLighting += rectLight * rectMapVisibility; // its shadow map (Settings > Local Light Shadows)
+                        directLighting += rectLight * rectMapVisibility *
+                                          contact_shadow(ubo, depthTex, pushConstant.viewportSize, worldPos, n, normalize(light.position.xyz - worldPos),
+                                                         length(light.position.xyz - worldPos), frac(shadowMapNoise + 0.5)); // its shadow map (Settings > Local Light Shadows)
                     else if (any(rectLight > 0.0) && light_shadow_priority(light, worldPos) < shadowThreshold)
                         directLighting += rectLight; // over the shadow-ray budget: unshadowed
                     else if (any(rectLight > 0.0))
@@ -526,8 +528,10 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
                 }
 
                 float lightShadow = 1.0;
+                bool shadowMapped = false; // by a shadow map: contact shadows add the detail its texels miss
                 if (i == ubo->shadowMaskLightIndex && shadowMaskValid && (rtShadows || sunShadowMaps))
                 {
+                    shadowMapped = sunShadowMaps;
                     // The sun (the first directional light) uses the shadow mask -- behind a leaf too: the mask looks a double-sided
                     // surface up from the side the sun is on (ShadowMask.slang, ShadowMapResolve.slang).
                     lightShadow = shadowFactor;
@@ -535,6 +539,7 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
                 else if (lightType != 0 && local_light_shadow_map(ubo, i, light, worldPos, (dot(n, l) < 0.0) ? -n : n, l, shadowMapNoise, lightShadow))
                 {
                     // A local light's shadow map (Settings > Local Light Shadows: Shadow Maps) instead of its shadow ray.
+                    shadowMapped = true;
                 }
                 else if (rtShadows)
                 {
@@ -556,6 +561,11 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
                         }
                     }
                 }
+
+                // Contact shadows (Settings > Contact Shadows) on what a shadow map lit.
+                if (shadowMapped && lightShadow > 0.0 && ubo->contactShadowLength > 0.0)
+                    lightShadow *= contact_shadow(ubo, depthTex, pushConstant.viewportSize, worldPos, (dot(n, l) < 0.0) ? -n : n, l, maxDist,
+                                                  frac(shadowMapNoise + 0.5));
 
                 float3 h = normalize(l + v);
 

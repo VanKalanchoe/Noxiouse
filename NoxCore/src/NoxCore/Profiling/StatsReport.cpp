@@ -183,6 +183,9 @@ namespace Nox
                                   renderer.getLocalShadowAtlasSize(), renderer.getLocalShadowMaxResolution());
                 else
                     AppendSetting(out, "Local light shadows: Ray Traced");
+                if (renderer.getContactShadowsEnabled())
+                    AppendSetting(out, "Contact shadows: ON | {:.2f} m | {} steps (on shadow-mapped lights)",
+                                  WorldUnits::ToMeters(renderer.getContactShadowLength()), renderer.getContactShadowSamples());
             }
 
             // Debug views replace the lit output and change what runs, so a report taken with one is not comparable.

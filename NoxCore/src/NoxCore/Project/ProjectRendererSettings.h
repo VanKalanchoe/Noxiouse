@@ -15,6 +15,7 @@ namespace Nox
         int32_t TAA = -1;                  // the engine's TAA where DLSS does not run: 0 off, 1 on
         int32_t SunShadows = -1;           // 0 ray traced (the RT shadow mask), 1 cascaded shadow maps
         int32_t LocalShadows = -1;         // local lights: 0 RT shadow rays, 1 shadow maps (atlas)
+        int32_t ContactShadows = -1;       // screen-space contact shadows on shadow-mapped lights: 0 off, 1 on
     };
 
     // The packaged game's window: "Windowed", "Borderless" (fullscreen at the desktop's resolution, the default) or "Fullscreen"

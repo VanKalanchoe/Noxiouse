@@ -529,3 +529,10 @@ for 2909 entries vs 0.09 for the camera), lower resolution for the far cascades.
 - **Lookup:** the face by the direction from the light, the same bilinear PCF / PCSS as the sun (penumbra = light radius x
   (receiver - caster) / caster distance; a rect / disc light's mean half extent as its radius), receiver bias converted to the
   perspective depth. In the deferred lighting (point, spot, rect, disc), the forward transparent pass; particles keep the sun only.
+
+**Contact shadows (RS2, 2026-11-05, untested)** -- Settings > Contact Shadows (project `ContactShadows`), off by default. UE5's
+screen space contact shadows (`contact_shadow` in `ShadowMaps.slang`): per pixel a ray towards the light (0.3 m, 12 steps, the
+start offset by the frame's noise) marched through the jittered depth buffer; something on screen in front of it within a
+thickness (half the ray) shadows the pixel. Only on lights a shadow map shadowed (the sun with Shadow Maps, local lights with an
+atlas view, rect / disc included): the RT shadows have that detail already. Perspective cameras only; what is off screen casts
+nothing.

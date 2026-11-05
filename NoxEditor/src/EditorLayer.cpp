@@ -898,6 +898,7 @@ namespace Nox
                 choice("Shadowed Lights##Project", saved.ShadowedLights, { { 0, "All" }, { 1, "1" }, { 2, "2" }, { 4, "4" }, { 8, "8" } });
                 choice("Sun Shadows##Project", saved.SunShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
                 choice("Local Light Shadows##Project", saved.LocalShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
+                choice("Contact Shadows##Project", saved.ContactShadows, { { 0, "Off" }, { 1, "On" } });
                 choice("Order-Independent Transparency##Project", saved.OIT, { { 0, "Off" }, { 1, "On" } });
                 choice("Temporal Anti-Aliasing##Project", saved.TAA, { { 0, "Off" }, { 1, "On" } });
 
@@ -1365,6 +1366,26 @@ namespace Nox
                 ImGui::SetItemTooltip("Texels per side of a light's view at the most (a light filling the screen); smaller on screen,\n"
                                       "fewer (at least 128). Halved for all when the atlas is full.");
                 ImGui::Text("This frame: %u lights, %u views", m_Renderer->getLocalShadowLightCount(), m_Renderer->getLocalShadowViewCount());
+                ImGui::Unindent();
+            }
+
+            // RS2: the detail shadow maps miss, marched through the depth buffer.
+            bool contactShadows = m_Renderer->getContactShadowsEnabled();
+            if (ImGui::Checkbox("Contact Shadows", &contactShadows))
+                m_Renderer->setContactShadowsEnabled(contactShadows);
+            ImGui::SetItemTooltip("A short ray towards the light per pixel, marched through the depth buffer (UE's contact shadows):\n"
+                                  "small shadows a shadow map's texels miss (things standing on the ground, creases, grass). Only on\n"
+                                  "lights shadowed by shadow maps (Sun / Local Light Shadows: Shadow Maps) -- RT shadows have the\n"
+                                  "detail already. What is off screen casts nothing here.");
+            if (contactShadows)
+            {
+                ImGui::Indent();
+                float lengthMeters = WorldUnits::ToMeters(m_Renderer->getContactShadowLength());
+                if (ImGui::SliderFloat("Length (m)##ContactShadows", &lengthMeters, 0.01f, 2.0f, "%.2f"))
+                    m_Renderer->setContactShadowLength(WorldUnits::FromMeters(lengthMeters));
+                int samples = static_cast<int>(m_Renderer->getContactShadowSamples());
+                if (ImGui::SliderInt("Steps##ContactShadows", &samples, 4, 32))
+                    m_Renderer->setContactShadowSamples(static_cast<uint32_t>(samples));
                 ImGui::Unindent();
             }
         }

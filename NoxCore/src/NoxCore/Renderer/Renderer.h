@@ -567,6 +567,14 @@ namespace Nox
         uint32_t getLocalShadowAtlasSize() const { return m_localShadowAtlasSize; }
         void setLocalShadowMaxResolution(uint32_t texels) { m_localShadowMaxResolution = std::clamp(texels, 128u, 2048u); }
         uint32_t getLocalShadowMaxResolution() const { return m_localShadowMaxResolution; }
+        // Contact shadows (RS2): a short screen-space ray towards the light for the lights shadowed by shadow maps (the sun's cascades,
+        // the local lights' atlas) -- the detail their texels miss. Off by default; its length (world units) and steps.
+        void setContactShadowsEnabled(bool enabled) { m_contactShadows = enabled; }
+        bool getContactShadowsEnabled() const { return m_contactShadows; }
+        void setContactShadowLength(float length) { m_contactShadowLengthMeters = std::clamp(WorldUnits::ToMeters(length), 0.01f, 5.0f); }
+        float getContactShadowLength() const { return WorldUnits::FromMeters(m_contactShadowLengthMeters); }
+        void setContactShadowSamples(uint32_t samples) { m_contactShadowSamples = std::clamp(samples, 4u, 64u); }
+        uint32_t getContactShadowSamples() const { return m_contactShadowSamples; }
         // This frame's local lights with a shadow map and their views (stats).
         uint32_t getLocalShadowLightCount() const { return m_localShadowLightCount; }
         uint32_t getLocalShadowViewCount() const { return m_localShadows.viewCount; }
@@ -1344,6 +1352,9 @@ namespace Nox
         uint32_t m_localShadowMaxLights = 8;
         uint32_t m_localShadowAtlasSize = 4096;
         uint32_t m_localShadowMaxResolution = 1024;
+        bool m_contactShadows = false;
+        float m_contactShadowLengthMeters = 0.3f;
+        uint32_t m_contactShadowSamples = 12;
         std::unique_ptr<NRI::Pipeline> m_nrdGuidesPipeline = nullptr; // NRD view Z + normal/roughness (NRDGuides.slang)
         std::unique_ptr<NRI::Pipeline> m_reflectionPipeline = nullptr;
         // Path Tracer

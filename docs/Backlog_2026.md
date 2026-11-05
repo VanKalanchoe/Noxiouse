@@ -24,7 +24,7 @@ default; the RT one stays the default otherwise (RT shadows may well win). Both 
 | # | Item |
 |---|---|
 | RS1 | **Shadow maps:** cascaded shadow maps for the sun (PCF / PCSS soft edges, stable cascades) and a shadow atlas for spot / point / rect lights. Vs RT shadows (`ShadowMask.slang`). Later, if measured worth it: Unreal-style virtual shadow maps. **Sun cascades built 2026-11-05, untested** (Settings > Sun Shadows; `Hybrid_Renderer_Plan_2026-10.md` §9): to measure against the RT mask; first measurement: RT cheaper (0.64 vs ~0.9 ms), RT stays the default. **Local-light atlas built 2026-11-05, untested** (Settings > Local Light Shadows) |
-| RS2 | **Contact shadows:** a short screen-space ray towards the light per pixel, for the small detail shadow maps miss. Only with RS1 (RT shadows have the detail already) |
+| RS2 | **Contact shadows:** a short screen-space ray towards the light per pixel, for the small detail shadow maps miss. Only with RS1 (RT shadows have the detail already). **Built 2026-11-05, untested** (Settings > Contact Shadows) |
 | RS3 | **GTAO** (ground-truth AO, Unreal / Godot) replacing the classic `SSAO.slang`. Vs RTAO |
 | RS4 | **SSR + reflection probes:** hierarchical screen-space reflections over the existing Hi-Z / color pyramid (`HiZBuild`, `ColorPyramid`), falling back to placed box-projected reflection probes (captured by rasterized cubemaps), then the sky. Vs RT reflections (`Reflection.slang`) |
 | RS5 | **GI without rays:** irradiance probe volumes captured by rasterized cubemaps (baked, or updated a few per frame), shared capture code with RS4's probes; SSGI on top for dynamic bounce. Vs the screen-probe GI and DDGI |
