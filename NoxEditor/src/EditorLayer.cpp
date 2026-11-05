@@ -899,6 +899,7 @@ namespace Nox
                 choice("Sun Shadows##Project", saved.SunShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
                 choice("Local Light Shadows##Project", saved.LocalShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
                 choice("Contact Shadows##Project", saved.ContactShadows, { { 0, "Off" }, { 1, "On" } });
+                choice("Screen-Space AO##Project", saved.SSAOMethod, { { 0, "Classic SSAO" }, { 1, "GTAO" } });
                 choice("Order-Independent Transparency##Project", saved.OIT, { { 0, "Off" }, { 1, "On" } });
                 choice("Temporal Anti-Aliasing##Project", saved.TAA, { { 0, "Off" }, { 1, "On" } });
 
@@ -1560,9 +1561,32 @@ namespace Nox
                 m_Renderer->setSSAOEnabled(ssaoEnabled);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Screen-space contact/ambient occlusion. Mutually exclusive with RTAO (below, under Hybrid Ray Tracing).");
+            if (m_Renderer->getSSAOEnabled())
+            {
+                ImGui::SameLine();
+                const char* aoMethods[] = { "Classic SSAO", "GTAO" };
+                int aoMethod = static_cast<int>(m_Renderer->getSSAOMethod());
+                ImGui::SetNextItemWidth(130.0f);
+                if (ImGui::Combo("##SSAOMethod", &aoMethod, aoMethods, IM_ARRAYSIZE(aoMethods)))
+                    m_Renderer->setSSAOMethod(static_cast<Renderer::SSAOMethod>(aoMethod));
+                ImGui::SetItemTooltip("Classic SSAO: random points in a hemisphere tested against the depth buffer. GTAO (ground-truth AO,\n"
+                                      "UE5's and Godot's): the horizon on both sides of a few slices per pixel, the visible arc\n"
+                                      "integrated around the normal -- closer to RTAO for the same radius.");
+            }
             if (m_Renderer->getSSAOEnabled() || m_Renderer->getRTAOEnabled())
             {
                 ImGui::Indent();
+                if (m_Renderer->getSSAOEnabled() && m_Renderer->getSSAOMethod() == Renderer::SSAOMethod::GTAO)
+                {
+                    int slices = static_cast<int>(m_Renderer->getGTAOSlices());
+                    ImGui::SetNextItemWidth(160.0f);
+                    if (ImGui::SliderInt("Slices", &slices, 1, 4))
+                        m_Renderer->setGTAOSlices(static_cast<uint32_t>(slices));
+                    int steps = static_cast<int>(m_Renderer->getGTAOSteps());
+                    ImGui::SetNextItemWidth(160.0f);
+                    if (ImGui::SliderInt("Steps per Side", &steps, 2, 12))
+                        m_Renderer->setGTAOSteps(static_cast<uint32_t>(steps));
+                }
                 float aoRadius = WorldUnits::ToCentimeters(m_Renderer->getSSAORadius());
                 ImGui::SetNextItemWidth(160.0f);
                 if (ImGui::SliderFloat("Radius (cm)", &aoRadius, 1.0f, 200.0f, "%.1f"))

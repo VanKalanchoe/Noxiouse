@@ -449,6 +449,15 @@ namespace Nox
         float getSSAORadius() const { return WorldUnits::FromMeters(m_ssaoRadiusMeters); }
         void setSSAOPower(float power) { m_ssaoPower = power; }
         float getSSAOPower() const { return m_ssaoPower; }
+        // The screen-space AO's technique (RS3): the classic hemisphere-kernel SSAO, or GTAO (Jimenez 2016 / XeGTAO, UE5's and Godot's)
+        // -- measured against RTAO. Same radius / power; GTAO's slices per pixel and depth samples per side.
+        enum class SSAOMethod : uint32_t { Classic = 0, GTAO = 1 };
+        void setSSAOMethod(SSAOMethod method) { m_ssaoMethod = method; }
+        SSAOMethod getSSAOMethod() const { return m_ssaoMethod; }
+        void setGTAOSlices(uint32_t slices) { m_gtaoSlices = std::clamp(slices, 1u, 8u); }
+        uint32_t getGTAOSlices() const { return m_gtaoSlices; }
+        void setGTAOSteps(uint32_t steps) { m_gtaoSteps = std::clamp(steps, 1u, 16u); }
+        uint32_t getGTAOSteps() const { return m_gtaoSteps; }
         void setLodFullDetail(bool fullDetail) { m_lodFullDetail = fullDetail; }
         bool getLodFullDetail() const { return m_lodFullDetail; }
         // Draw list entries, and of the newest finished frame: the instances drawn in phase 1 and the candidates phase 2
@@ -1268,6 +1277,10 @@ namespace Nox
         float m_ssaoRadiusMeters = 0.5f;
         float m_ssaoBiasMeters = 0.025f;
         float m_ssaoPower = 1.5f;
+        std::unique_ptr<NRI::Pipeline> m_gtaoPipeline;
+        SSAOMethod m_ssaoMethod = SSAOMethod::Classic;
+        uint32_t m_gtaoSlices = 2;
+        uint32_t m_gtaoSteps = 4;
         // Post Process
         std::unique_ptr<NRI::Pipeline> m_postProcessPipeline = nullptr;
         std::unique_ptr<NRI::Pipeline> m_autoExposureBuildPipeline;

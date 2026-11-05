@@ -377,6 +377,7 @@ namespace Nox
         watchShader("assets/shaders/DeferredLighting.slang", "DeferredLighting", [this]() { createDeferredLightingPipeline(true); });
         // SSAO
         watchShader("assets/shaders/SSAO.slang", "SSAO", [this]() { createSSAOPipeline(true); });
+        watchShader("assets/shaders/GTAO.slang", "GTAO", [this]() { createSSAOPipeline(true); });
         watchShader("assets/shaders/SSAOBlur.slang", "SSAOBlur", [this]() { createSSAOBlurPipeline(true); });
         watchShader("assets/shaders/RTAO.slang", "RTAO", [this]() { createRTAOPipeline(true); });
         // Post Process
@@ -938,6 +939,8 @@ namespace Nox
             setLocalShadowMode(static_cast<LocalShadowMode>(settings.LocalShadows));
         if (settings.ContactShadows >= 0)
             setContactShadowsEnabled(settings.ContactShadows != 0);
+        if (settings.SSAOMethod >= 0 && settings.SSAOMethod <= 1)
+            setSSAOMethod(static_cast<SSAOMethod>(settings.SSAOMethod));
     }
 
     void Renderer::setDLSSEnabled(bool enabled)
@@ -2288,6 +2291,11 @@ namespace Nox
         });
 
         m_ssaoPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+
+        // GTAO (RS3): the same target and the same blur after it.
+        for (NRI::ShaderStageDesc& stage : desc.shaders)
+            stage.sourcePath = "assets/shaders/GTAO.slang";
+        m_gtaoPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
     void Renderer::createSSAOBlurPipeline(bool forceCompile)

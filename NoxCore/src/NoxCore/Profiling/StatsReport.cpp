@@ -183,6 +183,16 @@ namespace Nox
                                   renderer.getLocalShadowAtlasSize(), renderer.getLocalShadowMaxResolution());
                 else
                     AppendSetting(out, "Local light shadows: Ray Traced");
+                // Ambient occlusion: which one runs (they are exclusive; the same radius / power).
+                if (renderer.getRTAOEnabled() && renderer.getRayTracingEnabled())
+                    AppendSetting(out, "Ambient occlusion: RTAO | radius {:.0f} cm", WorldUnits::ToCentimeters(renderer.getSSAORadius()));
+                else if (renderer.getSSAOEnabled() && renderer.getSSAOMethod() == Renderer::SSAOMethod::GTAO)
+                    AppendSetting(out, "Ambient occlusion: GTAO | {} slices x {} steps per side | radius {:.0f} cm", renderer.getGTAOSlices(),
+                                  renderer.getGTAOSteps(), WorldUnits::ToCentimeters(renderer.getSSAORadius()));
+                else if (renderer.getSSAOEnabled())
+                    AppendSetting(out, "Ambient occlusion: SSAO | radius {:.0f} cm", WorldUnits::ToCentimeters(renderer.getSSAORadius()));
+                else
+                    AppendSetting(out, "Ambient occlusion: off");
                 if (renderer.getContactShadowsEnabled())
                     AppendSetting(out, "Contact shadows: ON | {:.2f} m | {} steps (on shadow-mapped lights)",
                                   WorldUnits::ToMeters(renderer.getContactShadowLength()), renderer.getContactShadowSamples());

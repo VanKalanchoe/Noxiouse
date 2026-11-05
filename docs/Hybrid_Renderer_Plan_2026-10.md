@@ -536,3 +536,10 @@ start offset by the frame's noise) marched through the jittered depth buffer; so
 thickness (half the ray) shadows the pixel. Only on lights a shadow map shadowed (the sun with Shadow Maps, local lights with an
 atlas view, rect / disc included): the RT shadows have that detail already. Perspective cameras only; what is off screen casts
 nothing.
+
+**GTAO (RS3, 2026-11-05, untested)** -- Settings > Ambient Occlusion: SSAO [Classic SSAO / GTAO] (project `SSAOMethod`), classic by
+default; vs RTAO. Jimenez et al. 2016 in XeGTAO's formulation (`GTAO.slang`): per pixel 2 slices through the view direction
+(turned per pixel and frame by IGN), 4 depth samples per side spread towards the radius, the highest horizon per side (fading out
+over the radius' last 40%), the arc between them integrated cosine-weighted around the normal projected into the slice. View space;
+the same radius / power / short-range rule (`ambient_occlusion_radius`) as SSAO and RTAO, the same raw target and blur. Checked
+offline: an unoccluded surface integrates to exactly 1 at any tilt (0-85 degrees), so open ground is not darkened.

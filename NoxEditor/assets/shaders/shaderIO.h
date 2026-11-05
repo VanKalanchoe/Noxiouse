@@ -2366,6 +2366,24 @@ struct PushConstantSSAO
     float shortRangePixels; // > 0: the radius at most this many pixels' width at the surface (ambient_occlusion_radius)
 };
 
+// Ground-truth ambient occlusion (RS3; GTAO.slang, Jimenez et al. 2016 / Intel XeGTAO): per pixel a few screen-space slices around
+// the view direction, the horizon found on both sides of each, the visible arc integrated cosine-weighted against the normal. Writes
+// resources.SSAORaw like SSAO / RTAO (SSAOBlur.slang denoises it). The camera's matrices come from the uniforms.
+struct PushConstantGTAO
+{
+    mat4 invViewProj;
+    uint64_t matrixReference;
+    uint32_t depthTextureIndex;
+    uint32_t normalTextureIndex;
+    uint32_t sliceCount;   // directions per pixel (turned per pixel and frame)
+    uint32_t stepsPerSide; // depth samples along each side of a slice
+    float radius;          // world units
+    float power;           // contrast (pow(ao, power))
+    vec2 viewportSize;
+    float shortRangePixels; // > 0: the radius at most this many pixels' width at the surface (ambient_occlusion_radius)
+    uint32_t frameIndex;
+};
+
 struct PushConstantSSAOBlur
 {
     uint64_t matrixReference;

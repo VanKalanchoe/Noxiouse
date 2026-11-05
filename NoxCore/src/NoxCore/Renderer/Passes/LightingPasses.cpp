@@ -422,8 +422,48 @@ namespace Nox
 
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         const FrameGraphState& frame = m_frame;
-        m_frame.occlusionRawAdded = true;
 
+        // GTAO (RS3): horizon-based, into the same raw target (the blur and the lighting take it as they take SSAO's).
+        if (m_ssaoMethod == SSAOMethod::GTAO && m_gtaoPipeline)
+        {
+            m_frame.occlusionRawAdded = true;
+            m_renderGraph.AddPass("GTAO", RGPassFlags::Raster,
+                [&](RGBuilder& builder)
+                {
+                    builder.Read(resources.GBufferNormal);
+                    builder.Read(resources.Depth);
+                    builder.ColorTarget(resources.SSAORaw, NRI::LoadOP::clear, NRI::StoreOP::store, { 1.0f, 0.0f, 0.0f, 0.0f });
+                    builder.SetRenderArea(frame.renderExtent);
+                },
+                [this, res = &resources](RGPassContext& context)
+                {
+                    NRI::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_gtaoPipeline);
+                    cmd.setCullMode(NRI::CullMode::None);
+                    cmd.setDepthTestEnable(false);
+                    cmd.setDepthWriteEnable(false);
+                    cmd.setColorBlendEnable(0, false);
+                    cmd.setColorWriteMask(0, NRI::ColorComponent::R);
+
+                    shaderio::PushConstantGTAO push{};
+                    push.invViewProj = uniformData.invViewProj;
+                    push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                    push.depthTextureIndex = context.Slot(res->Depth);
+                    push.normalTextureIndex = context.Slot(res->GBufferNormal);
+                    push.sliceCount = m_gtaoSlices;
+                    push.stepsPerSide = m_gtaoSteps;
+                    push.radius = getSSAORadius();
+                    push.power = m_ssaoPower;
+                    push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
+                    push.shortRangePixels = ambientOcclusionShortRangePixels();
+                    push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                    cmd.pushData(&push, sizeof(push));
+                    cmd.drawMeshTasks(1, 1, 1);
+                });
+            return;
+        }
+
+        m_frame.occlusionRawAdded = true;
         m_renderGraph.AddPass("SSAO", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
