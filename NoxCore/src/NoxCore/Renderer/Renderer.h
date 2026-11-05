@@ -1663,7 +1663,9 @@ namespace Nox
             uint32_t Count = 0; // probes captured this frame
             std::array<glm::vec3, shaderio::MaxIrradianceProbesPerFrame> Centers{};
         } m_irradianceCaptureFrame;
-        uint32_t m_irradianceProbesPerFrame = 8;
+        // A capture costs ~1-2 ms a probe in a city scene: two a frame keep the frame rate steady while the volume fills (nearest the
+        // camera first) and while the scene changes.
+        uint32_t m_irradianceProbesPerFrame = 2;
         uint32_t m_irradianceRelightsPerFrame = 256;
         glm::vec3 m_sceneBoundsMin{ 0.0f };      // the automatic volume's box (render space), refreshed now and then
         glm::vec3 m_sceneBoundsMax{ 0.0f };

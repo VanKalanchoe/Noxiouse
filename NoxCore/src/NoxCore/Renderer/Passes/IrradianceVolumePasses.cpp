@@ -3,7 +3,7 @@
 // the whole scene's), lit at runtime the way Enlighten / Frostbite relight precomputed visibility:
 //   - Capture (what a probe sees): six small faces (IrradianceProbeFaceSize) drawn as an unlit G-buffer -- diffuse albedo, emission,
 //     normal, depth (Material_TransparentLit_Mesh.slang captureFragMain) -- each probe culling the draw list to the boxes within its
-//     reach, each face its clusters; then packed into the probe's surface cache and its distance SH (IrradianceProbeSH.slang
+//     reach (four cells, at least 20 m), each face its clusters; then packed into the probe's surface cache and its distance SH (IrradianceProbeSH.slang
 //     packMain). Once per probe, nearest the camera first, at most Probes per Frame a frame; again only for probes near where the
 //     scene changed (instances added, removed, moved or given another material: GpuScene::TakeChangedBounds).
 //   - Relight (the light it gets): every frame Relights per Frame probes in turn, each surface cache texel lit by the sun (through the
@@ -389,7 +389,8 @@ namespace Nox
 
             // Per probe the draw list within its reach (a box around it; the culling has side planes only, in x and z): what lies
             // farther shows as sky. Each face then culls its clusters to its view (the task stage).
-            const float reach = std::max(8.0f * std::max({ cell.x * scale.x, cell.y * scale.y, cell.z * scale.z }), WorldUnits::FromMeters(30.0f));
+            // Four cells, at least 20 m: the drawn instances (most of a capture's cost) grow with its square.
+            const float reach = std::max(4.0f * std::max({ cell.x * scale.x, cell.y * scale.y, cell.z * scale.z }), WorldUnits::FromMeters(20.0f));
             std::array<ViewDrawResources, shaderio::MaxIrradianceProbesPerFrame> draws{};
             for (uint32_t k = 0; k < count; ++k)
             {

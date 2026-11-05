@@ -680,3 +680,10 @@ opaque surface right behind it (`UniformBufferObject::ssgiTextureIndex` / `ssgiD
 ray: a decal on its wall), as the deferred lighting does there. SSGI's specks around lamps were fireflies (one of two rays hitting a
 small bright bulb): a ray now reads the lit scene at the mip its cone covers where it lands (UE's SSGI), a hit is held to 32 x middle
 grey at the frame's exposure (as the path tracer's firefly filter), and the 5 x 5 denoise averages by brightness on screen (Karis).
+
+**Frame drops for seconds (2026-11-05).** Measured: 5.9 ms (168 fps) with everything cached, then 20-25 ms for 3-4 s: 1501 probes
+re-queued (12.9 ms of capture a frame at 8) and every cascade drawn. Cause: texture streaming re-packs the GPU materials whenever a
+texture moves between slots, and every material update counted as a change of everything using it -- each streaming burst
+invalidated the probes and cascades all over the scene. Now a material counts as changed only when its look does (anything but a
+texture's slot; a texture appearing or going still counts). Captures are also budgeted for a steady frame rate (as engines
+time-slice their probe updates): 2 a frame by default, each probe drawing only what lies within 4 cells (at least 20 m).

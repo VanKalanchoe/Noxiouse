@@ -70,6 +70,39 @@ namespace Nox
         // transmission, which makes glass a transparent draw and a non-opaque instance shadow rays see through. It used to be left
         // out: a material that gained its transmission after its instances were placed (the mesh's own material standing in until the
         // .nmat loads, an edit) kept glass opaque to every shadow ray in the TLAS.
+        // Whether a material still looks the same to a view that keeps what it drew (the sun's cached cascades, the irradiance volume's
+        // probe captures): everything but which slot a texture sits in. Texture streaming re-packs the materials whenever textures move
+        // between slots (mips streamed in and out, virtual pages) without changing what they show; counting that as a change had every
+        // streaming burst capture the probes and draw the cascades again all over the scene (seconds of low frame rate). A texture
+        // appearing or going (a slot to or from none) still counts.
+        bool SameLook(const shaderio::GpuMaterial& a, const shaderio::GpuMaterial& b)
+        {
+            constexpr uint32_t None = 0xFFFFFFFF;
+            shaderio::GpuMaterial moved = b;
+            auto keep = [](uint32_t& slot, uint32_t previous)
+            {
+                if (slot != None && previous != None)
+                    slot = previous;
+            };
+            keep(moved.baseColorTextureIndex, a.baseColorTextureIndex);
+            keep(moved.metallicRoughnessTextureIndex, a.metallicRoughnessTextureIndex);
+            keep(moved.normalTextureIndex, a.normalTextureIndex);
+            keep(moved.occlusionTextureIndex, a.occlusionTextureIndex);
+            keep(moved.emissiveTextureIndex, a.emissiveTextureIndex);
+            keep(moved.transmissionTextureIndex, a.transmissionTextureIndex);
+            keep(moved.clearcoatTextureIndex, a.clearcoatTextureIndex);
+            keep(moved.clearcoatRoughnessTextureIndex, a.clearcoatRoughnessTextureIndex);
+            keep(moved.clearcoatNormalTextureIndex, a.clearcoatNormalTextureIndex);
+            keep(moved.sheenColorTextureIndex, a.sheenColorTextureIndex);
+            keep(moved.sheenRoughnessTextureIndex, a.sheenRoughnessTextureIndex);
+            keep(moved.specularColorTextureIndex, a.specularColorTextureIndex);
+            keep(moved.specularStrengthTextureIndex, a.specularStrengthTextureIndex);
+            keep(moved.iridescenceTextureIndex, a.iridescenceTextureIndex);
+            keep(moved.iridescenceThicknessTextureIndex, a.iridescenceThicknessTextureIndex);
+            keep(moved.anisotropyTextureIndex, a.anisotropyTextureIndex);
+            return std::memcmp(&a, &moved, sizeof(shaderio::GpuMaterial)) == 0;
+        }
+
         bool SameBucketInputs(const shaderio::GpuMaterial& a, const shaderio::GpuMaterial& b)
         {
             return a.alphaMode == b.alphaMode && a.unlit == b.unlit && a.doubleSided == b.doubleSided &&
@@ -321,6 +354,7 @@ namespace Nox
             return;
 
         const bool bucketsChange = !SameBucketInputs(m_Materials.Get(materialSlot), material);
+        const bool lookChanges = !SameLook(m_Materials.Get(materialSlot), material);
         m_Materials.Edit(materialSlot) = material;
 
         // Instances copy material fields into their ray tracing records; alpha mode, unlit and double-sided also pick the
@@ -331,8 +365,8 @@ namespace Nox
             if (state.Material != materialSlot)
                 continue;
 
-            if (state.Mesh != InvalidSlot)
-                MarkChanged(state.WorldSphere); // (alpha cutout, double-sidedness: what a shadow map drew)
+            if (state.Mesh != InvalidSlot && lookChanges)
+                MarkChanged(state.WorldSphere); // (its colors, alpha cutout, double-sidedness: what a capture or shadow map drew)
             WriteRayTracingInstance(instanceSlot);
             if (!bucketsChange || state.Mesh == InvalidSlot)
                 continue;
