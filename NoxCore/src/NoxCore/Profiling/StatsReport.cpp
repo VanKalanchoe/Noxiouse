@@ -145,8 +145,10 @@ namespace Nox
                                   DenoiserName(static_cast<uint8_t>(renderer.getNRDGIDenoiser())));
                     break;
                 case 4:
-                    AppendSetting(out, "Diffuse GI: Raster Probe Volume | {} probes, {} captured | {} per frame", renderer.getIrradianceProbeCount(),
-                                  renderer.getIrradianceProbesCaptured(), renderer.getIrradianceProbesPerFrame());
+                    AppendSetting(out, "Diffuse GI: Raster Probe Volume ({}) | {} probes, {} captured | {} per frame{}",
+                                  renderer.isIrradianceVolumeAutomatic() ? "automatic" : "entity", renderer.getIrradianceProbeCount(),
+                                  renderer.getIrradianceProbesCaptured(), renderer.getIrradianceProbesPerFrame(),
+                                  renderer.getIrradianceContinuous() ? " | continuous" : "");
                     break;
                 default:
                     AppendSetting(out, "Diffuse GI: Off (IBL ambient)");
@@ -168,6 +170,13 @@ namespace Nox
             else
             {
                 AppendSetting(out, "Pipeline: Raster");
+                if (renderer.getDiffuseGIMode() == 4)
+                    AppendSetting(out, "Diffuse GI: Raster Probe Volume ({}) | {} probes, {} captured | {} per frame{}",
+                                  renderer.isIrradianceVolumeAutomatic() ? "automatic" : "entity", renderer.getIrradianceProbeCount(),
+                                  renderer.getIrradianceProbesCaptured(), renderer.getIrradianceProbesPerFrame(),
+                                  renderer.getIrradianceContinuous() ? " | continuous" : "");
+                else
+                    AppendSetting(out, "Diffuse GI: Off (IBL ambient)");
             }
 
             // The sun's shadows (deferred and forward lighting, both pipelines above but the path tracer): the RT mask or the cascades.

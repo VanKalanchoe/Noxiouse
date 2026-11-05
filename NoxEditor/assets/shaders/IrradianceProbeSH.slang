@@ -52,8 +52,9 @@ void compMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
     {
         const uint probe = ((uint*)pushConstant.probeIndicesReference)[row];
         float4* sh = (float4*)pushConstant.probeSHReference;
-        sh[probe * 3 + 0] = gSH[0][0];
-        sh[probe * 3 + 1] = gSH[0][1];
-        sh[probe * 3 + 2] = gSH[0][2];
+        sh[probe * 4 + 0] = gSH[0][0];
+        sh[probe * 4 + 1] = gSH[0][1];
+        sh[probe * 4 + 2] = gSH[0][2];
+        sh[probe * 4 + 3] = float4(1.0, 0.0, 0.0, 0.0); // captured
     }
 }

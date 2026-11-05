@@ -29,6 +29,7 @@ namespace Nox
         desc.shaders.back().entryPoint = "traceMain";
         m_ssgiTracePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         desc.shaders.back().entryPoint = "denoiseMain";
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32G32_SFLOAT }; // the result, (view depth, frames)
         m_ssgiDenoisePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
@@ -123,13 +124,18 @@ namespace Nox
         desc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
         const RGTexture raw = m_renderGraph.CreateTexture("SSGI Raw", desc);
         const RGTextureHistory history = m_renderGraph.GetHistoryTexture("SSGI Accumulation", desc, 2);
+        RGTextureDesc depthDesc;
+        depthDesc.Format = NRI::ImageFormat::R32G32_SFLOAT;
+        const RGTextureHistory depthHistory = m_renderGraph.GetHistoryTexture("SSGI Depth History", depthDesc, 2);
         const uint32_t readIndex = m_ssgiHistoryIndex;
         const uint32_t writeIndex = 1 - readIndex;
         m_ssgiHistoryIndex = writeIndex;
-        const bool historyValid = m_ssgiRanLastFrame && !history.WasReset;
+        const bool historyValid = m_ssgiRanLastFrame && !history.WasReset && !depthHistory.WasReset;
         m_ssgiRanLastFrame = true;
         const RGTexture historyRead = history.Textures[readIndex];
         const RGTexture historyWrite = history.Textures[writeIndex];
+        const RGTexture depthRead = depthHistory.Textures[readIndex];
+        const RGTexture depthWrite = depthHistory.Textures[writeIndex];
         const RGTexture sceneHistory = resources.SSRHistory[m_ssrHistoryIndex];
         resources.SSGI = historyWrite;
         m_frame.ssgiAdded = true;
@@ -176,19 +182,26 @@ namespace Nox
                 builder.Read(resources.Depth);
                 builder.Read(resources.GBufferNormal);
                 if (historyValid)
+                {
                     builder.Read(historyRead);
+                    builder.Read(depthRead);
+                }
                 builder.ColorTarget(historyWrite, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.ColorTarget(depthWrite, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
-            [this, res = &resources, raw, historyRead, historyValid](RGPassContext& context)
+            [this, res = &resources, raw, historyRead, depthRead, historyValid](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ssgiDenoisePipeline);
                 cmd.setCullMode(NRI::CullMode::None);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
-                cmd.setColorBlendEnable(0, false);
-                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                for (uint32_t attachment = 0; attachment < 2; ++attachment)
+                {
+                    cmd.setColorBlendEnable(attachment, false);
+                    cmd.setColorWriteMask(attachment, NRI::ColorComponent::All);
+                }
                 shaderio::PushConstantSSGIDenoise push{};
                 push.invViewProj = uniformData.invViewProj;
                 push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
@@ -196,8 +209,9 @@ namespace Nox
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.normalTextureIndex = context.Slot(res->GBufferNormal);
                 push.historyTextureIndex = historyValid ? context.Slot(historyRead) : 0xFFFFFFFF;
+                push.historyDepthTextureIndex = historyValid ? context.Slot(depthRead) : 0xFFFFFFFF;
+                push.maxHistory = 32.0f;
                 push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
-                push.historyWeight = 0.9f;
                 cmd.pushData(&push, sizeof(push));
                 cmd.drawMeshTasks(1, 1, 1);
             });

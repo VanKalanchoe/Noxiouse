@@ -30,6 +30,7 @@ bool irradiance_volume_lookup(UniformBufferObject* ubo, float3 worldPos, float3 
     float4* sh = (float4*)volume->probeSHReference;
     float4 shR = float4(0.0), shG = float4(0.0), shB = float4(0.0);
     float total = 0.0;
+    float coverage = 0.0;
     for (uint corner = 0; corner < 8; ++corner)
     {
         const uint3 offset = uint3(corner & 1u, (corner >> 1) & 1u, (corner >> 2) & 1u);
@@ -38,13 +39,19 @@ bool irradiance_volume_lookup(UniformBufferObject* ubo, float3 worldPos, float3 
         // In front of the surface counts more (wrap shading, as DDGI's probe weight).
         const float3 toProbe = normalize(float3(probe) * cell - extents - local + localNormal * 1e-4);
         const float facing = 0.5 * (dot(toProbe, localNormal) + 1.0);
-        const float w = trilinear.x * trilinear.y * trilinear.z * (facing * facing + 0.05);
         const uint index = (probe.z * counts.y + probe.y) * counts.x + probe.x;
-        shR += sh[index * 3 + 0] * w;
-        shG += sh[index * 3 + 1] * w;
-        shB += sh[index * 3 + 2] * w;
+        // A probe not captured yet (the volume is still filling) is left out.
+        const float captured = saturate(sh[index * 4 + 3].x);
+        const float trilinearWeight = trilinear.x * trilinear.y * trilinear.z;
+        const float w = trilinearWeight * (facing * facing + 0.05) * captured;
+        shR += sh[index * 4 + 0] * w;
+        shG += sh[index * 4 + 1] * w;
+        shB += sh[index * 4 + 2] * w;
         total += w;
+        coverage += trilinearWeight * captured;
     }
+    // Where the probes around are not captured yet, the other ambient shows (no black while it fills).
+    weight *= saturate(coverage);
     if (total <= 0.0)
         return false;
     shR /= total;

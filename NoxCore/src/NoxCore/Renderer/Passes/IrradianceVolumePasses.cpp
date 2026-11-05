@@ -77,7 +77,10 @@ namespace Nox
             automatic.Id = ~0ull;
             automatic.World = glm::translate(glm::dmat4(1.0), 0.5 * (worldMin + worldMax));
             automatic.Extents = extents;
-            automatic.Spacing = std::max(WorldUnits::FromMeters(2.0f), 2.0f * std::max({ extents.x, extents.y, extents.z }) / 31.0f);
+            // At least 2 m apart, at most 32 per axis and about 2048 in all (a fill of a few seconds at 8 a frame).
+            const glm::vec3 size = 2.0f * extents;
+            const float volumeSpacing = std::cbrt(size.x * size.y * size.z / 2048.0f);
+            automatic.Spacing = std::max({ WorldUnits::FromMeters(2.0f), std::max({ size.x, size.y, size.z }) / 31.0f, volumeSpacing });
             automatic.Intensity = 1.0f;
             automatic.Revision = m_irradianceVolume.Id == ~0ull ? m_irradianceVolume.Revision : 0u;
             m_irradianceVolumeAutomatic = true;
@@ -102,9 +105,9 @@ namespace Nox
                     std::scoped_lock lock(m_deferredReleasesMutex);
                     m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(state.SH) });
                 }
-                state.SH = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(glm::vec4) * 3 * probeCount, .usage = NRI::BufferUsage::Storage });
+                state.SH = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(glm::vec4) * 4 * probeCount, .usage = NRI::BufferUsage::Storage });
             }
-            // Moved, resized or asked to: captured again from the start (black until each probe's turn comes).
+            // Moved, resized or asked to: captured again from the start (the lookup leaves each probe out until its turn comes).
             state.NeedsClear = true;
             state.Id = submission.Id;
             state.World = submission.World;
@@ -146,7 +149,7 @@ namespace Nox
         if (state.NeedsClear)
         {
             state.NeedsClear = false;
-            const uint64_t bytes = sizeof(glm::vec4) * 3 * state.ProbeCount;
+            const uint64_t bytes = sizeof(glm::vec4) * 4 * state.ProbeCount;
             m_renderGraph.AddPass("Irradiance Volume Clear", RGPassFlags::NeverCull,
                 [](RGBuilder&) {},
                 [shBuffer, bytes](RGPassContext& context)

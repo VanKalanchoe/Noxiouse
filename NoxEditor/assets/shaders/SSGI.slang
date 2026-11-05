@@ -145,30 +145,37 @@ float4 traceMain(MSOutput input, uniform PushConstantSSGI pushConstant) : SV_Tar
     return float4(radianceSum / float(rays), hits / float(rays));
 }
 
-[shader("fragment")]
-float4 denoiseMain(MSOutput input, uniform PushConstantSSGIDenoise pushConstant) : SV_Target0
+struct SSGIDenoiseOutput
 {
+    float4 accumulated : SV_Target0;
+    float2 depthHistory : SV_Target1; // view depth, frames accumulated (next frame's validation)
+};
+
+[shader("fragment")]
+SSGIDenoiseOutput denoiseMain(MSOutput input, uniform PushConstantSSGIDenoise pushConstant)
+{
+    SSGIDenoiseOutput output;
+    output.accumulated = float4(0.0);
+    output.depthHistory = float2(0.0);
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     const int2 pixelCoord = int2(input.pos.xy);
     const float2 viewportSize = pushConstant.viewportSize;
     Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     const float depth = depthTex.Load(int3(pixelCoord, 0)).r;
     if (depth <= 0.0)
-        return float4(0.0);
+        return output;
     Texture2D rawTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rawTextureIndex, 0));
     Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
     const float3 normal = normalize(normalTex.Load(int3(pixelCoord, 0)).rgb + float3(0.0, 1e-6, 0.0));
     const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
     const float viewZ = nearPlane / depth;
 
-    // 3x3 neighbours on the same surface (view depth within 2%, normals alike), and their range for the history clamp.
+    // 5x5 neighbours on the same surface (view depth within 2%, normals alike), Gaussian falloff.
     float4 sum = float4(0.0);
     float weightSum = 0.0;
-    float4 lo = float4(1e30);
-    float4 hi = float4(-1e30);
-    for (int y = -1; y <= 1; ++y)
+    for (int y = -2; y <= 2; ++y)
     {
-        for (int x = -1; x <= 1; ++x)
+        for (int x = -2; x <= 2; ++x)
         {
             const int2 p = clamp(pixelCoord + int2(x, y), int2(0), int2(viewportSize) - 1);
             const float d = depthTex.Load(int3(p, 0)).r;
@@ -176,33 +183,39 @@ float4 denoiseMain(MSOutput input, uniform PushConstantSSGIDenoise pushConstant)
                 continue;
             const float zWeight = saturate(1.0 - abs(nearPlane / d - viewZ) / (0.02 * viewZ));
             const float nWeight = pow(saturate(dot(normalize(normalTex.Load(int3(p, 0)).rgb + float3(0.0, 1e-6, 0.0)), normal)), 8.0);
-            const float w = zWeight * nWeight;
-            const float4 value = rawTex.Load(int3(p, 0));
-            sum += value * w;
+            const float w = zWeight * nWeight * exp(-0.25 * float(x * x + y * y));
+            sum += rawTex.Load(int3(p, 0)) * w;
             weightSum += w;
-            if (w > 0.25)
-            {
-                lo = min(lo, value);
-                hi = max(hi, value);
-            }
         }
     }
     const float4 current = weightSum > 0.0 ? sum / weightSum : rawTex.Load(int3(pixelCoord, 0));
-    if (pushConstant.historyTextureIndex == 0xFFFFFFFF)
-        return current;
 
-    // Last frame's result where this surface was then (the previous camera); off screen: start over.
-    const float2 uv = (float2(pixelCoord) + 0.5) / viewportSize;
-    const float4 worldH = mul(pushConstant.invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0));
-    const float4 previousClip = mul(ubo->prevProj, mul(ubo->prevView, float4(worldH.xyz / worldH.w, 1.0)));
-    const float2 previousUV = float2(previousClip.x / previousClip.w * 0.5 + 0.5, 0.5 - previousClip.y / previousClip.w * 0.5);
-    if (previousClip.w <= 0.0 || any(previousUV <= 0.0) || any(previousUV >= 1.0))
-        return current;
-    Texture2D historyTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.historyTextureIndex, 0));
-    SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
-    float4 history = historyTex.SampleLevel(linearClamp, previousUV, 0.0);
-    // Clamped to the neighbourhood (widened: a few noisy rays span less than the light really varies), against ghosting.
-    const float4 range = max(hi - lo, float4(0.0));
-    history = all(lo <= hi) ? clamp(history, lo - range, hi + range) : history;
-    return lerp(current, history, saturate(pushConstant.historyWeight));
+    // Where this surface was last frame (the previous camera), kept only where last frame saw the same depth there (no history from
+    // what was in front or behind: disocclusions start over).
+    float frames = 1.0;
+    float4 result = current;
+    if (pushConstant.historyTextureIndex != 0xFFFFFFFF && pushConstant.historyDepthTextureIndex != 0xFFFFFFFF)
+    {
+        const float2 uv = (float2(pixelCoord) + 0.5) / viewportSize;
+        const float4 worldH = mul(pushConstant.invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0));
+        const float3 worldPos = worldH.xyz / worldH.w;
+        const float4 previousClip = mul(ubo->prevProj, mul(ubo->prevView, float4(worldPos, 1.0)));
+        const float2 previousUV = float2(previousClip.x / previousClip.w * 0.5 + 0.5, 0.5 - previousClip.y / previousClip.w * 0.5);
+        if (previousClip.w > 0.0 && all(previousUV > 0.0) && all(previousUV < 1.0))
+        {
+            Texture2D<float2> historyDepth = Texture2D<float2>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.historyDepthTextureIndex, 0));
+            const float2 previous = historyDepth.Load(int3(int2(previousUV * viewportSize), 0));
+            const float expectedZ = mul(ubo->prevView, float4(worldPos, 1.0)).z;
+            if (previous.x > 0.0 && abs(previous.x - expectedZ) < 0.05 * expectedZ)
+            {
+                Texture2D historyTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.historyTextureIndex, 0));
+                SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+                frames = min(previous.y + 1.0, max(pushConstant.maxHistory, 1.0));
+                result = lerp(historyTex.SampleLevel(linearClamp, previousUV, 0.0), current, 1.0 / frames);
+            }
+        }
+    }
+    output.accumulated = result;
+    output.depthHistory = float2(viewZ, frames);
+    return output;
 }

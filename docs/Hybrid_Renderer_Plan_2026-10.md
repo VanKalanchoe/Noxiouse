@@ -635,3 +635,12 @@ light's cube 1.9 ms vs RT shadows + SIGMA 1.0 ms). Changes:
 - Presets set every feature on or off. New: **Ray Traced (All)** (High + every light shadowed, DLSS Ray Reconstruction, Auto
   Exposure) and **Raster (All)** (ray tracing off; shadow maps + contact shadows, GTAO, SSR + probes, raster probe volume + SSGI, DLSS
   Quality without RR, Auto Exposure). Low / Medium / High turn the raster versions off.
+
+**Fixes after the second measurement (2026-11-05).** Raster (All) measured 22.0 ms vs Ray Traced (All) 19.4 ms, 13.5 ms of it the
+irradiance volume still filling (an automatic volume over Bistro can reach ~5000 probes: 10+ s at 8 a frame) -- and probes not yet
+captured were black (the "inverted" look the user saw until it finished). Now: each probe carries a captured flag (a fourth float4)
+and the lookup leaves uncaptured probes out, the frame's other ambient showing there (no black while filling); the automatic volume is
+capped at ~2048 probes. SSGI's noise came from its denoiser's neighbourhood clamp (too tight for a 2-ray signal: the history was
+clamped away); it now keeps the history where last frame's view depth at the reprojected pixel matches (a second history: view depth,
+frames accumulated), accumulates up to 32 frames (blend 1 / frames), after a 5 x 5 bilateral average. Without the fill, Raster (All)
+is ~8.5 ms of GPU work vs ~19.4 ms for Ray Traced (All) in that view (the stats report now prints the raster pipeline's GI line).

@@ -2272,7 +2272,7 @@ struct GpuReflectionProbe
 // An irradiance volume (RS5a, GI without rays; Renderer::addIrradianceVolumePasses): a grid of probes over the entity's box, each the
 // scene around it rendered into six small faces (rasterized, a few probes a frame) and projected onto L1 spherical harmonics --
 // UE's volumetric lightmap / Godot's LightmapGI probes, updated at runtime. probeSH: per probe 3 float4 (R, G, B: L00, L1-1, L10, L11
-// of the radiance).
+// of the radiance), then a fourth: x 1 once captured (0: not yet -- the lookup leaves it out).
 STATIC_CONST uint32_t IrradianceProbeFaceSize = 16; // texels per side of a capture face
 STATIC_CONST uint32_t MaxIrradianceProbesPerFrame = 16;
 
@@ -2285,7 +2285,7 @@ struct GpuIrradianceVolume
     uint32_t countY;
     uint32_t countZ;
     uint32_t probeCount;
-    uint64_t probeSHReference; // float4[3] per probe, x fastest, then y, then z
+    uint64_t probeSHReference; // float4[4] per probe (R, G, B SH, then x = captured), x fastest, then y, then z
     float normalBias;       // local units the lookup moves along the normal (away from the surface's own probe gaps)
     uint32_t padding;
 };
@@ -2502,8 +2502,8 @@ struct PushConstantSSGI
     uint32_t padding[3];
 };
 
-// SSGI's denoiser (SSGI.slang denoiseMain): a 3x3 bilateral average of the raw rays, then last frame's result reprojected, clamped to
-// the neighbourhood and blended in.
+// SSGI's denoiser (SSGI.slang denoiseMain): a 5x5 bilateral average of the raw rays, then last frame's result where this surface was
+// (the previous camera; kept only where last frame's view depth there matches), accumulated over up to maxHistory frames.
 struct PushConstantSSGIDenoise
 {
     mat4 invViewProj;
@@ -2511,10 +2511,10 @@ struct PushConstantSSGIDenoise
     uint32_t rawTextureIndex;
     uint32_t depthTextureIndex;
     uint32_t normalTextureIndex;
-    uint32_t historyTextureIndex; // last frame's denoised result (0xFFFFFFFF: none, start over)
+    uint32_t historyTextureIndex;      // last frame's denoised result (0xFFFFFFFF: none, start over)
+    uint32_t historyDepthTextureIndex; // last frame's (view depth, frames accumulated)
+    float maxHistory;                  // frames at most (the blend is 1 / frames)
     vec2 viewportSize;
-    float historyWeight; // how much of the reprojected history stays (0.9: about 10 frames)
-    uint32_t padding;
 };
 
 // Volumetric fog (RS6; VolumetricFog.slang): lightMain lights each froxel (the height fog's density, the sun and local lights with the
