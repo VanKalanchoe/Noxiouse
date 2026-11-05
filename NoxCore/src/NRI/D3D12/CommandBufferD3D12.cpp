@@ -171,6 +171,12 @@ namespace NRI
         setScissor(swapChainExtent);
     }
 
+    void CommandBufferD3D12::setScissorRect(int32_t x, int32_t y, uint32_t width, uint32_t height)
+    {
+        const D3D12_RECT rect{ x, y, x + static_cast<LONG>(width), y + static_cast<LONG>(height) };
+        m_cmdList->RSSetScissorRects(1, &rect);
+    }
+
     void CommandBufferD3D12::setPrimitiveTopology(const PrimitiveTopology& topology)
     {
         m_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);

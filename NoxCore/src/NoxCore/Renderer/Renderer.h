@@ -553,6 +553,23 @@ namespace Nox
         float getShadowNormalBias() const { return m_shadowNormalBias; }
         void setShadowSlopeBias(float slope) { m_shadowSlopeBias = std::clamp(slope, 0.0f, 16.0f); }
         float getShadowSlopeBias() const { return m_shadowSlopeBias; }
+        // Local lights' shadows (RS1b; Passes/ShadowMapPasses.cpp): their RT shadow rays, or shadow maps in one atlas for the most
+        // important ones (a spot light one view, point / rect / disc lights a cube) -- the rest keep their rays. The filter and bias
+        // settings are the sun's. How many lights get a map, the atlas's size, the largest tile (texels per face side; each light's
+        // follows its size on screen, at least 128).
+        enum class LocalShadowMode : uint32_t { RayTraced = 0, ShadowMaps = 1 };
+        void setLocalShadowMode(LocalShadowMode mode) { m_localShadowMode = mode; }
+        LocalShadowMode getLocalShadowMode() const { return m_localShadowMode; }
+        static constexpr uint32_t MaxLocalShadowLights = 16;
+        void setLocalShadowMaxLights(uint32_t count) { m_localShadowMaxLights = std::clamp(count, 1u, MaxLocalShadowLights); }
+        uint32_t getLocalShadowMaxLights() const { return m_localShadowMaxLights; }
+        void setLocalShadowAtlasSize(uint32_t texels) { m_localShadowAtlasSize = std::clamp(texels, 1024u, 8192u); }
+        uint32_t getLocalShadowAtlasSize() const { return m_localShadowAtlasSize; }
+        void setLocalShadowMaxResolution(uint32_t texels) { m_localShadowMaxResolution = std::clamp(texels, 128u, 2048u); }
+        uint32_t getLocalShadowMaxResolution() const { return m_localShadowMaxResolution; }
+        // This frame's local lights with a shadow map and their views (stats).
+        uint32_t getLocalShadowLightCount() const { return m_localShadowLightCount; }
+        uint32_t getLocalShadowViewCount() const { return m_localShadows.viewCount; }
         // Same reasoning as setRayTracingShadows above -- the NRD reflection denoiser pass is gated on
         // this flag, so toggling it needs a clean history reset too.
         void setRayTracingReflections(bool enabled)
@@ -1066,6 +1083,10 @@ namespace Nox
         // shadow mask; replaces addRTShadowPasses' sun mask (SunShadowMode::ShadowMaps).
         void addShadowMapPasses();
         void createShadowMapPipelines(bool forceCompile = false);
+        // Local lights' shadow maps (Passes/ShadowMapPasses.cpp): which lights, their views and tiles, culling per light, one depth pass
+        // into the atlas; after Compile the atlas slot, the per-light view table and each view's copy of the uniforms.
+        void addLocalShadowPasses();
+        void updateLocalShadowUniforms();
         // After Compile: the cascades' bindless slots into GpuShadowCascades, each cascade's copy of the frame's uniforms.
         void updateShadowMapUniforms();
         void addRTReflectionPasses();
@@ -1298,6 +1319,31 @@ namespace Nox
         float m_shadowDepthBias = 0.5f;
         float m_shadowNormalBias = 1.5f;
         float m_shadowSlopeBias = 2.0f;
+        // Local lights' shadow maps: per frame slot a copy of the uniforms per view and a culling view per light, the GpuLocalShadows
+        // and the per-light view table (grown with the light count); this frame's views, lights and their draws.
+        struct LocalShadowLight
+        {
+            uint32_t LightIndex = 0;
+            uint32_t FirstView = 0;
+            uint32_t ViewCount = 0;
+        };
+        std::array<std::array<std::unique_ptr<NRI::Buffer>, shaderio::MaxLocalShadowViews>, MAX_FRAMES_IN_FLIGHT> m_localShadowViewUniforms;
+        std::array<std::array<void*, shaderio::MaxLocalShadowViews>, MAX_FRAMES_IN_FLIGHT> m_localShadowViewUniformsMapped{};
+        std::array<std::array<std::unique_ptr<NRI::Buffer>, MaxLocalShadowLights>, MAX_FRAMES_IN_FLIGHT> m_localShadowCullViews;
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_localShadowBuffers;
+        std::array<void*, MAX_FRAMES_IN_FLIGHT> m_localShadowBuffersMapped{};
+        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_localShadowLightViewBuffers;
+        std::array<void*, MAX_FRAMES_IN_FLIGHT> m_localShadowLightViewBuffersMapped{};
+        std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> m_localShadowLightViewCapacity{};
+        shaderio::GpuLocalShadows m_localShadows{};
+        std::array<glm::mat4, shaderio::MaxLocalShadowViews> m_localShadowViews{};
+        std::array<glm::mat4, shaderio::MaxLocalShadowViews> m_localShadowProjections{};
+        std::array<LocalShadowLight, MaxLocalShadowLights> m_localShadowLights{};
+        uint32_t m_localShadowLightCount = 0;
+        LocalShadowMode m_localShadowMode = LocalShadowMode::RayTraced;
+        uint32_t m_localShadowMaxLights = 8;
+        uint32_t m_localShadowAtlasSize = 4096;
+        uint32_t m_localShadowMaxResolution = 1024;
         std::unique_ptr<NRI::Pipeline> m_nrdGuidesPipeline = nullptr; // NRD view Z + normal/roughness (NRDGuides.slang)
         std::unique_ptr<NRI::Pipeline> m_reflectionPipeline = nullptr;
         // Path Tracer
@@ -1364,6 +1410,7 @@ namespace Nox
             bool rtShadowsAdded = false;
             bool nrdShadowsAdded = false;
             bool shadowMapsAdded = false; // the sun's cascaded shadow maps, resolved into RawShadowMask
+            bool localShadowsAdded = false; // local lights' shadow atlas
             uint32_t shadowCascadeCount = 0;
             bool rtReflectionsAdded = false;
             bool nrdReflectionsAdded = false;

@@ -897,6 +897,7 @@ namespace Nox
                 choice("Diffuse GI##Project", saved.DiffuseGI, { { 0, "Environment (IBL)" }, { 1, "DDGI" }, { 2, "ReSTIR GI" }, { 3, "Screen Probes" } });
                 choice("Shadowed Lights##Project", saved.ShadowedLights, { { 0, "All" }, { 1, "1" }, { 2, "2" }, { 4, "4" }, { 8, "8" } });
                 choice("Sun Shadows##Project", saved.SunShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
+                choice("Local Light Shadows##Project", saved.LocalShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
                 choice("Order-Independent Transparency##Project", saved.OIT, { { 0, "Off" }, { 1, "On" } });
                 choice("Temporal Anti-Aliasing##Project", saved.TAA, { { 0, "Off" }, { 1, "On" } });
 
@@ -1326,6 +1327,44 @@ namespace Nox
                 ImGui::SetItemTooltip("Against shadow acne, in texels of each cascade: the shaded point moves towards the sun (Depth)\n"
                                       "and along its normal (Normal); the casters' depth moves away by their slope (Slope).\n"
                                       "Too much detaches shadows from their casters (peter panning).");
+                ImGui::Unindent();
+            }
+
+            // Spot, point, rect and disc lights: their RT shadow rays or an atlas of shadow maps (RS1b).
+            const char* localShadowModes[] = { "Ray Traced", "Shadow Maps" };
+            int localShadowMode = static_cast<int>(m_Renderer->getLocalShadowMode());
+            ImGui::SetNextItemWidth(180.0f);
+            if (ImGui::Combo("Local Light Shadows", &localShadowMode, localShadowModes, IM_ARRAYSIZE(localShadowModes)))
+                m_Renderer->setLocalShadowMode(static_cast<Renderer::LocalShadowMode>(localShadowMode));
+            ImGui::SetItemTooltip("Spot, point, rect and disc lights. Ray Traced: shadow rays in the lighting (Ray Tracing Shadows,\n"
+                                  "Shadowed Lights per Pixel). Shadow Maps: the most important lights get shadow maps in one atlas\n"
+                                  "(a spot light one view, the others a cube of six), sized by how big they are on screen; the\n"
+                                  "rest keep their rays. Filter and bias are the sun's settings above.");
+            if (m_Renderer->getLocalShadowMode() == Renderer::LocalShadowMode::ShadowMaps)
+            {
+                ImGui::Indent();
+                int maxLights = static_cast<int>(m_Renderer->getLocalShadowMaxLights());
+                if (ImGui::SliderInt("Shadowed Lights##LocalShadows", &maxLights, 1, static_cast<int>(Renderer::MaxLocalShadowLights)))
+                    m_Renderer->setLocalShadowMaxLights(static_cast<uint32_t>(maxLights));
+                const uint32_t atlasSizes[] = { 2048, 4096, 8192 };
+                const char* atlasNames[] = { "2048", "4096", "8192" };
+                int atlas = 1;
+                for (int i = 0; i < 3; ++i)
+                    if (atlasSizes[i] == m_Renderer->getLocalShadowAtlasSize()) atlas = i;
+                ImGui::SetNextItemWidth(180.0f);
+                if (ImGui::Combo("Atlas Size##LocalShadows", &atlas, atlasNames, IM_ARRAYSIZE(atlasNames)))
+                    m_Renderer->setLocalShadowAtlasSize(atlasSizes[atlas]);
+                const uint32_t tileSizes[] = { 256, 512, 1024, 2048 };
+                const char* tileNames[] = { "256", "512", "1024", "2048" };
+                int tileSize = 2;
+                for (int i = 0; i < 4; ++i)
+                    if (tileSizes[i] == m_Renderer->getLocalShadowMaxResolution()) tileSize = i;
+                ImGui::SetNextItemWidth(180.0f);
+                if (ImGui::Combo("Max Resolution##LocalShadows", &tileSize, tileNames, IM_ARRAYSIZE(tileNames)))
+                    m_Renderer->setLocalShadowMaxResolution(tileSizes[tileSize]);
+                ImGui::SetItemTooltip("Texels per side of a light's view at the most (a light filling the screen); smaller on screen,\n"
+                                      "fewer (at least 128). Halved for all when the atlas is full.");
+                ImGui::Text("This frame: %u lights, %u views", m_Renderer->getLocalShadowLightCount(), m_Renderer->getLocalShadowViewCount());
                 ImGui::Unindent();
             }
         }

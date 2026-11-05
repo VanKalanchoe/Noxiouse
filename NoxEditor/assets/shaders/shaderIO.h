@@ -741,6 +741,11 @@ struct UniformBufferObject
     // frame for the passes that shade in their own pixels (the forward and particle passes; ShadowMaps.slang). 0: the sun is
     // shadowed by ray tracing, or not at all. The deferred lighting reads the shadow mask the cascades are resolved into instead.
     uint64_t sunShadowCascadesReference;
+    // Local lights' shadow maps (Settings > Local Light Shadows: Shadow Maps; Renderer::addLocalShadowPasses, ShadowMaps.slang):
+    // GpuLocalShadows of this frame, and per light (its index in the light buffer) (first view | view count << 16) or
+    // LOCAL_SHADOW_NONE -- a light without a map keeps its RT shadow rays. 0: no local light has a shadow map.
+    uint64_t localShadowsReference;
+    uint64_t localShadowLightViewsReference;
 };
 
 // An emissive mesh instance as a light for the path tracer's direct light sampling: picked by weight (its emission's luminance
@@ -2226,6 +2231,36 @@ struct GpuShadowCascades
     float filterTexels;     // PCF kernel radius / PCSS minimum
     float maxFilterTexels;  // PCSS kernel radius limit
     uint32_t padding[3];
+};
+
+// Local lights' shadow maps (RS1b; Renderer::addLocalShadowPasses): perspective views in one depth atlas, UE5's local light shadows
+// without virtual shadow maps. A spot light has one view (its cone); point, rect and disc lights a cube of six (+X, -X, +Y, -Y, +Z,
+// -Z), a face behind a rect / disc light left out (an empty atlasRect: lit). Each view's field of view is widened by a border of
+// texels, so a filter kernel at the face's edge stays in its own tile. Infinite reverse-Z projection: depth = nearPlane / view depth.
+STATIC_CONST uint32_t MaxLocalShadowViews = 96;
+STATIC_CONST uint32_t LOCAL_SHADOW_NONE = 0xFFFFFFFF;
+
+struct GpuShadowView
+{
+    mat4 viewProj;        // render space -> the view's clip space (w = the depth along the view)
+    vec4 atlasRect;       // xy: the tile's corner in atlas uv, zw: its size (0: no tile, lit)
+    float nearPlane;      // the view depth at depth 1
+    float texelPerDepth;  // world size of a texel per unit of view depth (2 tan(half fov) / tile texels)
+    uint32_t tileTexels;
+    uint32_t borderTexels; // the widened field of view's border (the filter's reach)
+};
+
+struct GpuLocalShadows
+{
+    uint32_t atlasTextureIndex;
+    uint32_t atlasSize;      // texels per side
+    uint32_t viewCount;
+    uint32_t filter;         // SHADOW_FILTER_* (the sun's setting)
+    float normalBias;        // texels, as GpuShadowCascades
+    float depthBias;
+    float filterTexels;
+    float maxFilterTexels;
+    GpuShadowView views[96]; // MaxLocalShadowViews
 };
 
 // The shadow maps resolved into the screen's shadow mask (ShadowMapResolve.slang), the RT shadow mask's format.

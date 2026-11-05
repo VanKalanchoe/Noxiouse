@@ -177,6 +177,12 @@ namespace Nox
                                   renderer.getShadowMaxFilterTexels());
                 else
                     AppendSetting(out, "Sun shadows: Ray Traced{}", renderer.getRayTracingEnabled() && renderer.getRayTracingShadows() ? "" : " (off: Ray Tracing Shadows is off)");
+                if (renderer.getLocalShadowMode() == Renderer::LocalShadowMode::ShadowMaps)
+                    AppendSetting(out, "Local light shadows: Shadow Maps | {} lights, {} views this frame (max {}) | atlas {} | max tile {}",
+                                  renderer.getLocalShadowLightCount(), renderer.getLocalShadowViewCount(), renderer.getLocalShadowMaxLights(),
+                                  renderer.getLocalShadowAtlasSize(), renderer.getLocalShadowMaxResolution());
+                else
+                    AppendSetting(out, "Local light shadows: Ray Traced");
             }
 
             // Debug views replace the lit output and change what runs, so a report taken with one is not comparable.

@@ -347,6 +347,11 @@ namespace NRI
         m_commandBuffers[m_currentFrameIndex].setScissorWithCount(scissor);
     }
     
+    void CommandBufferVK::setScissorRect(int32_t x, int32_t y, uint32_t width, uint32_t height)
+    {
+        m_commandBuffers[m_currentFrameIndex].setScissorWithCount(vk::Rect2D(vk::Offset2D(x, y), vk::Extent2D(width, height)));
+    }
+
     void CommandBufferVK::setVertexInput()
     {
         m_commandBuffers[m_currentFrameIndex].setVertexInputEXT({}, {});

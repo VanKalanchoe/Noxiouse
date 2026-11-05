@@ -510,3 +510,22 @@ slowed 3.48 -> 3.76 ms), so the frame grew only 15.18 -> 15.44 ms: net about 0.2
 RT. Transient VRAM +55 MB. Image: the user saw them "almost identical". **RT stays the default** for the sun. If the maps are to
 compete: cache the far cascades (UE's static shadow caching / redraw only what moved), cheaper per-cascade culling (each 0.15 ms
 for 2909 entries vs 0.09 for the camera), lower resolution for the far cascades.
+
+**Local lights' shadow maps (RS1b, 2026-11-05, untested)** -- Settings > Local Light Shadows: Ray Traced / Shadow Maps (project
+`LocalShadows`), off by default. UE5's local light shadows without virtual shadow maps (`addLocalShadowPasses`,
+`local_light_shadow_map` in `ShadowMaps.slang`):
+- **Which lights:** the local lights whose range the camera sees, by power / distance^2 (a rect / disc light's radiance x area), up
+  to Shadowed Lights (8, at most 16); the others keep their RT shadow rays.
+- **Views:** a spot light one perspective view over its outer cone; point, rect and disc lights a cube of six 90-degree faces (a
+  rect / disc light without the faces wholly behind its front). Every view's field of view is widened by a border of texels (the
+  filter's reach) so a kernel at a face's edge stays in its own tile. Infinite reverse-Z projections (depth = near / view depth),
+  near 2 cm, depth clamp (casters nearer still cast).
+- **Atlas:** one depth texture (4096^2 default); each light's tile follows its range on screen (power of two, 128 up to Max
+  Resolution 1024); when they do not fit, the largest are halved, at 128 the least important lights dropped. Tiles are placed in
+  Morton order from the largest, so each lands aligned to its own size (checked offline: no overlaps).
+- **Drawing:** one culling dispatch per light (a spot light's cone; a cube's range in x / z, everything for an infinite range), then
+  one depth pass for the whole atlas: per view its viewport and scissor (new NRI `setScissorRect`) and its copy of the uniforms; the
+  task stage culls clusters per face. Same casters as the sun's maps.
+- **Lookup:** the face by the direction from the light, the same bilinear PCF / PCSS as the sun (penumbra = light radius x
+  (receiver - caster) / caster distance; a rect / disc light's mean half extent as its radius), receiver bias converted to the
+  perspective depth. In the deferred lighting (point, spot, rect, disc), the forward transparent pass; particles keep the sun only.

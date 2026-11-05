@@ -565,6 +565,9 @@ namespace Nox
                 // Only the outputs of features that run this frame.
                 if (frame.rtShadowsAdded || frame.shadowMapsAdded)
                     builder.Read(resources.RawShadowMask);
+                // Local lights' shadow maps (ShadowMaps.slang, through the uniforms).
+                if (resources.LocalShadowAtlas.IsValid())
+                    builder.Read(resources.LocalShadowAtlas);
                 if (frame.nrdShadowsAdded)
                     builder.Read(resources.DenoisedShadowMask);
                 if (frame.rtReflectionsAdded)

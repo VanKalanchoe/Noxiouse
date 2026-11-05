@@ -553,6 +553,12 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             const LightPointSample sample = sample_light_point(light, vertIn.worldPos, u);
             l = sample.direction;
             lightDistance = sample.distance;
+            float rectMapVisibility;
+            if (local_light_shadow_map(ubo, i, light, vertIn.worldPos, n, normalize(light.position.xyz - vertIn.worldPos), shadowNoise, rectMapVisibility))
+            {
+                contribution *= rectMapVisibility; // its shadow map (Settings > Local Light Shadows) instead of the shadow ray
+                shadowMapped = true;
+            }
         }
         else
         {
@@ -574,6 +580,12 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
                 lightDistance = distance;
                 l = distance > 0.0001 ? lightVec / distance : float3(0.0, 1.0, 0.0);
                 attenuation = light_distance_attenuation(light, distance) * light_spot_attenuation(light, l);
+                float mapVisibility;
+                if (attenuation > 0.0 && dot(n, l) > 0.0 && local_light_shadow_map(ubo, i, light, vertIn.worldPos, n, l, shadowNoise, mapVisibility))
+                {
+                    attenuation *= mapVisibility; // its shadow map (Settings > Local Light Shadows) instead of the shadow ray
+                    shadowMapped = true;
+                }
             }
 
             if (attenuation <= 0.0)

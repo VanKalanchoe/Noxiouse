@@ -117,3 +117,98 @@ float sun_shadow_map(UniformBufferObject* ubo, GpuShadowCascades* cascades, floa
     }
     return lerp(1.0, lit / float(SHADOW_MAP_TAPS), fade);
 }
+
+// --- Local lights (RS1b; Renderer::addLocalShadowPasses, GpuLocalShadows in shaderIO.h) ---------------------------------------
+
+// The bilinear comparison within a tile of the atlas: the 2x2 footprint kept inside [lo, hi] (its texel centers), so a kernel at a
+// face's edge never reads the neighbouring tile.
+float shadow_atlas_bilinear(Texture2D<float> atlas, SamplerState pointClamp, float2 uv, float2 lo, float2 hi, float receiverDepth, float atlasSize)
+{
+    return shadow_map_bilinear(atlas, pointClamp, clamp(uv, lo, hi), receiverDepth, atlasSize);
+}
+
+// Whether the local light has a shadow map this frame, and its visibility at worldPos on a surface with normal n facing it (L: unit
+// vector towards the light). false: none -- the caller keeps the light's RT shadow ray. Perspective views (shaderIO.h): the depth is
+// nearPlane / view depth, so depth differences are turned into distances along the view through it.
+bool local_light_shadow_map(UniformBufferObject* ubo, uint lightIndex, LightData light, float3 worldPos, float3 n, float3 L, float noise, out float visibility)
+{
+    visibility = 1.0;
+    if (ubo->localShadowsReference == 0 || ubo->localShadowLightViewsReference == 0)
+        return false;
+    const uint entry = ((uint*)ubo->localShadowLightViewsReference)[lightIndex];
+    if (entry == LOCAL_SHADOW_NONE)
+        return false;
+    GpuLocalShadows* shadows = (GpuLocalShadows*)ubo->localShadowsReference;
+
+    // A cube's face by the direction from the light (+X, -X, +Y, -Y, +Z, -Z).
+    uint viewIndex = entry & 0xFFFFu;
+    if ((entry >> 16) == 6u)
+    {
+        const float3 d = worldPos - light.position.xyz;
+        const float3 a = abs(d);
+        viewIndex += a.x >= a.y && a.x >= a.z ? (d.x >= 0.0 ? 0u : 1u) : (a.y >= a.z ? (d.y >= 0.0 ? 2u : 3u) : (d.z >= 0.0 ? 4u : 5u));
+    }
+    const GpuShadowView view = shadows->views[min(viewIndex, MaxLocalShadowViews - 1u)];
+    if (view.atlasRect.z <= 0.0) // a face behind a rect / disc light
+        return true;
+
+    const float viewDepth = mul(view.viewProj, float4(worldPos, 1.0)).w;
+    if (viewDepth <= view.nearPlane)
+        return true;
+    const float texelWorld = view.texelPerDepth * viewDepth;
+    const float NoL = saturate(dot(n, L));
+    const float sinTheta = sqrt(saturate(1.0 - NoL * NoL));
+    const float3 receiverPos = worldPos + n * (shadows->normalBias * texelWorld * sinTheta) + L * (shadows->depthBias * texelWorld);
+    const float4 clip = mul(view.viewProj, float4(receiverPos, 1.0));
+    if (clip.w <= view.nearPlane)
+        return true;
+    const float3 ndc = clip.xyz / clip.w;
+    const float2 tileUV = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if (any(tileUV <= 0.0) || any(tileUV >= 1.0)) // outside a spot light's cone
+        return true;
+    const float receiverDepth = ndc.z;
+    const float receiverZ = clip.w;
+
+    Texture2D<float> atlas = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + shadows->atlasTextureIndex, 0));
+    SamplerState pointClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_NEAREST_CLAMP, 0));
+    const float atlasSize = float(shadows->atlasSize);
+    const float2 uv = view.atlasRect.xy + tileUV * view.atlasRect.zw;
+    const float2 lo = view.atlasRect.xy + 1.0 / atlasSize;
+    const float2 hi = view.atlasRect.xy + view.atlasRect.zw - 1.0 / atlasSize;
+    // The receiver plane's rise per texel of offset, in depth (d depth = nearPlane d z / z^2).
+    const float slopeDepthPerTexel = view.nearPlane * min(sinTheta / max(NoL, 0.05), 4.0) * texelWorld / (receiverZ * receiverZ);
+    const float rotation = noise * 6.283185307;
+    const float maxRadius = max(min(shadows->maxFilterTexels, float(view.borderTexels) - 1.0), 0.0);
+    float radiusTexels = min(max(shadows->filterTexels, 0.0), maxRadius);
+
+    // PCSS: the light's size (a sphere's radius; a rect / disc's mean half extent) over the distance to the casters.
+    const uint lightType = (uint)light.position.w;
+    const float sourceRadius = is_area_light(lightType) ? 0.5 * (length(light.spotParams.xyz) + light.spotParams.w) : light.spotParams.z;
+    if (shadows->filter == SHADOW_FILTER_PCSS && sourceRadius > 0.0)
+    {
+        float blockerDepthSum = 0.0;
+        float blockerCount = 0.0;
+        for (uint i = 0; i < SHADOW_MAP_TAPS; ++i)
+        {
+            const float2 offset = shadow_map_tap(i, rotation) * maxRadius;
+            const float4 depths = atlas.GatherRed(pointClamp, clamp(uv + offset / atlasSize, lo, hi));
+            const float4 blocker = step(float4(receiverDepth + (length(offset) + 1.0) * slopeDepthPerTexel), depths);
+            blockerDepthSum += dot(blocker, depths);
+            blockerCount += dot(blocker, float4(1.0));
+        }
+        if (blockerCount <= 0.0)
+            return true;
+        const float blockerZ = view.nearPlane / max(blockerDepthSum / blockerCount, 1e-6);
+        const float penumbraWorld = sourceRadius * max(receiverZ - blockerZ, 0.0) / max(blockerZ, 1e-4);
+        radiusTexels = clamp(penumbraWorld / texelWorld, radiusTexels, maxRadius);
+    }
+
+    float lit = 0.0;
+    for (uint i = 0; i < SHADOW_MAP_TAPS; ++i)
+    {
+        const float2 offset = shadow_map_tap(i, rotation) * radiusTexels;
+        lit += shadow_atlas_bilinear(atlas, pointClamp, uv + offset / atlasSize, lo, hi, receiverDepth + (length(offset) + 1.0) * slopeDepthPerTexel, atlasSize);
+    }
+    visibility = lit / float(SHADOW_MAP_TAPS);
+    return true;
+}

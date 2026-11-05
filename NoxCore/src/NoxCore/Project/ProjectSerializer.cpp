@@ -31,7 +31,7 @@ namespace Nox
                 out << YAML::Key << "WindowMode" << YAML::Value << config.WindowMode;
                 const ProjectRendererSettings& renderer = config.Renderer;
                 if (renderer.RayTracingResolution >= 0 || renderer.DiffuseGI >= 0 || renderer.ShadowedLights >= 0 || renderer.OIT >= 0 || renderer.TAA >= 0 ||
-                    renderer.SunShadows >= 0)
+                    renderer.SunShadows >= 0 || renderer.LocalShadows >= 0)
                 {
                     out << YAML::Key << "Renderer" << YAML::Value << YAML::BeginMap;
                     if (renderer.RayTracingResolution >= 0) out << YAML::Key << "RayTracingResolution" << YAML::Value << renderer.RayTracingResolution;
@@ -40,6 +40,7 @@ namespace Nox
                     if (renderer.OIT >= 0) out << YAML::Key << "OIT" << YAML::Value << renderer.OIT;
                     if (renderer.TAA >= 0) out << YAML::Key << "TAA" << YAML::Value << renderer.TAA;
                     if (renderer.SunShadows >= 0) out << YAML::Key << "SunShadows" << YAML::Value << renderer.SunShadows;
+                    if (renderer.LocalShadows >= 0) out << YAML::Key << "LocalShadows" << YAML::Value << renderer.LocalShadows;
                     out << YAML::EndMap;
                 }
                 out << YAML::EndMap; // Project
@@ -93,6 +94,7 @@ namespace Nox
             read("OIT", config.Renderer.OIT);
             read("TAA", config.Renderer.TAA);
             read("SunShadows", config.Renderer.SunShadows);
+            read("LocalShadows", config.Renderer.LocalShadows);
         }
 
         return true;

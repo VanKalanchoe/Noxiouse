@@ -29,6 +29,7 @@ namespace NRI
         void setScissor(Extent2D swapChainExtent) override;
         void setViewportWithCount(const ViewportBounds& bounds, float minDepth, float maxDepth) override;
         void setScissorWithCount(const Extent2D& swapChainExtent) override;
+        void setScissorRect(int32_t x, int32_t y, uint32_t width, uint32_t height) override;
         void setVertexInput() override {}
         void setPrimitiveTopology(const PrimitiveTopology& topology) override;
         void setPrimitiveRestartEnable(bool enable) override {}

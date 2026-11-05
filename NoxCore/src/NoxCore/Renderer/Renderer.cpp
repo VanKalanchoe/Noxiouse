@@ -786,6 +786,7 @@ namespace Nox
             uint32_t ShadowRayLights; // the shadow-ray budget a pixel (strongest lights); 0 every light
             // The sun's shadows: ray traced on every rung until the shadow maps (RS1) are measured against them.
             Renderer::SunShadowMode SunShadows = Renderer::SunShadowMode::RayTraced;
+            Renderer::LocalShadowMode LocalShadows = Renderer::LocalShadowMode::RayTraced;
         };
 
         QualityPresetSettings GetQualityPresetSettings(Renderer::RenderQuality quality)
@@ -835,6 +836,7 @@ namespace Nox
         setRayTracingResolutionDivisor(preset.RTDivisor);
         setShadowRayLightLimit(preset.ShadowRayLights);
         setSunShadowMode(preset.SunShadows);
+        setLocalShadowMode(preset.LocalShadows);
         // DDGI's probes trace in turn: a quarter a frame on the fallback rung, half on the others; two cascades on the fallback rung.
         // Under the screen probes DDGI is only the second bounce: a quarter of its probes a frame is plenty.
         m_ddgiUpdateStride = (quality == RenderQuality::Low || preset.DiffuseGI == 3) ? 4u : 2u;
@@ -852,7 +854,7 @@ namespace Nox
                 m_rayTracingReflections == preset.RTReflections && m_rtaoEnabled == preset.RTAO && m_diffuseGIMode == preset.DiffuseGI &&
                 m_directLightingMode == preset.DirectLighting && m_rtRefractionEnabled == preset.RTRefraction && upscaleMatches &&
                 m_rtSubsample == preset.RTDivisor && m_shadowRayLightLimit == preset.ShadowRayLights &&
-                m_sunShadowMode == preset.SunShadows)
+                m_sunShadowMode == preset.SunShadows && m_localShadowMode == preset.LocalShadows)
                 return quality;
         }
         return RenderQuality::Custom;
@@ -932,6 +934,8 @@ namespace Nox
             setTAAEnabled(settings.TAA != 0);
         if (settings.SunShadows >= 0 && settings.SunShadows <= 1)
             setSunShadowMode(static_cast<SunShadowMode>(settings.SunShadows));
+        if (settings.LocalShadows >= 0 && settings.LocalShadows <= 1)
+            setLocalShadowMode(static_cast<LocalShadowMode>(settings.LocalShadows));
     }
 
     void Renderer::setDLSSEnabled(bool enabled)
@@ -4917,6 +4921,7 @@ namespace Nox
             addNRDGuidesPass();
             // The sun's shadow mask: its cascaded shadow maps (Settings > Sun Shadows) or, without them, its RT shadow rays.
             addShadowMapPasses();
+            addLocalShadowPasses(); // local lights' shadow maps (the rest keep their rays in the lighting passes)
             addRTShadowPasses();
             // After the GI: reflection hits on screen take its light (SceneGI.slang), off screen this frame's DDGI.
             addRTReflectionPasses();
@@ -4951,6 +4956,7 @@ namespace Nox
             m_renderGraph.Compile();
             resolveFrameUniforms();
             updateShadowMapUniforms();
+            updateLocalShadowUniforms();
             updateExtraViewUniforms();
             // Read back only what this frame's inspector actually probes.
             m_inspectionProbePending[frameIndex] = m_frame.inspectionProbe && m_renderGraph.IsInspecting() ? 1 : 0;
@@ -7108,6 +7114,8 @@ namespace Nox
             uniforms.clusterStatsReference = 0;
             // The sun's shadow cascades cover the camera's view, not this one's (its forward pass keeps the RT shadow rays).
             uniforms.sunShadowCascadesReference = 0;
+            uniforms.localShadowsReference = 0; // (its forward pass does not declare the atlas: the RT rays there)
+            uniforms.localShadowLightViewsReference = 0;
             // The atlases are only read (and declared) when DDGI ran this frame.
             if (!m_frame.ddgiAdded)
                 uniforms.enableDDGI = 0;

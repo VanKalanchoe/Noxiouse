@@ -197,6 +197,8 @@ namespace NRI
         virtual void setScissor(Extent2D swapChainExtent) = 0;
         virtual void setViewportWithCount(const ViewportBounds& bounds, float minDepth, float maxDepth) = 0;
         virtual void setScissorWithCount(const Extent2D& swapChainExtent) = 0;
+        // A scissor rectangle at an offset (a tile of a shadow atlas).
+        virtual void setScissorRect(int32_t x, int32_t y, uint32_t width, uint32_t height) = 0;
         virtual void setVertexInput() = 0;
         virtual void setPrimitiveTopology(const PrimitiveTopology& topology) = 0;
         virtual void setPrimitiveRestartEnable(bool enable) = 0;

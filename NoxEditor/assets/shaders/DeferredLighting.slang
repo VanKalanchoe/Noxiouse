@@ -3,6 +3,7 @@
 #include "DDGICommon.slang"
 #include "PBRLighting.slang"
 #include "HeightFog.slang"
+#include "ShadowMaps.slang"
 
     import Tonemapping;
     import Math;
@@ -459,6 +460,9 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
         {
             LightData* lights = (LightData*)ubo->lightDataReference;
             const bool rtShadows = ubo->enableRTShadows != 0 && ubo->tlasDeviceAddress != 0;
+            // Local lights' shadow map kernels turn per pixel and frame (interleaved gradient noise), averaged by the temporal upscale.
+            const float2 noisePixel = float2(pixelCoord) + float(pushConstant.frameIndex % 64u) * float2(5.588238, 3.45367);
+            const float shadowMapNoise = frac(52.9829189 * frac(0.06711056 * noisePixel.x + 0.00583715 * noisePixel.y));
             const float shadowThreshold = rtShadows ? shadow_ray_threshold(ubo, lights, worldPos) : 0.0;
 
             for (uint i = 0; i < ubo->lightCount; i++)
@@ -472,7 +476,11 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
                                                  specularEnvironmentR90, alphaRoughness, diffuseColor, specularColor);
                     const float3 rectLight = hasLobes ? evaluateRectLightLobes(rectInputs, lobeShading, light, worldPos, n, v)
                                                       : evaluateRectLight(rectInputs, light, worldPos, n, v);
-                    if (any(rectLight > 0.0) && light_shadow_priority(light, worldPos) < shadowThreshold)
+                    float rectMapVisibility;
+                    if (any(rectLight > 0.0) && local_light_shadow_map(ubo, i, light, worldPos, n, normalize(light.position.xyz - worldPos),
+                                                                       shadowMapNoise, rectMapVisibility))
+                        directLighting += rectLight * rectMapVisibility; // its shadow map (Settings > Local Light Shadows)
+                    else if (any(rectLight > 0.0) && light_shadow_priority(light, worldPos) < shadowThreshold)
                         directLighting += rectLight; // over the shadow-ray budget: unshadowed
                     else if (any(rectLight > 0.0))
                         directLighting += rectLight * rect_light_visibility(ubo, light, worldPos, worldPos + n * raster_surface_bias(ubo, worldPos, 0.02 * ubo->unitsPerMeter),
@@ -523,6 +531,10 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
                     // The sun (the first directional light) uses the shadow mask -- behind a leaf too: the mask looks a double-sided
                     // surface up from the side the sun is on (ShadowMask.slang, ShadowMapResolve.slang).
                     lightShadow = shadowFactor;
+                }
+                else if (lightType != 0 && local_light_shadow_map(ubo, i, light, worldPos, (dot(n, l) < 0.0) ? -n : n, l, shadowMapNoise, lightShadow))
+                {
+                    // A local light's shadow map (Settings > Local Light Shadows: Shadow Maps) instead of its shadow ray.
                 }
                 else if (rtShadows)
                 {

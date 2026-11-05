@@ -59,6 +59,8 @@ namespace Nox
         // The sun's cascaded shadow maps (Renderer::addShadowMapPasses): depth per cascade, invalid past the cascade count or when the
         // sun is shadowed by ray tracing.
         std::array<RGTexture, shaderio::MaxShadowCascades> SunShadowMaps;
+        // Local lights' shadow atlas (Renderer::addLocalShadowPasses); invalid without it.
+        RGTexture LocalShadowAtlas;
 
         // Hybrid RT + NRD
         RGTexture RawShadowMask;
@@ -159,12 +161,15 @@ namespace Nox
             builder.Read(resources.DDGIProbeOffsets[index]);
     }
 
-    // A pass that looks up the sun's shadow maps (through UniformBufferObject::sunShadowCascadesReference; ShadowMaps.slang).
-    inline void ReadSunShadowMaps(RGBuilder& builder, const FrameGraphResources& resources)
+    // A pass that looks up the shadow maps (through UniformBufferObject::sunShadowCascadesReference / localShadowsReference;
+    // ShadowMaps.slang): the sun's cascades and the local lights' atlas, those that exist this frame.
+    inline void ReadShadowMaps(RGBuilder& builder, const FrameGraphResources& resources)
     {
         for (const RGTexture& map : resources.SunShadowMaps)
             if (map.IsValid())
                 builder.Read(map);
+        if (resources.LocalShadowAtlas.IsValid())
+            builder.Read(resources.LocalShadowAtlas);
     }
 
     inline void ReadIfValid(RGBuilder& builder, RGBuffer buffer)
