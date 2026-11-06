@@ -358,7 +358,7 @@ Each phase lands with the docs-site pages updated and the manual's walkthrough, 
 
 ### A1 as built (2026-11-06)
 
-- **Library:** miniaudio 0.11.25 (submodule `NoxCore/vendors/miniaudio`), compiled once as C (`Audio/MiniaudioImpl.c`) with its bundled
+- **Library:** miniaudio 0.11.26 (submodule `NoxCore/vendors/miniaudio`), compiled once as C (`Audio/MiniaudioImpl.c`) with its bundled
   stb_vorbis for Ogg; its engine / node graph / resource manager are off -- voices, buses and spatialization are Nox's own.
 - **Threads:** the device callback only copies out of a ring buffer; the **mixer thread** (MMCSS "Pro Audio", `AvSetMmThreadPriority`
   high) mixes 256-frame blocks to keep one device period + 2 blocks ahead (its first fill covers the device's whole buffer: devices
