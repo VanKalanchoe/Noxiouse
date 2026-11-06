@@ -107,6 +107,10 @@ namespace Nox
             glm::dvec3 Previous{ 0.0 }; // world positions (double precision)
             glm::dvec3 Current{ 0.0 };
             glm::vec3 Horizontal{ 0.0f }; // the horizontal velocity the controller has accelerated to (x, z)
+            // Root motion on the ground (native units): carried on as momentum when the character leaves it (Unreal keeps the
+            // root motion velocity as the character's velocity when it starts falling); a jump or fall clip moves it no further.
+            glm::vec3 GroundRootMotion{ 0.0f };
+            bool WasOnGround = false;
         };
         std::unordered_map<uint32_t, CharacterState> m_EntityToCharacterMap;
 

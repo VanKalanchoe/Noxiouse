@@ -808,4 +808,10 @@ Like Unreal's: a folder is NOT an entity. `FolderComponent { Path }` ("Bistro/Pr
   0.1 s; Locomotion -> JumpLoop: IsGrounded is false and VerticalSpeed < -2, 0.2 s (walked off a ledge); JumpStart -> JumpLoop: At
   End of State, 0.15 s; JumpStart -> JumpLand and JumpLoop -> JumpLand: IsGrounded is true, 0.05 s; JumpLand -> Locomotion: At End
   of State, 0.2 s, and JumpLand -> Locomotion: Speed > 1, 0.25 s (landing while running blends straight back).
+- **Root motion with jumps (2026-11-06, untested):** a character driven by root motion keeps the speed its walk / run gave it when
+  it leaves the ground (a jump or walking off a ledge: `CharacterState::GroundRootMotion` folded into its horizontal velocity, as
+  Unreal keeps the root motion velocity when falling); the jump and fall clips do not travel. `CharacterMovement.cs` has **Use Root
+  Motion**: on the ground it only turns the character and sends the wanted speed as `Speed` (the animation moves it); in the air it
+  steers with air control and does not brake. For the Quaternius set use `UAL1_Standard_RM.glb`, Animator Root Motion on, Root Bone
+  `root`. Its clips travel: walk 1.0 m/s, jog 5.4, sprint 8.2, crouch 0.75 (the in-place file's speeds should match these).
 

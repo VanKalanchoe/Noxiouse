@@ -16,6 +16,10 @@ public sealed class CharacterMovement : EntityBehaviour
     [Expose(Unit = "m/s")] public float JumpSpeed = 700.0f; // Unreal's third-person template, with gravity x1.75
     [Expose] public float TurnSpeed = 12.0f;
     [Expose] public float ModelYawOffset = 0.0f; // radians; the model's forward axis relative to +Z
+    // Root motion (the Animator's Root Motion on, a clip set whose root bone travels): on the ground the animation moves the
+    // character and this only turns it and tells the graph how fast the player wants to go (Speed); in the air it steers as
+    // usual, and keeps the momentum the walk / run gave it when no key is held.
+    [Expose] public bool UseRootMotion = false;
 
     private float _yaw;
 
@@ -33,10 +37,12 @@ public sealed class CharacterMovement : EntityBehaviour
         float length = MathF.Sqrt(direction.X * direction.X + direction.Z * direction.Z);
         float speed = Input.IsKeyDown(KeyCode.LeftShift) ? RunSpeed : WalkSpeed;
 
+        Vector3 velocity = character.Velocity;
+        bool rootMotionOnGround = UseRootMotion && character.IsGrounded;
         if (length > 0.0f)
         {
             direction = direction * (1.0f / length);
-            character.SetMoveVelocity(direction * speed);
+            character.SetMoveVelocity(rootMotionOnGround ? new Vector3() : direction * speed);
 
             float targetYaw = MathF.Atan2(direction.X, direction.Z) + ModelYawOffset;
             float delta = MathF.IEEERemainder(targetYaw - _yaw, 2.0f * MathF.PI);
@@ -47,6 +53,10 @@ public sealed class CharacterMovement : EntityBehaviour
             rotation.Y = _yaw;
             transform.LocalRotation = rotation;
         }
+        else if (UseRootMotion && !character.IsGrounded)
+        {
+            character.SetMoveVelocity(new Vector3(velocity.X, 0.0f, velocity.Z)); // no braking in the air: the jump keeps its speed
+        }
         else
         {
             character.SetMoveVelocity(new Vector3());
@@ -55,10 +65,11 @@ public sealed class CharacterMovement : EntityBehaviour
         if (character.IsGrounded && Input.IsKeyDown(KeyCode.Space))
             character.Jump(JumpSpeed);
 
-        Vector3 velocity = character.Velocity;
         // "Speed": horizontal speed in m/s -- the animation graph's state machine picks Idle / Walk / Run from it (its
-        // thresholds are in m/s: walk 2, run 5). The velocity is in world units per second (cm/s here): converted.
-        animator?.SetFloat("Speed", WorldUnits.ToMeters(MathF.Sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z)));
+        // thresholds are in m/s). The velocity is in world units per second (cm/s here): converted. With root motion the
+        // speed the player asks for (the animation then makes it real); otherwise the speed the character moves at.
+        float horizontalSpeed = UseRootMotion ? (length > 0.0f ? speed : 0.0f) : MathF.Sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z);
+        animator?.SetFloat("Speed", WorldUnits.ToMeters(horizontalSpeed));
         animator?.SetFloat("VerticalSpeed", WorldUnits.ToMeters(velocity.Y));
         animator?.SetBool("IsGrounded", character.IsGrounded);
     }

@@ -28,6 +28,7 @@
 
 | # | Item |
 |---|---|
+| C6 | **IK (inverse kinematics):** a Two Bone IK node (arm / leg reaching a target, with a pole for the knee / elbow), a Look At node (head / spine turning to a target) and foot placement (a ray down per foot: feet on slopes and stairs, the pelvis lowered to the lower foot). Unreal's Two Bone IK / Look At / foot placement, Godot's SkeletonIK3D. Not built |
 | C1 | **Jump / Fall states** in the locomotion graph. Engine side built 2026-11-06, untested: transitions can fire **At End of State** (Unity's Has Exit Time, Unreal's automatic rule: the blend starts Blend Time before the state's clips end), and `CharacterMovement.cs` sends `VerticalSpeed` (m/s, up positive) next to `Speed` and `IsGrounded`. The graph itself is authored in the editor for the Quaternius Universal Animation Library character (Jump_Start / Jump_Loop / Jump_Land; recipe in the conversation of 2026-11-06 and `Animation_Graph_Architecture_Plan_2026.md` §7) |
 | C5 | Fox sizes (a ~0.8 m animal): moot with the ~1.8 m Quaternius character, whose size the movement defaults are made for |
 

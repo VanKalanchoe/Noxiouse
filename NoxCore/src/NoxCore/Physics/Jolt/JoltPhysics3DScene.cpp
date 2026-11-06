@@ -963,18 +963,30 @@ namespace Nox {
             // controller.JumpSpeed / MoveVelocity / StepHeight are world-unit lengths (script-facing); the velocity math below stays
             // entirely in Jolt's native unit (like groundVelocity / currentVelocity / gravity, all read from Jolt already), so each is
             // converted with ToNative at the one place it enters the math. state.Horizontal is therefore a native-unit velocity.
+            // The animation's root motion, as it is (not ramped: the clip already starts and stops the way it moves).
+            const glm::vec3 rootMotion = ToNative(glm::vec3(controller.RootMotionVelocity.x, 0.0f, controller.RootMotionVelocity.z));
             JPH::Vec3 velocity;
+            bool leavesGround = !onGround && state.WasOnGround; // walked off a ledge
             if (onGround && movingTowardsGround)
             {
                 velocity = groundVelocity;
                 if (controller.JumpSpeed > 0.0f)
+                {
                     velocity += up * ToNative(controller.JumpSpeed);
+                    leavesGround = true;
+                }
             }
             else
             {
                 velocity = JPH::Vec3(0.0f, currentVelocity.GetY(), 0.0f);
             }
             controller.JumpSpeed = 0.0f;
+            // Leaving the ground under root motion: what the walk / run moved it by goes on as momentum (the jump and fall clips do
+            // not travel), steered by air control from there.
+            if (leavesGround)
+                state.Horizontal += state.GroundRootMotion;
+            state.GroundRootMotion = onGround && !leavesGround ? rootMotion : glm::vec3(0.0f);
+            state.WasOnGround = onGround && !leavesGround;
 
             velocity += gravity * controller.GravityScale * dt;
             // Horizontal velocity ramps towards the wanted one (Unreal's MaxAcceleration / BrakingDeceleration) instead of
@@ -990,8 +1002,6 @@ namespace Nox {
                 state.Horizontal = distance <= step || distance < 1e-5f ? wanted : state.Horizontal + toWanted * (step / distance);
             }
             velocity += JPH::Vec3(state.Horizontal.x, 0.0f, state.Horizontal.z);
-            // The animation's root motion, as it is (not ramped: the clip already starts and stops the way it moves).
-            const glm::vec3 rootMotion = ToNative(glm::vec3(controller.RootMotionVelocity.x, 0.0f, controller.RootMotionVelocity.z));
             velocity += JPH::Vec3(rootMotion.x, 0.0f, rootMotion.z);
 
             character->SetLinearVelocity(velocity);
