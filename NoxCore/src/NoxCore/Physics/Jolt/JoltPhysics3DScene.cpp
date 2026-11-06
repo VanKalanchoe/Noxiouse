@@ -938,7 +938,10 @@ namespace Nox {
             // The animation's root motion, as it is (not ramped: the clip already starts and stops the way it moves).
             const glm::vec3 rootMotion = ToNative(glm::vec3(controller.RootMotionVelocity.x, 0.0f, controller.RootMotionVelocity.z));
             JPH::Vec3 velocity;
-            bool leavesGround = !onGround && state.WasOnGround; // walked off a ledge
+            // On the ground by the floor test (last step's, so as things are now): a stair's edge counts, for jumping and for the
+            // root-motion momentum below -- the raw contact state would take every stair edge for leaving the ground.
+            const bool grounded = state.Grounded;
+            bool leavesGround = !grounded && state.WasOnGround; // walked off a ledge
             // Standing or walking on walkable ground: no gravity (Unreal's walking mode follows the floor instead) -- added every
             // step, the slope turned part of it into a slide (0.5 m in 4 s down a 27 degree ramp, standing still). The floor is
             // followed by the stick-to-floor step below; a jump and anything in the air fall as before.
@@ -946,25 +949,26 @@ namespace Nox {
             if (onGround && movingTowardsGround)
             {
                 velocity = groundVelocity;
-                if (controller.JumpSpeed > 0.0f)
-                {
-                    velocity += up * ToNative(controller.JumpSpeed);
-                    leavesGround = true;
-                }
-                else
-                    walking = true;
+                walking = true;
             }
             else
             {
                 velocity = JPH::Vec3(0.0f, currentVelocity.GetY(), 0.0f);
+            }
+            if (controller.JumpSpeed > 0.0f && grounded && movingTowardsGround)
+            {
+                velocity.SetY(groundVelocity.GetY());
+                velocity += up * ToNative(controller.JumpSpeed);
+                walking = false;
+                leavesGround = true;
             }
             controller.JumpSpeed = 0.0f;
             // Leaving the ground under root motion: what the walk / run moved it by goes on as momentum (the jump and fall clips do
             // not travel), steered by air control from there.
             if (leavesGround)
                 state.Horizontal += state.GroundRootMotion;
-            state.GroundRootMotion = onGround && !leavesGround ? rootMotion : glm::vec3(0.0f);
-            state.WasOnGround = onGround && !leavesGround;
+            state.GroundRootMotion = grounded && !leavesGround ? rootMotion : glm::vec3(0.0f);
+            state.WasOnGround = grounded && !leavesGround;
 
             if (!walking)
                 velocity += gravity * controller.GravityScale * dt;
@@ -989,11 +993,50 @@ namespace Nox {
             updateSettings.mStickToFloorStepDown = -up * 0.5f; // Jolt's own tolerance (Samples/CharacterVirtualTest.cpp): native, untouched
             updateSettings.mWalkStairsStepUp = up * ToNative(controller.StepHeight);
 
+            const JPH::RVec3 before = character->GetPosition();
+            const JPH::Vec3 groundNormalBefore = character->GetGroundNormal();
             character->ExtendedUpdate(dt, -up * gravity.Length(), updateSettings,
                 m_PhysicsSystem->GetDefaultBroadPhaseLayerFilter(PhysicsLayers::CHARACTER),
                 m_PhysicsSystem->GetDefaultLayerFilter(PhysicsLayers::CHARACTER),
                 {}, {}, *m_TempAllocator);
             state.Current = ToWorld(JoltUtils::ToGLMPosition(character->GetPosition()));
+
+            // Grounded the way Unreal's walking mode decides it: on walkable ground, or a walkable floor within step height under the
+            // capsule while not rising. A capsule resting on a stair's edge counts as steep ground: taken alone, going down a stair
+            // reported "in the air" on most steps (fall and land animations on every other step).
+            const float stepHeight = ToNative(std::max(controller.StepHeight, 0.0f));
+            state.Grounded = character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
+            if (!state.Grounded && character->GetLinearVelocity().GetY() - character->GetGroundVelocity().GetY() <= 0.5f)
+            {
+                const JPH::RRayCast ray(character->GetPosition() + up * 0.05f, -up * (stepHeight + 0.05f));
+                JPH::RayCastResult hit;
+                if (m_PhysicsSystem->GetNarrowPhaseQuery().CastRay(ray, hit))
+                {
+                    JPH::BodyLockRead lock(m_PhysicsSystem->GetBodyLockInterface(), hit.mBodyID);
+                    if (lock.Succeeded())
+                    {
+                        const JPH::Vec3 normal = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, ray.GetPointOnRay(hit.mFraction));
+                        state.Grounded = normal.GetY() >= std::cos(glm::radians(controller.MaxSlopeDegrees));
+                    }
+                }
+            }
+
+            // Stair smoothing: a vertical move while walking that following the ground's slope does not explain (a step up or down,
+            // 2 cm or more) is taken off the drawn position and eased back over ~0.12 s. Slopes are followed as they are.
+            state.PreviousStepOffset = state.StepOffset;
+            if (walking && state.Grounded && groundNormalBefore.GetY() > 0.1f)
+            {
+                const JPH::Vec3 moved = JPH::Vec3(character->GetPosition() - before);
+                const float alongSlope = -(moved.GetX() * groundNormalBefore.GetX() + moved.GetZ() * groundNormalBefore.GetZ()) / groundNormalBefore.GetY();
+                const float stepped = moved.GetY() - alongSlope;
+                if (std::abs(stepped) >= 0.02f)
+                    state.StepOffset -= ToWorld(stepped);
+            }
+            else if (!state.Grounded)
+            {
+                state.StepOffset = 0.0f; // jumping or falling: drawn where it is
+            }
+            state.StepOffset *= std::exp(-3.0f * dt / 0.12f);
         }
     }
 
@@ -1011,12 +1054,14 @@ namespace Nox {
 
             auto& controller = entity.GetComponent<CharacterController3DComponent>();
             JPH::CharacterVirtual* character = state.Character.GetPtr();
-            controller.IsGrounded = character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
+            controller.IsGrounded = state.Grounded; // Unreal's floor test (StepCharacters)
             controller.Velocity = ToWorld(JoltUtils::ToGLM(character->GetLinearVelocity())); // script-facing: world units
 
-            // Drawn between the last two fixed steps by how far the accumulator is into the next one.
+            // Drawn between the last two fixed steps by how far the accumulator is into the next one, minus what is left of a stair's
+            // step (StepOffset, eased out).
             const float alpha = glm::clamp(m_Accumulator / c_FixedDeltaTime, 0.0f, 1.0f);
             glm::dvec3 position = glm::mix(state.Previous, state.Current, static_cast<double>(alpha));
+            position.y += static_cast<double>(glm::mix(state.PreviousStepOffset, state.StepOffset, alpha));
             if (entity.HasComponent<RelationshipComponent>())
             {
                 UUID parentUUID = entity.GetComponent<RelationshipComponent>().Parent;

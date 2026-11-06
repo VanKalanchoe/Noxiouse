@@ -111,6 +111,14 @@ namespace Nox
             // root motion velocity as the character's velocity when it starts falling); a jump or fall clip moves it no further.
             glm::vec3 GroundRootMotion{ 0.0f };
             bool WasOnGround = false;
+            // Unreal's floor test, what IsGrounded reports: on walkable ground, or (resting on a stair's edge, which counts as steep)
+            // a walkable floor within step height under the capsule while not rising.
+            bool Grounded = false;
+            // Stair smoothing (world units, vertical): what a step up or down moved the capsule by beyond following the ground's
+            // slope, taken off the drawn position and eased back to 0, so the mesh glides up a stair instead of popping. Drawn
+            // interpolated between the last two fixed steps like the position.
+            float StepOffset = 0.0f;
+            float PreviousStepOffset = 0.0f;
         };
         std::unordered_map<uint32_t, CharacterState> m_EntityToCharacterMap;
 
