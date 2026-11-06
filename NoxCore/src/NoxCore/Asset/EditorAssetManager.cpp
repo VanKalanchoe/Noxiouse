@@ -2034,19 +2034,70 @@ namespace Nox
 
         bool registryChanged = false;
 
+        // Moved outside the editor (Explorer, version control): an unregistered file while an asset of the same file name and type
+        // is registered at a path that no longer exists is that asset, moved -- it keeps its handle, so whatever refers to it (an
+        // Animator's graph, a mesh's material) keeps working, as Godot finds a moved resource by its UID. Built on first need.
+        bool missingBuilt = false;
+        std::unordered_map<std::string, std::vector<AssetHandle>> missingByName;
+        auto adoptMoved = [&](const std::filesystem::path& relativePath, AssetType type)
+        {
+            if (!missingBuilt)
+            {
+                missingBuilt = true;
+                for (const auto& [handle, metadata] : m_AssetRegistry)
+                {
+                    const bool selfContained = metadata.SourceFilePath.empty() || metadata.SourceFilePath == metadata.FilePath;
+                    std::error_code missingError;
+                    if (selfContained && !metadata.FilePath.empty() && !std::filesystem::exists(assetDir / metadata.FilePath, missingError))
+                        missingByName[metadata.FilePath.filename().generic_string()].push_back(handle);
+                }
+            }
+            const auto found = missingByName.find(relativePath.filename().generic_string());
+            if (found == missingByName.end())
+                return false;
+            AssetHandle match = 0;
+            for (AssetHandle candidate : found->second)
+            {
+                if (m_AssetRegistry.at(candidate).Type != type)
+                    continue;
+                if (match != 0)
+                    return false; // two missing assets of that name: which one moved here is not known
+                match = candidate;
+            }
+            if (match == 0)
+                return false;
+
+            AssetMetadata& metadata = m_AssetRegistry.at(match);
+            m_HandleByPath.erase(metadata.FilePath.lexically_normal().generic_string());
+            if (std::find(metadata.FormerPaths.begin(), metadata.FormerPaths.end(), metadata.FilePath) == metadata.FormerPaths.end())
+                metadata.FormerPaths.push_back(metadata.FilePath);
+            NOX_CORE_INFO("[EditorAssetManager] '{}' was moved to '{}' outside the editor: it keeps its asset handle",
+                          metadata.FilePath.generic_string(), relativePath.generic_string());
+            metadata.FilePath = relativePath;
+            metadata.SourceFilePath = relativePath;
+            IndexPath(match, metadata);
+            std::erase(found->second, match);
+            return true;
+        };
+
         for (const auto& entry : std::filesystem::recursive_directory_iterator(scanRoot, ec))
         {
             if (!entry.is_regular_file(ec)) continue;
 
             std::filesystem::path ext = entry.path().extension();
             if (ext == ".nox" || ext == ".nanim" || ext == ".nskel" || ext == ".nmat" ||
-                ext == ".ntex" || ext == ".nanimgraph" || ext == ".nprefab")
+                ext == ".ntex" || ext == ".nanimgraph" || ext == ".nprefab" || ext == ".ntimeline")
             {
                 std::filesystem::path relativePath = entry.path().lexically_relative(assetDir).lexically_normal();
 
                 // insert() returning false means it was already registered.
                 if (registeredPaths.insert(relativePath.generic_string()).second)
                 {
+                    if (adoptMoved(relativePath, GetAssetTypeFromExtension(ext)))
+                    {
+                        registryChanged = true;
+                        continue;
+                    }
                     AssetHandle newHandle; // generates new random handle
                     AssetMetadata metadata;
                     metadata.FilePath = relativePath;

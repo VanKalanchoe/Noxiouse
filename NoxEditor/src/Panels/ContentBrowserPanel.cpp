@@ -937,6 +937,8 @@ namespace Nox
             }
             if (ImGui::MenuItem("Refresh"))
             {
+                // Files added or moved outside the editor, anywhere in the project, are picked up (moved ones keep their handle).
+                m_Project->GetEditorAssetManager()->ScanAndRegisterNewAssets({});
                 m_FolderTreeDirty = true;
                 RefreshAssetTree();
             }
@@ -1167,6 +1169,26 @@ namespace Nox
         }
 
         std::error_code error;
+        // A file of an asset kind the registry would know that it does not (put or moved here outside the editor): registered now,
+        // a moved one under its old handle (EditorAssetManager::ScanAndRegisterNewAssets), so it shows and can be dragged.
+        for (const auto& entry : std::filesystem::directory_iterator(m_CurrentDirectory, error))
+        {
+            static const std::unordered_set<std::string> kSelfContained = { ".nox", ".nmat", ".nanimgraph", ".nprefab", ".ntimeline" };
+            const auto relativePath = entry.path().lexically_relative(m_BaseDirectory).lexically_normal().generic_string();
+            if (entry.is_regular_file() && kSelfContained.contains(entry.path().extension().string()) && !handleOfPath.contains(relativePath))
+            {
+                std::filesystem::path folder = m_CurrentDirectory.lexically_relative(m_BaseDirectory);
+                m_Project->GetEditorAssetManager()->ScanAndRegisterNewAssets(folder == "." ? std::filesystem::path() : folder);
+                handleOfPath.clear();
+                for (const auto& [handle, metadata] : m_Project->GetEditorAssetManager()->GetAssetRegistry())
+                {
+                    handleOfPath.emplace(metadata.FilePath.lexically_normal().generic_string(), handle);
+                    if (!metadata.SourceFilePath.empty())
+                        handleOfPath.emplace(metadata.SourceFilePath.lexically_normal().generic_string(), handle);
+                }
+                break;
+            }
+        }
         for (const auto& entry : std::filesystem::directory_iterator(m_CurrentDirectory, error))
         {
             const auto path = entry.path();

@@ -1212,7 +1212,7 @@ window.NOX_MANUAL_PAGES = [
             "## Part B: The animation graph",
             "",
             "1. Content Browser > **+ Add > Animation Graph**, name it `UAL_Locomotion`, open it.",
-            "2. **Parameters** (top of the graph window, **+ Add Parameter**): `Speed` (Float), `VerticalSpeed` (Float), `IsGrounded` (Bool).",
+            "2. **Parameters** (top of the graph window, **+ Add Parameter**): `Speed` (Float), `VerticalSpeed` (Float), `IsGrounded` (Bool) with its default value **ticked**. The defaults are what the graph sees until a script sets the parameter -- in the editor (not playing) always -- so a character that starts grounded shows idle instead of falling.",
             "3. Right-click the canvas > **State Machines > StateMachine**, connect its Pose to **Output**. Double-click it: the path at the top reads **Graph > StateMachine** and the canvas is empty. This canvas holds states (boxes), not nodes, so its right-click menu has only **Add State**.",
             "4. Make the four states. For each: right-click an empty spot > **Add State** (a box named `State N` appears), click the box once, and type its name in **State Name** in the panel under the canvas. Names: **Locomotion**, **JumpStart**, **JumpLoop**, **JumpLand**. The first one you add is the entry state; to change it, right-click a box > **Set as Entry State**.",
             "5. Fill each state. A state is its own small graph, ending in its own **Output** node:",
