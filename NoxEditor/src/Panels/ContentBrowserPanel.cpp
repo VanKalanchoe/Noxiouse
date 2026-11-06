@@ -168,6 +168,36 @@ namespace Nox
         // m_ImportFitHeightCm is left as it was: it remembers the last height you fit to, instead of defaulting to a human's 180 cm.
     }
 
+    void ContentBrowserPanel::DuplicateAsset(AssetHandle handle)
+    {
+        EditorAssetManager* assets = m_Project->GetEditorAssetManager().get();
+        const AssetMetadata metadata = assets->GetMetadata(handle);
+        const std::filesystem::path source = m_BaseDirectory / metadata.FilePath;
+        const std::filesystem::path folder = source.parent_path();
+        std::filesystem::path target = folder / (source.stem().string() + " Copy" + source.extension().string());
+        for (int n = 2; std::filesystem::exists(target); ++n)
+            target = folder / (source.stem().string() + " Copy " + std::to_string(n) + source.extension().string());
+
+        std::error_code error;
+        if (!std::filesystem::copy_file(source, target, error))
+        {
+            NOX_CORE_ERROR("Duplicate: cannot copy '{}' ({})", source.string(), error.message());
+            return;
+        }
+        std::filesystem::path relativeDirectory = folder.lexically_relative(m_BaseDirectory);
+        if (relativeDirectory == ".")
+            relativeDirectory.clear();
+        assets->ScanAndRegisterNewAssets(relativeDirectory);
+        RefreshAssetTree();
+        const AssetHandle copy = FindAssetHandle(target.lexically_relative(m_BaseDirectory));
+        if (copy != 0)
+        {
+            m_Selected.clear();
+            m_Selected.insert(copy);
+            BeginRename(copy);
+        }
+    }
+
     void ContentBrowserPanel::BeginRename(AssetHandle handle)
     {
         if (handle == 0 || !m_Project->GetEditorAssetManager()->CanRename(handle))
@@ -1197,6 +1227,11 @@ namespace Nox
 
         if (ImGui::MenuItem("Rename", "F2", false, m_Selected.size() == 1 && assets->CanRename(handle)))
             BeginRename(handle);
+        // Unreal's Duplicate: a copy next to it ("<name> Copy"), registered as its own asset and up for renaming. For assets that are
+        // one self-contained file (an animation graph -- e.g. the same graph with the root-motion clips --, a material).
+        const bool duplicable = metadata.Type == AssetType::AnimationGraph || metadata.Type == AssetType::Material;
+        if (ImGui::MenuItem("Duplicate", nullptr, false, m_Selected.size() == 1 && duplicable))
+            DuplicateAsset(handle);
         if (metadata.Type == AssetType::Prefab && ImGui::MenuItem("Create Variant"))
         {
             m_HasVariantRequest = true;

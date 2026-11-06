@@ -40,6 +40,7 @@ namespace Nox
     private:
         void RefreshAssetTree();
         AssetHandle FindAssetHandle(const std::filesystem::path& relativePath) const;
+        void DuplicateAsset(AssetHandle handle);
         Ref<Texture2D> GetThumbnail(AssetHandle handle, const AssetMetadata& metadata, bool& rendered);
         // A prefab tile's color: blue, purple for a variant.
         ImVec4 PrefabTileColor(AssetHandle handle, const AssetMetadata& metadata);

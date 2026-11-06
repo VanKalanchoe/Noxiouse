@@ -22,6 +22,7 @@ public sealed class CharacterMovement : EntityBehaviour
     [Expose] public bool UseRootMotion = false;
 
     private float _yaw;
+    private bool _jumpWasDown;
 
     protected override void OnUpdate(float deltaTime)
     {
@@ -62,8 +63,11 @@ public sealed class CharacterMovement : EntityBehaviour
             character.SetMoveVelocity(new Vector3());
         }
 
-        if (character.IsGrounded && Input.IsKeyDown(KeyCode.Space))
+        // One jump per press, like Unreal's character (holding Space does not jump again on every landing).
+        bool jumpDown = Input.IsKeyDown(KeyCode.Space);
+        if (jumpDown && !_jumpWasDown && character.IsGrounded)
             character.Jump(JumpSpeed);
+        _jumpWasDown = jumpDown;
 
         // "Speed": horizontal speed in m/s -- the animation graph's state machine picks Idle / Walk / Run from it (its
         // thresholds are in m/s). The velocity is in world units per second (cm/s here): converted. With root motion the
