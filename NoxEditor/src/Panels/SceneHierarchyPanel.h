@@ -2,6 +2,8 @@
 #include <functional>
 #include <set>
 #include <string>
+#include <unordered_set>
+#include <vector>
 
 #include <imgui.h>
 
@@ -55,6 +57,11 @@ namespace Nox
         void DrawComponents(Entity entity);
         // Outliner folders (FolderComponent paths; Scene::GetFolders keeps empty ones): a folder only groups rows.
         void DrawFolderNode(const std::string& path, const std::set<std::string>& allFolders);
+        // Every folder shown: the scene's, those entities are filed under, and the folders above them.
+        std::set<std::string> CollectFolderPaths() const;
+        // The entity rows in the order they are drawn (folders first, then the top-level entities), inside open folders and open
+        // rows only: what a Shift-click selects a range of.
+        std::vector<Entity> CollectVisibleRows() const;
         void FileEntities(UUID dragged, const std::string& path);
         void AcceptAssetDrop(const std::string& folder);
         // The "Shapes" submenu of a right-click menu; shapes made from it are filed in `folder` ("" = top level).
@@ -63,6 +70,7 @@ namespace Nox
         Ref<Scene> m_Context;
         std::vector<Entity> m_SelectionContexts;
         Entity m_SelectionAnchor;
+        std::unordered_set<UUID> m_OpenRows; // entity rows drawn open (their children are rows too)
 
         // Deletes requested while drawing. Destroying entities inside the registry view being
         // iterated invalidates it, so they're applied after the loop, resolved by UUID so an entity

@@ -123,38 +123,9 @@ namespace Nox
             return;
         }
 
-        // 1. Traverse the scene in hierarchy display order (depth-first)
-        std::vector<Entity> allEntities;
-
-        auto collectHierarchy = [&](auto& self, Entity current) -> void
-        {
-            allEntities.push_back(current);
-            if (current.HasComponent<RelationshipComponent>())
-            {
-                const auto& children = current.GetComponent<RelationshipComponent>().Children;
-                for (UUID childID : children)
-                {
-                    Entity child = m_Context->GetEntityByUUID(childID);
-                    if (child)
-                        self(self, child);
-                }
-            }
-        };
-
-        m_Context->m_Registry.view<TagComponent>().each([&](auto entityID, TagComponent&)
-        {
-            Entity entity(entityID, m_Context.get());
-
-            bool isRoot = true;
-            if (entity.HasComponent<RelationshipComponent>())
-            {
-                if (entity.GetComponent<RelationshipComponent>().Parent != 0)
-                    isRoot = false;
-            }
-
-            if (isRoot)
-                collectHierarchy(collectHierarchy, entity);
-        });
+        // 1. The rows as the panel shows them (folders first, collapsed folders and rows left out): a range is what lies between
+        //    the two rows on screen, not between them in the registry's order.
+        const std::vector<Entity> allEntities = CollectVisibleRows();
 
         // 2. Find indices of anchor and target entity
         auto itAnchor = std::find(allEntities.begin(), allEntities.end(), m_SelectionAnchor);
@@ -176,9 +147,75 @@ namespace Nox
         m_SelectionContexts.clear();
         for (size_t i = startIndex; i <= endIndex; ++i)
         {
-            m_SelectionContexts.push_back(allEntities[i]);
+            if (!m_Context->IsEntityLocked(allEntities[i])) // (a locked level's rows are skipped)
+                m_SelectionContexts.push_back(allEntities[i]);
         }
         // Note: Do not change m_SelectionAnchor so subsequent Shift-clicks range from the same origin
+    }
+
+    std::set<std::string> SceneHierarchyPanel::CollectFolderPaths() const
+    {
+        std::set<std::string> folders(m_Context->GetFolders().begin(), m_Context->GetFolders().end());
+        for (auto handle : m_Context->m_Registry.view<FolderComponent>())
+            folders.insert(m_Context->m_Registry.get<FolderComponent>(handle).Path);
+        for (const std::string& path : std::set<std::string>(folders))
+        {
+            for (size_t slash = path.find('/'); slash != std::string::npos; slash = path.find('/', slash + 1))
+                folders.insert(path.substr(0, slash));
+        }
+        folders.erase(std::string());
+        return folders;
+    }
+
+    std::vector<Entity> SceneHierarchyPanel::CollectVisibleRows() const
+    {
+        // The same walk as OnImGuiRender / DrawFolderNode / DrawEntityNode draw.
+        std::vector<Entity> rows;
+        Scene* scene = m_Context.get();
+        auto addTree = [&](auto& self, Entity entity, uint32_t depth) -> void
+        {
+            rows.push_back(entity);
+            if (depth > 1024 || !m_OpenRows.contains(entity.GetUUID()) || !entity.HasComponent<RelationshipComponent>())
+                return;
+            for (UUID childID : entity.GetComponent<RelationshipComponent>().Children)
+            {
+                if (Entity child = scene->GetEntityByUUID(childID))
+                    self(self, child, depth + 1);
+            }
+        };
+        const std::set<std::string> folders = CollectFolderPaths();
+        auto addFolder = [&](auto& self, const std::string& path) -> void
+        {
+            if (m_Context->IsFolderCollapsed(path))
+                return;
+            for (const std::string& other : folders)
+            {
+                if (other.size() > path.size() + 1 && other.rfind(path + "/", 0) == 0 && other.find('/', path.size() + 1) == std::string::npos)
+                    self(self, other);
+            }
+            for (auto handle : m_Context->m_Registry.view<FolderComponent>())
+            {
+                Entity entity(handle, scene);
+                const bool hasParent = entity.HasComponent<RelationshipComponent>() && entity.GetComponent<RelationshipComponent>().Parent != 0;
+                if (!hasParent && entity.GetComponent<FolderComponent>().Path == path)
+                    addTree(addTree, entity, 0);
+            }
+        };
+        for (const std::string& path : folders)
+        {
+            if (path.find('/') == std::string::npos)
+                addFolder(addFolder, path);
+        }
+        m_Context->m_Registry.view<TagComponent>().each([&](auto entityID, TagComponent&)
+        {
+            Entity entity(entityID, scene);
+            if (entity.HasComponent<RelationshipComponent>() && entity.GetComponent<RelationshipComponent>().Parent != 0)
+                return;
+            if (entity.HasComponent<FolderComponent>() && !entity.GetComponent<FolderComponent>().Path.empty())
+                return; // drawn inside its folder
+            addTree(addTree, entity, 0);
+        });
+        return rows;
     }
 
     void SceneHierarchyPanel::ClearSelection()
@@ -227,15 +264,7 @@ namespace Nox
         {
             // Folders first (explicit ones plus those entities are filed under, with their parents), then the entities that are
             // at the top level: no parent and no folder.
-            std::set<std::string> folders(m_Context->GetFolders().begin(), m_Context->GetFolders().end());
-            for (auto handle : m_Context->m_Registry.view<FolderComponent>())
-                folders.insert(m_Context->m_Registry.get<FolderComponent>(handle).Path);
-            for (const std::string& path : std::set<std::string>(folders))
-            {
-                for (size_t slash = path.find('/'); slash != std::string::npos; slash = path.find('/', slash + 1))
-                    folders.insert(path.substr(0, slash));
-            }
-            folders.erase(std::string());
+            const std::set<std::string> folders = CollectFolderPaths();
             for (const std::string& path : folders)
             {
                 if (path.find('/') == std::string::npos)
@@ -584,6 +613,10 @@ namespace Nox
         if (locked)
             ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
         bool opened = ImGui::TreeNodeEx((void*)(uint64_t)(uint32_t)entity, flags, tag.c_str());
+        if (opened && hasChildren)
+            m_OpenRows.insert(entity.GetUUID());
+        else
+            m_OpenRows.erase(entity.GetUUID());
         if (locked)
             ImGui::PopStyleVar();
         if (prefabRoot || prefabNode)
