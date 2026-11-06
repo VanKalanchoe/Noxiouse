@@ -54,6 +54,7 @@ namespace Nox
     void AnimPose::ResetToRestPose(const Skeleton& skeleton)
     {
         Curves.clear();
+        RootMotion = glm::vec3(0.0f);
         LocalTransforms.assign(skeleton.AllNodes.size(), Animator::NodeTransform{});
         for (const Node* node : skeleton.AllNodes)
         {
@@ -109,6 +110,7 @@ namespace Nox
             blended[i].Scale = glm::mix(ta.Scale, tb.Scale, alpha);
         }
         out.Curves = WeightedCurves({ { &a.Curves, 1.0f - alpha }, { &b.Curves, alpha } });
+        out.RootMotion = glm::mix(a.RootMotion, b.RootMotion, alpha);
         out.LocalTransforms = std::move(blended); // built into a temporary so out may alias a or b
     }
 
@@ -129,7 +131,14 @@ namespace Nox
         {
             out.LocalTransforms.clear();
             out.Curves.clear();
+            out.RootMotion = glm::vec3(0.0f);
             return;
+        }
+        glm::vec3 rootMotion(0.0f);
+        for (size_t i = 0; i < poses.size() && i < weights.size(); ++i)
+        {
+            if (poses[i] && !poses[i]->LocalTransforms.empty() && weights[i] > 0.0f)
+                rootMotion += poses[i]->RootMotion * (weights[i] / total);
         }
         std::vector<std::pair<const std::vector<MorphWeightSample>*, float>> curveInputs;
         for (size_t i = 0; i < poses.size() && i < weights.size(); ++i)
@@ -168,6 +177,7 @@ namespace Nox
         }
         out.LocalTransforms = std::move(blended);
         out.Curves = std::move(curves);
+        out.RootMotion = rootMotion;
     }
 
     void BlendPosesPerNode(const AnimPose& base, const AnimPose& blend, const std::vector<float>& weights, AnimPose& out)
@@ -198,6 +208,7 @@ namespace Nox
             else
                 curves.push_back(sample);
         }
+        out.RootMotion = base.RootMotion; // the layer moves bones, not the character
         out.LocalTransforms = std::move(result);
         out.Curves = std::move(curves);
     }
@@ -233,6 +244,7 @@ namespace Nox
             else
                 curves.push_back({ sample.TargetNodeIndex, sample.Target, delta });
         }
+        out.RootMotion = base.RootMotion; // an additive pose moves bones, not the character
         out.LocalTransforms = std::move(result);
         out.Curves = std::move(curves);
     }

@@ -107,10 +107,6 @@ namespace Nox
         std::vector<std::string> m_FiredNotifies;
 
         glm::vec3 m_RootMotion{ 0.0f };
-        glm::vec3 m_LastRootPosition{ 0.0f };
-        glm::vec3 m_LastRootStep{ 0.0f };
-        float m_AverageRootStep = 0.0f;
-        bool m_HasLastRoot = false;
 
         AssetHandle m_GraphHandle = 0;
         Ref<NodeGraphAsset> m_Graph;

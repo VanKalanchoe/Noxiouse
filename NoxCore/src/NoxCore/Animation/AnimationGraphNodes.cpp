@@ -30,6 +30,35 @@ namespace Nox
             bool Started = false;
         };
 
+        // Where the root motion bone is in model space at `time` in `clip`: its translation track through its parents' rest pose
+        // (no track: it stays at rest).
+        glm::vec3 RootPositionAt(const AnimationSequence& clip, float time, const AnimGraphEvalData& data)
+        {
+            for (const NodeAnimationChannel& channel : clip.Channels)
+            {
+                if (channel.TargetNodeIndex == data.InPlaceRootIndex && !channel.PositionKeys.empty())
+                    return glm::vec3(data.InPlaceRootParent * glm::vec4(Animator::InterpolatePosition(time, channel), 1.0f));
+            }
+            return data.InPlaceRootRest;
+        }
+
+        // How far the clip's root moves horizontally while its playhead goes from `from` to `to` (model space; zero without root
+        // motion). A loop that wrapped adds the piece to the clip's end and the piece from its start (backwards: the reverse).
+        glm::vec3 ClipRootMotion(const AnimationSequence& clip, float from, float to, bool wrapped, bool forward, const AnimGraphEvalData& data)
+        {
+            if (data.InPlaceRootIndex < 0)
+                return glm::vec3(0.0f);
+            glm::vec3 delta;
+            if (!wrapped)
+                delta = RootPositionAt(clip, to, data) - RootPositionAt(clip, from, data);
+            else if (forward)
+                delta = (RootPositionAt(clip, clip.Duration, data) - RootPositionAt(clip, from, data)) + (RootPositionAt(clip, to, data) - RootPositionAt(clip, 0.0f, data));
+            else
+                delta = (RootPositionAt(clip, 0.0f, data) - RootPositionAt(clip, from, data)) + (RootPositionAt(clip, to, data) - RootPositionAt(clip, clip.Duration, data));
+            delta.y = 0.0f;
+            return delta;
+        }
+
         // Leaf, UE's Sequence Player: samples a .nanim clip at its own persistent playhead (GraphEvalContext::GetState),
         // advanced by this evaluation's DeltaTime. Properties: "Clip" (uint64_t AssetHandle), "Loop" (bool, default true),
         // "StartPosition" (float seconds, default 0: where the playhead starts, again each time a state machine enters the
@@ -84,6 +113,7 @@ namespace Nox
                 CollectCrossedNotifies(*clip, previousTime, time, wrapped, *data->FiredNotifies);
 
             SampleClipPose(*clip, time, *data->TargetSkeleton, pose);
+            pose.RootMotion = ClipRootMotion(*clip, previousTime, time, wrapped, speed >= 0.0f, *data);
             ctx.SetOutput(nodeIndex, 0, std::move(pose));
         }
 
@@ -244,17 +274,24 @@ namespace Nox
             // The leading clip plays at the phase; the other one at its sync markers' matching place (else the same phase).
             const size_t leadingIndex = weight < 0.5f ? first : second;
             const AnimationSequence& leadingClip = *samples[leadingIndex].Clip;
-            auto clipTime = [&](size_t index)
+            auto clipTime = [&](size_t index, float at)
             {
                 const AnimationSequence& clip = *samples[index].Clip;
-                const float normalized = phase * clip.Duration;
-                return index == leadingIndex ? normalized : SyncedClipTime(leadingClip, phase * leadingClip.Duration, clip, normalized);
+                const float normalized = at * clip.Duration;
+                return index == leadingIndex ? normalized : SyncedClipTime(leadingClip, at * leadingClip.Duration, clip, normalized);
             };
-            SampleClipPose(*samples[first].Clip, clipTime(first), *data->TargetSkeleton, pose);
+            // Each clip's own root motion over this step (from its time at the previous phase to its time now).
+            auto rootMotion = [&](size_t index)
+            {
+                return ClipRootMotion(*samples[index].Clip, clipTime(index, previousPhase), clipTime(index, phase), wrapped, speed >= 0.0f, *data);
+            };
+            SampleClipPose(*samples[first].Clip, clipTime(first, phase), *data->TargetSkeleton, pose);
+            pose.RootMotion = rootMotion(first);
             if (second != first && weight > 0.0f)
             {
                 AnimPose other;
-                SampleClipPose(*samples[second].Clip, clipTime(second), *data->TargetSkeleton, other);
+                SampleClipPose(*samples[second].Clip, clipTime(second, phase), *data->TargetSkeleton, other);
+                other.RootMotion = rootMotion(second);
                 AnimPose blended;
                 BlendPoses(pose, other, weight, blended);
                 pose = std::move(blended);
@@ -361,9 +398,14 @@ namespace Nox
                 if (weights[i] < 0.001f)
                     continue;
                 const AnimationSequence& leadingClip = *samples[leading].Clip;
-                const float normalized = phase * samples[i].Clip->Duration;
-                const float time = i == leading ? normalized : SyncedClipTime(leadingClip, phase * leadingClip.Duration, *samples[i].Clip, normalized);
+                auto timeAt = [&](float at)
+                {
+                    const float normalized = at * samples[i].Clip->Duration;
+                    return i == leading ? normalized : SyncedClipTime(leadingClip, at * leadingClip.Duration, *samples[i].Clip, normalized);
+                };
+                const float time = timeAt(phase);
                 SampleClipPose(*samples[i].Clip, time, *data->TargetSkeleton, sampled[i]);
+                sampled[i].RootMotion = ClipRootMotion(*samples[i].Clip, timeAt(previousPhase), time, wrapped, speed >= 0.0f, *data);
                 poses.push_back(&sampled[i]);
                 poseWeights.push_back(weights[i]);
             }

@@ -166,8 +166,6 @@ namespace Nox
         m_LastPose = m_EvalContext.GetInput<AnimPose>(m_Graph->Compiled.OutputNodeIndex, 0);
         if (RootMotion)
             ExtractRootMotion(skeleton);
-        else
-            m_HasLastRoot = false;
         return &m_LastPose;
     }
 
@@ -300,29 +298,12 @@ namespace Nox
         if (!root || root->Index < 0 || root->Index >= static_cast<int32_t>(m_LastPose.LocalTransforms.size()))
             return;
 
+        // The travel the clips worked out for this step (each from its own playhead, blended like the pose: AnimPose::RootMotion).
+        m_RootMotion += m_LastPose.RootMotion;
+
         const glm::mat4 parent = RestGlobalMatrix(root->Parent);
         Animator::NodeTransform& transform = m_LastPose.LocalTransforms[root->Index];
         const glm::vec3 position = glm::vec3(parent * glm::vec4(transform.Translation, 1.0f));
-        if (m_HasLastRoot)
-        {
-            glm::vec3 step = position - m_LastRootPosition;
-            step.y = 0.0f;
-            const float length = glm::length(step);
-            // A looping clip starting over moves the root back to its start in one frame: keep the recent motion instead.
-            const bool wrapped = m_AverageRootStep > 1e-6f && length > 3.0f * m_AverageRootStep && glm::dot(step, m_LastRootStep) < 0.0f;
-            if (wrapped)
-            {
-                step = m_LastRootStep;
-            }
-            else
-            {
-                m_AverageRootStep = m_AverageRootStep > 0.0f ? glm::mix(m_AverageRootStep, length, 0.2f) : length;
-                m_LastRootStep = step;
-            }
-            m_RootMotion += step;
-        }
-        m_LastRootPosition = position;
-        m_HasLastRoot = true;
 
         // In place: the root keeps its rest pose's horizontal position; its height and rotation stay animated.
         const glm::vec3 rest = glm::vec3(parent * glm::vec4(root->RestTranslation, 1.0f));

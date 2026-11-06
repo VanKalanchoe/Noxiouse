@@ -18,6 +18,11 @@ namespace Nox
         // Morph target weights the pose carries besides its transforms (UE's animation curves), by target name. Blends treat a
         // target one pose does not have as weight 0.
         std::vector<MorphWeightSample> Curves;
+        // The root motion bone's horizontal travel during this evaluation (model space; UE's root motion delta). Each clip source
+        // works it out from its own playhead (AnimGraph's ClipRootMotion: a loop wrapping adds the end and the start pieces), and
+        // blends mix it with the same weights as the pose -- never the difference of blended root positions, which jumps
+        // whenever the weights change (a walk and a run are metres apart in their clips).
+        glm::vec3 RootMotion{ 0.0f };
 
         void ResetToRestPose(const Skeleton& skeleton);
     };
