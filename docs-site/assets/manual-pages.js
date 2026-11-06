@@ -1222,7 +1222,7 @@ window.NOX_MANUAL_PAGES = [
             "   4. Click **StateMachine** in the path at the top to go back to the four boxes.",
             "   5. Do the same for **JumpLoop** (`Jump_Loop`, Loop **on**) and **JumpLand** (`Jump_Land`, Loop **off**).",
             "   6. **Locomotion**: idle, walk and jog blended by speed, the way Unreal's third-person template does it. Open the state, right-click > **Blending > BlendSpace1D**, connect its Pose to **Output**. Right-click > **Variables > Get Speed** (or drag `Speed` from the Parameters list onto the canvas) and connect its **Value** to the blend space's **Value** pin. On the blend space set **Clip0** = `Idle_Loop` at **Position0** = 0, **Clip1** = `Walk_Loop` at **Position1** = 1.0, **Clip2** = `Jog_Fwd_Loop` at **Position2** = 5.4 (the clips' own speeds in m/s, so the feet don't slide). Leave **Clip3** empty (or `Sprint_Loop` at 8.2 if your script has a sprint speed).",
-            "6. Transitions, back on the four boxes. Drag from a box's right pin to another box's left pin to make an arrow; click the arrow to set it in the panel (**+ Add Rule** for each rule, **Blend Time**, **At End of State**):",
+            "6. Transitions, back on the four boxes. Drag from a box's right pin to another box's left pin to make an arrow (drawn straight from box edge to box edge; two opposite arrows sit side by side). Click the **round icon** in the middle of an arrow to select it and set it in the panel (**+ Add Rule** for each rule, **Blend Time**, **At End of State**); **Delete** or right-click > **Delete Transition** removes it:",
             "",
             "| From -> To | Rules | At End of State | Blend |",
             "| :--- | :--- | :--- | :--- |",

@@ -304,7 +304,7 @@ namespace Nox
         else
         {
             ImGui::TextDisabled("Right-click the canvas to add a state. Drag from a state's right pin to another state to add a\n"
-                                "transition, then select the arrow to edit its rules. Double-click a state to edit what it plays.");
+                                "transition, then click the round icon on its arrow to edit its rules. Double-click a state to edit what it plays.");
         }
 
         if (edited)

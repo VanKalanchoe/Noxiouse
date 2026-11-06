@@ -64,6 +64,7 @@ namespace Nox
         std::unordered_set<uint32_t> m_SeededStatePositions;
         bool m_FitStatesOnNextFrame = true;
         uint32_t m_ContextStateId = 0;
+        size_t m_ContextTransition = 0; // the transition whose icon was right-clicked (its index)
         ImVec2 m_AddStateScreenPos{0.0f, 0.0f};
         std::unordered_set<uint32_t> m_SeededPositions; // node ids whose ed:: position has been seeded from GraphNode::EditorPosition
         ImVec2 m_CreateNodeScreenPos{0.0f, 0.0f};

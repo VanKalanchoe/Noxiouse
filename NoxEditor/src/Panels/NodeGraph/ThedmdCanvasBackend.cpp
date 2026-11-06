@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
+#include <cmath>
+#include <unordered_map>
 
 #include <imgui.h>
 #include <imgui_internal.h> // ImDrawFlags_RoundCornersTop
@@ -709,9 +712,28 @@ namespace Nox
     namespace
     {
         // A state's pins: id = state id * 2 (+1 for the output side), so an id decodes back to (state, side).
-        // Nodes, pins and links share one numeric id space in the node editor: states use their own ids, pins 2^32 + .., links 2^33 + ..
+        // Nodes and pins share one numeric id space in the node editor: states use their own ids, pins 2^32 + .., and a transition's
+        // icon (a node of its own, see DrawStateMachine) 2^34 + its index.
         constexpr uint64_t kStatePinBase = 1ull << 32;
-        constexpr uint64_t kStateLinkBase = 1ull << 33;
+        constexpr uint64_t kTransitionNodeBase = 1ull << 34;
+        bool IsTransitionNode(ed::NodeId node) { return node.Get() >= kTransitionNodeBase; }
+
+        ImVec2 Add(ImVec2 a, ImVec2 b) { return ImVec2(a.x + b.x, a.y + b.y); }
+        ImVec2 Sub(ImVec2 a, ImVec2 b) { return ImVec2(a.x - b.x, a.y - b.y); }
+        ImVec2 Scale(ImVec2 a, float s) { return ImVec2(a.x * s, a.y * s); }
+
+        // Where a ray from p (inside the box) along the unit direction d leaves it; p itself when it is not inside.
+        ImVec2 BoxExit(ImVec2 min, ImVec2 max, ImVec2 p, ImVec2 d)
+        {
+            float t = FLT_MAX;
+            if (d.x > 1e-6f) t = std::min(t, (max.x - p.x) / d.x);
+            else if (d.x < -1e-6f) t = std::min(t, (min.x - p.x) / d.x);
+            if (d.y > 1e-6f) t = std::min(t, (max.y - p.y) / d.y);
+            else if (d.y < -1e-6f) t = std::min(t, (min.y - p.y) / d.y);
+            if (t == FLT_MAX || t < 0.0f)
+                t = 0.0f;
+            return Add(p, Scale(d, t));
+        }
         ed::PinId StateInputPin(uint32_t stateId) { return ed::PinId(kStatePinBase + static_cast<uint64_t>(stateId) * 2); }
         ed::PinId StateOutputPin(uint32_t stateId) { return ed::PinId(kStatePinBase + static_cast<uint64_t>(stateId) * 2 + 1); }
         uint32_t PinState(ed::PinId pin) { return static_cast<uint32_t>((pin.Get() - kStatePinBase) >> 1); }
@@ -784,10 +806,90 @@ namespace Nox
             state.EditorPosition = { position.x, position.y };
         }
 
-        for (size_t i = 0; i < machine.Transitions.size(); ++i)
+        // Transitions as Unreal's state machines draw them: a straight arrow from the edge of one state box to the edge of the other,
+        // several between the same two states (a pair in opposite directions) side by side, and a round transition icon on each
+        // arrow's middle -- the part you click to select it, and Delete removes it. The icon is a node of its own (selected, deleted
+        // and box-selected like any node), drawn under the states (z -1), with its arrow in its background layer.
         {
-            const NodeTransition& transition = machine.Transitions[i];
-            ed::Link(ed::LinkId(kStateLinkBase + i), StateOutputPin(transition.FromState), StateInputPin(transition.ToState), ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 2.0f);
+            std::unordered_map<uint32_t, std::pair<ImVec2, ImVec2>> boxes; // state -> min, max (canvas space)
+            for (const NodeSubGraph& state : machine.SubGraphs)
+            {
+                const ImVec2 position = ed::GetNodePosition(ed::NodeId(state.Id));
+                const ImVec2 size = ed::GetNodeSize(ed::NodeId(state.Id));
+                if (size.x > 0.0f && size.y > 0.0f)
+                    boxes[state.Id] = { position, Add(position, size) };
+            }
+
+            constexpr float kLaneSpacing = 16.0f;
+            constexpr float kIconRadius = 8.0f;
+            constexpr float kArrowLength = 11.0f;
+            constexpr float kArrowHalfWidth = 5.5f;
+            const ed::NodeId hovered = ed::GetHoveredNode();
+            ed::PushStyleVar(ed::StyleVar_NodePadding, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            ed::PushStyleVar(ed::StyleVar_NodeRounding, kIconRadius + 1.0f);
+            ed::PushStyleColor(ed::StyleColor_NodeBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            ed::PushStyleColor(ed::StyleColor_NodeBorder, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            for (size_t i = 0; i < machine.Transitions.size(); ++i)
+            {
+                const NodeTransition& transition = machine.Transitions[i];
+                const auto from = boxes.find(transition.FromState);
+                const auto to = boxes.find(transition.ToState);
+                if (from == boxes.end() || to == boxes.end())
+                    continue;
+
+                // Its lane among the transitions between these two states (either direction), centered on the line between them.
+                size_t lane = 0, lanes = 0;
+                for (size_t j = 0; j < machine.Transitions.size(); ++j)
+                {
+                    const NodeTransition& other = machine.Transitions[j];
+                    const bool samePair = (other.FromState == transition.FromState && other.ToState == transition.ToState) ||
+                                          (other.FromState == transition.ToState && other.ToState == transition.FromState);
+                    if (!samePair)
+                        continue;
+                    if (j < i)
+                        ++lane;
+                    ++lanes;
+                }
+
+                const ImVec2 fromCenter = Scale(Add(from->second.first, from->second.second), 0.5f);
+                const ImVec2 toCenter = Scale(Add(to->second.first, to->second.second), 0.5f);
+                const ImVec2 delta = Sub(toCenter, fromCenter);
+                const float length = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+                if (length < 1.0f)
+                    continue;
+                const ImVec2 dir = Scale(delta, 1.0f / length);
+                const ImVec2 normal(-dir.y, dir.x);
+                // Lanes are measured along one side of the pair (from the lower state id), so opposite directions never share one.
+                const float side = transition.FromState < transition.ToState ? 1.0f : -1.0f;
+                const ImVec2 offset = Scale(normal, side * (static_cast<float>(lane) - 0.5f * static_cast<float>(lanes - 1)) * kLaneSpacing);
+
+                const ImVec2 start = Add(BoxExit(from->second.first, from->second.second, Add(fromCenter, offset), dir), Scale(dir, 2.0f));
+                const ImVec2 end = Sub(BoxExit(to->second.first, to->second.second, Add(toCenter, offset), Scale(dir, -1.0f)), Scale(dir, 3.0f));
+                const ImVec2 middle = Scale(Add(start, end), 0.5f);
+
+                const ed::NodeId iconId(kTransitionNodeBase + i);
+                ed::SetNodePosition(iconId, ImVec2(middle.x - kIconRadius, middle.y - kIconRadius));
+                ed::SetNodeZPosition(iconId, -1.0f);
+                ed::BeginNode(iconId);
+                ImGui::Dummy(ImVec2(2.0f * kIconRadius, 2.0f * kIconRadius));
+                ed::EndNode();
+
+                const bool selected = ed::IsNodeSelected(iconId);
+                const ImU32 color = selected ? IM_COL32(255, 176, 50, 255) : (hovered == iconId ? IM_COL32(50, 176, 255, 255) : IM_COL32(205, 205, 205, 255));
+                if (ImDrawList* drawList = ed::GetNodeBackgroundDrawList(iconId))
+                {
+                    const ImVec2 arrowBase = Sub(end, Scale(dir, kArrowLength));
+                    drawList->AddLine(start, arrowBase, color, selected ? 3.0f : 2.0f);
+                    drawList->AddTriangleFilled(end, Add(arrowBase, Scale(normal, kArrowHalfWidth)), Sub(arrowBase, Scale(normal, kArrowHalfWidth)), color);
+                    drawList->AddCircleFilled(middle, kIconRadius, IM_COL32(35, 35, 40, 255));
+                    drawList->AddCircle(middle, kIconRadius, color, 0, 1.5f);
+                    const ImVec2 tip = Add(middle, Scale(dir, 4.5f));
+                    const ImVec2 back = Sub(middle, Scale(dir, 3.0f));
+                    drawList->AddTriangleFilled(tip, Add(back, Scale(normal, 3.5f)), Sub(back, Scale(normal, 3.5f)), color);
+                }
+            }
+            ed::PopStyleColor(2);
+            ed::PopStyleVar(2);
         }
 
         // Connecting an output pin to another state's input makes a transition (rules are edited in the panel below).
@@ -825,19 +927,19 @@ namespace Nox
 
         if (ed::BeginDelete())
         {
-            ed::LinkId linkId;
-            std::vector<size_t> deletedTransitions;
-            while (ed::QueryDeletedLink(&linkId))
-            {
-                if (ed::AcceptDeletedItem() && linkId.Get() >= kStateLinkBase && linkId.Get() - kStateLinkBase < machine.Transitions.size())
-                    deletedTransitions.push_back(static_cast<size_t>(linkId.Get() - kStateLinkBase));
-            }
-
             ed::NodeId nodeId;
+            std::vector<size_t> deletedTransitions;
             std::vector<uint32_t> deletedStates;
             while (ed::QueryDeletedNode(&nodeId))
             {
-                if (ed::AcceptDeletedItem())
+                if (!ed::AcceptDeletedItem())
+                    continue;
+                if (IsTransitionNode(nodeId))
+                {
+                    if (nodeId.Get() - kTransitionNodeBase < machine.Transitions.size())
+                        deletedTransitions.push_back(static_cast<size_t>(nodeId.Get() - kTransitionNodeBase));
+                }
+                else
                     deletedStates.push_back(static_cast<uint32_t>(nodeId.Get()));
             }
 
@@ -863,15 +965,17 @@ namespace Nox
 
         // Selection and double-click, for the panel.
         selection = StateMachineSelection{};
-        ed::LinkId selectedLink;
-        if (ed::GetSelectedLinks(&selectedLink, 1) > 0 && selectedLink.Get() >= kStateLinkBase && selectedLink.Get() - kStateLinkBase < machine.Transitions.size())
-            selection.Transition = static_cast<int>(selectedLink.Get() - kStateLinkBase);
         ed::NodeId selectedNode;
         if (ed::GetSelectedNodes(&selectedNode, 1) > 0)
-            selection.State = static_cast<uint32_t>(selectedNode.Get());
+        {
+            if (!IsTransitionNode(selectedNode))
+                selection.State = static_cast<uint32_t>(selectedNode.Get());
+            else if (selectedNode.Get() - kTransitionNodeBase < machine.Transitions.size())
+                selection.Transition = static_cast<int>(selectedNode.Get() - kTransitionNodeBase);
+        }
 
         const ed::NodeId doubleClicked = ed::GetDoubleClickedNode();
-        if (doubleClicked)
+        if (doubleClicked && !IsTransitionNode(doubleClicked))
             outOpenState = static_cast<uint32_t>(doubleClicked.Get());
 
         if (m_FitStatesOnNextFrame && !machine.SubGraphs.empty())
@@ -885,8 +989,26 @@ namespace Nox
         ed::NodeId contextNode;
         if (ed::ShowNodeContextMenu(&contextNode))
         {
-            m_ContextStateId = static_cast<uint32_t>(contextNode.Get());
-            ImGui::OpenPopup("StateContext");
+            if (IsTransitionNode(contextNode))
+            {
+                m_ContextTransition = contextNode.Get() - kTransitionNodeBase;
+                ImGui::OpenPopup("TransitionContext");
+            }
+            else
+            {
+                m_ContextStateId = static_cast<uint32_t>(contextNode.Get());
+                ImGui::OpenPopup("StateContext");
+            }
+        }
+        if (ImGui::BeginPopup("TransitionContext"))
+        {
+            if (ImGui::MenuItem("Delete Transition") && m_ContextTransition < machine.Transitions.size())
+            {
+                machine.Transitions.erase(machine.Transitions.begin() + static_cast<std::ptrdiff_t>(m_ContextTransition));
+                ed::ClearSelection();
+                onGraphEdited();
+            }
+            ImGui::EndPopup();
         }
         if (ed::ShowBackgroundContextMenu())
         {
