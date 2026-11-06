@@ -77,7 +77,8 @@ namespace Nox
             ed::DestroyEditor(m_StateContext);
     }
 
-    void ThedmdCanvasBackend::Draw(NodeGraph& graph, const std::function<void()>& onGraphEdited, uint32_t* outOpenNode)
+    void ThedmdCanvasBackend::Draw(NodeGraph& graph, const std::vector<GraphParameter>& parameters, const std::function<void()>& onGraphEdited,
+                                   uint32_t* outOpenNode)
     {
         ed::SetCurrentEditor(m_Context);
         ed::Begin("Canvas");
@@ -147,12 +148,12 @@ namespace Nox
 
         if (ImGui::BeginPopup("CreateNode"))
         {
-            ShowCreateNodeMenu(graph, onGraphEdited);
+            ShowCreateNodeMenu(graph, parameters, onGraphEdited);
             ImGui::EndPopup();
         }
 
         DrawPendingAssetPicker(graph, onGraphEdited);
-        HandleParameterDrop(graph, onGraphEdited);
+        HandleParameterDrop(graph, parameters, onGraphEdited);
 
         ed::Resume();
 
@@ -546,7 +547,7 @@ namespace Nox
         onGraphEdited();
     }
 
-    void ThedmdCanvasBackend::HandleParameterDrop(NodeGraph& graph, const std::function<void()>& onGraphEdited)
+    void ThedmdCanvasBackend::HandleParameterDrop(NodeGraph& graph, const std::vector<GraphParameter>& parameters, const std::function<void()>& onGraphEdited)
     {
         // Called suspended, so the current window is the canvas at real screen coordinates. There's no item to
         // hang a drop target on (the canvas is just a window), hence the custom rect over its whole inner area.
@@ -557,7 +558,7 @@ namespace Nox
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kNodeGraphParameterPayload))
         {
             const std::string name(static_cast<const char*>(payload->Data));
-            const bool declared = std::any_of(graph.Parameters.begin(), graph.Parameters.end(),
+            const bool declared = std::any_of(parameters.begin(), parameters.end(),
                 [&](const GraphParameter& parameter) { return parameter.Name == name; });
 
             const NodeTypeDesc* reader = nullptr;
@@ -576,7 +577,7 @@ namespace Nox
         ImGui::EndDragDropTarget();
     }
 
-    void ThedmdCanvasBackend::ShowCreateNodeMenu(NodeGraph& graph, const std::function<void()>& onGraphEdited)
+    void ThedmdCanvasBackend::ShowCreateNodeMenu(NodeGraph& graph, const std::vector<GraphParameter>& parameters, const std::function<void()>& onGraphEdited)
     {
         // Creates a node of `type` where the menu was opened, optionally pointing it at a graph parameter.
         auto createNode = [&](const NodeTypeDesc& type, const std::string* parameterName)
@@ -603,7 +604,7 @@ namespace Nox
                 entries.push_back({ type.Category, type.TypeName, &type, nullptr });
                 continue;
             }
-            for (const GraphParameter& parameter : graph.Parameters)
+            for (const GraphParameter& parameter : parameters)
                 entries.push_back({ "Variables", "Get " + parameter.Name, &type, &parameter.Name });
         }
 

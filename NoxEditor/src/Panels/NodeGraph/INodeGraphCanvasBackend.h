@@ -24,8 +24,11 @@ namespace Nox
         // already called). Reads and mutates graph directly -- node/link add/remove, position changes, property
         // edits -- and calls onGraphEdited after any change, so the panel can mark itself dirty and recompile
         // the live asset. Node types come from NodeTypeRegistry, filtered to graph.Domain.
+        // parameters: the asset's parameters (the outer graph's), offered at every level -- a state's own graph declares none,
+        // like an Unreal Animation Blueprint, whose variables every state and nested graph reads.
         // outOpenNode (optional) is set to the id of a node that owns sub graphs when the user double-clicked it.
-        virtual void Draw(NodeGraph& graph, const std::function<void()>& onGraphEdited, uint32_t* outOpenNode = nullptr) = 0;
+        virtual void Draw(NodeGraph& graph, const std::vector<GraphParameter>& parameters, const std::function<void()>& onGraphEdited,
+                          uint32_t* outOpenNode = nullptr) = 0;
 
         // What the state-machine view has selected, for the panel's inspector below it.
         struct StateMachineSelection

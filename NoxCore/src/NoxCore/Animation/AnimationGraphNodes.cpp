@@ -795,7 +795,8 @@ namespace Nox
             /* Category          */ "Inputs",
             /* Inputs            */ {},
             /* Outputs           */ { { "Value", "Float" } },
-            // Normally created from the create-node menu's "Parameters / <name>" entries, which fill this in.
+            // Normally created from the create-node menu's "Variables / Get <name>" entries (or a parameter dragged onto the canvas),
+            // at any level of the graph: the parameters are the asset's, shared by every state.
             /* DefaultProperties */ { { kParameterReferenceProperty, std::string() } },
             /* PropertyAssetTypeHints */ {},
             /* PropertyRanges    */ {},

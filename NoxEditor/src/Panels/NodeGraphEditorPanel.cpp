@@ -19,6 +19,28 @@
 
 namespace Nox
 {
+    namespace
+    {
+        // A parameter's readers (nodes pointing at it through kParameterReferenceProperty) and the transition rules testing it, in
+        // this graph and every state of every state machine under it.
+        void RenameParameterReferences(NodeGraph& graph, const std::string& oldName, const std::string& newName)
+        {
+            for (GraphNode& node : graph.Nodes)
+            {
+                auto reference = node.Properties.find(kParameterReferenceProperty);
+                if (reference != node.Properties.end())
+                    if (auto* name = std::get_if<std::string>(&reference->second); name && *name == oldName)
+                        *name = newName;
+                for (NodeTransition& transition : node.Transitions)
+                    for (TransitionRule& rule : transition.Rules)
+                        if (rule.Parameter == oldName)
+                            rule.Parameter = newName;
+                for (NodeSubGraph& state : node.SubGraphs)
+                    RenameParameterReferences(state.Graph, oldName, newName);
+            }
+        }
+    }
+
     NodeGraphEditorPanel::NodeGraphEditorPanel(AssetHandle graphAsset)
         : m_GraphHandle(graphAsset)
     {
@@ -98,14 +120,9 @@ namespace Nox
                     [&](const GraphParameter& other) { return &other != &parameter && other.Name == newName; });
                 if (!newName.empty() && !duplicate)
                 {
-                    // Nodes that read this parameter (see kParameterReferenceProperty) follow the rename.
-                    for (GraphNode& node : graph.Nodes)
-                    {
-                        auto reference = node.Properties.find(kParameterReferenceProperty);
-                        if (reference != node.Properties.end())
-                            if (auto* name = std::get_if<std::string>(&reference->second); name && *name == parameter.Name)
-                                *name = newName;
-                    }
+                    // Nodes that read this parameter (see kParameterReferenceProperty) and transition rules testing it follow the
+                    // rename, in every state and nested state machine too.
+                    RenameParameterReferences(graph, parameter.Name, newName);
                     parameter.Name = newName;
                     edited = true;
                 }
@@ -516,7 +533,7 @@ namespace Nox
                 else
                 {
                     uint32_t openNode = 0;
-                    m_Backend->Draw(*graph, onEdited, &openNode);
+                    m_Backend->Draw(*graph, m_Asset->Graph.Parameters, onEdited, &openNode);
                     if (openNode != 0)
                         m_Path.push_back(openNode);
                 }

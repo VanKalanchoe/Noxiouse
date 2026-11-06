@@ -27,7 +27,8 @@ namespace Nox
         ThedmdCanvasBackend(const ThedmdCanvasBackend&) = delete;
         ThedmdCanvasBackend& operator=(const ThedmdCanvasBackend&) = delete;
 
-        void Draw(NodeGraph& graph, const std::function<void()>& onGraphEdited, uint32_t* outOpenNode = nullptr) override;
+        void Draw(NodeGraph& graph, const std::vector<GraphParameter>& parameters, const std::function<void()>& onGraphEdited,
+                  uint32_t* outOpenNode = nullptr) override;
         void DrawStateMachine(GraphNode& machine, const NodeGraph& rootGraph, const std::function<void()>& onGraphEdited,
                               uint32_t& outOpenState, StateMachineSelection& selection) override;
         void ResetView() override;
@@ -41,14 +42,14 @@ namespace Nox
         void DrawPendingAssetPicker(NodeGraph& graph, const std::function<void()>& onGraphEdited);
         void HandleLinkCreation(NodeGraph& graph, const std::function<void()>& onGraphEdited);
         void HandleDeletion(NodeGraph& graph, const std::function<void()>& onGraphEdited);
-        void ShowCreateNodeMenu(NodeGraph& graph, const std::function<void()>& onGraphEdited);
+        void ShowCreateNodeMenu(NodeGraph& graph, const std::vector<GraphParameter>& parameters, const std::function<void()>& onGraphEdited);
         // Adds a node of `type` (seeded with its default properties) at a screen position, optionally pointing
         // it at a graph parameter -- shared by the create-node menu and the parameter drag-and-drop.
         void CreateNode(NodeGraph& graph, const NodeTypeDesc& type, const std::string* parameterName, const ImVec2& screenPos,
                         const std::function<void()>& onGraphEdited);
         // Accepts a parameter dragged from the panel's Parameters list (kNodeGraphParameterPayload) anywhere over
         // the canvas and creates a node reading it at the drop position.
-        void HandleParameterDrop(NodeGraph& graph, const std::function<void()>& onGraphEdited);
+        void HandleParameterDrop(NodeGraph& graph, const std::vector<GraphParameter>& parameters, const std::function<void()>& onGraphEdited);
 
         static ed::PinId MakePinId(uint32_t nodeId, uint32_t pinIndex, bool isOutput);
         static void DecodePinId(ed::PinId id, uint32_t& nodeId, uint32_t& pinIndex, bool& isOutput);
