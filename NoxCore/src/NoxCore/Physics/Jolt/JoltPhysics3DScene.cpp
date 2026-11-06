@@ -2,6 +2,7 @@
 #include "NoxCore/Math/Math.h"
 #include "JoltUtils.h"
 #include "NoxCore/Physics/PhysicsEngine.h"
+#include "NoxCore/Physics/MeshColliderGeometry.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Components.h"
@@ -598,50 +599,20 @@ namespace Nox {
             return found->second;
         JPH::Ref<JPH::Shape>& shape = m_MeshShapes[key]; // a mesh that cannot be read is not tried again this session
 
-        const AssetType type = AssetManager::GetAssetType(collider.Mesh);
-        if (type != AssetType::StaticMesh && type != AssetType::Mesh)
+        // The same triangles the editor draws (MeshColliderGeometry), in native units.
+        std::vector<glm::vec3> positions;
+        std::vector<uint32_t> indices;
+        if (!ReadMeshColliderTriangles(collider, positions, indices))
             return shape;
-        const std::optional<CookedMesh> cooked = MeshImporter::ReadCookedMesh(Project::GetActiveAssetDirectory(), AssetManager::GetMetadata(collider.Mesh));
-        if (!cooked)
-        {
-            SPDLOG_WARN("Mesh collider: the cooked mesh of asset {} cannot be read", static_cast<uint64_t>(collider.Mesh));
-            return shape;
-        }
-
-        // The original triangles (the clusters of LOD level 0, as the ray tracing BLAS and HLOD take them), the copies of a vertex
-        // that streaming pages hold welded back into one, in native units.
         const float nativePerWorld = PhysicsScale();
         JPH::VertexList vertices;
+        vertices.reserve(positions.size());
+        for (const glm::vec3& position : positions)
+            vertices.push_back(JPH::Float3(position.x * nativePerWorld, position.y * nativePerWorld, position.z * nativePerWorld));
         JPH::IndexedTriangleList triangles;
-        std::unordered_map<std::string, uint32_t> welded;
-        const size_t first = std::min<size_t>(collider.SubmeshIndex, cooked->Submeshes.size());
-        const size_t last = collider.SubmeshCount == UINT32_MAX ? cooked->Submeshes.size()
-                                                                : std::min<size_t>(first + collider.SubmeshCount, cooked->Submeshes.size());
-        for (size_t submesh = first; submesh < last; ++submesh)
-        {
-            const MeshData& data = cooked->Submeshes[submesh];
-            for (size_t index = 0; index < data.Draws.size() && index < data.Bounds.size(); ++index)
-            {
-                if (data.Bounds[index].lodLevel != 0)
-                    continue;
-                const shaderio::MeshletDraw& draw = data.Draws[index];
-                for (uint32_t triangle = 0; triangle < draw.triangleCount; ++triangle)
-                {
-                    uint32_t corners[3];
-                    for (uint32_t corner = 0; corner < 3; ++corner)
-                    {
-                        const glm::vec3 position = data.Vertices[draw.globalVertexOffset +
-                            data.MeshletVertices[draw.vertexOffset + data.MeshletTriangles[draw.triangleOffset + triangle * 3 + corner]]].pos * nativePerWorld;
-                        auto [found, inserted] = welded.try_emplace(std::string(reinterpret_cast<const char*>(&position), sizeof(position)),
-                                                                    static_cast<uint32_t>(vertices.size()));
-                        if (inserted)
-                            vertices.push_back(JPH::Float3(position.x, position.y, position.z));
-                        corners[corner] = found->second;
-                    }
-                    triangles.push_back(JPH::IndexedTriangle(corners[0], corners[1], corners[2], 0));
-                }
-            }
-        }
+        triangles.reserve(indices.size() / 3);
+        for (size_t i = 0; i + 2 < indices.size(); i += 3)
+            triangles.push_back(JPH::IndexedTriangle(indices[i], indices[i + 1], indices[i + 2], 0));
         if (triangles.empty())
             return shape;
 

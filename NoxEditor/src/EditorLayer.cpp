@@ -28,6 +28,7 @@
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Core/Window.h"
 #include "NoxCore/Scene/EntityBounds.h"
+#include "NoxCore/Physics/MeshColliderGeometry.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/ImGui/ImGuiLayer.h"
 #include "NoxCore/Profiling/Profiler.h"
@@ -2318,6 +2319,8 @@ namespace Nox
 
         ImGui::Separator();
         ImGui::Checkbox("Show physics collider", &m_ShowPhysicsColliders);
+        ImGui::SetItemTooltip("Every collider as physics builds it. Green: part of a Rigid Body 3D (on the entity or above it).\n"
+                              "Red: part of no body, so it does not collide. Blue: a Character Controller 3D's capsule.");
         ImGui::Image(m_Font->GetAtlasTexture()->getImTextureID(), {512, 512}, ImVec2(0, 1), ImVec2(1, 0));
 
         ImGui::End(); // End Settings
@@ -4555,26 +4558,74 @@ namespace Nox
 
     void EditorLayer::DrawPhysicsColliders3D()
     {
-        constexpr glm::vec4 kColliderColor(0.2f, 1.0f, 0.3f, 0.9f);
-        constexpr int kCircleSegments = 24;
+        // Every collider drawn as the shape physics builds (JoltPhysics3DScene: ColliderShapeOf, CreateCharacter, MeshColliderShape),
+        // in the renderer's space. Green: part of a body (a Rigid Body 3D on the entity or above it). Red: part of none, so it does
+        // not collide (a collider alone is not in the physics world, like a Godot collision shape outside a body).
+        constexpr glm::vec4 kActiveColor(0.2f, 1.0f, 0.3f, 0.9f);
+        constexpr glm::vec4 kInactiveColor(1.0f, 0.3f, 0.25f, 0.9f);
+        constexpr glm::vec4 kCharacterColor(0.3f, 0.75f, 1.0f, 0.9f);
+        constexpr int kCircleSegments = 32;
 
-        // `transform` is the rigid (no-scale) part of an entity's world matrix; `radius`/`local` are already in world-unit length
-        // (the shape's own extent x worldScale, done by the caller -- see JoltPhysics3DScene::CreateBody for the same math).
-        auto drawCircle = [this, kColliderColor](const glm::mat4& transform, const glm::vec3& localCentre, float radius, int axis)
+        auto colorOf = [this, kActiveColor, kInactiveColor](entt::entity handle)
+        {
+            for (Entity entity(handle, m_ActiveScene.get()); entity; entity = entity.GetParent())
+                if (entity.HasComponent<RigidBody3DComponent>())
+                    return kActiveColor;
+            return kInactiveColor;
+        };
+        auto line = [this](const glm::vec3& a, const glm::vec3& b, const glm::vec4& color) { m_Renderer2D->DrawXRayLine(a, b, color); };
+
+        // A circle around `centre` (shape space) in the plane across `axis`, through `transform` (the rigid part of the world matrix).
+        auto drawCircle = [&](const glm::mat4& transform, const glm::vec3& centre, float radius, int axis, const glm::vec4& color)
         {
             const int a = (axis + 1) % 3, b = (axis + 2) % 3;
             glm::vec3 previous(0.0f);
             for (int i = 0; i <= kCircleSegments; ++i)
             {
                 const float t = glm::two_pi<float>() * static_cast<float>(i) / kCircleSegments;
-                glm::vec3 local = localCentre;
+                glm::vec3 local = centre;
                 local[a] += std::cos(t) * radius;
                 local[b] += std::sin(t) * radius;
                 const glm::vec3 point = glm::vec3(transform * glm::vec4(local, 1.0f));
                 if (i > 0)
-                    m_Renderer2D->DrawXRayLine(previous, point, kColliderColor);
+                    line(previous, point, color);
                 previous = point;
             }
+        };
+
+        // A capsule along Y: sphere centres at centre +- halfHeight, top radius `top`, bottom radius `bottom` (Jolt's tapered capsule
+        // when they differ). Its outline in the XY and ZY planes -- the two caps' arcs and the straight sides tangent to both -- and the
+        // rings where the sides meet the caps.
+        auto drawCapsule = [&](const glm::mat4& transform, const glm::vec3& centre, float halfHeight, float top, float bottom, const glm::vec4& color)
+        {
+            const float sine = halfHeight > 1e-6f ? std::clamp((bottom - top) / (2.0f * halfHeight), -1.0f, 1.0f) : 0.0f;
+            const float tangent = std::asin(sine); // the sides' tilt: the tangent points sit this far above each cap's equator
+            const glm::vec3 topCentre = centre + glm::vec3(0.0f, halfHeight, 0.0f);
+            const glm::vec3 bottomCentre = centre - glm::vec3(0.0f, halfHeight, 0.0f);
+            auto at = [&](const glm::vec3& c, float radius, const glm::vec3& across, float angle)
+            {
+                return glm::vec3(transform * glm::vec4(c + radius * (std::cos(angle) * across + std::sin(angle) * glm::vec3(0.0f, 1.0f, 0.0f)), 1.0f));
+            };
+            auto arc = [&](const glm::vec3& c, float radius, const glm::vec3& across, float from, float to)
+            {
+                constexpr int kSegments = 16;
+                glm::vec3 previous = at(c, radius, across, from);
+                for (int i = 1; i <= kSegments; ++i)
+                {
+                    const glm::vec3 point = at(c, radius, across, from + (to - from) * static_cast<float>(i) / kSegments);
+                    line(previous, point, color);
+                    previous = point;
+                }
+            };
+            for (const glm::vec3& across : { glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) })
+            {
+                arc(topCentre, top, across, tangent, glm::pi<float>() - tangent);                                  // over the top
+                arc(bottomCentre, bottom, across, glm::pi<float>() - tangent, glm::two_pi<float>() + tangent);    // under the bottom
+                line(at(topCentre, top, across, tangent), at(bottomCentre, bottom, across, tangent), color);
+                line(at(topCentre, top, across, glm::pi<float>() - tangent), at(bottomCentre, bottom, across, glm::pi<float>() - tangent), color);
+            }
+            drawCircle(transform, topCentre + glm::vec3(0.0f, top * sine, 0.0f), top * std::cos(tangent), 1, color);
+            drawCircle(transform, bottomCentre + glm::vec3(0.0f, bottom * sine, 0.0f), bottom * std::cos(tangent), 1, color);
         };
 
         // Box: a non-uniform Scale shears the half extents (matching Jolt's box shape, which can be non-uniform) but never the Offset.
@@ -4582,6 +4633,7 @@ namespace Nox
         for (auto entity : boxView)
         {
             auto [wtc, box] = boxView.get<WorldTransformComponent, BoxCollider3DComponent>(entity);
+            const glm::vec4 color = colorOf(entity);
             const glm::vec3 halfExtents = box.HalfExtents * DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
             const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
             glm::vec3 corners[8];
@@ -4592,48 +4644,51 @@ namespace Nox
             }
             constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
             for (const auto& edge : edges)
-                m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], kColliderColor);
+                line(corners[edge[0]], corners[edge[1]], color);
         }
 
-        // Sphere: Jolt's sphere shape is always uniform, sized by the largest axis of the entity's scale (JoltPhysics3DScene::CreateBody).
+        // Sphere: Jolt's sphere shape is always uniform, sized by the largest axis of the entity's scale.
         auto sphereView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, SphereCollider3DComponent>();
         for (auto entity : sphereView)
         {
             auto [wtc, sphere] = sphereView.get<WorldTransformComponent, SphereCollider3DComponent>(entity);
+            const glm::vec4 color = colorOf(entity);
             const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
             const float radius = sphere.Radius * std::max({ worldScale.x, worldScale.y, worldScale.z });
             const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
             for (int axis = 0; axis < 3; ++axis)
-                drawCircle(transform, sphere.Offset, radius, axis);
+                drawCircle(transform, sphere.Offset, radius, axis, color);
         }
 
-        // Capsule: two circles at the cap centres plus four verticals along the entity's local Y (JoltPhysics3DScene::CreateCharacter
-        // does the equivalent for the character controller, not a component here -- this is CapsuleCollider3DComponent only).
+        // Capsule (tapered when Bottom Radius is set): its whole outline, caps included.
         auto capsuleView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CapsuleCollider3DComponent>();
         for (auto entity : capsuleView)
         {
             auto [wtc, capsule] = capsuleView.get<WorldTransformComponent, CapsuleCollider3DComponent>(entity);
             const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
-            const float halfHeight = capsule.HalfHeight * worldScale.y;
-            const float radius = capsule.Radius * std::max(worldScale.x, worldScale.z);
-            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
-            const glm::vec3 topCentre = capsule.Offset + glm::vec3(0.0f, halfHeight, 0.0f);
-            const glm::vec3 bottomCentre = capsule.Offset - glm::vec3(0.0f, halfHeight, 0.0f);
-            drawCircle(transform, topCentre, radius, 1);
-            drawCircle(transform, bottomCentre, radius, 1);
-            for (int i = 0; i < 4; ++i)
-            {
-                const float t = glm::half_pi<float>() * static_cast<float>(i);
-                const glm::vec3 rim(std::cos(t) * radius, 0.0f, std::sin(t) * radius);
-                m_Renderer2D->DrawXRayLine(glm::vec3(transform * glm::vec4(topCentre + rim, 1.0f)), glm::vec3(transform * glm::vec4(bottomCentre + rim, 1.0f)), kColliderColor);
-            }
+            const float horizontal = std::max(worldScale.x, worldScale.z);
+            const float top = capsule.Radius * horizontal;
+            const float bottom = capsule.BottomRadius > 0.0f ? capsule.BottomRadius * horizontal : top;
+            drawCapsule(RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix)), capsule.Offset, capsule.HalfHeight * worldScale.y, top, bottom, colorOf(entity));
         }
 
-        // Cylinder (or cone / frustum): its top and bottom circles and four lines between them.
+        // Character controller: its own upright capsule (CreateCharacter), standing on the entity's origin, its size unscaled.
+        auto characterView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CharacterController3DComponent>();
+        for (auto entity : characterView)
+        {
+            auto [wtc, controller] = characterView.get<WorldTransformComponent, CharacterController3DComponent>(entity);
+            const float radius = std::max(controller.Radius, WorldUnits::FromCentimeters(1.0f));
+            const float halfHeight = 0.5f * std::max(controller.Height, 0.0f);
+            const glm::mat4 transform = glm::translate(glm::mat4(1.0f), m_Renderer->ToRenderSpace(wtc.GetPosition()));
+            drawCapsule(transform, glm::vec3(0.0f, halfHeight + radius, 0.0f), halfHeight, radius, radius, kCharacterColor);
+        }
+
+        // Cylinder (or cone / frustum): its top and bottom circles and eight lines between them.
         auto cylinderView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CylinderCollider3DComponent>();
         for (auto entity : cylinderView)
         {
             auto [wtc, cylinder] = cylinderView.get<WorldTransformComponent, CylinderCollider3DComponent>(entity);
+            const glm::vec4 color = colorOf(entity);
             const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
             const float halfHeight = cylinder.HalfHeight * worldScale.y;
             const float horizontal = std::max(worldScale.x, worldScale.z);
@@ -4643,44 +4698,85 @@ namespace Nox
             const glm::vec3 topCentre = cylinder.Offset + glm::vec3(0.0f, halfHeight, 0.0f);
             const glm::vec3 bottomCentre = cylinder.Offset - glm::vec3(0.0f, halfHeight, 0.0f);
             if (top > 0.0f)
-                drawCircle(transform, topCentre, top, 1);
-            drawCircle(transform, bottomCentre, bottom, 1);
-            for (int i = 0; i < 4; ++i)
+                drawCircle(transform, topCentre, top, 1, color);
+            drawCircle(transform, bottomCentre, bottom, 1, color);
+            for (int i = 0; i < 8; ++i)
             {
-                const float t = glm::half_pi<float>() * static_cast<float>(i);
+                const float t = glm::quarter_pi<float>() * static_cast<float>(i);
                 const glm::vec3 direction(std::cos(t), 0.0f, std::sin(t));
-                m_Renderer2D->DrawXRayLine(glm::vec3(transform * glm::vec4(topCentre + direction * top, 1.0f)),
-                                           glm::vec3(transform * glm::vec4(bottomCentre + direction * bottom, 1.0f)), kColliderColor);
+                line(glm::vec3(transform * glm::vec4(topCentre + direction * top, 1.0f)),
+                     glm::vec3(transform * glm::vec4(bottomCentre + direction * bottom, 1.0f)), color);
             }
         }
 
-        // Plane: its rectangle, or for an unbounded one a 10 m cross on it and its normal.
+        // Plane: a finite one's rectangle. An unbounded one (Half Size 0) is endless, so it is drawn as a 100 m grid on it around the
+        // point of the plane nearest the camera (on a 5 m step, so the lines stay put while the camera moves), with its normal.
+        glm::dvec3 viewPosition = m_EditorCamera.GetPosition();
+        if (m_SceneState == SceneState::Play)
+            if (Entity camera = m_ActiveScene->GetPrimaryCameraEntity())
+                viewPosition = camera.GetComponent<WorldTransformComponent>().GetPosition();
+        const glm::vec3 eye = m_Renderer->ToRenderSpace(viewPosition);
         auto planeView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, PlaneCollider3DComponent>();
         for (auto entity : planeView)
         {
             auto [wtc, plane] = planeView.get<WorldTransformComponent, PlaneCollider3DComponent>(entity);
+            const glm::vec4 color = colorOf(entity);
             const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
             const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
             auto point = [&](float x, float y, float z) { return glm::vec3(transform * glm::vec4(plane.Offset + glm::vec3(x, y, z), 1.0f)); };
             if (plane.HalfSize.x > 0.0f && plane.HalfSize.y > 0.0f)
             {
                 const float x = plane.HalfSize.x * worldScale.x, z = plane.HalfSize.y * worldScale.z;
-                m_Renderer2D->DrawXRayLine(point(-x, 0, -z), point(x, 0, -z), kColliderColor);
-                m_Renderer2D->DrawXRayLine(point(x, 0, -z), point(x, 0, z), kColliderColor);
-                m_Renderer2D->DrawXRayLine(point(x, 0, z), point(-x, 0, z), kColliderColor);
-                m_Renderer2D->DrawXRayLine(point(-x, 0, z), point(-x, 0, -z), kColliderColor);
+                line(point(-x, 0, -z), point(x, 0, -z), color);
+                line(point(x, 0, -z), point(x, 0, z), color);
+                line(point(x, 0, z), point(-x, 0, z), color);
+                line(point(-x, 0, z), point(-x, 0, -z), color);
+                line(point(0, 0, 0), point(0, WorldUnits::FromMeters(1.0f), 0), color);
+                continue;
             }
-            else
+            // Jolt has no endless plane on a dynamic body (JoltPhysics3DScene logs it and leaves the shape out): drawn as inactive.
+            glm::vec4 endlessColor = color;
+            for (Entity owner(entity, m_ActiveScene.get()); owner; owner = owner.GetParent())
+                if (owner.HasComponent<RigidBody3DComponent>())
+                {
+                    if (owner.GetComponent<RigidBody3DComponent>().Type == RigidBody3DComponent::BodyType::Dynamic)
+                        endlessColor = kInactiveColor;
+                    break;
+                }
+            const glm::vec3 origin = point(0, 0, 0);
+            const glm::vec3 alongX = glm::vec3(transform[0]), alongZ = glm::vec3(transform[2]);
+            const float step = WorldUnits::FromMeters(5.0f);
+            const float reach = WorldUnits::FromMeters(50.0f);
+            const float nearX = std::round(glm::dot(eye - origin, alongX) / step) * step;
+            const float nearZ = std::round(glm::dot(eye - origin, alongZ) / step) * step;
+            for (float offset = -reach; offset <= reach + 0.5f * step; offset += step)
             {
-                const float reach = WorldUnits::FromMeters(5.0f);
-                m_Renderer2D->DrawXRayLine(point(-reach, 0, 0), point(reach, 0, 0), kColliderColor);
-                m_Renderer2D->DrawXRayLine(point(0, 0, -reach), point(0, 0, reach), kColliderColor);
-                m_Renderer2D->DrawXRayLine(point(0, 0, 0), point(0, WorldUnits::FromMeters(1.0f), 0), kColliderColor);
+                line(point(nearX - reach, 0, nearZ + offset), point(nearX + reach, 0, nearZ + offset), endlessColor);
+                line(point(nearX + offset, 0, nearZ - reach), point(nearX + offset, 0, nearZ + reach), endlessColor);
             }
+            line(origin, point(0, WorldUnits::FromMeters(1.0f), 0), endlessColor);
         }
 
-        // A terrain/heightfield collider goes here later, as its own block: read its component, draw a wireframe grid of its sampled
-        // heights (or its own bounds) the same way, no changes needed above.
+        // Mesh: its triangles' edges, or with Convex (or on a dynamic body, which Jolt gives the hull) the hull physics builds.
+        auto meshView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, MeshCollider3DComponent>();
+        for (auto entity : meshView)
+        {
+            auto [wtc, mesh] = meshView.get<WorldTransformComponent, MeshCollider3DComponent>(entity);
+            if (mesh.Mesh == 0)
+                continue;
+            bool dynamic = false;
+            for (Entity owner(entity, m_ActiveScene.get()); owner; owner = owner.GetParent())
+                if (owner.HasComponent<RigidBody3DComponent>())
+                {
+                    dynamic = owner.GetComponent<RigidBody3DComponent>().Type == RigidBody3DComponent::BodyType::Dynamic;
+                    break;
+                }
+            const std::vector<glm::vec3>& lines = MeshColliderWireframe(mesh, mesh.Convex || dynamic);
+            const glm::vec4 color = colorOf(entity);
+            const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix); // the mesh scales with the entity (a scaled shape)
+            for (size_t i = 0; i + 1 < lines.size(); i += 2)
+                line(glm::vec3(world * glm::vec4(lines[i], 1.0f)), glm::vec3(world * glm::vec4(lines[i + 1], 1.0f)), color);
+        }
     }
 
     void EditorLayer::FocusOnEntity(Entity entity)
