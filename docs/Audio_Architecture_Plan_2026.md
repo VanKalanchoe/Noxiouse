@@ -254,15 +254,37 @@ clips and graphs in the Content Browser, and the graph editor's own live preview
   Cutscene. Set from scripts or timelines.
 - **Volume settings:** each top bus's volume is a player setting (Music / SFX / Voice sliders in a game's options menu), saved with the
   project's runtime settings.
-- **Metering:** peak / RMS meters per bus in a Mixer panel in the editor, live in Play.
+- **Metering:** peak / RMS meters per bus in the Mixer panel, live in Play.
+
+### 7.1 The Mixer panel (decided 2026-11-06)
+
+The mixer is **its own panel, not the audio graph**: the graph is *what one sound is* (Unreal's MetaSounds), the mixer is *where every
+sound goes* (Unity's Audio Mixer, Godot's bus panel, FMOD's and Wwise's mixers). Every engine keeps the two apart. The panel shows **all
+buses side by side as channel strips**, like a mixing desk:
+
+- per strip: name, **volume fader** (dB), live **level meter** (peak / RMS, moving in Play), **mute / solo / bypass**, its **effect slots**
+  (add, reorder, edit, bypass each), **send** amounts to other buses, and **Output To** (the parent bus: the routing);
+- **snapshots** across the top (Default / Pause / Underwater ...): pick one to edit its faders and effect values; scripts and timelines
+  blend between them in game;
+- **ducking** set on a bus: lower by N dB while another bus plays, with attack / release;
+- the faders are the project's mix (saved in the `.nmixer` asset); a game's options menu changes the top buses at run time
+  (`Audio.SetBusVolume`).
 
 ---
 
 ## 8. Engine side
 
-- **Threads:** miniaudio's device callback asks for blocks; the mixing runs on a dedicated audio thread (not a JobSystem task: it has
-  to meet its deadline every 5.3 ms). Spatial ray casts and baking run on workers. Decoding of streams on the IO workers, into ring
-  buffers the audio thread reads.
+- **Threads (decided 2026-11-06):** a **dedicated mixer thread**, not JobSystem tasks -- the one exception to "the JobSystem owns every
+  thread" (§5.2 of the engine plan), as in Unreal (its audio render thread), FMOD and Wwise (their mixer threads):
+  - JobSystem workers are not preemptive: even a High-priority job waits until a worker finishes its current task (a frame graph
+    pass, physics, a cook step), while audio has a hard deadline every block (5.3 ms at 256 frames, 48 kHz); a missed block is a click.
+    A frame may be 2 ms late, audio may not.
+  - The mixer thread runs at high OS priority (MMCSS "Pro Audio" on Windows) and mixes **1-2 blocks ahead into a ring buffer**; the
+    device callback (miniaudio's) only copies out of it and never mixes, so an occasionally expensive block does not glitch (~5 ms of
+    added latency, inaudible for games; Unreal does the same).
+  - The work without a deadline stays on the JobSystem: decoding streams (IO workers, into ring buffers the mixer reads), Steam Audio's
+    ray casts and bakes (workers), loading. They talk to the mixer thread through lock-free queues.
+  - Should 64 voices ever not fit one thread, the mixer thread gets helpers of its own, still apart from the frame's workers.
 - **Game -> audio:** a lock-free command queue (play, stop, parameter, trigger, position updates once per frame per moving source);
   **audio -> game:** events back (On Finished, cue markers) delivered to scripts on the main thread like animation notifies.
 - **Voices:** a hard voice limit (e.g. 64 real voices), **virtual voices** for the rest (they keep their playhead but are not mixed, and
