@@ -12,7 +12,6 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
-#include "NoxCore/Utils/Utils.h"
 
 namespace Nox
 {
@@ -171,7 +170,8 @@ namespace Nox
                 if (metadata.Type != AssetType::Scene || handle == openScene || scene.FindSubLevel(handle))
                     continue;
                 if (ImGui::Selectable(metadata.FilePath.stem().string().c_str()))
-                    scene.AddSubLevel(handle);
+                    m_Message = scene.AddSubLevel(handle) ? "Added " + metadata.FilePath.stem().string()
+                                                          : "Could not add " + metadata.FilePath.stem().string() + " (see the log)";
                 ImGui::SetItemTooltip("%s", metadata.FilePath.generic_string().c_str());
             }
             ImGui::EndCombo();
@@ -179,8 +179,8 @@ namespace Nox
         ImGui::SetItemTooltip("A scene made on its own, edited here together with this one (it keeps its own file)");
         ImGui::SameLine();
         if (ImGui::Button("New Level..."))
-            CreateLevel(scene);
-        ImGui::SetItemTooltip("Makes an empty scene file and adds it as a sub-level");
+            m_NewLevelRequest = true;
+        ImGui::SetItemTooltip("Makes an empty scene file next to the open scene, adds it as a sub-level and makes it the current level");
 
         ImGui::SameLine();
         const AssetHandle current = scene.GetCurrentLevel();
@@ -192,40 +192,78 @@ namespace Nox
                               current != 0 ? LevelName(current).c_str() : "the persistent level");
         if (openScene == 0 && !scene.GetSubLevels().empty())
             ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "The scene was never saved: save it to keep its sub-level list.");
+        if (!m_Message.empty())
+            ImGui::TextDisabled("%s", m_Message.c_str());
+        DrawNewLevelPrompt(scene);
     }
 
-    void LevelsPanel::CreateLevel(Scene& scene)
+    void LevelsPanel::DrawNewLevelPrompt(Scene& scene)
     {
-        std::filesystem::path path = Utility::SaveFile("Nox Scene *.nox\0nox\0");
-        if (path.empty())
-            return;
-        if (path.extension() != ".nox")
-            path += ".nox";
-        const std::filesystem::path assetRoot = std::filesystem::weakly_canonical(Project::GetActiveAssetDirectory());
-        std::error_code error;
-        const std::filesystem::path relative = std::filesystem::weakly_canonical(path, error).lexically_relative(assetRoot);
-        if (error || relative.empty() || relative.generic_string().rfind("..", 0) == 0)
+        if (m_NewLevelRequest)
         {
-            NOX_CORE_ERROR("New Level: '{}' is not inside the project's assets folder", path.string());
-            return;
+            ImGui::OpenPopup("New Level");
+            m_NewLevelRequest = false;
         }
+        if (!ImGui::BeginPopupModal("New Level", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            return;
+        const AssetHandle openScene = m_OpenScene ? m_OpenScene() : AssetHandle(0);
+        const std::filesystem::path folder = openScene != 0 ? AssetManager::GetMetadata(openScene).FilePath.parent_path() : std::filesystem::path();
+        ImGui::Text("A new empty level in %s", folder.empty() ? "the assets folder" : ("Assets/" + folder.generic_string()).c_str());
+        if (ImGui::IsWindowAppearing())
+            ImGui::SetKeyboardFocusHere();
+        const bool entered = ImGui::InputText("Name", m_NewLevelName, sizeof(m_NewLevelName), ImGuiInputTextFlags_EnterReturnsTrue);
+        if (ImGui::Button("Create", ImVec2(100.0f, 0.0f)) || entered)
+        {
+            if (CreateLevel(scene, m_NewLevelName))
+                ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(100.0f, 0.0f)))
+            ImGui::CloseCurrentPopup();
+        if (!m_Message.empty())
+            ImGui::TextDisabled("%s", m_Message.c_str());
+        ImGui::EndPopup();
+    }
+
+    bool LevelsPanel::CreateLevel(Scene& scene, const std::string& name)
+    {
+        // Paths built from the asset folder itself (no file dialog, no path comparisons): next to the open scene.
+        if (name.empty() || name.find_first_of("/\\:*?\"<>|") != std::string::npos)
+        {
+            m_Message = "New Level: give it a name without / \\ : * ? \" < > |";
+            return false;
+        }
+        const AssetHandle openScene = m_OpenScene ? m_OpenScene() : AssetHandle(0);
+        const std::filesystem::path folder = openScene != 0 ? AssetManager::GetMetadata(openScene).FilePath.parent_path() : std::filesystem::path();
+        const std::filesystem::path relative = (folder / (name + ".nox")).lexically_normal();
+        const std::filesystem::path path = Project::GetActiveAssetDirectory() / relative;
         if (std::filesystem::exists(path))
         {
-            NOX_CORE_ERROR("New Level: '{}' exists already (use Add Existing Level)", path.string());
-            return;
+            m_Message = "New Level: " + relative.generic_string() + " exists already (use Add Existing Level)";
+            return false;
         }
         {
             std::ofstream out(path);
-            out << "Scene: " << path.stem().string() << "\nEntities: []\n";
+            out << "Scene: " << name << "\nEntities: []\n";
             if (!out)
             {
-                NOX_CORE_ERROR("New Level: '{}' could not be written", path.string());
-                return;
+                m_Message = "New Level: " + path.string() + " could not be written";
+                return false;
             }
         }
-        const AssetHandle handle = Project::GetActive()->GetEditorAssetManager()->RegisterExistingFile(relative, AssetType::Scene);
-        if (handle != 0 && scene.AddSubLevel(handle))
-            scene.SetCurrentLevel(handle);
+        EditorAssetManager& assets = *Project::GetActive()->GetEditorAssetManager();
+        AssetHandle handle = assets.FindHandleByPath(relative, AssetType::Scene);
+        if (handle == 0)
+            handle = assets.RegisterExistingFile(relative, AssetType::Scene);
+        if (handle == 0 || !scene.AddSubLevel(handle))
+        {
+            m_Message = "New Level: " + relative.generic_string() + " was written but could not be added (see the log)";
+            return false;
+        }
+        scene.SetCurrentLevel(handle);
+        m_Message = "Created " + relative.generic_string() + " (the current level now)";
+        NOX_CORE_INFO("New level '{}'", relative.generic_string());
+        return true;
     }
 
     void LevelsPanel::DrawRemovePrompt(Scene& scene)

@@ -806,6 +806,19 @@ namespace Nox
         }
         streamed.CompletedAt = std::chrono::steady_clock::now();
         streamed.Shown = false; // (shown once its meshes are in: UpdateStreamedLevelVisibility)
+        // A level with a primary camera of its own (it was made to be played alone): the scene's camera stays the view.
+        if (Entity primary = GetPrimaryCameraEntity(); primary && !primary.HasComponent<LevelComponent>())
+        {
+            for (UUID id : created)
+            {
+                Entity entity = GetEntityByUUID(id);
+                if (entity && entity.HasComponent<CameraComponent>() && entity.GetComponent<CameraComponent>().Primary)
+                {
+                    NOX_CORE_INFO("Level `{}` has a primary camera ('{}'): the scene's own camera stays the view", streamed.Name, entity.GetName());
+                    break;
+                }
+            }
+        }
         if (streamed.IsCell)
             NOX_CORE_TRACE("World cell `{}` loaded ({} entities)", streamed.Name, created.size());
         else
@@ -1222,18 +1235,10 @@ namespace Nox
         // The primary camera's world transform is current once the update systems have run.
         Camera* mainCamera = nullptr;
         glm::dmat4 cameraTransform(1.0);
+        if (Entity camera = GetPrimaryCameraEntity(); camera && camera.HasComponent<WorldTransformComponent>())
         {
-            auto view = m_Registry.view<WorldTransformComponent, CameraComponent>();
-            for (auto entity : view)
-            {
-                auto [transform, camera] = view.get<WorldTransformComponent, CameraComponent>(entity);
-                if (camera.Primary)
-                {
-                    mainCamera = &camera.Camera;
-                    cameraTransform = transform.WorldMatrix;
-                    break;
-                }
-            }
+            mainCamera = &camera.GetComponent<CameraComponent>().Camera;
+            cameraTransform = camera.GetComponent<WorldTransformComponent>().WorldMatrix;
         }
 
         if (mainCamera)
@@ -2487,16 +2492,21 @@ namespace Nox
     
     Entity Scene::GetPrimaryCameraEntity()
     {
+        // The scene's own primary camera wins over one a streamed level or sub-level brought in (Unreal: the view belongs to the
+        // persistent level's player; a level loaded later does not take it over). A level's camera is used only when the scene has
+        // none of its own (a level played on its own, or a scene that leaves its camera to a level).
+        Entity fromLevel;
         auto view = m_Registry.view<CameraComponent>();
         for (auto entity : view)
         {
-            const auto& camera = view.get<CameraComponent>(entity);
-            if (camera.Primary)
-            {
-                return Entity{entity, this};
-            }
+            if (!view.get<CameraComponent>(entity).Primary)
+                continue;
+            if (!m_Registry.all_of<LevelComponent>(entity))
+                return Entity{ entity, this };
+            if (!fromLevel)
+                fromLevel = Entity{ entity, this };
         }
-        return {};
+        return fromLevel;
     }
     
     void Scene::Step(int frames)
@@ -2653,14 +2663,12 @@ namespace Nox
         // Presentation settings belong to the scene camera even while the editor viewport supplies
         // the view transform. This keeps imported RTXPT scenes visually consistent in both modes.
         bool foundPrimaryCamera = false;
-        for (auto entity : m_Registry.view<CameraComponent>())
+        if (Entity primary = GetPrimaryCameraEntity())
         {
-            const auto& camera = m_Registry.get<CameraComponent>(entity);
-            if (!camera.Primary) continue;
+            const auto& camera = primary.GetComponent<CameraComponent>();
             m_renderer->setAutoExposure(camera.AutoExposure, camera.ExposureCompensation,
                                         camera.AutoExposureMinEV, camera.AutoExposureMaxEV, camera.ManualEV100);
             foundPrimaryCamera = true;
-            break;
         }
         if (!foundPrimaryCamera)
             m_renderer->setAutoExposure(false, 0.0f, -16.0f, 16.0f, DefaultManualEV100);

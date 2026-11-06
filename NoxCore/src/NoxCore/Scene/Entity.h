@@ -54,6 +54,9 @@ namespace Nox
             if (!parent.HasComponent<RelationshipComponent>())
                 parent.AddComponent<RelationshipComponent>();
             parent.GetComponent<RelationshipComponent>().Children.push_back(GetUUID());
+            // Sub-levels (L1): the tree now goes with its new root's level.
+            if (m_Scene->m_SubLevelEditing)
+                m_Scene->TagLevelTree(*this, m_Scene->GetEntityLevel(parent));
         }
         else
         {

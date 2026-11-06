@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <string>
 #include <vector>
 
 #include "NoxCore/Asset/Asset.h"
@@ -32,12 +33,17 @@ namespace Nox
         void DrawLevels(Scene& scene, bool editing);
         void DrawActions(Scene& scene, const std::vector<Entity>& selection);
         void DrawRemovePrompt(Scene& scene);
-        void CreateLevel(Scene& scene);
+        void DrawNewLevelPrompt(Scene& scene);
+        // A new empty scene file named `name` next to the open scene, added as a sub-level and made the current level.
+        bool CreateLevel(Scene& scene, const std::string& name);
 
     private:
         bool m_Open = false;
         std::function<void()> m_Save;
         std::function<AssetHandle()> m_OpenScene;
         AssetHandle m_RemoveRequest = 0; // asks: save first, discard, cancel
+        bool m_NewLevelRequest = false;
+        char m_NewLevelName[128] = "NewLevel";
+        std::string m_Message; // the last New Level / Add result, shown in the panel
     };
 }
