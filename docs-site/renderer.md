@@ -107,3 +107,56 @@ Noxiouse supports multiple combinable real-time ray-tracing and global illuminat
 | [`PostPasses.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Renderer/Passes/PostPasses.cpp) | `Auto Exposure` + `Auto Exposure Reduce` + `Auto Exposure Adapt`, `Post Process` (tonemapping), `2D Overlay` (`Renderer2D`), `Selection Mask`, and `Outline` (orange silhouette). |
 | [`EditorPasses.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Renderer/Passes/EditorPasses.cpp) | `ImGui / Present Pass`, `Texture Readback 1..4`, `Editor Raycasts` (`EditorRaycast.slang`), `Pick Readback` (1x1 cursor entity/depth readback), and `TextureInspect` (live Render Graph texture/mip inspector). |
 | [`ExtraViewPasses.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Renderer/Passes/ExtraViewPasses.cpp) | `addExtraViewPasses`: Renders up to 7 secondary views (`Viewport 1..4`, `Thumbnail`, `Material Preview`, `Animation Preview`), each with its own culling, visibility, skybox, forward PBR shading, auto-exposure, tonemapping, and 2D overlays. |
+
+---
+
+## Raster Pipeline, Quality Presets & Async Compute (November 2026)
+
+Ray tracing stays required, but every ray-traced effect now has a **raster version** next to it, built to be measured against
+it in the same scene. Each one is selectable on its own in **Settings**, and the quality presets switch them together.
+
+### Quality presets (Settings > Quality Preset, saved in the `.nproj`)
+
+| Preset | What it turns on |
+| :--- | :--- |
+| **Low** | RT sun shadows, screen-probe GI (24 px probes), SSAO, DLSS Performance |
+| **Medium** | + RT reflections, screen-probe GI (16 px), DLSS Balanced |
+| **High** | + RTAO, RT glass, DLSS Quality |
+| **Ray Traced (All)** | High with every light shadowed, DLSS Ray Reconstruction, Auto Exposure, OIT |
+| **Raster (All)** | Raster everything except reflections: shadow maps + contact shadows, GTAO, raster probe volume GI + SSGI, RT reflections (NRD REBLUR), DLSS Quality, Auto Exposure, OIT |
+| **Custom** | Keeps the settings as they are (no preset at start) |
+
+Raster (All) uses ray-traced reflections rather than SSR: screen-space reflections change with what is on screen (they move
+and vanish at the screen edges), which no amount of filtering fixes.
+
+### The raster features
+
+| Feature | Setting | How it works | Equivalent |
+| :--- | :--- | :--- | :--- |
+| **Sun cascaded shadow maps** | Sun Shadows | 4 stable cascades of 2048, PCSS soft edges (filter 1.5-24 texels), resolved into the same shadow mask the RT shadows write | Unreal / Godot CSM |
+| **Cascade caching** | Cache Cascades | A cascade is drawn again only where the scene changed inside it (the GPU scene reports changed bounds); the far cascades take turns | Unreal's cached shadow maps |
+| **Local-light shadow atlas** | Local Light Shadows | Spot / point / rect light shadows in one 4096 atlas, tile size by screen size, up to 8 views a frame | Godot's shadow atlas |
+| **Contact shadows** | Contact Shadows | A short screen-space ray towards the light per pixel, for the detail shadow maps miss | Unreal contact shadows |
+| **GTAO** | Ambient Occlusion | Ground-truth AO (horizon slices), classic SSAO still selectable | Unreal / Godot GTAO |
+| **SSR + reflection probes** | Screen-Space Reflections, Reflection Probe component | A deterministic mirror ray with roughness filtering, falling back to box-projected reflection probes, then the sky | Godot SSR |
+| **Raster probe volume GI** | Raster GI | Irradiance Volume probes capture an unlit G-buffer once and are **relit every frame** (sun, sky, lights): dynamic lighting without rays. Captures / relights per frame are settings | Godot DDGI-style probes, Unreal's relit captures |
+| **SSGI** | Raster GI > Screen-Space GI | Screen-space bounce light on top of the probe volume | Godot SSIL |
+| **Volumetric fog** | Volumetric Fog | Lit froxel fog with light shafts, sampling the shadow mask or maps per froxel | Unreal volumetric fog |
+
+### Post effects (Settings > Post Effects)
+
+Bloom (downsample / upsample chain), depth of field (bokeh from the camera's aperture and focus distance), per-pixel motion
+blur from the motion vectors, color grading LUT, vignette, film grain, chromatic aberration, lens flares and CAS sharpening.
+
+### Async compute
+
+Passes flagged `RGPassFlags::AsyncCompute` run on the compute queue; the render graph forks and joins them. On the compute
+queue now: the screen-probe GI, the **NRD denoisers** (shadows and reflections: NRD only dispatches compute work, its README
+allows `queueType = COMPUTE`; NRD is created with both queue families and each call passes its command buffer's queue type with
+compute-only stages), the DDGI blends and the emissive light grid. The stats show **Async Compute Passes**.
+
+### Streamed levels drawn once complete
+
+A streamed level or world cell is registered with the GPU scene **hidden** while it comes in (its records uploaded, in no draw
+bucket and not in the TLAS) and all of it is shown in one frame once complete -- Unreal's `ULevel::bRequireFullVisibilityToRender`.
+No level is ever seen half built.

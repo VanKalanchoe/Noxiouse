@@ -17,7 +17,7 @@ Noxiouse is organized into four targets plus a sample game project:
 | :--- | :--- | :--- |
 | **`NoxCore/`** | Static Library (`C++20`) | The core engine: `NRI` graphics abstraction, Vulkan 1.4 backend, frame-compiled `RenderGraph`, hybrid visibility-buffer + RT + path-traced `Renderer`, `Scene` ECS (47 components), `Asset` cooking & streaming pipeline, `Physics` (Jolt 3D + Box2D 2D), `Animation` & `NodeGraph`, `Scripting` (.NET 9 / Coral), `Tasks` (`JobSystem`), and `Profiling`. |
 | **`NoxScriptCore/`** | Managed Class Library (`C# / net9.0`) | The `Nox` C# API (`Nox.ScriptCore.dll`) providing `EntityBehaviour`, `Entity`, component wrappers, `Physics`, `Mesh` / `MeshBuilder`, `Jobs`, `Scene`, `Input`, `WorldUnits`, and `Vector3d`. |
-| **`NoxEditor/`** | Executable (`C++20`) | The full authoring environment with multi-viewport layout, gizmos, Undo/Redo, 11 specialized panels (Hierarchy/Inspector, Content Browser, Material Editor, Node Graph Editor, Animation Clip, Sequencer Timeline, Render Graph Inspector, Profiler, World Partition), and 1-click `.npak` Game Packager. Also houses all **113 Slang/HLSL shaders** in `NoxEditor/assets/shaders/`. |
+| **`NoxEditor/`** | Executable (`C++20`) | The full authoring environment with multi-viewport layout, gizmos, Undo/Redo, 12 specialized panels (Hierarchy/Inspector, Content Browser, Material Editor, Node Graph Editor, Animation Clip, Sequencer Timeline, Render Graph Inspector, Profiler, World Partition, Levels), and 1-click `.npak` Game Packager. Also houses all **113 Slang/HLSL shaders** in `NoxEditor/assets/shaders/`. |
 | **`NoxRuntime/`** | Executable (`C++20`) | The lightweight shipping game player that mounts a cooked `.npak` archive, boots the startup scene in `RuntimeAssetManager` read-only mode, and runs the game loop without editor overhead. |
 | **`Facerun/`** | Sample Project (`.nproj` + `C#`) | A playable testbed project showcasing character controllers, weapons/projectiles, multithreaded voxel terrain generation, additive level streaming, and World Partition streaming. |
 
@@ -100,3 +100,16 @@ scripting
 editor-runtime-sample
 file-reference
 ```
+
+---
+
+## What's New (November 2026)
+
+- **Raster versions of the ray-traced effects** -- cascaded shadow maps (cached), a local-light shadow atlas, contact shadows,
+  GTAO, SSR + reflection probes, relightable irradiance probe volumes + SSGI, froxel volumetric fog -- and the **Raster (All)**
+  preset (see the Renderer page).
+- **Post effects:** bloom, depth of field, motion blur, color grading LUT, vignette / grain / chromatic aberration / lens flares, CAS.
+- **More async compute:** NRD denoisers, DDGI blends and the emissive light grid on the compute queue.
+- **Levels:** streamed levels drawn once complete, volumes that follow every streaming source, and **sub-levels** edited together
+  in the **Levels** window, each saved into its own file (see Scene, ECS & World).
+- **Profiler:** save / load captures, spike frames, a memory graph and a GPU Transfer track.

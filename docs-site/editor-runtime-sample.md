@@ -99,3 +99,16 @@ This page documents every file in **`NoxEditor/src/`** (31 files), **`NoxRuntime
 | [`docs/Sky_Atmosphere_Cloud_Plan_2026.md`](file:///E:/dev/noxiouse/docs/Sky_Atmosphere_Cloud_Plan_2026.md) | Design specification for the Hillaire 2020 physical sky atmosphere, volumetric clouds, horizon band, cloud shadow map, and 3D aerial perspective froxels. |
 | [`docs/World_Units_Convention_Plan_2026.md`](file:///E:/dev/noxiouse/docs/World_Units_Convention_Plan_2026.md) | Specification for the `1 unit = 1 cm` (`UnitsPerMeter = 100.0`) world-unit convention and physics meter boundary conversions. |
 | [`docs/Perf_Audit_Scene_Rendering_2026-04.md`](file:///E:/dev/noxiouse/docs/Perf_Audit_Scene_Rendering_2026-04.md) | CPU/GPU scene synchronization and rendering performance audit. |
+
+---
+
+## Levels Panel, Hierarchy & Profiler (November 2026)
+
+- **Window > Levels** (Unreal's Levels window): the persistent level and its sub-levels as rows -- the **Current** circle (where
+  new entities go), **Visible**, **Locked**, **Always Loaded / Streamed** -- with **Add Existing Level**, **New Level** (a name; the
+  file is made next to the open scene), **Remove** (asks to save first) and **Move Selection to Current**. Read-only in Play.
+- **Scene Hierarchy:** a sub-level's root shows `[LevelName]`; a locked level's entities are dimmed and cannot be selected;
+  right-click > **Move to Level**. **Shift-click** selects the rows between the two on screen (folders first, collapsed folders and
+  rows left out), as Windows Explorer and Unreal's Outliner do.
+- **Profiler:** Save / Load captures, the Spikes list and its threshold, the memory graph and the GPU Transfer track (see Core,
+  Multithreading, Project & Profiling).

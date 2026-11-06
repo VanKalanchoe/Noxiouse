@@ -103,3 +103,40 @@ flowchart TD
 | [`HLODBake.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/HLODBake.h) & [`HLODBake.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/HLODBake.cpp) | CPU mesh simplifier (`meshoptimizer` or watertight dual-contouring `VoxelShell`), `xatlas` UV parameterization, and BVH ray-casting texture baker (baking BaseColor, Normal, MetallicRoughness, Emissive, Opacity, and Transmission maps). |
 | [`HLODBuilder.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/HLODBuilder.h) & [`HLODBuilder.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/HLODBuilder.cpp) | Multi-frame background coordinator that decodes cell meshes/BC-compressed textures (`bcdec`), runs `HLOD::Build` across grid levels `L0..LN`, cooks `.nsmesh` + `.ntex` assets, and writes `HLODComponent` proxy entities into coarser cells. |
 | [`ScriptableEntity.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/ScriptableEntity.h) | C++ native script base class (`OnCreate`, `OnDestroy`, `OnUpdate`). |
+
+---
+
+## Levels: Level Streaming & Sub-Levels (November 2026)
+
+### Level streaming (runtime)
+
+A **level** is another scene file loaded into the running scene and unloaded again (Unreal's level streaming):
+
+- **`Scene::LoadLevel` / `UnloadLevel`** (C#: `Scene.LoadLevel("Levels/Interior.nox")`, a path under the asset folder), or a **Level Streaming Volume** naming levels: they load while a
+  streaming source is inside the box and unload after its Unload Delay.
+- **Streaming sources:** the primary camera in Play, the editor camera in Simulate, and every enabled **World Streaming Source**
+  whose target is Activated.
+- A level's entities are created a slice a frame (3 ms budget); its scripts, physics, particles and timelines start once all of it is
+  in, and it is **drawn once complete** (all its meshes shown in one frame).
+- **The scene's own primary camera stays the view**: a level that brings a primary camera of its own does not take it over (the
+  view belongs to the persistent level, as in Unreal). A level's camera is used only when the scene has none.
+
+### Sub-levels (Unreal's Levels window)
+
+A scene (the **persistent level**) can list other scenes as **sub-levels**, edited together with it:
+
+| Per sub-level | Meaning |
+| :--- | :--- |
+| **Always Loaded / Streamed** | In Play, Always Loaded ones are in from the start (before any script runs); Streamed ones wait for a volume or `LoadLevel` |
+| **Visible** (editor) | Hidden: its entities are kept aside in a scene of their own (not drawn, lit, picked or simulated); still saved |
+| **Locked** (editor) | Its entities cannot be selected |
+| **Current level** | Where new entities go |
+
+- **Membership:** an entity belongs to its **root's** level (`LevelComponent` on the root), so a tree is never split between files.
+  An entity taken off its parent stays in its level; one attached under another level's entity moves with its new root.
+- **Saving:** Ctrl+S writes each sub-level's trees into its own file (only when its text changed); the persistent level's file lists
+  the sub-levels and holds only its own entities. A sub-level that could not be read is never written.
+- **Undo:** an undo state still holds the whole scene as text, with each sub-level's roots named, so undo is "load the text" as before.
+- **Play / Simulate** copy the sub-levels as edited (unsaved changes included): Always Loaded ones are in the copy, streamed ones are
+  kept aside and copied in when their volume or script loads them. A packaged game reads them from their files.
+- Not in a World Partition scene: its cells split it already (Unreal 5 does the same; Data Layers would be the equivalent there).

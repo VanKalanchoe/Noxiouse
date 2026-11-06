@@ -255,7 +255,7 @@
             }
             var numMatch = line.trim().match(/^([0-9]+)\.\s+(.*)$/);
             if (numMatch) {
-                html.push("<ol><li>" + formatInline(numMatch[2]) + "</li></ol>");
+                html.push("<ol start=\"" + numMatch[1] + "\"><li>" + formatInline(numMatch[2]) + "</li></ol>");
                 continue;
             }
 

@@ -94,3 +94,19 @@ Noxiouse uses a multi-pool **Taskflow-backed Job System** (`JobSystem`) designed
 | [`StatsOverlayLayer.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsOverlayLayer.h) & [`StatsOverlayLayer.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsOverlayLayer.cpp) | Engine `Layer` that listens for **F3** (cycle overlay pages) and **Shift+F3** (write JSON + Chrome trace report to `profiling/`). |
 | [`StatsReport.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsReport.h) & [`StatsReport.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsReport.cpp) | Exports 240-frame profiling metrics to JSON (`WriteStatsReport`) and Chrome Tracing / Perfetto format (`WriteChromeTrace`). |
 | [`TracyBackend.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/TracyBackend.h) & [`TracyBackend.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/TracyBackend.cpp) | Bridges `Profiler` CPU zones, worker tasks, plots, and calibrated GPU timestamps into the **Tracy v0.14.1** profiler when built with `-DNOX_ENABLE_TRACY=ON`. |
+
+---
+
+## Frame Profiler Extras (November 2026)
+
+The editor's frame timeline (Window > Profiler) gained:
+
+- **Save / Load captures** (`.noxprof`, binary): the kept frames, the slow frames and the scope / thread names. A loaded capture is
+  shown instead of the live frames until **Close Capture**, so a capture can be sent and opened on another machine.
+- **Spikes:** frames slower than a threshold (frame or GPU time, default 16.7 ms) are copied apart once their GPU timings are in --
+  the last 64 -- and picked in the panel's frame combo, so a hitch stays to look at after it scrolled out (Unreal Insights' and
+  PIX's "find the spikes").
+- **Memory graph:** VRAM (device-local heaps) and process RAM per frame, drawn under the frame graph.
+- **GPU Transfer track:** one scope per upload submission (texture / geometry streaming) next to the graphics and async compute
+  tracks: timestamps of the dedicated transfer family in a query pool of its own, reset on the host (Vulkan 1.2 `hostQueryReset`,
+  since `vkCmdResetQueryPool` is not allowed on a transfer-only queue), placed on the CPU clock through the calibrated timestamps.
