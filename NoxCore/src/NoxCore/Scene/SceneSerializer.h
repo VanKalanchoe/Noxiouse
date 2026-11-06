@@ -91,12 +91,21 @@ namespace Nox
         // order of their IDs (the same entities, the same text) -- or a cell file's text with the roots' trees put in (merged by ID).
         static void WriteWorldPartition(YAML::Emitter& out, Scene& scene);
         static void ReadWorldPartition(Scene& scene, const YAML::Node& data);
+        // Sub-levels (L1): the list in a scene file; an undo state also names each loaded sub-level's roots (its entities are in the
+        // state) and the current level. Read after the entities.
+        static void WriteSubLevels(YAML::Emitter& out, Scene& scene, bool forFile);
+        static void ReadSubLevels(Scene& scene, const YAML::Node& data);
+        // A sub-level's file: the trees of its roots in the order of their IDs, and the folders they are filed in.
+        static std::string SubLevelText(Scene& scene, const std::vector<Entity>& roots, const std::string& name);
+        // Every loaded sub-level's file written where its text changed; false when one could not be written.
+        static bool SaveSubLevels(Scene& scene);
         static std::string WorldCellText(Scene& scene, const std::vector<Entity>& roots, const std::string& name, uint32_t* outCount);
         static std::string MergeWorldCellText(Scene& scene, const std::string& fileText, const std::vector<Entity>& roots, const std::string& name,
                                               uint32_t& outCount);
     private:
         // `exclude`: entities left out (a world's cells' entities, which are in the cell files).
-        std::string EmitScene(size_t& scriptComponentCount, size_t& scriptClassCount, const std::unordered_set<UUID>* exclude);
+        // forFile: the scene's file (sub-level entities are in their own files); else an undo state or a runtime scene (everything).
+        std::string EmitScene(size_t& scriptComponentCount, size_t& scriptClassCount, const std::unordered_set<UUID>* exclude, bool forFile);
         bool ReadScene(const YAML::Node& data);
     private:
         Ref<Scene> m_Scene;

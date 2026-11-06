@@ -263,7 +263,10 @@ namespace Nox
             NOX_CORE_TRACE("Deserializing scene '{}'", parsed.Document["Scene"].as<std::string>());
             m_Total = parsed.Entities && parsed.Entities.IsSequence() ? parsed.Entities.size() : 0;
             if (m_Level == 0)
+            {
                 SceneSerializer::ReadWorldPartition(scene, parsed.Document);
+                SceneSerializer::ReadSubLevels(scene, parsed.Document); // the list (the editor then reads them: LoadSubLevelsForEditing)
+            }
             // A level: none of its entities may be in the scene already (the same scene file, or one saved as a copy of it, shares the
             // IDs its entities, parents and scripts refer to each other by). Nothing is created then. A cell skips them one by one.
             if (m_Level != 0 && !m_Cell)

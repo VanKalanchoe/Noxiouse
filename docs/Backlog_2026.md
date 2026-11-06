@@ -16,7 +16,7 @@
 
 | # | Item |
 |---|---|
-| L1 | **Editing several levels together** (Unreal's Levels window): today each level is edited as its own scene |
+| L1 | **Editing several levels together** (Unreal's Levels window): sub-levels listed by the scene, edited together with it (current level, visible, locked, Always Loaded / streamed, Move to Level), each saved into its own file, Play copies them as edited. **Built 2026-11-06, untested** (Window > Levels; `Engine_Architecture_Plan_2026.md` §5.12 level streaming notes) |
 
 ### Tools (plan: `Engine_Architecture_Plan_2026.md`)
 

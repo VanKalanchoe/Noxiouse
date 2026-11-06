@@ -120,6 +120,42 @@ namespace Nox
         void UnloadLevel(AssetHandle level);
         LevelState GetLevelState(AssetHandle level) const;
 
+        // Sub-levels (Unreal's Levels window, Backlog L1): other scenes (scene assets) edited together with this one, the persistent
+        // level. While editing, their entities are in this scene, each root marked with LevelComponent (an entity belongs to its
+        // root's level: a tree is never split between files), and a save writes every sub-level's entities into its own file; this
+        // scene's file lists the sub-levels only. In Play an Always Loaded sub-level is in from the start, the others are loaded by
+        // a volume or a script (LoadLevel) -- both as edited, unsaved changes included. Not in a world (its cells split it already).
+        struct SubLevel
+        {
+            AssetHandle Level = 0;
+            bool AlwaysLoaded = true; // else streamed: Level Streaming Volumes or Scene.LoadLevel bring it in
+            bool Visible = true;      // editor: hidden, its entities are kept aside (nothing draws, lights, picks or simulates them)
+            bool Locked = false;      // editor: its entities cannot be selected
+            bool Loaded = false;      // editor: its entities were read (only then does a save write its file)
+        };
+        const std::vector<SubLevel>& GetSubLevels() const { return m_SubLevels; }
+        const SubLevel* FindSubLevel(AssetHandle level) const;
+        // Editor: lists a scene asset as a sub-level and reads its entities into this scene. False (logged) when it cannot be: not a
+        // scene, this scene itself, listed already, a world, or its entity IDs are in this scene already (a copy of it).
+        bool AddSubLevel(AssetHandle level, bool alwaysLoaded = true);
+        // Editor: unlisted, its entities leave this scene (what was not saved into its file is lost).
+        void RemoveSubLevel(AssetHandle level);
+        void SetSubLevelAlwaysLoaded(AssetHandle level, bool alwaysLoaded);
+        void SetSubLevelVisible(AssetHandle level, bool visible);
+        void SetSubLevelLocked(AssetHandle level, bool locked);
+        // Editor: where new root entities go (0: this scene). Unreal's current level.
+        AssetHandle GetCurrentLevel() const { return m_CurrentLevel; }
+        void SetCurrentLevel(AssetHandle level);
+        // The level an entity is saved into: its root's (0: this scene).
+        AssetHandle GetEntityLevel(Entity entity) const;
+        bool IsEntityLocked(Entity entity) const;
+        // Editor: the entities' roots, with everything under them, into a level (0: this scene). Locked levels are left alone.
+        void MoveToLevel(const std::vector<Entity>& entities, AssetHandle level);
+        // Editor, once the scene file is read: every listed sub-level's entities read into this scene (hidden ones kept aside).
+        void LoadSubLevelsForEditing();
+        // The root entities of a sub-level, in this scene or kept aside while it is hidden (the scene they are in: outScene).
+        std::vector<Entity> GetSubLevelRoots(AssetHandle level, Scene*& outScene);
+
         // World partition (WorldPartition.h, docs/Engine_Architecture_Plan_2026.md §5.13.1): the spatially loaded root entities are
         // kept in grid cells, each in its own file next to the scene, and streamed like levels -- around the streaming sources in Play
         // and Simulate (WorldStreamingSourceComponent, the camera), by hand in the editor.
@@ -371,6 +407,29 @@ namespace Nox
         std::map<WorldCellCoord, WorldCellSnapshot> m_WorldSnapshots;
         // These entities of another scene copied into this one (same IDs, every component).
         void CopyEntitiesFrom(Scene& source, const std::vector<UUID>& ids);
+
+        // Sub-levels (L1).
+        std::vector<SubLevel> m_SubLevels;
+        AssetHandle m_CurrentLevel = 0;
+        bool m_SubLevelEditing = false; // the editor's scene: new roots go into the current level, a detached entity keeps its level
+        // A hidden sub-level's entities, kept aside in a scene of their own (Order: roots, each before its children).
+        struct SubLevelStash
+        {
+            Ref<Scene> Entities;
+            std::vector<UUID> Order;
+            std::vector<UUID> Roots;
+        };
+        std::map<AssetHandle, SubLevelStash> m_HiddenSubLevels;
+        // Play / Simulate: a streamed sub-level as edited (its entities, every component), loaded from here by LoadLevel.
+        std::map<AssetHandle, SubLevelStash> m_LevelSnapshots;
+        bool ReadSubLevelEntities(AssetHandle level); // the level's file read into this scene, its roots tagged
+        void StartLevelLoad(StreamedLevel& streamed); // from the editor's copy (m_LevelSnapshots) or its file
+        void LoadAlwaysLoadedSubLevels();
+        void HideSubLevel(AssetHandle level);
+        void ShowSubLevel(AssetHandle level);
+        void TagLevelTree(Entity root, AssetHandle level); // LevelComponent on the root and everything under it (0: removed)
+        // The trees of the given roots as IDs, each before its children.
+        static std::vector<UUID> TreeOrder(Scene& scene, const std::vector<Entity>& roots);
         // A built cell's references requested (Loaded: in when it activates).
         void RequestWorldCellAssets(StreamedLevel& streamed);
         bool m_WorldStreaming = false; // Play / Simulate of a world: cells follow the streaming sources

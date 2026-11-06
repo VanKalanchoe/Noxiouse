@@ -11,6 +11,7 @@
 #include <cfloat>
 #include <functional>
 #include <unordered_set>
+#include <thread>
 
 #include "Entity.h"
 #include "Components.h"
@@ -362,6 +363,46 @@ namespace Nox
         const std::vector<WorldCellCoord> loadedCells = other->GetLoadedWorldCells(false);
         newScene->m_World.EditorLoaded = std::set<WorldCellCoord>(loadedCells.begin(), loadedCells.end());
 
+        // Sub-levels (L1), as edited: an Always Loaded one is in the copy from the start (a level already loaded), a streamed one is
+        // kept aside for its volume or script to load (LoadLevel copies it in). Hidden ones come from where the editor keeps them.
+        newScene->m_SubLevels = other->m_SubLevels;
+        for (const SubLevel& subLevel : other->m_SubLevels)
+        {
+            if (!subLevel.Loaded)
+                continue; // never read in the editor: loaded from its file (LoadAlwaysLoadedSubLevels, LoadLevel)
+            Scene* from = nullptr;
+            const std::vector<Entity> roots = other->GetSubLevelRoots(subLevel.Level, from);
+            std::vector<UUID> rootIDs;
+            for (Entity root : roots)
+                rootIDs.push_back(root.GetUUID());
+            const std::vector<UUID> order = TreeOrder(*from, roots);
+            if (subLevel.AlwaysLoaded)
+            {
+                if (from != other.get())
+                    newScene->CopyEntitiesFrom(*from, order);
+                for (UUID id : rootIDs)
+                    newScene->TagLevelTree(newScene->GetEntityByUUID(id), subLevel.Level);
+                StreamedLevel& streamed = newScene->m_Levels.emplace_back();
+                streamed.Level = subLevel.Level;
+                streamed.Name = AssetManager::IsAssetHandleValid(subLevel.Level) ? AssetManager::GetMetadata(subLevel.Level).FilePath.filename().string()
+                                                                                 : std::to_string(static_cast<uint64_t>(subLevel.Level));
+                streamed.Loaded = true;
+                streamed.Shown = true;
+                continue;
+            }
+            SubLevelStash& snapshot = newScene->m_LevelSnapshots[subLevel.Level];
+            snapshot.Entities = CreateRef<Scene>();
+            snapshot.Entities->CopyEntitiesFrom(*from, order);
+            snapshot.Entities->m_Folders = from->m_Folders;
+            snapshot.Order = order;
+            snapshot.Roots = rootIDs;
+            if (from == other.get())
+            {
+                for (UUID id : rootIDs)
+                    newScene->DestroyEntity(newScene->GetEntityByUUID(id));
+            }
+        }
+
         return newScene;
     }
     
@@ -439,6 +480,9 @@ namespace Nox
         entity.AddComponent<DirtyTransformComponent>(); // Mark initial state dirty
         
         m_EntityMap[uuid] = entityHandle;
+        // Editing sub-levels (L1): a new entity goes into the current level (a child is saved with its root's level whatever it says).
+        if (m_SubLevelEditing && m_CurrentLevel != 0)
+            entity.AddComponent<LevelComponent>().Level = m_CurrentLevel;
         
         return entity;
     }
@@ -632,14 +676,69 @@ namespace Nox
             streamed.Failed = false;
             streamed.UnloadQueued = false;
             streamed.OutsideTime = 0.0f;
-            streamed.Loader = std::make_unique<SceneLoader>(Project::GetActiveAssetDirectory() / AssetManager::GetMetadata(level).FilePath, *this, level);
+            StartLevelLoad(streamed);
             return true;
         }
         StreamedLevel& streamed = m_Levels.emplace_back();
         streamed.Level = level;
         streamed.Name = AssetManager::GetMetadata(level).FilePath.filename().string();
-        streamed.Loader = std::make_unique<SceneLoader>(Project::GetActiveAssetDirectory() / AssetManager::GetMetadata(level).FilePath, *this, level);
+        StartLevelLoad(streamed);
         return true;
+    }
+
+    void Scene::StartLevelLoad(StreamedLevel& streamed)
+    {
+        // A sub-level as the editor had it (Play / Simulate of a scene with sub-levels): copied in from memory, unsaved changes included.
+        if (auto snapshot = m_LevelSnapshots.find(streamed.Level); snapshot != m_LevelSnapshots.end())
+        {
+            streamed.Staged = snapshot->second.Entities;
+            streamed.StagedEntities = snapshot->second.Order;
+            streamed.ActivateNext = 0;
+            streamed.ActivatedEntities.clear();
+            return;
+        }
+        streamed.Loader = std::make_unique<SceneLoader>(Project::GetActiveAssetDirectory() / AssetManager::GetMetadata(streamed.Level).FilePath,
+                                                        *this, streamed.Level);
+    }
+
+    void Scene::LoadAlwaysLoadedSubLevels()
+    {
+        // Play / Simulate start (and a packaged game's): the Always Loaded sub-levels not in the scene yet (not read in the editor),
+        // read from their files before anything starts, so they start with the scene's own entities.
+        for (const SubLevel& subLevel : std::vector<SubLevel>(m_SubLevels))
+        {
+            if (!subLevel.AlwaysLoaded || GetLevelState(subLevel.Level) != LevelState::Unloaded || !LoadLevel(subLevel.Level))
+                continue;
+            for (StreamedLevel& streamed : m_Levels)
+            {
+                if (streamed.Level != subLevel.Level || streamed.IsCell)
+                    continue;
+                if (streamed.Loader)
+                {
+                    while (!streamed.Loader->Step(DBL_MAX))
+                        std::this_thread::yield(); // (its file is read on a thread)
+                    if (streamed.Loader->Failed())
+                    {
+                        DestroyLevelEntities(streamed.Level);
+                        streamed.Loader.reset();
+                        streamed.Failed = true;
+                        break;
+                    }
+                    FinishLevelLoad(streamed, streamed.Loader->GetCreatedEntities(), {});
+                    streamed.Loader.reset();
+                }
+                else if (streamed.Staged)
+                {
+                    ActivateWorldCellEntities(streamed, DBL_MAX);
+                    FinishLevelLoad(streamed, streamed.ActivatedEntities, {});
+                    streamed.ActivatedEntities.clear();
+                    streamed.Staged = nullptr;
+                    streamed.StagedEntities = {};
+                }
+                streamed.Loaded = true;
+                break;
+            }
+        }
     }
 
     void Scene::UnloadLevel(AssetHandle level)
@@ -794,8 +893,9 @@ namespace Nox
                 }
                 for (AssetHandle level : volume.Levels)
                 {
-                    if (level == 0)
-                        continue;
+                    const SubLevel* subLevel = FindSubLevel(level);
+                    if (level == 0 || (subLevel && subLevel->AlwaysLoaded))
+                        continue; // (an Always Loaded sub-level stays for the whole session)
                     auto [entry, added] = unloadDelays.try_emplace(level, volume.UnloadDelay);
                     if (!added)
                         entry->second = std::min(entry->second, volume.UnloadDelay);
@@ -874,7 +974,7 @@ namespace Nox
         for (size_t index = 0; index < m_Levels.size(); ++index)
         {
             StreamedLevel& streamed = m_Levels[index];
-            if (streamed.Loaded || (!streamed.Loader && !(streamed.IsCell && streamed.Staged && streamed.Activate)))
+            if (streamed.Loaded || (!streamed.Loader && !(streamed.Staged && streamed.Activate)))
                 continue;
             const double spent = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
             if (spent >= LevelStreamingBudgetMs)
@@ -898,6 +998,24 @@ namespace Nox
                     streamed.HeldPhysics.clear();
                     streamed.Loaded = true;
                 }
+                continue;
+            }
+            if (!streamed.Loader)
+            {
+                // A sub-level from the editor's copy (StartLevelLoad): its entities copied in, a slice a frame.
+                std::unordered_set<UUID> pendingBefore = std::move(m_PendingPhysics3D);
+                m_PendingPhysics3D.clear();
+                const bool activated = ActivateWorldCellEntities(streamed, LevelStreamingBudgetMs - spent);
+                streamed.HeldPhysics.insert(streamed.HeldPhysics.end(), m_PendingPhysics3D.begin(), m_PendingPhysics3D.end());
+                m_PendingPhysics3D = std::move(pendingBefore);
+                if (!activated)
+                    continue;
+                FinishLevelLoad(streamed, streamed.ActivatedEntities, streamed.HeldPhysics);
+                streamed.ActivatedEntities.clear();
+                streamed.HeldPhysics.clear();
+                streamed.Staged = nullptr;
+                streamed.StagedEntities = {};
+                streamed.Loaded = true;
                 continue;
             }
             std::unordered_set<UUID> pendingBefore = std::move(m_PendingPhysics3D);
@@ -961,6 +1079,7 @@ namespace Nox
             const glm::dvec3 source = camera ? ComposedWorldPosition(camera) : glm::dvec3(0.0);
             BeginWorldStreaming(camera ? &source : nullptr);
         }
+        LoadAlwaysLoadedSubLevels(); // before anything starts: they start with the scene's own entities
         m_IsRunning = true;
         OnPhysics2DStart();
         OnPhysics3DStart();
@@ -997,6 +1116,7 @@ namespace Nox
     void Scene::OnSimulationStart(const glm::dvec3* streamingSource)
     {
         BeginWorldStreaming(streamingSource);
+        LoadAlwaysLoadedSubLevels();
         OnPhysics2DStart();
         OnPhysics3DStart();
         StartTimelines();

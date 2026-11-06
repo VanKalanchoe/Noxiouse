@@ -8,6 +8,7 @@
 #include <functional>
 #include <iterator>
 #include <map>
+#include <set>
 #include <unordered_set>
 
 #include <yaml-cpp/yaml.h>
@@ -1231,7 +1232,7 @@ namespace Nox
         out << YAML::EndMap; // Corrected: No parentheses
     }
 
-    std::string SceneSerializer::EmitScene(size_t& scriptComponentCount, size_t& scriptClassCount, const std::unordered_set<UUID>* exclude)
+    std::string SceneSerializer::EmitScene(size_t& scriptComponentCount, size_t& scriptClassCount, const std::unordered_set<UUID>* exclude, bool forFile)
     {
         YAML::Emitter out;
         scriptComponentCount = 0;
@@ -1248,6 +1249,8 @@ namespace Nox
                 return; // in a world cell's file
             if (entity.HasComponent<HLODComponent>())
                 return; // generated (Build HLODs), kept in the HLOD grid's cells
+            if (forFile && m_Scene->GetEntityLevel(entity) != 0)
+                return; // in a sub-level's file
 
             if (entity.HasComponent<ScriptComponent>())
             {
@@ -1257,6 +1260,19 @@ namespace Nox
 
             SerializeEntity(out, *m_Scene, entity);
         });
+        // An undo state keeps the hidden sub-levels' entities too (kept aside while hidden: hidden again once read).
+        if (!forFile)
+        {
+            for (auto& [level, stash] : m_Scene->m_HiddenSubLevels)
+            {
+                for (UUID id : stash.Order)
+                {
+                    Entity entity = stash.Entities->GetEntityByUUID(id);
+                    if (entity && !IsSpawnedModelNode(*stash.Entities, id) && !IsSpawnedPrefabNode(*stash.Entities, id))
+                        SerializeEntity(out, *stash.Entities, entity);
+                }
+            }
+        }
         out << YAML::EndSeq; // Corrected: No parentheses
         if (!m_Scene->m_Folders.empty())
         {
@@ -1273,8 +1289,154 @@ namespace Nox
             out << YAML::EndSeq;
         }
         WriteWorldPartition(out, *m_Scene);
+        WriteSubLevels(out, *m_Scene, forFile);
         out << YAML::EndMap; // Corrected: No parentheses
         return std::string(out.c_str(), out.size());
+    }
+
+    void SceneSerializer::WriteSubLevels(YAML::Emitter& out, Scene& scene, bool forFile)
+    {
+        if (scene.m_SubLevels.empty())
+            return;
+        out << YAML::Key << "SubLevels" << YAML::Value << YAML::BeginSeq;
+        for (const Scene::SubLevel& subLevel : scene.m_SubLevels)
+        {
+            out << YAML::BeginMap;
+            out << YAML::Key << "Level" << YAML::Value << static_cast<uint64_t>(subLevel.Level);
+            out << YAML::Key << "AlwaysLoaded" << YAML::Value << subLevel.AlwaysLoaded;
+            out << YAML::Key << "Visible" << YAML::Value << subLevel.Visible;
+            out << YAML::Key << "Locked" << YAML::Value << subLevel.Locked;
+            if (!forFile && subLevel.Loaded)
+            {
+                Scene* from = nullptr;
+                out << YAML::Key << "Roots" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+                for (Entity root : scene.GetSubLevelRoots(subLevel.Level, from))
+                    out << static_cast<uint64_t>(root.GetUUID());
+                out << YAML::EndSeq;
+            }
+            out << YAML::EndMap;
+        }
+        out << YAML::EndSeq;
+        if (!forFile && scene.m_CurrentLevel != 0)
+            out << YAML::Key << "CurrentLevel" << YAML::Value << static_cast<uint64_t>(scene.m_CurrentLevel);
+    }
+
+    void SceneSerializer::ReadSubLevels(Scene& scene, const YAML::Node& data)
+    {
+        const YAML::Node list = data["SubLevels"];
+        if (!list || !list.IsSequence())
+            return;
+        scene.m_SubLevels.clear();
+        bool undoState = false;
+        for (const YAML::Node& node : list)
+        {
+            if (!node["Level"])
+                continue;
+            Scene::SubLevel subLevel;
+            subLevel.Level = node["Level"].as<uint64_t>();
+            subLevel.AlwaysLoaded = node["AlwaysLoaded"] ? node["AlwaysLoaded"].as<bool>() : true;
+            subLevel.Visible = node["Visible"] ? node["Visible"].as<bool>() : true;
+            subLevel.Locked = node["Locked"] ? node["Locked"].as<bool>() : false;
+            if (subLevel.Level == 0 || scene.FindSubLevel(subLevel.Level))
+                continue;
+            // An undo state: the sub-level's entities were read with the rest; its roots say which.
+            if (const YAML::Node roots = node["Roots"])
+            {
+                undoState = true;
+                subLevel.Loaded = true;
+                for (const YAML::Node& root : roots)
+                {
+                    if (Entity entity = scene.GetEntityByUUID(root.as<uint64_t>()))
+                        scene.TagLevelTree(entity, subLevel.Level);
+                }
+            }
+            scene.m_SubLevels.push_back(subLevel);
+        }
+        if (!undoState)
+            return;
+        scene.m_SubLevelEditing = true;
+        for (const Scene::SubLevel& subLevel : std::vector<Scene::SubLevel>(scene.m_SubLevels))
+        {
+            if (subLevel.Loaded && !subLevel.Visible)
+                scene.HideSubLevel(subLevel.Level);
+        }
+        if (data["CurrentLevel"])
+            scene.SetCurrentLevel(data["CurrentLevel"].as<uint64_t>());
+    }
+
+    std::string SceneSerializer::SubLevelText(Scene& scene, const std::vector<Entity>& roots, const std::string& name)
+    {
+        std::vector<Entity> entities;
+        std::set<std::string> folders;
+        for (UUID id : Scene::TreeOrder(scene, roots))
+        {
+            Entity entity = scene.GetEntityByUUID(id);
+            if (!entity || IsSpawnedModelNode(scene, id) || IsSpawnedPrefabNode(scene, id))
+                continue;
+            entities.push_back(entity);
+            if (entity.HasComponent<FolderComponent>())
+            {
+                // The folder and the ones above it ("a/b": "a" too).
+                const std::string& path = entity.GetComponent<FolderComponent>().Path;
+                for (size_t slash = path.find('/'); slash != std::string::npos; slash = path.find('/', slash + 1))
+                    folders.insert(path.substr(0, slash));
+                if (!path.empty())
+                    folders.insert(path);
+            }
+        }
+        std::sort(entities.begin(), entities.end(), [](Entity a, Entity b) { return static_cast<uint64_t>(a.GetUUID()) < static_cast<uint64_t>(b.GetUUID()); });
+
+        YAML::Emitter out;
+        out << YAML::BeginMap;
+        out << YAML::Key << "Scene" << YAML::Value << name;
+        out << YAML::Key << "Entities" << YAML::Value << YAML::BeginSeq;
+        for (Entity entity : entities)
+            SerializeEntity(out, scene, entity);
+        out << YAML::EndSeq;
+        if (!folders.empty())
+        {
+            out << YAML::Key << "Folders" << YAML::Value << YAML::BeginSeq;
+            for (const std::string& folder : folders)
+                out << folder;
+            out << YAML::EndSeq;
+        }
+        out << YAML::EndMap;
+        return std::string(out.c_str(), out.size());
+    }
+
+    bool SceneSerializer::SaveSubLevels(Scene& scene)
+    {
+        bool written = true;
+        for (const Scene::SubLevel& subLevel : scene.m_SubLevels)
+        {
+            if (!subLevel.Loaded || !AssetManager::IsAssetHandleValid(subLevel.Level))
+                continue; // never read: its file is left as it is
+            const AssetMetadata& metadata = AssetManager::GetMetadata(subLevel.Level);
+            const std::filesystem::path path = Project::GetActiveAssetDirectory() / metadata.FilePath;
+            Scene* from = nullptr;
+            const std::vector<Entity> roots = scene.GetSubLevelRoots(subLevel.Level, from);
+            const std::string text = SubLevelText(*from, roots, metadata.FilePath.stem().string());
+            {
+                std::ifstream in(path, std::ios::binary);
+                std::string current((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                if (in.good() || in.eof())
+                {
+                    if (current == text)
+                        continue; // unchanged
+                }
+            }
+            std::ofstream out(path, std::ios::binary | std::ios::trunc);
+            out << text;
+            out.close();
+            if (!out)
+            {
+                NOX_CORE_ERROR("Level `{}` could not be written ({})", metadata.FilePath.stem().string(), path.string());
+                written = false;
+                continue;
+            }
+            NOX_CORE_INFO("Saved level '{}' ({} root entities)", path.string(), roots.size());
+        }
+        return written;
     }
 
     void SceneSerializer::WriteWorldPartition(YAML::Emitter& out, Scene& scene)
@@ -1428,7 +1590,7 @@ namespace Nox
     {
         size_t scriptComponentCount = 0;
         size_t scriptClassCount = 0;
-        return EmitScene(scriptComponentCount, scriptClassCount, nullptr);
+        return EmitScene(scriptComponentCount, scriptClassCount, nullptr, false);
     }
 
     void SceneSerializer::Serialize(const std::filesystem::path& filepath)
@@ -1439,7 +1601,10 @@ namespace Nox
         std::unordered_set<UUID> inCells;
         if (m_Scene->IsWorldPartitioned() && !m_Scene->SaveWorldCells(filepath, inCells))
             NOX_CORE_ERROR("Saving scene '{}': some world cells could not be written", filepath.string());
-        const std::string text = EmitScene(scriptComponentCount, scriptClassCount, inCells.empty() ? nullptr : &inCells);
+        // Sub-levels: each into its own file (its entities stay out of this one).
+        if (!m_Scene->m_SubLevels.empty() && !SaveSubLevels(*m_Scene))
+            NOX_CORE_ERROR("Saving scene '{}': some sub-levels could not be written", filepath.string());
+        const std::string text = EmitScene(scriptComponentCount, scriptClassCount, inCells.empty() ? nullptr : &inCells, true);
 
         const std::filesystem::path filePath(filepath);
         std::ofstream fout(filePath);
@@ -2667,6 +2832,7 @@ namespace Nox
                 DeserializeEntityComponents(*m_Scene, entity, deserializedEntity, false);
             }
         }
+        ReadSubLevels(*m_Scene, data);
 
         return true;
     }

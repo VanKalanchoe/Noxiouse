@@ -117,6 +117,13 @@ namespace Nox
         m_Renderer = app.GetRenderer();
         m_RenderGraphPanel = CreateScope<RenderGraphPanel>(m_Renderer);
         m_WorldPartitionPanel.SetSaveCallback([this]() { SaveScene(); });
+        m_LevelsPanel.SetSaveCallback([this]() { SaveScene(); });
+        m_LevelsPanel.SetOpenSceneCallback([this]() -> AssetHandle
+        {
+            if (m_EditorScenePath.empty() || !Project::GetActive())
+                return 0;
+            return Project::GetActive()->GetEditorAssetManager()->FindHandleByPath(m_EditorScenePath, AssetType::Scene);
+        });
         m_WorldPartitionPanel.SetBuildHLODsCallback([this]() { StartHLODBuild(); }, [this]() { return m_HLODBuild.get(); });
         m_Renderer2D = m_Renderer->getRenderer2D();
 
@@ -642,6 +649,9 @@ namespace Nox
                 bool worldPartitionOpen = m_WorldPartitionPanel.IsOpen();
                 if (ImGui::MenuItem("World Partition", nullptr, &worldPartitionOpen))
                     m_WorldPartitionPanel.SetOpen(worldPartitionOpen);
+                bool levelsOpen = m_LevelsPanel.IsOpen();
+                if (ImGui::MenuItem("Levels", nullptr, &levelsOpen))
+                    m_LevelsPanel.SetOpen(levelsOpen);
 
                 // Up to four viewports, each with its own camera (docs/Future.md item 5). A layout snaps them into place; a
                 // viewport's tab can then be dragged anywhere and the splitters resized.
@@ -753,6 +763,7 @@ namespace Nox
                     streamingSource = camera.GetComponent<WorldTransformComponent>().GetPosition();
             }
             m_WorldPartitionPanel.OnImGuiRender(m_ActiveScene, streamingSource, m_SceneState == SceneState::Edit && !m_PrefabMode.Active);
+            m_LevelsPanel.OnImGuiRender(m_ActiveScene, m_SceneState == SceneState::Edit && !m_PrefabMode.Active, m_SceneHierarchyPanel.GetSelectedEntities());
         }
 
         for (auto& panel : m_NodeGraphEditors)
@@ -3228,6 +3239,7 @@ namespace Nox
             OnSceneStop(); // Play / Simulate started while it loaded: they ran on the scene being left
 
         Ref<Scene> newScene = load->GetScene();
+        newScene->LoadSubLevelsForEditing(); // its sub-levels' entities, edited together with it (Levels panel)
         if (m_ViewportSize.x > 0 && m_ViewportSize.y > 0)
             newScene->OnViewportResize(m_ViewportSize.x, m_ViewportSize.y);
 

@@ -94,6 +94,8 @@ namespace Nox
     void SceneHierarchyPanel::SetSelectedEntity(Entity entity)
     {
         m_SelectionContexts.clear();
+        if (entity && m_Context && m_Context->IsEntityLocked(entity))
+            entity = {}; // its level is locked (Levels panel)
         if (entity)
             m_SelectionContexts.push_back(entity);
 
@@ -102,6 +104,8 @@ namespace Nox
 
     void SceneHierarchyPanel::ToggleSelectedEntity(Entity entity)
     {
+        if (entity && m_Context && m_Context->IsEntityLocked(entity))
+            return; // its level is locked (Levels panel)
         auto it = std::find(m_SelectionContexts.begin(), m_SelectionContexts.end(), entity);
         if (it != m_SelectionContexts.end())
             m_SelectionContexts.erase(it);
@@ -575,9 +579,23 @@ namespace Nox
         const bool prefabNode = entity.HasComponent<PrefabNodeComponent>();
         if (prefabRoot || prefabNode)
             ImGui::PushStyleColor(ImGuiCol_Text, prefabRoot ? ImVec4(0.45f, 0.7f, 1.0f, 1.0f) : ImVec4(0.45f, 0.7f, 1.0f, 0.6f));
+        // Sub-levels (Levels panel): a locked level's entities dimmed; a root in a sub-level names its level.
+        const bool locked = m_Context->IsEntityLocked(entity);
+        if (locked)
+            ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
         bool opened = ImGui::TreeNodeEx((void*)(uint64_t)(uint32_t)entity, flags, tag.c_str());
+        if (locked)
+            ImGui::PopStyleVar();
         if (prefabRoot || prefabNode)
             ImGui::PopStyleColor();
+        if (!m_Context->GetSubLevels().empty() && !entity.GetParent())
+        {
+            if (const AssetHandle level = m_Context->GetEntityLevel(entity); level != 0 && AssetManager::IsAssetHandleValid(level))
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled("[%s]%s", AssetManager::GetMetadata(level).FilePath.stem().string().c_str(), locked ? " (locked)" : "");
+            }
+        }
 
         // Double-click: frame the editor camera on this entity (UE5's Outliner). Checked before the single/multi-select
         // handling below, which a double-click's first click also triggers (harmless: it just selects it too).
@@ -663,6 +681,22 @@ namespace Nox
         {
             if (ImGui::MenuItem("Create Prefab") && m_CreatePrefabFromEntity)
                 m_CreatePrefabFromEntity(entity.GetUUID()); // this entity, or the selection when it is part of it
+            // Sub-levels (Levels panel): this entity (or the selection it is part of) with its whole tree into another level.
+            if (!m_Context->GetSubLevels().empty() && !m_Context->IsRunning() && ImGui::BeginMenu("Move to Level"))
+            {
+                const std::vector<Entity> moved = IsSelected(entity) ? m_SelectionContexts : std::vector<Entity>{ entity };
+                const AssetHandle from = m_Context->GetEntityLevel(entity);
+                if (ImGui::MenuItem("Persistent Level", nullptr, from == 0))
+                    m_Context->MoveToLevel(moved, 0);
+                for (const Scene::SubLevel& subLevel : m_Context->GetSubLevels())
+                {
+                    const std::string name = AssetManager::IsAssetHandleValid(subLevel.Level) ? AssetManager::GetMetadata(subLevel.Level).FilePath.stem().string()
+                                                                                              : std::string("(missing scene)");
+                    if (ImGui::MenuItem(name.c_str(), nullptr, from == subLevel.Level, subLevel.Loaded && subLevel.Visible && !subLevel.Locked))
+                        m_Context->MoveToLevel(moved, subLevel.Level);
+                }
+                ImGui::EndMenu();
+            }
             if (ImGui::MenuItem("Delete Entity"))
             {
                 entityDeleted = true;

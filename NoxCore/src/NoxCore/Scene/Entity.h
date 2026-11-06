@@ -21,6 +21,9 @@ namespace Nox
         Entity currentParent = GetParent();
         if (currentParent == parent)
             return;
+        // Sub-levels (L1): a tree is saved into its root's level; an entity taken off its parent stays in the level it was in.
+        const bool keepLevel = !parent && currentParent && m_Scene->m_SubLevelEditing;
+        const AssetHandle keptLevel = keepLevel ? m_Scene->GetEntityLevel(*this) : AssetHandle(0);
 
         // 1. Calculate and preserve current World Transform before changing hierarchy
         glm::dmat4 worldTransform(1.0);
@@ -55,6 +58,8 @@ namespace Nox
         else
         {
             rel.Parent = 0;
+            if (keepLevel)
+                m_Scene->TagLevelTree(*this, keptLevel);
         }
 
         // 4. Convert the preserved World Transform into the *new* local space

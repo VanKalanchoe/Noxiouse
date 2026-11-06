@@ -1744,8 +1744,20 @@ own, loaded **additively** into the running scene and unloaded again.
   (the camera moved into the volume, out again, the level staying for its Unload Delay, then gone) and logs each check and
   `[LevelStreamingTest] PASS` / `FAIL`; T runs it again, L / U load and unload the script level by hand, and WASD flies the camera
   into the orange pad (the volume). The levels' boxes are meshes their script builds, so the test needs no imported asset.
-- Not yet: editing several levels together in the editor (Unreal's Levels window -- each level is edited as the scene it is), a level
-  shown only once complete (its entities appear over the frames it loads), streaming sources other than the camera, level transforms.
+- **Built 2026-11-05/06, tested:** a level shown only once complete (its meshes registered hidden, shown in one frame: Unreal's
+  `ULevel::bRequireFullVisibilityToRender`), volumes tested against every activating streaming source (Backlog L2, L3).
+- **Sub-levels (Unreal's Levels window, Backlog L1), built 2026-11-06, untested.** A scene lists other scenes as its sub-levels
+  (`Scene::SubLevel`: Always Loaded or streamed, editor visibility and lock). While editing, their entities are in the scene; an
+  entity belongs to its root's level (LevelComponent on the root: a tree is never split between files; a new root goes into the
+  current level, an entity taken off its parent keeps its level). A save writes each loaded sub-level's trees into its own file
+  (only when the text changed) and keeps them out of the scene's file, which lists the sub-levels; an undo state keeps everything
+  (each sub-level's roots named) so undo is still "load the text". A hidden sub-level's entities are kept aside in a scene of their
+  own (nothing draws, lights, picks or simulates them); a locked one's cannot be selected. Play / Simulate copy the sub-levels as
+  edited: Always Loaded ones are in the copy from the start (registered as loaded levels), streamed ones are kept aside and copied in
+  a slice a frame when a volume or script loads them; one never read in the editor (or a packaged game's) is read from its file,
+  Always Loaded ones before anything starts. Not in a world (its cells split it already). Window > Levels; hierarchy: `[level]` after
+  a sub-level's roots, right-click > Move to Level.
+- Not yet: level transforms (a sub-level placed with an offset, Unreal's level transform).
 
 ### 5.13 World Streaming
 
