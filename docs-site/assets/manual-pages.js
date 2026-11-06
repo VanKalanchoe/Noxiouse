@@ -1279,6 +1279,7 @@ window.NOX_MANUAL_PAGES = [
             "3. Play and **stand** on the ramp and across a stair edge. **Check:** each foot rests on its own surface (no floating, no sinking), the hips drop so the lower foot reaches, the feet tilt to the slope.",
             "4. **Walk** up and down the stairs. **Check:** the feet follow the steps smoothly. **Jump. Check:** in the air the feet go back to the animation, and they settle again on landing.",
             "5. Only Play / Simulate: in the editor (no physics) the node does nothing.",
+            "6. To see what the feet find: turn on **Show physics collider** (Settings) while playing. Each foot's ray is drawn from above the foot down: green to where it hit the ground (a cross and the ground's normal there), red where it found nothing. A foot that stays in the air with a green ray is the node; with a red ray, the ray missed (too short: raise **Trace Down**; or the surface has no collider / static Rigid Body 3D).",
             "",
             "---",
             "",

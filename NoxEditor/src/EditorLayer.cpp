@@ -2319,7 +2319,8 @@ namespace Nox
         ImGui::Separator();
         ImGui::Checkbox("Show physics collider", &m_ShowPhysicsColliders);
         ImGui::SetItemTooltip("Every collider as physics builds it. Green: part of a Rigid Body 3D (on the entity or above it).\n"
-                              "Red: part of no body, so it does not collide. Blue: a Character Controller 3D's capsule.");
+                              "Red: part of no body, so it does not collide. Blue: a Character Controller 3D's capsule.\n"
+                              "In Play / Simulate also Foot Placement's rays: green to where they hit the ground, red where they found none.");
         ImGui::Image(m_Font->GetAtlasTexture()->getImTextureID(), {512, 512}, ImVec2(0, 1), ImVec2(1, 0));
 
         ImGui::End(); // End Settings
@@ -4766,6 +4767,40 @@ namespace Nox
                 line(point(nearX + offset, 0, nearZ - reach), point(nearX + offset, 0, nearZ + reach), endlessColor);
             }
             line(origin, point(0, WorldUnits::FromMeters(1.0f), 0), endlessColor);
+        }
+
+        // Foot Placement's rays (Unreal's foot IK trace debug view), in Play / Simulate: each foot's ray from above it down, green to
+        // where it hit (with a cross there) and red where it found nothing.
+        auto animatorView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, AnimatorComponent>();
+        for (auto entity : animatorView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, animator] = animatorView.get<WorldTransformComponent, AnimatorComponent>(entity);
+            const AnimationGraphInstance& graph = animator.GraphInstance;
+            if (graph.FootProbes.empty())
+                continue;
+            const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix); // the skeleton's model space is the entity's
+            const float meter = WorldUnits::FromMeters(1.0f);
+            for (const AnimFootProbe& probe : graph.FootProbes)
+            {
+                const glm::vec3 foot = glm::vec3(world * glm::vec4(probe.Position, 1.0f));
+                const glm::vec3 start = foot + glm::vec3(0.0f, probe.Up * meter, 0.0f);
+                const glm::vec3 end = foot - glm::vec3(0.0f, probe.Down * meter, 0.0f);
+                const auto ground = graph.FootGround.find(probe.Bone);
+                if (ground == graph.FootGround.end() || !ground->second.Hit)
+                {
+                    line(start, end, glm::vec4(1.0f, 0.25f, 0.2f, 1.0f));
+                    continue;
+                }
+                const glm::vec3 hit = glm::vec3(world * glm::vec4(ground->second.Point, 1.0f));
+                const glm::vec4 green(0.2f, 1.0f, 0.3f, 1.0f);
+                line(start, hit, green);
+                const float c = WorldUnits::FromCentimeters(4.0f);
+                line(hit - glm::vec3(c, 0, 0), hit + glm::vec3(c, 0, 0), green);
+                line(hit - glm::vec3(0, 0, c), hit + glm::vec3(0, 0, c), green);
+                line(hit, hit + glm::vec3(world * glm::vec4(ground->second.Normal, 0.0f)) * (3.0f * c), green); // the ground's normal
+            }
         }
 
         // Mesh: its triangles' edges, or with Convex (or on a dynamic body, which Jolt gives the hull) the hull physics builds.

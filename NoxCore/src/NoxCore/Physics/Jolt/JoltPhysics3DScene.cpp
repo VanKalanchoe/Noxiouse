@@ -939,6 +939,10 @@ namespace Nox {
             const glm::vec3 rootMotion = ToNative(glm::vec3(controller.RootMotionVelocity.x, 0.0f, controller.RootMotionVelocity.z));
             JPH::Vec3 velocity;
             bool leavesGround = !onGround && state.WasOnGround; // walked off a ledge
+            // Standing or walking on walkable ground: no gravity (Unreal's walking mode follows the floor instead) -- added every
+            // step, the slope turned part of it into a slide (0.5 m in 4 s down a 27 degree ramp, standing still). The floor is
+            // followed by the stick-to-floor step below; a jump and anything in the air fall as before.
+            bool walking = false;
             if (onGround && movingTowardsGround)
             {
                 velocity = groundVelocity;
@@ -947,6 +951,8 @@ namespace Nox {
                     velocity += up * ToNative(controller.JumpSpeed);
                     leavesGround = true;
                 }
+                else
+                    walking = true;
             }
             else
             {
@@ -960,7 +966,8 @@ namespace Nox {
             state.GroundRootMotion = onGround && !leavesGround ? rootMotion : glm::vec3(0.0f);
             state.WasOnGround = onGround && !leavesGround;
 
-            velocity += gravity * controller.GravityScale * dt;
+            if (!walking)
+                velocity += gravity * controller.GravityScale * dt;
             // Horizontal velocity ramps towards the wanted one (Unreal's MaxAcceleration / BrakingDeceleration) instead of
             // snapping to it -- most of what makes its character start and stop smoothly. Less acceleration in the air.
             {
