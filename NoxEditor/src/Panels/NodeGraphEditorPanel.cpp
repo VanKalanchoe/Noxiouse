@@ -105,6 +105,12 @@ namespace Nox
         {
             for (const auto& [slot, value] : literalChanges)
                 AudioEngine::SetGraphConstant(m_AudioPreviewVoice, slot, value);
+            // A parameter's default changed in the Parameters list: the playing sound follows it, unless set in the Preview.
+            const auto& before = m_AudioPreviewProgram->GetParameters();
+            const auto& after = program->GetParameters();
+            for (size_t i = 0; i < after.size() && i < before.size(); ++i)
+                if (after[i].Default != before[i].Default && !m_AudioPreviewValues.contains(after[i].Name))
+                    AudioEngine::SetGraphParameter(m_AudioPreviewVoice, static_cast<int32_t>(i), after[i].Default);
             m_AudioPreviewVersion = m_Asset->CompileVersion;
             m_AudioPreviewProgram = program;
         }
@@ -160,9 +166,9 @@ namespace Nox
                 ImGui::PopID();
                 continue;
             }
-            NodeGraphValue& value = m_AudioPreviewValues.try_emplace(parameter.Name, parameter.DefaultValue).first->second;
-            if (value.index() != parameter.DefaultValue.index())
-                value = parameter.DefaultValue; // (its type was changed)
+            // The graph's default, unless changed here (then a Reset goes back to following the default).
+            const auto set = m_AudioPreviewValues.find(parameter.Name);
+            NodeGraphValue value = set != m_AudioPreviewValues.end() && set->second.index() == parameter.DefaultValue.index() ? set->second : parameter.DefaultValue;
             bool changed = false;
             ImGui::SetNextItemWidth(200.0f);
             if (float* f = std::get_if<float>(&value))
@@ -171,6 +177,19 @@ namespace Nox
                 changed = ImGui::DragInt(parameter.Name.c_str(), i);
             else if (bool* b = std::get_if<bool>(&value))
                 changed = ImGui::Checkbox(parameter.Name.c_str(), b);
+            if (changed)
+                m_AudioPreviewValues[parameter.Name] = value;
+            if (m_AudioPreviewValues.contains(parameter.Name)) // (looked up again: the insert above may have moved `set`)
+            {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Reset"))
+                {
+                    m_AudioPreviewValues.erase(parameter.Name);
+                    value = parameter.DefaultValue;
+                    changed = true;
+                }
+                ImGui::SetItemTooltip("Changed here for the preview only. Reset: back to the default set in the Parameters list.");
+            }
             if (changed)
                 AudioEngine::SetGraphParameter(m_AudioPreviewVoice, index, NodeGraphValueToFloat(value));
             ImGui::PopID();
