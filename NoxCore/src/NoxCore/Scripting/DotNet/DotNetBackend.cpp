@@ -477,6 +477,7 @@ namespace Nox
                 case 5: return entity.HasComponent<TimelinePlayerComponent>();
                 case 6: return entity.HasComponent<ParticleEmitterComponent>();
                 case 7: return entity.HasComponent<MeshComponent>();
+                case 8: return entity.HasComponent<AudioSourceComponent>();
                 default: return false;
             }
         }
@@ -775,6 +776,113 @@ namespace Nox
         {
             if (TimelinePlayerComponent* player = FindTimelinePlayer(entityID))
                 player->Speed = speed;
+        }
+
+        // Audio (Nox.Audio, Nox.AudioSourceComponent; docs/Audio_Architecture_Plan_2026.md §9). A clip by its path under the asset
+        // directory, its extension optional ("Sounds/Explosion" finds Sounds/Explosion.wav / .ogg / .flac / .mp3).
+        AssetHandle FindAudioClip(const std::string& path, const char* call)
+        {
+            const std::filesystem::path clipPath(path);
+            AssetHandle clip = AssetManager::FindHandleByPath(clipPath, AssetType::AudioClip);
+            for (const char* extension : { ".wav", ".ogg", ".flac", ".mp3" })
+            {
+                if (clip != 0 || clipPath.has_extension())
+                    break;
+                clip = AssetManager::FindHandleByPath(std::filesystem::path(path + extension), AssetType::AudioClip);
+            }
+            if (clip == 0)
+                NOX_CORE_ERROR("[C#] {}: no sound '{}' in the asset registry", call, path);
+            return clip;
+        }
+
+        // A bus by its name ("Music"); a name that is no bus is reported, not taken as Master.
+        bool FindAudioBus(const std::string& name, AudioBus& outBus, const char* call)
+        {
+            outBus = AudioBusFromString(name);
+            if (outBus != AudioBus::Master || name == "Master")
+                return true;
+            NOX_CORE_ERROR("[C#] {}: no bus '{}' (Master, Music, SFX, Voice, UI, Ambience)", call, name);
+            return false;
+        }
+
+        void AudioPlayOneShot(Coral::String path, double x, double y, double z, float volume, Coral::Bool32 spatial, Coral::String busName)
+        {
+            if (!s_Scene || !OnMainThread("Audio.PlayOneShot")) return;
+            AudioBus bus;
+            if (!FindAudioBus(std::string(busName), bus, "Audio.PlayOneShot"))
+                return;
+            if (const AssetHandle clip = FindAudioClip(std::string(path), "Audio.PlayOneShot"))
+                s_Scene->PlayOneShot(clip, { x, y, z }, volume, spatial, bus);
+        }
+
+        void AudioSetBusVolume(Coral::String busName, float volume)
+        {
+            AudioBus bus;
+            if (OnMainThread("Audio.SetBusVolume") && FindAudioBus(std::string(busName), bus, "Audio.SetBusVolume"))
+                AudioEngine::SetBusVolume(bus, volume);
+        }
+
+        float AudioGetBusVolume(Coral::String busName)
+        {
+            AudioBus bus;
+            return FindAudioBus(std::string(busName), bus, "Audio.GetBusVolume") ? AudioEngine::GetBusVolume(bus) : 0.0f;
+        }
+
+        Entity FindAudioSourceEntity(uint64_t entityID)
+        {
+            if (!s_Scene) return {};
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            return entity && entity.HasComponent<AudioSourceComponent>() ? entity : Entity{};
+        }
+
+        void AudioSourcePlay(uint64_t entityID)
+        {
+            if (!OnMainThread("AudioSourceComponent.Play")) return;
+            if (Entity entity = FindAudioSourceEntity(entityID))
+                s_Scene->PlayAudioSource(entity);
+        }
+
+        void AudioSourceStop(uint64_t entityID, float fadeOut)
+        {
+            if (!OnMainThread("AudioSourceComponent.Stop")) return;
+            if (Entity entity = FindAudioSourceEntity(entityID))
+                s_Scene->StopAudioSource(entity, fadeOut);
+        }
+
+        Coral::Bool32 AudioSourceIsPlaying(uint64_t entityID)
+        {
+            Entity entity = FindAudioSourceEntity(entityID);
+            return entity && s_Scene->IsAudioSourcePlaying(entity);
+        }
+
+        float AudioSourceGetFloat(uint64_t entityID, int32_t field)
+        {
+            Entity entity = FindAudioSourceEntity(entityID);
+            if (!entity) return 0.0f;
+            const auto& source = entity.GetComponent<AudioSourceComponent>();
+            return field == 0 ? source.Volume : field == 1 ? source.Pitch : field == 2 ? (source.Loop ? 1.0f : 0.0f) : 0.0f;
+        }
+
+        // (applied to a playing sound by the next frame's Scene::UpdateAudio)
+        void AudioSourceSetFloat(uint64_t entityID, int32_t field, float value)
+        {
+            Entity entity = FindAudioSourceEntity(entityID);
+            if (!entity) return;
+            auto& source = entity.GetComponent<AudioSourceComponent>();
+            if (field == 0) source.Volume = std::max(value, 0.0f);
+            else if (field == 1) source.Pitch = std::max(value, 0.0f);
+            else if (field == 2) source.Loop = value != 0.0f;
+        }
+
+        // The clip it plays next (Play); false when there is no such sound.
+        Coral::Bool32 AudioSourceSetClip(uint64_t entityID, Coral::String path)
+        {
+            Entity entity = FindAudioSourceEntity(entityID);
+            if (!entity) return false;
+            const AssetHandle clip = FindAudioClip(std::string(path), "AudioSourceComponent.SetClip");
+            if (clip == 0) return false;
+            entity.GetComponent<AudioSourceComponent>().Clip = clip;
+            return true;
         }
 
         // The Character Controller 3D (Nox.CharacterControllerComponent): inputs are read by the next fixed physics
@@ -1127,6 +1235,15 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Timeline_GetTime", reinterpret_cast<void*>(&TimelineGetTime));
         assembly.AddInternalCall("Nox.InternalCalls", "Timeline_SetTime", reinterpret_cast<void*>(&TimelineSetTime));
         assembly.AddInternalCall("Nox.InternalCalls", "Timeline_SetSpeed", reinterpret_cast<void*>(&TimelineSetSpeed));
+        assembly.AddInternalCall("Nox.InternalCalls", "Audio_PlayOneShot", reinterpret_cast<void*>(&AudioPlayOneShot));
+        assembly.AddInternalCall("Nox.InternalCalls", "Audio_SetBusVolume", reinterpret_cast<void*>(&AudioSetBusVolume));
+        assembly.AddInternalCall("Nox.InternalCalls", "Audio_GetBusVolume", reinterpret_cast<void*>(&AudioGetBusVolume));
+        assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_Play", reinterpret_cast<void*>(&AudioSourcePlay));
+        assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_Stop", reinterpret_cast<void*>(&AudioSourceStop));
+        assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_IsPlaying", reinterpret_cast<void*>(&AudioSourceIsPlaying));
+        assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_GetFloat", reinterpret_cast<void*>(&AudioSourceGetFloat));
+        assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_SetFloat", reinterpret_cast<void*>(&AudioSourceSetFloat));
+        assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_SetClip", reinterpret_cast<void*>(&AudioSourceSetClip));
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_Play", reinterpret_cast<void*>(&ParticlesPlay));
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_Stop", reinterpret_cast<void*>(&ParticlesStop));
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_Emit", reinterpret_cast<void*>(&ParticlesEmit));

@@ -21,6 +21,8 @@
 #include "NoxCore/Math/Math.h"
 #include "NoxCore/Animation/Timeline.h"
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Audio/AudioClip.h"
+#include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Physics/Physics2D.h"
 #include "NoxCore/Physics/Physics3DScene.h"
 #include "NoxCore/Profiling/Profiler.h"
@@ -328,6 +330,7 @@ namespace Nox
         m_Registry.on_destroy<CollisionFilter3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
         m_Registry.on_construct<CharacterController3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
         m_Registry.on_destroy<CharacterController3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_destroy<AudioSourceComponent>().connect<&Scene::OnAudioSourceDestroyed>(*this);
 
         RegisterSystems();
     }
@@ -609,6 +612,9 @@ namespace Nox
         for (auto entity : m_Registry.view<TimelinePlayerComponent>())
             outHandles.insert(m_Registry.get<TimelinePlayerComponent>(entity).Timeline);
 
+        for (auto entity : m_Registry.view<AudioSourceComponent>())
+            outHandles.insert(m_Registry.get<AudioSourceComponent>(entity).Clip);
+
         for (auto entity : m_Registry.view<ParticleEmitterComponent>())
             outHandles.insert(m_Registry.get<ParticleEmitterComponent>(entity).Texture);
 
@@ -800,6 +806,8 @@ namespace Nox
                 player.Playing = player.PlayOnStart;
                 player.FiredEvents.clear();
             }
+            if (m_AudioRunning && entity.HasComponent<AudioSourceComponent>() && entity.GetComponent<AudioSourceComponent>().PlayOnStart)
+                entity.GetComponent<AudioSourceComponent>().PendingPlay = true; // (UpdateAudio: once its clip is in, if it is active)
             if (m_IsRunning && entity.HasComponent<ScriptComponent>())
                 m_PendingScriptStart.push_back(id);
             // A cell's roots: where they go when unloaded by hand, saved or their bounds are unknown.
@@ -1113,6 +1121,7 @@ namespace Nox
         OnPhysics3DStart();
         StartTimelines();
         StartParticles();
+        StartAudio();
         
         // Scripting
         {
@@ -1135,6 +1144,7 @@ namespace Nox
         m_TimelinesRunning = false;
         
         ScriptEngine::OnRuntimeStop();
+        StopAudio();
         OnPhysics2DStop();
         OnPhysics3DStop();
         // What the scripts built lives as long as the Play session.
@@ -1150,11 +1160,13 @@ namespace Nox
         OnPhysics3DStart();
         StartTimelines();
         StartParticles();
+        StartAudio();
     }
 
     void Scene::OnSimulationStop()
     {
         m_TimelinesRunning = false;
+        StopAudio();
         m_WorldStreaming = false;
         OnPhysics2DStop();
         OnPhysics3DStop();
@@ -1259,6 +1271,8 @@ namespace Nox
             cameraTransform = camera.GetComponent<WorldTransformComponent>().WorldMatrix;
         }
 
+        UpdateAudio(cameraTransform);
+
         if (mainCamera)
         {
             m_renderer->BeginScene(*mainCamera, cameraTransform);
@@ -1278,6 +1292,7 @@ namespace Nox
         }
         RunUpdateSystems(ts, step, step);
         SyncGpuScene();
+        UpdateAudio(glm::translate(glm::dmat4(1.0), camera.GetPosition()) * glm::dmat4(glm::toMat4(camera.GetOrientation())));
 
         m_renderer->BeginScene(camera);
         RunSubmitSystems();
@@ -1407,6 +1422,18 @@ namespace Nox
                 if (m_Registry.any_of<RigidBody3DComponent, CharacterController3DComponent, BoxCollider3DComponent, SphereCollider3DComponent,
                                       CapsuleCollider3DComponent, CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent>(entity))
                     OnPhysics3DComponentChanged(m_Registry, entity);
+                // Unity's AudioSource: switched off, it stops; switched on again in Play, a Play On Start one plays again.
+                if (auto* source = m_Registry.try_get<AudioSourceComponent>(entity))
+                {
+                    if (inactive)
+                    {
+                        AudioEngine::Stop(source->Voice);
+                        source->Voice = 0;
+                        source->PendingPlay = false;
+                    }
+                    else if (m_AudioRunning && source->PlayOnStart)
+                        source->PendingPlay = true;
+                }
             }
             if (const auto* relationship = m_Registry.try_get<RelationshipComponent>(entity))
             {
@@ -1746,6 +1773,166 @@ namespace Nox
             player.Playing = player.PlayOnStart;
             player.FiredEvents.clear();
         }
+    }
+
+    void Scene::StartAudio()
+    {
+        m_AudioRunning = true;
+        for (auto handle : m_Registry.view<AudioSourceComponent>(entt::exclude<InactiveInHierarchyComponent>))
+        {
+            if (m_Registry.get<AudioSourceComponent>(handle).PlayOnStart)
+                PlayAudioSource(Entity(handle, this));
+        }
+    }
+
+    void Scene::StopAudio()
+    {
+        if (!m_AudioRunning)
+            return;
+        m_AudioRunning = false;
+        // Every game voice: the sources' and the scripts' one-shots alike.
+        AudioEngine::StopGroup(AudioVoiceGroup::Game);
+        AudioEngine::SetGroupPaused(AudioVoiceGroup::Game, false);
+        m_PendingOneShots.clear();
+        for (auto handle : m_Registry.view<AudioSourceComponent>())
+        {
+            auto& source = m_Registry.get<AudioSourceComponent>(handle);
+            source.Voice = 0;
+            source.PendingPlay = false;
+        }
+    }
+
+    void Scene::PlayAudioSource(Entity entity)
+    {
+        if (!m_AudioRunning || !entity || !entity.HasComponent<AudioSourceComponent>() || m_Registry.all_of<InactiveInHierarchyComponent>(entity))
+            return;
+        auto& source = entity.GetComponent<AudioSourceComponent>();
+        // Unity's Play: from the start, also when it is playing.
+        AudioEngine::Stop(source.Voice);
+        source.Voice = 0;
+        source.PendingPlay = false;
+        if (source.Clip == 0 || AssetManager::GetAssetType(source.Clip) != AssetType::AudioClip)
+            return;
+        const AssetState state = AssetManager::RequestAsset(source.Clip);
+        if (state == AssetState::Failed)
+            return;
+        if (state != AssetState::Ready)
+        {
+            source.PendingPlay = true; // (UpdateAudio plays it once it is in)
+            return;
+        }
+        AudioPlayDesc desc;
+        desc.Clip = AssetManager::GetAsset<AudioClip>(source.Clip);
+        desc.Volume = source.Volume;
+        desc.Pitch = source.Pitch;
+        desc.Loop = source.Loop;
+        desc.Bus = source.Bus;
+        desc.Group = AudioVoiceGroup::Game;
+        desc.Spatial = source.Spatial;
+        desc.Spatialization = source.Spatialization;
+        if (const auto* world = m_Registry.try_get<WorldTransformComponent>(entity))
+            desc.Position = world->GetPosition();
+        else
+            desc.Position = entity.GetComponent<TransformComponent>().Translation;
+        source.Voice = AudioEngine::Play(desc);
+    }
+
+    void Scene::StopAudioSource(Entity entity, float fadeOutSeconds)
+    {
+        if (!entity || !entity.HasComponent<AudioSourceComponent>())
+            return;
+        auto& source = entity.GetComponent<AudioSourceComponent>();
+        AudioEngine::Stop(source.Voice, fadeOutSeconds);
+        source.Voice = 0;
+        source.PendingPlay = false;
+    }
+
+    bool Scene::IsAudioSourcePlaying(Entity entity) const
+    {
+        if (!entity || !entity.HasComponent<AudioSourceComponent>())
+            return false;
+        const auto& source = entity.GetComponent<AudioSourceComponent>();
+        return source.PendingPlay || AudioEngine::IsPlaying(source.Voice);
+    }
+
+    void Scene::PlayOneShot(AssetHandle clip, const glm::dvec3& position, float volume, bool spatial, AudioBus bus)
+    {
+        if (!m_AudioRunning || clip == 0 || AssetManager::GetAssetType(clip) != AssetType::AudioClip)
+            return;
+        PendingOneShot shot;
+        shot.Clip = clip;
+        shot.Desc.Volume = volume;
+        shot.Desc.Bus = bus;
+        shot.Desc.Group = AudioVoiceGroup::Game;
+        shot.Desc.Spatial = spatial;
+        shot.Desc.Position = position;
+        const AssetState state = AssetManager::RequestAsset(clip);
+        if (state == AssetState::Ready)
+        {
+            shot.Desc.Clip = AssetManager::GetAsset<AudioClip>(clip);
+            AudioEngine::Play(shot.Desc);
+        }
+        else if (state != AssetState::Failed)
+            m_PendingOneShots.push_back(std::move(shot));
+    }
+
+    void Scene::UpdateAudio(const glm::dmat4& cameraWorld)
+    {
+        if (!m_AudioRunning)
+            return;
+        NOX_PROFILE_SCOPE("Update Audio");
+        // Paused, the game's voices hold where they are (the UI bus plays on).
+        AudioEngine::SetGroupPaused(AudioVoiceGroup::Game, m_IsPaused);
+
+        glm::dmat4 listener = cameraWorld;
+        for (auto handle : m_Registry.view<AudioListenerComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>))
+        {
+            listener = m_Registry.get<WorldTransformComponent>(handle).WorldMatrix;
+            break;
+        }
+        // (the rotation without the scale)
+        const glm::mat3 basis(glm::normalize(glm::vec3(listener[0])), glm::normalize(glm::vec3(listener[1])), glm::normalize(glm::vec3(listener[2])));
+        AudioEngine::SetListener(glm::dvec3(listener[3]), glm::quat_cast(basis));
+
+        // One-shots whose clip has come in since.
+        std::erase_if(m_PendingOneShots, [](PendingOneShot& shot)
+        {
+            const AssetState state = AssetManager::RequestAsset(shot.Clip);
+            if (state == AssetState::Failed)
+                return true;
+            if (state != AssetState::Ready)
+                return false;
+            shot.Desc.Clip = AssetManager::GetAsset<AudioClip>(shot.Clip);
+            AudioEngine::Play(shot.Desc);
+            return true;
+        });
+
+        for (auto handle : m_Registry.view<AudioSourceComponent>(entt::exclude<InactiveInHierarchyComponent>))
+        {
+            auto& source = m_Registry.get<AudioSourceComponent>(handle);
+            if (source.PendingPlay)
+                PlayAudioSource(Entity(handle, this));
+            if (source.Voice == 0)
+                continue;
+            if (!AudioEngine::IsPlaying(source.Voice))
+            {
+                source.Voice = 0; // (a one-shot that ended)
+                continue;
+            }
+            // What the Inspector or a script changed while it plays.
+            if (const auto* world = m_Registry.try_get<WorldTransformComponent>(handle))
+                AudioEngine::SetPosition(source.Voice, world->GetPosition());
+            AudioEngine::SetVolume(source.Voice, source.Volume);
+            AudioEngine::SetPitch(source.Voice, source.Pitch);
+            AudioEngine::SetLoop(source.Voice, source.Loop);
+            AudioEngine::SetSpatialization(source.Voice, source.Spatialization);
+        }
+    }
+
+    void Scene::OnAudioSourceDestroyed(entt::registry& registry, entt::entity entity)
+    {
+        // Removed or its entity destroyed: its sound goes with it (Unity's).
+        AudioEngine::Stop(registry.get<AudioSourceComponent>(entity).Voice);
     }
 
     Entity Scene::FindTimelineTarget(Entity player, const std::string& path)
@@ -2517,7 +2704,7 @@ namespace Nox
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
             PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent,
-            FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
+            AudioSourceComponent, AudioListenerComponent, FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
             CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent, PhysicsJoint3DComponent, CollisionFilter3DComponent,
@@ -3109,6 +3296,19 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<ParticleEmitterComponent>(Entity entity, ParticleEmitterComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<AudioSourceComponent>(Entity entity, AudioSourceComponent& component)
+    {
+        // Added in Play (a script, the Inspector): a Play On Start source plays once it has a clip that has loaded.
+        if (m_AudioRunning && component.PlayOnStart)
+            component.PendingPlay = true;
+    }
+
+    template <>
+    void Scene::OnComponentAdded<AudioListenerComponent>(Entity entity, AudioListenerComponent& component)
     {
     }
 

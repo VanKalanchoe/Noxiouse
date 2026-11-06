@@ -243,6 +243,16 @@ namespace Nox
         bool IsFolderCollapsed(const std::string& path) const { return m_CollapsedFolders.contains(path); }
         void SetFolderCollapsed(const std::string& path, bool collapsed);
         const std::set<std::string>& GetCollapsedFolders() const { return m_CollapsedFolders; }
+
+        // Audio sources (AudioSourceComponent) in Play / Simulate: plays the entity's clip (from the start; once loaded, if it is not
+        // yet), or stops it with a fade. No-ops outside Play / Simulate and on switched-off entities.
+        void PlayAudioSource(Entity entity);
+        void StopAudioSource(Entity entity, float fadeOutSeconds = 0.0f);
+        bool IsAudioSourcePlaying(Entity entity) const;
+        bool IsAudioRunning() const { return m_AudioRunning; } // Play or Simulate
+        // A sound played once (Audio.PlayOneShot): at a point (3D, the default Min / Max Distance) or as the file is (2D); played as
+        // soon as the clip is loaded. Stopped with the rest when Play ends.
+        void PlayOneShot(AssetHandle clip, const glm::dvec3& position, float volume, bool spatial, AudioBus bus);
     private:
         template<typename T>
         void OnComponentAdded(Entity entity, T& component);
@@ -342,6 +352,13 @@ namespace Nox
         void StartParticles();
         void UpdateParticles();
         void SubmitParticles();
+        // Audio (docs/Audio_Architecture_Plan_2026.md): Play / Simulate start the Play On Start sources and stop every game voice at
+        // the end; each frame the listener (an AudioListenerComponent, else the camera) and the playing sources' positions and
+        // settings go to the AudioEngine, after the late update.
+        void StartAudio();
+        void StopAudio();
+        void UpdateAudio(const glm::dmat4& cameraWorld);
+        void OnAudioSourceDestroyed(entt::registry& registry, entt::entity entity);
 
         const std::vector<glm::mat4>* GetBoneTransforms(entt::entity entity, const glm::dmat4& meshWorld);
 
@@ -365,6 +382,14 @@ namespace Nox
         std::set<std::string> m_CollapsedFolders;
         bool m_IsRunning = false;
         bool m_TimelinesRunning = false; // Play or Simulate
+        bool m_AudioRunning = false;     // Play or Simulate
+        // One-shots asked for while their clip was loading (UpdateAudio plays them once it is in).
+        struct PendingOneShot
+        {
+            AssetHandle Clip = 0;
+            AudioPlayDesc Desc;
+        };
+        std::vector<PendingOneShot> m_PendingOneShots;
         std::vector<UUID> m_PendingDestroy;
         std::vector<UUID> m_PendingScriptStart;
         std::unordered_set<UUID> m_PendingPhysics3D;

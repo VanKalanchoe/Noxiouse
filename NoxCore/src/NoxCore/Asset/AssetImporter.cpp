@@ -16,6 +16,7 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
+#include "NoxCore/Audio/AudioClip.h"
 
 namespace Nox
 {
@@ -73,6 +74,13 @@ namespace Nox
                 return {};
             font->Handle = h;
             return Ref<Asset>(font);
+        }},
+        { AssetType::AudioClip, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
+            Ref<AudioClip> clip = AudioClip::Load(Project::GetActiveAssetDirectory() / meta.FilePath, meta.AudioSettings.LoadType);
+            if (!clip)
+                return {};
+            clip->Handle = h;
+            return Ref<Asset>(clip);
         }}
     };
     

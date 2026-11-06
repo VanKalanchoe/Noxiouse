@@ -273,6 +273,7 @@ NoxCore/vendors/*
 !NoxCore/vendors/JoltPhysics/
 !NoxCore/vendors/xatlas/
 !NoxCore/vendors/bcdec/
+!NoxCore/vendors/miniaudio/
 *.ntex
 *.nmesh
 *.hash

@@ -24,6 +24,7 @@
 #include "NoxCore/Renderer/Font.h"
 
 #include "NoxCore/Asset/Asset.h"
+#include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Scripting/ScriptTypes.h"
 #include "NoxCore/Renderer/DataTypes.h"
 
@@ -550,6 +551,43 @@ namespace Nox
         TimelinePlayerComponent(const TimelinePlayerComponent&) = default;
     };
 
+    // A sound on an entity (docs/Audio_Architecture_Plan_2026.md §4; Unity's AudioSource, Unreal's Audio Component): plays an Audio
+    // Clip in Play and Simulate -- from the start (Play On Start) or when a script calls Play -- at the entity's position, panned and
+    // attenuated around the listener (3D) or as the file is (2D: music, UI). Distances are in meters, whatever the world unit.
+    struct AudioSourceComponent
+    {
+        AssetHandle Clip = 0;
+        float Volume = 1.0f; // linear
+        float Pitch = 1.0f;  // playback rate
+        bool Loop = false;
+        bool PlayOnStart = true;
+        AudioBus Bus = AudioBus::SFX;
+        bool Spatial = true;
+        AudioSpatialSettings Spatialization; // Min / Max Distance, attenuation curve, Doppler
+
+        // Runtime only.
+        AudioVoiceHandle Voice = 0;
+        bool PendingPlay = false; // asked to play while its clip was still loading: plays once it is in
+
+        AudioSourceComponent() = default;
+        AudioSourceComponent(const AudioSourceComponent& other)
+            : Clip(other.Clip), Volume(other.Volume), Pitch(other.Pitch), Loop(other.Loop), PlayOnStart(other.PlayOnStart), Bus(other.Bus),
+              Spatial(other.Spatial), Spatialization(other.Spatialization) {} // (a copy does not share the original's playing voice)
+        AudioSourceComponent& operator=(const AudioSourceComponent& other)
+        {
+            Clip = other.Clip; Volume = other.Volume; Pitch = other.Pitch; Loop = other.Loop; PlayOnStart = other.PlayOnStart; Bus = other.Bus;
+            Spatial = other.Spatial; Spatialization = other.Spatialization;
+            return *this;
+        }
+    };
+
+    // The ears (Unity's AudioListener): usually on the player's camera. Without one, the primary camera listens (Play) or the editor
+    // camera (Simulate). With several, the first active one is used (split screen is later).
+    struct AudioListenerComponent
+    {
+        bool Listening = true; // (a member: entt keeps no instances of empty types)
+    };
+
     // A particle emitter (docs/Hybrid_Renderer_Plan_2026-10.md §6, V1 / V2): particles spawned around the entity and simulated on
     // the CPU (Scene/ParticleSystem.h: gravity, drag, spin), drawn as camera-facing quads -- a texture (a flipbook sheet of
     // columns x rows frames) or soft round dots -- added (fire, sparks) or alpha blended (smoke, dust), optionally lit by the
@@ -1069,7 +1107,7 @@ namespace Nox
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
         MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent,
-        TimelinePlayerComponent, ParticleEmitterComponent, SpriteRendererComponent,
+        TimelinePlayerComponent, AudioSourceComponent, AudioListenerComponent, ParticleEmitterComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,

@@ -712,6 +712,32 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (entity.HasComponent<AudioSourceComponent>())
+        {
+            const auto& source = entity.GetComponent<AudioSourceComponent>();
+            out << YAML::Key << "AudioSourceComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Clip" << YAML::Value << source.Clip;
+            out << YAML::Key << "Volume" << YAML::Value << source.Volume;
+            out << YAML::Key << "Pitch" << YAML::Value << source.Pitch;
+            out << YAML::Key << "Loop" << YAML::Value << source.Loop;
+            out << YAML::Key << "PlayOnStart" << YAML::Value << source.PlayOnStart;
+            out << YAML::Key << "Bus" << YAML::Value << std::string(AudioBusToString(source.Bus));
+            out << YAML::Key << "Spatial" << YAML::Value << source.Spatial;
+            out << YAML::Key << "MinDistance" << YAML::Value << source.Spatialization.MinDistance;
+            out << YAML::Key << "MaxDistance" << YAML::Value << source.Spatialization.MaxDistance;
+            out << YAML::Key << "Attenuation" << YAML::Value << std::string(AudioAttenuationToString(source.Spatialization.Attenuation));
+            out << YAML::Key << "DopplerLevel" << YAML::Value << source.Spatialization.DopplerLevel;
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<AudioListenerComponent>())
+        {
+            out << YAML::Key << "AudioListenerComponent";
+            out << YAML::BeginMap;
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<LevelStreamingVolumeComponent>())
         {
             const auto& volume = entity.GetComponent<LevelStreamingVolumeComponent>();
@@ -2231,6 +2257,36 @@ namespace Nox
             if (timelinePlayer["Speed"])
                 player.Speed = timelinePlayer["Speed"].as<float>();
         }
+
+        if (auto audioSource = entity["AudioSourceComponent"])
+        {
+            auto& source = deserializedEntity.AddComponent<AudioSourceComponent>();
+            if (audioSource["Clip"])
+                source.Clip = audioSource["Clip"].as<AssetHandle>();
+            if (audioSource["Volume"])
+                source.Volume = audioSource["Volume"].as<float>();
+            if (audioSource["Pitch"])
+                source.Pitch = audioSource["Pitch"].as<float>();
+            if (audioSource["Loop"])
+                source.Loop = audioSource["Loop"].as<bool>();
+            if (audioSource["PlayOnStart"])
+                source.PlayOnStart = audioSource["PlayOnStart"].as<bool>();
+            if (audioSource["Bus"])
+                source.Bus = AudioBusFromString(audioSource["Bus"].as<std::string>());
+            if (audioSource["Spatial"])
+                source.Spatial = audioSource["Spatial"].as<bool>();
+            if (audioSource["MinDistance"])
+                source.Spatialization.MinDistance = audioSource["MinDistance"].as<float>();
+            if (audioSource["MaxDistance"])
+                source.Spatialization.MaxDistance = audioSource["MaxDistance"].as<float>();
+            if (audioSource["Attenuation"])
+                source.Spatialization.Attenuation = AudioAttenuationFromString(audioSource["Attenuation"].as<std::string>());
+            if (audioSource["DopplerLevel"])
+                source.Spatialization.DopplerLevel = audioSource["DopplerLevel"].as<float>();
+        }
+
+        if (entity["AudioListenerComponent"])
+            deserializedEntity.AddComponent<AudioListenerComponent>();
 
         if (auto levelVolume = entity["LevelStreamingVolumeComponent"])
         {

@@ -184,5 +184,14 @@ namespace Nox
         };
         std::vector<UnusedEntry> m_UnusedAssets;
         bool m_OpenUnusedDialog = false;
+
+        // Sound preview (a clip's play button, or a double-click): plays the clip once through the editor's own voices (the Editor
+        // group: Play / Stop leave it alone), as Unreal's thumbnail play button does. Clicking again, or another clip, stops it.
+        void ToggleAudioPreview(AssetHandle clip);
+        void UpdateAudioPreview();
+        bool IsPreviewing(AssetHandle clip) const;
+        AssetHandle m_PreviewClip = 0;
+        uint64_t m_PreviewVoice = 0; // AudioVoiceHandle
+        bool m_PreviewPending = false; // waiting for the clip to load
     };
 };

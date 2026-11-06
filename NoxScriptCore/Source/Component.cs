@@ -8,7 +8,8 @@ internal enum ComponentType
     RigidBody3D = 4,
     TimelinePlayer = 5,
     ParticleEmitter = 6,
-    Mesh = 7
+    Mesh = 7,
+    AudioSource = 8
 }
 
 public abstract class Component

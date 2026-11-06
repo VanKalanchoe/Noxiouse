@@ -22,6 +22,7 @@ namespace Nox
         case AssetType::Timeline: return "AssetType::Timeline";
         case AssetType::Prefab: return "AssetType::Prefab";
         case AssetType::Font: return "AssetType::Font";
+        case AssetType::AudioClip: return "AssetType::AudioClip";
         }
 
         return "AssetType::<Invalid>";
@@ -45,6 +46,7 @@ namespace Nox
         if (assetType == "AssetType::Timeline") return AssetType::Timeline;
         if (assetType == "AssetType::Prefab") return AssetType::Prefab;
         if (assetType == "AssetType::Font") return AssetType::Font;
+        if (assetType == "AssetType::AudioClip") return AssetType::AudioClip;
 
         return AssetType::None;
     }

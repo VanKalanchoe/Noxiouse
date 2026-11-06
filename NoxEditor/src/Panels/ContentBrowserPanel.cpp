@@ -20,6 +20,8 @@
 #include "NoxCore/Asset/NodeGraphSerializer.h"
 #include "NoxCore/Asset/TextureImporter.h"
 #include "NoxCore/Asset/TimelineImporter.h"
+#include "NoxCore/Audio/AudioClip.h"
+#include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Utils/Utils.h"
@@ -78,6 +80,40 @@ namespace Nox
             return;
 
         const auto extension = path.extension().string();
+        // A sound or a font: the file itself is the asset (Godot's way). Copied into the open folder when it comes from outside the
+        // project, then registered.
+        {
+            std::string lower = extension;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            const AssetType type = EditorAssetManager::GetAssetTypeFromExtension(lower);
+            if (type == AssetType::AudioClip || type == AssetType::Font)
+            {
+                std::error_code error;
+                const auto assetRoot = std::filesystem::weakly_canonical(m_BaseDirectory, error);
+                auto sourcePath = std::filesystem::weakly_canonical(path, error);
+                if (error)
+                    return;
+                auto relativePath = sourcePath.lexically_relative(assetRoot);
+                const bool isInsideProject = !relativePath.empty() && relativePath != "." && relativePath.generic_string().rfind("..", 0) != 0;
+                if (!isInsideProject)
+                {
+                    const auto destination = m_CurrentDirectory / path.filename();
+                    std::filesystem::copy_file(sourcePath, destination, std::filesystem::copy_options::overwrite_existing, error);
+                    if (error)
+                    {
+                        NOX_CORE_ERROR("Could not copy {} into the project: {}", path.generic_string(), error.message());
+                        return;
+                    }
+                    relativePath = destination.lexically_relative(m_BaseDirectory);
+                }
+                auto* assets = m_Project->GetEditorAssetManager().get();
+                if (!assets->FindHandleByPath(relativePath.lexically_normal(), type))
+                    assets->RegisterExistingFile(relativePath.lexically_normal(), type);
+                RefreshAssetTree();
+                return;
+            }
+        }
+
         if (extension == ".nox")
         {
             std::error_code error;
@@ -219,6 +255,7 @@ namespace Nox
 
     void ContentBrowserPanel::OnImGuiRender()
     {
+        UpdateAudioPreview();
         ImGui::Begin("Content Browser");
         m_WindowHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup | ImGuiHoveredFlags_ChildWindows);
 
@@ -709,6 +746,43 @@ namespace Nox
                             ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(imageMin.x, imageMax.y - bar), imageMax, ImGui::GetColorU32(prefabColor));
                         }
 
+                        // A sound: a play / stop button on its thumbnail, and its format in the tooltip.
+                        bool overAudioButton = false;
+                        if (metadata.Type == AssetType::AudioClip)
+                        {
+                            const ImVec2 imageMin = ImGui::GetItemRectMin();
+                            const ImVec2 imageMax = ImGui::GetItemRectMax();
+                            const float radius = std::max(10.0f, m_ThumbnailSize * 0.14f);
+                            const ImVec2 center(imageMin.x + radius + 4.0f, imageMax.y - radius - 4.0f);
+                            const bool playing = IsPreviewing(handle);
+                            const bool overButton = ImGui::IsMouseHoveringRect(ImVec2(center.x - radius, center.y - radius),
+                                                                               ImVec2(center.x + radius, center.y + radius)) &&
+                                                    ImGui::IsWindowHovered();
+                            ImDrawList* drawList = ImGui::GetWindowDrawList();
+                            drawList->AddCircleFilled(center, radius, overButton ? IM_COL32(60, 120, 220, 230) : IM_COL32(20, 20, 20, 200), 24);
+                            const float glyph = radius * 0.45f;
+                            if (playing)
+                                drawList->AddRectFilled(ImVec2(center.x - glyph, center.y - glyph), ImVec2(center.x + glyph, center.y + glyph), IM_COL32_WHITE);
+                            else
+                                drawList->AddTriangleFilled(ImVec2(center.x - glyph * 0.8f, center.y - glyph), ImVec2(center.x - glyph * 0.8f, center.y + glyph),
+                                                            ImVec2(center.x + glyph * 1.1f, center.y), IM_COL32_WHITE);
+                            overAudioButton = overButton;
+                            if (overButton && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                                ToggleAudioPreview(handle);
+                            if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+                            {
+                                const AudioLoadType loadType = metadata.AudioSettings.LoadType;
+                                if (const AudioClip* clip = AssetManager::FindLoadedAsset<AudioClip>(handle))
+                                    ImGui::SetTooltip("%s\n%.2f s, %s, %u Hz\nLoad Type: %s%s", browserEntry.Name.c_str(), clip->GetDuration(),
+                                                      clip->GetChannels() == 2 ? "stereo" : "mono", clip->GetSampleRate(),
+                                                      std::string(AudioLoadTypeToString(clip->GetLoadType())).c_str(),
+                                                      loadType == AudioLoadType::Auto ? " (Auto)" : "");
+                                else
+                                    ImGui::SetTooltip("%s\nLoad Type: %s\n(play it once to see its length and format)", browserEntry.Name.c_str(),
+                                                      std::string(AudioLoadTypeToString(loadType)).c_str());
+                            }
+                        }
+
                         // A mesh's size (its bounds, in meters and the project's units): what the importer scale made of it.
                         if ((metadata.Type == AssetType::StaticMesh || metadata.Type == AssetType::Mesh) &&
                             ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
@@ -799,7 +873,12 @@ namespace Nox
 
                         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                         {
-                            if (metadata.Type == AssetType::MeshSource)
+                            if (metadata.Type == AssetType::AudioClip)
+                            {
+                                if (!overAudioButton) // (its clicks already toggled it)
+                                    ToggleAudioPreview(handle);
+                            }
+                            else if (metadata.Type == AssetType::MeshSource)
                             {
                                 m_PendingImportPath = metadata.FilePath;
                                 m_ShowImportModal = true;
@@ -1190,7 +1269,8 @@ namespace Nox
         // a moved one under its old handle (EditorAssetManager::ScanAndRegisterNewAssets), so it shows and can be dragged.
         for (const auto& entry : std::filesystem::directory_iterator(m_CurrentDirectory, error))
         {
-            static const std::unordered_set<std::string> kSelfContained = { ".nox", ".nmat", ".nanimgraph", ".nprefab", ".ntimeline" };
+            static const std::unordered_set<std::string> kSelfContained = { ".nox", ".nmat", ".nanimgraph", ".nprefab", ".ntimeline",
+                                                                            ".ttf", ".otf", ".wav", ".ogg", ".flac", ".mp3" };
             const auto relativePath = entry.path().lexically_relative(m_BaseDirectory).lexically_normal().generic_string();
             if (entry.is_regular_file() && kSelfContained.contains(entry.path().extension().string()) && !handleOfPath.contains(relativePath))
             {
@@ -1253,6 +1333,45 @@ namespace Nox
         m_PendingMoveFolder = folder;
     }
 
+    bool ContentBrowserPanel::IsPreviewing(AssetHandle clip) const
+    {
+        return m_PreviewClip == clip && (m_PreviewPending || AudioEngine::IsPlaying(m_PreviewVoice));
+    }
+
+    void ContentBrowserPanel::ToggleAudioPreview(AssetHandle clip)
+    {
+        const bool wasThis = IsPreviewing(clip);
+        AudioEngine::Stop(m_PreviewVoice, 0.05f);
+        m_PreviewVoice = 0;
+        m_PreviewPending = false;
+        m_PreviewClip = 0;
+        if (wasThis)
+            return;
+        m_PreviewClip = clip;
+        m_PreviewPending = true;
+        UpdateAudioPreview();
+    }
+
+    void ContentBrowserPanel::UpdateAudioPreview()
+    {
+        if (!m_PreviewPending)
+            return;
+        const AssetState state = AssetManager::RequestAsset(m_PreviewClip);
+        if (state == AssetState::Failed)
+        {
+            m_PreviewPending = false;
+            return;
+        }
+        if (state != AssetState::Ready)
+            return;
+        m_PreviewPending = false;
+        AudioPlayDesc desc;
+        desc.Clip = AssetManager::GetAsset<AudioClip>(m_PreviewClip);
+        desc.Bus = AudioBus::Master;
+        desc.Group = AudioVoiceGroup::Editor;
+        m_PreviewVoice = AudioEngine::Play(desc);
+    }
+
     void ContentBrowserPanel::DrawAssetContextMenu(AssetHandle handle, const AssetMetadata& metadata)
     {
         auto* assets = m_Project->GetEditorAssetManager().get();
@@ -1271,6 +1390,32 @@ namespace Nox
         const bool duplicable = metadata.Type == AssetType::AnimationGraph || metadata.Type == AssetType::Material;
         if (ImGui::MenuItem("Duplicate", nullptr, false, m_Selected.size() == 1 && duplicable))
             DuplicateAsset(handle);
+        if (metadata.Type == AssetType::AudioClip)
+        {
+            if (ImGui::MenuItem(IsPreviewing(handle) ? "Stop" : "Play"))
+                ToggleAudioPreview(handle);
+            // Unity's Load Type: how the selected sounds are held while they play.
+            if (ImGui::BeginMenu("Load Type"))
+            {
+                constexpr AudioLoadType kTypes[] = { AudioLoadType::Auto, AudioLoadType::DecompressOnLoad, AudioLoadType::CompressedInMemory,
+                                                     AudioLoadType::Streaming };
+                constexpr const char* kNames[] = { "Auto (decompress up to 5 s, stream longer)", "Decompress On Load", "Compressed In Memory",
+                                                   "Streaming" };
+                for (size_t i = 0; i < std::size(kTypes); ++i)
+                {
+                    if (ImGui::MenuItem(kNames[i], nullptr, metadata.AudioSettings.LoadType == kTypes[i]))
+                    {
+                        for (AssetHandle selected : m_Selected)
+                        {
+                            if (assets->GetAssetType(selected) == AssetType::AudioClip)
+                                assets->SetAudioImportSettings(selected, { kTypes[i] });
+                        }
+                        RefreshAssetTree(); // (the tiles hold copies of the metadata)
+                    }
+                }
+                ImGui::EndMenu();
+            }
+        }
         if (metadata.Type == AssetType::Prefab && ImGui::MenuItem("Create Variant"))
         {
             m_HasVariantRequest = true;

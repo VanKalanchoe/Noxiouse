@@ -1139,6 +1139,8 @@ namespace Nox
 
             DisplayAddComponentEntry<AnimatorComponent>("Animator");
             DisplayAddComponentEntry<TimelinePlayerComponent>("Timeline Player");
+            DisplayAddComponentEntry<AudioSourceComponent>("Audio Source");
+            DisplayAddComponentEntry<AudioListenerComponent>("Audio Listener");
             DisplayAddComponentEntry<LevelStreamingVolumeComponent>("Level Streaming Volume");
             DisplayAddComponentEntry<WorldPartitionComponent>("World Partition");
             DisplayAddComponentEntry<WorldStreamingSourceComponent>("World Streaming Source");
@@ -2361,6 +2363,106 @@ namespace Nox
             ImGui::DragFloat("Speed", &component.Speed, 0.01f, -10.0f, 10.0f, "%.2fx");
             if (component.Playing)
                 ImGui::TextDisabled("Playing: %.2f s", component.Time);
+        });
+
+        DrawComponent<AudioSourceComponent>("Audio Source", entity, [this, entity](auto& component)
+        {
+            // The clip: a sound file in the project (drop one from the Content Browser).
+            const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
+            const std::string current = component.Clip != 0 && registry.contains(component.Clip)
+                ? registry.at(component.Clip).FilePath.filename().string() : std::string("None");
+            if (ImGui::BeginCombo("Clip", current.c_str()))
+            {
+                if (ImGui::Selectable("None", component.Clip == 0))
+                    component.Clip = 0;
+                for (const auto& [handle, metadata] : registry)
+                {
+                    if (metadata.Type != AssetType::AudioClip)
+                        continue;
+                    ImGui::PushID(static_cast<int>(static_cast<uint64_t>(handle) & 0x7fffffff));
+                    if (ImGui::Selectable(metadata.FilePath.filename().string().c_str(), component.Clip == handle))
+                        component.Clip = handle;
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+                        ImGui::SetTooltip("%s", metadata.FilePath.generic_string().c_str());
+                    ImGui::PopID();
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    const AssetHandle handle = *static_cast<const AssetHandle*>(payload->Data);
+                    if (AssetManager::GetAssetType(handle) == AssetType::AudioClip)
+                        component.Clip = handle;
+                }
+                ImGui::EndDragDropTarget();
+            }
+
+            ImGui::SliderFloat("Volume", &component.Volume, 0.0f, 1.0f, "%.2f");
+            ImGui::DragFloat("Pitch", &component.Pitch, 0.01f, 0.1f, 4.0f, "%.2fx");
+            ImGui::SetItemTooltip("Playback rate: 2 is an octave up and twice as fast, 0.5 an octave down.");
+            ImGui::Checkbox("Loop", &component.Loop);
+            ImGui::Checkbox("Play On Start", &component.PlayOnStart);
+            ImGui::SetItemTooltip("Plays when Play or Simulate starts, or when the entity is switched on in Play (else a script calls Play).");
+
+            constexpr AudioBus kBuses[] = { AudioBus::SFX, AudioBus::Music, AudioBus::Voice, AudioBus::Ambience, AudioBus::UI, AudioBus::Master };
+            if (ImGui::BeginCombo("Bus", std::string(AudioBusToString(component.Bus)).c_str()))
+            {
+                for (AudioBus bus : kBuses)
+                {
+                    if (ImGui::Selectable(std::string(AudioBusToString(bus)).c_str(), component.Bus == bus))
+                        component.Bus = bus;
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SetItemTooltip("The mixer bus it plays into: each has a volume (Audio.SetBusVolume), all go into Master. UI keeps playing while the game is paused.");
+
+            ImGui::Checkbox("3D", &component.Spatial);
+            ImGui::SetItemTooltip("3D: panned and attenuated around the listener, with Doppler. 2D: as the file is (music, UI).");
+            if (component.Spatial)
+            {
+                AudioSpatialSettings& spatial = component.Spatialization;
+                ImGui::DragFloat("Min Distance", &spatial.MinDistance, 0.05f, 0.01f, 10000.0f, "%.2f m");
+                ImGui::SetItemTooltip("Full volume up to here.");
+                ImGui::DragFloat("Max Distance", &spatial.MaxDistance, 0.5f, 0.02f, 100000.0f, "%.1f m");
+                ImGui::SetItemTooltip("Silent from here.");
+                spatial.MinDistance = std::max(spatial.MinDistance, 0.01f);
+                spatial.MaxDistance = std::max(spatial.MaxDistance, spatial.MinDistance + 0.01f);
+                constexpr AudioAttenuation kCurves[] = { AudioAttenuation::Inverse, AudioAttenuation::InverseSquare, AudioAttenuation::Linear, AudioAttenuation::None };
+                constexpr const char* kCurveNames[] = { "Inverse", "Inverse Square", "Linear", "None" };
+                int curve = static_cast<int>(spatial.Attenuation);
+                if (ImGui::Combo("Attenuation", &curve, kCurveNames, IM_ARRAYSIZE(kCurveNames)))
+                    spatial.Attenuation = kCurves[curve];
+                ImGui::SetItemTooltip("Inverse: as a sound falls off in the open (-6 dB per doubling of distance). Inverse Square: faster, stays local.\n"
+                                      "Linear: straight from full to silent. None: no falloff. All reach silence at Max Distance.");
+                ImGui::DragFloat("Doppler Level", &spatial.DopplerLevel, 0.01f, 0.0f, 5.0f, "%.2f");
+                ImGui::SetItemTooltip("The pitch shift of moving sounds: 0 off, 1 physical (speed of sound 343 m/s).");
+            }
+
+            // In Play / Simulate: try it out.
+            if (m_Context->IsAudioRunning())
+            {
+                const bool playing = m_Context->IsAudioSourcePlaying(entity);
+                if (ImGui::Button(playing ? "Stop" : "Play"))
+                {
+                    if (playing)
+                        m_Context->StopAudioSource(entity, 0.05f);
+                    else
+                        m_Context->PlayAudioSource(entity);
+                }
+                if (playing)
+                {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("playing");
+                }
+            }
+        });
+
+        DrawComponent<AudioListenerComponent>("Audio Listener", entity, [](auto&)
+        {
+            ImGui::TextWrapped("The ears of the game's sound: put it on the player's camera. Without one, the primary camera listens "
+                               "(Simulate: the editor camera).");
         });
 
         DrawComponent<LevelStreamingVolumeComponent>("Level Streaming Volume", entity, [this](auto& component)

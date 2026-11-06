@@ -2810,6 +2810,38 @@ namespace Nox
             }
         }
 
+        // The selected sound's attenuation spheres (Unreal's): full volume inside Min Distance (light blue), silent past Max (dark blue).
+        if (m_SceneState != SceneState::Play)
+        {
+            Entity selected = m_SceneHierarchyPanel.GetSelectedEntity();
+            if (selected && selected.HasComponent<AudioSourceComponent>() && selected.HasComponent<WorldTransformComponent>() &&
+                selected.GetComponent<AudioSourceComponent>().Spatial)
+            {
+                const auto& source = selected.GetComponent<AudioSourceComponent>();
+                const glm::vec3 centre = glm::vec3(m_Renderer->ToRenderSpace(selected.GetComponent<WorldTransformComponent>().WorldMatrix)[3]);
+                auto sphere = [&](float meters, const glm::vec4& colour)
+                {
+                    const float radius = WorldUnits::FromMeters(meters);
+                    constexpr int Segments = 48;
+                    for (int axis = 0; axis < 3; ++axis)
+                    {
+                        const int a = (axis + 1) % 3, b = (axis + 2) % 3;
+                        for (int i = 0; i < Segments; ++i)
+                        {
+                            const float t0 = glm::two_pi<float>() * static_cast<float>(i) / Segments;
+                            const float t1 = glm::two_pi<float>() * static_cast<float>(i + 1) / Segments;
+                            glm::vec3 p0 = centre, p1 = centre;
+                            p0[a] += std::cos(t0) * radius; p0[b] += std::sin(t0) * radius;
+                            p1[a] += std::cos(t1) * radius; p1[b] += std::sin(t1) * radius;
+                            m_Renderer2D->DrawXRayLine(p0, p1, colour);
+                        }
+                    }
+                };
+                sphere(source.Spatialization.MinDistance, glm::vec4(0.55f, 0.85f, 1.0f, 0.9f));
+                sphere(source.Spatialization.MaxDistance, glm::vec4(0.2f, 0.4f, 1.0f, 0.7f));
+            }
+        }
+
         // Level Streaming Volumes: their boxes while editing and simulating (Unreal shows its volumes in the editor), in orange.
         if (m_SceneState != SceneState::Play)
         {

@@ -34,7 +34,7 @@ The setup scripts target Windows with Visual Studio 2026 and ClangCL.
 1. Install the **Vulkan SDK 1.4.350 or newer** (CMake requires it) and the **.NET 9 SDK** (the editor build runs
    `dotnet build` for `NoxScriptCore` and the Facerun scripts).
 2. Fetch the git submodules in `NoxCore/vendors/` (taskflow, imgui, ImGuizmo, tinygltf, meshoptimizer, msdf-atlas-gen,
-   JoltPhysics, tracy, OffsetAllocator, bc7enc_rdo, VulkanMemoryAllocator-Hpp).
+   JoltPhysics, tracy, OffsetAllocator, bc7enc_rdo, VulkanMemoryAllocator-Hpp, xatlas, bcdec, miniaudio): `git submodule update --init`.
 3. Run `scripts/install_windows_dependencies.bat`. It installs vcpkg into `NoxCore/vendors/vcpkg` and the vcpkg packages
    (SDL3, GLM, EnTT, spdlog, xxHash, yaml-cpp, Box2D, stb, KTX, tinyobjloader, ...), and downloads Slang, NVIDIA Streamline,
    NRD, the RTXDI library and filewatch into `NoxCore/vendors/`.

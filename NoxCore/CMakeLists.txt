@@ -124,6 +124,12 @@ set(XATLAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/xatlas/source/xatlas")
 set(XATLAS_SOURCES "${XATLAS_DIR}/xatlas.cpp")
 set(BCDEC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/bcdec")
 
+# Audio (docs/Audio_Architecture_Plan_2026.md): miniaudio for the output device, the decoders (WAV, FLAC, MP3, and Ogg Vorbis through
+# its bundled stb_vorbis) and the lock-free ring buffers. Compiled once, as C, in src/NoxCore/Audio/MiniaudioImpl.c; the voices,
+# buses and spatialization are the engine's own, so miniaudio's engine, node graph, resource manager, encoders and generators are off.
+set(MINIAUDIO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/miniaudio")
+set(MINIAUDIO_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/NoxCore/Audio/MiniaudioImpl.c")
+
 # Set up Vulkan C++ module only if enabled
 if(ENABLE_CPP20_MODULE)
   add_library(VulkanCppModule)
@@ -178,13 +184,13 @@ file(GLOB_RECURSE NOXCORE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
-add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${IMGUI_NODE_EDITOR_SOURCES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES} ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${XATLAS_SOURCES} ${RTXDI_SOURCES}) #main file here
+add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${IMGUI_NODE_EDITOR_SOURCES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES} ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${XATLAS_SOURCES} ${RTXDI_SOURCES} ${MINIAUDIO_SOURCES}) #main file here
 
 # Precompiled header (src/NoxPCH.h): the standard library and the third-party headers most files include, parsed once instead of in
 # every source file. The vendors' own sources compiled into this library build without it (their own configuration macros).
 target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/NoxPCH.h")
 set_source_files_properties(${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${IMGUI_NODE_EDITOR_SOURCES} ${MESHOPTIMIZER_SOURCES}
-                            ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${XATLAS_SOURCES} ${RTXDI_SOURCES}
+                            ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${XATLAS_SOURCES} ${RTXDI_SOURCES} ${MINIAUDIO_SOURCES}
                             PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
 # slang.dll is delay-loaded: it is only loaded when a shader has to be compiled (SlangCompiler::ensureSession), so a packaged game
@@ -210,6 +216,13 @@ target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${IMGUIZM
 # Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR} ${OFFSETALLOCATOR_DIR} ${BC7ENC_DIR} ${XATLAS_DIR} ${BCDEC_DIR} ${STREAMLINE_INCLUDE_DIR} ${NRD_INCLUDE_DIR} ${NRD_INTEGRATION_DIR} ${RTXDI_INCLUDE_DIR} ${RTXDI_SHADERS_DIR})
 target_include_directories(${PROJECT_NAME} PRIVATE ${CLUSTERLOD_DIR})
+target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${MINIAUDIO_DIR})
+target_compile_definitions(${PROJECT_NAME} PRIVATE MA_NO_ENCODING MA_NO_GENERATION MA_NO_ENGINE MA_NO_NODE_GRAPH MA_NO_RESOURCE_MANAGER)
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE avrt) # MMCSS ("Pro Audio") for the audio mixer thread
+else()
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${CMAKE_DL_LIBS}) # miniaudio loads the platform's audio backend at run time
+endif()
 
 # Add compile definition if C++ 20 module is enabled
 if(ENABLE_CPP20_MODULE)

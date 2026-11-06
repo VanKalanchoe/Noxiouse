@@ -29,7 +29,9 @@ namespace Nox
 
         Timeline, // Animation/Timeline.h: a sequencer timeline (.ntimeline), played by TimelinePlayerComponent
 
-        Font // Renderer/Font.h: a TrueType / OpenType font (.ttf, .otf), drawn by TextComponent
+        Font, // Renderer/Font.h: a TrueType / OpenType font (.ttf, .otf), drawn by TextComponent
+
+        AudioClip // Audio/AudioClip.h: a sound file (.wav, .ogg, .flac, .mp3), played by AudioSourceComponent
     };
 
     // Where an asset is on its way into memory (§5.11.2). A request starts the load once; the asset is usable when Ready.

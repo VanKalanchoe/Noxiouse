@@ -1,8 +1,8 @@
 # Audio and the Audio Graph -- architecture plan (2026-11-06)
 
-> Status: plan only, nothing built. Backlog C4 ("audio graph", on hold). The engine has no audio at all today; this plan covers the
-> whole audio system the graph needs, not just the graph. Phase gates as in the other plans: each phase is built, then tested by the
-> user, before the next one starts.
+> Status: **A1 Core built (2026-11-06)**, waiting for the user's test before A2 (see §11 "A1 as built"). Backlog C4. This plan covers
+> the whole audio system the graph needs, not just the graph. Phase gates as in the other plans: each phase is built, then tested by
+> the user, before the next one starts.
 
 ---
 
@@ -71,6 +71,13 @@ Audio thread (one block every 256 frames at 48 kHz = 5.3 ms)
 
 Import: drag a `.wav` / `.ogg` into the Content Browser like a texture; the import dialog picks Load Type, compression and quality.
 Cooking for packages: compressed to Vorbis / Opus, streamed ones split for reading in chunks through the IO workers.
+
+**As built in A1:** the Audio Clip is the sound file itself (`.wav` / `.ogg` / `.flac` / `.mp3`), as Godot keeps Ogg and MP3 -- no
+`.naudio` cook. Its **Load Type** (Auto / Decompress On Load / Compressed In Memory / Streaming, Unity's three plus Auto at Unreal's 5 s
+decompression threshold) is an import setting in the asset registry, like a texture's compression (Content Browser > right-click > Load
+Type). Packages ship the file as it is (Ogg / MP3 / FLAC are already compressed, WAV is the uncompressed choice for short sounds); a
+streamed clip is read in 64 KB chunks through the VFS, from the loose file or from `Content.npak`. Loop points, cue markers and the
+Impulse Response flag come with the assets that use them (A2 Wave Player, A3 convolution reverb), in a `.naudio` sidecar then.
 
 ---
 
@@ -282,8 +289,11 @@ buses side by side as channel strips**, like a mixing desk:
   - The mixer thread runs at high OS priority (MMCSS "Pro Audio" on Windows) and mixes **1-2 blocks ahead into a ring buffer**; the
     device callback (miniaudio's) only copies out of it and never mixes, so an occasionally expensive block does not glitch (~5 ms of
     added latency, inaudible for games; Unreal does the same).
-  - The work without a deadline stays on the JobSystem: decoding streams (IO workers, into ring buffers the mixer reads), Steam Audio's
-    ray casts and bakes (workers), loading. They talk to the mixer thread through lock-free queues.
+  - The work without a deadline stays off the mixer thread: Steam Audio's ray casts and bakes (JobSystem workers), loading (the asset
+    loader's jobs). They talk to the mixer thread through lock-free queues. **Decoding streams** runs on a second, normal-priority thread
+    of the audio engine, the **stream thread** (FMOD's and Wwise's stream threads): it refills each streamed voice's ring buffer within
+    10 ms of it draining, whatever the frame is doing -- JobSystem IO jobs are scheduled from the game thread, so a 2-second hitch
+    there (a level load) would starve every stream. (As built in A1.)
   - Should 64 voices ever not fit one thread, the mixer thread gets helpers of its own, still apart from the frame's workers.
 - **Game -> audio:** a lock-free command queue (play, stop, parameter, trigger, position updates once per frame per moving source);
   **audio -> game:** events back (On Finished, cue markers) delivered to scripts on the main thread like animation notifies.
@@ -303,20 +313,22 @@ buses side by side as channel strips**, like a mixing desk:
 ## 9. Scripting (C#)
 
 ```csharp
-Audio.PlayOneShot("Sounds/Explosion", position);          // fire and forget, 3D at a point
-Audio.PlayOneShot2D("Sounds/UI_Click");                   // UI, no position
+Audio.PlayOneShot("Sounds/Explosion", position);          // fire and forget, 3D at a point            (A1)
+Audio.PlayOneShot2D("Sounds/UI_Click");                   // UI bus, no position                       (A1)
 
-AudioSource engine = GetComponent<AudioSourceComponent>();
-engine.Play();  engine.Stop(fadeOut: 0.5f);
-engine.SetFloat("RPM", rpm);  engine.Trigger("Backfire");
-engine.Volume = 0.8f;  engine.Pitch = 1.1f;
-bool playing = engine.IsPlaying;
+AudioSourceComponent engine = GetComponent<AudioSourceComponent>();
+engine.Play();  engine.Stop(fadeOut: 0.5f);               //                                           (A1)
+engine.Volume = 0.8f;  engine.Pitch = 1.1f;  engine.Loop = true;  engine.SetClip("Sounds/Idle");    // (A1)
+bool playing = engine.IsPlaying;                          //                                           (A1)
+engine.SetFloat("RPM", rpm);  engine.Trigger("Backfire"); // graph parameters                          (A2)
 
-Audio.SetBusVolume("Music", 0.5f);
-Audio.SetSnapshot("Underwater", blendSeconds: 0.3f);
+Audio.SetBusVolume("Music", 0.5f);                        //                                           (A1)
+Audio.SetSnapshot("Underwater", blendSeconds: 0.3f);      //                                           (A3)
 
-protected override void OnAudioEvent(string name) { }      // On Finished, cue markers
+protected override void OnAudioEvent(string name) { }      // On Finished, cue markers                 (A2)
 ```
+
+Clip paths are under the asset folder with the extension optional; a bus name that is not a bus is reported, not taken as Master.
 
 ---
 
@@ -343,3 +355,36 @@ protected override void OnAudioEvent(string name) { }      // On Finished, cue m
 | **A5 Integrations** | Play Sound notifies with surface types, a sequencer audio track, impact sounds, profiler lane and stats, concurrency and virtual voices tuned | A character's footsteps change on grass / stone; a cutscene with music and dialogue |
 
 Each phase lands with the docs-site pages updated and the manual's walkthrough, like the other systems.
+
+### A1 as built (2026-11-06)
+
+- **Library:** miniaudio 0.11.25 (submodule `NoxCore/vendors/miniaudio`), compiled once as C (`Audio/MiniaudioImpl.c`) with its bundled
+  stb_vorbis for Ogg; its engine / node graph / resource manager are off -- voices, buses and spatialization are Nox's own.
+- **Threads:** the device callback only copies out of a ring buffer; the **mixer thread** (MMCSS "Pro Audio", `AvSetMmThreadPriority`
+  high) mixes 256-frame blocks to keep one device period + 2 blocks ahead (its first fill covers the device's whole buffer: devices
+  ask for all their periods at once when they start), sleeping on an event the callback signals; the **stream thread** decodes. The
+  game thread talks to the mixer through a lock-free SPSC command queue (8192) and hears voices end through a lock-free event queue;
+  the mixer never locks or allocates. Checked under ThreadSanitizer.
+- **Voices:** 128, handles with a generation (a stale handle finds nothing); linear-interpolation resampling for pitch, Doppler and the
+  clip-to-device rate (Unreal's mixer source); every gain ramped across its block; stops fade (5 ms minimum, no clicks); fade-in.
+- **Spatialization (game thread, once a frame):** listener-relative positions in meters (large worlds: double on the game side),
+  equal-power panning (-3 dB centre), Inverse / Inverse Square / Linear / None attenuation reaching zero at Max Distance, OpenAL's
+  Doppler (343 m/s, speeds clamped to half of it) from smoothed velocities with teleports ignored; stereo clips summed to mono in 3D.
+- **Buses:** Master <- Music, SFX, Voice, UI, Ambience; volume and mute, ramped; peak meters; pausing the game pauses its voices except
+  the UI bus. Master is clamped to [-1, 1] (its limiter is an A3 bus effect).
+- **Scene:** `AudioSourceComponent` / `AudioListenerComponent` (Add Component, Inspector, scene files, duplicate, world-partition cells);
+  Play / Simulate start the Play On Start sources and stop every game voice at the end; sources follow their entity; switching an entity
+  off stops it, on again replays a Play On Start one; destroying it or removing the component stops it; clips are loaded with the scene
+  and a source asked to play before its clip is in plays once it is. Selected sources show their Min / Max spheres.
+- **Editor:** Content Browser play button / double-click preview (its own voice group), tooltip with format and Load Type, Load Type
+  menu, drag-in from Explorer (copied and registered), files put in the project folder registered when their folder is shown.
+- **Scripts (API 16):** `Audio.PlayOneShot / PlayOneShot2D / SetBusVolume / GetBusVolume`, `AudioSourceComponent.Play / Stop / IsPlaying /
+  Volume / Pitch / Loop / SetClip`.
+- **Tests (harness on miniaudio's null device):** WAV / FLAC / MP3 / Ogg load with the right format and length; decoded, streamed and
+  in-memory loops at rate 0.75 / 1.37 match a reference resampler with 0 error; one-shots end on their last block; a 50 ms stop fade
+  ends in 10 blocks; an Ogg stream ends within 5 ms of its length; pans, attenuation curves and Doppler match their formulas; bus gains
+  and group pause; 128-voice limit; no underruns or stream starvation in a live run.
+- **Not in A1 (by phase):** the graph and graph parameters (A2); the bus tree asset, effects, sends, ducking, snapshots, Mixer panel
+  (A3); HRTF, occlusion, reverb (A4); concurrency groups, virtual voices and priorities, stats overlay lines (the profiler already has the mixer's lane, "Audio Mixer"
+  with its "Audio Mix Block" scopes, and a warning when a block takes longer than its 5.3 ms), notifies,
+  sequencer track, impact sounds (A5).

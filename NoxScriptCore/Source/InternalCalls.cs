@@ -71,6 +71,15 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, int> Entity_GetMaterialVariantCount;
     private static delegate*<ulong, int> Entity_GetMaterialVariantIndex;
     private static delegate*<ulong, int> Particles_GetCount;
+    private static delegate*<NativeString, double, double, double, float, uint, NativeString, void> Audio_PlayOneShot;
+    private static delegate*<NativeString, float, void> Audio_SetBusVolume;
+    private static delegate*<NativeString, float> Audio_GetBusVolume;
+    private static delegate*<ulong, void> AudioSource_Play;
+    private static delegate*<ulong, float, void> AudioSource_Stop;
+    private static delegate*<ulong, uint> AudioSource_IsPlaying;
+    private static delegate*<ulong, int, float> AudioSource_GetFloat;
+    private static delegate*<ulong, int, float, void> AudioSource_SetFloat;
+    private static delegate*<ulong, NativeString, uint> AudioSource_SetClip;
     private static delegate*<ulong, float, float, float, void> Character_SetMoveVelocity;
     private static delegate*<ulong, float, void> Character_Jump;
     private static delegate*<ulong, uint> Character_IsGrounded;
@@ -362,6 +371,42 @@ internal static unsafe class InternalCalls
     internal static bool IsEmittingParticles(ulong entityID) => Particles_IsEmitting(entityID) != 0;
 
     internal static int GetParticleCount(ulong entityID) => Particles_GetCount(entityID);
+
+    internal static void PlayOneShot(string clipPath, Vector3d position, float volume, bool spatial, string bus)
+    {
+        using NativeString nativePath = new(clipPath);
+        using NativeString nativeBus = new(bus);
+        Audio_PlayOneShot(nativePath, position.X, position.Y, position.Z, volume, spatial ? 1u : 0u, nativeBus);
+    }
+
+    internal static void SetBusVolume(string bus, float volume)
+    {
+        using NativeString nativeBus = new(bus);
+        Audio_SetBusVolume(nativeBus, volume);
+    }
+
+    internal static float GetBusVolume(string bus)
+    {
+        using NativeString nativeBus = new(bus);
+        return Audio_GetBusVolume(nativeBus);
+    }
+
+    internal static void PlayAudioSource(ulong entityID) => AudioSource_Play(entityID);
+
+    internal static void StopAudioSource(ulong entityID, float fadeOut) => AudioSource_Stop(entityID, fadeOut);
+
+    internal static bool IsAudioSourcePlaying(ulong entityID) => AudioSource_IsPlaying(entityID) != 0;
+
+    // field: 0 volume, 1 pitch, 2 loop (0 / 1)
+    internal static float GetAudioSourceFloat(ulong entityID, int field) => AudioSource_GetFloat(entityID, field);
+
+    internal static void SetAudioSourceFloat(ulong entityID, int field, float value) => AudioSource_SetFloat(entityID, field, value);
+
+    internal static bool SetAudioSourceClip(ulong entityID, string clipPath)
+    {
+        using NativeString nativePath = new(clipPath);
+        return AudioSource_SetClip(entityID, nativePath) != 0;
+    }
 
     internal static void SetCharacterMoveVelocity(ulong entityID, Vector3 velocity) =>
         Character_SetMoveVelocity(entityID, velocity.X, velocity.Y, velocity.Z);

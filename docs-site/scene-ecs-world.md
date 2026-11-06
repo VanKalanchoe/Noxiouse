@@ -4,7 +4,7 @@ Noxiouse's world representation lives in `NoxCore/src/NoxCore/Scene/` and is bui
 
 ---
 
-## 1. Complete Reference of All 47 ECS Components ([`Components.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/Components.h))
+## 1. Complete Reference of All 49 ECS Components ([`Components.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/Components.h))
 
 ### Identity, Hierarchy & Metadata (6 Components)
 1. **`IDComponent`**: Persistent 64-bit `UUID ID`.
@@ -48,6 +48,10 @@ Noxiouse's world representation lives in `NoxCore/src/NoxCore/Scene/` and is bui
 25. **`TimelinePlayerComponent`**: Plays a `.ntimeline` Sequencer asset (`Timeline`, `Playing`, `Loop`, `Speed`, `CurrentTime`, `ActiveCameraEntity`).
 26. **`ParticleEmitterComponent`**: CPU billboard particle emitter (rate, lifetime, velocity, Box/Sphere/Cone/Point shape, size/color curves, gravity, drag, spin, additive/alpha blend, flipbook rows/cols/FPS, texture).
 
+### Audio (2 Components)
+- **`AudioSourceComponent`**: Plays an Audio Clip (`.wav` / `.ogg` / `.flac` / `.mp3`) at the entity in Play and Simulate (`Clip`, `Volume`, `Pitch`, `Loop`, `PlayOnStart`, `Bus`, `Spatial` 2D / 3D, `Spatialization`: `MinDistance` / `MaxDistance` in meters, `Attenuation` Inverse / InverseSquare / Linear / None, `DopplerLevel`). Stopped when its entity is switched off or destroyed (`Scene::UpdateAudio`, `Audio/AudioEngine.h`).
+- **`AudioListenerComponent`**: The ears (usually on the player's camera); without one the primary camera listens (Simulate: the editor camera).
+
 ### Scripting, 2D Physics & 3D Jolt Physics (13 Components)
 27. **`ScriptComponent`**: Binds one or more C# `EntityBehaviour` classes (`ClassNames`, `FieldOverrides`, `EntityReferences`).
 28. **`NativeScriptComponent`**: Binds a C++ `ScriptableEntity` subclass.
@@ -86,7 +90,7 @@ flowchart TD
 
 | File | Plain-English Summary & Key Responsibilities |
 | :--- | :--- |
-| [`Components.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/Components.h) | Defines all **47 ECS components** listed above. |
+| [`Components.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/Components.h) | Defines all **49 ECS components** listed above. |
 | [`Entity.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/Entity.h) & [`Entity.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/Entity.cpp) | Lightweight value wrapper around `(entt::entity, Scene*)` providing component CRUD, `SetParent` (preserving world transform and preventing cycles), `SetWorldTransform`, and `MarkTransformDirty`. |
 | [`EntityBounds.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/EntityBounds.h) & [`EntityBounds.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/EntityBounds.cpp) | Computes double-precision world-space AABBs (`WorldBounds`, `ComputeWorldBounds`) across mesh submeshes, colliders, lights, and child hierarchies. |
 | [`EntityCommandBuffer.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/EntityCommandBuffer.h) & [`EntityCommandBuffer.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/EntityCommandBuffer.cpp) | Lock-free deferred ECS command recorder backed by each worker thread's `FrameArena`, replayed deterministically at `Scene::ApplySyncPoint()`. |
@@ -97,7 +101,7 @@ flowchart TD
 | [`ModelInstance.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/ModelInstance.h) & [`ModelInstance.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/ModelInstance.cpp) | Spawns entity hierarchies from imported `.nmesh`/`.nsmesh` glTF models, flattening simple static/single-skin hierarchies while translating glTF lights, cameras, instancing, extras, and physics into ECS components and preserving user overrides across reimports. |
 | [`Prefab.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/Prefab.h), [`PrefabInstance.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/PrefabInstance.h) & [`PrefabInstance.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/PrefabInstance.cpp) | Implements `.nprefab` assets, **Prefab Variants** (`BasePrefab` inheritance), per-property YAML overrides, added/removed child structural overrides, live scene instance refreshing (`RefreshInstances`), `RevertOverride`, `ApplyOverride`, `Unpack`, and isolated Prefab Mode editing. |
 | [`MaterialVariants.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/MaterialVariants.h) & [`MaterialVariants.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/MaterialVariants.cpp) | Runtime and editor switcher for glTF `KHR_materials_variants` (`List`, `Select`, `Current`). |
-| [`SceneSerializer.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/SceneSerializer.h) & [`SceneSerializer.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/SceneSerializer.cpp) | Serializes and deserializes all 47 ECS components to/from human-readable YAML (`.nox`, `.nprefab`, `.noxcell`) and fast binary streams (`.noxbin`, `.noxcell.cooked` `NXCL`). |
+| [`SceneSerializer.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/SceneSerializer.h) & [`SceneSerializer.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/SceneSerializer.cpp) | Serializes and deserializes all 49 ECS components to/from human-readable YAML (`.nox`, `.nprefab`, `.noxcell`) and fast binary streams (`.noxbin`, `.noxcell.cooked` `NXCL`). |
 | [`SceneLoader.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/SceneLoader.h) & [`SceneLoader.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/SceneLoader.cpp) | Non-blocking background scene/cell parser (`ParsedSceneData`) with main-thread time-sliced entity creation (`Step(budgetMs)`). |
 | [`WorldPartition.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/WorldPartition.h) & [`WorldPartition.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/WorldPartition.cpp) | Automatic spatial grid partitioner (`SplitIntoSeparateEntities`, `MergeBackIntoScene`) and runtime cell streamer (`Update`, `UpdateHLODVisibility`). |
 | [`HLODBake.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/HLODBake.h) & [`HLODBake.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scene/HLODBake.cpp) | CPU mesh simplifier (`meshoptimizer` or watertight dual-contouring `VoxelShell`), `xatlas` UV parameterization, and BVH ray-casting texture baker (baking BaseColor, Normal, MetallicRoughness, Emissive, Opacity, and Transmission maps). |

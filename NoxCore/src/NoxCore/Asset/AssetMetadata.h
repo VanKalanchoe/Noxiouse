@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "Asset.h"
+#include "NoxCore/Audio/AudioTypes.h"
 #include "NRI/Texture.h"
 
 namespace Nox
@@ -69,6 +70,12 @@ namespace Nox
         std::filesystem::path MaterialBasePath;
     };
 
+    // How a sound file is held while it plays (Audio/AudioTypes.h; Unity's Load Type).
+    struct AudioImportSettings
+    {
+        AudioLoadType LoadType = AudioLoadType::Auto;
+    };
+
     struct AssetMetadata
     {
         AssetType Type = AssetType::None;
@@ -76,6 +83,7 @@ namespace Nox
         std::filesystem::path SourceFilePath;
         TextureSpecification TextureSpec; // Import settings for Texture2D assets
         MeshImportSettings MeshSettings;  // Import settings for Mesh / StaticMesh assets
+        AudioImportSettings AudioSettings; // Import settings for AudioClip assets
         // Where the asset was before it was renamed or moved (EditorAssetManager::MoveAsset): still found by those paths, which
         // materials (their textures) and meshes (their materials, derived from the mesh's name) name it by.
         std::vector<std::filesystem::path> FormerPaths;

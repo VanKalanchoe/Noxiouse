@@ -524,6 +524,7 @@ namespace Nox
             case AssetType::Material:
             case AssetType::Skeleton:
             case AssetType::AnimationSequence:
+            case AssetType::AudioClip: // decoded on a worker (Decompress On Load clips)
                 return true;
             default:
                 return false;

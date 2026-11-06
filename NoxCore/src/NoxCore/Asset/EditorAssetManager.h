@@ -44,6 +44,9 @@ namespace Nox
         // Once per frame, main thread: reimports edited sources and publishes the background loads that finished.
         void Update();
         void ReimportAsset(AssetHandle handle, bool force = false);
+        // A sound's Load Type (Audio/AudioTypes.h): saved in the registry, and the clip reloaded with it if it is loaded (playing
+        // voices keep the clip they started with).
+        void SetAudioImportSettings(AssetHandle handle, const AudioImportSettings& settings);
         
         void ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType = AssetType::None, const MeshImportSettings& meshSettings = {});
         // Registers an asset file that already exists (relative to the asset directory) and returns its handle.

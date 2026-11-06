@@ -123,18 +123,25 @@ namespace Nox
         { ".nprefab", AssetType::Prefab },
         { ".ntimeline", AssetType::Timeline },
         { ".ttf", AssetType::Font },
-        { ".otf", AssetType::Font }
+        { ".otf", AssetType::Font },
+        { ".wav", AssetType::AudioClip },
+        { ".ogg", AssetType::AudioClip },
+        { ".flac", AssetType::AudioClip },
+        { ".mp3", AssetType::AudioClip }
     };
 
     AssetType EditorAssetManager::GetAssetTypeFromExtension(const std::filesystem::path& extension)
     {
-        if (s_AssetExtensionMap.find(extension) == s_AssetExtensionMap.end())
+        // Case-insensitive: Windows tools write ".WAV" and ".PNG" as often as not.
+        std::string lower = extension.string();
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        const auto found = s_AssetExtensionMap.find(lower);
+        if (found == s_AssetExtensionMap.end())
         {
             NOX_CORE_WARN("Could not find AssetType for {}", extension.string());
             return AssetType::None;
         }
-
-        return s_AssetExtensionMap.at(extension);
+        return found->second;
     }
     
     /*YAML::Emitter& operator<<(YAML::Emitter& out, const std::string_view& v)
@@ -418,6 +425,18 @@ namespace Nox
         // 4. Scan and register any new .nanim / .nskel files generated during cooking (they land
         // next to the model: <Model>/Meshes, <Model>/Materials, <Model>/Textures).
         ScanAndRegisterNewAssets(metadata.FilePath.parent_path().parent_path());
+    }
+
+    void EditorAssetManager::SetAudioImportSettings(AssetHandle handle, const AudioImportSettings& settings)
+    {
+        const auto found = m_AssetRegistry.find(handle);
+        if (m_ReadOnly || found == m_AssetRegistry.end() || found->second.Type != AssetType::AudioClip)
+            return;
+        if (found->second.AudioSettings.LoadType == settings.LoadType)
+            return;
+        found->second.AudioSettings = settings;
+        SerializeAssetRegistry();
+        ReimportAsset(handle, true);
     }
 
     void EditorAssetManager::OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath)
@@ -1166,7 +1185,8 @@ namespace Nox
                 raw.remove_prefix(1);
             while (!raw.empty() && (raw.back() == ' ' || raw.back() == '\t'))
                 raw.remove_suffix(1);
-            if (raw.size() < 3 || raw.find('.') == std::string_view::npos)
+            // A file name, or a path in a folder (scripts name sounds without their extension: "Sounds/Explosion").
+            if (raw.size() < 3 || (raw.find('.') == std::string_view::npos && raw.find('/') == std::string_view::npos))
                 return;
             const std::string path = NormalizeReferencePath(raw);
             tokens.Paths.insert(path);
@@ -1435,6 +1455,9 @@ namespace Nox
         for (const auto& [handle, metadata] : m_AssetRegistry)
         {
             byPath[NormalizeReferencePath(metadata.FilePath.lexically_normal().generic_string())].push_back(handle);
+            // Scripts name sounds with the extension optional (Audio.PlayOneShot("Sounds/Explosion")).
+            if (metadata.Type == AssetType::AudioClip)
+                byPath[NormalizeReferencePath(std::filesystem::path(metadata.FilePath).replace_extension().lexically_normal().generic_string())].push_back(handle);
             if (!metadata.SourceFilePath.empty() && metadata.SourceFilePath != metadata.FilePath)
             {
                 const std::string source = NormalizeReferencePath(metadata.SourceFilePath.lexically_normal().generic_string());
@@ -1944,6 +1967,13 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (metadata.Type == AssetType::AudioClip && metadata.AudioSettings.LoadType != AudioLoadType::Auto)
+        {
+            out << YAML::Key << "AudioSettings" << YAML::Value << YAML::BeginMap;
+            out << YAML::Key << "LoadType" << YAML::Value << std::string(AudioLoadTypeToString(metadata.AudioSettings.LoadType));
+            out << YAML::EndMap;
+        }
+
         if (metadata.Type == AssetType::Mesh || metadata.Type == AssetType::StaticMesh)
         {
             out << YAML::Key << "MeshSettings" << YAML::Value;
@@ -2102,9 +2132,11 @@ namespace Nox
         {
             if (!entry.is_regular_file(ec)) continue;
 
-            std::filesystem::path ext = entry.path().extension();
+            std::string ext = entry.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (ext == ".nox" || ext == ".nanim" || ext == ".nskel" || ext == ".nmat" ||
-                ext == ".ntex" || ext == ".nanimgraph" || ext == ".nprefab" || ext == ".ntimeline")
+                ext == ".ntex" || ext == ".nanimgraph" || ext == ".nprefab" || ext == ".ntimeline" ||
+                ext == ".ttf" || ext == ".otf" || ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3")
             {
                 std::filesystem::path relativePath = entry.path().lexically_relative(assetDir).lexically_normal();
 
@@ -2198,6 +2230,12 @@ namespace Nox
                                                         : mode == "Off" ? VirtualTextureMode::Off
                                                                         : VirtualTextureMode::Auto;
                 }
+            }
+
+            if (const YAML::Node audioNode = node["AudioSettings"])
+            {
+                if (audioNode["LoadType"])
+                    metadata.AudioSettings.LoadType = AudioLoadTypeFromString(audioNode["LoadType"].as<std::string>());
             }
 
             if (auto settingsNode = node["MeshSettings"])

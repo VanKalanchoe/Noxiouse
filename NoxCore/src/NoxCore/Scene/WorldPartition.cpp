@@ -97,6 +97,7 @@ namespace Nox
                    entity.HasComponent<SpotLightComponent>() || entity.HasComponent<RectLightComponent>() ||
                    entity.HasComponent<DiscLightComponent>() || entity.HasComponent<ReflectionProbeComponent>() || entity.HasComponent<IrradianceVolumeComponent>() || entity.HasComponent<SpriteRendererComponent>() ||
                    entity.HasComponent<CircleRendererComponent>() || entity.HasComponent<ParticleEmitterComponent>() ||
+                   entity.HasComponent<AudioSourceComponent>() ||
                    entity.HasComponent<TextComponent>() || entity.HasComponent<RigidBody3DComponent>() ||
                    entity.HasComponent<RigidBody2DComponent>() || entity.HasComponent<BoxCollider3DComponent>() ||
                    entity.HasComponent<SphereCollider3DComponent>() || entity.HasComponent<CapsuleCollider3DComponent>() ||
@@ -110,7 +111,7 @@ namespace Nox
             return entity.HasComponent<CameraComponent>() || entity.HasComponent<DirectionalLightComponent>() ||
                    entity.HasComponent<EnvironmentLightComponent>() || entity.HasComponent<CharacterController3DComponent>() ||
                    entity.HasComponent<LevelStreamingVolumeComponent>() || entity.HasComponent<WorldStreamingSourceComponent>() ||
-                   entity.HasComponent<TimelinePlayerComponent>();
+                   entity.HasComponent<TimelinePlayerComponent>() || entity.HasComponent<AudioListenerComponent>();
         }
 
         bool IsRoot(Entity entity)
