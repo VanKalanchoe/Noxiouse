@@ -806,6 +806,18 @@ namespace Nox
         }
         streamed.CompletedAt = std::chrono::steady_clock::now();
         streamed.Shown = false; // (shown once its meshes are in: UpdateStreamedLevelVisibility)
+        // A sub-level read from its file (not the editor's copy, which is placed already) goes where its level transform puts it.
+        if (const SubLevel* subLevel = !streamed.IsCell && streamed.Loader ? FindSubLevel(streamed.Level) : nullptr; subLevel && subLevel->HasTransform())
+        {
+            std::vector<Entity> roots;
+            for (UUID id : created)
+            {
+                Entity entity = GetEntityByUUID(id);
+                if (entity && (!entity.HasComponent<RelationshipComponent>() || entity.GetComponent<RelationshipComponent>().Parent == 0))
+                    roots.push_back(entity);
+            }
+            TransformRoots(roots, subLevel->GetTransform());
+        }
         // A level with a primary camera of its own (it was made to be played alone): the scene's camera stays the view.
         if (Entity primary = GetPrimaryCameraEntity(); primary && !primary.HasComponent<LevelComponent>())
         {

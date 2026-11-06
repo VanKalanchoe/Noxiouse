@@ -16,7 +16,7 @@
 
 | # | Item |
 |---|---|
-| L4 | **Level transforms:** a sub-level placed with an offset / rotation (Unreal's level transform), so one level can be reused in several places |
+| L4 | **Level transforms:** a sub-level's Offset and Yaw (Unreal's level transform: translation and yaw), set in the Levels panel's Placement column: the whole level moves and turns at once, its file keeps it where it was built (applied when read, taken out when saved; a level read from its file in Play / a packaged game is placed the same way). Reuse in several places stays with prefabs. **Built 2026-11-06, untested** |
 
 ### Tools (plan: `Engine_Architecture_Plan_2026.md`)
 

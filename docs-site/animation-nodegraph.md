@@ -72,3 +72,9 @@ A `.ntimeline` asset played by `TimelinePlayerComponent` (or scrubbed in `Timeli
 | [`GraphCompiler.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/GraphCompiler.h) & [`GraphCompiler.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/GraphCompiler.cpp) | Implements `GraphCompiler::Compile`: link/type validation, cycle detection, Kahn's topological sort, and recursive subgraph compilation. |
 | [`GraphEvalContext.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/GraphEvalContext.h) & [`GraphEvalContext.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/GraphEvalContext.cpp) | Per-instance evaluation state (`GraphEvalContext`: `GetInput<T>`, `SetOutput<T>`, `GetState<T>`, `GetProperty<T>`) and `EvaluateGraph()`. |
 | [`NodeGraphAsset.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/NodeGraphAsset.h) | Engine asset wrapper (`NodeGraphAsset : public Asset`) holding `NodeGraph Source`, `CompiledGraph Compiled`, and `CompileVersion` for live hot-reloading. |
+
+---
+
+## Jump / Fall (November 2026)
+
+- **At End of State** transitions (Unity's Has Exit Time, Unreal's automatic rule): a state machine transition can wait for its state's animation to end -- Jump Start -> Jump Loop, Jump Land -> Locomotion. `CharacterMovement.cs` sends `VerticalSpeed` next to `Speed` and `IsGrounded`.

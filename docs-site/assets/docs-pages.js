@@ -655,6 +655,7 @@ window.NOX_DOCS_PAGES = [
             "| **Always Loaded / Streamed** | In Play, Always Loaded ones are in from the start (before any script runs); Streamed ones wait for a volume or `LoadLevel` |",
             "| **Visible** (editor) | Hidden: its entities are kept aside in a scene of their own (not drawn, lit, picked or simulated); still saved |",
             "| **Locked** (editor) | Its entities cannot be selected |",
+            "| **Placement** (Offset, Yaw) | Moves and turns the whole level at once (Unreal's level transform); its file keeps it where it was built |",
             "| **Current level** | Where new entities go |",
             "",
             "- **Membership:** an entity belongs to its **root's** level (`LevelComponent` on the root), so a tree is never split between files. An entity taken off its parent stays in its level; one attached under another level's entity moves with its new root.",
@@ -790,7 +791,11 @@ window.NOX_DOCS_PAGES = [
             "| [`NodeGraph/NodeGraph.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/NodeGraph.h) & [`NodeGraph.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/NodeGraph.cpp) | Generic DAG compiler, topological sort, cycle detector, and pin/link validator. |",
             "| [`NodeGraph/NodeGraphSchema.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/NodeGraphSchema.h) | Registry of node prototypes, categories, and type-coercion rules. |",
             "| [`NodeGraph/NodeGraphCompiler.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/NodeGraphCompiler.h) & [`NodeGraphCompiler.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/NodeGraphCompiler.cpp) | Compiles visual node graphs into linear instruction streams (`Bytecode`). |",
-            "| [`NodeGraph/NodeGraphRuntime.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/NodeGraphRuntime.h) & [`NodeGraphRuntime.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/NodeGraphRuntime.cpp) | Executes compiled bytecode graphs with persistent register memories. |"
+            "| [`NodeGraph/NodeGraphRuntime.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/NodeGraphRuntime.h) & [`NodeGraphRuntime.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/NodeGraph/NodeGraphRuntime.cpp) | Executes compiled bytecode graphs with persistent register memories. |",
+            "",
+            "## Jump / Fall States",
+            "",
+            "- **At End of State** transitions (Unity's Has Exit Time, Unreal's automatic rule): a state machine transition can wait for its state's animation to end -- Jump Start -> Jump Loop, Jump Land -> Locomotion. `CharacterMovement.cs` sends `VerticalSpeed` next to `Speed` and `IsGrounded`."
         ]
     },
     {

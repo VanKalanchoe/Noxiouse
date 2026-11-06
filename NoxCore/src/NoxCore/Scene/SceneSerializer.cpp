@@ -1306,6 +1306,11 @@ namespace Nox
             out << YAML::Key << "AlwaysLoaded" << YAML::Value << subLevel.AlwaysLoaded;
             out << YAML::Key << "Visible" << YAML::Value << subLevel.Visible;
             out << YAML::Key << "Locked" << YAML::Value << subLevel.Locked;
+            if (subLevel.HasTransform())
+            {
+                out << YAML::Key << "Offset" << YAML::Value << YAML::Flow << YAML::BeginSeq << subLevel.Offset.x << subLevel.Offset.y << subLevel.Offset.z << YAML::EndSeq;
+                out << YAML::Key << "Yaw" << YAML::Value << subLevel.Yaw;
+            }
             if (!forFile && subLevel.Loaded)
             {
                 Scene* from = nullptr;
@@ -1337,6 +1342,10 @@ namespace Nox
             subLevel.AlwaysLoaded = node["AlwaysLoaded"] ? node["AlwaysLoaded"].as<bool>() : true;
             subLevel.Visible = node["Visible"] ? node["Visible"].as<bool>() : true;
             subLevel.Locked = node["Locked"] ? node["Locked"].as<bool>() : false;
+            if (const YAML::Node offset = node["Offset"]; offset && offset.IsSequence() && offset.size() == 3)
+                subLevel.Offset = { offset[0].as<double>(), offset[1].as<double>(), offset[2].as<double>() };
+            if (node["Yaw"])
+                subLevel.Yaw = node["Yaw"].as<float>();
             if (subLevel.Level == 0 || scene.FindSubLevel(subLevel.Level))
                 continue;
             // An undo state: the sub-level's entities were read with the rest; its roots say which.
@@ -1414,8 +1423,24 @@ namespace Nox
             const AssetMetadata& metadata = AssetManager::GetMetadata(subLevel.Level);
             const std::filesystem::path path = Project::GetActiveAssetDirectory() / metadata.FilePath;
             Scene* from = nullptr;
-            const std::vector<Entity> roots = scene.GetSubLevelRoots(subLevel.Level, from);
+            std::vector<Entity> roots = scene.GetSubLevelRoots(subLevel.Level, from);
+            // The file keeps the level in its own space: the level transform taken out for the text, the roots' exact values put back.
+            std::vector<TransformComponent> placed;
+            if (subLevel.HasTransform())
+            {
+                for (Entity root : roots)
+                    placed.push_back(root.HasComponent<TransformComponent>() ? root.GetComponent<TransformComponent>() : TransformComponent());
+                Scene::TransformRoots(roots, glm::inverse(subLevel.GetTransform()));
+            }
             const std::string text = SubLevelText(*from, roots, metadata.FilePath.stem().string());
+            for (size_t index = 0; index < placed.size(); ++index)
+            {
+                if (roots[index].HasComponent<TransformComponent>())
+                {
+                    roots[index].GetComponent<TransformComponent>() = placed[index];
+                    roots[index].MarkTransformDirty();
+                }
+            }
             {
                 std::ifstream in(path, std::ios::binary);
                 std::string current((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());

@@ -10,7 +10,10 @@
 #include "SceneSerializer.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Math/Math.h"
 #include "NoxCore/Project/Project.h"
+
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace Nox
 {
@@ -45,6 +48,42 @@ namespace Nox
             return AssetManager::IsAssetHandleValid(level) ? AssetManager::GetMetadata(level).FilePath.stem().string()
                                                            : std::to_string(static_cast<uint64_t>(level));
         }
+    }
+
+    glm::dmat4 Scene::SubLevel::GetTransform() const
+    {
+        return glm::rotate(glm::translate(glm::dmat4(1.0), Offset), static_cast<double>(Yaw), glm::dvec3(0.0, 1.0, 0.0));
+    }
+
+    void Scene::TransformRoots(const std::vector<Entity>& roots, const glm::dmat4& transform)
+    {
+        for (Entity root : roots)
+        {
+            if (!root || !root.HasComponent<TransformComponent>())
+                continue;
+            TransformComponent& component = root.GetComponent<TransformComponent>();
+            glm::dvec3 translation;
+            glm::vec3 rotation, scale;
+            Math::DecomposeTransform(transform * component.GetTransform(), translation, rotation, scale);
+            component.Translation = translation;
+            component.Rotation = rotation;
+            component.Scale = scale;
+            root.MarkTransformDirty();
+        }
+    }
+
+    void Scene::SetSubLevelTransform(AssetHandle level, const glm::dvec3& offset, float yaw)
+    {
+        SubLevel* subLevel = const_cast<SubLevel*>(FindSubLevel(level));
+        if (!subLevel || subLevel->Locked || (subLevel->Offset == offset && subLevel->Yaw == yaw))
+            return;
+        const glm::dmat4 from = subLevel->GetTransform();
+        subLevel->Offset = offset;
+        subLevel->Yaw = yaw;
+        if (!subLevel->Loaded)
+            return; // applied when it is read
+        Scene* scene = nullptr;
+        TransformRoots(GetSubLevelRoots(level, scene), subLevel->GetTransform() * glm::inverse(from));
     }
 
     const Scene::SubLevel* Scene::FindSubLevel(AssetHandle level) const
@@ -208,8 +247,15 @@ namespace Nox
         }
         const std::vector<UUID> order = TreeOrder(*file, roots);
         CopyEntitiesFrom(*file, order);
+        std::vector<Entity> added;
         for (Entity root : roots)
-            TagLevelTree(GetEntityByUUID(root.GetUUID()), level);
+        {
+            Entity copy = GetEntityByUUID(root.GetUUID());
+            TagLevelTree(copy, level);
+            added.push_back(copy);
+        }
+        if (subLevel->HasTransform())
+            TransformRoots(added, subLevel->GetTransform()); // from the level's own space to where it sits here
         for (const std::string& folder : file->GetFolders())
             AddFolder(folder);
         subLevel->Loaded = true;

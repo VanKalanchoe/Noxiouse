@@ -130,6 +130,7 @@ A scene (the **persistent level**) can list other scenes as **sub-levels**, edit
 | **Always Loaded / Streamed** | In Play, Always Loaded ones are in from the start (before any script runs); Streamed ones wait for a volume or `LoadLevel` |
 | **Visible** (editor) | Hidden: its entities are kept aside in a scene of their own (not drawn, lit, picked or simulated); still saved |
 | **Locked** (editor) | Its entities cannot be selected |
+| **Placement** (Offset, Yaw) | Moves and turns the whole level at once (Unreal's level transform); its file keeps it where it was built |
 | **Current level** | Where new entities go |
 
 - **Membership:** an entity belongs to its **root's** level (`LevelComponent` on the root), so a tree is never split between files.

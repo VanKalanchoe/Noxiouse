@@ -472,6 +472,7 @@ window.NOX_MANUAL_PAGES = [
             "| **Current** (the circle) | New entities you create, paste or drop go into this level |",
             "| **Visible** | Untick to hide a level while you work (it is still saved) |",
             "| **Locked** | Its entities cannot be selected, so they cannot be changed by accident |",
+            "| **Placement** | Moves and turns the whole level (Offset in meters, Yaw in degrees); its file keeps it where it was built |",
             "| **Loading** | **Always Loaded**: in from the start of Play. **Streamed**: loaded by volumes or scripts |",
             "| **Add Existing Level** | Adds a scene you already have as a sub-level |",
             "| **New Level...** | Asks for a name, makes an empty scene next to your open scene, adds it and makes it current |",
@@ -1182,7 +1183,11 @@ window.NOX_MANUAL_PAGES = [
             "1. Select the entity you want to attach (e.g. `Sword`).",
             "2. Click **Add Component > Animation > BoneSocketComponent**.",
             "3. Select the target character entity and pick the bone name (e.g. `\"hand_r\"`).",
-            "4. The sword now moves, swings, and rotates with the hand bone in real-time!"
+            "4. The sword now moves, swings, and rotates with the hand bone in real-time!",
+            "",
+            "## Jump / Fall States",
+            "",
+            "- **At End of State** transitions (Unity's Has Exit Time, Unreal's automatic rule): a state machine transition can wait for its state's animation to end -- Jump Start -> Jump Loop, Jump Land -> Locomotion. `CharacterMovement.cs` sends `VerticalSpeed` next to `Speed` and `IsGrounded`."
         ]
     },
 

@@ -1757,7 +1757,10 @@ own, loaded **additively** into the running scene and unloaded again.
   a slice a frame when a volume or script loads them; one never read in the editor (or a packaged game's) is read from its file,
   Always Loaded ones before anything starts. Not in a world (its cells split it already). Window > Levels; hierarchy: `[level]` after
   a sub-level's roots, right-click > Move to Level.
-- Not yet: level transforms (a sub-level placed with an offset, Unreal's level transform).
+- **Level transforms (Backlog L4), built 2026-11-06, untested:** `Scene::SubLevel::Offset` / `Yaw` (Unreal's level transform:
+  translation and yaw), the Levels panel's Placement column. Applied to the level's roots when it is read (editor, or from its file
+  in Play / a packaged game), taken out for its file on save (the roots' exact values put back); changing it moves the roots by
+  the difference. Saved in the persistent level's sub-level list.
 
 ### 5.13 World Streaming
 

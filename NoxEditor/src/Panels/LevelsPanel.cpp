@@ -1,7 +1,9 @@
 #include "LevelsPanel.h"
 
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <cmath>
 #include <string>
 
 #include <imgui.h>
@@ -9,6 +11,7 @@
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
@@ -69,13 +72,14 @@ namespace Nox
     void LevelsPanel::DrawLevels(Scene& scene, bool editing)
     {
         constexpr ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingFixedFit;
-        if (!ImGui::BeginTable("##Levels", 6, flags))
+        if (!ImGui::BeginTable("##Levels", 7, flags))
             return;
         ImGui::TableSetupColumn("Current", ImGuiTableColumnFlags_WidthFixed);
         ImGui::TableSetupColumn("Visible", ImGuiTableColumnFlags_WidthFixed);
         ImGui::TableSetupColumn("Locked", ImGuiTableColumnFlags_WidthFixed);
         ImGui::TableSetupColumn("Level", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Loading", ImGuiTableColumnFlags_WidthFixed, 130.0f);
+        ImGui::TableSetupColumn("Placement", ImGuiTableColumnFlags_WidthFixed, 150.0f);
         ImGui::TableSetupColumn("##Actions", ImGuiTableColumnFlags_WidthFixed);
         ImGui::TableHeadersRow();
 
@@ -94,6 +98,7 @@ namespace Nox
         ImGui::Text("Persistent Level (%s)", openScene != 0 ? LevelName(openScene).c_str() : "unsaved scene");
         ImGui::TableNextColumn();
         ImGui::TextDisabled("always");
+        ImGui::TableNextColumn();
         ImGui::TableNextColumn();
 
         for (const Scene::SubLevel& subLevel : std::vector<Scene::SubLevel>(scene.GetSubLevels()))
@@ -148,6 +153,38 @@ namespace Nox
             ImGui::EndDisabled();
             ImGui::SetItemTooltip("Always Loaded: in from the start of Play, with the persistent level.\n"
                                   "Streamed: loaded by Level Streaming Volumes naming it, or a script (Scene.LoadLevel).");
+
+            // Level transform (Unreal's: offset and yaw): where the level's own space sits in this scene.
+            ImGui::TableNextColumn();
+            const double meter = static_cast<double>(WorldUnits::FromMeters(1.0f));
+            const std::string placement = subLevel.HasTransform()
+                ? std::format("{:.1f}, {:.1f}, {:.1f} m  {:.0f}\xC2\xB0", subLevel.Offset.x / meter, subLevel.Offset.y / meter, subLevel.Offset.z / meter,
+                              subLevel.Yaw * 57.29578f)
+                : std::string("as built");
+            ImGui::BeginDisabled(!editing || subLevel.Locked);
+            if (ImGui::SmallButton(placement.c_str()))
+                ImGui::OpenPopup("##Placement");
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip("The level transform: moves and turns the whole level (all its entities) at once. Its file keeps it\n"
+                                  "where it was built; the offset is applied when it is read and taken out when it is saved.");
+            if (ImGui::BeginPopup("##Placement"))
+            {
+                double offset[3] = { subLevel.Offset.x / meter, subLevel.Offset.y / meter, subLevel.Offset.z / meter };
+                float yawDegrees = subLevel.Yaw * 57.29578f;
+                bool changed = false;
+                ImGui::TextUnformatted(LevelName(subLevel.Level).c_str());
+                ImGui::SetNextItemWidth(240.0f);
+                const double step = 0.05;
+                changed |= ImGui::DragScalarN("Offset (m)", ImGuiDataType_Double, offset, 3, static_cast<float>(step), nullptr, nullptr, "%.2f");
+                ImGui::SetNextItemWidth(240.0f);
+                changed |= ImGui::DragFloat("Yaw (deg)", &yawDegrees, 0.5f, -360.0f, 360.0f, "%.1f");
+                if (changed)
+                    scene.SetSubLevelTransform(subLevel.Level, glm::dvec3(offset[0], offset[1], offset[2]) * meter, yawDegrees / 57.29578f);
+                if (ImGui::Button("Reset"))
+                    scene.SetSubLevelTransform(subLevel.Level, glm::dvec3(0.0), 0.0f);
+                ImGui::SetItemTooltip("Back to where it was built");
+                ImGui::EndPopup();
+            }
 
             ImGui::TableNextColumn();
             if (editing && ImGui::SmallButton("Remove"))

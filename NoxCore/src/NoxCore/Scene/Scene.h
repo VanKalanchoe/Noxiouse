@@ -132,6 +132,12 @@ namespace Nox
             bool Visible = true;      // editor: hidden, its entities are kept aside (nothing draws, lights, picks or simulates them)
             bool Locked = false;      // editor: its entities cannot be selected
             bool Loaded = false;      // editor: its entities were read (only then does a save write its file)
+            // Level transform (Unreal's: translation and yaw): where the level's own space sits in this scene. Applied to its root
+            // entities when it is read, taken back out when it is saved -- its file keeps the level where it was built.
+            glm::dvec3 Offset{ 0.0 }; // world units
+            float Yaw = 0.0f;         // radians, around the up axis
+            glm::dmat4 GetTransform() const;
+            bool HasTransform() const { return Offset != glm::dvec3(0.0) || Yaw != 0.0f; }
         };
         const std::vector<SubLevel>& GetSubLevels() const { return m_SubLevels; }
         const SubLevel* FindSubLevel(AssetHandle level) const;
@@ -143,6 +149,8 @@ namespace Nox
         void SetSubLevelAlwaysLoaded(AssetHandle level, bool alwaysLoaded);
         void SetSubLevelVisible(AssetHandle level, bool visible);
         void SetSubLevelLocked(AssetHandle level, bool locked);
+        // Editor: moves the level's entities by the change from its old transform to this one (a locked level is left alone).
+        void SetSubLevelTransform(AssetHandle level, const glm::dvec3& offset, float yaw);
         // Editor: where new root entities go (0: this scene). Unreal's current level.
         AssetHandle GetCurrentLevel() const { return m_CurrentLevel; }
         void SetCurrentLevel(AssetHandle level);
@@ -428,6 +436,8 @@ namespace Nox
         void HideSubLevel(AssetHandle level);
         void ShowSubLevel(AssetHandle level);
         void TagLevelTree(Entity root, AssetHandle level); // LevelComponent on the root and everything under it (0: removed)
+        // Roots (no parent) moved by `transform` in world space (their trees follow).
+        static void TransformRoots(const std::vector<Entity>& roots, const glm::dmat4& transform);
         // The trees of the given roots as IDs, each before its children.
         static std::vector<UUID> TreeOrder(Scene& scene, const std::vector<Entity>& roots);
         // A built cell's references requested (Loaded: in when it activates).
