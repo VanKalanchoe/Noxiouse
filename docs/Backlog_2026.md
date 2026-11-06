@@ -16,7 +16,7 @@
 
 | # | Item |
 |---|---|
-| L1 | **Editing several levels together** (Unreal's Levels window): sub-levels listed by the scene, edited together with it (current level, visible, locked, Always Loaded / streamed, Move to Level), each saved into its own file, Play copies them as edited. **Built 2026-11-06, untested** (Window > Levels; `Engine_Architecture_Plan_2026.md` §5.12 level streaming notes) |
+| L4 | **Level transforms:** a sub-level placed with an offset / rotation (Unreal's level transform), so one level can be reused in several places |
 
 ### Tools (plan: `Engine_Architecture_Plan_2026.md`)
 
@@ -46,7 +46,9 @@
 
 Built items many of which the user has not tested yet (marked "untested"); the plan docs hold the details.
 
-- **2026-11-06 (tested by the user):** R11 more async compute (NRD shadows / reflections, DDGI blends, emissive light grid on the compute
+- **2026-11-06 (tested by the user):** L1 sub-levels (Levels window: current level, visible, locked, Always Loaded / streamed, Move
+  to Level, each level saved into its own file, Play copies them as edited; the scene's own primary camera stays the view; hierarchy
+  Shift-click in display order). R11 more async compute (NRD shadows / reflections, DDGI blends, emissive light grid on the compute
   queue; Raster (All) 8.64 -> 8.16 ms GPU, 115 -> 121 fps); RS1-RS6 raster versions (shadow maps + cascade caching + local-light atlas,
   contact shadows, GTAO, SSR + reflection probes, relightable probe volume + SSGI, froxel fog); L2 a streamed level drawn once complete,
   L3 volumes use every streaming source (with the Play / Simulate crash fix: Jolt initialized before the collision group filter).
