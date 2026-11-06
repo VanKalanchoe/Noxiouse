@@ -35,11 +35,10 @@
 
 | # | Item |
 |---|---|
-| B1 | ReSTIR DI broken, cause unknown (ignore for now) |
+| B1 | ReSTIR DI broken, cause unknown (on hold: not needed now) |
 | B2 | ReSTIR PT temporal artifact (ignore for now) |
 | B3 | ReSTIR light indices across light changes (ignore for now) |
 | B4 | Meshlet cone culling (ignore for now) |
-| H5 | Denoising for the transparent signals (RT shadows on glass, refraction) through the NRD front end (ignore for now: after the rest of the backlog) |
 | C4 | Step 8: **audio graph**, a second node-graph domain on the same core and editor panel (ignore for now: after the rest of the backlog) |
 
 ## Closed (checked against the code 2026-10-30)
@@ -52,6 +51,7 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   queue; Raster (All) 8.64 -> 8.16 ms GPU, 115 -> 121 fps); RS1-RS6 raster versions (shadow maps + cascade caching + local-light atlas,
   contact shadows, GTAO, SSR + reflection probes, relightable probe volume + SSGI, froxel fog); L2 a streamed level drawn once complete,
   L3 volumes use every streaming source (with the Play / Simulate crash fix: Jolt initialized before the collision group filter).
+  H5 (denoising the transparent signals) dropped by the user.
   R10 (DLSS "WorldToScreenMatrix not invertible") dropped: reopened if it comes back. Raster colored translucent shadows: not wanted.
 - **I2** `KHR_texture_transform`, normal / occlusion strength (2026-10-31); **M1** the missing material lobes (2026-10-31). Materials
   policy (decided 2026-10-31): Nox keeps its own glTF PBR model with OpenPBR as the reference for each lobe, no run-time material graphs
