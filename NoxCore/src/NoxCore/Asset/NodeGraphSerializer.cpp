@@ -186,6 +186,8 @@ namespace Nox
             {
                 out << YAML::BeginMap;
                 out << YAML::Key << "Name" << YAML::Value << param.Name;
+                if (param.IsTrigger)
+                    out << YAML::Key << "Trigger" << YAML::Value << true;
                 out << YAML::Key << "Default";
                 NodeGraphSerializer::EmitValue(out, param.DefaultValue);
                 out << YAML::EndMap;
@@ -301,6 +303,8 @@ namespace Nox
                     param.Name = paramData["Name"].as<std::string>();
                     if (paramData["Default"])
                         NodeGraphSerializer::ReadValue(paramData["Default"], param.DefaultValue);
+                    if (paramData["Trigger"])
+                        param.IsTrigger = paramData["Trigger"].as<bool>();
                     graph.Parameters.push_back(std::move(param));
                 }
             }

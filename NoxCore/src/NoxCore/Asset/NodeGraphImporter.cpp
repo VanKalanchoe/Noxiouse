@@ -18,6 +18,7 @@ namespace Nox
         if (graphAsset)
         {
             graphAsset->Handle = handle;
+            graphAsset->Type = metadata.Type; // AnimationGraph or AudioGraph
         }
 
         return graphAsset;
@@ -34,7 +35,7 @@ namespace Nox
         Ref<NodeGraphAsset> graph = CreateRef<NodeGraphAsset>();
         if (!NodeGraphSerializer::Deserialize(path, graph->Graph))
         {
-            NOX_CORE_ERROR("NodeGraphImporter::LoadNodeGraph - Failed to deserialize .nanimgraph file: {}", path.string());
+            NOX_CORE_ERROR("NodeGraphImporter::LoadNodeGraph - Failed to deserialize graph file: {}", path.string());
             return {};
         }
 

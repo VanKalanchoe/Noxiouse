@@ -1,6 +1,8 @@
 #pragma once
 
+#include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "NoxCore/Asset/Asset.h"
@@ -52,9 +54,19 @@ namespace Nox
         void DrawStateMachineInspector(GraphNode& machine);
         // An animation graph's preview (A7): the graph played on a skeletal mesh, its parameters set here.
         void DrawPreview();
+        // An audio graph's preview (MetaSounds' Play in the graph window): the graph heard as it is edited (an edit restarts it with
+        // the new graph), its parameters as sliders / checkboxes / Fire buttons, the output's level.
+        void DrawAudioPreview();
+        void StopAudioPreview();
 
     private:
         AssetHandle m_GraphHandle;
+        // Audio preview.
+        uint64_t m_AudioPreviewVoice = 0; // AudioVoiceHandle
+        bool m_AudioPreviewWanted = false;
+        uint32_t m_AudioPreviewVersion = 0;
+        std::shared_ptr<const class AudioGraphProgram> m_AudioPreviewProgram; // what the playing preview runs
+        std::unordered_map<std::string, NodeGraphValue> m_AudioPreviewValues;
         Ref<NodeGraphAsset> m_Asset;
         std::string m_Title;
         bool m_Open = true;

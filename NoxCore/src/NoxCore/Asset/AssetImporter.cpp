@@ -62,6 +62,9 @@ namespace Nox
         { AssetType::AnimationGraph, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
             return Ref<Asset>(NodeGraphImporter::ImportNodeGraph(h, meta));
         }},
+        { AssetType::AudioGraph, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
+            return Ref<Asset>(NodeGraphImporter::ImportNodeGraph(h, meta));
+        }},
         { AssetType::Prefab, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
             return Ref<Asset>(PrefabImporter::ImportPrefab(h, meta));
         }},

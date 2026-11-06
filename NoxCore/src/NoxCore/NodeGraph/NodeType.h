@@ -43,35 +43,47 @@ namespace Nox
         NodeEvaluateFn Evaluate;
         // The node owns sub graphs (GraphNode::SubGraphs) -- a state machine -- and an editor opens them on double-click.
         bool OwnsSubGraphs = false;
-        // Unreal's "Add Pin" (Blend Poses by Int, Blend Multi): after Inputs, this pin repeated as often as the node's
-        // kVariableInputCountProperty says ("Pose 0", "Pose 1", ...), never fewer than MinVariableInputs. Empty Name: none.
-        NodePinDesc VariableInput;
+        // Unreal's "Add Pin" (Blend Poses by Int, Blend Multi, MetaSounds' Mixer): after Inputs, this group of pins repeated as
+        // often as the node's kVariableInputCountProperty says -- one pin ("Pose 0", "Pose 1", ...) or several together ("In 0",
+        // "Gain 0", "In 1", "Gain 1", ...) -- never fewer than MinVariableInputs times. Empty: none.
+        std::vector<NodePinDesc> VariableInputs;
+        // The literal a new group's pins start with, by the group pin's name ("Gain" -> 1.0): seeded as "<name> <n>" properties.
+        std::unordered_map<std::string, NodeGraphValue> VariableInputLiterals;
         uint32_t MinVariableInputs = 2;
+        // A node reading a graph parameter (kParameterReferenceProperty) reads parameters of this type only ("Float", "Int",
+        // "Bool", "Trigger": GraphParameterTypeName); empty = any. The editor offers each parameter with the reader of its type.
+        std::string ParameterType;
+        // For an int property that picks one of several options (an oscillator's waveform, a filter's type): their names, by value.
+        std::unordered_map<std::string, std::vector<std::string>> PropertyEnums;
     };
 
     // How many copies of its type's VariableInput a node has (an int property; the editor's + / - pins change it).
     inline constexpr const char* kVariableInputCountProperty = "InputCount";
 
+    // How many times the node repeats its type's VariableInputs group.
     inline uint32_t VariableInputCount(const NodeTypeDesc& type, const std::unordered_map<std::string, NodeGraphValue>& properties)
     {
-        if (type.VariableInput.Name.empty())
+        if (type.VariableInputs.empty())
             return 0;
         const auto found = properties.find(kVariableInputCountProperty);
         const int32_t* count = found != properties.end() ? std::get_if<int32_t>(&found->second) : nullptr;
         return std::max<uint32_t>(type.MinVariableInputs, count && *count > 0 ? static_cast<uint32_t>(*count) : 0u);
     }
 
-    // A node's input pins: its type's fixed ones, then its variable ones.
+    // A node's input pins: its type's fixed ones, then its variable groups.
     inline uint32_t InputPinCount(const NodeTypeDesc& type, const std::unordered_map<std::string, NodeGraphValue>& properties)
     {
-        return static_cast<uint32_t>(type.Inputs.size()) + VariableInputCount(type, properties);
+        return static_cast<uint32_t>(type.Inputs.size() + type.VariableInputs.size() * VariableInputCount(type, properties));
     }
 
     inline NodePinDesc InputPin(const NodeTypeDesc& type, uint32_t index)
     {
         if (index < type.Inputs.size())
             return type.Inputs[index];
-        return { type.VariableInput.Name + " " + std::to_string(index - type.Inputs.size()), type.VariableInput.Type };
+        const uint32_t variable = index - static_cast<uint32_t>(type.Inputs.size());
+        const uint32_t groupSize = static_cast<uint32_t>(type.VariableInputs.size());
+        const NodePinDesc& pin = type.VariableInputs[variable % groupSize];
+        return { pin.Name + " " + std::to_string(variable / groupSize), pin.Type };
     }
 
     // Process-wide registry of node types, shared by every domain. Domain-agnostic: it only stores and looks up

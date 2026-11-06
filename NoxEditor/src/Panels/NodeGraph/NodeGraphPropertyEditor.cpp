@@ -2,17 +2,28 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Project/Project.h"
 
 namespace Nox
 {
-    bool DrawNodeGraphProperty(const std::string& name, NodeGraphValue& value, const std::pair<float, float>* range)
+    bool DrawNodeGraphProperty(const std::string& name, NodeGraphValue& value, const std::pair<float, float>* range, const std::vector<std::string>* options)
     {
         if (bool* b = std::get_if<bool>(&value))
             return ImGui::Checkbox(name.c_str(), b);
         if (int32_t* i = std::get_if<int32_t>(&value))
+        {
+            // Options: a slider over them labelled with the chosen one's name (no popup: combos do not work inside imgui-node-editor
+            // nodes, see the uint64_t case below).
+            if (options && !options->empty())
+            {
+                *i = std::clamp(*i, 0, static_cast<int32_t>(options->size()) - 1);
+                return ImGui::SliderInt(name.c_str(), i, 0, static_cast<int32_t>(options->size()) - 1, (*options)[*i].c_str(), ImGuiSliderFlags_AlwaysClamp);
+            }
             return ImGui::DragInt(name.c_str(), i);
+        }
         if (float* f = std::get_if<float>(&value))
         {
             if (range)

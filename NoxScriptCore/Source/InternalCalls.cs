@@ -79,7 +79,9 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, uint> AudioSource_IsPlaying;
     private static delegate*<ulong, int, float> AudioSource_GetFloat;
     private static delegate*<ulong, int, float, void> AudioSource_SetFloat;
-    private static delegate*<ulong, NativeString, uint> AudioSource_SetClip;
+    private static delegate*<ulong, NativeString, uint> AudioSource_SetSound;
+    private static delegate*<ulong, NativeString, float, int, void> AudioSource_SetParameter;
+    private static delegate*<ulong, NativeString, void> AudioSource_FireParameter;
     private static delegate*<ulong, float, float, float, void> Character_SetMoveVelocity;
     private static delegate*<ulong, float, void> Character_Jump;
     private static delegate*<ulong, uint> Character_IsGrounded;
@@ -402,10 +404,23 @@ internal static unsafe class InternalCalls
 
     internal static void SetAudioSourceFloat(ulong entityID, int field, float value) => AudioSource_SetFloat(entityID, field, value);
 
-    internal static bool SetAudioSourceClip(ulong entityID, string clipPath)
+    internal static bool SetAudioSourceSound(ulong entityID, string soundPath)
     {
-        using NativeString nativePath = new(clipPath);
-        return AudioSource_SetClip(entityID, nativePath) != 0;
+        using NativeString nativePath = new(soundPath);
+        return AudioSource_SetSound(entityID, nativePath) != 0;
+    }
+
+    // type: 0 float, 1 int, 2 bool
+    internal static void SetAudioSourceParameter(ulong entityID, string name, float value, int type)
+    {
+        using NativeString nativeName = new(name);
+        AudioSource_SetParameter(entityID, nativeName, value, type);
+    }
+
+    internal static void FireAudioSourceParameter(ulong entityID, string name)
+    {
+        using NativeString nativeName = new(name);
+        AudioSource_FireParameter(entityID, nativeName);
     }
 
     internal static void SetCharacterMoveVelocity(ulong entityID, Vector3 velocity) =>

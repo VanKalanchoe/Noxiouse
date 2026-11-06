@@ -551,32 +551,35 @@ namespace Nox
         TimelinePlayerComponent(const TimelinePlayerComponent&) = default;
     };
 
-    // A sound on an entity (docs/Audio_Architecture_Plan_2026.md §4; Unity's AudioSource, Unreal's Audio Component): plays an Audio
-    // Clip in Play and Simulate -- from the start (Play On Start) or when a script calls Play -- at the entity's position, panned and
-    // attenuated around the listener (3D) or as the file is (2D: music, UI). Distances are in meters, whatever the world unit.
+    // A sound on an entity (docs/Audio_Architecture_Plan_2026.md §4; Unity's AudioSource, Unreal's Audio Component): plays its Sound --
+    // an Audio Clip, or an Audio Graph -- in Play and Simulate, from the start (Play On Start) or when a script calls Play, at the entity's
+    // position, panned and attenuated around the listener (3D) or as it is (2D: music, UI). Distances are in meters, whatever the
+    // world unit. An audio graph's parameters are its defaults unless overridden here (saved, like the Animator's) or set by scripts.
     struct AudioSourceComponent
     {
-        AssetHandle Clip = 0;
-        float Volume = 1.0f; // linear
-        float Pitch = 1.0f;  // playback rate
-        bool Loop = false;
+        AssetHandle Sound = 0; // an AudioClip or an AudioGraph
+        float Volume = 1.0f;   // linear
+        float Pitch = 1.0f;    // playback rate (an audio graph's Wave Players and oscillators follow it)
+        bool Loop = false;     // (clips; a graph loops by itself)
         bool PlayOnStart = true;
         AudioBus Bus = AudioBus::SFX;
         bool Spatial = true;
         AudioSpatialSettings Spatialization; // Min / Max Distance, attenuation curve, Doppler
+        std::unordered_map<std::string, NodeGraphValue> GraphParameters; // overrides of the graph's defaults (saved)
 
         // Runtime only.
         AudioVoiceHandle Voice = 0;
-        bool PendingPlay = false; // asked to play while its clip was still loading: plays once it is in
+        bool PendingPlay = false; // asked to play while its sound was still loading: plays once it is in
+        std::unordered_map<std::string, NodeGraphValue> RuntimeParameters; // what scripts set (over the overrides), for this Play session
 
         AudioSourceComponent() = default;
         AudioSourceComponent(const AudioSourceComponent& other)
-            : Clip(other.Clip), Volume(other.Volume), Pitch(other.Pitch), Loop(other.Loop), PlayOnStart(other.PlayOnStart), Bus(other.Bus),
-              Spatial(other.Spatial), Spatialization(other.Spatialization) {} // (a copy does not share the original's playing voice)
+            : Sound(other.Sound), Volume(other.Volume), Pitch(other.Pitch), Loop(other.Loop), PlayOnStart(other.PlayOnStart), Bus(other.Bus),
+              Spatial(other.Spatial), Spatialization(other.Spatialization), GraphParameters(other.GraphParameters) {} // (not the playing voice)
         AudioSourceComponent& operator=(const AudioSourceComponent& other)
         {
-            Clip = other.Clip; Volume = other.Volume; Pitch = other.Pitch; Loop = other.Loop; PlayOnStart = other.PlayOnStart; Bus = other.Bus;
-            Spatial = other.Spatial; Spatialization = other.Spatialization;
+            Sound = other.Sound; Volume = other.Volume; Pitch = other.Pitch; Loop = other.Loop; PlayOnStart = other.PlayOnStart; Bus = other.Bus;
+            Spatial = other.Spatial; Spatialization = other.Spatialization; GraphParameters = other.GraphParameters;
             return *this;
         }
     };

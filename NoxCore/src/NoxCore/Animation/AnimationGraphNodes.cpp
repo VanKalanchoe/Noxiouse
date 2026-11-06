@@ -773,7 +773,7 @@ namespace Nox
             blendByInt.DefaultProperties = { { "Active Index", 0.0f }, { "BlendTime", 0.2f }, { kVariableInputCountProperty, int32_t(2) } };
             blendByInt.PropertyRanges = { { "BlendTime", { 0.0f, 5.0f } } };
             blendByInt.Evaluate = &EvaluateBlendByInt;
-            blendByInt.VariableInput = { "Pose", "Pose" };
+            blendByInt.VariableInputs = { { "Pose", "Pose" } };
             blendByInt.MinVariableInputs = 2;
             NodeTypeRegistry::Register(std::move(blendByInt));
         }

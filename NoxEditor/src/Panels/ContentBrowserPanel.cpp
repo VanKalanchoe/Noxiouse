@@ -21,6 +21,7 @@
 #include "NoxCore/Asset/TextureImporter.h"
 #include "NoxCore/Asset/TimelineImporter.h"
 #include "NoxCore/Audio/AudioClip.h"
+#include "NoxCore/Audio/AudioGraph.h"
 #include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
@@ -479,14 +480,15 @@ namespace Nox
 
         if (m_ShowCreateGraphModal)
         {
-            ImGui::OpenPopup("Create Animation Graph");
+            ImGui::OpenPopup("Create Graph");
             m_ShowCreateGraphModal = false;
         }
-        if (ImGui::BeginPopupModal("Create Animation Graph", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        if (ImGui::BeginPopupModal("Create Graph", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
+            ImGui::TextUnformatted(m_CreateAudioGraph ? "Audio Graph (.naudiograph)" : "Animation Graph (.nanimgraph)");
             ImGui::InputText("Name", m_NewGraphName, sizeof(m_NewGraphName));
             const std::string graphName = m_NewGraphName;
-            const std::filesystem::path graphPath = m_CurrentDirectory / (graphName + ".nanimgraph");
+            const std::filesystem::path graphPath = m_CurrentDirectory / (graphName + (m_CreateAudioGraph ? ".naudiograph" : ".nanimgraph"));
             const bool validName = !graphName.empty() && graphName.find_first_of("\\/:*?\"<>|") == std::string::npos;
             const bool graphAlreadyExists = std::filesystem::exists(graphPath);
             if (!validName)
@@ -498,7 +500,7 @@ namespace Nox
             if (disableCreate) ImGui::BeginDisabled();
             if (ImGui::Button("Create"))
             {
-                if (NodeGraphSerializer::Serialize(graphPath, CreateEmptyAnimationGraph()))
+                if (NodeGraphSerializer::Serialize(graphPath, m_CreateAudioGraph ? CreateEmptyAudioGraph() : CreateEmptyAnimationGraph()))
                 {
                     // Writing the file isn't enough: the registry (and so the Content Browser, the Animator's
                     // Graph combo and everything else keyed by AssetHandle) only knows registered assets.
@@ -512,13 +514,11 @@ namespace Nox
                     if (handle != 0 && m_OpenAsset)
                         m_OpenAsset(handle);
 
-                    constexpr char defaultGraphName[] = "NewAnimationGraph";
-                    std::copy_n(defaultGraphName, sizeof(defaultGraphName), m_NewGraphName);
                     ImGui::CloseCurrentPopup();
                 }
                 else
                 {
-                    NOX_CORE_ERROR("Failed to create animation graph '{}'", graphPath.string());
+                    NOX_CORE_ERROR("Failed to create graph '{}'", graphPath.string());
                 }
             }
             if (disableCreate) ImGui::EndDisabled();
@@ -748,7 +748,7 @@ namespace Nox
 
                         // A sound: a play / stop button on its thumbnail, and its format in the tooltip.
                         bool overAudioButton = false;
-                        if (metadata.Type == AssetType::AudioClip)
+                        if (metadata.Type == AssetType::AudioClip || metadata.Type == AssetType::AudioGraph)
                         {
                             const ImVec2 imageMin = ImGui::GetItemRectMin();
                             const ImVec2 imageMax = ImGui::GetItemRectMax();
@@ -769,7 +769,9 @@ namespace Nox
                             overAudioButton = overButton;
                             if (overButton && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
                                 ToggleAudioPreview(handle);
-                            if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+                            if (metadata.Type == AssetType::AudioGraph && ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+                                ImGui::SetTooltip("%s\nAudio Graph: the play button hears it, a double-click edits it", browserEntry.Name.c_str());
+                            else if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
                             {
                                 const AudioLoadType loadType = metadata.AudioSettings.LoadType;
                                 if (const AudioClip* clip = AssetManager::FindLoadedAsset<AudioClip>(handle))
@@ -952,7 +954,7 @@ namespace Nox
 
     namespace
     {
-        constexpr const char* kTypeFilterNames[] = { "All types", "Meshes", "Materials", "Textures", "Prefabs", "Scenes", "Animation" };
+        constexpr const char* kTypeFilterNames[] = { "All types", "Meshes", "Materials", "Textures", "Prefabs", "Scenes", "Animation", "Audio" };
 
         std::string ToLower(std::string_view text)
         {
@@ -996,7 +998,19 @@ namespace Nox
             if (ImGui::MenuItem("C# Script"))
                 m_ShowCreateScriptModal = true;
             if (ImGui::MenuItem("Animation Graph"))
+            {
                 m_ShowCreateGraphModal = true;
+                m_CreateAudioGraph = false;
+                std::snprintf(m_NewGraphName, sizeof(m_NewGraphName), "NewAnimationGraph");
+            }
+            if (ImGui::MenuItem("Audio Graph"))
+            {
+                m_ShowCreateGraphModal = true;
+                m_CreateAudioGraph = true;
+                std::snprintf(m_NewGraphName, sizeof(m_NewGraphName), "NewAudioGraph");
+            }
+            ImGui::SetItemTooltip("A procedural sound (MetaSounds' Source): clips, oscillators, noise, triggers, envelopes, filters\n"
+                                  "and parameters wired in a graph, played by an Audio Source like a clip.");
             if (ImGui::MenuItem("Timeline"))
                 CreateTimeline();
             ImGui::SetItemTooltip("A sequencer timeline: keyed positions, rotations, lights, camera FOV and events over time,\n"
@@ -1195,6 +1209,7 @@ namespace Nox
         case 4: return type == AssetType::Prefab;
         case 5: return type == AssetType::Scene;
         case 6: return type == AssetType::AnimationSequence || type == AssetType::Skeleton || type == AssetType::AnimationGraph;
+        case 7: return type == AssetType::AudioClip || type == AssetType::AudioGraph;
         default: return true;
         }
     }
@@ -1269,7 +1284,7 @@ namespace Nox
         // a moved one under its old handle (EditorAssetManager::ScanAndRegisterNewAssets), so it shows and can be dragged.
         for (const auto& entry : std::filesystem::directory_iterator(m_CurrentDirectory, error))
         {
-            static const std::unordered_set<std::string> kSelfContained = { ".nox", ".nmat", ".nanimgraph", ".nprefab", ".ntimeline",
+            static const std::unordered_set<std::string> kSelfContained = { ".nox", ".nmat", ".nanimgraph", ".naudiograph", ".nprefab", ".ntimeline",
                                                                             ".ttf", ".otf", ".wav", ".ogg", ".flac", ".mp3" };
             const auto relativePath = entry.path().lexically_relative(m_BaseDirectory).lexically_normal().generic_string();
             if (entry.is_regular_file() && kSelfContained.contains(entry.path().extension().string()) && !handleOfPath.contains(relativePath))
@@ -1356,6 +1371,25 @@ namespace Nox
     {
         if (!m_PreviewPending)
             return;
+        if (AssetManager::GetAssetType(m_PreviewClip) == AssetType::AudioGraph)
+        {
+            // An audio graph: its program once the graph and its clips are in.
+            std::string error;
+            const std::shared_ptr<const AudioGraphProgram> program = GetAudioGraphProgram(m_PreviewClip, &error);
+            if (!program)
+            {
+                if (!error.empty())
+                    m_PreviewPending = false; // (the reason is in the log)
+                return;
+            }
+            m_PreviewPending = false;
+            AudioPlayDesc desc;
+            desc.Graph = program;
+            desc.Bus = AudioBus::Master;
+            desc.Group = AudioVoiceGroup::Editor;
+            m_PreviewVoice = AudioEngine::Play(desc);
+            return;
+        }
         const AssetState state = AssetManager::RequestAsset(m_PreviewClip);
         if (state == AssetState::Failed)
         {
@@ -1387,9 +1421,11 @@ namespace Nox
             BeginRename(handle);
         // Unreal's Duplicate: a copy next to it ("<name> Copy"), registered as its own asset and up for renaming. For assets that are
         // one self-contained file (an animation graph -- e.g. the same graph with the root-motion clips --, a material).
-        const bool duplicable = metadata.Type == AssetType::AnimationGraph || metadata.Type == AssetType::Material;
+        const bool duplicable = metadata.Type == AssetType::AnimationGraph || metadata.Type == AssetType::AudioGraph || metadata.Type == AssetType::Material;
         if (ImGui::MenuItem("Duplicate", nullptr, false, m_Selected.size() == 1 && duplicable))
             DuplicateAsset(handle);
+        if (metadata.Type == AssetType::AudioGraph && ImGui::MenuItem(IsPreviewing(handle) ? "Stop" : "Play"))
+            ToggleAudioPreview(handle);
         if (metadata.Type == AssetType::AudioClip)
         {
             if (ImGui::MenuItem(IsPreviewing(handle) ? "Stop" : "Play"))

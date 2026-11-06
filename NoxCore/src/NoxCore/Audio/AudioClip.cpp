@@ -1,5 +1,6 @@
 #include "AudioClip.h"
 
+#include <atomic>
 #include <cstring>
 
 #include <miniaudio.h>
@@ -15,6 +16,8 @@ namespace Nox
         constexpr double kAutoDecompressSeconds = 5.0;
         // A streamed file is read in pieces of this size (one read every few seconds of compressed music).
         constexpr uint64_t kStreamChunkBytes = 64 * 1024;
+        // What a Compressed In Memory / Streaming clip keeps decoded from its start (Unreal primes its streamed sounds' first chunk).
+        constexpr double kPrimeSeconds = 1.0;
 
         // miniaudio reading a file through the engine's VFS, so a streamed clip plays from a loose file in the editor and from the
         // pack in a packaged game alike. One open file per decoder: a cursor over the file and the chunk read last.
@@ -212,7 +215,10 @@ namespace Nox
         clip->m_LoadType = loadType;
 
         if (loadType == AudioLoadType::Streaming)
+        {
+            clip->LoadPrime();
             return clip;
+        }
 
         std::vector<char> bytes;
         if (!VFS::ReadBytes(path, bytes))
@@ -224,6 +230,7 @@ namespace Nox
         if (loadType == AudioLoadType::CompressedInMemory)
         {
             clip->m_Encoded.assign(bytes.begin(), bytes.end());
+            clip->LoadPrime();
             return clip;
         }
 
@@ -258,6 +265,18 @@ namespace Nox
             return {};
         }
         return clip;
+    }
+
+    void AudioClip::LoadPrime()
+    {
+        AudioClipDecoder decoder;
+        if (!decoder.Open(Ref<AudioClip>(this)))
+            return;
+        const uint64_t frames = static_cast<uint64_t>(kPrimeSeconds * m_SampleRate);
+        m_Prime.resize(static_cast<size_t>(frames * m_Channels));
+        const uint64_t read = decoder.Read(m_Prime.data(), frames);
+        m_Prime.resize(static_cast<size_t>(read * m_Channels));
+        m_Prime.shrink_to_fit();
     }
 
     struct AudioClipDecoder::Impl
@@ -310,5 +329,144 @@ namespace Nox
     bool AudioClipDecoder::Seek(uint64_t frame)
     {
         return m_Impl->Open && ma_decoder_seek_to_pcm_frame(&m_Impl->Decoder, frame) == MA_SUCCESS;
+    }
+
+    struct AudioClipStream::Impl
+    {
+        ma_pcm_rb Ring{};
+        bool RingReady = false;
+        // The request (written by the mixer before it bumps RequestGeneration, read by the stream thread after it sees the bump).
+        std::atomic<const AudioClip*> RequestClip{ nullptr };
+        std::atomic<uint64_t> RequestFrame{ 0 };
+        std::atomic<uint32_t> RequestGeneration{ 0 };
+        std::atomic<uint32_t> ReadyGeneration{ 0 }; // the request the ring holds frames of
+        std::atomic<bool> Ended{ false };           // that request's frames all decoded into the ring
+        // Stream thread only.
+        uint32_t Served = 0;
+        AudioClipDecoder* Decoder = nullptr;
+        const AudioClip* DecoderClip = nullptr;
+        std::vector<float> Scratch; // a mono clip decoded before it is spread to the stereo ring
+    };
+
+    AudioClipStream::AudioClipStream(uint32_t ringFrames) : m_Impl(std::make_unique<Impl>())
+    {
+        m_Impl->RingReady = ma_pcm_rb_init(ma_format_f32, 2, ringFrames, nullptr, nullptr, &m_Impl->Ring) == MA_SUCCESS;
+    }
+
+    AudioClipStream::~AudioClipStream()
+    {
+        delete m_Impl->Decoder;
+        if (m_Impl->RingReady)
+            ma_pcm_rb_uninit(&m_Impl->Ring);
+    }
+
+    void AudioClipStream::Request(const AudioClip* clip, uint64_t frame)
+    {
+        m_ConsumerClip = clip;
+        m_ConsumerFrame = frame;
+        m_Impl->RequestClip.store(clip, std::memory_order_relaxed);
+        m_Impl->RequestFrame.store(frame, std::memory_order_relaxed);
+        m_ConsumerGeneration = m_Impl->RequestGeneration.load(std::memory_order_relaxed) + 1;
+        m_Impl->RequestGeneration.store(m_ConsumerGeneration, std::memory_order_release);
+    }
+
+    bool AudioClipStream::IsReady() const
+    {
+        return m_ConsumerGeneration != 0 && m_Impl->ReadyGeneration.load(std::memory_order_acquire) == m_ConsumerGeneration;
+    }
+
+    uint32_t AudioClipStream::Read(float* stereo, uint32_t frames)
+    {
+        if (!IsReady() || !m_Impl->RingReady)
+            return 0;
+        uint32_t done = 0;
+        while (done < frames)
+        {
+            ma_uint32 count = frames - done;
+            void* source = nullptr;
+            if (ma_pcm_rb_acquire_read(&m_Impl->Ring, &count, &source) != MA_SUCCESS || count == 0)
+                break;
+            std::memcpy(stereo + done * 2, source, sizeof(float) * count * 2);
+            ma_pcm_rb_commit_read(&m_Impl->Ring, count);
+            done += count;
+        }
+        return done;
+    }
+
+    bool AudioClipStream::HasEnded() const
+    {
+        // (Ended read before the ring: once it says ended, every frame is in the ring already.)
+        return IsReady() && m_Impl->Ended.load(std::memory_order_acquire) && ma_pcm_rb_available_read(&m_Impl->Ring) == 0;
+    }
+
+    void AudioClipStream::Fill()
+    {
+        Impl& impl = *m_Impl;
+        if (!impl.RingReady)
+            return;
+        const uint32_t requested = impl.RequestGeneration.load(std::memory_order_acquire);
+        if (requested == 0)
+            return;
+        if (requested != impl.Served)
+        {
+            // A new request: the mixer reads nothing until ReadyGeneration says so, so the ring can be emptied and refilled.
+            const AudioClip* clip = impl.RequestClip.load(std::memory_order_relaxed);
+            const uint64_t frame = impl.RequestFrame.load(std::memory_order_relaxed);
+            ma_pcm_rb_reset(&impl.Ring);
+            impl.Ended.store(false, std::memory_order_relaxed);
+            if (clip != impl.DecoderClip || !impl.Decoder)
+            {
+                delete impl.Decoder;
+                impl.Decoder = nullptr;
+                impl.DecoderClip = nullptr;
+                if (clip && !clip->IsDecoded())
+                {
+                    impl.Decoder = new AudioClipDecoder();
+                    if (!impl.Decoder->Open(Ref<AudioClip>(const_cast<AudioClip*>(clip))))
+                    {
+                        delete impl.Decoder;
+                        impl.Decoder = nullptr;
+                    }
+                    else
+                        impl.DecoderClip = clip;
+                }
+            }
+            if (!impl.Decoder || !impl.Decoder->Seek(frame))
+                impl.Ended.store(true, std::memory_order_relaxed);
+            impl.Served = requested;
+            impl.ReadyGeneration.store(requested, std::memory_order_release);
+        }
+        if (impl.Ended.load(std::memory_order_relaxed) || !impl.Decoder)
+            return;
+        const uint32_t channels = impl.DecoderClip->GetChannels();
+        for (;;)
+        {
+            if (impl.RequestGeneration.load(std::memory_order_acquire) != impl.Served)
+                return; // asked for something else meanwhile: served on the next pass
+            ma_uint32 frames = ma_pcm_rb_available_write(&impl.Ring);
+            if (frames < 512)
+                return;
+            frames = std::min<ma_uint32>(frames, 4096);
+            void* destination = nullptr;
+            if (ma_pcm_rb_acquire_write(&impl.Ring, &frames, &destination) != MA_SUCCESS || frames == 0)
+                return;
+            float* out = static_cast<float*>(destination);
+            uint64_t read = 0;
+            if (channels == 2)
+                read = impl.Decoder->Read(out, frames);
+            else
+            {
+                impl.Scratch.resize(frames);
+                read = impl.Decoder->Read(impl.Scratch.data(), frames);
+                for (uint64_t i = 0; i < read; ++i)
+                    out[i * 2] = out[i * 2 + 1] = impl.Scratch[i];
+            }
+            ma_pcm_rb_commit_write(&impl.Ring, static_cast<ma_uint32>(read));
+            if (read < frames)
+            {
+                impl.Ended.store(true, std::memory_order_release);
+                return;
+            }
+        }
     }
 }

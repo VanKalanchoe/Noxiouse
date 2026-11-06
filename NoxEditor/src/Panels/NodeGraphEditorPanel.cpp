@@ -16,6 +16,8 @@
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Asset/NodeGraphSerializer.h"
+#include "NoxCore/Audio/AudioEngine.h"
+#include "NoxCore/Audio/AudioGraph.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 
@@ -47,7 +49,7 @@ namespace Nox
         : m_GraphHandle(graphAsset)
     {
         m_Asset = AssetManager::GetAsset<NodeGraphAsset>(graphAsset);
-        m_Title = "Animation Graph";
+        m_Title = m_Asset && m_Asset->Graph.Domain == kAudioGraphDomain ? "Audio Graph" : "Animation Graph";
         if (auto assetManager = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr)
         {
             const auto& registry = assetManager->GetAssetRegistry();
@@ -62,7 +64,118 @@ namespace Nox
         m_Backend = CreateScope<ThedmdCanvasBackend>();
     }
 
-    NodeGraphEditorPanel::~NodeGraphEditorPanel() = default;
+    NodeGraphEditorPanel::~NodeGraphEditorPanel()
+    {
+        StopAudioPreview();
+    }
+
+    void NodeGraphEditorPanel::StopAudioPreview()
+    {
+        AudioEngine::Stop(m_AudioPreviewVoice, 0.05f);
+        m_AudioPreviewVoice = 0;
+        m_AudioPreviewWanted = false;
+    }
+
+    void NodeGraphEditorPanel::DrawAudioPreview()
+    {
+        // Closing the window stops it.
+        if (!ImGui::CollapsingHeader("Preview", ImGuiTreeNodeFlags_DefaultOpen))
+            return;
+        if (ImGui::Button(m_AudioPreviewWanted ? "Stop##audioPreview" : "Play##audioPreview", ImVec2(70.0f, 0.0f)))
+        {
+            if (m_AudioPreviewWanted)
+                StopAudioPreview();
+            else
+                m_AudioPreviewWanted = true;
+        }
+        ImGui::SameLine();
+
+        std::string error;
+        const std::shared_ptr<const AudioGraphProgram> program = GetAudioGraphProgram(m_GraphHandle, &error);
+        if (m_AudioPreviewVoice != 0 && !AudioEngine::IsPlaying(m_AudioPreviewVoice))
+        {
+            // It ended by itself (its Output's On Finished): a one-shot graph played once.
+            m_AudioPreviewVoice = 0;
+            m_AudioPreviewWanted = false;
+        }
+        // An edit that only changed literals (dragging a frequency, a gain): into the playing sound, as MetaSounds does.
+        std::vector<std::pair<uint32_t, float>> literalChanges;
+        if (m_AudioPreviewVoice != 0 && program && m_AudioPreviewVersion != m_Asset->CompileVersion && m_AudioPreviewProgram &&
+            m_AudioPreviewProgram->LiteralChanges(*program, literalChanges))
+        {
+            for (const auto& [slot, value] : literalChanges)
+                AudioEngine::SetGraphConstant(m_AudioPreviewVoice, slot, value);
+            m_AudioPreviewVersion = m_Asset->CompileVersion;
+            m_AudioPreviewProgram = program;
+        }
+        if (m_AudioPreviewWanted && program && (m_AudioPreviewVoice == 0 || m_AudioPreviewVersion != m_Asset->CompileVersion))
+        {
+            // Any other edit: the new graph replaces the playing one (MetaSounds rebuilds its preview too), with the parameters set here.
+            AudioEngine::Stop(m_AudioPreviewVoice, 0.02f);
+            AudioPlayDesc desc;
+            desc.Graph = program;
+            desc.GraphParameters = m_AudioPreviewValues;
+            desc.Bus = AudioBus::Master;
+            desc.Group = AudioVoiceGroup::Editor;
+            desc.FadeIn = m_AudioPreviewVoice != 0 ? 0.02f : 0.0f; // (crossfaded with the one it replaces)
+            m_AudioPreviewVoice = AudioEngine::Play(desc);
+            m_AudioPreviewVersion = m_Asset->CompileVersion;
+            m_AudioPreviewProgram = program;
+            if (m_AudioPreviewVoice == 0)
+                m_AudioPreviewWanted = false;
+        }
+
+        if (!error.empty())
+            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "Cannot play: %s", error.c_str());
+        else if (!program)
+            ImGui::TextDisabled("Loading...");
+        else
+        {
+            // The output's level, left and right (-60 .. 0 dB).
+            const glm::vec2 peak = AudioEngine::GetVoicePeak(m_AudioPreviewVoice);
+            for (int channel = 0; channel < 2; ++channel)
+            {
+                const float level = channel == 0 ? peak.x : peak.y;
+                const float db = 20.0f * std::log10(std::max(level, 1e-6f));
+                const float fill = std::clamp((db + 60.0f) / 60.0f, 0.0f, 1.0f);
+                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, level >= 1.0f ? ImVec4(0.9f, 0.25f, 0.2f, 1.0f) : ImVec4(0.3f, 0.75f, 0.35f, 1.0f));
+                char label[32];
+                std::snprintf(label, sizeof(label), level > 1e-6f ? "%s %.1f dB" : "%s", channel == 0 ? "L" : "R", db);
+                ImGui::ProgressBar(fill, ImVec2(160.0f, 0.0f), label);
+                ImGui::PopStyleColor();
+                if (channel == 0)
+                    ImGui::SameLine();
+            }
+        }
+
+        // The parameters, as a script would set them while it plays (not saved: the graph's defaults are in the Parameters list).
+        for (const GraphParameter& parameter : m_Asset->Graph.Parameters)
+        {
+            ImGui::PushID(parameter.Name.c_str());
+            const int32_t index = program ? program->FindParameter(parameter.Name) : -1;
+            if (parameter.IsTrigger)
+            {
+                if (ImGui::Button(("Fire " + parameter.Name).c_str()))
+                    AudioEngine::FireGraphParameter(m_AudioPreviewVoice, index);
+                ImGui::PopID();
+                continue;
+            }
+            NodeGraphValue& value = m_AudioPreviewValues.try_emplace(parameter.Name, parameter.DefaultValue).first->second;
+            if (value.index() != parameter.DefaultValue.index())
+                value = parameter.DefaultValue; // (its type was changed)
+            bool changed = false;
+            ImGui::SetNextItemWidth(200.0f);
+            if (float* f = std::get_if<float>(&value))
+                changed = ImGui::DragFloat(parameter.Name.c_str(), f, std::max(std::fabs(*f) * 0.005f, 0.001f));
+            else if (int32_t* i = std::get_if<int32_t>(&value))
+                changed = ImGui::DragInt(parameter.Name.c_str(), i);
+            else if (bool* b = std::get_if<bool>(&value))
+                changed = ImGui::Checkbox(parameter.Name.c_str(), b);
+            if (changed)
+                AudioEngine::SetGraphParameter(m_AudioPreviewVoice, index, NodeGraphValueToFloat(value));
+            ImGui::PopID();
+        }
+    }
 
     void NodeGraphEditorPanel::Save()
     {
@@ -94,6 +207,8 @@ namespace Nox
         NodeGraph& graph = m_Asset->Graph;
         bool edited = false;
         int removeIndex = -1;
+        const bool triggersAllowed = std::any_of(NodeTypeRegistry::All().begin(), NodeTypeRegistry::All().end(),
+            [&](const NodeTypeDesc& type) { return type.Domain == graph.Domain && type.ParameterType == "Trigger"; });
 
         for (int i = 0; i < (int)graph.Parameters.size(); i++)
         {
@@ -134,18 +249,23 @@ namespace Nox
             }
 
             ImGui::SameLine();
-            int type = std::holds_alternative<bool>(parameter.DefaultValue) ? 1 : (std::holds_alternative<int32_t>(parameter.DefaultValue) ? 2 : 0);
+            // Trigger is offered where the domain has a node reading trigger parameters (audio graphs).
+            int type = parameter.IsTrigger ? 3 : std::holds_alternative<bool>(parameter.DefaultValue) ? 1 : (std::holds_alternative<int32_t>(parameter.DefaultValue) ? 2 : 0);
             ImGui::SetNextItemWidth(70.0f);
-            if (ImGui::Combo("##type", &type, "Float\0Bool\0Int\0"))
+            if (ImGui::Combo("##type", &type, triggersAllowed ? "Float\0Bool\0Int\0Trigger\0" : "Float\0Bool\0Int\0"))
             {
-                parameter.DefaultValue = type == 1 ? NodeGraphValue(false) : (type == 2 ? NodeGraphValue(int32_t(0)) : NodeGraphValue(0.0f));
+                parameter.IsTrigger = type == 3;
+                parameter.DefaultValue = type == 1 || type == 3 ? NodeGraphValue(false) : (type == 2 ? NodeGraphValue(int32_t(0)) : NodeGraphValue(0.0f));
                 edited = true;
             }
 
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(80.0f);
-            if (DrawNodeGraphProperty("##default", parameter.DefaultValue))
-                edited = true;
+            if (!parameter.IsTrigger)
+            {
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(80.0f);
+                if (DrawNodeGraphProperty("##default", parameter.DefaultValue))
+                    edited = true;
+            }
 
             ImGui::SameLine();
             if (ImGui::SmallButton("X"))
@@ -451,7 +571,11 @@ namespace Nox
         m_WantsInput = false; // both stay false if the window is closed or collapsed this frame
         m_Hovered = false;
         if (!m_Open)
+        {
+            if (m_AudioPreviewVoice != 0)
+                StopAudioPreview(); // (closing the window stops what it plays)
             return;
+        }
 
         // "###" gives the window a stable ID independent of the visible label, so the "*" dirty marker changing
         // doesn't make ImGui think this is a different window.
@@ -490,6 +614,8 @@ namespace Nox
                 DrawParametersPanel();
                 if (m_Asset->Graph.Domain == "AnimationGraph")
                     DrawPreview();
+                else if (m_Asset->Graph.Domain == kAudioGraphDomain)
+                    DrawAudioPreview();
 
                 auto onEdited = [this]()
                 {

@@ -120,6 +120,7 @@ namespace Nox
         { ".nanim",   AssetType::AnimationSequence },
         { ".nskmesh", AssetType::SkeletalMesh },
         { ".nanimgraph", AssetType::AnimationGraph },
+        { ".naudiograph", AssetType::AudioGraph },
         { ".nprefab", AssetType::Prefab },
         { ".ntimeline", AssetType::Timeline },
         { ".ttf", AssetType::Font },
@@ -992,6 +993,8 @@ namespace Nox
         {
         case AssetType::Prefab:
         case AssetType::AnimationGraph:
+        case AssetType::AudioGraph:
+        case AssetType::AudioClip:
         case AssetType::Timeline:
         case AssetType::Material:
         case AssetType::Texture2D:
@@ -1249,7 +1252,7 @@ namespace Nox
 
         bool IsReferencingType(AssetType type)
         {
-            return type == AssetType::Scene || type == AssetType::Prefab || type == AssetType::AnimationGraph || type == AssetType::Material ||
+            return type == AssetType::Scene || type == AssetType::Prefab || type == AssetType::AnimationGraph || type == AssetType::AudioGraph || type == AssetType::Material ||
                    type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::SkeletalMesh;
         }
 
@@ -1356,7 +1359,7 @@ namespace Nox
         for (const auto& [handle, metadata] : m_AssetRegistry)
         {
             if ((metadata.Type == AssetType::Scene || metadata.Type == AssetType::Prefab || metadata.Type == AssetType::AnimationGraph ||
-                 metadata.Type == AssetType::Timeline) && !metadata.FilePath.empty())
+                 metadata.Type == AssetType::AudioGraph || metadata.Type == AssetType::Timeline) && !metadata.FilePath.empty())
                 files.push_back(Project::GetActiveAssetDirectory() / metadata.FilePath);
         }
         // World cells: a world's entities that are not in its scene file.
@@ -2135,7 +2138,7 @@ namespace Nox
             std::string ext = entry.path().extension().string();
             std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (ext == ".nox" || ext == ".nanim" || ext == ".nskel" || ext == ".nmat" ||
-                ext == ".ntex" || ext == ".nanimgraph" || ext == ".nprefab" || ext == ".ntimeline" ||
+                ext == ".ntex" || ext == ".nanimgraph" || ext == ".naudiograph" || ext == ".nprefab" || ext == ".ntimeline" ||
                 ext == ".ttf" || ext == ".otf" || ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3")
             {
                 std::filesystem::path relativePath = entry.path().lexically_relative(assetDir).lexically_normal();

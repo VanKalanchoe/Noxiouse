@@ -29,6 +29,10 @@ namespace Nox
         {
             if (pinType == "Pose")
                 return ax::Drawing::IconType::RoundSquare;
+            if (pinType == "Audio")
+                return ax::Drawing::IconType::Square;  // a signal (MetaSounds' audio pins)
+            if (pinType == "Trigger")
+                return ax::Drawing::IconType::Flow;    // an event, like an execution pin
             return ax::Drawing::IconType::Circle;
         }
 
@@ -37,7 +41,10 @@ namespace Nox
             if (pinType == "Pose")     return ImVec4(0.78f, 0.55f, 0.95f, 1.0f); // purple
             if (pinType == "Float")    return ImVec4(0.55f, 0.85f, 0.55f, 1.0f); // green
             if (pinType == "Bool")     return ImVec4(0.85f, 0.45f, 0.45f, 1.0f); // red
+            if (pinType == "Int")      return ImVec4(0.40f, 0.85f, 0.85f, 1.0f); // cyan
             if (pinType == "Vector2")  return ImVec4(0.95f, 0.85f, 0.35f, 1.0f); // yellow
+            if (pinType == "Audio")    return ImVec4(0.40f, 0.60f, 1.00f, 1.0f); // blue
+            if (pinType == "Trigger")  return ImVec4(0.95f, 0.95f, 0.95f, 1.0f); // white
             return ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
         }
 
@@ -51,6 +58,12 @@ namespace Nox
             if (category == "Sinks")    return IM_COL32(55, 135, 90, 255);  // green
             if (category == "Inputs")   return IM_COL32(130, 75, 150, 255); // purple
             if (category == "State Machines") return IM_COL32(150, 60, 60, 255); // red
+            // Audio graph categories.
+            if (category == "Triggers")  return IM_COL32(150, 150, 150, 255); // grey-white
+            if (category == "Math")      return IM_COL32(60, 130, 70, 255);   // green
+            if (category == "Envelopes") return IM_COL32(150, 120, 40, 255);  // amber
+            if (category == "Mixing")    return IM_COL32(40, 120, 150, 255);  // teal
+            if (category == "Filters")   return IM_COL32(120, 70, 140, 255);  // violet
             return IM_COL32(90, 90, 90, 255);
         }
 
@@ -60,6 +73,22 @@ namespace Nox
         {
             return std::any_of(type.DefaultProperties.begin(), type.DefaultProperties.end(),
                 [](const auto& property) { return property.first == kParameterReferenceProperty; });
+        }
+
+        // The domain's node reading `parameter`: of its type (an audio graph's Get Float / Get Trigger), or one reading any type.
+        const NodeTypeDesc* ParameterReader(const std::string& domain, const GraphParameter& parameter)
+        {
+            const NodeTypeDesc* any = nullptr;
+            for (const NodeTypeDesc& type : NodeTypeRegistry::All())
+            {
+                if (type.Domain != domain || !ReadsParameter(type))
+                    continue;
+                if (type.ParameterType == GraphParameterTypeName(parameter))
+                    return &type;
+                if (type.ParameterType.empty() && !any)
+                    any = &type;
+            }
+            return any;
         }
     }
 
@@ -207,13 +236,17 @@ namespace Nox
                 ImGui::SetTooltip("%s", pin.Type.c_str());
             ed::EndPin();
         }
-        // Unreal's Add Pin: one more of the type's variable input, or the last one away (its link with it).
-        if (!type.VariableInput.Name.empty())
+        // Unreal's Add Pin: one more of the type's variable input group (its literals seeded), or the last group away (its links
+        // and literals with it).
+        if (!type.VariableInputs.empty())
         {
             const uint32_t variable = VariableInputCount(type, node.Properties);
             ImGui::PushID(static_cast<int>(node.Id));
             if (ImGui::SmallButton("+ Pin"))
             {
+                for (const NodePinDesc& pin : type.VariableInputs)
+                    if (const auto literal = type.VariableInputLiterals.find(pin.Name); literal != type.VariableInputLiterals.end())
+                        node.Properties.try_emplace(pin.Name + " " + std::to_string(variable), literal->second);
                 node.Properties[kVariableInputCountProperty] = static_cast<int32_t>(variable + 1);
                 onGraphEdited();
             }
@@ -222,9 +255,11 @@ namespace Nox
                 ImGui::SameLine();
                 if (ImGui::SmallButton("- Pin"))
                 {
-                    const uint32_t last = inputCount - 1;
+                    const uint32_t firstOfLast = inputCount - static_cast<uint32_t>(type.VariableInputs.size());
                     graph.Links.erase(std::remove_if(graph.Links.begin(), graph.Links.end(),
-                        [&](const GraphLink& l) { return l.ToNode == node.Id && l.ToPin == last; }), graph.Links.end());
+                        [&](const GraphLink& l) { return l.ToNode == node.Id && l.ToPin >= firstOfLast; }), graph.Links.end());
+                    for (const NodePinDesc& pin : type.VariableInputs)
+                        node.Properties.erase(pin.Name + " " + std::to_string(variable - 1));
                     node.Properties[kVariableInputCountProperty] = static_cast<int32_t>(variable - 1);
                     onGraphEdited();
                 }
@@ -300,9 +335,11 @@ namespace Nox
                 // otherwise collide inside the node.
                 ImGui::PushID(name.c_str());
                 // A pin's literal does nothing while a link feeds the pin: shown, but greyed out.
-                const auto pin = std::find_if(type.Inputs.begin(), type.Inputs.end(), [&](const NodePinDesc& input) { return input.Name == name; });
-                const uint32_t pinIndex = static_cast<uint32_t>(pin - type.Inputs.begin());
-                const bool pinConnected = pin != type.Inputs.end() &&
+                uint32_t pinIndex = UINT32_MAX;
+                for (uint32_t p = 0; p < inputCount && pinIndex == UINT32_MAX; ++p)
+                    if (InputPin(type, p).Name == name)
+                        pinIndex = p;
+                const bool pinConnected = pinIndex != UINT32_MAX &&
                     std::any_of(links.begin(), links.end(), [&](const GraphLink& l) { return l.ToNode == node.Id && l.ToPin == pinIndex; });
                 ImGui::BeginDisabled(pinConnected);
                 const auto boneHint = type.PropertyAssetTypeHints.find(name);
@@ -319,7 +356,9 @@ namespace Nox
                 else
                 {
                     auto rangeIt = type.PropertyRanges.find(name);
-                    if (DrawNodeGraphProperty(name, value, rangeIt != type.PropertyRanges.end() ? &rangeIt->second : nullptr))
+                    auto optionsIt = type.PropertyEnums.find(name);
+                    if (DrawNodeGraphProperty(name, value, rangeIt != type.PropertyRanges.end() ? &rangeIt->second : nullptr,
+                                              optionsIt != type.PropertyEnums.end() ? &optionsIt->second : nullptr))
                         onGraphEdited();
                 }
                 ImGui::EndDisabled();
@@ -671,20 +710,10 @@ namespace Nox
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kNodeGraphParameterPayload))
         {
             const std::string name(static_cast<const char*>(payload->Data));
-            const bool declared = std::any_of(parameters.begin(), parameters.end(),
+            const auto declared = std::find_if(parameters.begin(), parameters.end(),
                 [&](const GraphParameter& parameter) { return parameter.Name == name; });
-
-            const NodeTypeDesc* reader = nullptr;
-            for (const NodeTypeDesc& type : NodeTypeRegistry::All())
-            {
-                if (type.Domain == graph.Domain && ReadsParameter(type))
-                {
-                    reader = &type;
-                    break;
-                }
-            }
-
-            if (declared && reader)
+            const NodeTypeDesc* reader = declared != parameters.end() ? ParameterReader(graph.Domain, *declared) : nullptr;
+            if (reader)
                 CreateNode(graph, *reader, &name, ImGui::GetMousePos(), onGraphEdited);
         }
         ImGui::EndDragDropTarget();
@@ -718,7 +747,8 @@ namespace Nox
                 continue;
             }
             for (const GraphParameter& parameter : parameters)
-                entries.push_back({ "Variables", "Get " + parameter.Name, &type, &parameter.Name });
+                if (ParameterReader(graph.Domain, parameter) == &type)
+                    entries.push_back({ "Variables", "Get " + parameter.Name, &type, &parameter.Name });
         }
 
         // Search box first, focused as the menu opens, like Unreal's action palette: type to filter across every

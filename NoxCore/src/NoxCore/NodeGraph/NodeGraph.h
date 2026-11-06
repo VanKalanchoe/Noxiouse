@@ -82,7 +82,22 @@ namespace Nox
     {
         std::string Name;
         NodeGraphValue DefaultValue;
+        // An event rather than a value (an audio graph's "Fire", MetaSounds' trigger inputs): read by Trigger pins, set off by
+        // scripts (AudioSourceComponent.Trigger); DefaultValue unused.
+        bool IsTrigger = false;
     };
+
+    // "Trigger", or the default value's type: "Bool", "Int", "Float" (NodeTypeDesc::ParameterType names these).
+    inline const char* GraphParameterTypeName(const GraphParameter& parameter)
+    {
+        if (parameter.IsTrigger)
+            return "Trigger";
+        if (std::holds_alternative<bool>(parameter.DefaultValue))
+            return "Bool";
+        if (std::holds_alternative<int32_t>(parameter.DefaultValue))
+            return "Int";
+        return "Float";
+    }
 
     // The authored, editable graph -- what the editor shows and what NodeGraphSerializer saves to disk.
     // GraphCompiler turns this into a CompiledGraph for evaluation; nothing here is touched at runtime.

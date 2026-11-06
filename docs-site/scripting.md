@@ -1,6 +1,6 @@
 # C# Scripting Host (`.NET 9` / Coral) & `NoxScriptCore` API (`35` Files)
 
-Noxiouse features a first-class **C# scripting runtime** powered by **.NET 9 (`net9.0`)** and **Coral** (`NoxCore/src/NoxCore/Scripting/` + `NoxScriptCore/`). It supports **multiple scripts per entity**, **stateful hot reload during Play Mode**, **rich Inspector attributes (`[Expose]`, `[DisallowSelf]`)**, **64-bit Large World Coordinate `Vector3d` positions**, **multi-threaded C# jobs (`Nox.Jobs`)**, **runtime procedural meshes (`MeshBuilder`)**, and **83 native C++ internal calls**.
+Noxiouse features a first-class **C# scripting runtime** powered by **.NET 9 (`net9.0`)** and **Coral** (`NoxCore/src/NoxCore/Scripting/` + `NoxScriptCore/`). It supports **multiple scripts per entity**, **stateful hot reload during Play Mode**, **rich Inspector attributes (`[Expose]`, `[DisallowSelf]`)**, **64-bit Large World Coordinate `Vector3d` positions**, **multi-threaded C# jobs (`Nox.Jobs`)**, **runtime procedural meshes (`MeshBuilder`)**, and **85 native C++ internal calls**.
 
 ---
 
@@ -11,7 +11,7 @@ Noxiouse features a first-class **C# scripting runtime** powered by **.NET 9 (`n
 - **Stateful Hot Reload (`ScriptEngine::ReloadAssembly`)**:
   1. Waits for any running background `Nox.Jobs` tasks to finish (`WaitForJobs(2000)`).
   2. Snapshots the live value of every `[Expose]` field on every active script instance (`FieldSnapshot`).
-  3. Unloads the old `Coral::AssemblyLoadContext` and loads the new generation DLL (automatically rolling back to the previous generation if the new DLL fails to load or mismatches `kScriptApiVersion = 16`).
+  3. Unloads the old `Coral::AssemblyLoadContext` and loads the new generation DLL (automatically rolling back to the previous generation if the new DLL fails to load or mismatches `kScriptApiVersion = 17`).
   4. Recreates script instances, restores their live `[Expose]` field values from the snapshot, invokes `OnCreate()`, and calls `OnAfterReload()`.
 
 ### B. `EntityBehaviour` Lifecycle & Inspector Attributes
@@ -52,7 +52,7 @@ public sealed class PlayerController : EntityBehaviour
 | [`IScriptBackend.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/IScriptBackend.h) | Pure abstract interface decoupling `ScriptEngine` from the underlying .NET / Coral hosting implementation. |
 | [`ScriptEngine.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/ScriptEngine.h) & [`ScriptEngine.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/ScriptEngine.cpp) | Static scripting facade: assembly discovery (`FindAssemblies`), shadow-copy staging (`StageAssemblies`), stateful hot reload (`ReloadAssembly`), entity instance creation/destruction, and callback dispatch. |
 | [`DotNet/CoralCompat.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/CoralCompat.h) | Declares explicit `Coral::Attribute::GetFieldValue<std::string>` and `<bool>` specializations matching `Coral.Native`. |
-| [`DotNet/DotNetBackend.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/DotNetBackend.h) & [`DotNetBackend.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/DotNetBackend.cpp) | Hosts `.NET 9` via `Coral::HostInstance` (supporting both system .NET and packaged self-contained `dotnet/` folders), verifies `kScriptApiVersion = 16`, reflects `[Expose]`/`[DisallowSelf]` fields, enforces main-thread guards (`OnMainThread`), and implements all **83 native C++ internal calls**. |
+| [`DotNet/DotNetBackend.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/DotNetBackend.h) & [`DotNetBackend.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/DotNetBackend.cpp) | Hosts `.NET 9` via `Coral::HostInstance` (supporting both system .NET and packaged self-contained `dotnet/` folders), verifies `kScriptApiVersion = 17`, reflects `[Expose]`/`[DisallowSelf]` fields, enforces main-thread guards (`OnMainThread`), and implements all **85 native C++ internal calls**. |
 
 ---
 
@@ -61,7 +61,7 @@ public sealed class PlayerController : EntityBehaviour
 | File | Plain-English Summary & Public API |
 | :--- | :--- |
 | [`Nox.ScriptCore.csproj`](file:///E:/dev/noxiouse/NoxScriptCore/Nox.ScriptCore.csproj) | .NET 9 (`net9.0`) project file with `AllowUnsafeBlocks` enabled for zero-overhead unmanaged `delegate*` pointers. |
-| [`Source/ScriptApi.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/ScriptApi.cs) | Defines `ScriptApi.Version = 16` and `WaitForDebugger(timeoutMs)` (polls `Debugger.IsAttached` and calls `Debugger.Break()`). |
+| [`Source/ScriptApi.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/ScriptApi.cs) | Defines `ScriptApi.Version = 17` and `WaitForDebugger(timeoutMs)` (polls `Debugger.IsAttached` and calls `Debugger.Break()`). |
 | [`Source/InternalCalls.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/InternalCalls.cs) | Declares all **69 unmanaged `delegate*` function pointers** bound by `DotNetBackend::RegisterInternalCalls` plus `NativeString` marshaling. |
 | [`Source/ExposeAttribute.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/ExposeAttribute.cs) | `[Expose]` attribute with optional `Unit` (`"cm"`, `"m"`, `"cm/s"`, `"m/s"`, `"km/h"`), `Tooltip`, `Min`, `Max`, and `ReadOnly` parameters. |
 | [`Source/DisallowSelfAttribute.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/DisallowSelfAttribute.cs) | `[DisallowSelf]` attribute preventing an `Entity` reference field from being assigned to `Self` in the Inspector. |
@@ -76,8 +76,8 @@ public sealed class PlayerController : EntityBehaviour
 | [`Source/MeshComponent.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/MeshComponent.cs) | Controls per-entity morph target weights (`SetMorphWeight`, `GetMorphWeight`, `ClearMorphWeight`, `ClearMorphWeights`). |
 | [`Source/ParticleEmitterComponent.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/ParticleEmitterComponent.cs) | Controls a particle emitter: `Play(restart)`, `Stop()`, `Emit(int count)`, `IsEmitting`, and `ParticleCount`. |
 | [`Source/TimelinePlayerComponent.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/TimelinePlayerComponent.cs) | Controls a Sequencer timeline player: `Play(fromStart)`, `Stop()`, `IsPlaying`, `Time`, and `Speed`. |
-| [`Source/AudioSourceComponent.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/AudioSourceComponent.cs) | Controls an Audio Source: `Play()`, `Stop(fadeOut)`, `IsPlaying`, `Volume`, `Pitch`, `Loop`, `SetClip(path)` (API 16). |
-| [`Source/Audio.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/Audio.cs) | `Audio.PlayOneShot(path, Vector3d position, volume, bus)`, `PlayOneShot2D(path, volume, bus)`, `SetBusVolume(bus, volume)`, `GetBusVolume(bus)`; clip paths with an optional extension (API 16). |
+| [`Source/AudioSourceComponent.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/AudioSourceComponent.cs) | Controls an Audio Source: `Play()`, `Stop(fadeOut)`, `IsPlaying`, `Volume`, `Pitch`, `Loop`, `SetSound(path)` (a clip or an audio graph), and an audio graph's parameters `SetFloat` / `SetInt` / `SetBool(name, value)` and `Trigger(name)` (API 17). |
+| [`Source/Audio.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/Audio.cs) | `Audio.PlayOneShot(path, Vector3d position, volume, bus)`, `PlayOneShot2D(path, volume, bus)`, `SetBusVolume(bus, volume)`, `GetBusVolume(bus)`; sound paths (clips and audio graphs) with an optional extension (API 17). |
 | [`Source/Physics.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/Physics.cs) | Defines `RaycastHit` (`Entity`, `Vector3d Point`, `Vector3 Normal`, `float Distance`) and `Physics.Raycast(Vector3d origin, Vector3 direction, float maxDistance, out RaycastHit hit)`. |
 | [`Source/Mesh.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/Mesh.cs) | Defines `Mesh : IDisposable` (`SetData`, `Clear`, `SetColor`, `SetMaterial`) and thread-safe `MeshBuilder` (`AddVertex`, `AddTriangle`, `AddQuad`) for procedural geometry generation on worker threads. |
 | [`Source/Jobs.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/Jobs.cs) | Multi-core C# job API (`Jobs.Run`, `Jobs.ParallelFor`, `JobHandle`, `JobHandle<T>.TryGetResult`, `WaitForAll`) safe across hot reloads. |

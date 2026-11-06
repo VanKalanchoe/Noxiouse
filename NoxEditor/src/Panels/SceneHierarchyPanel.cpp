@@ -9,6 +9,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/NodeGraph/NodeGraphAsset.h"
 #include "NoxCore/Animation/Skeleton.h"
 #include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/MaterialSerializer.h"
@@ -2367,42 +2368,52 @@ namespace Nox
 
         DrawComponent<AudioSourceComponent>("Audio Source", entity, [this, entity](auto& component)
         {
-            // The clip: a sound file in the project (drop one from the Content Browser).
+            // The sound: a sound file or an audio graph in the project (drop one from the Content Browser).
             const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
-            const std::string current = component.Clip != 0 && registry.contains(component.Clip)
-                ? registry.at(component.Clip).FilePath.filename().string() : std::string("None");
-            if (ImGui::BeginCombo("Clip", current.c_str()))
+            const std::string current = component.Sound != 0 && registry.contains(component.Sound)
+                ? registry.at(component.Sound).FilePath.filename().string() : std::string("None");
+            if (ImGui::BeginCombo("Sound", current.c_str()))
             {
-                if (ImGui::Selectable("None", component.Clip == 0))
-                    component.Clip = 0;
+                if (ImGui::Selectable("None", component.Sound == 0))
+                    component.Sound = 0;
                 for (const auto& [handle, metadata] : registry)
                 {
-                    if (metadata.Type != AssetType::AudioClip)
+                    if (metadata.Type != AssetType::AudioClip && metadata.Type != AssetType::AudioGraph)
                         continue;
                     ImGui::PushID(static_cast<int>(static_cast<uint64_t>(handle) & 0x7fffffff));
-                    if (ImGui::Selectable(metadata.FilePath.filename().string().c_str(), component.Clip == handle))
-                        component.Clip = handle;
+                    if (ImGui::Selectable(metadata.FilePath.filename().string().c_str(), component.Sound == handle))
+                        component.Sound = handle;
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
                         ImGui::SetTooltip("%s", metadata.FilePath.generic_string().c_str());
                     ImGui::PopID();
                 }
                 ImGui::EndCombo();
             }
+            ImGui::SetItemTooltip("An audio clip (.wav / .ogg / .flac / .mp3) or an audio graph (.naudiograph).");
             if (ImGui::BeginDragDropTarget())
             {
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
                 {
                     const AssetHandle handle = *static_cast<const AssetHandle*>(payload->Data);
-                    if (AssetManager::GetAssetType(handle) == AssetType::AudioClip)
-                        component.Clip = handle;
+                    const AssetType type = AssetManager::GetAssetType(handle);
+                    if (type == AssetType::AudioClip || type == AssetType::AudioGraph)
+                        component.Sound = handle;
                 }
                 ImGui::EndDragDropTarget();
+            }
+            const bool isGraph = component.Sound != 0 && AssetManager::GetAssetType(component.Sound) == AssetType::AudioGraph;
+            if (isGraph)
+            {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Open") && m_OpenAsset)
+                    m_OpenAsset(component.Sound);
             }
 
             ImGui::SliderFloat("Volume", &component.Volume, 0.0f, 1.0f, "%.2f");
             ImGui::DragFloat("Pitch", &component.Pitch, 0.01f, 0.1f, 4.0f, "%.2fx");
             ImGui::SetItemTooltip("Playback rate: 2 is an octave up and twice as fast, 0.5 an octave down.");
-            ImGui::Checkbox("Loop", &component.Loop);
+            if (!isGraph)
+                ImGui::Checkbox("Loop", &component.Loop);
             ImGui::Checkbox("Play On Start", &component.PlayOnStart);
             ImGui::SetItemTooltip("Plays when Play or Simulate starts, or when the entity is switched on in Play (else a script calls Play).");
 
@@ -2438,6 +2449,54 @@ namespace Nox
                                       "Linear: straight from full to silent. None: no falloff. All reach silence at Max Distance.");
                 ImGui::DragFloat("Doppler Level", &spatial.DopplerLevel, 0.01f, 0.0f, 5.0f, "%.2f");
                 ImGui::SetItemTooltip("The pitch shift of moving sounds: 0 off, 1 physical (speed of sound 343 m/s).");
+            }
+
+            // An audio graph's parameters: its defaults unless changed here (this entity's own, saved; Reset follows the default
+            // again), as the Animator's. In Play a change reaches the playing sound at once.
+            if (isGraph)
+            {
+                if (const NodeGraphAsset* graph = AssetManager::RequestAsset(component.Sound) == AssetState::Ready
+                        ? AssetManager::FindLoadedAsset<NodeGraphAsset>(component.Sound) : nullptr;
+                    graph && !graph->Graph.Parameters.empty())
+                {
+                    ImGui::Text("Parameters");
+                    ImGui::SetItemTooltip("The graph's defaults unless changed here. A changed one is this entity's own (saved with the scene);\n"
+                                          "Reset makes it follow the graph's default again. Scripts set them with SetFloat / SetInt / SetBool,\n"
+                                          "and fire trigger parameters with Trigger.");
+                    std::string reset;
+                    for (const GraphParameter& parameter : graph->Graph.Parameters)
+                    {
+                        if (parameter.IsTrigger)
+                            continue;
+                        ImGui::PushID(parameter.Name.c_str());
+                        const auto overridden = component.GraphParameters.find(parameter.Name);
+                        NodeGraphValue value = overridden != component.GraphParameters.end() && overridden->second.index() == parameter.DefaultValue.index()
+                            ? overridden->second : parameter.DefaultValue;
+                        bool changed = false;
+                        if (float* f = std::get_if<float>(&value))
+                            changed = ImGui::DragFloat(parameter.Name.c_str(), f, std::max(std::fabs(*f) * 0.005f, 0.001f));
+                        else if (bool* b = std::get_if<bool>(&value))
+                            changed = ImGui::Checkbox(parameter.Name.c_str(), b);
+                        else if (int32_t* i = std::get_if<int32_t>(&value))
+                            changed = ImGui::DragInt(parameter.Name.c_str(), i);
+                        if (changed)
+                        {
+                            component.GraphParameters[parameter.Name] = value;
+                            if (m_Context->IsAudioRunning())
+                                m_Context->SetAudioSourceParameter(entity, parameter.Name, value);
+                        }
+                        if (component.GraphParameters.contains(parameter.Name))
+                        {
+                            ImGui::SameLine();
+                            if (ImGui::SmallButton("Reset"))
+                                reset = parameter.Name;
+                            ImGui::SetItemTooltip("Overridden on this entity. Reset: follow the graph's default.");
+                        }
+                        ImGui::PopID();
+                    }
+                    if (!reset.empty())
+                        component.GraphParameters.erase(reset);
+                }
             }
 
             // In Play / Simulate: try it out.

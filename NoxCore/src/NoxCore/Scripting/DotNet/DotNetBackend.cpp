@@ -778,21 +778,25 @@ namespace Nox
                 player->Speed = speed;
         }
 
-        // Audio (Nox.Audio, Nox.AudioSourceComponent; docs/Audio_Architecture_Plan_2026.md §9). A clip by its path under the asset
-        // directory, its extension optional ("Sounds/Explosion" finds Sounds/Explosion.wav / .ogg / .flac / .mp3).
-        AssetHandle FindAudioClip(const std::string& path, const char* call)
+        // Audio (Nox.Audio, Nox.AudioSourceComponent; docs/Audio_Architecture_Plan_2026.md §9). A sound -- an audio clip or an audio
+        // graph -- by its path under the asset directory, its extension optional ("Sounds/Explosion" finds Sounds/Explosion.wav /
+        // .ogg / .flac / .mp3 / .naudiograph).
+        AssetHandle FindSound(const std::string& path, const char* call)
         {
-            const std::filesystem::path clipPath(path);
-            AssetHandle clip = AssetManager::FindHandleByPath(clipPath, AssetType::AudioClip);
-            for (const char* extension : { ".wav", ".ogg", ".flac", ".mp3" })
+            const std::filesystem::path soundPath(path);
+            AssetHandle sound = AssetManager::FindHandleByPath(soundPath, AssetType::AudioClip);
+            if (sound == 0)
+                sound = AssetManager::FindHandleByPath(soundPath, AssetType::AudioGraph);
+            for (const char* extension : { ".wav", ".ogg", ".flac", ".mp3", ".naudiograph" })
             {
-                if (clip != 0 || clipPath.has_extension())
+                if (sound != 0 || soundPath.has_extension())
                     break;
-                clip = AssetManager::FindHandleByPath(std::filesystem::path(path + extension), AssetType::AudioClip);
+                const std::filesystem::path candidate(path + extension);
+                sound = AssetManager::FindHandleByPath(candidate, std::string_view(extension) == ".naudiograph" ? AssetType::AudioGraph : AssetType::AudioClip);
             }
-            if (clip == 0)
+            if (sound == 0)
                 NOX_CORE_ERROR("[C#] {}: no sound '{}' in the asset registry", call, path);
-            return clip;
+            return sound;
         }
 
         // A bus by its name ("Music"); a name that is no bus is reported, not taken as Master.
@@ -811,8 +815,8 @@ namespace Nox
             AudioBus bus;
             if (!FindAudioBus(std::string(busName), bus, "Audio.PlayOneShot"))
                 return;
-            if (const AssetHandle clip = FindAudioClip(std::string(path), "Audio.PlayOneShot"))
-                s_Scene->PlayOneShot(clip, { x, y, z }, volume, spatial, bus);
+            if (const AssetHandle sound = FindSound(std::string(path), "Audio.PlayOneShot"))
+                s_Scene->PlayOneShot(sound, { x, y, z }, volume, spatial, bus);
         }
 
         void AudioSetBusVolume(Coral::String busName, float volume)
@@ -874,15 +878,32 @@ namespace Nox
             else if (field == 2) source.Loop = value != 0.0f;
         }
 
-        // The clip it plays next (Play); false when there is no such sound.
-        Coral::Bool32 AudioSourceSetClip(uint64_t entityID, Coral::String path)
+        // The sound it plays next (Play); false when there is no such sound.
+        Coral::Bool32 AudioSourceSetSound(uint64_t entityID, Coral::String path)
         {
             Entity entity = FindAudioSourceEntity(entityID);
             if (!entity) return false;
-            const AssetHandle clip = FindAudioClip(std::string(path), "AudioSourceComponent.SetClip");
-            if (clip == 0) return false;
-            entity.GetComponent<AudioSourceComponent>().Clip = clip;
+            const AssetHandle sound = FindSound(std::string(path), "AudioSourceComponent.SetSound");
+            if (sound == 0) return false;
+            entity.GetComponent<AudioSourceComponent>().Sound = sound;
             return true;
+        }
+
+        // An audio graph parameter: type 0 float, 1 int, 2 bool.
+        void AudioSourceSetParameter(uint64_t entityID, Coral::String name, float value, int32_t type)
+        {
+            if (!OnMainThread("AudioSourceComponent.SetFloat")) return;
+            Entity entity = FindAudioSourceEntity(entityID);
+            if (!entity) return;
+            const NodeGraphValue typed = type == 1 ? NodeGraphValue(static_cast<int32_t>(value)) : type == 2 ? NodeGraphValue(value != 0.0f) : NodeGraphValue(value);
+            s_Scene->SetAudioSourceParameter(entity, std::string(name), typed);
+        }
+
+        void AudioSourceFireParameter(uint64_t entityID, Coral::String name)
+        {
+            if (!OnMainThread("AudioSourceComponent.Trigger")) return;
+            if (Entity entity = FindAudioSourceEntity(entityID))
+                s_Scene->FireAudioSourceParameter(entity, std::string(name));
         }
 
         // The Character Controller 3D (Nox.CharacterControllerComponent): inputs are read by the next fixed physics
@@ -1243,7 +1264,9 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_IsPlaying", reinterpret_cast<void*>(&AudioSourceIsPlaying));
         assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_GetFloat", reinterpret_cast<void*>(&AudioSourceGetFloat));
         assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_SetFloat", reinterpret_cast<void*>(&AudioSourceSetFloat));
-        assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_SetClip", reinterpret_cast<void*>(&AudioSourceSetClip));
+        assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_SetSound", reinterpret_cast<void*>(&AudioSourceSetSound));
+        assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_SetParameter", reinterpret_cast<void*>(&AudioSourceSetParameter));
+        assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_FireParameter", reinterpret_cast<void*>(&AudioSourceFireParameter));
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_Play", reinterpret_cast<void*>(&ParticlesPlay));
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_Stop", reinterpret_cast<void*>(&ParticlesStop));
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_Emit", reinterpret_cast<void*>(&ParticlesEmit));

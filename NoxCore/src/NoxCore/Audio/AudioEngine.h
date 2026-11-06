@@ -6,11 +6,17 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <memory>
+#include <unordered_map>
+
 #include "AudioClip.h"
 #include "AudioTypes.h"
+#include "NoxCore/NodeGraph/NodeGraphTypes.h"
 
 namespace Nox
 {
+    class AudioGraphProgram;
+
     // How a 3D sound is heard by distance (docs/Audio_Architecture_Plan_2026.md §4; the shared Attenuation asset of A3 holds the
     // same fields). Distances in meters, whatever the project's world unit.
     struct AudioSpatialSettings
@@ -23,7 +29,10 @@ namespace Nox
 
     struct AudioPlayDesc
     {
+        // What plays: a clip, or an audio graph (AudioGraph.h; its program built from the asset, its parameters' values here).
         Ref<AudioClip> Clip;
+        std::shared_ptr<const AudioGraphProgram> Graph;
+        std::unordered_map<std::string, NodeGraphValue> GraphParameters;
         float Volume = 1.0f; // linear
         float Pitch = 1.0f;  // playback rate (2 = an octave up)
         bool Loop = false;
@@ -32,7 +41,7 @@ namespace Nox
         bool Spatial = false;           // 3D: panned and attenuated around the listener, with Doppler; 2D: as the file is
         glm::dvec3 Position{ 0.0 };     // world position (world units), for Spatial
         AudioSpatialSettings Spatialization;
-        float StartTime = 0.0f; // seconds into the clip
+        float StartTime = 0.0f; // seconds into the clip (clips only)
         float FadeIn = 0.0f;    // seconds
     };
 
@@ -58,6 +67,9 @@ namespace Nox
     // into per-voice ring buffers (FMOD's and Wwise's stream threads). The game thread talks to the mixer through a lock-free command
     // queue and hears back through a lock-free event queue -- the mixer never locks or allocates.
     //
+    // A voice plays a clip or an audio graph (an AudioGraphInstance of its program, run block by block on the mixer thread; its pitch
+    // and Doppler reach the graph's Wave Players and oscillators, as a MetaSound's do not -- Unreal leaves them to the graph).
+    //
     // Everything here is called from the main thread. Spatialization (distance attenuation, equal-power panning, Doppler) is worked
     // out on the main thread once per frame from the listener and each voice's position (Unreal's active sounds do the same) and
     // reaches the mixer as target gains and a rate, which it ramps across each block so nothing clicks.
@@ -73,6 +85,9 @@ namespace Nox
         static bool IsAvailable();
 
         static AudioVoiceHandle Play(const AudioPlayDesc& desc);
+    private:
+        static AudioVoiceHandle PlayGraph(const AudioPlayDesc& desc);
+    public:
         // Stops with a fade (at least a few milliseconds, so it never clicks).
         static void Stop(AudioVoiceHandle voice, float fadeOutSeconds = 0.0f);
         // Playing and not stopped (a voice fading out after Stop is no longer playing).
@@ -83,6 +98,15 @@ namespace Nox
         static void SetSpatialization(AudioVoiceHandle voice, const AudioSpatialSettings& settings);
         static void SetLoop(AudioVoiceHandle voice, bool loop);
         static void SetPaused(AudioVoiceHandle voice, bool paused);
+        // An audio graph voice's parameters (by their index in its program: AudioGraphProgram::FindParameter); a trigger parameter
+        // fires at the start of the next block.
+        static void SetGraphParameter(AudioVoiceHandle voice, int32_t index, float value);
+        static void FireGraphParameter(AudioVoiceHandle voice, int32_t index);
+        // A live literal edit (AudioGraphProgram::LiteralChanges): the value slot set in the playing graph.
+        static void SetGraphConstant(AudioVoiceHandle voice, uint32_t slot, float value);
+        // A voice's output level (linear peak, falling ~20 dB a second), left and right: the graph editor's meters.
+        static glm::vec2 GetVoicePeak(AudioVoiceHandle voice);
+        static uint32_t GetSampleRate();
 
         static void StopGroup(AudioVoiceGroup group, float fadeOutSeconds = 0.0f);
         // Pausing the game pauses its voices, except those on the UI bus (a pause menu's sounds keep playing).

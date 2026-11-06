@@ -1,6 +1,7 @@
 # Audio and the Audio Graph -- architecture plan (2026-11-06)
 
-> Status: **A1 Core built (2026-11-06)**, waiting for the user's test before A2 (see §11 "A1 as built"). Backlog C4. This plan covers
+> Status: **A1 Core built and tested (2026-11-06); A2 Audio graph built**, waiting for the user's test before A3 (see §11 "A1 as built",
+> "A2 as built"). Backlog C4. This plan covers
 > the whole audio system the graph needs, not just the graph. Phase gates as in the other plans: each phase is built, then tested by
 > the user, before the next one starts.
 
@@ -388,3 +389,47 @@ Each phase lands with the docs-site pages updated and the manual's walkthrough, 
   (A3); HRTF, occlusion, reverb (A4); concurrency groups, virtual voices and priorities, stats overlay lines (the profiler already has the mixer's lane, "Audio Mixer"
   with its "Audio Mix Block" scopes, and a warning when a block takes longer than its 5.3 ms), notifies,
   sequencer track, impact sounds (A5).
+
+### A2 as built (2026-11-06)
+
+- **Authoring on the shared core:** domain `AudioGraph`, `.naudiograph` (`AssetType::AudioGraph`, the same `NodeGraphAsset` and
+  serializer as animation graphs), edited in the node graph window: Content Browser > + Add > Audio Graph. The core gained what the audio
+  graph needed and any domain can use: variable pin *groups* (a Mixer's "In n" + "Gain n", their literals seeded), node readers typed by
+  parameter (`NodeTypeDesc::ParameterType`: the editor offers each parameter with its reader -- Get Float / Int / Bool / Trigger),
+  **Trigger parameters** (`GraphParameter::IsTrigger`), and option properties drawn as a labelled slider (`PropertyEnums`; combos do not
+  work inside imgui-node-editor nodes). Pin colours / shapes: Audio blue squares, Trigger white arrows, Int cyan.
+- **Runtime (`Audio/AudioGraph.h`):** `GraphCompiler` validates and orders the graph, then `AudioGraphProgram::Build` lays its pins out as
+  slots -- audio (256 floats), values (Float / Int / Bool as one float), triggers (up to 16 frame offsets a block) -- unconnected inputs
+  as constant slots with their literals, and every node's state at an offset of one block of memory. An `AudioGraphInstance` (one voice)
+  allocates once on the game thread; `Process` runs the nodes in order on the mixer thread, allocation- and lock-free (the generic
+  `GraphEvalContext`, `std::any` / `std::function` based, is not used here). The Output node's On Finished ends the voice at that frame;
+  a graph without it plays until stopped. Programs are built per asset version once its clips are loaded (`GetAudioGraphProgram`).
+- **Engine:** a voice is a clip or a graph instance; graph voices take parameter set / fire commands and live literal edits through the
+  same lock-free queue, report a per-voice peak meter, and their Wave Players' streams are serviced by the stream thread. The source's
+  Pitch and Doppler reach the graph's Wave Players and oscillators (unlike a MetaSound's, which Unreal leaves to the graph).
+- **Streamed clips in graphs:** Compressed In Memory / Streaming clips keep their first second decoded (the prime, Unreal's stream
+  priming); a Wave Player starts from it at once while an `AudioClipStream` positions itself after it, and a looping one keeps a second
+  stream ready at the loop's start, so starts are instant and loops seamless. Requests are generation-counted: the stream thread resets
+  and seeks a ring only between the mixer's reads, neither ever waits.
+- **Nodes (~60):** sources (Wave / Random Wave / Sequence Player, band-limited Oscillator, Noise), triggers and logic (On Play, Repeat,
+  Delay, Counter, Random, Pick Random, Sequence, Any, All, Once, Gate, Branch, Compare, Select, Switch), math (arithmetic, Clamp, Abs, Map
+  Range, Lerp, Random Float / Int, Interpolate, unit conversions, audio Add / Multiply), envelopes (AD, ADSR -- exponential segments end
+  60 dB down in their time --, LFO with sample & hold, Envelope Follower), mixing (Mixer, Stereo Mixer, Crossfade, Gain, Gain dB, Stereo
+  Panner, Mono / Stereo), filters (RBJ Biquad in seven types, Simper SVF, Zavalishin ZDF Ladder, One-Pole LP / HP, 3-band Parametric EQ).
+  Gains, pans and filter frequencies are ramped across each block (frequencies in octaves); triggers are sample-accurate.
+- **Editor:** the graph window's Preview (Play / Stop, parameters as sliders / checkboxes / Fire buttons, L / R meters); a literal edit goes
+  into the playing preview (`AudioGraphProgram::LiteralChanges`), other edits restart it with a 20 ms crossfade; Content Browser play
+  button on graph tiles.
+- **Audio Source:** `Clip` became **`Sound`** (a clip or a graph); a graph's parameters are overridden per entity in the Inspector (saved,
+  Reset), set live in Play, and by scripts. The scene keeps a graph's clips loaded with it.
+- **Scripts (API 17):** `AudioSourceComponent.SetSound / SetFloat / SetInt / SetBool / Trigger`; `Audio.PlayOneShot` plays graphs too.
+- **Tests (harness, real compiler and nodes):** oscillator frequency and level, PolyBLEP aliasing (strongest alias -25 dB for saw and square
+  at 3.5 kHz, -42 dB triangle); every filter's gain at 100 Hz / 1 kHz / 10 kHz equal to the bilinear-transform theory to 0.3 %; ladder 4-pole
+  response; Wave Player output equal to a reference resampler (decoded 4e-6; streamed and in-memory loops at 1.37x 4e-6; a 2-second loop
+  region past the prime of a streamed Ogg over 10 s: 0 frames off); Random Wave Player never repeating with No Repeats 1 and Trigger
+  Repeat starting it every 4800 frames exactly; ADSR attack / sustain / release times; parameters ramped; live literal edits applied in
+  place and structural ones refused; the footstep, car engine (0.013 ms a block for 4 Wave Players, crossfade and filter) and wind examples
+  rendered; graph voices in the live engine ending by themselves, stopping, streaming without starvation; ThreadSanitizer clean.
+- **Not in A2:** graphs inside graphs (composition) and the Curve node (needs a curve editor in nodes) -- with A3; the delay / reverb /
+  dynamics nodes (A3, with the bus effects); notifies playing graphs (A5).
+

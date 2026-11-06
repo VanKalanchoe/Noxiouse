@@ -717,7 +717,7 @@ namespace Nox
             const auto& source = entity.GetComponent<AudioSourceComponent>();
             out << YAML::Key << "AudioSourceComponent";
             out << YAML::BeginMap;
-            out << YAML::Key << "Clip" << YAML::Value << source.Clip;
+            out << YAML::Key << "Sound" << YAML::Value << source.Sound;
             out << YAML::Key << "Volume" << YAML::Value << source.Volume;
             out << YAML::Key << "Pitch" << YAML::Value << source.Pitch;
             out << YAML::Key << "Loop" << YAML::Value << source.Loop;
@@ -728,6 +728,19 @@ namespace Nox
             out << YAML::Key << "MaxDistance" << YAML::Value << source.Spatialization.MaxDistance;
             out << YAML::Key << "Attenuation" << YAML::Value << std::string(AudioAttenuationToString(source.Spatialization.Attenuation));
             out << YAML::Key << "DopplerLevel" << YAML::Value << source.Spatialization.DopplerLevel;
+            if (!source.GraphParameters.empty())
+            {
+                out << YAML::Key << "GraphParameters" << YAML::Value << YAML::BeginSeq;
+                for (const auto& [name, value] : source.GraphParameters)
+                {
+                    out << YAML::BeginMap;
+                    out << YAML::Key << "Name" << YAML::Value << name;
+                    out << YAML::Key << "Value";
+                    NodeGraphSerializer::EmitValue(out, value);
+                    out << YAML::EndMap;
+                }
+                out << YAML::EndSeq;
+            }
             out << YAML::EndMap;
         }
 
@@ -2261,8 +2274,8 @@ namespace Nox
         if (auto audioSource = entity["AudioSourceComponent"])
         {
             auto& source = deserializedEntity.AddComponent<AudioSourceComponent>();
-            if (audioSource["Clip"])
-                source.Clip = audioSource["Clip"].as<AssetHandle>();
+            if (audioSource["Sound"])
+                source.Sound = audioSource["Sound"].as<AssetHandle>();
             if (audioSource["Volume"])
                 source.Volume = audioSource["Volume"].as<float>();
             if (audioSource["Pitch"])
@@ -2283,6 +2296,15 @@ namespace Nox
                 source.Spatialization.Attenuation = AudioAttenuationFromString(audioSource["Attenuation"].as<std::string>());
             if (audioSource["DopplerLevel"])
                 source.Spatialization.DopplerLevel = audioSource["DopplerLevel"].as<float>();
+            if (const YAML::Node parameters = audioSource["GraphParameters"])
+            {
+                for (const auto& parameter : parameters)
+                {
+                    NodeGraphValue value;
+                    if (parameter["Name"] && parameter["Value"] && NodeGraphSerializer::ReadValue(parameter["Value"], value))
+                        source.GraphParameters[parameter["Name"].as<std::string>()] = value;
+                }
+            }
         }
 
         if (entity["AudioListenerComponent"])

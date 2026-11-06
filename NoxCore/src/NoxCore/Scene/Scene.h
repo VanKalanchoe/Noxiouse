@@ -250,9 +250,13 @@ namespace Nox
         void StopAudioSource(Entity entity, float fadeOutSeconds = 0.0f);
         bool IsAudioSourcePlaying(Entity entity) const;
         bool IsAudioRunning() const { return m_AudioRunning; } // Play or Simulate
-        // A sound played once (Audio.PlayOneShot): at a point (3D, the default Min / Max Distance) or as the file is (2D); played as
-        // soon as the clip is loaded. Stopped with the rest when Play ends.
-        void PlayOneShot(AssetHandle clip, const glm::dvec3& position, float volume, bool spatial, AudioBus bus);
+        // A sound (a clip or an audio graph) played once (Audio.PlayOneShot): at a point (3D, the default Min / Max Distance) or as it is
+        // (2D); played as soon as it is loaded. Stopped with the rest when Play ends.
+        void PlayOneShot(AssetHandle sound, const glm::dvec3& position, float volume, bool spatial, AudioBus bus);
+        // An Audio Source's audio graph parameter (AudioSourceComponent.SetFloat / SetInt / SetBool): kept for its next Play this
+        // session, and sent to its sound if it plays; a trigger parameter (Trigger) fires on the playing sound.
+        void SetAudioSourceParameter(Entity entity, const std::string& name, const NodeGraphValue& value);
+        void FireAudioSourceParameter(Entity entity, const std::string& name);
     private:
         template<typename T>
         void OnComponentAdded(Entity entity, T& component);
@@ -386,10 +390,11 @@ namespace Nox
         // One-shots asked for while their clip was loading (UpdateAudio plays them once it is in).
         struct PendingOneShot
         {
-            AssetHandle Clip = 0;
+            AssetHandle Sound = 0;
             AudioPlayDesc Desc;
         };
         std::vector<PendingOneShot> m_PendingOneShots;
+        bool StartOneShot(PendingOneShot& shot); // false: its sound is still loading
         std::vector<UUID> m_PendingDestroy;
         std::vector<UUID> m_PendingScriptStart;
         std::unordered_set<UUID> m_PendingPhysics3D;

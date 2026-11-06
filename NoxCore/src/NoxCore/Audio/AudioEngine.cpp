@@ -13,6 +13,7 @@
 
 #include <miniaudio.h>
 
+#include "AudioGraph.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Profiling/Profiler.h"
@@ -105,7 +106,10 @@ namespace Nox
             PauseVoice,
             PauseGroup,
             StopGroup,
-            BusGain
+            BusGain,
+            SetParameter,
+            FireParameter,
+            SetConstant
         };
 
         struct Command
@@ -115,6 +119,8 @@ namespace Nox
             // Start
             const AudioClip* Clip = nullptr;
             StreamState* Stream = nullptr;
+            AudioGraphInstance* Graph = nullptr;
+            int32_t Parameter = -1; // SetParameter / FireParameter
             uint64_t StartFrame = 0;
             uint8_t Bus = 0;
             uint8_t Group = 0;
@@ -141,6 +147,7 @@ namespace Nox
             bool Stopping = false;
             const AudioClip* Clip = nullptr;
             StreamState* Stream = nullptr;
+            AudioGraphInstance* Graph = nullptr;
             uint32_t Channels = 1;
             bool Loop = false;
             bool Downmix = false;
@@ -167,6 +174,7 @@ namespace Nox
             uint32_t Generation = 0;
             AudioPlayDesc Desc;
             std::shared_ptr<StreamState> Stream;
+            std::unique_ptr<AudioGraphInstance> Graph; // destroyed here, after the mixer reported the voice ended
             glm::dvec3 PreviousPosition{ 0.0 };
             glm::vec3 Velocity{ 0.0f };
             bool HasPrevious = false;
@@ -222,6 +230,8 @@ namespace Nox
             std::mutex StreamMutex;
             std::condition_variable StreamWake;
             std::vector<std::shared_ptr<StreamState>> Streams;
+            std::vector<std::shared_ptr<AudioClipStream>> ClipStreams; // audio graph Wave Players'
+            uint32_t NextGraphSeed = 1;
 
             // Statistics (written by the mixer and the device callback).
             std::atomic<uint64_t> Underruns{ 0 };
@@ -229,6 +239,7 @@ namespace Nox
             std::atomic<float> MixAverage{ 0.0f };
             std::atomic<float> MixMax{ 0.0f };
             std::array<std::atomic<float>, kBusCount> BusPeak{};
+            std::array<std::atomic<float>, AudioEngine::MaxVoices * 2> VoicePeak{};
             std::atomic<bool> MixerReady{ false };
         };
 
@@ -262,7 +273,10 @@ namespace Nox
                 voice.Stopping = false;
                 voice.Clip = command.Clip;
                 voice.Stream = command.Stream;
-                voice.Channels = command.Clip->GetChannels();
+                voice.Graph = command.Graph;
+                voice.Channels = command.Graph ? 2 : command.Clip->GetChannels();
+                state.VoicePeak[command.Slot * 2].store(0.0f, std::memory_order_relaxed);
+                state.VoicePeak[command.Slot * 2 + 1].store(0.0f, std::memory_order_relaxed);
                 voice.Loop = command.Flag;
                 voice.Downmix = command.Downmix;
                 voice.Bus = command.Bus;
@@ -317,6 +331,18 @@ namespace Nox
                 break;
             case CommandType::BusGain:
                 state.BusTarget[command.Bus] = command.Value;
+                break;
+            case CommandType::SetParameter:
+                if (AudioGraphInstance* graph = state.MixVoices[command.Slot].Graph)
+                    graph->SetParameter(command.Parameter, command.Value);
+                break;
+            case CommandType::FireParameter:
+                if (AudioGraphInstance* graph = state.MixVoices[command.Slot].Graph)
+                    graph->FireParameter(command.Parameter);
+                break;
+            case CommandType::SetConstant:
+                if (AudioGraphInstance* graph = state.MixVoices[command.Slot].Graph)
+                    graph->SetConstant(static_cast<uint32_t>(command.Parameter), command.Value);
                 break;
             }
         }
@@ -463,6 +489,56 @@ namespace Nox
             return true;
         }
 
+        // An audio graph voice's block: the graph runs once, its stereo out gets the voice's gains and fade. False when it has ended.
+        bool MixGraphBlock(State& state, MixVoice& voice, float* out, uint32_t slot)
+        {
+            AudioGraphInstance& graph = *voice.Graph;
+            graph.SetVoicePitch(std::clamp(voice.Rate, 0.0f, kMaxRate));
+            const bool running = graph.Process();
+            if (const uint64_t starved = graph.TakeStarvations())
+                state.Starvations.fetch_add(starved, std::memory_order_relaxed);
+            const float* left = graph.Left();
+            const float* right = graph.Right();
+            const float stepL = (voice.TargetL - voice.GainL) / static_cast<float>(kBlock);
+            const float stepR = (voice.TargetR - voice.GainR) / static_cast<float>(kBlock);
+            float peakL = 0.0f, peakR = 0.0f;
+            bool faded = false;
+            for (uint32_t i = 0; i < kBlock; ++i)
+            {
+                float l = left[i], r = right[i];
+                if (voice.Downmix)
+                    l = r = 0.5f * (l + r);
+                peakL = std::max(peakL, std::fabs(left[i]));
+                peakR = std::max(peakR, std::fabs(right[i]));
+                out[i * 2] += l * voice.GainL * voice.Fade;
+                out[i * 2 + 1] += r * voice.GainR * voice.Fade;
+                voice.GainL += stepL;
+                voice.GainR += stepR;
+                if (voice.FadeStep != 0.0f && !faded)
+                {
+                    voice.Fade += voice.FadeStep;
+                    if (voice.Fade >= 1.0f)
+                    {
+                        voice.Fade = 1.0f;
+                        voice.FadeStep = 0.0f;
+                    }
+                    else if (voice.Fade <= 0.0f)
+                    {
+                        voice.Fade = 0.0f;
+                        faded = true; // stopped: the rest of the block silent
+                    }
+                }
+            }
+            voice.GainL = voice.TargetL;
+            voice.GainR = voice.TargetR;
+            for (uint32_t c = 0; c < 2; ++c)
+            {
+                const float held = state.VoicePeak[slot * 2 + c].load(std::memory_order_relaxed) * 0.985f;
+                state.VoicePeak[slot * 2 + c].store(std::max(held, c == 0 ? peakL : peakR), std::memory_order_relaxed);
+            }
+            return running && !faded;
+        }
+
         void MixBlock(State& state)
         {
             NOX_PROFILE_SCOPE("Audio Mix Block");
@@ -481,11 +557,14 @@ namespace Nox
                 const bool groupPaused = state.GroupPaused[voice.Group] && voice.Bus != static_cast<uint8_t>(AudioBus::UI);
                 if (voice.Paused || groupPaused)
                     continue;
-                if (!MixVoiceBlock(state, voice, state.BusBuffers[voice.Bus].data()))
+                const bool running = voice.Graph ? MixGraphBlock(state, voice, state.BusBuffers[voice.Bus].data(), slot)
+                                                 : MixVoiceBlock(state, voice, state.BusBuffers[voice.Bus].data());
+                if (!running)
                 {
                     voice.Active = false;
                     voice.Clip = nullptr;
                     voice.Stream = nullptr;
+                    voice.Graph = nullptr;
                     state.Finished.Push({ slot }); // (room for every slot: a slot is reused only after its event is read)
                 }
             }
@@ -651,15 +730,20 @@ namespace Nox
         {
             Profiler::Get().SetThreadName("Audio Streams");
             std::vector<std::shared_ptr<StreamState>> streams;
+            std::vector<std::shared_ptr<AudioClipStream>> clipStreams;
             while (state.Running.load(std::memory_order_acquire))
             {
                 {
                     std::unique_lock lock(state.StreamMutex);
                     streams = state.Streams;
+                    clipStreams = state.ClipStreams;
                 }
                 for (const std::shared_ptr<StreamState>& stream : streams)
                     FillStream(*stream);
+                for (const std::shared_ptr<AudioClipStream>& stream : clipStreams)
+                    stream->Fill();
                 streams.clear();
+                clipStreams.clear(); // (a stream released meanwhile is destroyed here, off the game thread's path)
                 std::unique_lock lock(state.StreamMutex);
                 state.StreamWake.wait_for(lock, std::chrono::milliseconds(10));
             }
@@ -793,7 +877,14 @@ namespace Nox
                 std::scoped_lock lock(state.StreamMutex);
                 std::erase(state.Streams, voice.Stream);
             }
+            if (voice.Graph && !voice.Graph->GetStreams().empty())
+            {
+                std::scoped_lock lock(state.StreamMutex);
+                for (const std::shared_ptr<AudioClipStream>& stream : voice.Graph->GetStreams())
+                    std::erase(state.ClipStreams, stream);
+            }
             voice.Stream.reset();
+            voice.Graph.reset();
             voice.Desc = {};
             voice.Alive = false;
             state.FreeSlots.push_back(slot);
@@ -883,7 +974,11 @@ namespace Nox
 
     AudioVoiceHandle AudioEngine::Play(const AudioPlayDesc& desc)
     {
-        if (!IsAvailable() || !desc.Clip || desc.Clip->GetChannels() == 0)
+        if (!IsAvailable())
+            return 0;
+        if (desc.Graph)
+            return PlayGraph(desc);
+        if (!desc.Clip || desc.Clip->GetChannels() == 0)
             return 0;
         State& state = *s_State;
         if (state.FreeSlots.empty())
@@ -962,6 +1057,124 @@ namespace Nox
             state.StreamWake.notify_one();
         }
         return (static_cast<uint64_t>(voice.Generation) << 32) | slot;
+    }
+
+    namespace
+    {
+        uint32_t TakeSlot(State& state)
+        {
+            if (!state.FreeSlots.empty())
+                return state.FreeSlots.back();
+            const double now = static_cast<double>(std::chrono::steady_clock::now().time_since_epoch().count()) * 1e-9;
+            if (now - state.LastVoiceLimitWarning > 2.0)
+            {
+                NOX_CORE_WARN("Audio: all {} voices are playing; a new sound was not started", AudioEngine::MaxVoices);
+                state.LastVoiceLimitWarning = now;
+            }
+            return UINT32_MAX;
+        }
+    }
+
+    AudioVoiceHandle AudioEngine::PlayGraph(const AudioPlayDesc& desc)
+    {
+        State& state = *s_State;
+        const uint32_t slot = TakeSlot(state);
+        if (slot == UINT32_MAX)
+            return 0;
+        GameVoice& voice = state.GameVoices[slot];
+        // Created here (it allocates): its pin slots, node states and Wave Players' streams.
+        auto graph = std::make_unique<AudioGraphInstance>(desc.Graph, static_cast<float>(state.SampleRate), state.NextGraphSeed++, &desc.GraphParameters);
+
+        state.FreeSlots.pop_back();
+        const uint32_t generation = voice.Generation + 1;
+        voice = GameVoice{};
+        voice.Alive = true;
+        voice.Generation = generation;
+        voice.Desc = desc;
+        voice.Desc.GraphParameters.clear(); // (in the instance now)
+        TrackVelocity(desc.Position, voice.PreviousPosition, voice.HasPrevious, voice.Velocity, 0.0f);
+
+        const MixParams params = ComputeMix(state, voice);
+        Command command;
+        command.Type = CommandType::Start;
+        command.Slot = slot;
+        command.Graph = graph.get();
+        command.Bus = static_cast<uint8_t>(desc.Bus);
+        command.Group = static_cast<uint8_t>(desc.Group);
+        command.Downmix = desc.Spatial;
+        command.GainL = params.GainL;
+        command.GainR = params.GainR;
+        command.Rate = params.Rate;
+        command.Value = std::max(desc.FadeIn, 0.0f);
+        if (!Push(state, command))
+        {
+            voice.Alive = false;
+            voice.Desc = {};
+            state.FreeSlots.push_back(slot);
+            return 0;
+        }
+        if (!graph->GetStreams().empty())
+        {
+            {
+                std::scoped_lock lock(state.StreamMutex);
+                for (const std::shared_ptr<AudioClipStream>& stream : graph->GetStreams())
+                    state.ClipStreams.push_back(stream);
+            }
+            state.StreamWake.notify_one();
+        }
+        voice.Graph = std::move(graph);
+        return (static_cast<uint64_t>(voice.Generation) << 32) | slot;
+    }
+
+    void AudioEngine::SetGraphParameter(AudioVoiceHandle handle, int32_t index, float value)
+    {
+        GameVoice* voice = Find(s_State, handle);
+        if (!voice || !voice->Graph || index < 0)
+            return;
+        Command command;
+        command.Type = CommandType::SetParameter;
+        command.Slot = SlotOf(handle);
+        command.Parameter = index;
+        command.Value = value;
+        Push(*s_State, command);
+    }
+
+    void AudioEngine::FireGraphParameter(AudioVoiceHandle handle, int32_t index)
+    {
+        GameVoice* voice = Find(s_State, handle);
+        if (!voice || !voice->Graph || index < 0)
+            return;
+        Command command;
+        command.Type = CommandType::FireParameter;
+        command.Slot = SlotOf(handle);
+        command.Parameter = index;
+        Push(*s_State, command);
+    }
+
+    void AudioEngine::SetGraphConstant(AudioVoiceHandle handle, uint32_t slot, float value)
+    {
+        GameVoice* voice = Find(s_State, handle);
+        if (!voice || !voice->Graph)
+            return;
+        Command command;
+        command.Type = CommandType::SetConstant;
+        command.Slot = SlotOf(handle);
+        command.Parameter = static_cast<int32_t>(slot);
+        command.Value = value;
+        Push(*s_State, command);
+    }
+
+    glm::vec2 AudioEngine::GetVoicePeak(AudioVoiceHandle handle)
+    {
+        if (!Find(s_State, handle))
+            return glm::vec2(0.0f);
+        const uint32_t slot = SlotOf(handle);
+        return { s_State->VoicePeak[slot * 2].load(std::memory_order_relaxed), s_State->VoicePeak[slot * 2 + 1].load(std::memory_order_relaxed) };
+    }
+
+    uint32_t AudioEngine::GetSampleRate()
+    {
+        return s_State ? s_State->SampleRate : 48000;
     }
 
     void AudioEngine::Stop(AudioVoiceHandle handle, float fadeOutSeconds)
@@ -1157,7 +1370,7 @@ namespace Nox
             if (!voice.Alive)
                 continue;
             ++stats.Voices;
-            if (voice.Stream)
+            if (voice.Stream || (voice.Graph && !voice.Graph->GetStreams().empty()))
                 ++stats.StreamingVoices;
         }
         stats.Underruns = state.Underruns.load(std::memory_order_relaxed);

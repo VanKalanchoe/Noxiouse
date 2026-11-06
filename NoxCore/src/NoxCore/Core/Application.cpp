@@ -17,6 +17,7 @@
 #include "NoxCore/Tasks/JobSystem.h"
 #include "NoxCore/Animation/AnimationGraphNodes.h"
 #include "NoxCore/Audio/AudioEngine.h"
+#include "NoxCore/Audio/AudioGraph.h"
 
 namespace Nox
 {
@@ -169,6 +170,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
     // Node-graph domains register their node types once, here, regardless of editor vs. future standalone
     // runtime (NodeTypeRegistry has no de-duplication, so this must run exactly once).
     Nox::RegisterAnimationGraphNodeTypes();
+    Nox::RegisterAudioGraphNodeTypes();
 
     Nox::ApplicationCommandLineArgs args;
     args.Count = argc;

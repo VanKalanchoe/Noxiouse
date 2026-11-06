@@ -10,13 +10,14 @@ namespace Nox
 {
     // The saved/editable node graph as an engine asset: the authored NodeGraph (what the editor shows and what
     // NodeGraphSerializer writes to disk) plus its current CompiledGraph (rebuilt by Recompile(), read by every
-    // running GraphEvalContext). AssetType::AnimationGraph today; a future audio graph domain would reuse this
-    // exact class under its own AssetType, since nothing here is animation-specific.
+    // running GraphEvalContext). One class for every domain: AssetType::AnimationGraph (.nanimgraph) and
+    // AssetType::AudioGraph (.naudiograph), nothing here being specific to either.
     class NodeGraphAsset : public Asset
     {
     public:
-        static AssetType GetStaticType() { return AssetType::AnimationGraph; }
-        virtual AssetType GetType() const override { return GetStaticType(); }
+        virtual AssetType GetType() const override { return Type; }
+
+        AssetType Type = AssetType::AnimationGraph;
 
         // Re-runs GraphCompiler on Graph and replaces Compiled. Call after loading and after every editor edit.
         void Recompile()

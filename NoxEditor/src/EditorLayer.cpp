@@ -129,6 +129,7 @@ namespace Nox
         m_Renderer2D = m_Renderer->getRenderer2D();
 
         m_AssetOpeners[AssetType::AnimationGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
+        m_AssetOpeners[AssetType::AudioGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
         m_AssetOpeners[AssetType::Prefab] = [this](AssetHandle handle) { OpenPrefabMode(handle); };
         // A scene (from a Level Streaming Volume's list, say): opened for editing, as a double click in the Content Browser does.
         m_AssetOpeners[AssetType::Scene] = [this](AssetHandle handle) { OpenScene(handle); };

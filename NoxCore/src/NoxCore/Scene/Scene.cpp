@@ -23,6 +23,8 @@
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Audio/AudioClip.h"
 #include "NoxCore/Audio/AudioEngine.h"
+#include "NoxCore/Audio/AudioGraph.h"
+#include "NoxCore/NodeGraph/NodeGraphAsset.h"
 #include "NoxCore/Physics/Physics2D.h"
 #include "NoxCore/Physics/Physics3DScene.h"
 #include "NoxCore/Profiling/Profiler.h"
@@ -613,7 +615,18 @@ namespace Nox
             outHandles.insert(m_Registry.get<TimelinePlayerComponent>(entity).Timeline);
 
         for (auto entity : m_Registry.view<AudioSourceComponent>())
-            outHandles.insert(m_Registry.get<AudioSourceComponent>(entity).Clip);
+        {
+            const AssetHandle sound = m_Registry.get<AudioSourceComponent>(entity).Sound;
+            outHandles.insert(sound);
+            // An audio graph's clips are the scene's too (kept loaded with it).
+            if (const NodeGraphAsset* graph = sound != 0 && AssetManager::GetAssetType(sound) == AssetType::AudioGraph
+                    ? AssetManager::FindLoadedAsset<NodeGraphAsset>(sound) : nullptr)
+            {
+                std::vector<AssetHandle> clips;
+                AudioGraphProgram::CollectClips(graph->Graph, clips);
+                outHandles.insert(clips.begin(), clips.end());
+            }
+        }
 
         for (auto entity : m_Registry.view<ParticleEmitterComponent>())
             outHandles.insert(m_Registry.get<ParticleEmitterComponent>(entity).Texture);
@@ -1799,6 +1812,7 @@ namespace Nox
             auto& source = m_Registry.get<AudioSourceComponent>(handle);
             source.Voice = 0;
             source.PendingPlay = false;
+            source.RuntimeParameters.clear();
         }
     }
 
@@ -1811,18 +1825,35 @@ namespace Nox
         AudioEngine::Stop(source.Voice);
         source.Voice = 0;
         source.PendingPlay = false;
-        if (source.Clip == 0 || AssetManager::GetAssetType(source.Clip) != AssetType::AudioClip)
-            return;
-        const AssetState state = AssetManager::RequestAsset(source.Clip);
-        if (state == AssetState::Failed)
-            return;
-        if (state != AssetState::Ready)
-        {
-            source.PendingPlay = true; // (UpdateAudio plays it once it is in)
-            return;
-        }
+        const AssetType type = source.Sound != 0 ? AssetManager::GetAssetType(source.Sound) : AssetType::None;
         AudioPlayDesc desc;
-        desc.Clip = AssetManager::GetAsset<AudioClip>(source.Clip);
+        if (type == AssetType::AudioGraph)
+        {
+            std::string error;
+            desc.Graph = GetAudioGraphProgram(source.Sound, &error);
+            if (!desc.Graph)
+            {
+                source.PendingPlay = error.empty(); // loading: plays once it is in (a graph that does not compile is in the log)
+                return;
+            }
+            desc.GraphParameters = source.GraphParameters;
+            for (const auto& [name, value] : source.RuntimeParameters)
+                desc.GraphParameters[name] = value;
+        }
+        else if (type == AssetType::AudioClip)
+        {
+            const AssetState state = AssetManager::RequestAsset(source.Sound);
+            if (state == AssetState::Failed)
+                return;
+            if (state != AssetState::Ready)
+            {
+                source.PendingPlay = true; // (UpdateAudio plays it once it is in)
+                return;
+            }
+            desc.Clip = AssetManager::GetAsset<AudioClip>(source.Sound);
+        }
+        else
+            return;
         desc.Volume = source.Volume;
         desc.Pitch = source.Pitch;
         desc.Loop = source.Loop;
@@ -1855,25 +1886,65 @@ namespace Nox
         return source.PendingPlay || AudioEngine::IsPlaying(source.Voice);
     }
 
-    void Scene::PlayOneShot(AssetHandle clip, const glm::dvec3& position, float volume, bool spatial, AudioBus bus)
+    void Scene::PlayOneShot(AssetHandle sound, const glm::dvec3& position, float volume, bool spatial, AudioBus bus)
     {
-        if (!m_AudioRunning || clip == 0 || AssetManager::GetAssetType(clip) != AssetType::AudioClip)
+        const AssetType type = sound != 0 ? AssetManager::GetAssetType(sound) : AssetType::None;
+        if (!m_AudioRunning || (type != AssetType::AudioClip && type != AssetType::AudioGraph))
             return;
         PendingOneShot shot;
-        shot.Clip = clip;
+        shot.Sound = sound;
         shot.Desc.Volume = volume;
         shot.Desc.Bus = bus;
         shot.Desc.Group = AudioVoiceGroup::Game;
         shot.Desc.Spatial = spatial;
         shot.Desc.Position = position;
-        const AssetState state = AssetManager::RequestAsset(clip);
-        if (state == AssetState::Ready)
-        {
-            shot.Desc.Clip = AssetManager::GetAsset<AudioClip>(clip);
-            AudioEngine::Play(shot.Desc);
-        }
-        else if (state != AssetState::Failed)
+        if (!StartOneShot(shot))
             m_PendingOneShots.push_back(std::move(shot));
+    }
+
+    bool Scene::StartOneShot(PendingOneShot& shot)
+    {
+        if (AssetManager::GetAssetType(shot.Sound) == AssetType::AudioGraph)
+        {
+            std::string error;
+            shot.Desc.Graph = GetAudioGraphProgram(shot.Sound, &error);
+            if (!shot.Desc.Graph)
+                return !error.empty(); // (done with it: it does not compile)
+        }
+        else
+        {
+            const AssetState state = AssetManager::RequestAsset(shot.Sound);
+            if (state == AssetState::Failed)
+                return true;
+            if (state != AssetState::Ready)
+                return false;
+            shot.Desc.Clip = AssetManager::GetAsset<AudioClip>(shot.Sound);
+        }
+        AudioEngine::Play(shot.Desc);
+        return true;
+    }
+
+    void Scene::SetAudioSourceParameter(Entity entity, const std::string& name, const NodeGraphValue& value)
+    {
+        if (!entity || !entity.HasComponent<AudioSourceComponent>())
+            return;
+        auto& source = entity.GetComponent<AudioSourceComponent>();
+        source.RuntimeParameters[name] = value;
+        if (source.Voice == 0)
+            return;
+        if (const std::shared_ptr<const AudioGraphProgram> program = GetAudioGraphProgram(source.Sound))
+            AudioEngine::SetGraphParameter(source.Voice, program->FindParameter(name), NodeGraphValueToFloat(value));
+    }
+
+    void Scene::FireAudioSourceParameter(Entity entity, const std::string& name)
+    {
+        if (!entity || !entity.HasComponent<AudioSourceComponent>())
+            return;
+        const auto& source = entity.GetComponent<AudioSourceComponent>();
+        if (source.Voice == 0)
+            return;
+        if (const std::shared_ptr<const AudioGraphProgram> program = GetAudioGraphProgram(source.Sound))
+            AudioEngine::FireGraphParameter(source.Voice, program->FindParameter(name));
     }
 
     void Scene::UpdateAudio(const glm::dmat4& cameraWorld)
@@ -1894,18 +1965,8 @@ namespace Nox
         const glm::mat3 basis(glm::normalize(glm::vec3(listener[0])), glm::normalize(glm::vec3(listener[1])), glm::normalize(glm::vec3(listener[2])));
         AudioEngine::SetListener(glm::dvec3(listener[3]), glm::quat_cast(basis));
 
-        // One-shots whose clip has come in since.
-        std::erase_if(m_PendingOneShots, [](PendingOneShot& shot)
-        {
-            const AssetState state = AssetManager::RequestAsset(shot.Clip);
-            if (state == AssetState::Failed)
-                return true;
-            if (state != AssetState::Ready)
-                return false;
-            shot.Desc.Clip = AssetManager::GetAsset<AudioClip>(shot.Clip);
-            AudioEngine::Play(shot.Desc);
-            return true;
-        });
+        // One-shots whose sound has come in since.
+        std::erase_if(m_PendingOneShots, [this](PendingOneShot& shot) { return StartOneShot(shot); });
 
         for (auto handle : m_Registry.view<AudioSourceComponent>(entt::exclude<InactiveInHierarchyComponent>))
         {
