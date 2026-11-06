@@ -1520,6 +1520,24 @@ namespace Nox
         return handle;
     }
 
+    AssetHandle EditorAssetManager::FindSkeletonOf(AssetHandle mesh) const
+    {
+        // The rule LinkImportedAssets links a model's skeleton by: <base>.nskel next to the mesh (a per-mesh asset's base is the whole
+        // file's, MaterialBasePath).
+        const auto found = m_AssetRegistry.find(mesh);
+        if (found == m_AssetRegistry.end())
+            return 0;
+        const AssetMetadata& meshMetadata = found->second;
+        std::filesystem::path skeletonPath = meshMetadata.MeshSettings.MaterialBasePath.empty() ? meshMetadata.FilePath : meshMetadata.MeshSettings.MaterialBasePath;
+        skeletonPath.replace_extension(".nskel");
+        for (const auto& [handle, metadata] : m_AssetRegistry)
+        {
+            if (metadata.Type == AssetType::Skeleton && (metadata.FilePath == skeletonPath || metadata.SourceFilePath == skeletonPath))
+                return handle;
+        }
+        return 0;
+    }
+
     void EditorAssetManager::LinkImportedAssets(const Ref<Asset>& meshAsset, const AssetMetadata& meshMetadata)
     {
         // Cooked next to the model: <Model>/Meshes/<model>.nskel and <model>_<clip>.nanim (sorted by path, so the default

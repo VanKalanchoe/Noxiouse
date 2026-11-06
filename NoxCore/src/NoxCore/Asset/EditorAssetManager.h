@@ -54,6 +54,8 @@ namespace Nox
         // Renames an asset's file (same folder) with its companions (a texture's source and .ntex, the .hash files), keeping its
         // handle; its old path stays an alias (FormerPaths) for what names it by path. False when the name is invalid or taken.
         bool RenameAsset(AssetHandle handle, const std::string& newName);
+        // A skeletal mesh asset's skeleton (0: none) -- the one placing it gives its Animator.
+        AssetHandle FindSkeletonOf(AssetHandle mesh) const;
         // Prefabs, graphs, timelines, materials, textures and meshes (not scenes, nor a model's skeletons and clips).
         bool CanRename(AssetHandle handle) const;
         // Moves an asset (what CanRename allows) into another folder, relative to the asset directory, the same way.

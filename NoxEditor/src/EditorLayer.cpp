@@ -150,12 +150,11 @@ namespace Nox
         {
             const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
             const AssetMetadata& mesh = AssetManager::GetMetadata(handle);
-            bool skinned = false;
+            // Skinned: a skeleton next to it (the rule its import links it by; the skeleton has its own .nskel path, not the model's).
+            const bool skinned = Project::GetActive()->GetEditorAssetManager()->FindSkeletonOf(handle) != 0;
             AssetHandle sameSource = 0, sameFolder = 0;
             for (const auto& [candidate, metadata] : registry)
             {
-                if (metadata.Type == AssetType::Skeleton && !mesh.SourceFilePath.empty() && metadata.SourceFilePath == mesh.SourceFilePath)
-                    skinned = true;
                 if (metadata.Type != AssetType::AnimationSequence)
                     continue;
                 if (!mesh.SourceFilePath.empty() && metadata.SourceFilePath == mesh.SourceFilePath && sameSource == 0)

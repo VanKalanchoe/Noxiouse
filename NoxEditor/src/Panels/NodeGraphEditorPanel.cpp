@@ -373,34 +373,21 @@ namespace Nox
         ImGui::SetNextItemWidth(220.0f);
         if (ImGui::BeginCombo("Mesh##graphPreview", meshName.c_str()))
         {
+            // Skeletal meshes: mesh assets with a skeleton next to them (EditorAssetManager::FindSkeletonOf, the rule the import
+            // links them by -- the skeleton is registered under its own .nskel path, not the model file's).
+            const auto* assets = Project::GetActive()->GetEditorAssetManager().get();
             for (const auto& [handle, metadata] : registry)
             {
                 if (metadata.Type != AssetType::Mesh)
                     continue;
-                bool skinned = false;
-                for (const auto& [other, otherMetadata] : registry)
-                {
-                    if (otherMetadata.Type == AssetType::Skeleton && !metadata.SourceFilePath.empty() && otherMetadata.SourceFilePath == metadata.SourceFilePath)
-                    {
-                        skinned = true;
-                        break;
-                    }
-                }
-                if (!skinned)
+                const AssetHandle skeleton = assets->FindSkeletonOf(handle);
+                if (skeleton == 0)
                     continue;
                 ImGui::PushID(static_cast<int>(static_cast<uint64_t>(handle) & 0x7fffffff));
                 if (ImGui::Selectable(metadata.FilePath.stem().string().c_str(), handle == m_PreviewMesh))
                 {
                     m_PreviewMesh = handle;
-                    m_PreviewSkeleton = 0;
-                    for (const auto& [other, otherMetadata] : registry)
-                    {
-                        if (otherMetadata.Type == AssetType::Skeleton && otherMetadata.SourceFilePath == metadata.SourceFilePath)
-                        {
-                            m_PreviewSkeleton = other;
-                            break;
-                        }
-                    }
+                    m_PreviewSkeleton = skeleton;
                     m_PreviewInstance = CreateScope<AnimationGraphInstance>(); // playheads from the start
                 }
                 ImGui::PopID();

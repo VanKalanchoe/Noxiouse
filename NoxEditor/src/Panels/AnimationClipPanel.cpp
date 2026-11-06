@@ -63,16 +63,8 @@ namespace Nox
         m_PreviewSkeleton = 0;
         if (mesh == 0)
             return;
-        // The skeleton cooked from the mesh's model.
-        const AssetMetadata& meshMetadata = AssetManager::GetMetadata(mesh);
-        for (const auto& [handle, metadata] : Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry())
-        {
-            if (metadata.Type == AssetType::Skeleton && metadata.SourceFilePath == meshMetadata.SourceFilePath)
-            {
-                m_PreviewSkeleton = handle;
-                break;
-            }
-        }
+        // The skeleton cooked from the mesh's model (EditorAssetManager::FindSkeletonOf: the rule its import links it by).
+        m_PreviewSkeleton = Project::GetActive()->GetEditorAssetManager()->FindSkeletonOf(mesh);
     }
 
     void AnimationClipPanel::DrawPreview(float duration)
