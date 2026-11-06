@@ -794,3 +794,18 @@ Unreal has two actions: the Content Browser import (assets only: flat, no lights
 ### Outliner folders (2026-09-25, untested)
 Like Unreal's: a folder is NOT an entity. `FolderComponent { Path }` ("Bistro/Props", '/' nests) on an entity only groups rows in the Scene Hierarchy panel; no transform, no parenting. `Scene::GetFolders/AddFolder/RemoveFolder/RenameFolder` keep the folders the user made (empty ones included), saved as `Folders:` in the `.nox` (entities carry `FolderComponent`). Panel: folders draw first (`DrawFolderNode`), then the loose top-level entities; right-click blank space or a folder -> New Folder; folder menu: New Folder (nested), Rename (moves subfolders and entities with it), Select Contents, Delete Folder (unfiles the entities, deletes none); dragging entities (or the whole selection) onto a folder files them (and unparents them: a folder holds top-level entities); dropping on blank space unfiles. Multi-drag from the Content Browser no longer creates a "Placed Assets" group entity: like Unreal, the pieces land at the top level, each root offset to the drop point and flattened into plain mesh entities (`ModelInstance::spawn` copies a root's folder to the pieces).
 - **Assets dropped on the hierarchy (2026-09-25, untested):** the Scene Hierarchy panel accepts Content Browser drags (one asset or a multi-selection): on a folder row they are placed in that folder, on blank space at the top level, at the point the editor camera orbits; the placement code is shared with the viewport drop (`EditorLayer::PlaceAssets`).
+
+### Jump / Fall (C1, built 2026-11-06, untested)
+- **At End of State** (`NodeTransition::AtStateEnd`, saved as `AtStateEnd`): a transition that also waits for the From state's
+  animation to end -- Unity's Has Exit Time, Unreal's "automatic rule based on sequence player in state". It is taken once the
+  state's Clip nodes (the longest remaining one, as last evaluated) have no more than the transition's Blend Time left, so the
+  blend finishes as they end; with no rules it fires at the end alone. Inspector: "At End of State" next to Ease In/Out.
+- `CharacterMovement.cs` sends `VerticalSpeed` (m/s, up positive) besides `Speed` and `IsGrounded`.
+- **Graph for the Quaternius Universal Animation Library character** (UAL1_Standard.glb: 65 joints, 1.83 m, in place; the `_RM`
+  file has root motion): parameters Speed (float), VerticalSpeed (float), IsGrounded (bool). States: Locomotion (Idle_Loop /
+  Walk_Loop / Jog_Fwd_Loop / Sprint_Loop by Speed, a nested state machine or blend), JumpStart (Jump_Start, Loop off), JumpLoop
+  (Jump_Loop), JumpLand (Jump_Land, Loop off). Transitions: Locomotion -> JumpStart: IsGrounded is false and VerticalSpeed > 0.5,
+  0.1 s; Locomotion -> JumpLoop: IsGrounded is false and VerticalSpeed < -2, 0.2 s (walked off a ledge); JumpStart -> JumpLoop: At
+  End of State, 0.15 s; JumpStart -> JumpLand and JumpLoop -> JumpLand: IsGrounded is true, 0.05 s; JumpLand -> Locomotion: At End
+  of State, 0.2 s, and JumpLand -> Locomotion: Speed > 1, 0.25 s (landing while running blends straight back).
+

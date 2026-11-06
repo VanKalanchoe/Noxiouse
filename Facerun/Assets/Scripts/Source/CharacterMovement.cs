@@ -5,8 +5,8 @@ namespace Facerun;
 
 /// <summary>
 /// Walks a Character Controller 3D with WASD (Shift = run, Space = jump), turns it towards its movement direction and
-/// feeds the animation graph the parameters "Speed" (float, horizontal speed in m/s, whatever the world unit) and
-/// "IsGrounded" (bool).
+/// feeds the animation graph the parameters "Speed" (float, horizontal speed in m/s, whatever the world unit), "VerticalSpeed"
+/// (float, m/s, up is positive: a jump rises, a fall is negative) and "IsGrounded" (bool). A graph without one of them ignores it.
 /// </summary>
 public sealed class CharacterMovement : EntityBehaviour
 {
@@ -59,6 +59,7 @@ public sealed class CharacterMovement : EntityBehaviour
         // "Speed": horizontal speed in m/s -- the animation graph's state machine picks Idle / Walk / Run from it (its
         // thresholds are in m/s: walk 2, run 5). The velocity is in world units per second (cm/s here): converted.
         animator?.SetFloat("Speed", WorldUnits.ToMeters(MathF.Sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z)));
+        animator?.SetFloat("VerticalSpeed", WorldUnits.ToMeters(velocity.Y));
         animator?.SetBool("IsGrounded", character.IsGrounded);
     }
 }

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
+#include <variant>
 #include <string>
 
 #include "NoxCore/Asset/AssetManager.h"
@@ -523,6 +525,31 @@ namespace Nox
             return true;
         }
 
+        // How long a state's animation has left: the longest of its Clip nodes' remaining times as they were last evaluated (the
+        // leading clip of a blend ends last); infinite with no clip that has started. A looping clip counts to the end of its
+        // current loop. A state's nested state machines are not looked into.
+        float StateTimeRemaining(GraphEvalContext& state, const CompiledGraph& graph)
+        {
+            float remaining = -1.0f;
+            for (uint32_t index = 0; index < graph.Nodes.size(); ++index)
+            {
+                const CompiledNode& clipNode = graph.Nodes[index];
+                if (!clipNode.Type || clipNode.Type->TypeName != "Clip")
+                    continue;
+                const ClipPlayhead& playhead = state.GetState<ClipPlayhead>(index);
+                if (!playhead.Started)
+                    continue;
+                const auto handle = clipNode.Properties.find("Clip");
+                const uint64_t clipHandle = handle != clipNode.Properties.end() && std::holds_alternative<uint64_t>(handle->second)
+                    ? std::get<uint64_t>(handle->second) : 0;
+                const AnimationSequence* clip = clipHandle != 0 ? AssetManager::FindLoadedAsset<AnimationSequence>(clipHandle) : nullptr;
+                if (!clip || clip->Duration <= 0.0f)
+                    continue;
+                remaining = std::max(remaining, clip->Duration - playhead.Time);
+            }
+            return remaining < 0.0f ? std::numeric_limits<float>::infinity() : remaining;
+        }
+
         // A state machine's running state, kept in the node's GraphEvalContext slot: one evaluation context per state (each
         // state's own playheads), which state is active and, during a transition, which one it is blending to.
         struct StateMachineRuntime
@@ -576,6 +603,9 @@ namespace Nox
                 for (const NodeTransition& transition : node.Transitions)
                 {
                     if (indexOfState(transition.FromState) != runtime.Current || !TransitionRulesHold(transition.Rules, *data))
+                        continue;
+                    if (transition.AtStateEnd && StateTimeRemaining(runtime.States[runtime.Current], node.SubGraphs[runtime.Current].Graph) >
+                                                     std::max(transition.Duration, 0.0f))
                         continue;
                     const int to = indexOfState(transition.ToState);
                     if (to < 0 || to == runtime.Current)

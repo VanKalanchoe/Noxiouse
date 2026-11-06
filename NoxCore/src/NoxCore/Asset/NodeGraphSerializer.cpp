@@ -135,6 +135,8 @@ namespace Nox
                     out << YAML::Key << "To" << YAML::Value << transition.ToState;
                     out << YAML::Key << "Duration" << YAML::Value << transition.Duration;
                     out << YAML::Key << "EaseInOut" << YAML::Value << transition.EaseInOut;
+                    if (transition.AtStateEnd)
+                        out << YAML::Key << "AtStateEnd" << YAML::Value << true;
                     out << YAML::Key << "Rules" << YAML::Value << YAML::BeginSeq;
                     for (const TransitionRule& rule : transition.Rules)
                     {
@@ -237,6 +239,8 @@ namespace Nox
                         transition.Duration = transitionData["Duration"].as<float>();
                     if (transitionData["EaseInOut"])
                         transition.EaseInOut = transitionData["EaseInOut"].as<bool>();
+                    if (transitionData["AtStateEnd"])
+                        transition.AtStateEnd = transitionData["AtStateEnd"].as<bool>();
                     if (auto rules = transitionData["Rules"])
                     {
                         for (const auto& ruleData : rules)

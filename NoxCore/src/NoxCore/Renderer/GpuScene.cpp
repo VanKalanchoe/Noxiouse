@@ -507,9 +507,12 @@ namespace Nox
             transform.previousWorld = transform.world;
             state.LastMovedFrame = m_Frame;
         }
+        // Set again to where it is (a parent marked dirty, a script writing the same transform): nothing a cached view drew changed,
+        // so the shadow cascades and irradiance probes around it are left as they are.
+        const bool moved = transform.world != world;
         transform.world = world;
         transform.normal = glm::transpose(glm::inverse(world));
-        if (state.Mesh != InvalidSlot)
+        if (state.Mesh != InvalidSlot && moved)
         {
             if (!state.Hidden)
                 MarkChanged(state.WorldSphere); // where it was

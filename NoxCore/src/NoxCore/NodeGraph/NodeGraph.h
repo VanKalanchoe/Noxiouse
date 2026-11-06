@@ -43,6 +43,10 @@ namespace Nox
         uint32_t ToState = 0;
         float Duration = 0.2f;
         bool EaseInOut = true; // smoothstep instead of linear
+        // Also waits for the From state's animation to end (Unity's Has Exit Time, Unreal's automatic rule based on the state's
+        // sequence player): taken once its clips have no more than Duration left, so the blend finishes as they end. With no
+        // rules it fires at the end alone (Jump Start -> Jump Loop, Land -> Locomotion).
+        bool AtStateEnd = false;
         std::vector<TransitionRule> Rules;
     };
 

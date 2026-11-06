@@ -28,8 +28,8 @@
 
 | # | Item |
 |---|---|
-| C1 | **Jump / Fall states** in the locomotion graph -- needs jump/fall clips (the Fox has only Survey, Walk, Run); add the `VerticalSpeed` parameter back with the states |
-| C5 | Fox sizes: the movement defaults are for a ~1.8 m character; the Fox capsule and speeds need values for a ~0.8 m animal (scene tuning; the `Speed` thresholds were fixed 2026-10-20) |
+| C1 | **Jump / Fall states** in the locomotion graph. Engine side built 2026-11-06, untested: transitions can fire **At End of State** (Unity's Has Exit Time, Unreal's automatic rule: the blend starts Blend Time before the state's clips end), and `CharacterMovement.cs` sends `VerticalSpeed` (m/s, up positive) next to `Speed` and `IsGrounded`. The graph itself is authored in the editor for the Quaternius Universal Animation Library character (Jump_Start / Jump_Loop / Jump_Land; recipe in the conversation of 2026-11-06 and `Animation_Graph_Architecture_Plan_2026.md` §7) |
+| C5 | Fox sizes (a ~0.8 m animal): moot with the ~1.8 m Quaternius character, whose size the movement defaults are made for |
 
 ### Ignore for now
 

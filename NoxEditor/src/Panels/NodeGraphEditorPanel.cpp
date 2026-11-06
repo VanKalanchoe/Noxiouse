@@ -179,8 +179,14 @@ namespace Nox
             edited |= ImGui::DragFloat("Blend Time (s)", &transition.Duration, 0.01f, 0.0f, 10.0f, "%.2f");
             ImGui::SameLine();
             edited |= ImGui::Checkbox("Ease In/Out", &transition.EaseInOut);
+            ImGui::SameLine();
+            edited |= ImGui::Checkbox("At End of State", &transition.AtStateEnd);
+            ImGui::SetItemTooltip("Also waits for the state's animation to end (Unity's Has Exit Time, Unreal's automatic rule): the\n"
+                                  "blend starts Blend Time before its clips end. With no rules below, it fires at the end alone --\n"
+                                  "Jump Start -> Jump Loop, Jump Land -> Locomotion. Uncheck Loop on those clips.");
 
-            ImGui::TextUnformatted("Fires when all of these hold:");
+            ImGui::TextUnformatted(transition.AtStateEnd ? "Fires at the end of the state when all of these hold (none: at the end alone):"
+                                                         : "Fires when all of these hold:");
             int removeRule = -1;
             static constexpr const char* kCompareNames[] = { "==", "!=", ">", ">=", "<", "<=", "is true", "is false" };
             for (int i = 0; i < static_cast<int>(transition.Rules.size()); ++i)
