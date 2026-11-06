@@ -248,8 +248,21 @@ namespace Nox
             }
         }
 
-        // Look At: property "Bone" (head, neck, a spine bone) turns its forward axis towards the IK target "Target", by at most
-        // "MaxAngle" degrees. Chain a few (spine 0.3, neck 0.5, head 1.0) for a natural turn. Pin "Alpha".
+        // Look At's eased turn (Unreal's Look At Interpolation Time): the yaw and pitch it turns the bone by and how much of it applies.
+        struct LookAtState
+        {
+            float Yaw = 0.0f;
+            float Pitch = 0.0f;
+            float Weight = 0.0f;
+            bool Started = false;
+        };
+
+        // Look At: property "Bone" (head, neck, a spine bone) turns its forward axis towards the IK target "Target". The turn is a
+        // yaw about the character's up axis and a pitch, each at most "MaxAngle" degrees -- not one rotation about the axis between
+        // the two directions, which turns unstable as the target goes behind (the axis flips with every bob of the animation and
+        // the head nods). Past the limit to the side the look fades out over the next 45 degrees, so a target behind lets the head go
+        // back to the animation (Unity's look-at clamp does the same). The result eases over "InterpolationTime" seconds. Chain a few
+        // (spine 0.3, neck 0.5, head 1.0) for a natural turn. Pin "Alpha".
         void EvaluateLookAt(GraphEvalContext& ctx, uint32_t nodeIndex)
         {
             auto* data = static_cast<AnimGraphEvalData*>(ctx.UserData);
@@ -257,24 +270,63 @@ namespace Nox
             const float alpha = std::clamp(ctx.GetInput<float>(nodeIndex, 1), 0.0f, 1.0f);
             const AnimIKTarget* target = data ? FindTarget(*data, ctx.GetProperty<std::string>(nodeIndex, "Target", std::string())) : nullptr;
             const Node* bone = data && data->TargetSkeleton ? FindBone(*data->TargetSkeleton, ctx.GetProperty<std::string>(nodeIndex, "Bone", std::string())) : nullptr;
-            const float weight = target ? alpha * std::clamp(target->Weight, 0.0f, 1.0f) : 0.0f;
-            if (pose.LocalTransforms.empty() || !ValidIndex(bone, pose) || weight <= 0.0f)
+            if (pose.LocalTransforms.empty() || !ValidIndex(bone, pose))
                 return PassThrough(ctx, nodeIndex, std::move(pose));
 
             std::vector<glm::mat4> globals;
             ComputeGlobals(*data->TargetSkeleton, pose, *data, globals);
             const glm::quat global = Rotation(globals[bone->Index]);
             const glm::vec3 forward = glm::normalize(global * ForwardAxis(bone, ctx.GetProperty<int32_t>(nodeIndex, "Axis", 0)));
-            const glm::vec3 toTarget = target->Position - Position(globals[bone->Index]);
-            if (glm::length(toTarget) < 1e-5f)
+            const glm::vec3 up(0.0f, 1.0f, 0.0f); // model space: the character stands along +Y
+
+            // What it wants this frame: the yaw and pitch to the target, clamped, and how much of it (target weight x Alpha x the fade
+            // past the limit). No target: nothing, eased out like the rest.
+            float wantedYaw = 0.0f, wantedPitch = 0.0f, wantedWeight = 0.0f;
+            const glm::vec3 flat(forward.x, 0.0f, forward.z);
+            if (target && glm::length(flat) > 1e-3f)
+            {
+                const glm::vec3 toTarget = target->Position - Position(globals[bone->Index]);
+                if (glm::length(toTarget) > 1e-5f)
+                {
+                    const glm::vec3 wanted = glm::normalize(toTarget);
+                    const glm::vec3 flatWanted(wanted.x, 0.0f, wanted.z);
+                    const glm::vec3 f = glm::normalize(flat);
+                    const float yaw = glm::length(flatWanted) > 1e-4f
+                        ? std::atan2(glm::dot(up, glm::cross(f, glm::normalize(flatWanted))), glm::dot(f, glm::normalize(flatWanted))) : 0.0f;
+                    const float pitch = std::asin(std::clamp(wanted.y, -1.0f, 1.0f)) - std::asin(std::clamp(forward.y, -1.0f, 1.0f));
+                    const float limit = glm::radians(std::clamp(ctx.GetProperty<float>(nodeIndex, "MaxAngle", 70.0f), 0.0f, 180.0f));
+                    const float beyond = std::abs(yaw) - limit;
+                    const float fade = beyond > 0.0f ? 1.0f - glm::smoothstep(0.0f, glm::radians(45.0f), beyond) : 1.0f;
+                    wantedYaw = std::clamp(yaw, -limit, limit);
+                    wantedPitch = std::clamp(pitch, -limit, limit);
+                    wantedWeight = alpha * std::clamp(target->Weight, 0.0f, 1.0f) * fade;
+                }
+            }
+
+            LookAtState& state = ctx.GetState<LookAtState>(nodeIndex);
+            const float time = std::max(ctx.GetProperty<float>(nodeIndex, "InterpolationTime", 0.15f), 0.0f);
+            if (!state.Started || time <= 0.0f)
+            {
+                state = { wantedYaw, wantedPitch, wantedWeight, true };
+            }
+            else
+            {
+                const float ease = 1.0f - std::exp(-4.0f * std::max(data->DeltaTime, 0.0f) / time);
+                state.Yaw += (wantedYaw - state.Yaw) * ease;
+                state.Pitch += (wantedPitch - state.Pitch) * ease;
+                state.Weight += (wantedWeight - state.Weight) * ease;
+            }
+            if (state.Weight <= 1e-4f)
                 return PassThrough(ctx, nodeIndex, std::move(pose));
-            const glm::vec3 wanted = glm::normalize(toTarget);
-            const float maxAngle = glm::radians(std::clamp(ctx.GetProperty<float>(nodeIndex, "MaxAngle", 70.0f), 0.0f, 180.0f));
-            glm::vec3 axis = glm::cross(forward, wanted);
-            if (glm::length(axis) < 1e-6f)
-                return PassThrough(ctx, nodeIndex, std::move(pose));
-            const float angle = std::min(SafeAcos(glm::dot(forward, wanted)), maxAngle) * weight;
-            SetGlobalRotation(pose, bone, glm::angleAxis(angle, glm::normalize(axis)) * global, globals);
+
+            // Yaw about up, then pitch about the turned forward's side axis (towards up for a positive pitch).
+            const glm::quat yawTurn = glm::angleAxis(state.Yaw * state.Weight, up);
+            const glm::vec3 turned = yawTurn * forward;
+            glm::quat turn = yawTurn;
+            const glm::vec3 side = glm::cross(turned, up);
+            if (glm::length(side) > 1e-4f)
+                turn = glm::angleAxis(state.Pitch * state.Weight, glm::normalize(side)) * yawTurn;
+            SetGlobalRotation(pose, bone, glm::normalize(turn * global), globals);
             ctx.SetOutput(nodeIndex, 0, std::move(pose));
         }
 
@@ -402,7 +454,7 @@ namespace Nox
             /* Inputs            */ { { "Pose", "Pose" }, { "Alpha", "Float" } },
             /* Outputs           */ { { "Pose", "Pose" } },
             /* DefaultProperties */ { { "Alpha", 1.0f }, { "Bone", std::string("Head") }, { "Target", std::string("LookAt") },
-                                      { "Axis", int32_t(0) }, { "MaxAngle", 70.0f } },
+                                      { "Axis", int32_t(0) }, { "MaxAngle", 70.0f }, { "InterpolationTime", 0.15f } },
             /* PropertyAssetTypeHints */ { { "Bone", "Bone" } },
             /* PropertyRanges    */ { { "Alpha", { 0.0f, 1.0f } }, { "MaxAngle", { 0.0f, 180.0f } } },
             /* Evaluate          */ &EvaluateLookAt

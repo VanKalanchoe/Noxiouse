@@ -1262,7 +1262,7 @@ window.NOX_MANUAL_PAGES = [
             "   - first: **Bone** `spine_03`, **Target** `LookAt`, **Alpha** 0.3, **Max Angle** 30;",
             "   - second: **Bone** `Head`, **Target** `LookAt`, **Alpha** 1, **Max Angle** 70. (StateMachine -> LookAt spine -> LookAt head -> Output.) Leave **Axis** 0 (automatic).",
             "2. Create a small sphere named **LookTarget** in front of the character, about head height.",
-            "3. Add the script **IKTargetTest** to the character. Play. **Check:** the chest turns a little and the head looks at the sphere; move the sphere in Simulate (or walk around it) and the head follows, stopping at its limit when it is behind. **J** toggles it (it fades over 0.3 s).",
+            "3. Add the script **IKTargetTest** to the character. Play. **Check:** the chest turns a little and the head looks at the sphere; move the sphere in Simulate (or walk around it) and the head follows up to Max Angle; further round (the sphere behind) the look fades out over 45 degrees and the head goes back to the animation instead of twisting. **Interpolation Time** (0.15 s) eases every change. **J** toggles it (it fades over 0.3 s).",
             "4. If the head turns the wrong way or tilts, set **Axis** on the Head node: try 5 (+Z), then 3 (+Y).",
             "",
             "## Part F: Two Bone IK (a hand reaches a target)",
