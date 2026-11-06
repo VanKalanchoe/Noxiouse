@@ -602,6 +602,10 @@ namespace Nox
 
         if (!hasChildren)
             flags |= ImGuiTreeNodeFlags_Leaf;
+        flags |= ImGuiTreeNodeFlags_AllowOverlap; // the eye at the row's right end takes its own clicks
+
+        // Where the row ends on the right (screen space), for the eye drawn over its right end.
+        const float rowRight = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
 
         // Prefab instances are blue (Unity's convention); the entities spawned from the prefab are a dimmer blue.
         const bool prefabRoot = entity.HasComponent<PrefabInstanceComponent>();
@@ -614,6 +618,7 @@ namespace Nox
         const bool dimmed = locked || !m_Context->IsActiveInHierarchy(entity);
         if (dimmed)
             ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+        ImGui::SetNextItemAllowOverlap(); // (the tree flag covers the node's press; this also makes IsItemClicked leave the eye's clicks)
         bool opened = ImGui::TreeNodeEx((void*)(uint64_t)(uint32_t)entity, flags, tag.c_str());
         if (opened && hasChildren)
             m_OpenRows.insert(entity.GetUUID());
@@ -740,6 +745,56 @@ namespace Nox
             {
                 ImGui::SameLine();
                 ImGui::TextDisabled("[%s]%s", AssetManager::GetMetadata(level).FilePath.stem().string().c_str(), locked ? " (locked)" : "");
+            }
+        }
+
+        // Godot's eye at the row's right end: the Active switch (the Inspector's box) in one click, without selecting the entity.
+        // Open: active. Closed: switched off. Open but faint: active itself, but under a switched-off parent.
+        {
+            const float size = ImGui::GetTextLineHeight();
+            // On the row's line, at its right end (SameLine's x is measured from the window's left edge, scrolled).
+            ImGui::SameLine(rowRight - size - ImGui::GetStyle().ItemSpacing.x - (ImGui::GetWindowPos().x - ImGui::GetScrollX()));
+            ImGui::PushID(static_cast<int>(static_cast<uint32_t>(entity)));
+            const bool clicked = ImGui::InvisibleButton("##eye", ImVec2(size, size));
+            const bool hovered = ImGui::IsItemHovered();
+            ImGui::PopID();
+            const bool selfActive = !entity.HasComponent<InactiveComponent>();
+            if (clicked && !locked)
+            {
+                if (selfActive)
+                    entity.AddComponent<InactiveComponent>();
+                else
+                    entity.RemoveComponent<InactiveComponent>();
+            }
+            if (hovered)
+                ImGui::SetTooltip(selfActive ? "Visible. Click to hide: switches it and everything under it off (not drawn, no physics,\n"
+                                               "no animation, scripts not updated) -- the Inspector's Active box."
+                                             : "Hidden (switched off). Click to show it again.");
+
+            const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+            const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+            const float r = size * 0.42f;
+            const bool faint = selfActive && !m_Context->IsActiveInHierarchy(entity);
+            ImU32 color = ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+            if (faint)
+                color = ImGui::GetColorU32(ImGuiCol_TextDisabled, 0.5f);
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            const ImVec2 left(centre.x - r, centre.y), right(centre.x + r, centre.y);
+            if (selfActive)
+            {
+                drawList->AddBezierQuadratic(left, ImVec2(centre.x, centre.y - r * 1.25f), right, color, 1.5f);
+                drawList->AddBezierQuadratic(left, ImVec2(centre.x, centre.y + r * 1.25f), right, color, 1.5f);
+                drawList->AddCircleFilled(centre, r * 0.38f, color);
+            }
+            else
+            {
+                // A closed lid with three lashes.
+                drawList->AddBezierQuadratic(left, ImVec2(centre.x, centre.y + r * 1.1f), right, color, 1.5f);
+                for (float t : { -0.55f, 0.0f, 0.55f })
+                {
+                    const ImVec2 base(centre.x + t * r, centre.y + r * 0.55f * (1.0f - t * t * 0.6f));
+                    drawList->AddLine(base, ImVec2(base.x + t * r * 0.35f, base.y + r * 0.45f), color, 1.2f);
+                }
             }
         }
 
