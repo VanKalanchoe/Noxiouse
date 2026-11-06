@@ -6,30 +6,6 @@
 
 ## Open
 
-### Rendering (plan: `Engine_Architecture_Plan_2026.md`, `Hybrid_Renderer_Plan_2026-10.md`)
-
-| # | Item |
-|---|---|
-| R10 | DLSS "WorldToScreenMatrix not invertible" every frame (seen 2026-10-29 after a DLSS recreate in LevelStreamingTest). A one-time log names the degenerate camera input (`addDLSSPass`): needs that log line to fix |
-
-| R11 | **More async compute:** besides the screen-probe GI, now on the compute queue: the NRD denoisers' shadows and reflections (NRD README: it only dispatches compute work, `queueType = GRAPHICS; // or COMPUTE`; NRD is created with both queue families, and each call passes its command buffer's queue type with compute-only stages on the compute queue), the DDGI blends and the emissive light grid. **Built 2026-11-05, untested**: to measure ("Async Compute Passes" in the stats; the frame time in RT mode and Raster (All)). Not moved: the sky / cloud / fog passes (tiny, or read through the uniforms without a graph dependency) |
-
-### Raster versions of the RT features (decided 2026-10-31)
-
-RT stays required (every GPU Nox targets has it; no fallback for GPUs without it). Each item below is a raster version of an effect
-Nox already does with rays, built only to be **measured against the RT version** in the same scenes (Bistro, the streaming test world)
-at the same quality preset: GPU time, VRAM, and image quality side by side. The cheaper one at comparable quality becomes the preset
-default; the RT one stays the default otherwise (RT shadows may well win). Both stay selectable per setting.
-
-| # | Item |
-|---|---|
-| RS1 | **Shadow maps:** cascaded shadow maps for the sun (PCF / PCSS soft edges, stable cascades) and a shadow atlas for spot / point / rect lights. Vs RT shadows (`ShadowMask.slang`). Later, if measured worth it: Unreal-style virtual shadow maps. **Sun cascades built 2026-11-05, untested** (Settings > Sun Shadows; `Hybrid_Renderer_Plan_2026-10.md` §9): to measure against the RT mask; first measurement: RT cheaper (0.64 vs ~0.9 ms), RT stays the default. **Local-light atlas built 2026-11-05, untested** (Settings > Local Light Shadows). **Cascade caching 2026-11-05, untested** (Cache Cascades) |
-| RS2 | **Contact shadows:** a short screen-space ray towards the light per pixel, for the small detail shadow maps miss. Only with RS1 (RT shadows have the detail already). **Built 2026-11-05, untested** (Settings > Contact Shadows) |
-| RS3 | **GTAO** (ground-truth AO, Unreal / Godot) replacing the classic `SSAO.slang`. Vs RTAO. **Built 2026-11-05, untested** (Ambient Occlusion: SSAO > GTAO; classic stays selectable) |
-| RS4 | **SSR + reflection probes:** hierarchical screen-space reflections over the existing Hi-Z / color pyramid (`HiZBuild`, `ColorPyramid`), falling back to placed box-projected reflection probes (captured by rasterized cubemaps), then the sky. Vs RT reflections (`Reflection.slang`). **SSR built 2026-11-05, untested** (Settings > Screen-Space Reflections; linear perspective-correct march, not Hi-Z: the pyramid holds the farthest depth for culling). **Reflection probes built 2026-11-05, untested** (Add Component > Reflection Probe) |
-| RS5 | **GI without rays:** irradiance probe volumes captured by rasterized cubemaps (baked, or updated a few per frame), shared capture code with RS4's probes; SSGI on top for dynamic bounce. Vs the screen-probe GI and DDGI. **Probe volume built 2026-11-05, untested** (Diffuse GI: Raster Probe Volume + Irradiance Volume entity). **SSGI built 2026-11-05, untested** (Settings > Raster GI > Screen-Space GI). **Relightable probes 2026-11-05, untested** (captured once as a G-buffer, lit again every frame; `Hybrid_Renderer_Plan_2026-10.md` "Toward 120 fps") |
-| RS6 | **Volumetric fog in froxels:** lit fog with light shafts, sampling the shadows (RT shadow mask or RS1's maps) per froxel; extends the height fog (`HeightFog.slang`). **Built 2026-11-05, untested** (Settings > Volumetric Fog) |
-
 ### Post effects (new features)
 
 | # | Item |
@@ -41,30 +17,12 @@ default; the RT one stays the default otherwise (RT shadows may well win). Both 
 | # | Item |
 |---|---|
 | L1 | **Editing several levels together** (Unreal's Levels window): today each level is edited as its own scene |
-| L2 | **A streamed level shows once complete:** its entities are activated within a 3 ms budget per frame, so a big level used to appear over several frames. Now (Unreal's `ULevel::bRequireFullVisibilityToRender`) a level's and a world cell's meshes are registered with the GPU scene hidden (their records uploaded, in no draw bucket and not in the TLAS) and all shown in one frame once the level is complete and every mesh is registered with its assets, or 2 s after completion (as long as a cell's activation waits for its assets: a reference that fails to load does not hold the level back). The HLOD swap follows the same state. **Built 2026-11-05, untested** |
-| L3 | **Level streaming volumes use every streaming source:** volumes (`UpdateLevelStreaming`) now test the camera and every enabled World Streaming Source whose target is Activated (a Loaded target prepares world cells without putting them in the world; a level has no such stage), in Play (also without a primary camera) and Simulate. **Built 2026-11-05, untested** |
 
 ### Tools (plan: `Engine_Architecture_Plan_2026.md`)
 
 | # | Item |
 |---|---|
 | P1 | **Frame profiler extras:** save / load a capture (`.noxprof`: the kept frames, the spikes and the scope / thread names; a loaded capture is shown instead of the live frames until closed); frames slower than a threshold (frame or GPU time, default 16.7 ms) kept apart, the last 64, picked in the panel's frame combo; VRAM and RAM per frame drawn under the frame graph; a "GPU Transfer" track with one scope per upload submission (timestamps of the dedicated transfer family, query pairs reset on the host with `hostQueryReset`, placed on the CPU clock through the calibrated timestamps). **Built 2026-11-05, untested** (Window > Profiler) |
-
-### Import / glTF (plan: `Animation_Graph_Architecture_Plan_2026.md` section 8)
-
-| # | Item |
-|---|---|
-| I2 | **`KHR_texture_transform`**, normal / occlusion strength. **Done 2026-10-31** (four UV channels per material, §5.8.2) |
-
-### Materials (decided 2026-10-31: OpenPBR as the reference model, not the runtime shader -- Unreal's way)
-
-Nox keeps its own material model (glTF PBR and its extensions) and does not run material graphs or the full OpenPBR shader at run
-time. Where glTF leaves room, a lobe follows OpenPBR's definition, so materials authored for OpenPBR / Standard Surface convert
-faithfully. Each lobe costs nothing for materials that do not use it.
-
-| # | Item |
-|---|---|
-| M1 | **The missing material lobes**: `KHR_materials_clearcoat`, `_sheen`, `_specular`, `_iridescence`, `_anisotropy`, `_dispersion`. **Done 2026-10-31:** data, import, material editor, G-buffer, deferred, forward, ray hits, reflections and guides, the path tracer's BSDF (`Engine_Architecture_Plan_2026.md` §5.8.2). ReSTIR DI's mode shades the base lobes only (ignored for now) |
 
 ### Characters and animation (plan: `Animation_Graph_Architecture_Plan_2026.md`)
 
@@ -87,6 +45,14 @@ faithfully. Each lobe costs nothing for materials that do not use it.
 ## Closed (checked against the code 2026-10-30)
 
 Built items many of which the user has not tested yet (marked "untested"); the plan docs hold the details.
+
+- **2026-11-06 (tested by the user):** R11 more async compute (NRD shadows / reflections, DDGI blends, emissive light grid on the compute
+  queue; Raster (All) 8.64 -> 8.16 ms GPU, 115 -> 121 fps); RS1-RS6 raster versions (shadow maps + cascade caching + local-light atlas,
+  contact shadows, GTAO, SSR + reflection probes, relightable probe volume + SSGI, froxel fog); L2 a streamed level drawn once complete,
+  L3 volumes use every streaming source (with the Play / Simulate crash fix: Jolt initialized before the collision group filter).
+  R10 (DLSS "WorldToScreenMatrix not invertible") dropped: reopened if it comes back. Raster colored translucent shadows: not wanted.
+- **I2** `KHR_texture_transform`, normal / occlusion strength (2026-10-31); **M1** the missing material lobes (2026-10-31). Materials
+  policy (decided 2026-10-31): Nox keeps its own glTF PBR model with OpenPBR as the reference for each lobe, no run-time material graphs
 
 - **N4 World units and world tools:** U1-U6 built (cm world unit, grid, snap, ortho views, Measure tool, reference figure, import
   units, physics unit boundary) plus per-field unit display. U2 confirmed by the user; the rest untested. `Units_And_World_Tools_Plan_2026.md`
