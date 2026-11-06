@@ -1205,7 +1205,7 @@ window.NOX_MANUAL_PAGES = [
             "## Part A: The character (both versions)",
             "",
             "1. Content Browser > **Import** `UAL1_Standard.glb` with **Source Unit = Meters** (Size shows about 1.8 m tall). Do the same with `UAL1_Standard_RM.glb` for Part D. Imported before the skinning scale fix? Right-click > **Reimport**, then delete the old character and drag it in again.",
-            "2. Drag the skeletal mesh into the scene and put it on a floor (Create > Shape > Plane, with a collider).",
+            "2. Drag the skeletal mesh into the scene and put it on a floor: **Create > Shape > Plane**, then on the plane **Add Component > Rigid Body 3D** with **Body Type = Static** (the default is Dynamic) and **Add Component > Plane Collider 3D**. A collider alone does nothing: like Godot's StaticBody3D, the body is what makes it part of the physics world. Boxes for ramps and stairs (Part G) need the same: Rigid Body 3D (Static) + Box Collider 3D.",
             "3. On the character entity: **Add Component > Character Controller 3D**, and **Add Component > Script > CharacterMovement**.",
             "4. Add a camera that follows it (the CameraFollow script) or use Simulate.",
             "",
