@@ -63,6 +63,8 @@ namespace Nox
         Entity GetEntityByUUID(UUID uuid);
 
         Entity GetPrimaryCameraEntity();
+        // Unity's activeInHierarchy: false when the entity or one above it is switched off (InactiveComponent).
+        bool IsActiveInHierarchy(entt::entity entity) const { return !m_Registry.all_of<InactiveInHierarchyComponent>(entity); }
 
         bool IsRunning() const { return m_IsRunning; }
         bool IsPaused() const { return m_IsPaused; }
@@ -263,6 +265,11 @@ namespace Nox
         void SyncGpuScene();
         // EnTT signals of the components that decide a mesh entity's GPU instances.
         void OnMeshEntityChanged(entt::registry& registry, entt::entity entity);
+        // Active / inactive (InactiveComponent): an entity switched, or moved under another parent, is queued; ApplyActiveChanges
+        // brings InactiveInHierarchyComponent up to date below it and re-registers what changed (meshes, physics).
+        void OnActiveChanged(entt::registry& registry, entt::entity entity);
+        void ApplyActiveChanges();
+        void RefreshActiveTree(entt::entity root);
         // EnTT signals of the 3D physics components: added or removed while the physics scene runs (Duplicate, a script's
         // AddComponent, the properties panel), the entity's body / character is made again after the update systems.
         void OnPhysics3DComponentChanged(entt::registry& registry, entt::entity entity);
@@ -361,6 +368,7 @@ namespace Nox
         std::vector<UUID> m_PendingDestroy;
         std::vector<UUID> m_PendingScriptStart;
         std::unordered_set<UUID> m_PendingPhysics3D;
+        std::vector<entt::entity> m_PendingActiveChanges;
         bool m_IsPaused = false;
         int m_StepFrames = 0;
         float m_FixedTimeAccumulator = 0.0f; // seconds owed to OnFixedUpdate

@@ -45,7 +45,7 @@ namespace Nox
     static SceneSun FindSun(entt::registry& registry)
     {
         SceneSun sun;
-        auto lights = registry.view<WorldTransformComponent, DirectionalLightComponent>();
+        auto lights = registry.view<WorldTransformComponent, DirectionalLightComponent>(entt::exclude<InactiveInHierarchyComponent>);
         for (auto entity : lights)
         {
             auto [wtc, light] = lights.get<WorldTransformComponent, DirectionalLightComponent>(entity);
@@ -178,7 +178,7 @@ namespace Nox
     // The scene's environment: the first enabled component with something to show, or null.
     static const EnvironmentLightComponent* FindEnvironment(entt::registry& registry)
     {
-        auto view = registry.view<EnvironmentLightComponent>();
+        auto view = registry.view<EnvironmentLightComponent>(entt::exclude<InactiveInHierarchyComponent>);
         for (auto entity : view)
         {
             const auto& environment = view.get<EnvironmentLightComponent>(entity);
@@ -304,6 +304,8 @@ namespace Nox
         m_Registry.on_construct<MaterialComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
         m_Registry.on_update<MaterialComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
         m_Registry.on_destroy<MaterialComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
+        m_Registry.on_construct<InactiveComponent>().connect<&Scene::OnActiveChanged>(*this);
+        m_Registry.on_destroy<InactiveComponent>().connect<&Scene::OnActiveChanged>(*this);
         m_Registry.on_construct<AnimatorComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
         m_Registry.on_destroy<AnimatorComponent>().connect<&Scene::OnMeshEntityChanged>(*this);
         m_Registry.on_construct<RigidBody3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
@@ -1105,6 +1107,7 @@ namespace Nox
             BeginWorldStreaming(camera ? &source : nullptr);
         }
         LoadAlwaysLoadedSubLevels(); // before anything starts: they start with the scene's own entities
+        ApplyActiveChanges();        // switched-off entities make no bodies
         m_IsRunning = true;
         OnPhysics2DStart();
         OnPhysics3DStart();
@@ -1142,6 +1145,7 @@ namespace Nox
     {
         BeginWorldStreaming(streamingSource);
         LoadAlwaysLoadedSubLevels();
+        ApplyActiveChanges();
         OnPhysics2DStart();
         OnPhysics3DStart();
         StartTimelines();
@@ -1171,10 +1175,12 @@ namespace Nox
             else
                 UpdateLevelStreaming(nullptr, static_cast<float>(ts));
 
-            // Collected first: a script may instantiate prefabs (new entities, new script components) or destroy entities.
+            // Collected first: a script may instantiate prefabs (new entities, new script components) or destroy entities. A
+            // switched-off entity's scripts are not updated (Unity's inactive GameObject).
+            ApplyActiveChanges();
             std::vector<entt::entity> scriptEntities;
             {
-                auto scripts = m_Registry.view<ScriptComponent>();
+                auto scripts = m_Registry.view<ScriptComponent>(entt::exclude<InactiveInHierarchyComponent>);
                 scriptEntities.assign(scripts.begin(), scripts.end());
             }
             // OnFixedUpdate at 60 Hz (as many steps as the frame's time holds, at most 5: a long hitch does not snowball), then
@@ -1186,13 +1192,13 @@ namespace Nox
                 m_FixedTimeAccumulator -= fixedStep;
                 for (entt::entity handle : scriptEntities)
                 {
-                    if (m_Registry.valid(handle))
+                    if (m_Registry.valid(handle) && IsActiveInHierarchy(handle))
                         ScriptEngine::OnFixedUpdateEntity(Entity(handle, this), fixedStep);
                 }
             }
             for (entt::entity handle : scriptEntities)
             {
-                if (m_Registry.valid(handle))
+                if (m_Registry.valid(handle) && IsActiveInHierarchy(handle))
                     ScriptEngine::OnUpdateEntity(Entity(handle, this), static_cast<float>(ts));
             }
             // Both run here, outside every script call: they call into managed code (OnCreate / OnDestroy).
@@ -1217,7 +1223,7 @@ namespace Nox
             }
             for (const auto& [entity, name] : notifies)
             {
-                if (m_Registry.valid(entity))
+                if (m_Registry.valid(entity) && IsActiveInHierarchy(entity))
                     ScriptEngine::OnAnimationEvent(Entity(entity, this), name);
             }
 
@@ -1226,12 +1232,12 @@ namespace Nox
             bool lateUpdated = false;
             std::vector<entt::entity> lateEntities;
             {
-                auto scripts = m_Registry.view<ScriptComponent>();
+                auto scripts = m_Registry.view<ScriptComponent>(entt::exclude<InactiveInHierarchyComponent>);
                 lateEntities.assign(scripts.begin(), scripts.end());
             }
             for (entt::entity handle : lateEntities)
             {
-                if (m_Registry.valid(handle))
+                if (m_Registry.valid(handle) && IsActiveInHierarchy(handle))
                     lateUpdated |= ScriptEngine::OnLateUpdateEntity(Entity(handle, this), static_cast<float>(ts));
             }
             if (lateUpdated)
@@ -1355,9 +1361,68 @@ namespace Nox
         m_PendingMeshEntities.push_back(entity);
     }
 
+    void Scene::OnActiveChanged(entt::registry&, entt::entity entity)
+    {
+        // Applied later (ApplyActiveChanges): on_destroy fires while the component is still there.
+        m_PendingActiveChanges.push_back(entity);
+    }
+
+    void Scene::ApplyActiveChanges()
+    {
+        if (m_PendingActiveChanges.empty())
+            return;
+        std::vector<entt::entity> pending;
+        pending.swap(m_PendingActiveChanges);
+        for (entt::entity entity : pending)
+        {
+            if (m_Registry.valid(entity))
+                RefreshActiveTree(entity);
+        }
+    }
+
+    void Scene::RefreshActiveTree(entt::entity root)
+    {
+        // Inactive in the hierarchy: switched off itself, or its parent is. Every entity whose state changes is re-registered: its
+        // meshes leave or rejoin the GPU scene, its body / character / collider is made again (or not, while inactive).
+        bool parentInactive = false;
+        if (const auto* relationship = m_Registry.try_get<RelationshipComponent>(root); relationship && relationship->Parent != 0)
+        {
+            if (auto parent = m_EntityMap.find(relationship->Parent); parent != m_EntityMap.end() && m_Registry.valid(parent->second))
+                parentInactive = m_Registry.all_of<InactiveInHierarchyComponent>(parent->second);
+        }
+        std::vector<std::pair<entt::entity, bool>> pending{ { root, parentInactive } };
+        while (!pending.empty())
+        {
+            const auto [entity, aboveInactive] = pending.back();
+            pending.pop_back();
+            const bool inactive = aboveInactive || m_Registry.all_of<InactiveComponent>(entity);
+            if (inactive != m_Registry.all_of<InactiveInHierarchyComponent>(entity))
+            {
+                if (inactive)
+                    m_Registry.emplace<InactiveInHierarchyComponent>(entity);
+                else
+                    m_Registry.remove<InactiveInHierarchyComponent>(entity);
+                if (m_Registry.all_of<MeshComponent>(entity))
+                    m_PendingMeshEntities.push_back(entity);
+                if (m_Registry.any_of<RigidBody3DComponent, CharacterController3DComponent, BoxCollider3DComponent, SphereCollider3DComponent,
+                                      CapsuleCollider3DComponent, CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent>(entity))
+                    OnPhysics3DComponentChanged(m_Registry, entity);
+            }
+            if (const auto* relationship = m_Registry.try_get<RelationshipComponent>(entity))
+            {
+                for (UUID child : relationship->Children)
+                {
+                    if (auto found = m_EntityMap.find(child); found != m_EntityMap.end() && m_Registry.valid(found->second))
+                        pending.push_back({ found->second, inactive });
+                }
+            }
+        }
+    }
+
     void Scene::SyncGpuScene()
     {
         NOX_PROFILE_SCOPE("Sync GPU Scene");
+        ApplyActiveChanges();
         std::vector<AssetHandle>& missingAssets = m_MissingAssets.Local();
 
         // 0. Model instances whose model finished loading get their node entities (registered below as new meshes).
@@ -1447,6 +1512,8 @@ namespace Nox
                     continue;
                 if (const HLODComponent* hlod = m_Registry.try_get<HLODComponent>(entity); hlod && hlod->Hidden)
                     continue; // its cell is in
+                if (m_Registry.all_of<InactiveInHierarchyComponent>(entity))
+                    continue; // switched off: re-registered when switched on (RefreshActiveTree)
                 const WorldTransformComponent* world = m_Registry.try_get<WorldTransformComponent>(entity);
                 if (!world)
                 {
@@ -1613,7 +1680,7 @@ namespace Nox
     {
         if (!m_FrameInput.StepAnimation)
             return;
-        auto view = m_Registry.view<ParticleEmitterComponent, WorldTransformComponent>();
+        auto view = m_Registry.view<ParticleEmitterComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>);
         for (auto entity : view)
         {
             auto [emitter, world] = view.get<ParticleEmitterComponent, WorldTransformComponent>(entity);
@@ -1625,7 +1692,7 @@ namespace Nox
     {
         std::vector<AssetHandle>& missingAssets = m_MissingAssets.Local();
         std::vector<shaderio::GpuParticle> particles;
-        auto view = m_Registry.view<ParticleEmitterComponent, WorldTransformComponent>();
+        auto view = m_Registry.view<ParticleEmitterComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>);
         for (auto entity : view)
         {
             auto [emitter, world] = view.get<ParticleEmitterComponent, WorldTransformComponent>(entity);
@@ -1859,7 +1926,7 @@ namespace Nox
 
         const float ts = m_FrameInput.Timestep;
         std::vector<AssetHandle>& missingAssets = m_MissingAssets.Local();
-        for (auto handle : m_Registry.view<TimelinePlayerComponent>())
+        for (auto handle : m_Registry.view<TimelinePlayerComponent>(entt::exclude<InactiveInHierarchyComponent>))
         {
             auto& player = m_Registry.get<TimelinePlayerComponent>(handle);
             player.FiredEvents.clear();
@@ -1907,7 +1974,7 @@ namespace Nox
         // Animators update in parallel (Unreal evaluates each skeletal mesh's animation as a task of its own). The ones that write into
         // the same node table -- one imported model's joints and nodes: its skinned meshes in graph mode, its node clips, root motion on
         // its nodes -- update one after another in one task, in registry order as before; any other two write different entities.
-        auto view = m_Registry.view<AnimatorComponent>();
+        auto view = m_Registry.view<AnimatorComponent>(entt::exclude<InactiveInHierarchyComponent>); // switched off: not animated
         m_AnimatorOrder.clear();
         for (auto entity : view)
         {
@@ -2563,7 +2630,7 @@ namespace Nox
         // persistent level's player; a level loaded later does not take it over). A level's camera is used only when the scene has
         // none of its own (a level played on its own, or a scene that leaves its camera to a level).
         Entity fromLevel;
-        auto view = m_Registry.view<CameraComponent>();
+        auto view = m_Registry.view<CameraComponent>(entt::exclude<InactiveInHierarchyComponent>);
         for (auto entity : view)
         {
             if (!view.get<CameraComponent>(entity).Primary)
@@ -2583,7 +2650,7 @@ namespace Nox
     
     void Scene::OnPhysics2DStart()
     {
-        auto view = m_Registry.view<RigidBody2DComponent>();
+        auto view = m_Registry.view<RigidBody2DComponent>(entt::exclude<InactiveInHierarchyComponent>);
         // Box2D works in the world's units: its tolerances follow the project's units per meter, gravity and speeds are converted.
         b2SetLengthUnitsPerMeter(WorldUnits::PerMeter());
         b2WorldDef worldDef = b2DefaultWorldDef();
@@ -2748,7 +2815,7 @@ namespace Nox
         // moon after it: the first directional light submitted gets the denoised shadow mask, which at night is the moon's.
         bool hasDirectionalLight = false;
         {
-            auto view = m_Registry.view<WorldTransformComponent, DirectionalLightComponent>();
+            auto view = m_Registry.view<WorldTransformComponent, DirectionalLightComponent>(entt::exclude<InactiveInHierarchyComponent>);
             for (auto entity : view)
             {
                 auto [wtc, light] = view.get<WorldTransformComponent, DirectionalLightComponent>(entity);
@@ -2784,7 +2851,7 @@ namespace Nox
             m_renderer->SubmitLight(glm::dmat4(DirectionalLightTransform(sky.MoonDirection)), moon);
         }
         {
-            auto view = m_Registry.view<WorldTransformComponent, PointLightComponent>();
+            auto view = m_Registry.view<WorldTransformComponent, PointLightComponent>(entt::exclude<InactiveInHierarchyComponent>);
             for (auto entity : view)
             {
                 auto [wtc, light] = view.get<WorldTransformComponent, PointLightComponent>(entity);
@@ -2792,7 +2859,7 @@ namespace Nox
             }
         }
         {
-            auto view = m_Registry.view<WorldTransformComponent, SpotLightComponent>();
+            auto view = m_Registry.view<WorldTransformComponent, SpotLightComponent>(entt::exclude<InactiveInHierarchyComponent>);
             for (auto entity : view)
             {
                 auto [wtc, light] = view.get<WorldTransformComponent, SpotLightComponent>(entity);
@@ -2800,7 +2867,7 @@ namespace Nox
             }
         }
         {
-            auto view = m_Registry.view<WorldTransformComponent, RectLightComponent>();
+            auto view = m_Registry.view<WorldTransformComponent, RectLightComponent>(entt::exclude<InactiveInHierarchyComponent>);
             for (auto entity : view)
             {
                 auto [wtc, light] = view.get<WorldTransformComponent, RectLightComponent>(entity);
@@ -2808,7 +2875,7 @@ namespace Nox
             }
         }
         {
-            auto view = m_Registry.view<WorldTransformComponent, DiscLightComponent>();
+            auto view = m_Registry.view<WorldTransformComponent, DiscLightComponent>(entt::exclude<InactiveInHierarchyComponent>);
             for (auto entity : view)
             {
                 auto [wtc, light] = view.get<WorldTransformComponent, DiscLightComponent>(entity);
@@ -2817,7 +2884,7 @@ namespace Nox
         }
         {
             // Reflection probes (the renderer keeps each one's capture by its entity's ID).
-            auto view = m_Registry.view<WorldTransformComponent, ReflectionProbeComponent, IDComponent>();
+            auto view = m_Registry.view<WorldTransformComponent, ReflectionProbeComponent, IDComponent>(entt::exclude<InactiveInHierarchyComponent>);
             for (auto entity : view)
             {
                 auto [wtc, probe, id] = view.get<WorldTransformComponent, ReflectionProbeComponent, IDComponent>(entity);
@@ -2825,7 +2892,7 @@ namespace Nox
             }
         }
         {
-            auto view = m_Registry.view<WorldTransformComponent, IrradianceVolumeComponent, IDComponent>();
+            auto view = m_Registry.view<WorldTransformComponent, IrradianceVolumeComponent, IDComponent>(entt::exclude<InactiveInHierarchyComponent>);
             for (auto entity : view)
             {
                 auto [wtc, volume, id] = view.get<WorldTransformComponent, IrradianceVolumeComponent, IDComponent>(entity);
@@ -2843,7 +2910,7 @@ namespace Nox
 
         // Sprites
         {
-            auto view = m_Registry.view<WorldTransformComponent, SpriteRendererComponent>();
+            auto view = m_Registry.view<WorldTransformComponent, SpriteRendererComponent>(entt::exclude<InactiveInHierarchyComponent>);
             for (auto entity : view)
             {
                 auto [transform, sprite] = view.get<WorldTransformComponent, SpriteRendererComponent>(entity);
@@ -2868,7 +2935,7 @@ namespace Nox
 
         // Circles
         {
-            auto view = m_Registry.view<WorldTransformComponent, CircleRendererComponent>();
+            auto view = m_Registry.view<WorldTransformComponent, CircleRendererComponent>(entt::exclude<InactiveInHierarchyComponent>);
             for (auto entity : view)
             {
                 auto [transform, circle] = view.get<WorldTransformComponent, CircleRendererComponent>(entity);
@@ -2878,7 +2945,7 @@ namespace Nox
 
         // Text
         {
-            auto view = m_Registry.view<WorldTransformComponent, TextComponent>();
+            auto view = m_Registry.view<WorldTransformComponent, TextComponent>(entt::exclude<InactiveInHierarchyComponent>);
             for (auto entity : view)
             {
                 auto [transform, text] = view.get<WorldTransformComponent, TextComponent>(entity);
@@ -2917,6 +2984,16 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<IDComponent>(Entity entity, IDComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<InactiveComponent>(Entity entity, InactiveComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<InactiveInHierarchyComponent>(Entity entity, InactiveInHierarchyComponent& component)
     {
     }
 

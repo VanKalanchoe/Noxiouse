@@ -610,14 +610,16 @@ namespace Nox
             ImGui::PushStyleColor(ImGuiCol_Text, prefabRoot ? ImVec4(0.45f, 0.7f, 1.0f, 1.0f) : ImVec4(0.45f, 0.7f, 1.0f, 0.6f));
         // Sub-levels (Levels panel): a locked level's entities dimmed; a root in a sub-level names its level.
         const bool locked = m_Context->IsEntityLocked(entity);
-        if (locked)
+        // Switched off (itself or above it, the Inspector's Active box): greyed, like Unity's hierarchy.
+        const bool dimmed = locked || !m_Context->IsActiveInHierarchy(entity);
+        if (dimmed)
             ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
         bool opened = ImGui::TreeNodeEx((void*)(uint64_t)(uint32_t)entity, flags, tag.c_str());
         if (opened && hasChildren)
             m_OpenRows.insert(entity.GetUUID());
         else
             m_OpenRows.erase(entity.GetUUID());
-        if (locked)
+        if (dimmed)
             ImGui::PopStyleVar();
         if (prefabRoot || prefabNode)
             ImGui::PopStyleColor();
@@ -1024,6 +1026,23 @@ namespace Nox
     {
         if (!entity)
             return;
+
+        // Unity's Active box in front of the name: unticked, the entity and everything under it are out of the game (not drawn, no
+        // physics, no animation, scripts not updated), in the editor and in Play alike.
+        {
+            bool active = !entity.HasComponent<InactiveComponent>();
+            if (ImGui::Checkbox("##Active", &active))
+            {
+                if (active)
+                    entity.RemoveComponent<InactiveComponent>();
+                else
+                    entity.AddComponent<InactiveComponent>();
+            }
+            ImGui::SetItemTooltip(active ? "Active. Untick to switch this entity and everything under it off: not drawn, no physics,\n"
+                                           "no animation, scripts not updated (Unity's SetActive)."
+                                         : "Switched off: it and everything under it are out of the game. Tick to switch it back on.");
+            ImGui::SameLine();
+        }
 
         if (entity.HasComponent<TagComponent>())
         {

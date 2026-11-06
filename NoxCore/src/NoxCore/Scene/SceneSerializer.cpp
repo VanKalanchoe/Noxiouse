@@ -345,6 +345,8 @@ namespace Nox
 
             out << YAML::EndMap;
         }
+        if (entity.HasComponent<InactiveComponent>())
+            out << YAML::Key << "Active" << YAML::Value << false;
 
         if (entity.HasComponent<TransformComponent>())
         {
@@ -1908,6 +1910,10 @@ namespace Nox
 
     void SceneSerializer::DeserializeEntityComponents(Scene& scene, const YAML::Node& entity, Entity deserializedEntity, bool keepPlacement)
     {
+        // Switched off (the Inspector's Active box): written only then, so most entities carry nothing.
+        if (const YAML::Node active = entity["Active"]; active && !active.as<bool>() && !deserializedEntity.HasComponent<InactiveComponent>())
+            deserializedEntity.AddComponent<InactiveComponent>();
+
         auto transformComponent = entity["TransformComponent"];
         if (transformComponent && !keepPlacement)
         {

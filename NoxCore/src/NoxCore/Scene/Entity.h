@@ -65,6 +65,9 @@ namespace Nox
                 m_Scene->TagLevelTree(*this, keptLevel);
         }
 
+        // Active in the hierarchy follows the new parent (a tree moved under a switched-off entity is switched off with it).
+        m_Scene->m_PendingActiveChanges.push_back(m_EntityHandle);
+
         // 4. Convert the preserved World Transform into the *new* local space
         if (HasComponent<TransformComponent>())
         {

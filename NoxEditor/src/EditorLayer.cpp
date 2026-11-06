@@ -4632,6 +4632,8 @@ namespace Nox
         auto boxView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, BoxCollider3DComponent>();
         for (auto entity : boxView)
         {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue; // switched off: out of the physics world
             auto [wtc, box] = boxView.get<WorldTransformComponent, BoxCollider3DComponent>(entity);
             const glm::vec4 color = colorOf(entity);
             const glm::vec3 halfExtents = box.HalfExtents * DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
@@ -4651,6 +4653,8 @@ namespace Nox
         auto sphereView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, SphereCollider3DComponent>();
         for (auto entity : sphereView)
         {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue; // switched off: out of the physics world
             auto [wtc, sphere] = sphereView.get<WorldTransformComponent, SphereCollider3DComponent>(entity);
             const glm::vec4 color = colorOf(entity);
             const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
@@ -4664,6 +4668,8 @@ namespace Nox
         auto capsuleView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CapsuleCollider3DComponent>();
         for (auto entity : capsuleView)
         {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue; // switched off: out of the physics world
             auto [wtc, capsule] = capsuleView.get<WorldTransformComponent, CapsuleCollider3DComponent>(entity);
             const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
             const float horizontal = std::max(worldScale.x, worldScale.z);
@@ -4676,6 +4682,8 @@ namespace Nox
         auto characterView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CharacterController3DComponent>();
         for (auto entity : characterView)
         {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue; // switched off: out of the physics world
             auto [wtc, controller] = characterView.get<WorldTransformComponent, CharacterController3DComponent>(entity);
             const float radius = std::max(controller.Radius, WorldUnits::FromCentimeters(1.0f));
             const float halfHeight = 0.5f * std::max(controller.Height, 0.0f);
@@ -4687,6 +4695,8 @@ namespace Nox
         auto cylinderView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CylinderCollider3DComponent>();
         for (auto entity : cylinderView)
         {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue; // switched off: out of the physics world
             auto [wtc, cylinder] = cylinderView.get<WorldTransformComponent, CylinderCollider3DComponent>(entity);
             const glm::vec4 color = colorOf(entity);
             const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
@@ -4719,6 +4729,8 @@ namespace Nox
         auto planeView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, PlaneCollider3DComponent>();
         for (auto entity : planeView)
         {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue; // switched off: out of the physics world
             auto [wtc, plane] = planeView.get<WorldTransformComponent, PlaneCollider3DComponent>(entity);
             const glm::vec4 color = colorOf(entity);
             const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
@@ -4761,6 +4773,8 @@ namespace Nox
         auto meshView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, MeshCollider3DComponent>();
         for (auto entity : meshView)
         {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue; // switched off: out of the physics world
             auto [wtc, mesh] = meshView.get<WorldTransformComponent, MeshCollider3DComponent>(entity);
             if (mesh.Mesh == 0)
                 continue;

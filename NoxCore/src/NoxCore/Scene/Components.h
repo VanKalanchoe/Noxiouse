@@ -1051,6 +1051,21 @@ namespace Nox
     {
     };
 
+    // The entity is switched off (Unity's GameObject.SetActive(false), the Inspector's Active box): it and everything under it are
+    // out of the game -- not drawn or traced, no physics body or character, no animation, scripts not updated, lights, particles,
+    // sprites, text and timelines off, cameras not used. Saved with the scene; switching it back on brings all of it back.
+    struct InactiveComponent
+    {
+        bool Inactive = true; // (a member: entt keeps no instances of empty types)
+    };
+
+    // On every entity that is inactive itself or below an inactive one (Scene::RefreshActiveTree keeps it, after adding or removing
+    // InactiveComponent and after a parent change). The systems leave these out. Not saved.
+    struct InactiveInHierarchyComponent
+    {
+        bool Inactive = true;
+    };
+
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
         MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent,
@@ -1060,5 +1075,5 @@ namespace Nox
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,
             SphereCollider3DComponent, CapsuleCollider3DComponent, CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent,
             PhysicsJoint3DComponent, CollisionFilter3DComponent, CharacterController3DComponent, TextComponent, BoneSocketComponent, LevelStreamingVolumeComponent,
-            WorldPartitionComponent, WorldStreamingSourceComponent, HLODComponent>;
+            WorldPartitionComponent, WorldStreamingSourceComponent, HLODComponent, InactiveComponent>;
 }

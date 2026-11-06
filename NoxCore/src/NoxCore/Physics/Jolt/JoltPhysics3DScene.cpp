@@ -416,7 +416,8 @@ namespace Nox {
 
     void JoltPhysics3DScene::CreateBody(Entity entity)
     {
-        if (!m_PhysicsSystem || !entity)
+        // Switched off (the entity or one above it: InactiveComponent): no body until it is switched on (Scene::RefreshActiveTree).
+        if (!m_PhysicsSystem || !entity || entity.HasComponent<InactiveInHierarchyComponent>())
             return;
 
         auto& rb = entity.GetComponent<RigidBody3DComponent>();
@@ -448,8 +449,8 @@ namespace Nox {
             {
                 Entity child = m_Scene->GetEntityByUUID(pending.back());
                 pending.pop_back();
-                if (!child || child.HasComponent<RigidBody3DComponent>())
-                    continue; // a body of its own takes its subtree
+                if (!child || child.HasComponent<RigidBody3DComponent>() || child.HasComponent<InactiveInHierarchyComponent>())
+                    continue; // a body of its own takes its subtree; a switched-off one is out of it
                 const WorldPose childPose = WorldPoseOf(child);
                 ColliderSurface childSurface;
                 if (JPH::Ref<JPH::Shape> childShape = ColliderShapeOf(child, childPose.Scale, nativePerWorld, dynamic, meshShape, childSurface))
@@ -864,7 +865,7 @@ namespace Nox {
     // character position is at the feet, the supporting volume is the lower sphere cap.
     void JoltPhysics3DScene::CreateCharacter(Entity entity)
     {
-        if (!m_PhysicsSystem || !entity)
+        if (!m_PhysicsSystem || !entity || entity.HasComponent<InactiveInHierarchyComponent>()) // switched off: no character
             return;
 
         const auto& controller = entity.GetComponent<CharacterController3DComponent>();
