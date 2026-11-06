@@ -192,6 +192,31 @@ namespace Nox
             ctx.SetOutput(nodeIndex, 0, std::move(out));
         }
 
+        // A blend space's playback: its shared normalized phase, and its input eased towards the pin's value (UE's blend space
+        // Smoothing Time, Unity's damped SetFloat) so a sudden change -- a key tapped, Shift spammed -- blends over a moment
+        // instead of popping from one clip to another.
+        struct BlendSpaceState
+        {
+            float Phase = 0.0f;
+            glm::vec2 Input{ 0.0f };
+            bool Started = false;
+        };
+
+        // Eases `current` towards `target`: ~98% of a change in `smoothingTime` seconds (exponential, frame-rate independent);
+        // 0 = no smoothing. The first evaluation starts at the target.
+        glm::vec2 SmoothBlendInput(BlendSpaceState& state, glm::vec2 target, float smoothingTime, float deltaTime)
+        {
+            if (!state.Started || smoothingTime <= 0.0f)
+            {
+                state.Started = true;
+                state.Input = target;
+                return target;
+            }
+            const float alpha = 1.0f - std::exp(-4.0f * std::max(deltaTime, 0.0f) / smoothingTime);
+            state.Input += (target - state.Input) * alpha;
+            return state.Input;
+        }
+
         // UE's Blend Space 1D: up to four clips ("Clip0".."Clip3") placed along one axis ("Position0".."Position3"); the
         // "Value" pin (or, unconnected, the property of the same name) picks the point, e.g. Speed for idle / walk / run.
         // The two clips around the value play in step -- one shared normalized phase, advanced at the rate of their blended
@@ -231,8 +256,11 @@ namespace Nox
             std::stable_sort(samples.begin(), samples.begin() + count,
                              [](const BlendSample& a, const BlendSample& b) { return a.Position < b.Position; });
 
-            // The two samples around the value and how far it is from the first to the second; clamped at the ends.
-            const float value = ctx.GetInput<float>(nodeIndex, 0);
+            // The two samples around the value and how far it is from the first to the second; clamped at the ends. The value is
+            // the pin's, eased over "SmoothingTime".
+            BlendSpaceState& state = ctx.GetState<BlendSpaceState>(nodeIndex);
+            const float value = SmoothBlendInput(state, glm::vec2(ctx.GetInput<float>(nodeIndex, 0), 0.0f),
+                                                 ctx.GetProperty<float>(nodeIndex, "SmoothingTime", 0.25f), data->DeltaTime).x;
             size_t first = 0;
             size_t second = 0;
             float weight = 0.0f;
@@ -258,7 +286,7 @@ namespace Nox
             const bool loop = ctx.GetProperty<bool>(nodeIndex, "Loop", true);
             const float speed = ctx.GetProperty<float>(nodeIndex, "Speed", 1.0f);
             const float duration = glm::mix(samples[first].Clip->Duration, samples[second].Clip->Duration, weight);
-            float& phase = ctx.GetState<float>(nodeIndex); // normalized 0..1, shared by every clip of the space
+            float& phase = state.Phase; // normalized 0..1, shared by every clip of the space
             const float previousPhase = phase;
             phase += data->DeltaTime * speed / std::max(duration, 1e-4f);
             const bool wrapped = loop && (phase >= 1.0f || phase < 0.0f);
@@ -336,7 +364,9 @@ namespace Nox
                 return;
             }
 
-            const glm::vec2 point(ctx.GetInput<float>(nodeIndex, 0), ctx.GetInput<float>(nodeIndex, 1));
+            BlendSpaceState& state = ctx.GetState<BlendSpaceState>(nodeIndex);
+            const glm::vec2 point = SmoothBlendInput(state, glm::vec2(ctx.GetInput<float>(nodeIndex, 0), ctx.GetInput<float>(nodeIndex, 1)),
+                                                     ctx.GetProperty<float>(nodeIndex, "SmoothingTime", 0.25f), data->DeltaTime);
             std::array<float, 8> weights{};
             float total = 0.0f;
             for (size_t i = 0; i < count; ++i)
@@ -379,7 +409,7 @@ namespace Nox
 
             const bool loop = ctx.GetProperty<bool>(nodeIndex, "Loop", true);
             const float speed = ctx.GetProperty<float>(nodeIndex, "Speed", 1.0f);
-            float& phase = ctx.GetState<float>(nodeIndex);
+            float& phase = state.Phase;
             const float previousPhase = phase;
             phase += data->DeltaTime * speed / std::max(duration, 1e-4f);
             const bool wrapped = loop && (phase >= 1.0f || phase < 0.0f);
@@ -759,7 +789,7 @@ namespace Nox
                                       { "Clip1", uint64_t(0) }, { "Position1", 1.0f },
                                       { "Clip2", uint64_t(0) }, { "Position2", 2.0f },
                                       { "Clip3", uint64_t(0) }, { "Position3", 3.0f },
-                                      { "Loop", true }, { "Speed", 1.0f } },
+                                      { "Loop", true }, { "Speed", 1.0f }, { "SmoothingTime", 0.25f } },
             /* PropertyAssetTypeHints */ { { "Clip0", "AssetType::AnimationSequence" }, { "Clip1", "AssetType::AnimationSequence" },
                                            { "Clip2", "AssetType::AnimationSequence" }, { "Clip3", "AssetType::AnimationSequence" } },
             /* PropertyRanges    */ {},
@@ -782,6 +812,7 @@ namespace Nox
             }
             properties.push_back({ "Loop", true });
             properties.push_back({ "Speed", 1.0f });
+            properties.push_back({ "SmoothingTime", 0.25f });
             NodeTypeRegistry::Register({
                 /* TypeName          */ "BlendSpace2D",
                 /* Domain            */ kAnimationGraphDomain,

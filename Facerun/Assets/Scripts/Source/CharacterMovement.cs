@@ -14,7 +14,9 @@ public sealed class CharacterMovement : EntityBehaviour
     [Expose(Unit = "m/s")] public float WalkSpeed = 200.0f; // 2 m/s
     [Expose(Unit = "m/s")] public float RunSpeed = 500.0f; // 5 m/s (Unreal template)
     [Expose(Unit = "m/s")] public float JumpSpeed = 700.0f; // Unreal's third-person template, with gravity x1.75
-    [Expose] public float TurnSpeed = 12.0f;
+    // How fast it turns to face where it moves, in degrees per second (Unreal's Rotation Rate with Orient Rotation To Movement;
+    // its template uses 500): a reversal takes a moment -- with root motion it walks a curve -- instead of snapping round.
+    [Expose] public float TurnRate = 500.0f;
     [Expose] public float ModelYawOffset = 0.0f; // radians; the model's forward axis relative to +Z
     // Root motion (the Animator's Root Motion on, a clip set whose root bone travels): on the ground the animation moves the
     // character and this only turns it and tells the graph how fast the player wants to go (Speed); in the air it steers as
@@ -47,7 +49,8 @@ public sealed class CharacterMovement : EntityBehaviour
 
             float targetYaw = MathF.Atan2(direction.X, direction.Z) + ModelYawOffset;
             float delta = MathF.IEEERemainder(targetYaw - _yaw, 2.0f * MathF.PI);
-            _yaw += delta * MathF.Min(1.0f, TurnSpeed * deltaTime);
+            float maxStep = TurnRate * (MathF.PI / 180.0f) * deltaTime;
+            _yaw += Math.Clamp(delta, -maxStep, maxStep);
 
             TransformComponent transform = GetComponent<TransformComponent>();
             Vector3 rotation = transform.LocalRotation;

@@ -272,6 +272,10 @@ namespace Nox
             order.reserve(node.Properties.size());
             for (const auto& [name, defaultValue] : type.DefaultProperties)
             {
+                // A property the type gained after the node was saved (a blend space's Smoothing Time) shows with its default --
+                // the value evaluation already falls back to -- and is saved with the graph from then on.
+                if (!node.Properties.contains(name) && name != kVariableInputCountProperty && !(type.OwnsSubGraphs && name == "EntryState"))
+                    node.Properties[name] = defaultValue;
                 if (node.Properties.contains(name))
                     order.push_back(name);
             }
