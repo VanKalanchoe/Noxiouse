@@ -16,7 +16,7 @@ Nothing open: everything left is in "Ignore for now" below (2026-11-06).
 | B2 | ReSTIR PT temporal artifact (ignore for now) |
 | B3 | ReSTIR light indices across light changes (ignore for now) |
 | B4 | Meshlet cone culling (ignore for now) |
-| C4 | Step 8: **audio graph**, a second node-graph domain on the same core and editor panel (ignore for now: after the rest of the backlog) |
+| C4 | Step 8: **audio graph**, a second node-graph domain on the same core and editor panel. Planned 2026-11-06 with the whole audio system it needs: miniaudio + Steam Audio, MetaSounds-style graph, buses, spatial audio, phases A1-A5 (`Audio_Architecture_Plan_2026.md`) |
 | PP1 | **Post effects** (bloom, DOF, motion blur, grading / LUT, vignette / grain / CA / lens flares, CAS): built 2026-11-05, untested; not wanted for now (Settings > Post Effects; `Hybrid_Renderer_Plan_2026-10.md` §10) |
 | L4 | **Level transforms** (a sub-level's Offset / Yaw in the Levels panel): built 2026-11-06, untested; later |
 | C9 | **Stair animations:** with a walk clip made for flat ground (UAL's step ~65 cm, a tread 30 cm) the feet land on every second step; AAA games play stairs up / down walks chosen when the floor under the feet is a stair. Needs a character with stair clips (none at hand): then an `OnStairs` parameter and a stair state |
