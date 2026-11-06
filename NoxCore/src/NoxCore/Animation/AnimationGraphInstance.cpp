@@ -108,6 +108,11 @@ namespace Nox
         return GetFloat(name) != 0.0f;
     }
 
+    namespace
+    {
+        glm::mat4 RestGlobalMatrix(const Node* node); // (below)
+    }
+
     const AnimPose* AnimationGraphInstance::Evaluate(float deltaTime, bool playing, const Skeleton& skeleton)
     {
         // Also bails if the graph was recompiled after this frame's Sync() -- m_EvalContext would still be sized
@@ -124,6 +129,21 @@ namespace Nox
         evalData.Parameters = &Parameters;
         evalData.FiredNotifies = &m_FiredNotifies;
         evalData.Montages = &m_MontageSlots;
+        FootProbes.clear();
+        evalData.IKTargets = &IKTargets;
+        evalData.FootGround = &FootGround;
+        evalData.FootProbes = &FootProbes;
+        evalData.ModelUnitsPerMeter = ModelUnitsPerMeter;
+        if (RootMotion)
+        {
+            // Where ExtractRootMotion will leave the root bone, for the IK nodes to measure the pose as it is drawn.
+            if (const Node* root = FindRootMotionBone(skeleton))
+            {
+                evalData.InPlaceRootIndex = root->Index;
+                evalData.InPlaceRootParent = RestGlobalMatrix(root->Parent);
+                evalData.InPlaceRootRest = glm::vec3(evalData.InPlaceRootParent * glm::vec4(root->RestTranslation, 1.0f));
+            }
+        }
         m_EvalContext.UserData = &evalData;
 
         EvaluateGraph(m_EvalContext, m_Graph->Compiled);
@@ -244,22 +264,24 @@ namespace Nox
         }
     }
 
-    void AnimationGraphInstance::ExtractRootMotion(const Skeleton& skeleton)
+    const Node* AnimationGraphInstance::FindRootMotionBone(const Skeleton& skeleton) const
     {
-        const Node* root = nullptr;
         if (!RootBone.empty())
         {
             for (const Node* node : skeleton.AllNodes)
             {
                 if (node && node->Name == RootBone)
-                {
-                    root = node;
-                    break;
-                }
+                    return node;
             }
         }
-        if (!root && !skeleton.Skins.empty() && skeleton.Skins[0] && !skeleton.Skins[0]->Joints.empty())
-            root = skeleton.Skins[0]->Joints[0];
+        if (!skeleton.Skins.empty() && skeleton.Skins[0] && !skeleton.Skins[0]->Joints.empty())
+            return skeleton.Skins[0]->Joints[0];
+        return nullptr;
+    }
+
+    void AnimationGraphInstance::ExtractRootMotion(const Skeleton& skeleton)
+    {
+        const Node* root = FindRootMotionBone(skeleton);
         if (!root || root->Index < 0 || root->Index >= static_cast<int32_t>(m_LastPose.LocalTransforms.size()))
             return;
 

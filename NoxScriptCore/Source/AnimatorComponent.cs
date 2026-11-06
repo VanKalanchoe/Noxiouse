@@ -28,4 +28,14 @@ public sealed class AnimatorComponent : Component
     public void StopMontage(string slot = "DefaultSlot", float blendOut = 0.2f) => InternalCalls.StopAnimatorMontage(EntityID, slot, blendOut);
 
     public bool IsMontagePlaying(string slot = "DefaultSlot") => InternalCalls.IsAnimatorMontagePlaying(EntityID, slot);
+
+    /// <summary>
+    /// An IK target (world position) the animation graph's Two Bone IK and Look At nodes reach for by name, e.g.
+    /// <c>SetIKTarget("RightHand", doorHandle.Position)</c> or <c>SetIKTarget("LookAt", player.Position)</c>. It stays until cleared or
+    /// set again; <paramref name="weight"/> (0..1) fades the IK in and out. A graph without a node reading that name ignores it.
+    /// </summary>
+    public void SetIKTarget(string name, Vector3d position, float weight = 1.0f) => InternalCalls.SetAnimatorIKTarget(EntityID, name, position, weight);
+
+    /// <summary>Removes an IK target: the nodes reading it go back to the animation.</summary>
+    public void ClearIKTarget(string name) => InternalCalls.ClearAnimatorIKTarget(EntityID, name);
 }

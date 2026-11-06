@@ -828,6 +828,8 @@ namespace Nox
             /* PropertyRanges    */ {},
             /* Evaluate          */ &EvaluateOutput
         });
+
+        RegisterAnimationIKNodeTypes();
     }
 
     NodeGraph CreateEmptyAnimationGraph()

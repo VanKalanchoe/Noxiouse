@@ -795,7 +795,21 @@ window.NOX_DOCS_PAGES = [
             "",
             "## Jump / Fall States",
             "",
-            "- **At End of State** transitions (Unity's Has Exit Time, Unreal's automatic rule): a state machine transition can wait for its state's animation to end -- Jump Start -> Jump Loop, Jump Land -> Locomotion. `CharacterMovement.cs` sends `VerticalSpeed` next to `Speed` and `IsGrounded`."
+            "- **At End of State** transitions (Unity's Has Exit Time, Unreal's automatic rule): a state machine transition can wait for its state's animation to end -- Jump Start -> Jump Loop, Jump Land -> Locomotion. `CharacterMovement.cs` sends `VerticalSpeed` next to `Speed` and `IsGrounded`.",
+            "",
+            "---",
+            "",
+            "## IK Nodes (November 2026)",
+            "",
+            "Category **IK** in the animation graph (Unreal's Two Bone IK / Look At / foot placement, Godot's SkeletonIK3D), working in the skeleton's model space on the pose coming in:",
+            "",
+            "| Node | Properties | What it does |",
+            "| :--- | :--- | :--- |",
+            "| **TwoBoneIK** | End Bone, Target, Pole, Alpha | The end bone's parent and grandparent (elbow / knee, shoulder / hip) turn so it reaches the target (analytic, law of cosines); the bend stays in its plane, turned towards Pole when set; the end bone keeps its orientation |",
+            "| **LookAt** | Bone, Target, Axis (0 = automatic), Max Angle, Alpha | The bone's forward axis turns towards the target, at most Max Angle; chain several (spine 0.3, head 1.0) |",
+            "| **FootPlacement** | Left / Right Foot, Pelvis, Trace Up / Down, Max Pelvis Drop, Speed, Align To Ground, Max Align Angle, Alpha | A ray down per foot (cast by the scene after the parallel animation update, used the next frame); feet onto what it hit, the pelvis lowered for the lower foot, feet tilted to the slope; eases at Speed. Play / Simulate only |",
+            "",
+            "Targets come from scripts by name: `animator.SetIKTarget(\"RightHand\", position, weight)` / `ClearIKTarget(name)` (world positions, converted to the skeleton's space each frame). With root motion the nodes measure the pose with the root bone where it will be drawn. Test script: `IKTargetTest.cs`. Step-by-step guide: the manual's **Character Setup: Jump, Root Motion & IK**."
         ]
     },
     {

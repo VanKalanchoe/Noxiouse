@@ -492,6 +492,14 @@ namespace Nox
         // move forward). RootBone empty = the skin's first joint.
         bool RootMotion = false;
         std::string RootBone;
+        // Runtime only, set by scripts (Animator.SetIKTarget): IK targets by name in world space, read by the graph's Two Bone IK and
+        // Look At nodes (converted to the skeleton's space each frame). Weight 0..1. They stay until cleared.
+        struct IKTarget
+        {
+            glm::dvec3 Position{ 0.0 };
+            float Weight = 1.0f;
+        };
+        std::unordered_map<std::string, IKTarget> IKTargets;
         // Runtime only: the notifies the last animation update crossed, handed to the scripts as OnAnimationEvent(name).
         std::vector<std::string> FiredNotifies;
 

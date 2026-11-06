@@ -15,6 +15,7 @@
 namespace Nox
 {
     class Skeleton;
+    struct Node;
 
     // Per-entity runtime state for AnimatorComponent's graph mode (Graph != 0): the GraphEvalContext (node
     // playheads, cached pin values) and the instance's parameter overrides, paired with the asset-owned
@@ -67,9 +68,17 @@ namespace Nox
         std::string RootBone;
         glm::vec3 ConsumeRootMotion() { return std::exchange(m_RootMotion, glm::vec3(0.0f)); }
 
+        // IK (Backlog C6), set by the scene before Evaluate: the scripts' targets and last frame's foot rays in the skeleton's model
+        // space, and its model units per meter. Evaluate fills FootProbes with the rays its Foot Placement nodes want next.
+        std::unordered_map<std::string, AnimIKTarget> IKTargets;
+        std::unordered_map<std::string, AnimFootGround> FootGround;
+        std::vector<AnimFootProbe> FootProbes;
+        float ModelUnitsPerMeter = 1.0f;
+
     private:
         void UpdateMontages(float deltaTime);
         void ExtractRootMotion(const Skeleton& skeleton);
+        const Node* FindRootMotionBone(const Skeleton& skeleton) const;
 
         struct Montage
         {

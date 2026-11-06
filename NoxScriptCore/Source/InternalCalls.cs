@@ -42,6 +42,8 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, NativeString, float> Animator_GetFloat;
     private static delegate*<ulong, NativeString, uint, void> Animator_SetBool;
     private static delegate*<ulong, NativeString, uint> Animator_GetBool;
+    private static delegate*<ulong, NativeString, double, double, double, float, void> Animator_SetIKTarget;
+    private static delegate*<ulong, NativeString, void> Animator_ClearIKTarget;
     private static delegate*<ulong, NativeString, NativeString, float, float, float, uint> Animator_PlayMontage;
     private static delegate*<ulong, NativeString, float, void> Animator_StopMontage;
     private static delegate*<ulong, NativeString, uint> Animator_IsMontagePlaying;
@@ -242,6 +244,18 @@ internal static unsafe class InternalCalls
     {
         using NativeString nativeName = new(name);
         return Animator_GetBool(entityID, nativeName) != 0;
+    }
+
+    internal static void SetAnimatorIKTarget(ulong entityID, string name, Vector3d position, float weight)
+    {
+        using NativeString nativeName = new(name);
+        Animator_SetIKTarget(entityID, nativeName, position.X, position.Y, position.Z, weight);
+    }
+
+    internal static void ClearAnimatorIKTarget(ulong entityID, string name)
+    {
+        using NativeString nativeName = new(name);
+        Animator_ClearIKTarget(entityID, nativeName);
     }
 
     internal static bool PlayAnimatorMontage(ulong entityID, string clipPath, string slot, float blendIn, float blendOut, float rate)

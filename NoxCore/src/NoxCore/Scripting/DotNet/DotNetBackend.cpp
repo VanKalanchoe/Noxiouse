@@ -519,6 +519,20 @@ namespace Nox
             return animator && animator->GraphInstance.GetBool(std::string(name));
         }
 
+        // IK targets (Nox.AnimatorComponent.SetIKTarget / ClearIKTarget): world positions the graph's Two Bone IK and Look At nodes
+        // reach for, by name.
+        void AnimatorSetIKTarget(uint64_t entityID, Coral::String name, double x, double y, double z, float weight)
+        {
+            if (AnimatorComponent* animator = FindAnimator(entityID))
+                animator->IKTargets[std::string(name)] = { glm::dvec3(x, y, z), std::clamp(weight, 0.0f, 1.0f) };
+        }
+
+        void AnimatorClearIKTarget(uint64_t entityID, Coral::String name)
+        {
+            if (AnimatorComponent* animator = FindAnimator(entityID))
+                animator->IKTargets.erase(std::string(name));
+        }
+
         // Montages (Nox.AnimatorComponent.PlayMontage): the clip by its path relative to the asset folder.
         Coral::Bool32 AnimatorPlayMontage(uint64_t entityID, Coral::String clipPath, Coral::String slot, float blendIn, float blendOut, float rate)
         {
@@ -1064,6 +1078,8 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_SetFloat", reinterpret_cast<void*>(&AnimatorSetFloat));
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_GetFloat", reinterpret_cast<void*>(&AnimatorGetFloat));
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_SetBool", reinterpret_cast<void*>(&AnimatorSetBool));
+        assembly.AddInternalCall("Nox.InternalCalls", "Animator_SetIKTarget", reinterpret_cast<void*>(&AnimatorSetIKTarget));
+        assembly.AddInternalCall("Nox.InternalCalls", "Animator_ClearIKTarget", reinterpret_cast<void*>(&AnimatorClearIKTarget));
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_GetBool", reinterpret_cast<void*>(&AnimatorGetBool));
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_PlayMontage", reinterpret_cast<void*>(&AnimatorPlayMontage));
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_StopMontage", reinterpret_cast<void*>(&AnimatorStopMontage));

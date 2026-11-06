@@ -815,3 +815,18 @@ Like Unreal's: a folder is NOT an entity. `FolderComponent { Path }` ("Bistro/Pr
   steers with air control and does not brake. For the Quaternius set use `UAL1_Standard_RM.glb`, Animator Root Motion on, Root Bone
   `root`. Its clips travel: walk 1.0 m/s, jog 5.4, sprint 8.2, crouch 0.75 (the in-place file's speeds should match these).
 
+### IK (C6, built 2026-11-06, untested)
+- **Nodes** (`AnimationIKNodes.cpp`, category IK), all on the pose coming in, in the skeleton's model space (the entity's own space):
+  **TwoBoneIK** (End Bone, Target, Pole, Alpha: Holden's analytic two-joint solve -- the upper and mid bones turn by the law of
+  cosines, the chain swings to the target, an optional pole turns the bend plane; the end bone keeps its model-space rotation),
+  **LookAt** (Bone, Target, Axis 0 = automatic: the model's +Z as the bone has it at rest, Max Angle, Alpha), **FootPlacement**
+  (Left / Right Foot, Pelvis, Trace Up / Down m, Max Pelvis Drop m, Speed 1/s, Align To Ground, Max Align Angle).
+- **Targets:** `AnimatorComponent::IKTargets` (world, set by `Animator.SetIKTarget` / `ClearIKTarget`, script API 14) converted to
+  model space each frame into `AnimationGraphInstance::IKTargets`.
+- **Foot rays:** FootPlacement lists rays (`AnimGraphEvalData::FootProbes`) while the animators run in parallel; `UpdateAnimators`
+  casts them on the main thread after the tasks (physics is not stepping then) and stores the hits in model space
+  (`FootGround`), read by the next frame's evaluation. A hit on the character's own entities counts as none. The floor is model
+  height 0 (the character controller's origin is the capsule's bottom).
+- **Root motion:** the root bone is pulled back in place after the evaluation, so the IK nodes measure bone positions with the root
+  where it will be drawn (`AnimGraphEvalData::InPlaceRoot*`).
+

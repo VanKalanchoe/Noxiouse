@@ -1953,6 +1953,43 @@ namespace Nox
                 }
             }
         });
+
+        // Foot Placement's rays (main thread: physics is not stepping now), answered for the next frame. Down from above each foot, in
+        // world space; a hit on the character itself (its own colliders) counts as none.
+        for (const AnimatorTask& task : m_AnimatorOrder)
+        {
+            AnimatorComponent& animator = view.get<AnimatorComponent>(task.Entity);
+            AnimationGraphInstance& graph = animator.GraphInstance;
+            if (graph.FootProbes.empty() && graph.FootGround.empty())
+                continue;
+            graph.FootGround.clear();
+            if (!m_Physics3DScene || graph.FootProbes.empty())
+                continue;
+            const auto* world = m_Registry.try_get<WorldTransformComponent>(task.Entity);
+            const glm::dmat4 toWorld = world ? world->WorldMatrix : glm::dmat4(1.0);
+            const glm::dmat4 toModel = glm::inverse(toWorld);
+            const glm::dmat3 normalToModel = glm::transpose(glm::dmat3(toWorld));
+            const double meter = static_cast<double>(WorldUnits::FromMeters(1.0f));
+            const UUID self = m_Registry.get<IDComponent>(task.Entity).ID;
+            for (const AnimFootProbe& probe : graph.FootProbes)
+            {
+                const glm::dvec3 foot = glm::dvec3(toWorld * glm::dvec4(glm::dvec3(probe.Position), 1.0));
+                const glm::dvec3 start = foot + glm::dvec3(0.0, static_cast<double>(probe.Up) * meter, 0.0);
+                const float length = static_cast<float>(static_cast<double>(probe.Up + probe.Down) * meter);
+                AnimFootGround& ground = graph.FootGround[probe.Bone];
+                RayCastHit hit;
+                if (length <= 0.0f || !m_Physics3DScene->RayCast(start, glm::vec3(0.0f, -1.0f, 0.0f), length, hit))
+                    continue;
+                bool onSelf = false;
+                for (Entity up = hit.HitEntity; up && !onSelf; up = up.GetParent())
+                    onSelf = up.GetUUID() == self;
+                if (onSelf)
+                    continue;
+                ground.Hit = true;
+                ground.Point = glm::vec3(toModel * glm::dvec4(glm::dvec3(hit.Position), 1.0));
+                ground.Normal = glm::normalize(glm::vec3(normalToModel * glm::dvec3(hit.Normal)));
+            }
+        }
     }
 
     void Scene::UpdateAnimator(entt::entity entity, AnimatorComponent& animatorComp, float ts)
@@ -1992,6 +2029,24 @@ namespace Nox
         };
 
         std::vector<AssetHandle>& missingAssets = m_MissingAssets.Local();
+
+        // 0. IK (graph mode): the scripts' targets into the skeleton's model space (this entity's own: its world matrix inverted), and
+        //    its model units per meter (the IK nodes' distances are meters).
+        if (animatorComp.Graph != 0)
+        {
+            AnimationGraphInstance& graph = animatorComp.GraphInstance;
+            graph.IKTargets.clear();
+            const auto* world = m_Registry.try_get<WorldTransformComponent>(entity);
+            const glm::dmat4 toWorld = world ? world->WorldMatrix : glm::dmat4(1.0);
+            const double scale = std::max(glm::length(glm::dvec3(toWorld[0])), 1e-9);
+            graph.ModelUnitsPerMeter = static_cast<float>(static_cast<double>(WorldUnits::FromMeters(1.0f)) / scale);
+            if (!animatorComp.IKTargets.empty())
+            {
+                const glm::dmat4 toModel = glm::inverse(toWorld);
+                for (const auto& [name, target] : animatorComp.IKTargets)
+                    graph.IKTargets[name] = { glm::vec3(toModel * glm::dvec4(target.Position, 1.0)), target.Weight };
+            }
+        }
 
         // 1. Sync Animation sequence from AssetHandle if assigned
         if (animatorComp.Animation != 0)
