@@ -794,9 +794,44 @@ namespace Nox
                 const std::filesystem::path candidate(path + extension);
                 sound = AssetManager::FindHandleByPath(candidate, std::string_view(extension) == ".naudiograph" ? AssetType::AudioGraph : AssetType::AudioClip);
             }
-            if (sound == 0)
-                NOX_CORE_ERROR("[C#] {}: no sound '{}' in the asset registry", call, path);
-            return sound;
+            if (sound != 0 || !Project::GetActive())
+            {
+                if (sound == 0)
+                    NOX_CORE_ERROR("[C#] {}: no sound '{}' in the asset registry", call, path);
+                return sound;
+            }
+            // Not at that exact spelling: the same path in another letter case (Windows folders ignore it), else say where sounds of that
+            // name are -- paths start at the asset folder ("Sounds/Footsteps" is Assets/Sounds/Footsteps.naudiograph).
+            auto lower = [](std::string text)
+            {
+                std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                return text;
+            };
+            const std::string wanted = lower(soundPath.has_extension() ? soundPath.generic_string()
+                                                                       : (soundPath.parent_path() / soundPath.stem()).generic_string());
+            const std::string wantedName = lower(soundPath.stem().string());
+            std::vector<std::string> sameName;
+            for (const auto& [handle, metadata] : Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry())
+            {
+                if (metadata.Type != AssetType::AudioClip && metadata.Type != AssetType::AudioGraph)
+                    continue;
+                const std::filesystem::path& file = metadata.FilePath;
+                const std::string withoutExtension = lower((file.parent_path() / file.stem()).generic_string());
+                if (withoutExtension == wanted || lower(file.generic_string()) == wanted)
+                    return handle;
+                if (lower(file.stem().string()) == wantedName)
+                    sameName.push_back((file.parent_path() / file.stem()).generic_string());
+            }
+            if (sameName.empty())
+                NOX_CORE_ERROR("[C#] {}: no sound '{}' in the asset registry (paths start at the asset folder, e.g. \"Sounds/Footsteps\")", call, path);
+            else
+            {
+                std::string list;
+                for (const std::string& candidate : sameName)
+                    list += (list.empty() ? "\"" : ", \"") + candidate + "\"";
+                NOX_CORE_ERROR("[C#] {}: no sound '{}'; a sound of that name is at {} -- use that path", call, path, list);
+            }
+            return 0;
         }
 
         // A bus by its name ("Music"); a name that is no bus is reported, not taken as Master.
