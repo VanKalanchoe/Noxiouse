@@ -2210,15 +2210,39 @@ namespace Nox
                     ImGui::SetItemTooltip("The bone whose horizontal movement is taken (e.g. \"root\" or \"Hips\"); empty = the skin's first joint.");
                 }
 
+                // Unreal's instance-editable variables: changing one here overrides the graph's default for this entity (saved
+                // with the scene, marked "overridden"); Reset goes back to following the graph's default.
                 ImGui::Text("Parameters");
-                for (auto& [name, value] : component.GraphInstance.Parameters)
+                ImGui::SetItemTooltip("The graph's defaults unless changed here. A changed one is this entity's own (saved with the scene);\n"
+                                      "Reset makes it follow the graph's default again.");
+                AnimationGraphInstance& graph = component.GraphInstance;
+                std::string reset;
+                for (auto& [name, value] : graph.Parameters)
                 {
+                    ImGui::PushID(name.c_str());
+                    bool changed = false;
                     if (float* f = std::get_if<float>(&value))
-                        ImGui::DragFloat(name.c_str(), f, 0.01f); // not clamped: a parameter can be a speed, not just a 0-1 blend
+                        changed = ImGui::DragFloat(name.c_str(), f, 0.01f); // not clamped: a parameter can be a speed, not just a 0-1 blend
                     else if (bool* b = std::get_if<bool>(&value))
-                        ImGui::Checkbox(name.c_str(), b);
+                        changed = ImGui::Checkbox(name.c_str(), b);
                     else if (int32_t* i = std::get_if<int32_t>(&value))
-                        ImGui::DragInt(name.c_str(), i);
+                        changed = ImGui::DragInt(name.c_str(), i);
+                    if (changed)
+                        graph.Overrides[name] = value;
+                    if (graph.Overrides.contains(name))
+                    {
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Reset"))
+                            reset = name;
+                        ImGui::SetItemTooltip("Overridden on this entity. Reset: follow the graph's default.");
+                    }
+                    ImGui::PopID();
+                }
+                if (!reset.empty())
+                {
+                    graph.Overrides.erase(reset);
+                    if (const NodeGraphValue* fallback = graph.DefaultOf(reset))
+                        graph.Parameters[reset] = *fallback;
                 }
             }
         });

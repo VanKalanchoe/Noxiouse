@@ -69,22 +69,37 @@ namespace Nox
 
         m_EvalContext.Init(m_Graph->Compiled);
 
-        // Bring Parameters in line with what the graph declares now: a value set for a parameter that still
-        // exists (by the inspector, a script, or loaded from the scene) is kept, unless its type changed in the
-        // editor; new parameters start at their default; ones the graph no longer declares are dropped.
+        // Bring Parameters in line with what the graph declares now: each declared parameter starts at this entity's override
+        // (set in the Inspector, saved with the scene) or else at the graph's default -- so a default changed in the graph
+        // reaches every entity that did not override it, as in Unreal. An override whose type no longer matches is dropped;
+        // parameters the graph no longer declares are dropped.
         const auto& declared = m_Graph->Compiled.Parameters;
-        for (auto it = Parameters.begin(); it != Parameters.end();)
+        auto isDeclared = [&](const std::string& name)
         {
-            auto match = std::find_if(declared.begin(), declared.end(),
-                [&](const GraphParameter& p) { return p.Name == it->first; });
-            it = (match == declared.end()) ? Parameters.erase(it) : std::next(it);
-        }
+            return std::any_of(declared.begin(), declared.end(), [&](const GraphParameter& p) { return p.Name == name; });
+        };
+        std::erase_if(Parameters, [&](const auto& entry) { return !isDeclared(entry.first); });
+        std::erase_if(Overrides, [&](const auto& entry) { return !isDeclared(entry.first); });
         for (const GraphParameter& param : declared)
         {
-            auto existing = Parameters.find(param.Name);
-            if (existing == Parameters.end() || existing->second.index() != param.DefaultValue.index())
-                Parameters[param.Name] = param.DefaultValue;
+            auto overridden = Overrides.find(param.Name);
+            if (overridden != Overrides.end() && overridden->second.index() != param.DefaultValue.index())
+            {
+                Overrides.erase(overridden);
+                overridden = Overrides.end();
+            }
+            Parameters[param.Name] = overridden != Overrides.end() ? overridden->second : param.DefaultValue;
         }
+    }
+
+    const NodeGraphValue* AnimationGraphInstance::DefaultOf(const std::string& name) const
+    {
+        if (!m_Graph)
+            return nullptr;
+        for (const GraphParameter& param : m_Graph->Compiled.Parameters)
+            if (param.Name == name)
+                return &param.DefaultValue;
+        return nullptr;
     }
 
     void AnimationGraphInstance::SetFloat(const std::string& name, float value)

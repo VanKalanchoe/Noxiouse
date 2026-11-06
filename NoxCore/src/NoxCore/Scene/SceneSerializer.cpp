@@ -684,8 +684,9 @@ namespace Nox
             out << YAML::Key << "Graph" << YAML::Value << animatorComponent.Graph;
             out << YAML::Key << "RootMotion" << YAML::Value << animatorComponent.RootMotion;
             out << YAML::Key << "RootBone" << YAML::Value << animatorComponent.RootBone;
-            out << YAML::Key << "GraphParameters" << YAML::Value << YAML::BeginSeq;
-            for (const auto& [name, value] : animatorComponent.GraphInstance.Parameters)
+            // Only what was set on this entity: the rest follows the graph's defaults.
+            out << YAML::Key << "GraphParameterOverrides" << YAML::Value << YAML::BeginSeq;
+            for (const auto& [name, value] : animatorComponent.GraphInstance.Overrides)
             {
                 out << YAML::BeginMap;
                 out << YAML::Key << "Name" << YAML::Value << name;
@@ -2358,14 +2359,17 @@ namespace Nox
                 ac.RootMotion = animatorComponent["RootMotion"].as<bool>();
             if (animatorComponent["RootBone"])
                 ac.RootBone = animatorComponent["RootBone"].as<std::string>();
-            if (auto parameters = animatorComponent["GraphParameters"])
+            if (auto parameters = animatorComponent["GraphParameterOverrides"])
             {
                 for (const auto& paramData : parameters)
                 {
                     std::string name = paramData["Name"].as<std::string>();
                     NodeGraphValue value;
                     if (paramData["Value"] && NodeGraphSerializer::ReadValue(paramData["Value"], value))
+                    {
+                        ac.GraphInstance.Overrides[name] = value;
                         ac.GraphInstance.Parameters[name] = value;
+                    }
                 }
             }
         }

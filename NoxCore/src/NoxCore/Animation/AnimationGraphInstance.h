@@ -50,7 +50,13 @@ namespace Nox
         float GetFloat(const std::string& name) const;
         bool GetBool(const std::string& name) const;
 
-        std::unordered_map<std::string, NodeGraphValue> Parameters; // instance overrides of the graph's declared parameters
+        // The parameters' current values: the graph's defaults, the overrides below, and what scripts set while playing.
+        std::unordered_map<std::string, NodeGraphValue> Parameters;
+        // The values set on this entity in the Inspector (Unreal's instance-editable variables): kept, saved with the scene. Every
+        // other parameter follows the graph's default, also when that default is changed later.
+        std::unordered_map<std::string, NodeGraphValue> Overrides;
+        // The graph's default for a parameter (nullptr: no graph loaded, or not declared).
+        const NodeGraphValue* DefaultOf(const std::string& name) const;
 
         // Montages (UE's anim montages): a clip played once over the graph in the Slot node of that name, started by scripts
         // (attack, interact, reload). It blends in over blendIn seconds and out over the last blendOut seconds; a new one in
