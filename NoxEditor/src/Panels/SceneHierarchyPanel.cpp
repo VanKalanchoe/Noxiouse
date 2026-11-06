@@ -588,14 +588,6 @@ namespace Nox
             ImGui::PopStyleVar();
         if (prefabRoot || prefabNode)
             ImGui::PopStyleColor();
-        if (!m_Context->GetSubLevels().empty() && !entity.GetParent())
-        {
-            if (const AssetHandle level = m_Context->GetEntityLevel(entity); level != 0 && AssetManager::IsAssetHandleValid(level))
-            {
-                ImGui::SameLine();
-                ImGui::TextDisabled("[%s]%s", AssetManager::GetMetadata(level).FilePath.stem().string().c_str(), locked ? " (locked)" : "");
-            }
-        }
 
         // Double-click: frame the editor camera on this entity (UE5's Outliner). Checked before the single/multi-select
         // handling below, which a double-click's first click also triggers (harmless: it just selects it too).
@@ -703,6 +695,17 @@ namespace Nox
             }
 
             ImGui::EndPopup();
+        }
+
+        // The level a sub-level's root belongs to, after the row: drawn last, so the click, drag, drop and context menu checks
+        // above still see the row as the last item (a label drawn right after it took the clicks: sub-level rows did not select).
+        if (!m_Context->GetSubLevels().empty() && !entity.GetParent())
+        {
+            if (const AssetHandle level = m_Context->GetEntityLevel(entity); level != 0 && AssetManager::IsAssetHandleValid(level))
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled("[%s]%s", AssetManager::GetMetadata(level).FilePath.stem().string().c_str(), locked ? " (locked)" : "");
+            }
         }
 
         if (opened)
