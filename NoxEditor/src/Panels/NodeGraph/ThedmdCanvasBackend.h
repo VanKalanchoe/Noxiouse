@@ -1,6 +1,8 @@
 #pragma once
 
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include <imgui_node_editor.h>
 
@@ -34,6 +36,13 @@ namespace Nox
         void ResetView() override;
 
     private:
+        // Where a state box's two pins are this frame (canvas space).
+        struct StatePins
+        {
+            ImVec2 InputMin, InputMax, OutputMin, OutputMax;
+        };
+        // The state view's transitions as orthogonally routed wires between the pins (see the .cpp).
+        void DrawTransitionWires(const GraphNode& machine, const std::unordered_map<uint32_t, StatePins>& statePins);
         void DrawNode(NodeGraph& graph, GraphNode& node, const NodeTypeDesc& type, const std::function<void()>& onGraphEdited);
         // Draws just the button for a uint64_t (AssetHandle-shaped) property; a plain combo doesn't work inside
         // a node here (see the .cpp), so this only queues the request -- DrawPendingAssetPicker renders the
@@ -64,7 +73,11 @@ namespace Nox
         std::unordered_set<uint32_t> m_SeededStatePositions;
         bool m_FitStatesOnNextFrame = true;
         uint32_t m_ContextStateId = 0;
-        size_t m_ContextTransition = 0; // the transition whose icon was right-clicked (its index)
+        int m_ContextTransition = -1;  // the transition whose wire was right-clicked (its index)
+        int m_SelectedTransition = -1; // the state view's selected transition (its wire, clicked)
+        int m_HoveredTransition = -1;  // the wire under the mouse, last frame
+        std::vector<std::vector<ImVec2>> m_TransitionWires; // each transition's route this frame (canvas space), for picking
+        std::vector<float> m_RouteKey; // the boxes and wire ends m_TransitionWires was routed for
         ImVec2 m_AddStateScreenPos{0.0f, 0.0f};
         std::unordered_set<uint32_t> m_SeededPositions; // node ids whose ed:: position has been seeded from GraphNode::EditorPosition
         ImVec2 m_CreateNodeScreenPos{0.0f, 0.0f};

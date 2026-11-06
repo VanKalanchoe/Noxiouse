@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cfloat>
 #include <cmath>
+#include <array>
 #include <unordered_map>
 
 #include <imgui.h>
@@ -715,24 +716,194 @@ namespace Nox
         // Nodes and pins share one numeric id space in the node editor: states use their own ids, pins 2^32 + .., and a transition's
         // icon (a node of its own, see DrawStateMachine) 2^34 + its index.
         constexpr uint64_t kStatePinBase = 1ull << 32;
-        constexpr uint64_t kTransitionNodeBase = 1ull << 34;
-        bool IsTransitionNode(ed::NodeId node) { return node.Get() >= kTransitionNodeBase; }
+        // The layer the transition wires are drawn in: an empty node kept under the first state and below every state (z), whose
+        // background draw list sits under all the states (the node editor offers per-node layers only).
+        constexpr uint64_t kWireLayerNode = 1ull << 34;
+        bool IsWireLayer(ed::NodeId node) { return node.Get() == kWireLayerNode; }
 
         ImVec2 Add(ImVec2 a, ImVec2 b) { return ImVec2(a.x + b.x, a.y + b.y); }
         ImVec2 Sub(ImVec2 a, ImVec2 b) { return ImVec2(a.x - b.x, a.y - b.y); }
         ImVec2 Scale(ImVec2 a, float s) { return ImVec2(a.x * s, a.y * s); }
 
-        // Where a ray from p (inside the box) along the unit direction d leaves it; p itself when it is not inside.
-        ImVec2 BoxExit(ImVec2 min, ImVec2 max, ImVec2 p, ImVec2 d)
+        struct Box
         {
-            float t = FLT_MAX;
-            if (d.x > 1e-6f) t = std::min(t, (max.x - p.x) / d.x);
-            else if (d.x < -1e-6f) t = std::min(t, (min.x - p.x) / d.x);
-            if (d.y > 1e-6f) t = std::min(t, (max.y - p.y) / d.y);
-            else if (d.y < -1e-6f) t = std::min(t, (min.y - p.y) / d.y);
-            if (t == FLT_MAX || t < 0.0f)
-                t = 0.0f;
-            return Add(p, Scale(d, t));
+            ImVec2 Min, Max;
+        };
+
+        // Does the axis-aligned segment a-b pass through the box (grown by `margin`)?
+        bool SegmentHitsBox(ImVec2 a, ImVec2 b, const Box& box, float margin)
+        {
+            const float minX = std::min(a.x, b.x), maxX = std::max(a.x, b.x);
+            const float minY = std::min(a.y, b.y), maxY = std::max(a.y, b.y);
+            return maxX > box.Min.x - margin && minX < box.Max.x + margin && maxY > box.Min.y - margin && minY < box.Max.y + margin;
+        }
+
+        // How much of the axis-aligned segment a-b runs along (on top of, within 3 px) any segment of the other wires.
+        float OverlapLength(ImVec2 a, ImVec2 b, const std::vector<std::vector<ImVec2>>& others)
+        {
+            const bool horizontal = std::abs(a.y - b.y) < 0.01f;
+            float overlap = 0.0f;
+            for (const std::vector<ImVec2>& wire : others)
+                for (size_t i = 0; i + 1 < wire.size(); ++i)
+                {
+                    const ImVec2 c = wire[i], d = wire[i + 1];
+                    if (horizontal != (std::abs(c.y - d.y) < 0.01f))
+                        continue;
+                    if (horizontal ? std::abs(c.y - a.y) > 3.0f : std::abs(c.x - a.x) > 3.0f)
+                        continue;
+                    const float lo = horizontal ? std::max(std::min(a.x, b.x), std::min(c.x, d.x)) : std::max(std::min(a.y, b.y), std::min(c.y, d.y));
+                    const float hi = horizontal ? std::min(std::max(a.x, b.x), std::max(c.x, d.x)) : std::min(std::max(a.y, b.y), std::max(c.y, d.y));
+                    overlap += std::max(0.0f, hi - lo);
+                }
+            return overlap;
+        }
+
+        // An orthogonal route from an output pin (leaving to the right) to an input pin (entering from the left): out by `stub`,
+        // along a column, across a row, along another column, in by `stub`. Every combination of candidate columns and rows (the
+        // stubs, the midpoint, and two lanes beside, above and below each box) is scored: crossing a box costs far more than any
+        // length, running on top of an already routed wire (`others`) costs its length several times over, each corner a little.
+        // The cheapest is kept. The source box is ignored for the first leg and the target box for the last one.
+        std::vector<ImVec2> RouteWire(ImVec2 start, ImVec2 end, const std::vector<Box>& boxes, int sourceBox, int targetBox, float stub,
+                                      float laneShift, const std::vector<std::vector<ImVec2>>& others)
+        {
+            constexpr float kBoxCost = 100000.0f;
+            constexpr float kOverlapCost = 6.0f;
+            constexpr float kCornerCost = 40.0f;
+            const float clearance = 6.0f;
+            std::vector<float> columnsOut{ start.x + stub }, columnsIn{ end.x - stub }, rows{ start.y, end.y };
+            const float middle = 0.5f * (start.x + end.x) + laneShift;
+            if (middle >= start.x + stub && middle <= end.x - stub)
+            {
+                columnsOut.push_back(middle);
+                columnsIn.push_back(middle);
+            }
+            for (const Box& box : boxes)
+                for (float lane : { stub, 1.75f * stub })
+                {
+                    if (box.Max.x + lane > start.x + stub)
+                        columnsOut.push_back(box.Max.x + lane);
+                    if (box.Min.x - lane < end.x - stub)
+                        columnsIn.push_back(box.Min.x - lane);
+                    rows.push_back(box.Min.y - lane);
+                    rows.push_back(box.Max.y + lane);
+                }
+
+            // Points where the direction changes. A route that doubles back on itself (out to the right, then back left along the
+            // same row) is refused: it would retrace its own line.
+            auto build = [&](float x1, float y, float x2, std::vector<ImVec2>& points)
+            {
+                const ImVec2 raw[] = { start, ImVec2(x1, start.y), ImVec2(x1, y), ImVec2(x2, y), ImVec2(x2, end.y), end };
+                points.clear();
+                for (const ImVec2& p : raw)
+                {
+                    if (!points.empty() && std::abs(points.back().x - p.x) < 0.01f && std::abs(points.back().y - p.y) < 0.01f)
+                        continue;
+                    if (points.size() >= 2)
+                    {
+                        const ImVec2 a = points[points.size() - 2], b = points.back();
+                        const bool sameColumn = std::abs(a.x - b.x) < 0.01f && std::abs(b.x - p.x) < 0.01f;
+                        const bool sameRow = std::abs(a.y - b.y) < 0.01f && std::abs(b.y - p.y) < 0.01f;
+                        if (sameColumn || sameRow)
+                        {
+                            const float ab = sameRow ? b.x - a.x : b.y - a.y;
+                            const float bp = sameRow ? p.x - b.x : p.y - b.y;
+                            if (ab * bp < 0.0f)
+                                return false; // reverses
+                            points.pop_back(); // b is in a straight run
+                        }
+                    }
+                    points.push_back(p);
+                }
+                return points.size() >= 2;
+            };
+            auto score = [&](const std::vector<ImVec2>& points, bool& clear)
+            {
+                float cost = kCornerCost * static_cast<float>(points.size() - 2);
+                clear = true;
+                for (size_t i = 0; i + 1 < points.size(); ++i)
+                {
+                    const ImVec2 a = points[i], b = points[i + 1];
+                    cost += std::abs(b.x - a.x) + std::abs(b.y - a.y);
+                    for (int k = 0; k < static_cast<int>(boxes.size()); ++k)
+                    {
+                        if ((i == 0 && k == sourceBox) || (i + 2 == points.size() && k == targetBox))
+                            continue;
+                        if (SegmentHitsBox(a, b, boxes[k], clearance))
+                        {
+                            cost += kBoxCost;
+                            clear = false;
+                        }
+                    }
+                    // The short legs at the pins may share their pin's line with wires of the same pin; the rest should not.
+                    if (i != 0 && i + 2 != points.size())
+                    {
+                        const float overlap = OverlapLength(a, b, others);
+                        cost += kOverlapCost * overlap;
+                        clear &= overlap <= 0.0f;
+                    }
+                }
+                return cost;
+            };
+
+            std::vector<ImVec2> points, best;
+            bool clear = false;
+            // The usual case first: a forward wire with two corners at the midpoint, when it crosses no box and no other wire.
+            if (middle >= start.x + stub && middle <= end.x - stub && build(middle, end.y, middle, points))
+            {
+                score(points, clear);
+                if (clear)
+                    return points;
+            }
+
+            float bestCost = FLT_MAX;
+            for (float x1 : columnsOut)
+                for (float x2 : columnsIn)
+                    for (float y : rows)
+                    {
+                        if (!build(x1, y, x2, points))
+                            continue;
+                        const float cost = score(points, clear);
+                        if (cost < bestCost)
+                        {
+                            bestCost = cost;
+                            best = points;
+                        }
+                    }
+            return best;
+        }
+
+        // A polyline with its corners rounded (each by up to `radius`, at most half of the shorter leg).
+        void StrokeRoundedPolyline(ImDrawList* drawList, const std::vector<ImVec2>& points, ImU32 color, float thickness, float radius)
+        {
+            if (points.size() < 2)
+                return;
+            drawList->PathLineTo(points.front());
+            for (size_t i = 1; i + 1 < points.size(); ++i)
+            {
+                const ImVec2 a = points[i - 1], c = points[i], b = points[i + 1];
+                const float inLength = std::abs(c.x - a.x) + std::abs(c.y - a.y);
+                const float outLength = std::abs(b.x - c.x) + std::abs(b.y - c.y);
+                const float r = std::min(radius, 0.5f * std::min(inLength, outLength));
+                if (r < 0.5f || inLength < 0.01f || outLength < 0.01f)
+                {
+                    drawList->PathLineTo(c);
+                    continue;
+                }
+                drawList->PathLineTo(Sub(c, Scale(Sub(c, a), r / inLength)));
+                drawList->PathBezierQuadraticCurveTo(c, Add(c, Scale(Sub(b, c), r / outLength)), 6);
+            }
+            drawList->PathLineTo(points.back());
+            drawList->PathStroke(color, ImDrawFlags_None, thickness);
+        }
+
+        float DistanceToSegment(ImVec2 p, ImVec2 a, ImVec2 b)
+        {
+            const ImVec2 ab = Sub(b, a), ap = Sub(p, a);
+            const float lengthSq = ab.x * ab.x + ab.y * ab.y;
+            const float t = lengthSq > 0.0f ? std::clamp((ap.x * ab.x + ap.y * ab.y) / lengthSq, 0.0f, 1.0f) : 0.0f;
+            const ImVec2 closest = Add(a, Scale(ab, t));
+            const ImVec2 d = Sub(p, closest);
+            return std::sqrt(d.x * d.x + d.y * d.y);
         }
         ed::PinId StateInputPin(uint32_t stateId) { return ed::PinId(kStatePinBase + static_cast<uint64_t>(stateId) * 2); }
         ed::PinId StateOutputPin(uint32_t stateId) { return ed::PinId(kStatePinBase + static_cast<uint64_t>(stateId) * 2 + 1); }
@@ -746,6 +917,130 @@ namespace Nox
             NodeGraph graph;
             graph.Domain = domain;
             return graph;
+        }
+    }
+
+    void ThedmdCanvasBackend::DrawTransitionWires(const GraphNode& machine, const std::unordered_map<uint32_t, StatePins>& statePins)
+    {
+        std::vector<Box> boxes;
+        std::unordered_map<uint32_t, int> boxOf;
+        for (const NodeSubGraph& state : machine.SubGraphs)
+        {
+            const ImVec2 position = ed::GetNodePosition(ed::NodeId(state.Id));
+            const ImVec2 size = ed::GetNodeSize(ed::NodeId(state.Id));
+            if (size.x <= 0.0f || size.y <= 0.0f || !statePins.contains(state.Id))
+                continue;
+            boxOf[state.Id] = static_cast<int>(boxes.size());
+            boxes.push_back({ position, Add(position, size) });
+        }
+
+        // The layer node, tucked under the first state (so it is never clicked) and below every state.
+        if (!machine.SubGraphs.empty())
+        {
+            const ed::NodeId layer(kWireLayerNode);
+            const ImVec2 anchor = Add(ed::GetNodePosition(ed::NodeId(machine.SubGraphs.front().Id)), ImVec2(4.0f, 4.0f));
+            ed::SetNodePosition(layer, anchor);
+            ed::SetNodeZPosition(layer, -1.0e6f);
+            ed::PushStyleVar(ed::StyleVar_NodePadding, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            ed::PushStyleColor(ed::StyleColor_NodeBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            ed::PushStyleColor(ed::StyleColor_NodeBorder, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            ed::BeginNode(layer);
+            ImGui::Dummy(ImVec2(1.0f, 1.0f));
+            ed::EndNode();
+            ed::PopStyleColor(2);
+            ed::PopStyleVar();
+        }
+        ImDrawList* wireLayer = machine.SubGraphs.empty() ? nullptr : ed::GetNodeBackgroundDrawList(ed::NodeId(kWireLayerNode));
+
+        constexpr float kStub = 20.0f;      // straight out of / into a pin before the first / after the last corner
+        constexpr float kLaneSpacing = 9.0f; // between wires joining the same two states
+        constexpr float kCornerRadius = 8.0f;
+        constexpr float kArrowLength = 9.0f;
+        constexpr float kArrowHalfWidth = 4.5f;
+        // Every wire's ends, then the routes: searched again only when a box, a pin or the transitions changed (moving a box
+        // re-routes live), all together and in order, each avoiding the wires routed before it.
+        struct WireEnds
+        {
+            ImVec2 Start, End;
+            int SourceBox = -1, TargetBox = -1, Lane = 0;
+        };
+        std::vector<WireEnds> ends(machine.Transitions.size());
+        std::vector<float> routeKey;
+        routeKey.reserve(boxes.size() * 4 + machine.Transitions.size() * 7);
+        for (const Box& box : boxes)
+            routeKey.insert(routeKey.end(), { box.Min.x, box.Min.y, box.Max.x, box.Max.y });
+        for (size_t i = 0; i < machine.Transitions.size(); ++i)
+        {
+            const NodeTransition& transition = machine.Transitions[i];
+            const auto fromBox = boxOf.find(transition.FromState);
+            const auto toBox = boxOf.find(transition.ToState);
+            if (fromBox != boxOf.end() && toBox != boxOf.end())
+            {
+                const StatePins& from = statePins.at(transition.FromState);
+                const StatePins& to = statePins.at(transition.ToState);
+                WireEnds& wire = ends[i];
+                wire.Start = ImVec2(from.OutputMax.x, 0.5f * (from.OutputMin.y + from.OutputMax.y));
+                wire.End = ImVec2(to.InputMin.x, 0.5f * (to.InputMin.y + to.InputMax.y));
+                wire.SourceBox = fromBox->second;
+                wire.TargetBox = toBox->second;
+                // Its lane among the transitions joining the same two states in the same direction.
+                for (size_t j = 0; j < i; ++j)
+                    if (machine.Transitions[j].FromState == transition.FromState && machine.Transitions[j].ToState == transition.ToState)
+                        ++wire.Lane;
+            }
+            routeKey.insert(routeKey.end(), { ends[i].Start.x, ends[i].Start.y, ends[i].End.x, ends[i].End.y,
+                                              static_cast<float>(ends[i].SourceBox), static_cast<float>(ends[i].TargetBox),
+                                              static_cast<float>(ends[i].Lane) });
+        }
+        if (routeKey != m_RouteKey)
+        {
+            m_RouteKey = std::move(routeKey);
+            m_TransitionWires.assign(machine.Transitions.size(), {});
+            for (size_t i = 0; i < ends.size(); ++i)
+            {
+                if (ends[i].SourceBox < 0)
+                    continue;
+                const float lane = static_cast<float>(ends[i].Lane);
+                m_TransitionWires[i] = RouteWire(ends[i].Start, ends[i].End, boxes, ends[i].SourceBox, ends[i].TargetBox,
+                                                 kStub + kLaneSpacing * lane, kLaneSpacing * lane, m_TransitionWires);
+            }
+        }
+
+        for (size_t i = 0; i < machine.Transitions.size(); ++i)
+        {
+            const NodeTransition& transition = machine.Transitions[i];
+            const std::vector<ImVec2>& points = m_TransitionWires[i];
+            if (points.size() < 2)
+                continue;
+            const ImVec2 start = ends[i].Start;
+            const ImVec2 end = ends[i].End;
+            const auto fromBox = boxOf.find(transition.FromState);
+            const auto toBox = boxOf.find(transition.ToState);
+
+            const bool selected = static_cast<int>(i) == m_SelectedTransition;
+            const bool hovered = static_cast<int>(i) == m_HoveredTransition;
+            const ImU32 color = selected ? IM_COL32(255, 176, 50, 255) : (hovered ? IM_COL32(50, 176, 255, 255) : IM_COL32(200, 200, 200, 255));
+            const float thickness = selected || hovered ? 3.0f : 2.0f;
+
+            // The wire, ending where the arrowhead starts; the arrowhead points into the input pin.
+            std::vector<ImVec2> wire = points;
+            wire.back().x -= kArrowLength;
+            if (wireLayer)
+                StrokeRoundedPolyline(wireLayer, wire, color, thickness, kCornerRadius);
+
+            // Inside the two boxes (under them in the wire layer) the first and last legs are drawn again on the boxes themselves.
+            const Box& source = boxes[fromBox->second];
+            const Box& target = boxes[toBox->second];
+            if (ImDrawList* sourceLayer = ed::GetNodeBackgroundDrawList(ed::NodeId(transition.FromState)))
+                sourceLayer->AddLine(start, ImVec2(std::min(points[1].x, source.Max.x), start.y), color, thickness);
+            if (ImDrawList* targetLayer = ed::GetNodeBackgroundDrawList(ed::NodeId(transition.ToState)))
+            {
+                const ImVec2 arrowBase(end.x - kArrowLength, end.y);
+                const float legStart = std::max(points[points.size() - 2].x, target.Min.x);
+                if (legStart < arrowBase.x)
+                    targetLayer->AddLine(ImVec2(legStart, end.y), arrowBase, color, thickness);
+                targetLayer->AddTriangleFilled(end, ImVec2(arrowBase.x, end.y - kArrowHalfWidth), ImVec2(arrowBase.x, end.y + kArrowHalfWidth), color);
+            }
         }
     }
 
@@ -763,6 +1058,8 @@ namespace Nox
         ed::SetCurrentEditor(m_StateContext);
         ed::Begin("States");
 
+        std::unordered_map<uint32_t, StatePins> statePins;
+
         for (NodeSubGraph& state : machine.SubGraphs)
         {
             const ed::NodeId nodeId(state.Id);
@@ -779,14 +1076,22 @@ namespace Nox
             const ImVec2 headerMax = ImGui::GetItemRectMax();
             ImGui::Dummy(ImVec2(0.0f, 4.0f));
 
+            StatePins& pins = statePins[state.Id];
             ed::BeginPin(StateInputPin(state.Id), ed::PinKind::Input);
             ax::Widgets::Icon(kPinIconSize, ax::Drawing::IconType::Circle, false, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
+            pins.InputMin = ImGui::GetItemRectMin();
+            pins.InputMax = ImGui::GetItemRectMax();
             ed::EndPin();
             ImGui::SameLine();
             ImGui::TextDisabled(isEntry ? "entry" : "     ");
+            // The output pin at the right edge (under a long name too), so its wire leaves the box where the pin is.
             ImGui::SameLine();
+            const ImVec2 cursor = ImGui::GetCursorScreenPos();
+            ImGui::SetCursorScreenPos(ImVec2(std::max(cursor.x, headerMax.x - kPinIconSize.x), cursor.y));
             ed::BeginPin(StateOutputPin(state.Id), ed::PinKind::Output);
             ax::Widgets::Icon(kPinIconSize, ax::Drawing::IconType::Circle, false, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
+            pins.OutputMin = ImGui::GetItemRectMin();
+            pins.OutputMax = ImGui::GetItemRectMax();
             ed::EndPin();
 
             ImGui::PopID();
@@ -806,91 +1111,13 @@ namespace Nox
             state.EditorPosition = { position.x, position.y };
         }
 
-        // Transitions as Unreal's state machines draw them: a straight arrow from the edge of one state box to the edge of the other,
-        // several between the same two states (a pair in opposite directions) side by side, and a round transition icon on each
-        // arrow's middle -- the part you click to select it, and Delete removes it. The icon is a node of its own (selected, deleted
-        // and box-selected like any node), drawn under the states (z -1), with its arrow in its background layer.
-        {
-            std::unordered_map<uint32_t, std::pair<ImVec2, ImVec2>> boxes; // state -> min, max (canvas space)
-            for (const NodeSubGraph& state : machine.SubGraphs)
-            {
-                const ImVec2 position = ed::GetNodePosition(ed::NodeId(state.Id));
-                const ImVec2 size = ed::GetNodeSize(ed::NodeId(state.Id));
-                if (size.x > 0.0f && size.y > 0.0f)
-                    boxes[state.Id] = { position, Add(position, size) };
-            }
-
-            constexpr float kLaneSpacing = 16.0f;
-            constexpr float kIconRadius = 8.0f;
-            constexpr float kArrowLength = 11.0f;
-            constexpr float kArrowHalfWidth = 5.5f;
-            const ed::NodeId hovered = ed::GetHoveredNode();
-            ed::PushStyleVar(ed::StyleVar_NodePadding, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-            ed::PushStyleVar(ed::StyleVar_NodeRounding, kIconRadius + 1.0f);
-            ed::PushStyleColor(ed::StyleColor_NodeBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-            ed::PushStyleColor(ed::StyleColor_NodeBorder, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-            for (size_t i = 0; i < machine.Transitions.size(); ++i)
-            {
-                const NodeTransition& transition = machine.Transitions[i];
-                const auto from = boxes.find(transition.FromState);
-                const auto to = boxes.find(transition.ToState);
-                if (from == boxes.end() || to == boxes.end())
-                    continue;
-
-                // Its lane among the transitions between these two states (either direction), centered on the line between them.
-                size_t lane = 0, lanes = 0;
-                for (size_t j = 0; j < machine.Transitions.size(); ++j)
-                {
-                    const NodeTransition& other = machine.Transitions[j];
-                    const bool samePair = (other.FromState == transition.FromState && other.ToState == transition.ToState) ||
-                                          (other.FromState == transition.ToState && other.ToState == transition.FromState);
-                    if (!samePair)
-                        continue;
-                    if (j < i)
-                        ++lane;
-                    ++lanes;
-                }
-
-                const ImVec2 fromCenter = Scale(Add(from->second.first, from->second.second), 0.5f);
-                const ImVec2 toCenter = Scale(Add(to->second.first, to->second.second), 0.5f);
-                const ImVec2 delta = Sub(toCenter, fromCenter);
-                const float length = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-                if (length < 1.0f)
-                    continue;
-                const ImVec2 dir = Scale(delta, 1.0f / length);
-                const ImVec2 normal(-dir.y, dir.x);
-                // Lanes are measured along one side of the pair (from the lower state id), so opposite directions never share one.
-                const float side = transition.FromState < transition.ToState ? 1.0f : -1.0f;
-                const ImVec2 offset = Scale(normal, side * (static_cast<float>(lane) - 0.5f * static_cast<float>(lanes - 1)) * kLaneSpacing);
-
-                const ImVec2 start = Add(BoxExit(from->second.first, from->second.second, Add(fromCenter, offset), dir), Scale(dir, 2.0f));
-                const ImVec2 end = Sub(BoxExit(to->second.first, to->second.second, Add(toCenter, offset), Scale(dir, -1.0f)), Scale(dir, 3.0f));
-                const ImVec2 middle = Scale(Add(start, end), 0.5f);
-
-                const ed::NodeId iconId(kTransitionNodeBase + i);
-                ed::SetNodePosition(iconId, ImVec2(middle.x - kIconRadius, middle.y - kIconRadius));
-                ed::SetNodeZPosition(iconId, -1.0f);
-                ed::BeginNode(iconId);
-                ImGui::Dummy(ImVec2(2.0f * kIconRadius, 2.0f * kIconRadius));
-                ed::EndNode();
-
-                const bool selected = ed::IsNodeSelected(iconId);
-                const ImU32 color = selected ? IM_COL32(255, 176, 50, 255) : (hovered == iconId ? IM_COL32(50, 176, 255, 255) : IM_COL32(205, 205, 205, 255));
-                if (ImDrawList* drawList = ed::GetNodeBackgroundDrawList(iconId))
-                {
-                    const ImVec2 arrowBase = Sub(end, Scale(dir, kArrowLength));
-                    drawList->AddLine(start, arrowBase, color, selected ? 3.0f : 2.0f);
-                    drawList->AddTriangleFilled(end, Add(arrowBase, Scale(normal, kArrowHalfWidth)), Sub(arrowBase, Scale(normal, kArrowHalfWidth)), color);
-                    drawList->AddCircleFilled(middle, kIconRadius, IM_COL32(35, 35, 40, 255));
-                    drawList->AddCircle(middle, kIconRadius, color, 0, 1.5f);
-                    const ImVec2 tip = Add(middle, Scale(dir, 4.5f));
-                    const ImVec2 back = Sub(middle, Scale(dir, 3.0f));
-                    drawList->AddTriangleFilled(tip, Add(back, Scale(normal, 3.5f)), Sub(back, Scale(normal, 3.5f)), color);
-                }
-            }
-            ed::PopStyleColor(2);
-            ed::PopStyleVar(2);
-        }
+        // Transitions: wires from a state's output pin (right) into the other state's input pin (left), routed with right-angle
+        // corners around the other state boxes (rounded a little), like a Blueprint editor's orthogonal wire routing -- a wire
+        // going back (JumpLand -> Locomotion) goes over or under the boxes instead of curling through them. Several between the
+        // same two states run in their own lanes. Click a wire to select it (Delete, or right-click > Delete Transition, removes
+        // it). Wires lie under the states (DrawTransitionWires); the bits inside the two boxes, from the box edge to the pin, are
+        // drawn again on those boxes so a wire visibly ends in its pin.
+        DrawTransitionWires(machine, statePins);
 
         // Connecting an output pin to another state's input makes a transition (rules are edited in the panel below).
         if (ed::BeginCreate())
@@ -928,26 +1155,21 @@ namespace Nox
         if (ed::BeginDelete())
         {
             ed::NodeId nodeId;
-            std::vector<size_t> deletedTransitions;
             std::vector<uint32_t> deletedStates;
             while (ed::QueryDeletedNode(&nodeId))
             {
-                if (!ed::AcceptDeletedItem())
-                    continue;
-                if (IsTransitionNode(nodeId))
+                if (IsWireLayer(nodeId))
                 {
-                    if (nodeId.Get() - kTransitionNodeBase < machine.Transitions.size())
-                        deletedTransitions.push_back(static_cast<size_t>(nodeId.Get() - kTransitionNodeBase));
+                    ed::RejectDeletedItem();
+                    continue;
                 }
-                else
+                if (ed::AcceptDeletedItem())
                     deletedStates.push_back(static_cast<uint32_t>(nodeId.Get()));
             }
 
-            if (!deletedTransitions.empty() || !deletedStates.empty())
+            if (!deletedStates.empty())
             {
-                std::sort(deletedTransitions.begin(), deletedTransitions.end(), std::greater<size_t>());
-                for (size_t index : deletedTransitions)
-                    machine.Transitions.erase(machine.Transitions.begin() + index);
+                m_SelectedTransition = -1; // indices shift
                 for (uint32_t stateId : deletedStates)
                 {
                     machine.SubGraphs.erase(std::remove_if(machine.SubGraphs.begin(), machine.SubGraphs.end(),
@@ -965,17 +1187,23 @@ namespace Nox
 
         // Selection and double-click, for the panel.
         selection = StateMachineSelection{};
-        ed::NodeId selectedNode;
-        if (ed::GetSelectedNodes(&selectedNode, 1) > 0)
+        std::array<ed::NodeId, 2> selectedNodes;
+        const int selectedCount = ed::GetSelectedNodes(selectedNodes.data(), static_cast<int>(selectedNodes.size()));
+        for (int i = 0; i < selectedCount; ++i)
         {
-            if (!IsTransitionNode(selectedNode))
-                selection.State = static_cast<uint32_t>(selectedNode.Get());
-            else if (selectedNode.Get() - kTransitionNodeBase < machine.Transitions.size())
-                selection.Transition = static_cast<int>(selectedNode.Get() - kTransitionNodeBase);
+            if (!IsWireLayer(selectedNodes[i]))
+            {
+                selection.State = static_cast<uint32_t>(selectedNodes[i].Get());
+                m_SelectedTransition = -1; // a state was picked
+                break;
+            }
         }
+        if (m_SelectedTransition >= static_cast<int>(machine.Transitions.size()))
+            m_SelectedTransition = -1;
+        selection.Transition = m_SelectedTransition;
 
         const ed::NodeId doubleClicked = ed::GetDoubleClickedNode();
-        if (doubleClicked && !IsTransitionNode(doubleClicked))
+        if (doubleClicked && !IsWireLayer(doubleClicked))
             outOpenState = static_cast<uint32_t>(doubleClicked.Get());
 
         if (m_FitStatesOnNextFrame && !machine.SubGraphs.empty())
@@ -986,34 +1214,70 @@ namespace Nox
 
         ed::Suspend();
 
-        ed::NodeId contextNode;
-        if (ed::ShowNodeContextMenu(&contextNode))
+        // The wire under the mouse (within a few pixels at any zoom), when no state or pin is: hovered, clicked to select, Delete
+        // or right-click to remove.
+        m_HoveredTransition = -1;
+        if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && !ed::GetHoveredPin() &&
+            (!ed::GetHoveredNode() || IsWireLayer(ed::GetHoveredNode())))
         {
-            if (IsTransitionNode(contextNode))
+            const ImVec2 mouse = ed::ScreenToCanvas(ImGui::GetMousePos());
+            const float reach = 6.0f / std::max(ed::GetCurrentZoom(), 0.01f);
+            float nearest = reach;
+            for (size_t i = 0; i < m_TransitionWires.size(); ++i)
+                for (size_t k = 0; k + 1 < m_TransitionWires[i].size(); ++k)
+                {
+                    const float distance = DistanceToSegment(mouse, m_TransitionWires[i][k], m_TransitionWires[i][k + 1]);
+                    if (distance < nearest)
+                    {
+                        nearest = distance;
+                        m_HoveredTransition = static_cast<int>(i);
+                    }
+                }
+        }
+        if (ed::IsBackgroundClicked())
+        {
+            m_SelectedTransition = m_HoveredTransition;
+            selection.Transition = m_SelectedTransition;
+        }
+        auto deleteTransition = [&](int index)
+        {
+            if (index < 0 || index >= static_cast<int>(machine.Transitions.size()))
+                return;
+            machine.Transitions.erase(machine.Transitions.begin() + index);
+            m_SelectedTransition = -1;
+            m_HoveredTransition = -1;
+            selection.Transition = -1;
+            onGraphEdited();
+        };
+        if (m_SelectedTransition >= 0 && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
+            deleteTransition(m_SelectedTransition);
+
+        ed::NodeId contextNode;
+        if (ed::ShowNodeContextMenu(&contextNode) && !IsWireLayer(contextNode))
+        {
+            m_ContextStateId = static_cast<uint32_t>(contextNode.Get());
+            ImGui::OpenPopup("StateContext");
+        }
+        if (ed::ShowBackgroundContextMenu())
+        {
+            if (m_HoveredTransition >= 0)
             {
-                m_ContextTransition = contextNode.Get() - kTransitionNodeBase;
+                m_ContextTransition = m_HoveredTransition;
+                m_SelectedTransition = m_HoveredTransition;
+                selection.Transition = m_SelectedTransition;
                 ImGui::OpenPopup("TransitionContext");
             }
             else
             {
-                m_ContextStateId = static_cast<uint32_t>(contextNode.Get());
-                ImGui::OpenPopup("StateContext");
+                m_AddStateScreenPos = ImGui::GetMousePos();
+                ImGui::OpenPopup("AddState");
             }
         }
         if (ImGui::BeginPopup("TransitionContext"))
         {
-            if (ImGui::MenuItem("Delete Transition") && m_ContextTransition < machine.Transitions.size())
-            {
-                machine.Transitions.erase(machine.Transitions.begin() + static_cast<std::ptrdiff_t>(m_ContextTransition));
-                ed::ClearSelection();
-                onGraphEdited();
-            }
+            if (ImGui::MenuItem("Delete Transition"))
+                deleteTransition(m_ContextTransition);
             ImGui::EndPopup();
-        }
-        if (ed::ShowBackgroundContextMenu())
-        {
-            m_AddStateScreenPos = ImGui::GetMousePos();
-            ImGui::OpenPopup("AddState");
         }
 
         if (ImGui::BeginPopup("StateContext"))
