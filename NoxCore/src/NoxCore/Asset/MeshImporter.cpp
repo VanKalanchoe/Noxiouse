@@ -1121,9 +1121,11 @@ namespace Nox
     // The skeleton (bone rest poses) and its animation clips need the same uniform scale as the mesh they drive, or a scaled-up
     // character's bones stay at their old (too small) positions relative to the now-larger geometry. Node::RestTranslation is
     // translation-only, like a MeshNodeData's, for the same reason (a rotation-preserving uniform scale of a whole TRS chain only
-    // ever needs each level's own translation scaled -- see ApplyImportScale). Skin::InverseBindMatrices is different: it is the
-    // inverse of a bind-pose world matrix, and (Scale(S) * M)^-1 = M^-1 * Scale(1/S), which -- multiplying on the right -- scales
-    // only the matrix's rotation/scale columns (0-2) by 1/S and leaves its translation column (3) alone.
+    // ever needs each level's own translation scaled -- see ApplyImportScale). Scaling every level's translation turns each bind-pose
+    // world matrix M into Scale(S) * M * Scale(1/S) (rotation kept, translation times S), so its inverse becomes
+    // Scale(S) * M^-1 * Scale(1/S): the inverse bind matrix's rotation columns (0-2) stay as they are and its translation column (3)
+    // is scaled by S. Then joint * inverseBind * (S * v) = S * (the unscaled skinning of v): the whole character scales. (Dividing
+    // columns 0-2 by S instead kept each vertex's offset from its joint unscaled: at S = 100 the body collapsed onto its bones.)
     static void ApplySkeletonScale(Skeleton& skeleton, float scale)
     {
         if (std::abs(scale - 1.0f) < 1e-6f)
@@ -1141,11 +1143,7 @@ namespace Nox
             if (!skin)
                 continue;
             for (glm::mat4& inverseBind : skin->InverseBindMatrices)
-            {
-                inverseBind[0] /= scale;
-                inverseBind[1] /= scale;
-                inverseBind[2] /= scale;
-            }
+                inverseBind[3] = glm::vec4(glm::vec3(inverseBind[3]) * scale, inverseBind[3].w);
         }
     }
 
