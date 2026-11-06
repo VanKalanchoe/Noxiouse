@@ -27,7 +27,10 @@ public sealed class CameraFollow : EntityBehaviour
         UpdateCamera();
     }
 
-    protected override void OnUpdate(float deltaTime)
+    // After physics, animation and this frame's transforms (Unity's LateUpdate, Unreal's camera update after the tick): in
+    // OnUpdate the camera aimed at where the target was the frame before, so any uneven frame made a moving target lag behind
+    // and snap back -- worst at running speed.
+    protected override void OnLateUpdate(float deltaTime)
     {
         UpdateCamera();
     }
