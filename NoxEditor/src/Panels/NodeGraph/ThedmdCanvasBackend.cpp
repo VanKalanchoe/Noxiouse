@@ -25,15 +25,75 @@ namespace Nox
         // Pin shape + color by declared pin Type, the same "type tells you the socket" convention Blueprint-
         // style editors use: a distinct shape for the domain's own composite type(s), a shared shape (colored
         // differently per type) for scalars. Extend as new pin types show up.
-        ax::Drawing::IconType PinIconType(const std::string& pinType)
+        enum class PinShape { Circle, Square, RoundSquare, Flow };
+        PinShape PinShapeOf(const std::string& pinType)
         {
             if (pinType == "Pose")
-                return ax::Drawing::IconType::RoundSquare;
+                return PinShape::RoundSquare;
             if (pinType == "Audio")
-                return ax::Drawing::IconType::Square;  // a signal (MetaSounds' audio pins)
+                return PinShape::Square; // a signal (MetaSounds' audio pins)
             if (pinType == "Trigger")
-                return ax::Drawing::IconType::Flow;    // an event, like an execution pin
-            return ax::Drawing::IconType::Circle;
+                return PinShape::Flow;   // an event, like an execution pin
+            return PinShape::Circle;
+        }
+
+        // A pin's icon: filled when connected, outlined when not. Drawn here rather than with the blueprints example's icon widget,
+        // whose drawing.cpp passes AddRect / PathStroke's thickness and flags in the order ImGui had before 1.92.8 (they were
+        // swapped): "Incorrect parameter. Did you swap 'thickness' and 'flags'?" for every outlined pin.
+        void DrawPinIcon(const ImVec2& size, PinShape shape, bool filled, const ImVec4& colour)
+        {
+            if (ImGui::IsRectVisible(size))
+            {
+                ImDrawList* drawList = ImGui::GetWindowDrawList();
+                const ImVec2 origin = ImGui::GetCursorScreenPos();
+                const ImVec2 centre(origin.x + size.x * 0.5f, origin.y + size.y * 0.5f);
+                const float thickness = 2.0f * size.x / 24.0f;
+                const ImU32 colour32 = ImGui::ColorConvertFloat4ToU32(colour);
+                const ImU32 inner = IM_COL32(32, 32, 32, static_cast<int>(colour.w * 255.0f));
+                const float r = filled ? size.x * 0.25f : size.x * 0.25f - 0.5f;
+                switch (shape)
+                {
+                case PinShape::Circle:
+                    if (filled)
+                        drawList->AddCircleFilled(centre, r, colour32, 16);
+                    else
+                    {
+                        drawList->AddCircleFilled(centre, r, inner, 16);
+                        drawList->AddCircle(centre, r, colour32, 16, thickness);
+                    }
+                    break;
+                case PinShape::Square:
+                case PinShape::RoundSquare:
+                {
+                    const float rounding = shape == PinShape::RoundSquare ? r * 0.5f : 0.0f;
+                    const ImVec2 p0(centre.x - r, centre.y - r), p1(centre.x + r, centre.y + r);
+                    if (filled)
+                        drawList->AddRectFilled(p0, p1, colour32, rounding);
+                    else
+                    {
+                        drawList->AddRectFilled(p0, p1, inner, rounding);
+                        drawList->AddRect(p0, p1, colour32, rounding, thickness);
+                    }
+                    break;
+                }
+                case PinShape::Flow:
+                {
+                    // An arrow pointing right.
+                    const float w = size.x * 0.32f, h = size.y * 0.3f;
+                    const ImVec2 points[5] = { ImVec2(centre.x - w, centre.y - h), ImVec2(centre.x + w * 0.2f, centre.y - h), ImVec2(centre.x + w, centre.y),
+                                               ImVec2(centre.x + w * 0.2f, centre.y + h), ImVec2(centre.x - w, centre.y + h) };
+                    if (filled)
+                        drawList->AddConvexPolyFilled(points, 5, colour32);
+                    else
+                    {
+                        drawList->AddConvexPolyFilled(points, 5, inner);
+                        drawList->AddPolyline(points, 5, colour32, thickness, ImDrawFlags_Closed);
+                    }
+                    break;
+                }
+                }
+            }
+            ImGui::Dummy(size);
         }
 
         ImVec4 PinColor(const std::string& pinType)
@@ -229,7 +289,7 @@ namespace Nox
 
             const NodePinDesc pin = InputPin(type, p);
             ed::BeginPin(MakePinId(node.Id, p, false), ed::PinKind::Input);
-            ax::Widgets::Icon(kPinIconSize, PinIconType(pin.Type), connected, PinColor(pin.Type));
+            DrawPinIcon(kPinIconSize, PinShapeOf(pin.Type), connected, PinColor(pin.Type));
             ImGui::SameLine();
             ImGui::TextUnformatted(pin.Name.c_str());
             if (ImGui::IsItemHovered())
@@ -282,7 +342,7 @@ namespace Nox
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("%s", type.Outputs[p].Type.c_str());
                 ImGui::SameLine();
-                ax::Widgets::Icon(kPinIconSize, PinIconType(type.Outputs[p].Type), connected, PinColor(type.Outputs[p].Type));
+                DrawPinIcon(kPinIconSize, PinShapeOf(type.Outputs[p].Type), connected, PinColor(type.Outputs[p].Type));
                 ed::EndPin();
             }
             ImGui::EndGroup();
@@ -1032,7 +1092,7 @@ namespace Nox
                 drawList->PathBezierQuadraticCurveTo(c, Add(c, Scale(Sub(b, c), r / outLength)), 6);
             }
             drawList->PathLineTo(points.back());
-            drawList->PathStroke(color, ImDrawFlags_None, thickness);
+            drawList->PathStroke(color, thickness); // (ImGui 1.92.8 order: thickness, then flags)
         }
 
         float DistanceToSegment(ImVec2 p, ImVec2 a, ImVec2 b)
@@ -1217,7 +1277,7 @@ namespace Nox
 
             StatePins& pins = statePins[state.Id];
             ed::BeginPin(StateInputPin(state.Id), ed::PinKind::Input);
-            ax::Widgets::Icon(kPinIconSize, ax::Drawing::IconType::Circle, false, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
+            DrawPinIcon(kPinIconSize, PinShape::Circle, false, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
             pins.InputMin = ImGui::GetItemRectMin();
             pins.InputMax = ImGui::GetItemRectMax();
             ed::EndPin();
@@ -1228,7 +1288,7 @@ namespace Nox
             const ImVec2 cursor = ImGui::GetCursorScreenPos();
             ImGui::SetCursorScreenPos(ImVec2(std::max(cursor.x, headerMax.x - kPinIconSize.x), cursor.y));
             ed::BeginPin(StateOutputPin(state.Id), ed::PinKind::Output);
-            ax::Widgets::Icon(kPinIconSize, ax::Drawing::IconType::Circle, false, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
+            DrawPinIcon(kPinIconSize, PinShape::Circle, false, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
             pins.OutputMin = ImGui::GetItemRectMin();
             pins.OutputMax = ImGui::GetItemRectMax();
             ed::EndPin();

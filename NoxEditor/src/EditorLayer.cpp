@@ -3758,7 +3758,7 @@ namespace Nox
             // Semi-transparent box fill
             drawList->AddRectFilled(pMin, pMax, IM_COL32(230, 140, 30, 40));
             // Solid border outline
-            drawList->AddRect(pMin, pMax, IM_COL32(255, 160, 40, 220), 0.0f, 0, 1.5f);
+            drawList->AddRect(pMin, pMax, IM_COL32(255, 160, 40, 220), 0.0f, 1.5f);
         }
 
         // Commit selection when mouse button is released
@@ -4042,7 +4042,7 @@ namespace Nox
         if (OpenViewportCount() > 1)
         {
             ImGui::GetWindowDrawList()->AddRect(ImVec2(m_ViewportBounds[0].x + 1.0f, m_ViewportBounds[0].y + 1.0f),
-                                                ImVec2(m_ViewportBounds[1].x - 1.0f, m_ViewportBounds[1].y - 1.0f), IM_COL32(255, 170, 40, 255), 0.0f, 0, 2.0f);
+                                                ImVec2(m_ViewportBounds[1].x - 1.0f, m_ViewportBounds[1].y - 1.0f), IM_COL32(255, 170, 40, 255), 0.0f, 2.0f);
         }
 
         ImGui::End(); // End viewport

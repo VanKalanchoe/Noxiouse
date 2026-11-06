@@ -336,7 +336,7 @@ namespace Nox
             const ImVec2 a = toScreen(rectMin), b = toScreen(rectMax);
             draw->AddRectFilled(ImVec2(a.x + 1.0f, a.y + 1.0f), b, fill);
             const bool selected = m_Selection.contains(cell);
-            draw->AddRect(a, b, selected ? kSelectedBorder : kCellBorder, 0.0f, 0, selected ? 2.0f : 1.0f);
+            draw->AddRect(a, b, selected ? kSelectedBorder : kCellBorder, 0.0f, selected ? 2.0f : 1.0f);
             if (auto info = world.Cells.find(cell); info != world.Cells.end())
             {
                 const ImVec2 boundsA = toScreen({ info->second.BoundsMin.x, info->second.BoundsMin.z });

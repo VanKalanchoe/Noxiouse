@@ -606,7 +606,7 @@ namespace Nox
                                   : track.Property == TimelineProperty::CameraCut ? IM_COL32(200, 140, 255, 255) : IM_COL32(220, 220, 220, 255);
                 const ImVec2 diamond[4] = { ImVec2(center.x, center.y - 6.0f), ImVec2(center.x + 6.0f, center.y), ImVec2(center.x, center.y + 6.0f), ImVec2(center.x - 6.0f, center.y) };
                 draw->AddConvexPolyFilled(diamond, 4, color);
-                draw->AddPolyline(diamond, 4, IM_COL32(20, 20, 20, 255), ImDrawFlags_Closed, 1.0f);
+                draw->AddPolyline(diamond, 4, IM_COL32(20, 20, 20, 255), 1.0f, ImDrawFlags_Closed);
             }
             ImGui::SetCursorScreenPos(ImVec2(rowMin.x, rowMin.y + LaneHeight));
             ImGui::Dummy(ImVec2(LabelWidth + laneWidth + 20.0f, 0.0f));

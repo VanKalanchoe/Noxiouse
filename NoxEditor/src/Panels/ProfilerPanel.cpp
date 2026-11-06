@@ -723,7 +723,7 @@ namespace Nox
             const float y1 = y0 + rowHeight - 1.0f;
             drawList->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), ScopeColor(scope.ScopeId, !gpu && Scope(scope.ScopeId).IsWait, gpu));
             if (scope.ScopeId == m_HighlightScope)
-                drawList->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), IM_COL32(255, 255, 255, 255), 0.0f, 0, 2.0f);
+                drawList->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), IM_COL32(255, 255, 255, 255), 0.0f, 2.0f);
             x0 = std::max(x0, trackX);
             x1 = std::min(x1, trackX + trackWidth);
             if (x1 - x0 > 24.0f)
