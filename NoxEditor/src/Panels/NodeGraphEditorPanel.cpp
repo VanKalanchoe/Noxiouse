@@ -85,6 +85,9 @@ namespace Nox
     {
         if (!ImGui::CollapsingHeader("Parameters"))
             return;
+        // Its rows are numbered like the transition rules drawn in the same window: a scope of their own keeps their widgets'
+        // IDs apart (parameter 0's X and rule 0's X were one button).
+        ImGui::PushID("Parameters");
 
         NodeGraph& graph = m_Asset->Graph;
         bool edited = false;
@@ -164,6 +167,7 @@ namespace Nox
             graph.Parameters.push_back({ name, 0.0f });
             edited = true;
         }
+        ImGui::PopID();
 
         if (edited)
         {
@@ -190,6 +194,8 @@ namespace Nox
         if (m_SelectedTransition >= 0 && m_SelectedTransition < static_cast<int>(machine.Transitions.size()))
         {
             NodeTransition& transition = machine.Transitions[m_SelectedTransition];
+            ImGui::PushID("Transition");
+            ImGui::PushID(m_SelectedTransition);
             ImGui::Text("Transition: %s -> %s", stateName(transition.FromState).c_str(), stateName(transition.ToState).c_str());
 
             ImGui::SetNextItemWidth(120.0f);
@@ -257,6 +263,8 @@ namespace Nox
                                              TransitionCompare::Greater, 0.0f });
                 edited = true;
             }
+            ImGui::PopID();
+            ImGui::PopID();
         }
         else if (m_SelectedState != 0)
         {
