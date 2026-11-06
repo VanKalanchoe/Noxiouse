@@ -1256,6 +1256,8 @@ window.NOX_MANUAL_PAGES = [
             "",
             "## Part E: Look At (head follows a target)",
             "",
+            "Bone fields (**Bone**, **End Bone**, **Left Foot**, ...) are buttons: click one for the skeleton's bone tree with a search box. The list comes from the **Preview** section of the graph window: pick `UAL1_Standard` as its **Mesh** first. A name the skeleton does not have shows in orange. (The names below are the Quaternius skeleton's, as its glTF file names its nodes.)",
+            "",
             "1. Open `UAL_Locomotion` and click **Graph** in the path at the top (the outer level, where the StateMachine node is). Between the StateMachine and Output, add **IK > LookAt** twice, in a row:",
             "   - first: **Bone** `spine_03`, **Target** `LookAt`, **Alpha** 0.3, **Max Angle** 30;",
             "   - second: **Bone** `Head`, **Target** `LookAt`, **Alpha** 1, **Max Angle** 70. (StateMachine -> LookAt spine -> LookAt head -> Output.) Leave **Axis** 0 (automatic).",

@@ -157,6 +157,7 @@ namespace Nox
         }
 
         DrawPendingAssetPicker(graph, onGraphEdited);
+        DrawPendingBonePicker(graph, onGraphEdited);
         HandleParameterDrop(graph, parameters, onGraphEdited);
 
         ed::Resume();
@@ -304,7 +305,13 @@ namespace Nox
                 const bool pinConnected = pin != type.Inputs.end() &&
                     std::any_of(links.begin(), links.end(), [&](const GraphLink& l) { return l.ToNode == node.Id && l.ToPin == pinIndex; });
                 ImGui::BeginDisabled(pinConnected);
-                if (uint64_t* handle = std::get_if<uint64_t>(&value))
+                const auto boneHint = type.PropertyAssetTypeHints.find(name);
+                std::string* text = std::get_if<std::string>(&value);
+                if (text && boneHint != type.PropertyAssetTypeHints.end() && boneHint->second == "Bone")
+                {
+                    DrawBonePickerButton(node.Id, name, *text);
+                }
+                else if (uint64_t* handle = std::get_if<uint64_t>(&value))
                 {
                     auto hintIt = type.PropertyAssetTypeHints.find(name);
                     DrawAssetPickerButton(node.Id, name, *handle, hintIt != type.PropertyAssetTypeHints.end() ? hintIt->second : std::string());
@@ -339,6 +346,104 @@ namespace Nox
 
         ImVec2 currentPos = ed::GetNodePosition(nodeId);
         node.EditorPosition = { currentPos.x, currentPos.y };
+    }
+
+    void ThedmdCanvasBackend::SetBoneList(std::vector<BoneEntry> bones, std::string skeletonName)
+    {
+        m_Bones = std::move(bones);
+        m_BoneSkeletonName = std::move(skeletonName);
+    }
+
+    void ThedmdCanvasBackend::DrawBonePickerButton(uint32_t nodeId, const std::string& propertyName, const std::string& current)
+    {
+        ImGui::Text("%s:", propertyName.c_str());
+        ImGui::SameLine();
+        const bool known = m_Bones.empty() || current.empty() ||
+                           std::any_of(m_Bones.begin(), m_Bones.end(), [&](const BoneEntry& bone) { return bone.Name == current; });
+        if (!known)
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.2f, 1.0f));
+        if (ImGui::Button(((current.empty() ? std::string("(none)") : current) + "##bone").c_str()))
+        {
+            m_ShowBonePicker = true;
+            m_BonePickerNodeId = nodeId;
+            m_BonePickerPropertyName = propertyName;
+            m_BonePickerFilter[0] = '\0';
+            strncpy_s(m_BonePickerTyped, current.c_str(), sizeof(m_BonePickerTyped) - 1);
+        }
+        if (!known)
+        {
+            ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s has no bone of this name", m_BoneSkeletonName.c_str());
+        }
+    }
+
+    void ThedmdCanvasBackend::DrawPendingBonePicker(NodeGraph& graph, const std::function<void()>& onGraphEdited)
+    {
+        // Like the asset picker: opened the frame the button was pressed, drawn suspended (screen coordinates) every frame it is open.
+        if (m_ShowBonePicker)
+        {
+            ImGui::OpenPopup("BonePicker");
+            m_ShowBonePicker = false;
+        }
+        if (!ImGui::BeginPopup("BonePicker"))
+            return;
+
+        GraphNode* node = FindNodeById(graph, m_BonePickerNodeId);
+        auto choose = [&](const std::string& bone)
+        {
+            if (node)
+            {
+                node->Properties[m_BonePickerPropertyName] = bone;
+                onGraphEdited();
+            }
+            ImGui::CloseCurrentPopup();
+        };
+
+        if (m_Bones.empty())
+        {
+            ImGui::TextDisabled("No skeleton to list bones from:");
+            ImGui::TextDisabled("pick a Mesh in the Preview section of this window.");
+        }
+        else
+        {
+            ImGui::TextDisabled("Bones of %s", m_BoneSkeletonName.c_str());
+            if (ImGui::IsWindowAppearing())
+                ImGui::SetKeyboardFocusHere();
+            ImGui::SetNextItemWidth(240.0f);
+            ImGui::InputTextWithHint("##filter", "Search bones...", m_BonePickerFilter, sizeof(m_BonePickerFilter));
+            auto lower = [](std::string text)
+            {
+                std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+                return text;
+            };
+            const std::string filter = lower(m_BonePickerFilter);
+            const std::string current = node && node->Properties.contains(m_BonePickerPropertyName) &&
+                                                std::holds_alternative<std::string>(node->Properties[m_BonePickerPropertyName])
+                                            ? std::get<std::string>(node->Properties[m_BonePickerPropertyName]) : std::string();
+            // The skeleton's tree, indented by depth (a flat list of matches while searching).
+            ImGui::BeginChild("BonePickerList", ImVec2(260.0f, 280.0f), true);
+            for (const BoneEntry& bone : m_Bones)
+            {
+                if (!filter.empty() && lower(bone.Name).find(filter) == std::string::npos)
+                    continue;
+                if (filter.empty() && bone.Depth > 0)
+                    ImGui::Indent(12.0f * bone.Depth);
+                if (ImGui::Selectable(bone.Name.c_str(), bone.Name == current))
+                    choose(bone.Name);
+                if (filter.empty() && bone.Depth > 0)
+                    ImGui::Unindent(12.0f * bone.Depth);
+            }
+            ImGui::EndChild();
+        }
+
+        // Any name, typed (a skeleton not previewed, a bone added later).
+        ImGui::SetNextItemWidth(180.0f);
+        const bool entered = ImGui::InputText("##typed", m_BonePickerTyped, sizeof(m_BonePickerTyped), ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SameLine();
+        if (ImGui::Button("Set") || entered)
+            choose(m_BonePickerTyped);
+        ImGui::EndPopup();
     }
 
     void ThedmdCanvasBackend::DrawAssetPickerButton(uint32_t nodeId, const std::string& propertyName, uint64_t currentHandle, const std::string& assetTypeHint)

@@ -833,7 +833,7 @@ namespace Nox
             /* Inputs            */ { { "Base", "Pose" }, { "Blend", "Pose" }, { "Alpha", "Float" } },
             /* Outputs           */ { { "Pose", "Pose" } },
             /* DefaultProperties */ { { "Alpha", 1.0f }, { "Bone", std::string("spine_02") }, { "BlendDepth", int32_t(0) } },
-            /* PropertyAssetTypeHints */ {},
+            /* PropertyAssetTypeHints */ { { "Bone", "Bone" } }, // the editor offers the preview skeleton's bones
             /* PropertyRanges    */ { { "Alpha", { 0.0f, 1.0f } } },
             /* Evaluate          */ &EvaluateLayeredBlend
         });

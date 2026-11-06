@@ -1,6 +1,8 @@
 #pragma once
 
 #include <functional>
+#include <string>
+#include <vector>
 
 #include "NoxCore/NodeGraph/NodeGraph.h"
 
@@ -46,5 +48,15 @@ namespace Nox
 
         // The panel switched to another graph or view: forget per-view canvas state (node positions seeded, fit-to-content).
         virtual void ResetView() = 0;
+
+        // The bones a bone-name property (a node type's property hinted "Bone": IK nodes, Layered Blend) offers in its picker, in
+        // the skeleton's tree order with their depth -- the panel's preview skeleton (Unreal's bone dropdown from the target
+        // skeleton). Empty: no skeleton chosen; the picker says so and still takes a typed name.
+        struct BoneEntry
+        {
+            std::string Name;
+            int Depth = 0;
+        };
+        virtual void SetBoneList(std::vector<BoneEntry> bones, std::string skeletonName) = 0;
     };
 }

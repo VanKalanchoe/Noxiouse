@@ -77,5 +77,9 @@ namespace Nox
         AssetHandle m_PreviewSkeleton = 0;
         bool m_PreviewPlaying = true;
         std::vector<glm::mat4> m_PreviewBones;
+        // The preview skeleton's bones handed to the canvas for bone-name properties (UpdateBoneList), and which skeleton they are.
+        AssetHandle m_BoneListSkeleton = 0;
+        bool m_BoneListLoaded = false;
+        void UpdateBoneList();
     };
 }

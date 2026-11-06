@@ -34,6 +34,7 @@ namespace Nox
         void DrawStateMachine(GraphNode& machine, const NodeGraph& rootGraph, const std::function<void()>& onGraphEdited,
                               uint32_t& outOpenState, StateMachineSelection& selection) override;
         void ResetView() override;
+        void SetBoneList(std::vector<BoneEntry> bones, std::string skeletonName) override;
 
     private:
         // Where a state box's two pins are this frame (canvas space).
@@ -49,6 +50,10 @@ namespace Nox
         // actual popup later, suspended, after every node this frame is done drawing.
         void DrawAssetPickerButton(uint32_t nodeId, const std::string& propertyName, uint64_t currentHandle, const std::string& assetTypeHint);
         void DrawPendingAssetPicker(NodeGraph& graph, const std::function<void()>& onGraphEdited);
+        // A bone-name property: a button with the bone's name (orange when the preview skeleton has no such bone) that queues the
+        // bone picker, drawn later like the asset picker (popups do not work inside a node).
+        void DrawBonePickerButton(uint32_t nodeId, const std::string& propertyName, const std::string& current);
+        void DrawPendingBonePicker(NodeGraph& graph, const std::function<void()>& onGraphEdited);
         void HandleLinkCreation(NodeGraph& graph, const std::function<void()>& onGraphEdited);
         void HandleDeletion(NodeGraph& graph, const std::function<void()>& onGraphEdited);
         void ShowCreateNodeMenu(NodeGraph& graph, const std::vector<GraphParameter>& parameters, const std::function<void()>& onGraphEdited);
@@ -86,6 +91,13 @@ namespace Nox
 
         // Pending asset-picker request (github.com/thedmd/imgui-node-editor issues #48/#154's documented
         // workaround: a node-body button just requests the popup, the popup itself is drawn later, suspended).
+        std::vector<BoneEntry> m_Bones;
+        std::string m_BoneSkeletonName;
+        bool m_ShowBonePicker = false;
+        uint32_t m_BonePickerNodeId = 0;
+        std::string m_BonePickerPropertyName;
+        char m_BonePickerFilter[64] = "";
+        char m_BonePickerTyped[128] = "";
         bool m_ShowAssetPicker = false;
         uint32_t m_AssetPickerNodeId = 0;
         std::string m_AssetPickerPropertyName;

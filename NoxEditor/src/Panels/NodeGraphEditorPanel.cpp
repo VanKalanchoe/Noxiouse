@@ -7,6 +7,8 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <functional>
+#include <unordered_set>
 
 #include "NodeGraph/INodeGraphCanvasBackend.h"
 #include "NodeGraph/NodeGraphPropertyEditor.h"
@@ -314,6 +316,50 @@ namespace Nox
         }
     }
 
+    void NodeGraphEditorPanel::UpdateBoneList()
+    {
+        // The preview skeleton's bones for the canvas's bone pickers: again only when the skeleton changes or finishes loading.
+        const Skeleton* skeleton = m_PreviewSkeleton != 0 && AssetManager::RequestAsset(m_PreviewSkeleton) == AssetState::Ready
+            ? AssetManager::FindLoadedAsset<Skeleton>(m_PreviewSkeleton) : nullptr;
+        if (m_PreviewSkeleton == m_BoneListSkeleton && (skeleton != nullptr) == m_BoneListLoaded)
+            return;
+        m_BoneListSkeleton = m_PreviewSkeleton;
+        m_BoneListLoaded = skeleton != nullptr;
+
+        std::vector<INodeGraphCanvasBackend::BoneEntry> bones;
+        std::string name;
+        if (skeleton)
+        {
+            name = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry().contains(m_PreviewSkeleton)
+                ? Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry().at(m_PreviewSkeleton).FilePath.stem().string()
+                : std::string("the preview skeleton");
+            // The skin's joints and the nodes above them (a mesh node under the armature is not a bone), in tree order.
+            std::unordered_set<const Node*> joints;
+            for (const Skin* skin : skeleton->Skins)
+                if (skin)
+                    joints.insert(skin->Joints.begin(), skin->Joints.end());
+            std::function<bool(const Node*)> holdsJoint = [&](const Node* node)
+            {
+                if (!node)
+                    return false;
+                if (joints.empty() || joints.contains(node))
+                    return true;
+                return std::any_of(node->Children.begin(), node->Children.end(), [&](const Node* child) { return holdsJoint(child); });
+            };
+            std::function<void(const Node*, int)> walk = [&](const Node* node, int depth)
+            {
+                if (!node || !holdsJoint(node))
+                    return;
+                bones.push_back({ node->Name, depth });
+                for (const Node* child : node->Children)
+                    walk(child, depth + 1);
+            };
+            for (const Node* root : skeleton->RootNodes)
+                walk(root, 0);
+        }
+        m_Backend->SetBoneList(std::move(bones), std::move(name));
+    }
+
     void NodeGraphEditorPanel::DrawPreview()
     {
         if (!ImGui::CollapsingHeader("Preview"))
@@ -540,6 +586,7 @@ namespace Nox
                 }
                 else
                 {
+                    UpdateBoneList();
                     uint32_t openNode = 0;
                     m_Backend->Draw(*graph, m_Asset->Graph.Parameters, onEdited, &openNode);
                     if (openNode != 0)

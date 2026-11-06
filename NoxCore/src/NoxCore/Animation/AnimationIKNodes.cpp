@@ -391,7 +391,7 @@ namespace Nox
             /* Outputs           */ { { "Pose", "Pose" } },
             /* DefaultProperties */ { { "Alpha", 1.0f }, { "EndBone", std::string("hand_r") }, { "Target", std::string("RightHand") },
                                       { "Pole", std::string() } },
-            /* PropertyAssetTypeHints */ {},
+            /* PropertyAssetTypeHints */ { { "EndBone", "Bone" } }, // "Bone": the editor offers the preview skeleton's bones
             /* PropertyRanges    */ { { "Alpha", { 0.0f, 1.0f } } },
             /* Evaluate          */ &EvaluateTwoBoneIK
         });
@@ -403,7 +403,7 @@ namespace Nox
             /* Outputs           */ { { "Pose", "Pose" } },
             /* DefaultProperties */ { { "Alpha", 1.0f }, { "Bone", std::string("Head") }, { "Target", std::string("LookAt") },
                                       { "Axis", int32_t(0) }, { "MaxAngle", 70.0f } },
-            /* PropertyAssetTypeHints */ {},
+            /* PropertyAssetTypeHints */ { { "Bone", "Bone" } },
             /* PropertyRanges    */ { { "Alpha", { 0.0f, 1.0f } }, { "MaxAngle", { 0.0f, 180.0f } } },
             /* Evaluate          */ &EvaluateLookAt
         });
@@ -416,7 +416,7 @@ namespace Nox
             /* DefaultProperties */ { { "Alpha", 1.0f }, { "LeftFoot", std::string("foot_l") }, { "RightFoot", std::string("foot_r") },
                                       { "Pelvis", std::string("pelvis") }, { "TraceUp", 0.5f }, { "TraceDown", 0.6f },
                                       { "MaxPelvisDrop", 0.35f }, { "Speed", 12.0f }, { "AlignToGround", true }, { "MaxAlignAngle", 35.0f } },
-            /* PropertyAssetTypeHints */ {},
+            /* PropertyAssetTypeHints */ { { "LeftFoot", "Bone" }, { "RightFoot", "Bone" }, { "Pelvis", "Bone" } },
             /* PropertyRanges    */ { { "Alpha", { 0.0f, 1.0f } }, { "MaxAlignAngle", { 0.0f, 89.0f } } },
             /* Evaluate          */ &EvaluateFootPlacement
         });
