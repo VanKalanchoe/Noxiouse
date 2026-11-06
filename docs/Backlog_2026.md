@@ -28,9 +28,9 @@
 
 | # | Item |
 |---|---|
-| C6 | **IK (inverse kinematics):** animation graph nodes in category IK -- **TwoBoneIK** (an arm / leg reaches a target, analytic, optional pole, the end keeps its orientation), **LookAt** (a bone turns to a target within a max angle; chain spine + head), **FootPlacement** (a physics ray down per foot after the parallel animation update, used next frame: feet on slopes and stairs, pelvis lowered, feet tilted; Play / Simulate). Targets from scripts: `Animator.SetIKTarget(name, position, weight)` / `ClearIKTarget` (script API 14). Root motion aware. Test script `IKTargetTest.cs`; guide: manual "Character Setup: Jump, Root Motion & IK". **Built 2026-11-06, untested** |
-| C1 | **Jump / Fall states** in the locomotion graph. Engine side built 2026-11-06, untested: transitions can fire **At End of State** (Unity's Has Exit Time, Unreal's automatic rule: the blend starts Blend Time before the state's clips end), and `CharacterMovement.cs` sends `VerticalSpeed` (m/s, up positive) next to `Speed` and `IsGrounded`. The graph itself is authored in the editor for the Quaternius Universal Animation Library character (Jump_Start / Jump_Loop / Jump_Land; recipe in the conversation of 2026-11-06 and `Animation_Graph_Architecture_Plan_2026.md` §7) |
-| C5 | Fox sizes (a ~0.8 m animal): moot with the ~1.8 m Quaternius character, whose size the movement defaults are made for |
+| C9 | **Stair animations:** with a walk clip made for flat ground (UAL's step is ~65 cm, a stair tread 30 cm) the feet land on every second step; Foot Placement puts each foot on its step but cannot shorten the stride. AAA games play dedicated stairs up / down walks (short step, high lift) chosen when the floor under the feet is a stair. Needs stair clips (UAL1 has none); then an `OnStairs` parameter from the floor under the feet and a stair state in the graph |
+| C10 | **Script API for Active:** `Entity.Active` / `SetActive` (Unity's) so scripts can switch entities on and off (the Inspector box and the Hierarchy eye exist) |
+| C11 | **Two Bone IK** (Part F of the character guide): the only part of C6 the user has not tried yet |
 
 ### Ignore for now
 
@@ -45,6 +45,17 @@
 ## Closed (checked against the code 2026-10-30)
 
 Built items many of which the user has not tested yet (marked "untested"); the plan docs hold the details.
+
+- **2026-11-06 (tested by the user with the Quaternius UAL character):** C1 Jump / Fall states (At End of State transitions,
+  VerticalSpeed; falling = not grounded and not rising), C6 IK Look At and Foot Placement (Two Bone IK still to try: C11), root
+  motion (per-clip root travel blended like the pose; no teleport on Shift), blend space Smoothing Time and a constant turn rate.
+  Fixed on the way: skinned import scale (inverse bind matrices), Animator parameters follow the graph's defaults unless overridden,
+  parameters inside states, transition rule ID clash, Content Browser Duplicate and files moved outside the editor, Look At yaw / pitch
+  limits with a fade behind, the character controller (no gravity while walking: no sliding down slopes; Unreal's floor test for
+  IsGrounded: stairs down; stair smoothing; one jump per press), CameraFollow in OnLateUpdate. New editor features: state machine
+  wires routed with right angles between pins, bone picker for bone-name properties, Active (Inspector box + Hierarchy eye, Unity's
+  SetActive), physics collider overlay for every collider (inactive ones red, character capsules, mesh colliders, foot IK rays).
+  C5 (Fox sizes) dropped: moot with the 1.8 m character.
 
 - **2026-11-06 (tested by the user):** L1 sub-levels (Levels window: current level, visible, locked, Always Loaded / streamed, Move
   to Level, each level saved into its own file, Play copies them as edited; the scene's own primary camera stays the view; hierarchy
