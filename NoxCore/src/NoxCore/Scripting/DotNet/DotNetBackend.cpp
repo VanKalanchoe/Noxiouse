@@ -519,6 +519,40 @@ namespace Nox
             return animator && animator->GraphInstance.GetBool(std::string(name));
         }
 
+        // Active (Nox.Entity.Active / ActiveInHierarchy / SetActive; Unity's activeSelf / activeInHierarchy / SetActive): the Inspector's
+        // Active box and the Hierarchy's eye. Switched off, the entity and everything under it are out of the game (InactiveComponent).
+        Coral::Bool32 EntityGetActive(uint64_t entityID)
+        {
+            if (!s_Scene) return false;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            return entity && !entity.HasComponent<InactiveComponent>();
+        }
+
+        Coral::Bool32 EntityGetActiveInHierarchy(uint64_t entityID)
+        {
+            // Walked here rather than read from the cached tag: a SetActive earlier this frame counts at once.
+            if (!s_Scene) return false;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!entity)
+                return false;
+            for (Entity up = entity; up; up = up.GetParent())
+                if (up.HasComponent<InactiveComponent>())
+                    return false;
+            return true;
+        }
+
+        void EntitySetActive(uint64_t entityID, Coral::Bool32 active)
+        {
+            if (!s_Scene || !OnMainThread("Entity.SetActive")) return;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!entity)
+                return;
+            if (active && entity.HasComponent<InactiveComponent>())
+                entity.RemoveComponent<InactiveComponent>();
+            else if (!active && !entity.HasComponent<InactiveComponent>())
+                entity.AddComponent<InactiveComponent>();
+        }
+
         // IK targets (Nox.AnimatorComponent.SetIKTarget / ClearIKTarget): world positions the graph's Two Bone IK and Look At nodes
         // reach for, by name.
         void AnimatorSetIKTarget(uint64_t entityID, Coral::String name, double x, double y, double z, float weight)
@@ -1075,6 +1109,9 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_FindByName", reinterpret_cast<void*>(&FindEntityByName));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_FindChild", reinterpret_cast<void*>(&FindChild));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_HasComponent", reinterpret_cast<void*>(&HasComponent));
+        assembly.AddInternalCall("Nox.InternalCalls", "Entity_GetActive", reinterpret_cast<void*>(&EntityGetActive));
+        assembly.AddInternalCall("Nox.InternalCalls", "Entity_GetActiveInHierarchy", reinterpret_cast<void*>(&EntityGetActiveInHierarchy));
+        assembly.AddInternalCall("Nox.InternalCalls", "Entity_SetActive", reinterpret_cast<void*>(&EntitySetActive));
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_SetFloat", reinterpret_cast<void*>(&AnimatorSetFloat));
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_GetFloat", reinterpret_cast<void*>(&AnimatorGetFloat));
         assembly.AddInternalCall("Nox.InternalCalls", "Animator_SetBool", reinterpret_cast<void*>(&AnimatorSetBool));

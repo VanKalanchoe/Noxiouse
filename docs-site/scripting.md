@@ -11,7 +11,7 @@ Noxiouse features a first-class **C# scripting runtime** powered by **.NET 9 (`n
 - **Stateful Hot Reload (`ScriptEngine::ReloadAssembly`)**:
   1. Waits for any running background `Nox.Jobs` tasks to finish (`WaitForJobs(2000)`).
   2. Snapshots the live value of every `[Expose]` field on every active script instance (`FieldSnapshot`).
-  3. Unloads the old `Coral::AssemblyLoadContext` and loads the new generation DLL (automatically rolling back to the previous generation if the new DLL fails to load or mismatches `kScriptApiVersion = 13`).
+  3. Unloads the old `Coral::AssemblyLoadContext` and loads the new generation DLL (automatically rolling back to the previous generation if the new DLL fails to load or mismatches `kScriptApiVersion = 15`).
   4. Recreates script instances, restores their live `[Expose]` field values from the snapshot, invokes `OnCreate()`, and calls `OnAfterReload()`.
 
 ### B. `EntityBehaviour` Lifecycle & Inspector Attributes
@@ -52,7 +52,7 @@ public sealed class PlayerController : EntityBehaviour
 | [`IScriptBackend.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/IScriptBackend.h) | Pure abstract interface decoupling `ScriptEngine` from the underlying .NET / Coral hosting implementation. |
 | [`ScriptEngine.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/ScriptEngine.h) & [`ScriptEngine.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/ScriptEngine.cpp) | Static scripting facade: assembly discovery (`FindAssemblies`), shadow-copy staging (`StageAssemblies`), stateful hot reload (`ReloadAssembly`), entity instance creation/destruction, and callback dispatch. |
 | [`DotNet/CoralCompat.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/CoralCompat.h) | Declares explicit `Coral::Attribute::GetFieldValue<std::string>` and `<bool>` specializations matching `Coral.Native`. |
-| [`DotNet/DotNetBackend.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/DotNetBackend.h) & [`DotNetBackend.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/DotNetBackend.cpp) | Hosts `.NET 9` via `Coral::HostInstance` (supporting both system .NET and packaged self-contained `dotnet/` folders), verifies `kScriptApiVersion = 13`, reflects `[Expose]`/`[DisallowSelf]` fields, enforces main-thread guards (`OnMainThread`), and implements all **69 native C++ internal calls**. |
+| [`DotNet/DotNetBackend.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/DotNetBackend.h) & [`DotNetBackend.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/DotNetBackend.cpp) | Hosts `.NET 9` via `Coral::HostInstance` (supporting both system .NET and packaged self-contained `dotnet/` folders), verifies `kScriptApiVersion = 15`, reflects `[Expose]`/`[DisallowSelf]` fields, enforces main-thread guards (`OnMainThread`), and implements all **69 native C++ internal calls**. |
 
 ---
 
@@ -61,7 +61,7 @@ public sealed class PlayerController : EntityBehaviour
 | File | Plain-English Summary & Public API |
 | :--- | :--- |
 | [`Nox.ScriptCore.csproj`](file:///E:/dev/noxiouse/NoxScriptCore/Nox.ScriptCore.csproj) | .NET 9 (`net9.0`) project file with `AllowUnsafeBlocks` enabled for zero-overhead unmanaged `delegate*` pointers. |
-| [`Source/ScriptApi.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/ScriptApi.cs) | Defines `ScriptApi.Version = 13` and `WaitForDebugger(timeoutMs)` (polls `Debugger.IsAttached` and calls `Debugger.Break()`). |
+| [`Source/ScriptApi.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/ScriptApi.cs) | Defines `ScriptApi.Version = 15` and `WaitForDebugger(timeoutMs)` (polls `Debugger.IsAttached` and calls `Debugger.Break()`). |
 | [`Source/InternalCalls.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/InternalCalls.cs) | Declares all **69 unmanaged `delegate*` function pointers** bound by `DotNetBackend::RegisterInternalCalls` plus `NativeString` marshaling. |
 | [`Source/ExposeAttribute.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/ExposeAttribute.cs) | `[Expose]` attribute with optional `Unit` (`"cm"`, `"m"`, `"cm/s"`, `"m/s"`, `"km/h"`), `Tooltip`, `Min`, `Max`, and `ReadOnly` parameters. |
 | [`Source/DisallowSelfAttribute.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/DisallowSelfAttribute.cs) | `[DisallowSelf]` attribute preventing an `Entity` reference field from being assigned to `Self` in the Inspector. |

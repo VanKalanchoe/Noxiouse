@@ -6,31 +6,7 @@
 
 ## Open
 
-### Post effects (new features)
-
-| # | Item |
-|---|---|
-| PP1 | **Bloom** (downsample / upsample chain, Call of Duty style), **depth of field** (bokeh, from the camera's aperture and focus distance), **motion blur** (per-pixel, from the motion vectors TAA / DLSS already have), **color grading LUT**, **vignette / film grain / chromatic aberration / lens flares**, **sharpening** (CAS). Settings on the camera / project like the existing exposure and tonemapping. **Built 2026-11-05, untested** (Settings > Post Effects; `Hybrid_Renderer_Plan_2026-10.md` §10) |
-
-### Levels and streaming (plan: `Engine_Architecture_Plan_2026.md` §6c)
-
-| # | Item |
-|---|---|
-| L4 | **Level transforms:** a sub-level's Offset and Yaw (Unreal's level transform: translation and yaw), set in the Levels panel's Placement column: the whole level moves and turns at once, its file keeps it where it was built (applied when read, taken out when saved; a level read from its file in Play / a packaged game is placed the same way). Reuse in several places stays with prefabs. **Built 2026-11-06, untested** |
-
-### Tools (plan: `Engine_Architecture_Plan_2026.md`)
-
-| # | Item |
-|---|---|
-| P1 | **Frame profiler extras:** save / load a capture (`.noxprof`: the kept frames, the spikes and the scope / thread names; a loaded capture is shown instead of the live frames until closed); frames slower than a threshold (frame or GPU time, default 16.7 ms) kept apart, the last 64, picked in the panel's frame combo; VRAM and RAM per frame drawn under the frame graph; a "GPU Transfer" track with one scope per upload submission (timestamps of the dedicated transfer family, query pairs reset on the host with `hostQueryReset`, placed on the CPU clock through the calibrated timestamps). **Built 2026-11-05, untested** (Window > Profiler) |
-
-### Characters and animation (plan: `Animation_Graph_Architecture_Plan_2026.md`)
-
-| # | Item |
-|---|---|
-| C9 | **Stair animations:** with a walk clip made for flat ground (UAL's step is ~65 cm, a stair tread 30 cm) the feet land on every second step; Foot Placement puts each foot on its step but cannot shorten the stride. AAA games play dedicated stairs up / down walks (short step, high lift) chosen when the floor under the feet is a stair. Needs stair clips (UAL1 has none); then an `OnStairs` parameter from the floor under the feet and a stair state in the graph |
-| C10 | **Script API for Active:** `Entity.Active` / `SetActive` (Unity's) so scripts can switch entities on and off (the Inspector box and the Hierarchy eye exist) |
-| C11 | **Two Bone IK** (Part F of the character guide): the only part of C6 the user has not tried yet |
+Nothing open: everything left is in "Ignore for now" below (2026-11-06).
 
 ### Ignore for now
 
@@ -41,6 +17,9 @@
 | B3 | ReSTIR light indices across light changes (ignore for now) |
 | B4 | Meshlet cone culling (ignore for now) |
 | C4 | Step 8: **audio graph**, a second node-graph domain on the same core and editor panel (ignore for now: after the rest of the backlog) |
+| PP1 | **Post effects** (bloom, DOF, motion blur, grading / LUT, vignette / grain / CA / lens flares, CAS): built 2026-11-05, untested; not wanted for now (Settings > Post Effects; `Hybrid_Renderer_Plan_2026-10.md` §10) |
+| L4 | **Level transforms** (a sub-level's Offset / Yaw in the Levels panel): built 2026-11-06, untested; later |
+| C9 | **Stair animations:** with a walk clip made for flat ground (UAL's step ~65 cm, a tread 30 cm) the feet land on every second step; AAA games play stairs up / down walks chosen when the floor under the feet is a stair. Needs a character with stair clips (none at hand): then an `OnStairs` parameter and a stair state |
 
 ## Closed (checked against the code 2026-10-30)
 
@@ -55,7 +34,10 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   IsGrounded: stairs down; stair smoothing; one jump per press), CameraFollow in OnLateUpdate. New editor features: state machine
   wires routed with right angles between pins, bone picker for bone-name properties, Active (Inspector box + Hierarchy eye, Unity's
   SetActive), physics collider overlay for every collider (inactive ones red, character capsules, mesh colliders, foot IK rays).
-  C5 (Fox sizes) dropped: moot with the 1.8 m character.
+  C5 (Fox sizes) dropped: moot with the 1.8 m character. C11 Two Bone IK tested too (the hand reaches its target).
+  P1 profiler extras tested (a capture saved and read back); the capture showed a ~26 ms "ImGui Build" spike every 2 s: the Content
+  Browser walked the whole asset folder tree on the main thread every 2 s to see new folders -- now on an IO worker.
+  C10 built: `Entity.Active` / `SetActive` / `ActiveInHierarchy` for scripts (script API 15).
 
 - **2026-11-06 (tested by the user):** L1 sub-levels (Levels window: current level, visible, locked, Always Loaded / streamed, Move
   to Level, each level saved into its own file, Play copies them as edited; the scene's own primary camera stays the view; hierarchy

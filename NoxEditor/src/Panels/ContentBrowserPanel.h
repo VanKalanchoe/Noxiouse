@@ -1,8 +1,10 @@
 #pragma once
 #include <functional>
+#include <filesystem>
 #include <unordered_set>
 
 #include "NoxCore/Core/UUID.h"
+#include "NoxCore/Tasks/JobSystem.h"
 #include "ThumbnailCache.h"
 
 struct ImGuiPayload;
@@ -102,6 +104,10 @@ namespace Nox
         FolderNode m_FolderTree;
         bool m_FolderTreeDirty = true;
         double m_FolderTreeTime = 0.0; // ImGui time of the last rebuild
+        // The periodic look for folders made outside the editor, on an IO worker: walking a big project's folders took ~24 ms on the
+        // main thread every 2 s (a frame spike each time). Swapped in when done.
+        TaskFuture<FolderNode> m_FolderTreeJob;
+        static FolderNode ScanFolderTree(const std::filesystem::path& base);
         std::filesystem::path m_TreeRevealedDirectory; // the folder the tree was last unfolded to
 
         char m_SearchBuffer[128] = {0};

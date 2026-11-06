@@ -39,6 +39,23 @@ public readonly struct Entity
 
     public Entity FindChild(string path) => new(InternalCalls.FindChild(ID, path));
 
+    /// <summary>
+    /// Switched on or off itself (Unity's activeSelf; the Inspector's Active box, the Hierarchy's eye). Off, this entity and everything
+    /// under it are out of the game: not drawn, no physics body or character, no animation, scripts not updated (this one too), lights
+    /// and particles off. Setting it takes effect this frame; switching back on brings everything back.
+    /// </summary>
+    public bool Active
+    {
+        get => InternalCalls.GetEntityActive(ID);
+        set => InternalCalls.SetEntityActive(ID, value);
+    }
+
+    /// <summary>Unity's activeInHierarchy: false when this entity or one above it is switched off.</summary>
+    public bool ActiveInHierarchy => InternalCalls.GetEntityActiveInHierarchy(ID);
+
+    /// <summary>Unity's SetActive: the same as setting <see cref="Active"/>.</summary>
+    public void SetActive(bool active) => InternalCalls.SetEntityActive(ID, active);
+
     /// <summary>Shows a mesh built at run time on this entity (null: nothing).</summary>
     public void SetMesh(Mesh? mesh) => InternalCalls.SetEntityMesh(ID, mesh?.Handle ?? 0);
 

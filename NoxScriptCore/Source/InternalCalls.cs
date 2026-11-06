@@ -38,6 +38,9 @@ internal static unsafe class InternalCalls
     private static delegate*<NativeString, ulong> Entity_FindByName;
     private static delegate*<ulong, NativeString, ulong> Entity_FindChild;
     private static delegate*<ulong, int, uint> Entity_HasComponent;
+    private static delegate*<ulong, uint> Entity_GetActive;
+    private static delegate*<ulong, uint> Entity_GetActiveInHierarchy;
+    private static delegate*<ulong, uint, void> Entity_SetActive;
     private static delegate*<ulong, NativeString, float, void> Animator_SetFloat;
     private static delegate*<ulong, NativeString, float> Animator_GetFloat;
     private static delegate*<ulong, NativeString, uint, void> Animator_SetBool;
@@ -109,6 +112,10 @@ internal static unsafe class InternalCalls
     }
 
     internal static void DestroyEntity(ulong entityID) => Scene_Destroy(entityID);
+
+    internal static bool GetEntityActive(ulong entityID) => Entity_GetActive(entityID) != 0;
+    internal static bool GetEntityActiveInHierarchy(ulong entityID) => Entity_GetActiveInHierarchy(entityID) != 0;
+    internal static void SetEntityActive(ulong entityID, bool active) => Entity_SetActive(entityID, active ? 1u : 0u);
 
     internal static bool LoadLevel(string scenePath)
     {

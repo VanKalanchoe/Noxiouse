@@ -293,9 +293,18 @@ namespace Nox
 
         if (m_EntriesDirectory != m_CurrentDirectory)
             RefreshAssetTree();
-        // Folders made outside the editor show up within a couple of seconds.
-        if (m_FolderTreeDirty || ImGui::GetTime() - m_FolderTreeTime > 2.0)
+        // Folders made outside the editor show up within a couple of seconds: looked for on an IO worker every 2 s, swapped in when
+        // done (a change made here -- a move, a new folder -- rebuilds at once).
+        if (m_FolderTreeDirty)
             RebuildFolderTree();
+        else if (m_FolderTreeJob.IsReady())
+            m_FolderTree = m_FolderTreeJob.Get();
+        else if (!m_FolderTreeJob.IsValid() && ImGui::GetTime() - m_FolderTreeTime > 2.0)
+        {
+            m_FolderTreeTime = ImGui::GetTime();
+            m_FolderTreeJob = JobSystem::Get().AsyncIO("Scan Asset Folders", JobPriority::Normal,
+                [base = m_BaseDirectory](const CancellationToken&) { return ScanFolderTree(base); });
+        }
         UpdateVisibleEntries();
 
         // Only the visible rows are built (a folder of hundreds of meshes cost milliseconds per frame otherwise); the ids
@@ -1031,7 +1040,14 @@ namespace Nox
     {
         m_FolderTreeDirty = false;
         m_FolderTreeTime = ImGui::GetTime();
+        if (m_FolderTreeJob.IsValid())
+            m_FolderTreeJob.Wait(); // its older result is dropped below
+        m_FolderTreeJob = {};
+        m_FolderTree = ScanFolderTree(m_BaseDirectory);
+    }
 
+    ContentBrowserPanel::FolderNode ContentBrowserPanel::ScanFolderTree(const std::filesystem::path& base)
+    {
         std::function<void(FolderNode&)> fill = [&](FolderNode& node)
         {
             std::error_code error;
@@ -1049,8 +1065,9 @@ namespace Nox
                       [](const FolderNode& a, const FolderNode& b) { return ToLower(a.Name) < ToLower(b.Name); });
         };
 
-        m_FolderTree = FolderNode{ m_BaseDirectory, "Assets", {} };
-        fill(m_FolderTree);
+        FolderNode root{ base, "Assets", {} };
+        fill(root);
+        return root;
     }
 
     void ContentBrowserPanel::DrawFolderTree(const FolderNode& node)
