@@ -1,7 +1,7 @@
 # Audio and the Audio Graph -- architecture plan (2026-11-06)
 
-> Status: **A1 Core built and tested (2026-11-06); A2 Audio graph built**, waiting for the user's test before A3 (see §11 "A1 as built",
-> "A2 as built"). Backlog C4. This plan covers
+> Status: **A1 Core and A2 Audio graph built and tested (2026-11-06); A3 Mixer built (2026-11-07)**, waiting for the user's test before
+> A4 (see §11 "A1 as built", "A2 as built", "A3 as built"). Backlog C4. This plan covers
 > the whole audio system the graph needs, not just the graph. Phase gates as in the other plans: each phase is built, then tested by
 > the user, before the next one starts.
 
@@ -432,4 +432,51 @@ Each phase lands with the docs-site pages updated and the manual's walkthrough, 
   rendered; graph voices in the live engine ending by themselves, stopping, streaming without starvation; ThreadSanitizer clean.
 - **Not in A2:** graphs inside graphs (composition) and the Curve node (needs a curve editor in nodes) -- with A3; the delay / reverb /
   dynamics nodes (A3, with the bus effects); notifies playing graphs (A5).
+
+
+### A3 as built (2026-11-07)
+
+- **Effects (`Audio/AudioEffects.h`), one implementation for bus chains and graph nodes:** EQ (low shelf, two peaks, high shelf), Filter
+  (low / high / band pass, frequency in octaves every 32 frames), Compressor (Giannoulis-Massberg-Reiss soft-knee gain computer, smooth
+  branching attack / release in dB, peak or RMS detector, makeup, mix, sidechain key), Limiter (look-ahead brickwall: sliding minimum of
+  the needed gain, release, box filter of the look-ahead's length; the audio delayed by look-ahead - 1 frames), Gate (hysteresis, hold),
+  Delay (Hermite-interpolated lines whose time slews like tape; normal / ping pong / cross; damped feedback), Reverb (Jot FDN: 8 lines
+  with slow modulation, Householder feedback, per-line one-pole absorption giving Decay Time at DC and Decay Time x HF Ratio at 5 kHz
+  -- I3DL2's HF Reference --, input fed by sqrt(1 - g^2) so long and short decays sound as loud, four Schroeder all-passes per side, 8-tap
+  early reflections), Convolution Reverb (uniformly partitioned overlap-save, 256-frame partitions: no latency beyond the block; both
+  inputs in one complex FFT and both outputs in one inverse; impulse responses up to 10 s, resampled by windowed sinc, normalized to unit
+  energy), Chorus (3 voices a side) / Flanger, Phaser (2-12 first-order all-pass stages), Distortion (soft / hard clip, sine foldback,
+  tube; 2x oversampled through a 31-tap Kaiser half-band, DC blocked, tone filter), Bitcrusher. Parameters are raw values the effects
+  smooth themselves (gains ramped per block, frequencies in octaves, times slewed). `Audio/AudioDSP.h` holds the shared biquad (moved
+  out of the graph nodes), one-pole, delay line, ramps and FFT. Every effect is also an audio graph node (category Effects).
+- **Engine:** the fixed bus enum is gone; buses are the mixer's (up to 32), referenced by id. The game thread builds a layout (buses,
+  effect instances, sends, ducking, the processing order: every bus after its children, send sources, sidechain and ducking sources;
+  loops dropped with a warning) and swaps it in by command; the replaced layout comes back through a queue to be freed on the game
+  thread. An effect whose bus id, effect id, type and impulse response are unchanged keeps its instance (a reverb's tail runs through
+  any edit); its values reach it as commands after the swap. Per block: voices into their bus (and their environment send), then each bus:
+  effects, pre-fader sends, ducking (the source's output peak against a threshold, smoothed in dB), the fader ramp, meters (peak falling
+  ~20 dB/s, RMS over 300 ms, gain reduction), post-fader sends, into the parent. Per voice: a low pass (12 dB/oct, cutoff moved in
+  octaves) and one send, for Audio Volumes. Pausing honours each bus's Plays While Paused. The mixer thread flushes denormals.
+- **Mixer asset (`Audio/AudioMixer.h`):** `.nmixer` (`AssetType::AudioMixer`), YAML with effect parameters by name; the project's at
+  `ProjectConfig::AudioMixer` (default `Audio/Mixer.nmixer`, created with the default buses when the editor opens a project without one;
+  the runtime reads it through the VFS; the packager adds it as a root, with the impulse responses it names). Default: Master (Limiter
+  -0.3 dB), Music (ducked 10 dB by Voice), SFX, Voice, UI (plays while paused), Ambience, Reverb (a Reverb, all wet) at fixed ids 1-7.
+- **AudioMixer (game thread):** builds the layout, sends only changed values, mute / solo (soloed buses plus what feeds them, their way
+  to Master and their send targets), game volumes (`Audio.SetBusVolume`, on top of the mix, reset when Play stops), snapshots as overrides
+  of the Default mix (faders, send levels, number parameters) blended with a smoothstep, frequencies in octaves; `Audio.SetSnapshot`.
+- **Mixer panel:** channel strips (fader, L/R peak + RMS meter, GR, M / S / B, effect list), the selected bus's Output To, effect chain
+  (add, reorder, bypass, remove, every parameter, sidechain, impulse response), sends (level, pre-fader) and ducking; snapshot bar
+  (add, rename, duplicate, delete; editing one stores changes in it, shown orange; right-click: remove from snapshot); its own undo /
+  redo; Ctrl+S saves it with the scene. Only routings that make no loop are offered.
+- **Audio Volume component:** box, priority, reverb bus + send, interior / exterior volume and low pass (Unreal's interior settings),
+  fade time; worked out per 3D voice (sources and one-shots) each frame from the listener's and the sound's volumes; blue box in the
+  viewport.
+- **Tests (harness):** delay echoes exactly on their frame; reverb T30 within 6 % of Decay Time at 0.8 / 2 / 5 s, HF / LF decay ratio
+  0.35 for HF Ratio 0.3, wet loudness within 3 dB of the input for every decay; compressor static curve exact (knee included) and
+  sidechain ducking 10.48 dB for 10.5; limiter peak -1.0000 dB under +12 dB bursts; gate; EQ and filter equal to theory; convolution
+  equal to direct convolution (3e-6); flanger and phaser notches; distortion aliases 150 dB under the harmonics; routing, pre / post-fader
+  sends, ducking -12.00 dB with the meter agreeing, a reverb tail identical through a layout swap, voice low pass -37.8 dB at 8 kHz for a
+  1 kHz cutoff, sidechain compressor -17.98 dB for -18; snapshot blend -10 dB half way, solo, game volume, a bus added while voices
+  play, save / load round trip, the default project mixer created; ThreadSanitizer clean; A1 and A2 suites still pass.
+- **Not in A3:** graphs inside graphs and the Curve node (moved to A5 with the notifies); HRTF / occlusion / Steam Audio reverb (A4).
 

@@ -51,6 +51,7 @@ Noxiouse's world representation lives in `NoxCore/src/NoxCore/Scene/` and is bui
 ### Audio (2 Components)
 - **`AudioSourceComponent`**: Plays its `Sound` -- an Audio Clip (`.wav` / `.ogg` / `.flac` / `.mp3`) or an Audio Graph (`.naudiograph`, with `GraphParameters` overrides) -- at the entity in Play and Simulate ( `Volume`, `Pitch`, `Loop`, `PlayOnStart`, `Bus`, `Spatial` 2D / 3D, `Spatialization`: `MinDistance` / `MaxDistance` in meters, `Attenuation` Inverse / InverseSquare / Linear / None, `DopplerLevel`). Stopped when its entity is switched off or destroyed (`Scene::UpdateAudio`, `Audio/AudioEngine.h`).
 - **`AudioListenerComponent`**: The ears (usually on the player's camera); without one the primary camera listens (Simulate: the editor camera).
+- **`AudioVolumeComponent`**: A box (Half Extents, Priority) where sound changes: 3D sounds inside send to its Reverb Bus (Reverb Send), and sounds heard through its walls get its Interior / Exterior volume and low pass, blended over Fade Time (Unreal's Audio Volume).
 
 ### Scripting, 2D Physics & 3D Jolt Physics (13 Components)
 27. **`ScriptComponent`**: Binds one or more C# `EntityBehaviour` classes (`ClassNames`, `FieldOverrides`, `EntityReferences`).
