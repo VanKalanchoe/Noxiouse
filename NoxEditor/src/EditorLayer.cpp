@@ -2829,7 +2829,7 @@ namespace Nox
         {
             Entity selected = m_SceneHierarchyPanel.GetSelectedEntity();
             if (selected && selected.HasComponent<AudioSourceComponent>() && selected.HasComponent<WorldTransformComponent>() &&
-                selected.GetComponent<AudioSourceComponent>().Spatial)
+                selected.GetComponent<AudioSourceComponent>().Spatial && !selected.HasComponent<InactiveInHierarchyComponent>())
             {
                 const auto& source = selected.GetComponent<AudioSourceComponent>();
                 const glm::vec3 centre = glm::vec3(m_Renderer->ToRenderSpace(selected.GetComponent<WorldTransformComponent>().WorldMatrix)[3]);
@@ -2877,12 +2877,16 @@ namespace Nox
             auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, LevelStreamingVolumeComponent>();
             for (auto entity : view)
             {
+                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
+                    continue; // (hidden: the eye closed)
                 auto [wtc, volume] = view.get<WorldTransformComponent, LevelStreamingVolumeComponent>(entity);
                 drawBox(wtc, volume.HalfExtents, kVolumeColor);
             }
             auto audioView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, AudioVolumeComponent>();
             for (auto entity : audioView)
             {
+                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
+                    continue;
                 auto [wtc, volume] = audioView.get<WorldTransformComponent, AudioVolumeComponent>(entity);
                 drawBox(wtc, volume.HalfExtents, kAudioVolumeColor);
             }
