@@ -25,6 +25,7 @@ namespace Nox
         case AssetType::AudioClip: return "AssetType::AudioClip";
         case AssetType::AudioGraph: return "AssetType::AudioGraph";
         case AssetType::AudioMixer: return "AssetType::AudioMixer";
+        case AssetType::AcousticData: return "AssetType::AcousticData";
         }
 
         return "AssetType::<Invalid>";
@@ -51,6 +52,7 @@ namespace Nox
         if (assetType == "AssetType::AudioClip") return AssetType::AudioClip;
         if (assetType == "AssetType::AudioGraph") return AssetType::AudioGraph;
         if (assetType == "AssetType::AudioMixer") return AssetType::AudioMixer;
+        if (assetType == "AssetType::AcousticData") return AssetType::AcousticData;
 
         return AssetType::None;
     }

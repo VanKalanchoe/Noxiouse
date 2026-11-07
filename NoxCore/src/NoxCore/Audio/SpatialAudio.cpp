@@ -19,7 +19,7 @@ namespace Nox
 {
     namespace
     {
-        constexpr double kRebaseMeters = 1000.0;  // the origin moves to the listener once it is this far (floats keep ~0.1 mm there)
+        constexpr double kRebaseCells = 0.75;     // the origin moves to the listener's grid point once it is this many cells away
         constexpr int32_t kOcclusionSamples = 16; // volumetric occlusion: rays to points over the source's sphere
         constexpr int32_t kTransmissionRays = 3;  // up to this many surfaces passed through count for transmission
         constexpr int32_t kMaxRays = 16384;
@@ -81,6 +81,33 @@ namespace Nox
             std::atomic<bool> ReflectFinished{ false };
             std::atomic<float> ReflectMilliseconds{ 0.0f };
             std::vector<IPLInstancedMesh> RetiredReflect; // placements replaced: out of the reflection scene at the next sync
+
+            // Baked acoustics (A4c): the volumes' probe batches (in the reflection simulator while the origin is theirs), the
+            // listener's reverb source, the pathing pool. All changed between runs only, like the reflection scene.
+            struct ProbeBatchEntry
+            {
+                Ref<AcousticData> Data;
+                IPLProbeBatch Batch = nullptr;
+                bool Added = false;
+            };
+            std::unordered_map<uint64_t, ProbeBatchEntry> Batches;
+            std::vector<IPLProbeBatch> RetiredBatches; // replaced or removed: out of the simulator at the next sync, then released
+            IPLSource ListenerSource = nullptr;
+            bool ListenerAdded = false;
+            bool ListenerHasResults = false;
+            float ListenerIrSeconds = 1.0f;            // the response length of its last run (baked: the volume's bake)
+            std::array<IPLSource, SpatialAudio::MaxPathingSources> PathPool{};
+            std::array<bool, SpatialAudio::MaxPathingSources> PathAdded{};
+            std::array<bool, SpatialAudio::MaxPathingSources> PathHasResults{};
+            struct PathCurve // the distance callback's data, per pathing slot (read on the reflection thread during a run)
+            {
+                AudioAttenuation Attenuation = AudioAttenuation::Inverse;
+                float MinDistance = 1.0f;
+                float MaxDistance = 50.0f;
+            };
+            std::array<PathCurve, SpatialAudio::MaxPathingSources> PathCurves{};
+            bool RunReflections = false; // (set before a run is requested, read by the reflection thread)
+            bool RunPathing = false;
         };
         State* s_State = nullptr;
         uint32_t s_MaterialVersion = 1;
@@ -307,6 +334,84 @@ namespace Nox
             state.ReflectDirty = false;
         }
 
+        float IPLCALL PathDistanceCallback(IPLfloat32 distance, void* userData)
+        {
+            const auto* curve = static_cast<const State::PathCurve*>(userData);
+            return AudioAttenuationGain(curve->Attenuation, curve->MinDistance, curve->MaxDistance, distance);
+        }
+
+        // The active batch whose box holds a point (the smallest when they overlap), else null.
+        const State::ProbeBatchEntry* BatchAt(const State& state, const glm::dvec3& point)
+        {
+            const State::ProbeBatchEntry* best = nullptr;
+            double bestSize = 0.0;
+            for (const auto& [key, entry] : state.Batches)
+            {
+                if (!entry.Added || !entry.Data->Contains(point))
+                    continue;
+                const double size = std::abs(glm::determinant(glm::dmat3(entry.Data->Volume)));
+                if (!best || size < bestSize)
+                {
+                    best = &entry;
+                    bestSize = size;
+                }
+            }
+            return best;
+        }
+
+        // The probe batches whose origin is the current one in the reflection simulator, the others out (only between runs).
+        void SyncProbeBatches(State& state)
+        {
+            bool changed = false;
+            for (IPLProbeBatch& batch : state.RetiredBatches)
+            {
+                iplSimulatorRemoveProbeBatch(state.ReflectSimulator, batch);
+                iplProbeBatchRelease(&batch);
+                changed = true;
+            }
+            state.RetiredBatches.clear();
+            for (auto& [key, entry] : state.Batches)
+            {
+                const bool wanted = entry.Batch && entry.Data->Origin == state.Origin;
+                if (wanted == entry.Added)
+                    continue;
+                if (wanted)
+                    iplSimulatorAddProbeBatch(state.ReflectSimulator, entry.Batch);
+                else
+                    iplSimulatorRemoveProbeBatch(state.ReflectSimulator, entry.Batch);
+                entry.Added = wanted;
+                changed = true;
+            }
+            if (changed)
+                iplSimulatorCommit(state.ReflectSimulator);
+        }
+
+        // Where the origin should be for a listener: inside a baked volume its frame's, else the grid point nearest the listener
+        // once it is kRebaseCells away from the current one.
+        glm::dvec3 DesiredOrigin(const State& state, const glm::dvec3& listener)
+        {
+            const State::ProbeBatchEntry* inside = nullptr;
+            double insideSize = 0.0;
+            for (const auto& [key, entry] : state.Batches)
+            {
+                if (!entry.Batch || !entry.Data->Contains(listener))
+                    continue;
+                const double size = std::abs(glm::determinant(glm::dmat3(entry.Data->Volume)));
+                if (!inside || size < insideSize)
+                {
+                    inside = &entry;
+                    insideSize = size;
+                }
+            }
+            if (inside)
+                return inside->Data->Origin;
+            const double cell = SpatialAudio::OriginGridMeters / static_cast<double>(WorldUnits::ToMeters(1.0f));
+            const glm::dvec3 away = glm::abs(listener - state.Origin);
+            if (std::max({ away.x, away.y, away.z }) > kRebaseCells * cell)
+                return SpatialAudio::GridOrigin(listener);
+            return state.Origin;
+        }
+
         void ReflectionThread(State* state)
         {
             Profiler::Get().SetThreadName("Audio Reflections");
@@ -320,9 +425,15 @@ namespace Nox
                     state->ReflectRequested = false;
                 }
                 const auto begin = std::chrono::steady_clock::now();
+                if (state->RunReflections)
                 {
                     NOX_PROFILE_SCOPE("Steam Audio Reflections");
                     iplSimulatorRunReflections(state->ReflectSimulator);
+                }
+                if (state->RunPathing)
+                {
+                    NOX_PROFILE_SCOPE("Steam Audio Pathing");
+                    iplSimulatorRunPathing(state->ReflectSimulator);
                 }
                 state->ReflectMilliseconds.store(std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - begin).count(), std::memory_order_relaxed);
                 state->ReflectFinished.store(true, std::memory_order_release);
@@ -384,12 +495,13 @@ namespace Nox
         direct.samplingRate = static_cast<IPLint32>(sampleRate);
         direct.frameSize = static_cast<IPLint32>(frameSize);
         IPLSimulationSettings reflect = direct;
-        reflect.flags = IPL_SIMULATIONFLAGS_REFLECTIONS;
+        reflect.flags = static_cast<IPLSimulationFlags>(IPL_SIMULATIONFLAGS_REFLECTIONS | IPL_SIMULATIONFLAGS_PATHING);
         reflect.maxNumRays = kMaxRays;
+        reflect.numVisSamples = 4; // (pathing's real-time visibility checks, Steam Audio's default)
         reflect.numDiffuseSamples = kDiffuseSamples;
         reflect.maxDuration = MaxReflectionDuration;
         reflect.maxOrder = ReflectionOrder;
-        reflect.maxNumSources = MaxReflectionSources;
+        reflect.maxNumSources = MaxReflectionSources + 1 + MaxPathingSources; // pool, listener reverb, pathing pool
         reflect.numThreads = std::max(1u, std::min(4u, std::thread::hardware_concurrency() / 4));
         const bool created = iplSceneCreate(state->Context, &sceneSettings, &state->Scene) == IPL_STATUS_SUCCESS &&
                              iplSimulatorCreate(state->Context, &direct, &state->Simulator) == IPL_STATUS_SUCCESS &&
@@ -415,10 +527,15 @@ namespace Nox
         poolSettings.flags = IPL_SIMULATIONFLAGS_REFLECTIONS;
         for (IPLSource& source : state->Pool)
             iplSourceCreate(state->ReflectSimulator, &poolSettings, &source);
+        iplSourceCreate(state->ReflectSimulator, &poolSettings, &state->ListenerSource);
+        IPLSourceSettings pathSettings{};
+        pathSettings.flags = IPL_SIMULATIONFLAGS_PATHING;
+        for (IPLSource& source : state->PathPool)
+            iplSourceCreate(state->ReflectSimulator, &pathSettings, &source);
         iplSimulatorCommit(state->ReflectSimulator);
         state->ReflectThread = std::thread(ReflectionThread, state.get());
         s_State = state.release();
-        NOX_CORE_INFO("Steam Audio {}.{}.{}: HRTF, occlusion, transmission and reflections on", STEAMAUDIO_VERSION_MAJOR, STEAMAUDIO_VERSION_MINOR, STEAMAUDIO_VERSION_PATCH);
+        NOX_CORE_INFO("Steam Audio {}.{}.{}: HRTF, occlusion, transmission, reflections, baked reverb and pathing on", STEAMAUDIO_VERSION_MAJOR, STEAMAUDIO_VERSION_MINOR, STEAMAUDIO_VERSION_PATCH);
         return true;
     }
 
@@ -443,6 +560,17 @@ namespace Nox
                 iplSourceRemove(state.Pool[i], state.ReflectSimulator);
             iplSourceRelease(&state.Pool[i]);
         }
+        if (state.ListenerAdded)
+            iplSourceRemove(state.ListenerSource, state.ReflectSimulator);
+        iplSourceRelease(&state.ListenerSource);
+        for (size_t i = 0; i < state.PathPool.size(); ++i)
+        {
+            if (state.PathAdded[i])
+                iplSourceRemove(state.PathPool[i], state.ReflectSimulator);
+            iplSourceRelease(&state.PathPool[i]);
+        }
+        ClearProbeBatches();
+        SyncProbeBatches(state);
         iplSimulatorRelease(&state.ReflectSimulator);
         iplSceneRelease(&state.ReflectScene);
         iplSimulatorRelease(&state.Simulator);
@@ -535,6 +663,8 @@ namespace Nox
         iplSceneCommit(state.ReflectScene);
         iplSimulatorCommit(state.ReflectSimulator);
         state.PoolHasResults.fill(false);
+        state.PathHasResults.fill(false);
+        state.ListenerHasResults = false;
         state.SceneDirty = false;
         state.ReflectDirty = false;
     }
@@ -560,11 +690,12 @@ namespace Nox
             for (auto& [key, instance] : state.Instances)
                 PlaceDirect(state, instance);
 
-        // The origin follows the listener (every instance's transform then moves with it) -- between reflection runs only.
-        const double metersPerUnit = static_cast<double>(WorldUnits::ToMeters(1.0f));
-        if (glm::length(listener - state.Origin) * metersPerUnit > kRebaseMeters && Idle(state))
+        // The origin follows the listener on the grid, or is the baked volume's it is in (every instance's transform moves with
+        // it; the probe batches of the new origin go in) -- between reflection runs only.
+        const glm::dvec3 desired = DesiredOrigin(state, listener);
+        if (desired != state.Origin && Idle(state))
         {
-            state.Origin = listener;
+            state.Origin = desired;
             for (auto& [key, instance] : state.Instances)
             {
                 if (instance.Direct)
@@ -581,7 +712,10 @@ namespace Nox
             state.SimulatorDirty = true;
         }
         if (Idle(state))
+        {
             SyncReflectScene(state);
+            SyncProbeBatches(state);
+        }
     }
 
     SpatialAudio::SceneStats SpatialAudio::GetSceneStats()
@@ -709,6 +843,7 @@ namespace Nox
         stored.Bounces = std::clamp(stored.Bounces, 1, 32);
         stored.Duration = std::clamp(stored.Duration, 0.1f, MaxReflectionDuration);
         stored.MaxSources = std::clamp(stored.MaxSources, 0, MaxReflectionSources);
+        stored.MaxPathingSources = std::clamp(stored.MaxPathingSources, 0, MaxPathingSources);
         stored.Interval = std::max(stored.Interval, 0.0f);
     }
 
@@ -724,52 +859,132 @@ namespace Nox
         return s_State && Idle(*s_State) && s_State->ReflectFinished.exchange(false, std::memory_order_acq_rel);
     }
 
-    void SpatialAudio::StartReflections(const std::vector<std::pair<int32_t, glm::dvec3>>& sources)
+    bool SpatialAudio::StartSimulation(const std::vector<std::pair<int32_t, glm::dvec3>>& reflections, const std::vector<PathingRequest>& pathing)
     {
         if (!s_State || !Idle(*s_State))
-            return;
+            return false;
         State& state = *s_State;
         SyncReflectScene(state);
-        // The pool slots in this run in the simulator, the others out.
+        SyncProbeBatches(state);
+
+        // What this run simulates: the reflection pool slots given, the listener's reverb, the pathing slots whose source and
+        // listener are both inside the active baked volume the listener is in (else there are no probes to find paths between).
         std::array<bool, MaxReflectionSources> wanted{};
-        for (const auto& [slot, position] : sources)
+        for (const auto& [slot, position] : reflections)
             if (slot >= 0 && slot < MaxReflectionSources)
                 wanted[slot] = true;
+        const State::ProbeBatchEntry* listenerBatch = BatchAt(state, state.ListenerPosition);
+        const ListenerReverb reverbMode = state.Settings.Reverb;
+        const bool listenerWanted = reverbMode == ListenerReverb::Realtime || (reverbMode == ListenerReverb::Baked && listenerBatch && listenerBatch->Data->Settings.Reverb);
+        std::array<bool, MaxPathingSources> pathWanted{};
+        for (const PathingRequest& request : pathing)
+            if (request.Slot >= 0 && request.Slot < MaxPathingSources && listenerBatch && listenerBatch->Data->Settings.Pathing && listenerBatch->Data->Contains(request.Position))
+                pathWanted[request.Slot] = true;
+
         bool changed = false;
+        auto setAdded = [&](IPLSource source, bool want, bool& added)
+        {
+            if (want == added)
+                return;
+            if (want)
+                iplSourceAdd(source, state.ReflectSimulator);
+            else
+                iplSourceRemove(source, state.ReflectSimulator);
+            added = want;
+            changed = true;
+        };
         for (int32_t slot = 0; slot < MaxReflectionSources; ++slot)
         {
-            if (wanted[slot] == state.PoolAdded[slot])
-                continue;
-            if (wanted[slot])
-                iplSourceAdd(state.Pool[slot], state.ReflectSimulator);
-            else
-            {
-                iplSourceRemove(state.Pool[slot], state.ReflectSimulator);
+            bool added = state.PoolAdded[slot];
+            setAdded(state.Pool[slot], wanted[slot], added);
+            state.PoolAdded[slot] = added;
+            if (!added)
                 state.PoolHasResults[slot] = false;
-            }
-            state.PoolAdded[slot] = wanted[slot];
-            changed = true;
+        }
+        setAdded(state.ListenerSource, listenerWanted, state.ListenerAdded);
+        if (!state.ListenerAdded)
+            state.ListenerHasResults = false;
+        for (int32_t slot = 0; slot < MaxPathingSources; ++slot)
+        {
+            bool added = state.PathAdded[slot];
+            setAdded(state.PathPool[slot], pathWanted[slot], added);
+            state.PathAdded[slot] = added;
+            if (!added)
+                state.PathHasResults[slot] = false;
         }
         if (changed)
             iplSimulatorCommit(state.ReflectSimulator);
-        if (sources.empty())
-            return;
-        for (const auto& [slot, position] : sources)
+        if (reflections.empty() && !listenerWanted && std::none_of(pathWanted.begin(), pathWanted.end(), [](bool b) { return b; }))
+            return false;
+
+        auto space = [](IPLVector3 origin)
+        {
+            IPLCoordinateSpace3 coordinates{};
+            coordinates.origin = origin;
+            coordinates.right = { 1.0f, 0.0f, 0.0f };
+            coordinates.up = { 0.0f, 1.0f, 0.0f };
+            coordinates.ahead = { 0.0f, 0.0f, -1.0f };
+            return coordinates;
+        };
+        for (const auto& [slot, position] : reflections)
         {
             if (slot < 0 || slot >= MaxReflectionSources)
                 continue;
             IPLSimulationInputs inputs{};
             inputs.flags = IPL_SIMULATIONFLAGS_REFLECTIONS;
-            inputs.source.origin = ToAcoustic(position);
-            inputs.source.right = { 1.0f, 0.0f, 0.0f };
-            inputs.source.up = { 0.0f, 1.0f, 0.0f };
-            inputs.source.ahead = { 0.0f, 0.0f, -1.0f };
+            inputs.source = space(ToAcoustic(position));
             inputs.distanceAttenuationModel.type = IPL_DISTANCEATTENUATIONTYPE_DEFAULT;
             inputs.airAbsorptionModel.type = IPL_AIRABSORPTIONTYPE_DEFAULT;
             inputs.reverbScale[0] = inputs.reverbScale[1] = inputs.reverbScale[2] = 1.0f;
             inputs.baked = IPL_FALSE;
             iplSourceSetInputs(state.Pool[slot], IPL_SIMULATIONFLAGS_REFLECTIONS, &inputs);
+            state.PoolHasResults[slot] = true; // (results once this run finishes)
         }
+        if (listenerWanted)
+        {
+            // Steam Audio's listener-centric reverb: a source at the listener; baked, its response is looked up in the probes.
+            IPLSimulationInputs inputs{};
+            inputs.flags = IPL_SIMULATIONFLAGS_REFLECTIONS;
+            inputs.source = space(ToAcoustic(state.ListenerPosition));
+            inputs.distanceAttenuationModel.type = IPL_DISTANCEATTENUATIONTYPE_DEFAULT;
+            inputs.airAbsorptionModel.type = IPL_AIRABSORPTIONTYPE_DEFAULT;
+            inputs.reverbScale[0] = inputs.reverbScale[1] = inputs.reverbScale[2] = 1.0f;
+            const bool baked = reverbMode == ListenerReverb::Baked;
+            inputs.baked = baked ? IPL_TRUE : IPL_FALSE;
+            inputs.bakedDataIdentifier = { IPL_BAKEDDATATYPE_REFLECTIONS, IPL_BAKEDDATAVARIATION_REVERB };
+            iplSourceSetInputs(state.ListenerSource, IPL_SIMULATIONFLAGS_REFLECTIONS, &inputs);
+            state.ListenerHasResults = true;
+            state.ListenerIrSeconds = baked ? std::min(listenerBatch->Data->Settings.Duration, MaxReflectionDuration) : state.Settings.Duration;
+        }
+        for (const PathingRequest& request : pathing)
+        {
+            if (request.Slot < 0 || request.Slot >= MaxPathingSources || !pathWanted[request.Slot])
+                continue;
+            State::PathCurve& curve = state.PathCurves[request.Slot];
+            const bool curveChanged = curve.Attenuation != request.Attenuation || curve.MinDistance != request.MinDistance || curve.MaxDistance != request.MaxDistance;
+            curve = { request.Attenuation, request.MinDistance, request.MaxDistance };
+            const AcousticBakeSettings& baked = listenerBatch->Data->Settings;
+            IPLSimulationInputs inputs{};
+            inputs.flags = IPL_SIMULATIONFLAGS_PATHING;
+            inputs.source = space(ToAcoustic(request.Position));
+            inputs.distanceAttenuationModel.type = IPL_DISTANCEATTENUATIONTYPE_CALLBACK;
+            inputs.distanceAttenuationModel.callback = PathDistanceCallback;
+            inputs.distanceAttenuationModel.userData = &curve;
+            inputs.distanceAttenuationModel.dirty = curveChanged ? IPL_TRUE : IPL_FALSE;
+            inputs.airAbsorptionModel.type = IPL_AIRABSORPTIONTYPE_DEFAULT;
+            inputs.baked = IPL_TRUE;
+            inputs.bakedDataIdentifier = { IPL_BAKEDDATATYPE_PATHING, IPL_BAKEDDATAVARIATION_DYNAMIC };
+            inputs.pathingProbes = listenerBatch->Batch;
+            inputs.visRadius = baked.VisRadius;
+            inputs.visThreshold = baked.VisThreshold;
+            inputs.visRange = baked.VisRange;
+            inputs.pathingOrder = ReflectionOrder;
+            inputs.enableValidation = IPL_TRUE;    // (the paths checked against the scene now: Steam Audio's default)
+            inputs.findAlternatePaths = IPL_TRUE;
+            iplSourceSetInputs(state.PathPool[request.Slot], IPL_SIMULATIONFLAGS_PATHING, &inputs);
+            state.PathHasResults[request.Slot] = true;
+        }
+
         IPLSimulationSharedInputs shared{};
         shared.listener = ListenerSpace(state, ToAcoustic(state.ListenerPosition));
         shared.numRays = state.Settings.Rays;
@@ -777,16 +992,128 @@ namespace Nox
         shared.duration = state.Settings.Duration;
         shared.order = ReflectionOrder;
         shared.irradianceMinDistance = 1.0f;
-        iplSimulatorSetSharedInputs(state.ReflectSimulator, IPL_SIMULATIONFLAGS_REFLECTIONS, &shared);
-        for (const auto& [slot, position] : sources)
-            if (slot >= 0 && slot < MaxReflectionSources)
-                state.PoolHasResults[slot] = true; // (results once this run finishes)
+        iplSimulatorSetSharedInputs(state.ReflectSimulator, static_cast<IPLSimulationFlags>(IPL_SIMULATIONFLAGS_REFLECTIONS | IPL_SIMULATIONFLAGS_PATHING), &shared);
+        state.RunReflections = !reflections.empty() || listenerWanted;
+        state.RunPathing = std::any_of(pathWanted.begin(), pathWanted.end(), [](bool b) { return b; });
         state.ReflectRunning.store(true, std::memory_order_release);
         {
             std::scoped_lock lock(state.ReflectMutex);
             state.ReflectRequested = true;
         }
         state.ReflectWake.notify_one();
+        return true;
+    }
+
+    bool SpatialAudio::GetListenerReverbParams(IPLReflectionEffectParams& out)
+    {
+        if (!s_State || !s_State->ListenerAdded || !s_State->ListenerHasResults)
+            return false;
+        IPLSimulationOutputs outputs{};
+        iplSourceGetOutputs(s_State->ListenerSource, IPL_SIMULATIONFLAGS_REFLECTIONS, &outputs);
+        out = outputs.reflections;
+        out.type = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION;
+        out.numChannels = ReflectionChannels;
+        out.irSize = static_cast<IPLint32>(s_State->ListenerIrSeconds * static_cast<float>(s_State->SampleRate));
+        return out.ir != nullptr;
+    }
+
+    SpatialAudio::PathingOutputs SpatialAudio::GetPathingOutputs(int32_t slot)
+    {
+        PathingOutputs result;
+        if (!s_State || slot < 0 || slot >= MaxPathingSources || !s_State->PathAdded[slot] || !s_State->PathHasResults[slot])
+            return result;
+        IPLSimulationOutputs outputs{};
+        iplSourceGetOutputs(s_State->PathPool[slot], IPL_SIMULATIONFLAGS_PATHING, &outputs);
+        if (!outputs.pathing.shCoeffs)
+            return result;
+        result.Valid = true;
+        for (int band = 0; band < 3; ++band)
+            result.Eq[band] = outputs.pathing.eqCoeffs[band];
+        for (int c = 0; c < ReflectionChannels; ++c)
+            result.Sh[c] = outputs.pathing.shCoeffs[c];
+        return result;
+    }
+
+    glm::dvec3 SpatialAudio::GridOrigin(const glm::dvec3& world)
+    {
+        const double cell = OriginGridMeters / static_cast<double>(WorldUnits::ToMeters(1.0f));
+        return glm::round(world / cell) * cell;
+    }
+
+    void SpatialAudio::SetProbeBatch(uint64_t key, Ref<AcousticData> data)
+    {
+        if (!s_State)
+            return;
+        State& state = *s_State;
+        auto found = state.Batches.find(key);
+        if (found != state.Batches.end() && found->second.Data == data)
+            return;
+        RemoveProbeBatch(key);
+        if (!data || data->ProbeBatch.empty())
+            return;
+        IPLSerializedObjectSettings serializedSettings{};
+        serializedSettings.data = const_cast<IPLbyte*>(reinterpret_cast<const IPLbyte*>(data->ProbeBatch.data()));
+        serializedSettings.size = data->ProbeBatch.size();
+        IPLSerializedObject serialized = nullptr;
+        IPLProbeBatch batch = nullptr;
+        if (iplSerializedObjectCreate(state.Context, &serializedSettings, &serialized) != IPL_STATUS_SUCCESS)
+            return;
+        const IPLerror loaded = iplProbeBatchLoad(state.Context, serialized, &batch);
+        iplSerializedObjectRelease(&serialized);
+        if (loaded != IPL_STATUS_SUCCESS || !batch)
+        {
+            NOX_CORE_WARN("Steam Audio: baked acoustic data could not be read (bake the volume again)");
+            return;
+        }
+        iplProbeBatchCommit(batch);
+        State::ProbeBatchEntry& entry = state.Batches[key];
+        entry.Data = std::move(data);
+        entry.Batch = batch;
+        entry.Added = false; // (in the simulator at the next sync, when its origin is the current one)
+    }
+
+    void SpatialAudio::RemoveProbeBatch(uint64_t key)
+    {
+        if (!s_State)
+            return;
+        State& state = *s_State;
+        const auto found = state.Batches.find(key);
+        if (found == state.Batches.end())
+            return;
+        if (found->second.Added)
+            state.RetiredBatches.push_back(found->second.Batch); // (out of the simulator between runs)
+        else
+            iplProbeBatchRelease(&found->second.Batch);
+        state.Batches.erase(found);
+    }
+
+    void SpatialAudio::ClearProbeBatches()
+    {
+        if (!s_State)
+            return;
+        std::vector<uint64_t> keys;
+        for (const auto& [key, entry] : s_State->Batches)
+            keys.push_back(key);
+        for (uint64_t key : keys)
+            RemoveProbeBatch(key);
+    }
+
+    SpatialAudio::ProbeStats SpatialAudio::GetProbeStats()
+    {
+        ProbeStats stats;
+        if (!s_State)
+            return stats;
+        for (const auto& [key, entry] : s_State->Batches)
+        {
+            ++stats.Batches;
+            if (entry.Added)
+            {
+                ++stats.Active;
+                stats.Probes += entry.Data->ProbeCount;
+            }
+        }
+        stats.ListenerInside = BatchAt(*s_State, s_State->ListenerPosition) != nullptr;
+        return stats;
     }
 
     bool SpatialAudio::GetReflectionParams(int32_t slot, IPLReflectionEffectParams& out)

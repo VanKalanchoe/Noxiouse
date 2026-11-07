@@ -26,7 +26,18 @@ namespace Nox
         None           // no falloff (panned only), up to Max Distance
     };
 
+    // The gain at `distance` (meters) between Min Distance (1) and Max Distance (0) on a curve: the engine's direct sound and Steam
+    // Audio's paths (pathing) fall off alike.
+    float AudioAttenuationGain(AudioAttenuation attenuation, float minDistance, float maxDistance, float distance);
+
     std::string_view AudioAttenuationToString(AudioAttenuation attenuation);
+
+    // The reverb at the listener that the Acoustic Reverb effect applies (Steam Audio's listener-centric reverb, its Unity
+    // listener's Reverb Type): none, traced in real time from the listener, or looked up in the baked probes of the Acoustic Probe
+    // Volume the listener is in (none outside every baked volume).
+    enum class AudioListenerReverb : uint8_t { Off = 0, Realtime, Baked };
+    std::string_view AudioListenerReverbToString(AudioListenerReverb reverb);
+    AudioListenerReverb AudioListenerReverbFromString(std::string_view name);
     AudioAttenuation AudioAttenuationFromString(std::string_view name);
 
     // How a clip is held while it plays (Unity's Load Type, Unreal's decompression threshold).

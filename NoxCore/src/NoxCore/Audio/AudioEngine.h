@@ -32,6 +32,8 @@ namespace Nox
         bool Occlusion = true;     // muffled by geometry in the way, passing through by its acoustic material (transmission)
         float SourceRadius = 0.5f; // meters: the sound's size for occlusion -- partly hidden behind a corner is partly occluded
         bool Reflections = true;   // gets real-time reflections when it is among the nearest (the reflections' budget)
+        bool Pathing = false;      // reaches around corners and through doors along the paths baked in Acoustic Probe Volumes:
+                                   // what occlusion takes from the direct sound comes back along them (Steam Audio's pathing)
     };
 
     // Steam Audio's real-time reflections (§6, A4b): the mixer's Acoustics settings.
@@ -44,6 +46,10 @@ namespace Nox
         int32_t MaxSources = 4;     // voices with reflections at once (the nearest; each convolution costs mixer time)
         uint64_t Bus = kAudioBusMaster; // where the reflections are heard
         float LevelDb = 0.0f;
+        // A4c: the reverb at the listener the Acoustic Reverb effect applies, and how many sounds get pathing at once (the nearest
+        // with Pathing on, inside the baked volume the listener is in).
+        AudioListenerReverb ListenerReverb = AudioListenerReverb::Baked;
+        int32_t PathingSources = 8;
         bool operator==(const AudioReflectionSettings&) const = default;
     };
 
@@ -209,6 +215,8 @@ namespace Nox
             float Milliseconds = 0.0f; // the last run's time on the reflection thread
             float Peak = 0.0f, Rms = 0.0f; // linear: what the reflections alone add to their bus (after Level)
             int32_t Voices = 0;            // voices with reflections now
+            int32_t PathingVoices = 0;     // voices with pathing now (their paths found)
+            bool ListenerReverb = false;   // a reverb at the listener now (the Acoustic Reverb effects have one to apply)
         };
         static ReflectionStats GetReflectionStats();
         static bool GetHeadphones();

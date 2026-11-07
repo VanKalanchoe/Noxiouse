@@ -1,9 +1,59 @@
 #include "AudioTypes.h"
 
+#include <algorithm>
+
 #include <iterator>
 
 namespace Nox
 {
+    float AudioAttenuationGain(AudioAttenuation attenuation, float minDistance, float maxDistance, float distance)
+    {
+        const float minimum = std::max(minDistance, 0.001f);
+        const float maximum = std::max(maxDistance, minimum + 0.001f);
+        if (distance <= minimum)
+            return 1.0f;
+        if (distance >= maximum)
+            return 0.0f;
+        switch (attenuation)
+        {
+        case AudioAttenuation::Inverse:
+        {
+            const float gain = minimum / distance;
+            const float atMax = minimum / maximum;
+            return (gain - atMax) / (1.0f - atMax);
+        }
+        case AudioAttenuation::InverseSquare:
+        {
+            const float gain = (minimum / distance) * (minimum / distance);
+            const float atMax = (minimum / maximum) * (minimum / maximum);
+            return (gain - atMax) / (1.0f - atMax);
+        }
+        case AudioAttenuation::Linear:
+            return 1.0f - (distance - minimum) / (maximum - minimum);
+        case AudioAttenuation::None:
+            return 1.0f;
+        }
+        return 1.0f;
+    }
+
+    std::string_view AudioListenerReverbToString(AudioListenerReverb reverb)
+    {
+        switch (reverb)
+        {
+        case AudioListenerReverb::Off: return "Off";
+        case AudioListenerReverb::Realtime: return "Realtime";
+        case AudioListenerReverb::Baked: return "Baked";
+        }
+        return "Baked";
+    }
+
+    AudioListenerReverb AudioListenerReverbFromString(std::string_view name)
+    {
+        if (name == "Off") return AudioListenerReverb::Off;
+        if (name == "Realtime") return AudioListenerReverb::Realtime;
+        return AudioListenerReverb::Baked;
+    }
+
     std::string_view AudioAttenuationToString(AudioAttenuation attenuation)
     {
         switch (attenuation)

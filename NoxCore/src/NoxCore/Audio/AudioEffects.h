@@ -29,6 +29,7 @@ namespace Nox
         Phaser,
         Distortion,        // soft / hard clip, foldback, tube; oversampled 2x
         Bitcrusher,
+        AcousticReverb,    // Steam Audio's reverb at the listener (baked probes or traced): created by the engine, not CreateAudioEffect
         Count
     };
 
@@ -103,6 +104,7 @@ namespace Nox
     };
 
     // Game thread: an effect running at `sampleRate`, its parameters at their defaults. `impulse`: the Convolution Reverb's impulse
-    // response (mono or stereo, any rate -- resampled; up to 10 seconds used); without one it is silent.
+    // response (mono or stereo, any rate -- resampled; up to 10 seconds used); without one it is silent. Null for the Acoustic
+    // Reverb: it lives in the mixer (AudioEngine), where Steam Audio's reverb at the listener is.
     std::unique_ptr<AudioEffect> CreateAudioEffect(AudioEffectType type, float sampleRate, const AudioClip* impulse = nullptr);
 }

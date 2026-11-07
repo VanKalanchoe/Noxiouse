@@ -11,6 +11,7 @@
 #include <phonon.h>
 
 #include "NoxCore/Asset/Asset.h"
+#include "AcousticData.h"
 #include "AudioTypes.h"
 
 namespace Nox
@@ -108,6 +109,7 @@ namespace Nox
         // occlusion above never waits for it), for a budget of the voices nearest the listener: each gets the reflections of one of
         // a pool of reflection sources. Each voice's response (ambisonics, order 1) is convolved through Steam Audio's reflection
         // mixer, decoded once for all.
+        using ListenerReverb = AudioListenerReverb; // (real time: one more reflection source, at the listener)
         struct ReflectionSettings
         {
             bool Enabled = true;
@@ -116,8 +118,11 @@ namespace Nox
             float Duration = 1.0f;       // seconds of response simulated and convolved (up to MaxReflectionDuration)
             int32_t MaxSources = 4;      // voices with reflections at once (up to MaxReflectionSources): ~0.15-0.3 ms of mixing each
             float Interval = 0.1f;       // seconds between runs at most often
+            ListenerReverb Reverb = ListenerReverb::Baked;
+            int32_t MaxPathingSources = 8; // voices with pathing at once (up to MaxPathingSources)
         };
         static constexpr int32_t MaxReflectionSources = 16;
+        static constexpr int32_t MaxPathingSources = 16;
         static constexpr float MaxReflectionDuration = 1.5f;
         static constexpr int32_t ReflectionOrder = 1;
         static constexpr int32_t ReflectionChannels = 4; // (order + 1)^2
@@ -127,11 +132,53 @@ namespace Nox
         static bool ReflectionsIdle();
         // True once after each finished run: GetReflectionParams then gives its results.
         static bool TakeReflectionResults();
-        // Starts a run (when idle) for the pool slots given a position (world units); the others are left out.
-        static void StartReflections(const std::vector<std::pair<int32_t, glm::dvec3>>& sources);
+        // A voice's pathing (A4c): where it is and how it falls off with distance (paths are longer than the straight line).
+        struct PathingRequest
+        {
+            int32_t Slot = -1;            // in the pathing pool
+            glm::dvec3 Position{ 0.0 };   // world units
+            AudioAttenuation Attenuation = AudioAttenuation::Inverse;
+            float MinDistance = 1.0f;     // meters
+            float MaxDistance = 50.0f;
+        };
+        // Starts a run (when idle): reflections for the pool slots given a position (world units), pathing for the pathing slots
+        // given, and the listener's reverb (ReflectionSettings::Reverb); the slots not given are left out. False: no run started
+        // (not idle, or nothing to simulate).
+        static bool StartSimulation(const std::vector<std::pair<int32_t, glm::dvec3>>& reflections, const std::vector<PathingRequest>& pathing);
         // The effect parameters a pool slot's last run produced (false: none yet).
         static bool GetReflectionParams(int32_t slot, IPLReflectionEffectParams& out);
+        // The reverb at the listener from the last run (false: none -- Off, or Baked outside every baked volume).
+        static bool GetListenerReverbParams(IPLReflectionEffectParams& out);
+        // A pathing slot's last run: the paths' EQ and their directions (order-1 ambisonics, world space). Not valid when the
+        // listener or the source was outside every active baked volume (no probes to find paths between).
+        struct PathingOutputs
+        {
+            bool Valid = false;
+            float Eq[3] = { 1.0f, 1.0f, 1.0f };
+            float Sh[ReflectionChannels] = {};
+        };
+        static PathingOutputs GetPathingOutputs(int32_t slot);
         static float GetLastReflectionMilliseconds();
+
+        // ---- Baked acoustics (A4c): Acoustic Probe Volumes' probe batches ------------------------------------------------------
+        // The acoustic origin (where Steam Audio's meters start) is on a grid OriginGridMeters apart: the grid point nearest the
+        // listener, kept until the listener is 3/4 of a cell away -- and, inside a baked volume, that volume's own. A volume is
+        // baked around the grid point nearest its center, and its probes are in the simulation while that is the origin.
+        static constexpr double OriginGridMeters = 1000.0;
+        static glm::dvec3 GridOrigin(const glm::dvec3& world); // world units
+        // A volume's baked data, by a key of the caller's (its entity's id): added, or replaced. Loaded here (Steam Audio's probe
+        // batch read from the bytes); in the simulation from the next run whose origin is its.
+        static void SetProbeBatch(uint64_t key, Ref<AcousticData> data);
+        static void RemoveProbeBatch(uint64_t key);
+        static void ClearProbeBatches();
+        struct ProbeStats
+        {
+            uint32_t Batches = 0;
+            uint32_t Active = 0;      // in the simulation (their origin is the current one)
+            uint32_t Probes = 0;      // in the active ones
+            bool ListenerInside = false;
+        };
+        static ProbeStats GetProbeStats();
 
         // Meters around the origin (what Steam Audio sees) from world units.
         static IPLVector3 ToAcoustic(const glm::dvec3& world);

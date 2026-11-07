@@ -35,7 +35,9 @@ namespace Nox
 
         AudioGraph, // NodeGraph/NodeGraphAsset.h wrapping a NodeGraph whose Domain is "AudioGraph" (.naudiograph): a procedural sound
 
-        AudioMixer // Audio/AudioMixer.h: the project's buses, effects, sends and snapshots (.nmixer), run by AudioMixer
+        AudioMixer, // Audio/AudioMixer.h: the project's buses, effects, sends and snapshots (.nmixer), run by AudioMixer
+
+        AcousticData // Audio/AcousticData.h: an Acoustic Probe Volume's baked reverb and pathing (.nacoustics), made by its Bake button
     };
 
     // Where an asset is on its way into memory (§5.11.2). A request starts the load once; the asset is usable when Ready.

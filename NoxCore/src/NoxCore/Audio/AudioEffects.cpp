@@ -119,6 +119,10 @@ namespace Nox
                   P("Tone", 500.0f, 20000.0f, 8000.0f, "Hz", true), P("Output", -48.0f, 12.0f, -6.0f, "dB"), P("Mix", 0.0f, 1.0f, 1.0f) });
             set(AudioEffectType::Bitcrusher, "Bitcrusher", "Fewer bits, a lower sample rate: lo-fi.",
                 { P("Bits", 1.0f, 24.0f, 8.0f), P("Sample Rate", 500.0f, 48000.0f, 8000.0f, "Hz", true), P("Mix", 0.0f, 1.0f, 1.0f) });
+            set(AudioEffectType::AcousticReverb, "Acoustic Reverb",
+                "The reverb of the place the listener is in, from the level's geometry (Steam Audio): baked in Acoustic Probe Volumes, or\n"
+                "traced in real time (Mixer > Acoustics > Listener Reverb). Put it on a bus that sounds are sent to, like a Reverb bus.",
+                { P("Wet", kSilenceDb, 12.0f, 0.0f, "dB"), P("Dry", kSilenceDb, 12.0f, kSilenceDb, "dB"), Toggle("HRTF", false) });
             return infos;
         }
 
