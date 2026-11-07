@@ -1209,7 +1209,7 @@ namespace Nox
         case 4: return type == AssetType::Prefab;
         case 5: return type == AssetType::Scene;
         case 6: return type == AssetType::AnimationSequence || type == AssetType::Skeleton || type == AssetType::AnimationGraph;
-        case 7: return type == AssetType::AudioClip || type == AssetType::AudioGraph;
+        case 7: return type == AssetType::AudioClip || type == AssetType::AudioGraph || type == AssetType::AudioMixer;
         default: return true;
         }
     }
@@ -1385,7 +1385,7 @@ namespace Nox
             m_PreviewPending = false;
             AudioPlayDesc desc;
             desc.Graph = program;
-            desc.Bus = AudioBus::Master;
+            desc.Bus = kAudioBusMaster;
             desc.Group = AudioVoiceGroup::Editor;
             m_PreviewVoice = AudioEngine::Play(desc);
             return;
@@ -1401,7 +1401,7 @@ namespace Nox
         m_PreviewPending = false;
         AudioPlayDesc desc;
         desc.Clip = AssetManager::GetAsset<AudioClip>(m_PreviewClip);
-        desc.Bus = AudioBus::Master;
+        desc.Bus = kAudioBusMaster;
         desc.Group = AudioVoiceGroup::Editor;
         m_PreviewVoice = AudioEngine::Play(desc);
     }

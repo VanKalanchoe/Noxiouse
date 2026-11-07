@@ -24,6 +24,7 @@
 #include "NoxCore/Audio/AudioClip.h"
 #include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Audio/AudioGraph.h"
+#include "NoxCore/Audio/AudioMixer.h"
 #include "NoxCore/NodeGraph/NodeGraphAsset.h"
 #include "NoxCore/Physics/Physics2D.h"
 #include "NoxCore/Physics/Physics3DScene.h"
@@ -1806,7 +1807,9 @@ namespace Nox
         // Every game voice: the sources' and the scripts' one-shots alike.
         AudioEngine::StopGroup(AudioVoiceGroup::Game);
         AudioEngine::SetGroupPaused(AudioVoiceGroup::Game, false);
+        AudioMixer::ResetGameState(); // the snapshot and the bus volumes the game set: back to the mix
         m_PendingOneShots.clear();
+        m_OneShotVoices.clear();
         for (auto handle : m_Registry.view<AudioSourceComponent>())
         {
             auto& source = m_Registry.get<AudioSourceComponent>(handle);
@@ -1865,6 +1868,8 @@ namespace Nox
             desc.Position = world->GetPosition();
         else
             desc.Position = entity.GetComponent<TransformComponent>().Translation;
+        source.Environment = desc.Spatial ? AudioEnvironmentAt(desc.Position).Target : AudioVoiceEnvironment{};
+        desc.Environment = source.Environment;
         source.Voice = AudioEngine::Play(desc);
     }
 
@@ -1886,7 +1891,7 @@ namespace Nox
         return source.PendingPlay || AudioEngine::IsPlaying(source.Voice);
     }
 
-    void Scene::PlayOneShot(AssetHandle sound, const glm::dvec3& position, float volume, bool spatial, AudioBus bus)
+    void Scene::PlayOneShot(AssetHandle sound, const glm::dvec3& position, float volume, bool spatial, uint64_t bus)
     {
         const AssetType type = sound != 0 ? AssetManager::GetAssetType(sound) : AssetType::None;
         if (!m_AudioRunning || (type != AssetType::AudioClip && type != AssetType::AudioGraph))
@@ -1920,7 +1925,10 @@ namespace Nox
                 return false;
             shot.Desc.Clip = AssetManager::GetAsset<AudioClip>(shot.Sound);
         }
-        AudioEngine::Play(shot.Desc);
+        if (shot.Desc.Spatial)
+            shot.Desc.Environment = AudioEnvironmentAt(shot.Desc.Position).Target;
+        if (const AudioVoiceHandle voice = AudioEngine::Play(shot.Desc); voice && shot.Desc.Spatial)
+            m_OneShotVoices.push_back({ voice, shot.Desc.Position, shot.Desc.Environment });
         return true;
     }
 
@@ -1964,6 +1972,28 @@ namespace Nox
         // (the rotation without the scale)
         const glm::mat3 basis(glm::normalize(glm::vec3(listener[0])), glm::normalize(glm::vec3(listener[1])), glm::normalize(glm::vec3(listener[2])));
         AudioEngine::SetListener(glm::dvec3(listener[3]), glm::quat_cast(basis));
+        m_AudioListenerPosition = glm::dvec3(listener[3]);
+        const auto now = std::chrono::steady_clock::now();
+        const float deltaSeconds = m_AudioLastUpdate == std::chrono::steady_clock::time_point{} ? 0.0f
+            : std::min(std::chrono::duration<float>(now - m_AudioLastUpdate).count(), 0.25f);
+        m_AudioLastUpdate = now;
+
+        // Audio Volumes: each 3D voice's filtering and reverb send, blending toward where the volumes now want it.
+        auto blend = [deltaSeconds](AudioVoiceEnvironment& current, const AudioEnvironment& wanted)
+        {
+            const float t = std::clamp(deltaSeconds / std::max(wanted.FadeTime, 1e-3f), 0.0f, 1.0f);
+            current.Volume += (wanted.Target.Volume - current.Volume) * t;
+            current.LowPassHz *= std::pow(std::max(wanted.Target.LowPassHz, 10.0f) / std::max(current.LowPassHz, 10.0f), t); // (in octaves)
+            if (current.SendBus != wanted.Target.SendBus)
+            {
+                // Out of one reverb's room into another's: the old send fades out first, then the new one fades in.
+                current.SendLevel -= std::min(current.SendLevel, t);
+                if (current.SendLevel <= 1e-4f)
+                    current.SendBus = wanted.Target.SendBus;
+            }
+            else
+                current.SendLevel += (wanted.Target.SendLevel - current.SendLevel) * t;
+        };
 
         // One-shots whose sound has come in since.
         std::erase_if(m_PendingOneShots, [this](PendingOneShot& shot) { return StartOneShot(shot); });
@@ -1982,12 +2012,71 @@ namespace Nox
             }
             // What the Inspector or a script changed while it plays.
             if (const auto* world = m_Registry.try_get<WorldTransformComponent>(handle))
+            {
                 AudioEngine::SetPosition(source.Voice, world->GetPosition());
+                if (source.Spatial)
+                {
+                    blend(source.Environment, AudioEnvironmentAt(world->GetPosition()));
+                    AudioEngine::SetVoiceEnvironment(source.Voice, source.Environment);
+                }
+            }
             AudioEngine::SetVolume(source.Voice, source.Volume);
             AudioEngine::SetPitch(source.Voice, source.Pitch);
             AudioEngine::SetLoop(source.Voice, source.Loop);
             AudioEngine::SetSpatialization(source.Voice, source.Spatialization);
         }
+        std::erase_if(m_OneShotVoices, [&](OneShotVoice& shot)
+        {
+            if (!AudioEngine::IsPlaying(shot.Voice))
+                return true;
+            blend(shot.Environment, AudioEnvironmentAt(shot.Position));
+            AudioEngine::SetVoiceEnvironment(shot.Voice, shot.Environment);
+            return false;
+        });
+    }
+
+    Scene::AudioEnvironment Scene::AudioEnvironmentAt(const glm::dvec3& position) const
+    {
+        // The highest-priority volume containing a point (the first one found among equals).
+        auto volumeAt = [this](const glm::dvec3& point) -> const AudioVolumeComponent*
+        {
+            const AudioVolumeComponent* best = nullptr;
+            for (auto handle : m_Registry.view<AudioVolumeComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>))
+            {
+                const auto& volume = m_Registry.get<AudioVolumeComponent>(handle);
+                if (best && volume.Priority <= best->Priority)
+                    continue;
+                const glm::vec3 local = glm::vec3(glm::inverse(m_Registry.get<WorldTransformComponent>(handle).WorldMatrix) * glm::dvec4(point, 1.0));
+                if (glm::all(glm::lessThanEqual(glm::abs(local), volume.HalfExtents)))
+                    best = &volume;
+            }
+            return best;
+        };
+        const AudioVolumeComponent* sound = volumeAt(position);
+        const AudioVolumeComponent* listener = volumeAt(m_AudioListenerPosition);
+        AudioEnvironment environment;
+        if (sound && sound->ReverbBus != 0)
+        {
+            environment.Target.SendBus = sound->ReverbBus;
+            environment.Target.SendLevel = std::max(sound->ReverbSend, 0.0f);
+        }
+        if (sound != listener)
+        {
+            // Through the walls (Unreal's interior settings): out of the listener's room, into the sound's.
+            if (listener)
+            {
+                environment.Target.Volume *= std::max(listener->ExteriorVolume, 0.0f);
+                environment.Target.LowPassHz = std::min(environment.Target.LowPassHz, listener->ExteriorLowPass);
+            }
+            if (sound)
+            {
+                environment.Target.Volume *= std::max(sound->InteriorVolume, 0.0f);
+                environment.Target.LowPassHz = std::min(environment.Target.LowPassHz, sound->InteriorLowPass);
+            }
+        }
+        const AudioVolumeComponent* timing = listener ? listener : sound;
+        environment.FadeTime = timing ? timing->FadeTime : 0.5f;
+        return environment;
     }
 
     void Scene::OnAudioSourceDestroyed(entt::registry& registry, entt::entity entity)
@@ -2765,7 +2854,7 @@ namespace Nox
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
             PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent,
-            AudioSourceComponent, AudioListenerComponent, FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
+            AudioSourceComponent, AudioListenerComponent, AudioVolumeComponent, FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
             CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent, PhysicsJoint3DComponent, CollisionFilter3DComponent,
@@ -3370,6 +3459,11 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<AudioListenerComponent>(Entity entity, AudioListenerComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<AudioVolumeComponent>(Entity entity, AudioVolumeComponent& component)
     {
     }
 

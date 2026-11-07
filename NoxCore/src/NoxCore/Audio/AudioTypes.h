@@ -5,22 +5,15 @@
 
 namespace Nox
 {
-    // The mixer's buses (docs/Audio_Architecture_Plan_2026.md §7). Every sound plays into one; each top bus has a volume (a game's
-    // Music / SFX / Voice options) and they all sum into Master. The bus tree, effects, sends and snapshots are phase A3's Mixer asset.
-    enum class AudioBus : uint8_t
-    {
-        Master = 0,
-        Music,
-        SFX,
-        Voice,
-        UI,
-        Ambience,
-        Count
-    };
-
-    std::string_view AudioBusToString(AudioBus bus);
-    // Master when the name is not a bus.
-    AudioBus AudioBusFromString(std::string_view name);
+    // The mixer's buses (docs/Audio_Architecture_Plan_2026.md §7) are the .nmixer asset's (AudioMixer.h), named by id. A new mixer
+    // starts with these, at fixed ids every project shares; buses added in the Mixer panel get random ones.
+    inline constexpr uint64_t kAudioBusMaster = 1;
+    inline constexpr uint64_t kAudioBusMusic = 2;
+    inline constexpr uint64_t kAudioBusSFX = 3;
+    inline constexpr uint64_t kAudioBusVoice = 4;
+    inline constexpr uint64_t kAudioBusUI = 5;
+    inline constexpr uint64_t kAudioBusAmbience = 6;
+    inline constexpr uint64_t kAudioBusReverb = 7;
 
     // How the volume falls with distance between Min Distance (full volume) and Max Distance (silent) -- Godot's and Unity's
     // rolloff curves. The inverse curves are brought down to exactly zero at Max Distance (as Unreal's attenuation always is), so a

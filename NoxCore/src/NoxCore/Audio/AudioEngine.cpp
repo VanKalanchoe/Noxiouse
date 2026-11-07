@@ -9,10 +9,16 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <vector>
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    #include <xmmintrin.h>
+    #define NOX_AUDIO_SSE 1
+#endif
 
 #include <miniaudio.h>
 
+#include "AudioDSP.h"
 #include "AudioGraph.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/WorldUnits.h"
@@ -34,7 +40,6 @@ namespace Nox
     namespace
     {
         constexpr uint32_t kBlock = AudioEngine::BlockFrames;
-        constexpr uint32_t kBusCount = static_cast<uint32_t>(AudioBus::Count);
         constexpr uint32_t kGroupCount = static_cast<uint32_t>(AudioVoiceGroup::Count);
         constexpr uint32_t kOutputRingFrames = 8192;  // the mixer's lead over the device (it keeps a period + 2 blocks in it)
         constexpr uint32_t kStagingFrames = 4096;     // a streamed voice's decoded frames at hand for one block's resampling
@@ -109,8 +114,15 @@ namespace Nox
             BusGain,
             SetParameter,
             FireParameter,
-            SetConstant
+            SetConstant,
+            SetLayout,
+            VoiceBus,
+            EffectParameter,
+            EffectBypass,
+            SendGain
         };
+
+        struct MixerLayout;
 
         struct Command
         {
@@ -120,15 +132,20 @@ namespace Nox
             const AudioClip* Clip = nullptr;
             StreamState* Stream = nullptr;
             AudioGraphInstance* Graph = nullptr;
-            int32_t Parameter = -1; // SetParameter / FireParameter
+            MixerLayout* Layout = nullptr; // SetLayout
+            int32_t Parameter = -1; // SetParameter / FireParameter; EffectParameter / EffectBypass: the effect; SendGain: the send
+            uint32_t Index = 0;     // EffectParameter: the parameter
             uint64_t StartFrame = 0;
-            uint8_t Bus = 0;
+            uint16_t Bus = 0;       // a bus index (Start, VoiceBus, BusGain and the bus commands)
+            int16_t SendBus = -1;   // Start / Update / VoiceBus: the voice's environment send (-1: none)
             uint8_t Group = 0;
             bool Downmix = false; // a 3D stereo clip is heard as one point: its channels summed before panning
             // Start / Update
             float GainL = 0.0f;
             float GainR = 0.0f;
             float Rate = 1.0f;
+            float LowPass = 20000.0f;
+            float SendGain = 0.0f;
             // Start (fade in), Stop / StopGroup (fade out), BusGain (gain)
             float Value = 0.0f;
             bool Flag = false; // Loop, paused
@@ -151,8 +168,15 @@ namespace Nox
             uint32_t Channels = 1;
             bool Loop = false;
             bool Downmix = false;
-            uint8_t Bus = 0;
+            uint16_t Bus = 0;
             uint8_t Group = 0;
+            // The environment (Audio Volumes): a low pass and a send.
+            int32_t SendBus = -1;
+            float SendGain = 0.0f, SendApplied = 0.0f;
+            float LowPass = 20000.0f;
+            bool LowPassActive = false;
+            AudioDSP::FrequencyRamp LowPassRamp;
+            AudioDSP::Biquad LowPassFilter[2];
             int64_t Frame = 0; // the playhead: decoded clip frame, or a streamed voice's frame counted from its start
             double Fraction = 0.0;
             float Rate = 1.0f;
@@ -178,6 +202,52 @@ namespace Nox
             glm::dvec3 PreviousPosition{ 0.0 };
             glm::vec3 Velocity{ 0.0f };
             bool HasPrevious = false;
+            AudioVoiceEnvironment Environment;
+        };
+
+        // ---- The mixer's buses as they run (built on the game thread from an AudioMixerLayoutDesc, swapped in by a command) -----
+
+        constexpr float kLowPassOff = 19999.0f; // a voice's low pass at or above this is not run
+
+        struct RuntimeEffect
+        {
+            std::shared_ptr<AudioEffect> Instance; // (shared with the game side's cache: kept across layouts; never released here)
+            bool Bypass = false;
+            int32_t Sidechain = -1;
+        };
+
+        struct RuntimeSend
+        {
+            int32_t Target = -1;
+            float Gain = 0.0f;
+            float Applied = 0.0f;
+            bool PreFader = false;
+        };
+
+        struct RuntimeBus
+        {
+            uint64_t Id = 0;
+            int32_t Parent = -1;
+            bool PlaysWhilePaused = false;
+            std::vector<RuntimeEffect> Effects;
+            std::vector<RuntimeSend> Sends;
+            int32_t DuckSource = -1;
+            float DuckDepthDb = 0.0f;
+            float DuckThreshold = 0.0f;  // linear
+            float DuckAttack = 0.0f;     // per-block smoothing coefficients
+            float DuckRelease = 0.0f;
+            float DuckDb = 0.0f;         // the ducking now (<= 0)
+            float Target = 1.0f;         // the fader (linear)
+            float Applied = 1.0f;        // fader x ducking at the end of the last block
+            float PowerLeft = 0.0f, PowerRight = 0.0f; // the RMS meters' mean squares
+            alignas(16) float Left[kBlock] = {};
+            alignas(16) float Right[kBlock] = {};
+        };
+
+        struct MixerLayout
+        {
+            std::vector<RuntimeBus> Buses;  // [0]: Master
+            std::vector<uint32_t> Order;    // every bus after its children, its send sources and its sidechain / ducking sources
         };
 
         struct MixParams
@@ -204,21 +274,29 @@ namespace Nox
 
             SpscQueue<Command, 8192> Commands;
             SpscQueue<FinishedEvent, 256> Finished;
+            SpscQueue<MixerLayout*, 64> Retired; // layouts the mixer replaced, back to the game thread to be freed
 
             // Mixer side.
             std::array<MixVoice, AudioEngine::MaxVoices> MixVoices;
-            std::array<float, kBusCount> BusGain{};
-            std::array<float, kBusCount> BusTarget{};
+            MixerLayout* Layout = nullptr;
             std::array<bool, kGroupCount> GroupPaused{};
-            std::array<std::array<float, kBlock * 2>, kBusCount> BusBuffers{};
+            std::array<float, kBlock * 2> VoiceBuffer{}; // one voice's block, interleaved
             std::array<float, kBlock * 2> Block{};
 
             // Game side.
             std::array<GameVoice, AudioEngine::MaxVoices> GameVoices;
             std::vector<uint32_t> FreeSlots;
-            std::array<float, kBusCount> BusVolume{};
-            std::array<bool, kBusCount> BusMuted{};
             std::array<bool, kGroupCount> GamePaused{};
+            MixerLayout* GameLayout = nullptr;   // the last layout sent (the game thread reads only its ids and effect instances)
+            std::unordered_map<uint64_t, uint32_t> BusIndex; // bus id -> index in it
+            struct CachedEffect
+            {
+                AudioEffectType Type = AudioEffectType::EQ;
+                const AudioClip* Impulse = nullptr;
+                Ref<AudioClip> ImpulseRef;
+                std::shared_ptr<AudioEffect> Instance;
+            };
+            std::unordered_map<uint64_t, CachedEffect> Effects; // by bus id ^ effect id hash
             glm::dvec3 ListenerPosition{ 0.0 };
             glm::quat ListenerOrientation{ 1.0f, 0.0f, 0.0f, 0.0f };
             glm::dvec3 ListenerPrevious{ 0.0 };
@@ -238,7 +316,7 @@ namespace Nox
             std::atomic<uint64_t> Starvations{ 0 };
             std::atomic<float> MixAverage{ 0.0f };
             std::atomic<float> MixMax{ 0.0f };
-            std::array<std::atomic<float>, kBusCount> BusPeak{};
+            std::array<std::atomic<float>, AudioEngine::MaxBuses * 5> BusMeters{}; // per bus: peak L / R, RMS L / R, gain reduction
             std::array<std::atomic<float>, AudioEngine::MaxVoices * 2> VoicePeak{};
             std::atomic<bool> MixerReady{ false };
         };
@@ -281,6 +359,18 @@ namespace Nox
                 voice.Downmix = command.Downmix;
                 voice.Bus = command.Bus;
                 voice.Group = command.Group;
+                voice.SendBus = command.SendBus;
+                voice.SendGain = voice.SendApplied = command.SendGain;
+                voice.LowPass = command.LowPass;
+                voice.LowPassRamp = {};
+                voice.LowPassFilter[0].Reset();
+                voice.LowPassFilter[1].Reset();
+                voice.LowPassActive = command.LowPass < kLowPassOff;
+                if (voice.LowPassActive)
+                {
+                    float from, to;
+                    voice.LowPassRamp.Begin(command.LowPass, static_cast<float>(state.SampleRate), from, to); // (filtered from its first frame)
+                }
                 voice.Frame = command.Stream ? 0 : static_cast<int64_t>(command.StartFrame);
                 voice.Fraction = 0.0;
                 voice.Rate = command.Rate;
@@ -308,6 +398,9 @@ namespace Nox
                 voice.TargetL = command.GainL;
                 voice.TargetR = command.GainR;
                 voice.Rate = command.Rate;
+                voice.LowPass = command.LowPass;
+                voice.SendBus = command.SendBus;
+                voice.SendGain = command.SendGain;
                 break;
             }
             case CommandType::SetLoop:
@@ -330,7 +423,74 @@ namespace Nox
                 }
                 break;
             case CommandType::BusGain:
-                state.BusTarget[command.Bus] = command.Value;
+                if (state.Layout && command.Bus < state.Layout->Buses.size())
+                    state.Layout->Buses[command.Bus].Target = command.Value;
+                break;
+            case CommandType::SetLayout:
+            {
+                // What carries on from the old layout: a bus's fader and ducking where they were (no jump), its meters' memory, its
+                // sends' gains. (The effect instances the two share are the same objects.)
+                MixerLayout* old = state.Layout;
+                MixerLayout* layout = command.Layout;
+                if (old)
+                {
+                    for (RuntimeBus& bus : layout->Buses)
+                    {
+                        for (const RuntimeBus& previous : old->Buses)
+                        {
+                            if (previous.Id != bus.Id)
+                                continue;
+                            bus.Applied = previous.Applied;
+                            bus.DuckDb = previous.DuckDb;
+                            bus.PowerLeft = previous.PowerLeft;
+                            bus.PowerRight = previous.PowerRight;
+                            for (RuntimeSend& send : bus.Sends)
+                            {
+                                for (const RuntimeSend& before : previous.Sends)
+                                {
+                                    if (before.Target >= 0 && send.Target >= 0 && old->Buses[before.Target].Id == layout->Buses[send.Target].Id)
+                                        send.Applied = before.Applied;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                state.Layout = layout;
+                if (old && !state.Retired.Push(old))
+                    state.Layout = old, state.Retired.Push(layout); // (never: the game frees retired layouts every frame)
+                break;
+            }
+            case CommandType::VoiceBus:
+                state.MixVoices[command.Slot].Bus = command.Bus;
+                state.MixVoices[command.Slot].SendBus = command.SendBus;
+                break;
+            case CommandType::EffectParameter:
+            case CommandType::EffectBypass:
+                if (state.Layout && command.Bus < state.Layout->Buses.size())
+                {
+                    RuntimeBus& bus = state.Layout->Buses[command.Bus];
+                    if (command.Parameter >= 0 && static_cast<size_t>(command.Parameter) < bus.Effects.size())
+                    {
+                        RuntimeEffect& effect = bus.Effects[command.Parameter];
+                        if (command.Type == CommandType::EffectBypass)
+                        {
+                            if (effect.Bypass && !command.Flag)
+                                effect.Instance->Reset(); // back in: no stale tail from before it was bypassed
+                            effect.Bypass = command.Flag;
+                        }
+                        else
+                            effect.Instance->SetParameter(command.Index, command.Value);
+                    }
+                }
+                break;
+            case CommandType::SendGain:
+                if (state.Layout && command.Bus < state.Layout->Buses.size())
+                {
+                    RuntimeBus& bus = state.Layout->Buses[command.Bus];
+                    if (command.Parameter >= 0 && static_cast<size_t>(command.Parameter) < bus.Sends.size())
+                        bus.Sends[command.Parameter].Gain = command.Value;
+                }
                 break;
             case CommandType::SetParameter:
                 if (AudioGraphInstance* graph = state.MixVoices[command.Slot].Graph)
@@ -539,6 +699,154 @@ namespace Nox
             return running && !faded;
         }
 
+        // A voice's block (in state.VoiceBuffer) into its bus and its environment send: the low pass first (an interior / exterior
+        // muffle, its cutoff moving in octaves), the send's gain ramped.
+        void RouteVoice(State& state, MixVoice& voice, MixerLayout& layout)
+        {
+            float* buffer = state.VoiceBuffer.data();
+            const float sampleRate = static_cast<float>(state.SampleRate);
+            if (voice.LowPass < kLowPassOff || voice.LowPassActive)
+            {
+                if (!voice.LowPassActive)
+                {
+                    voice.LowPassActive = true;
+                    voice.LowPassFilter[0].Reset();
+                    voice.LowPassFilter[1].Reset();
+                    voice.LowPassRamp = {};
+                    float open, unused;
+                    voice.LowPassRamp.Begin(kLowPassOff, sampleRate, open, unused); // (it closes from fully open)
+                }
+                float from, to;
+                voice.LowPassRamp.Begin(voice.LowPass, sampleRate, from, to);
+                for (uint32_t start = 0; start < kBlock; start += AudioDSP::kCoefficientStep)
+                {
+                    const float frequency = AudioDSP::FrequencyRamp::At(from, to, static_cast<float>(start + AudioDSP::kCoefficientStep) / static_cast<float>(kBlock));
+                    voice.LowPassFilter[0].Set(AudioDSP::BiquadType::LowPass, frequency, 0.707f, 0.0f, sampleRate);
+                    AudioDSP::Biquad& right = voice.LowPassFilter[1];
+                    right.B0 = voice.LowPassFilter[0].B0; right.B1 = voice.LowPassFilter[0].B1; right.B2 = voice.LowPassFilter[0].B2;
+                    right.A1 = voice.LowPassFilter[0].A1; right.A2 = voice.LowPassFilter[0].A2;
+                    for (uint32_t i = start; i < start + AudioDSP::kCoefficientStep; ++i)
+                    {
+                        buffer[i * 2] = voice.LowPassFilter[0].Process(buffer[i * 2]);
+                        buffer[i * 2 + 1] = right.Process(buffer[i * 2 + 1]);
+                    }
+                }
+                if (voice.LowPass >= kLowPassOff && to >= kLowPassOff)
+                    voice.LowPassActive = false; // fully open again: off
+            }
+            RuntimeBus& bus = layout.Buses[voice.Bus < layout.Buses.size() ? voice.Bus : 0];
+            for (uint32_t i = 0; i < kBlock; ++i)
+            {
+                bus.Left[i] += buffer[i * 2];
+                bus.Right[i] += buffer[i * 2 + 1];
+            }
+            if (voice.SendBus >= 0 && static_cast<size_t>(voice.SendBus) < layout.Buses.size() && (voice.SendGain > 0.0f || voice.SendApplied > 0.0f))
+            {
+                RuntimeBus& send = layout.Buses[voice.SendBus];
+                const float step = (voice.SendGain - voice.SendApplied) / static_cast<float>(kBlock);
+                float gain = voice.SendApplied;
+                for (uint32_t i = 0; i < kBlock; ++i)
+                {
+                    gain += step;
+                    send.Left[i] += buffer[i * 2] * gain;
+                    send.Right[i] += buffer[i * 2 + 1] * gain;
+                }
+            }
+            voice.SendApplied = voice.SendGain;
+        }
+
+        // A bus's output into another bus, its gain ramped.
+        void AddInto(RuntimeBus& target, const float* left, const float* right, float from, float to)
+        {
+            const float step = (to - from) / static_cast<float>(kBlock);
+            float gain = from;
+            for (uint32_t i = 0; i < kBlock; ++i)
+            {
+                gain += step;
+                target.Left[i] += left[i] * gain;
+                target.Right[i] += right[i] * gain;
+            }
+        }
+
+        // One bus: its effects, pre-fader sends, ducking and fader, meters, post-fader sends, into its parent. Its buffer is its
+        // output afterwards (sidechains and ducking read it).
+        void ProcessBus(State& state, MixerLayout& layout, uint32_t index)
+        {
+            RuntimeBus& bus = layout.Buses[index];
+            float reduction = 0.0f;
+            for (RuntimeEffect& effect : bus.Effects)
+            {
+                if (effect.Bypass)
+                    continue;
+                const RuntimeBus* key = effect.Sidechain >= 0 ? &layout.Buses[effect.Sidechain] : nullptr;
+                effect.Instance->Process(bus.Left, bus.Right, kBlock, key ? key->Left : nullptr, key ? key->Right : nullptr);
+                reduction = std::max(reduction, effect.Instance->GetGainReductionDb());
+            }
+            for (RuntimeSend& send : bus.Sends)
+            {
+                if (send.PreFader && send.Target >= 0)
+                {
+                    AddInto(layout.Buses[send.Target], bus.Left, bus.Right, send.Applied, send.Gain);
+                    send.Applied = send.Gain;
+                }
+            }
+            // Ducking: the source's output level this block against the threshold, smoothed in dB.
+            if (bus.DuckSource >= 0)
+            {
+                const RuntimeBus& source = layout.Buses[bus.DuckSource];
+                float level = 0.0f;
+                for (uint32_t i = 0; i < kBlock; ++i)
+                    level = std::max(level, std::max(std::fabs(source.Left[i]), std::fabs(source.Right[i])));
+                const float target = level > bus.DuckThreshold ? bus.DuckDepthDb : 0.0f;
+                const float coefficient = target < bus.DuckDb ? bus.DuckAttack : bus.DuckRelease;
+                bus.DuckDb = target + (bus.DuckDb - target) * coefficient;
+                reduction = std::max(reduction, -bus.DuckDb);
+            }
+            else
+                bus.DuckDb = 0.0f;
+            const float gain = bus.Target * (bus.DuckDb < -0.001f ? AudioDSP::DbToLinear(bus.DuckDb) : 1.0f);
+            const float step = (gain - bus.Applied) / static_cast<float>(kBlock);
+            float g = bus.Applied;
+            float peakL = 0.0f, peakR = 0.0f, sumL = 0.0f, sumR = 0.0f;
+            for (uint32_t i = 0; i < kBlock; ++i)
+            {
+                g += step;
+                const float l = bus.Left[i] * g;
+                const float r = bus.Right[i] * g;
+                bus.Left[i] = l;
+                bus.Right[i] = r;
+                peakL = std::max(peakL, std::fabs(l));
+                peakR = std::max(peakR, std::fabs(r));
+                sumL += l * l;
+                sumR += r * r;
+            }
+            bus.Applied = gain;
+            for (RuntimeSend& send : bus.Sends)
+            {
+                if (!send.PreFader && send.Target >= 0)
+                {
+                    AddInto(layout.Buses[send.Target], bus.Left, bus.Right, send.Applied, send.Gain);
+                    send.Applied = send.Gain;
+                }
+            }
+            if (bus.Parent >= 0)
+                AddInto(layout.Buses[bus.Parent], bus.Left, bus.Right, 1.0f, 1.0f);
+
+            // Meters: peaks falling ~20 dB a second, RMS over ~300 ms.
+            if (index < AudioEngine::MaxBuses)
+            {
+                std::atomic<float>* meter = &state.BusMeters[index * 5];
+                const float rmsCoefficient = std::exp(-static_cast<float>(kBlock) / (0.3f * static_cast<float>(state.SampleRate)));
+                bus.PowerLeft = rmsCoefficient * bus.PowerLeft + (1.0f - rmsCoefficient) * sumL / static_cast<float>(kBlock);
+                bus.PowerRight = rmsCoefficient * bus.PowerRight + (1.0f - rmsCoefficient) * sumR / static_cast<float>(kBlock);
+                meter[0].store(std::max(meter[0].load(std::memory_order_relaxed) * 0.985f, peakL), std::memory_order_relaxed);
+                meter[1].store(std::max(meter[1].load(std::memory_order_relaxed) * 0.985f, peakR), std::memory_order_relaxed);
+                meter[2].store(std::sqrt(bus.PowerLeft), std::memory_order_relaxed);
+                meter[3].store(std::sqrt(bus.PowerRight), std::memory_order_relaxed);
+                meter[4].store(reduction, std::memory_order_relaxed);
+            }
+        }
+
         void MixBlock(State& state)
         {
             NOX_PROFILE_SCOPE("Audio Mix Block");
@@ -546,19 +854,25 @@ namespace Nox
             while (state.Commands.Pop(command))
                 ApplyCommand(state, command);
 
-            for (auto& bus : state.BusBuffers)
-                bus.fill(0.0f);
+            MixerLayout& layout = *state.Layout;
+            for (RuntimeBus& bus : layout.Buses)
+            {
+                std::memset(bus.Left, 0, sizeof(bus.Left));
+                std::memset(bus.Right, 0, sizeof(bus.Right));
+            }
 
             for (uint32_t slot = 0; slot < AudioEngine::MaxVoices; ++slot)
             {
                 MixVoice& voice = state.MixVoices[slot];
                 if (!voice.Active)
                     continue;
-                const bool groupPaused = state.GroupPaused[voice.Group] && voice.Bus != static_cast<uint8_t>(AudioBus::UI);
-                if (voice.Paused || groupPaused)
+                const bool playsWhilePaused = voice.Bus < layout.Buses.size() && layout.Buses[voice.Bus].PlaysWhilePaused;
+                if (voice.Paused || (state.GroupPaused[voice.Group] && !playsWhilePaused))
                     continue;
-                const bool running = voice.Graph ? MixGraphBlock(state, voice, state.BusBuffers[voice.Bus].data(), slot)
-                                                 : MixVoiceBlock(state, voice, state.BusBuffers[voice.Bus].data());
+                state.VoiceBuffer.fill(0.0f);
+                const bool running = voice.Graph ? MixGraphBlock(state, voice, state.VoiceBuffer.data(), slot)
+                                                 : MixVoiceBlock(state, voice, state.VoiceBuffer.data());
+                RouteVoice(state, voice, layout);
                 if (!running)
                 {
                     voice.Active = false;
@@ -569,43 +883,16 @@ namespace Nox
                 }
             }
 
-            // Buses into Master, each with its gain ramped across the block.
-            std::array<float, kBlock * 2>& master = state.BusBuffers[0];
-            auto applyGain = [&](uint32_t bus, std::array<float, kBlock * 2>& buffer, std::array<float, kBlock * 2>* into)
-            {
-                const float from = state.BusGain[bus];
-                const float to = state.BusTarget[bus];
-                const float step = (to - from) / static_cast<float>(kBlock);
-                float peak = 0.0f;
-                for (uint32_t i = 0; i < kBlock; ++i)
-                {
-                    const float gain = from + step * static_cast<float>(i + 1);
-                    const float left = buffer[i * 2] * gain;
-                    const float right = buffer[i * 2 + 1] * gain;
-                    peak = std::max(peak, std::max(std::fabs(left), std::fabs(right)));
-                    if (into)
-                    {
-                        (*into)[i * 2] += left;
-                        (*into)[i * 2 + 1] += right;
-                    }
-                    else
-                    {
-                        buffer[i * 2] = left;
-                        buffer[i * 2 + 1] = right;
-                    }
-                }
-                state.BusGain[bus] = to;
-                // Peak meter, falling ~20 dB a second.
-                const float held = state.BusPeak[bus].load(std::memory_order_relaxed) * 0.985f;
-                state.BusPeak[bus].store(std::max(held, peak), std::memory_order_relaxed);
-            };
-            for (uint32_t bus = 1; bus < kBusCount; ++bus)
-                applyGain(bus, state.BusBuffers[bus], &master);
-            applyGain(0, master, nullptr);
+            for (uint32_t index : layout.Order)
+                ProcessBus(state, layout, index);
 
-            // The device takes floats in [-1, 1]. (Master's limiter is phase A3's bus effects.)
-            for (uint32_t i = 0; i < kBlock * 2; ++i)
-                state.Block[i] = std::clamp(master[i], -1.0f, 1.0f);
+            // The device takes floats in [-1, 1] (Master's Limiter keeps it there without distortion; this only guards).
+            const RuntimeBus& master = layout.Buses[0];
+            for (uint32_t i = 0; i < kBlock; ++i)
+            {
+                state.Block[i * 2] = std::clamp(master.Left[i], -1.0f, 1.0f);
+                state.Block[i * 2 + 1] = std::clamp(master.Right[i], -1.0f, 1.0f);
+            }
         }
 
         void WriteOutput(State& state)
@@ -628,6 +915,11 @@ namespace Nox
             Profiler::Get().SetThreadName("Audio Mixer");
 #ifdef _WIN32
             HANDLE task = RaiseMixerPriority();
+#endif
+#ifdef NOX_AUDIO_SSE
+            // Flush denormals to zero: a reverb's or a filter's tail decaying toward silence would otherwise run at a fraction of the
+            // speed (what every audio engine's mixer thread sets).
+            _mm_setcsr(_mm_getcsr() | 0x8040);
 #endif
             const float blockMilliseconds = 1000.0f * static_cast<float>(kBlock) / static_cast<float>(state.SampleRate);
             auto lastSlowWarning = std::chrono::steady_clock::now() - std::chrono::seconds(10);
@@ -807,7 +1099,7 @@ namespace Nox
         {
             const AudioPlayDesc& desc = voice.Desc;
             MixParams params;
-            const float volume = std::max(desc.Volume, 0.0f);
+            const float volume = std::max(desc.Volume, 0.0f) * std::max(voice.Environment.Volume, 0.0f);
             float doppler = 1.0f;
             if (!desc.Spatial)
             {
@@ -891,17 +1183,187 @@ namespace Nox
         }
     }
 
+    namespace
+    {
+        uint64_t EffectKey(uint64_t bus, uint64_t effect) { return bus * 0x9E3779B97F4A7C15ull ^ (effect + 0x632BE59BD9B4E019ull); }
+
+        int32_t BusOf(const State& state, uint64_t id)
+        {
+            const auto found = state.BusIndex.find(id);
+            return found != state.BusIndex.end() ? static_cast<int32_t>(found->second) : -1;
+        }
+
+        // The order the buses run in: each after what feeds it (its children and send sources) and what it listens to (its effects'
+        // sidechains and its ducking source). Edges that would close a loop are dropped (the Mixer panel does not offer them).
+        std::vector<uint32_t> ProcessingOrder(MixerLayout& layout)
+        {
+            const uint32_t count = static_cast<uint32_t>(layout.Buses.size());
+            for (int attempt = 0; attempt < 2; ++attempt)
+            {
+                std::vector<std::vector<uint32_t>> after(count); // a -> the buses that must run after a
+                std::vector<uint32_t> incoming(count, 0);
+                auto edge = [&](int32_t from, uint32_t to)
+                {
+                    if (from < 0 || static_cast<uint32_t>(from) == to)
+                        return;
+                    after[from].push_back(to);
+                    ++incoming[to];
+                };
+                for (uint32_t b = 0; b < count; ++b)
+                {
+                    const RuntimeBus& bus = layout.Buses[b];
+                    if (bus.Parent >= 0)
+                        edge(static_cast<int32_t>(b), static_cast<uint32_t>(bus.Parent));
+                    for (const RuntimeSend& send : bus.Sends)
+                        if (send.Target >= 0)
+                            edge(static_cast<int32_t>(b), static_cast<uint32_t>(send.Target));
+                    for (const RuntimeEffect& effect : bus.Effects)
+                        edge(effect.Sidechain, b);
+                    edge(bus.DuckSource, b);
+                }
+                std::vector<uint32_t> order;
+                std::vector<uint32_t> ready;
+                for (uint32_t b = 0; b < count; ++b)
+                    if (incoming[b] == 0)
+                        ready.push_back(b);
+                while (!ready.empty())
+                {
+                    const uint32_t b = ready.back();
+                    ready.pop_back();
+                    order.push_back(b);
+                    for (uint32_t next : after[b])
+                        if (--incoming[next] == 0)
+                            ready.push_back(next);
+                }
+                if (order.size() == count)
+                    return order;
+                // A loop: drop the sends, sidechains and ducking among the buses left over, then order again.
+                NOX_CORE_WARN("Audio: the mixer's sends / sidechains form a loop; the ones in it are ignored");
+                for (uint32_t b = 0; b < count; ++b)
+                {
+                    if (incoming[b] == 0)
+                        continue;
+                    RuntimeBus& bus = layout.Buses[b];
+                    for (RuntimeSend& send : bus.Sends)
+                        send.Target = -1;
+                    for (RuntimeEffect& effect : bus.Effects)
+                        effect.Sidechain = -1;
+                    bus.DuckSource = -1;
+                }
+            }
+            std::vector<uint32_t> order(count);
+            for (uint32_t b = 0; b < count; ++b)
+                order[b] = count - 1 - b; // (only a broken parent chain gets here)
+            return order;
+        }
+
+        // A reused effect's parameters: sent as commands after the new layout (the mixer is running that instance now).
+        struct PendingParameter
+        {
+            uint16_t Bus = 0;
+            int32_t Effect = 0;
+            uint32_t Parameter = 0;
+            float Value = 0.0f;
+        };
+
+        MixerLayout* BuildLayout(State& state, const AudioMixerLayoutDesc& desc, std::vector<PendingParameter>* reusedParameters = nullptr)
+        {
+            auto layout = std::make_unique<MixerLayout>();
+            const uint32_t count = static_cast<uint32_t>(std::min<size_t>(std::max<size_t>(desc.Buses.size(), 1), AudioEngine::MaxBuses));
+            layout->Buses.resize(count);
+            auto valid = [&](int32_t index) { return index >= 0 && static_cast<uint32_t>(index) < count ? index : -1; };
+            const float blocksPerSecond = static_cast<float>(state.SampleRate) / static_cast<float>(kBlock);
+            std::unordered_map<uint64_t, State::CachedEffect> effects;
+            for (uint32_t b = 0; b < count; ++b)
+            {
+                RuntimeBus& bus = layout->Buses[b];
+                if (b >= desc.Buses.size())
+                {
+                    bus.Id = kAudioBusMaster;
+                    continue;
+                }
+                const AudioMixerLayoutDesc::Bus& source = desc.Buses[b];
+                bus.Id = source.Id;
+                bus.Parent = b == 0 ? -1 : (valid(source.Parent) >= 0 && source.Parent != static_cast<int32_t>(b) ? source.Parent : 0);
+                bus.PlaysWhilePaused = source.PlaysWhilePaused;
+                bus.Target = bus.Applied = std::max(source.Gain, 0.0f);
+                for (const AudioMixerLayoutDesc::Effect& effect : source.Effects)
+                {
+                    const uint64_t key = EffectKey(source.Id, effect.Id);
+                    State::CachedEffect cached;
+                    bool reused = false;
+                    if (const auto found = state.Effects.find(key);
+                        found != state.Effects.end() && found->second.Type == effect.Type && found->second.Impulse == effect.Impulse.get())
+                    {
+                        cached = found->second;
+                        reused = true;
+                    }
+                    else
+                    {
+                        cached.Type = effect.Type;
+                        cached.Impulse = effect.Impulse.get();
+                        cached.ImpulseRef = effect.Impulse;
+                        cached.Instance = CreateAudioEffect(effect.Type, static_cast<float>(state.SampleRate), effect.Impulse.get());
+                    }
+                    if (!cached.Instance)
+                        continue;
+                    for (size_t p = 0; p < effect.Values.size(); ++p)
+                    {
+                        if (!reused)
+                            cached.Instance->SetParameter(static_cast<uint32_t>(p), effect.Values[p]); // (not running yet: set here)
+                        else if (reusedParameters)
+                            reusedParameters->push_back({ static_cast<uint16_t>(b), static_cast<int32_t>(bus.Effects.size()), static_cast<uint32_t>(p), effect.Values[p] });
+                    }
+                    RuntimeEffect runtime;
+                    runtime.Instance = cached.Instance;
+                    runtime.Bypass = effect.Bypass;
+                    runtime.Sidechain = valid(effect.Sidechain) == static_cast<int32_t>(b) ? -1 : valid(effect.Sidechain);
+                    bus.Effects.push_back(runtime);
+                    effects[key] = std::move(cached);
+                }
+                for (const AudioMixerLayoutDesc::Send& send : source.Sends)
+                {
+                    RuntimeSend runtime;
+                    runtime.Target = valid(send.Target) == static_cast<int32_t>(b) ? -1 : valid(send.Target);
+                    runtime.Gain = runtime.Applied = std::max(send.Gain, 0.0f);
+                    runtime.PreFader = send.PreFader;
+                    bus.Sends.push_back(runtime);
+                }
+                bus.DuckSource = valid(source.DuckSource) == static_cast<int32_t>(b) ? -1 : valid(source.DuckSource);
+                bus.DuckDepthDb = std::min(source.DuckDepthDb, 0.0f);
+                bus.DuckThreshold = AudioDSP::DbToLinear(source.DuckThresholdDb);
+                bus.DuckAttack = std::exp(-1.0f / std::max(source.DuckAttack * blocksPerSecond, 1e-3f));
+                bus.DuckRelease = std::exp(-1.0f / std::max(source.DuckRelease * blocksPerSecond, 1e-3f));
+            }
+            layout->Order = ProcessingOrder(*layout);
+            state.Effects = std::move(effects); // (instances no longer used live on in the old layout until it is retired)
+            return layout.release();
+        }
+
+        void FreeRetiredLayouts(State& state)
+        {
+            MixerLayout* retired = nullptr;
+            while (state.Retired.Pop(retired))
+                delete retired;
+        }
+
+        AudioMixerLayoutDesc MasterOnlyLayout()
+        {
+            AudioMixerLayoutDesc desc;
+            desc.Buses.push_back({});
+            desc.Buses[0].Id = kAudioBusMaster;
+            return desc;
+        }
+    }
+
     void AudioEngine::Init()
     {
         if (s_State)
             return;
         s_State = new State();
         State& state = *s_State;
-        state.BusVolume.fill(1.0f);
-        state.BusGain.fill(1.0f);
-        state.BusTarget.fill(1.0f);
-        for (auto& peak : state.BusPeak)
-            peak.store(0.0f);
+        for (auto& meter : state.BusMeters)
+            meter.store(0.0f);
         for (MixVoice& voice : state.MixVoices)
             voice.Staging.resize(static_cast<size_t>(kStagingFrames) * 2);
         state.FreeSlots.reserve(MaxVoices);
@@ -925,6 +1387,10 @@ namespace Nox
         state.PeriodFrames = state.Device.playback.internalPeriodSizeInFrames;
         state.DeviceBufferFrames = state.PeriodFrames * std::max<uint32_t>(state.Device.playback.internalPeriods, 1);
         state.DeviceName = state.Device.playback.name;
+        // Until the project's mixer arrives (AudioMixer): Master alone.
+        state.Layout = BuildLayout(state, MasterOnlyLayout());
+        state.GameLayout = state.Layout;
+        state.BusIndex = { { kAudioBusMaster, 0u } };
         if (ma_pcm_rb_init(ma_format_f32, 2, kOutputRingFrames, nullptr, nullptr, &state.Output) != MA_SUCCESS ||
             ma_event_init(&state.MixerWake) != MA_SUCCESS)
         {
@@ -962,6 +1428,13 @@ namespace Nox
             ma_device_uninit(&state.Device);
             ma_event_uninit(&state.MixerWake);
             ma_pcm_rb_uninit(&state.Output);
+            // The mixer has stopped: the layout it ran, and every one it handed back, are the game thread's to free.
+            FreeRetiredLayouts(state);
+            Command command;
+            while (state.Commands.Pop(command))
+                if (command.Type == CommandType::SetLayout && command.Layout != state.Layout)
+                    delete command.Layout;
+            delete state.Layout;
         }
         delete s_State;
         s_State = nullptr;
@@ -1023,6 +1496,7 @@ namespace Nox
         voice.Generation = generation;
         voice.Desc = desc;
         voice.Stream = stream;
+        voice.Environment = desc.Environment;
         TrackVelocity(desc.Position, voice.PreviousPosition, voice.HasPrevious, voice.Velocity, 0.0f);
 
         const MixParams params = ComputeMix(state, voice);
@@ -1032,7 +1506,7 @@ namespace Nox
         command.Clip = clip.get();
         command.Stream = stream.get();
         command.StartFrame = startFrame;
-        command.Bus = static_cast<uint8_t>(desc.Bus);
+        command.Bus = static_cast<uint16_t>(std::max(BusOf(state, desc.Bus), 0));
         command.Group = static_cast<uint8_t>(desc.Group);
         command.Downmix = desc.Spatial && clip->GetChannels() == 2;
         command.GainL = params.GainL;
@@ -1040,6 +1514,9 @@ namespace Nox
         command.Rate = params.Rate;
         command.Value = std::max(desc.FadeIn, 0.0f);
         command.Flag = desc.Loop;
+        command.LowPass = desc.Environment.LowPassHz;
+        command.SendBus = static_cast<int16_t>(desc.Environment.SendBus ? BusOf(state, desc.Environment.SendBus) : -1);
+        command.SendGain = command.SendBus >= 0 ? std::max(desc.Environment.SendLevel, 0.0f) : 0.0f;
         if (!Push(state, command))
         {
             voice.Alive = false;
@@ -1092,6 +1569,7 @@ namespace Nox
         voice.Generation = generation;
         voice.Desc = desc;
         voice.Desc.GraphParameters.clear(); // (in the instance now)
+        voice.Environment = desc.Environment;
         TrackVelocity(desc.Position, voice.PreviousPosition, voice.HasPrevious, voice.Velocity, 0.0f);
 
         const MixParams params = ComputeMix(state, voice);
@@ -1099,13 +1577,16 @@ namespace Nox
         command.Type = CommandType::Start;
         command.Slot = slot;
         command.Graph = graph.get();
-        command.Bus = static_cast<uint8_t>(desc.Bus);
+        command.Bus = static_cast<uint16_t>(std::max(BusOf(state, desc.Bus), 0));
         command.Group = static_cast<uint8_t>(desc.Group);
         command.Downmix = desc.Spatial;
         command.GainL = params.GainL;
         command.GainR = params.GainR;
         command.Rate = params.Rate;
         command.Value = std::max(desc.FadeIn, 0.0f);
+        command.LowPass = desc.Environment.LowPassHz;
+        command.SendBus = static_cast<int16_t>(desc.Environment.SendBus ? BusOf(state, desc.Environment.SendBus) : -1);
+        command.SendGain = command.SendBus >= 0 ? std::max(desc.Environment.SendLevel, 0.0f) : 0.0f;
         if (!Push(state, command))
         {
             voice.Alive = false;
@@ -1289,36 +1770,130 @@ namespace Nox
         s_State->ListenerOrientation = glm::normalize(orientation);
     }
 
-    void AudioEngine::SetBusVolume(AudioBus bus, float volume)
+    void AudioEngine::SetVoiceEnvironment(AudioVoiceHandle handle, const AudioVoiceEnvironment& environment)
     {
-        if (!s_State || bus >= AudioBus::Count)
+        if (GameVoice* voice = Find(s_State, handle))
+            voice->Environment = environment; // (sent with the voice's next update)
+    }
+
+    void AudioEngine::SetMixerLayout(const AudioMixerLayoutDesc& desc)
+    {
+        if (!IsAvailable())
             return;
         State& state = *s_State;
-        state.BusVolume[static_cast<size_t>(bus)] = std::max(volume, 0.0f);
+        FreeRetiredLayouts(state);
+        std::vector<PendingParameter> reused;
+        MixerLayout* layout = BuildLayout(state, desc, &reused);
+        Command command;
+        command.Type = CommandType::SetLayout;
+        command.Layout = layout;
+        if (!Push(state, command))
+        {
+            delete layout;
+            return;
+        }
+        for (const PendingParameter& parameter : reused)
+        {
+            Command set;
+            set.Type = CommandType::EffectParameter;
+            set.Bus = parameter.Bus;
+            set.Parameter = parameter.Effect;
+            set.Index = parameter.Parameter;
+            set.Value = parameter.Value;
+            Push(state, set);
+        }
+        state.GameLayout = layout;
+        state.BusIndex.clear();
+        for (uint32_t b = 0; b < layout->Buses.size(); ++b)
+            state.BusIndex.emplace(layout->Buses[b].Id, b);
+        // Every playing voice to its bus's (and send's) index in the new layout, applied right after it.
+        for (uint32_t slot = 0; slot < MaxVoices; ++slot)
+        {
+            const GameVoice& voice = state.GameVoices[slot];
+            if (!voice.Alive)
+                continue;
+            Command bus;
+            bus.Type = CommandType::VoiceBus;
+            bus.Slot = slot;
+            bus.Bus = static_cast<uint16_t>(std::max(BusOf(state, voice.Desc.Bus), 0));
+            bus.SendBus = static_cast<int16_t>(voice.Environment.SendBus ? BusOf(state, voice.Environment.SendBus) : -1);
+            Push(state, bus);
+        }
+    }
+
+    void AudioEngine::SetBusGain(uint32_t bus, float gain)
+    {
+        if (!IsAvailable())
+            return;
         Command command;
         command.Type = CommandType::BusGain;
-        command.Bus = static_cast<uint8_t>(bus);
-        command.Value = state.BusMuted[static_cast<size_t>(bus)] ? 0.0f : state.BusVolume[static_cast<size_t>(bus)];
-        if (state.DeviceOpen)
-            Push(state, command);
+        command.Bus = static_cast<uint16_t>(bus);
+        command.Value = std::max(gain, 0.0f);
+        Push(*s_State, command);
     }
 
-    float AudioEngine::GetBusVolume(AudioBus bus)
+    void AudioEngine::SetEffectParameter(uint32_t bus, uint32_t effect, uint32_t parameter, float value)
     {
-        return s_State && bus < AudioBus::Count ? s_State->BusVolume[static_cast<size_t>(bus)] : 1.0f;
-    }
-
-    void AudioEngine::SetBusMuted(AudioBus bus, bool muted)
-    {
-        if (!s_State || bus >= AudioBus::Count)
+        if (!IsAvailable())
             return;
-        s_State->BusMuted[static_cast<size_t>(bus)] = muted;
-        SetBusVolume(bus, s_State->BusVolume[static_cast<size_t>(bus)]);
+        Command command;
+        command.Type = CommandType::EffectParameter;
+        command.Bus = static_cast<uint16_t>(bus);
+        command.Parameter = static_cast<int32_t>(effect);
+        command.Index = parameter;
+        command.Value = value;
+        Push(*s_State, command);
     }
 
-    bool AudioEngine::IsBusMuted(AudioBus bus)
+    void AudioEngine::SetEffectBypass(uint32_t bus, uint32_t effect, bool bypass)
     {
-        return s_State && bus < AudioBus::Count && s_State->BusMuted[static_cast<size_t>(bus)];
+        if (!IsAvailable())
+            return;
+        Command command;
+        command.Type = CommandType::EffectBypass;
+        command.Bus = static_cast<uint16_t>(bus);
+        command.Parameter = static_cast<int32_t>(effect);
+        command.Flag = bypass;
+        Push(*s_State, command);
+    }
+
+    void AudioEngine::SetSendGain(uint32_t bus, uint32_t send, float gain)
+    {
+        if (!IsAvailable())
+            return;
+        Command command;
+        command.Type = CommandType::SendGain;
+        command.Bus = static_cast<uint16_t>(bus);
+        command.Parameter = static_cast<int32_t>(send);
+        command.Value = std::max(gain, 0.0f);
+        Push(*s_State, command);
+    }
+
+    AudioBusMeter AudioEngine::GetBusMeter(uint32_t bus)
+    {
+        AudioBusMeter meter;
+        if (!IsAvailable() || bus >= MaxBuses)
+            return meter;
+        const std::atomic<float>* values = &s_State->BusMeters[bus * 5];
+        meter.PeakLeft = values[0].load(std::memory_order_relaxed);
+        meter.PeakRight = values[1].load(std::memory_order_relaxed);
+        meter.RmsLeft = values[2].load(std::memory_order_relaxed);
+        meter.RmsRight = values[3].load(std::memory_order_relaxed);
+        meter.GainReductionDb = values[4].load(std::memory_order_relaxed);
+        return meter;
+    }
+
+    float AudioEngine::GetEffectGainReduction(uint32_t bus, uint32_t effect)
+    {
+        if (!IsAvailable() || !s_State->GameLayout || bus >= s_State->GameLayout->Buses.size())
+            return 0.0f;
+        const RuntimeBus& runtime = s_State->GameLayout->Buses[bus];
+        return effect < runtime.Effects.size() ? runtime.Effects[effect].Instance->GetGainReductionDb() : 0.0f; // (an atomic)
+    }
+
+    uint32_t AudioEngine::GetBusCount()
+    {
+        return IsAvailable() && s_State->GameLayout ? static_cast<uint32_t>(s_State->GameLayout->Buses.size()) : 0;
     }
 
     void AudioEngine::Update(float deltaSeconds)
@@ -1334,6 +1909,7 @@ namespace Nox
             if (state.GameVoices[finished.Slot].Alive)
                 ReleaseVoice(state, finished.Slot);
         }
+        FreeRetiredLayouts(state);
 
         TrackVelocity(state.ListenerPosition, state.ListenerPrevious, state.ListenerHasPrevious, state.ListenerVelocity, deltaSeconds);
 
@@ -1351,6 +1927,9 @@ namespace Nox
             command.GainL = params.GainL;
             command.GainR = params.GainR;
             command.Rate = params.Rate;
+            command.LowPass = voice.Environment.LowPassHz;
+            command.SendBus = static_cast<int16_t>(voice.Environment.SendBus ? BusOf(state, voice.Environment.SendBus) : -1);
+            command.SendGain = command.SendBus >= 0 ? std::max(voice.Environment.SendLevel, 0.0f) : 0.0f;
             Push(state, command);
         }
     }
@@ -1378,8 +1957,6 @@ namespace Nox
         stats.MixBlockMilliseconds = state.MixAverage.load(std::memory_order_relaxed);
         stats.MixBlockMaxMilliseconds = state.MixMax.exchange(0.0f, std::memory_order_relaxed);
         stats.BlockMilliseconds = 1000.0f * static_cast<float>(kBlock) / static_cast<float>(state.SampleRate);
-        for (uint32_t bus = 0; bus < kBusCount; ++bus)
-            stats.BusPeak[bus] = state.BusPeak[bus].load(std::memory_order_relaxed);
         return stats;
     }
 }

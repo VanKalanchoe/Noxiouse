@@ -722,7 +722,7 @@ namespace Nox
             out << YAML::Key << "Pitch" << YAML::Value << source.Pitch;
             out << YAML::Key << "Loop" << YAML::Value << source.Loop;
             out << YAML::Key << "PlayOnStart" << YAML::Value << source.PlayOnStart;
-            out << YAML::Key << "Bus" << YAML::Value << std::string(AudioBusToString(source.Bus));
+            out << YAML::Key << "Bus" << YAML::Value << source.Bus;
             out << YAML::Key << "Spatial" << YAML::Value << source.Spatial;
             out << YAML::Key << "MinDistance" << YAML::Value << source.Spatialization.MinDistance;
             out << YAML::Key << "MaxDistance" << YAML::Value << source.Spatialization.MaxDistance;
@@ -748,6 +748,23 @@ namespace Nox
         {
             out << YAML::Key << "AudioListenerComponent";
             out << YAML::BeginMap;
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<AudioVolumeComponent>())
+        {
+            const auto& volume = entity.GetComponent<AudioVolumeComponent>();
+            out << YAML::Key << "AudioVolumeComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "HalfExtents" << YAML::Value << volume.HalfExtents;
+            out << YAML::Key << "Priority" << YAML::Value << volume.Priority;
+            out << YAML::Key << "ReverbBus" << YAML::Value << volume.ReverbBus;
+            out << YAML::Key << "ReverbSend" << YAML::Value << volume.ReverbSend;
+            out << YAML::Key << "InteriorVolume" << YAML::Value << volume.InteriorVolume;
+            out << YAML::Key << "InteriorLowPass" << YAML::Value << volume.InteriorLowPass;
+            out << YAML::Key << "ExteriorVolume" << YAML::Value << volume.ExteriorVolume;
+            out << YAML::Key << "ExteriorLowPass" << YAML::Value << volume.ExteriorLowPass;
+            out << YAML::Key << "FadeTime" << YAML::Value << volume.FadeTime;
             out << YAML::EndMap;
         }
 
@@ -2285,7 +2302,7 @@ namespace Nox
             if (audioSource["PlayOnStart"])
                 source.PlayOnStart = audioSource["PlayOnStart"].as<bool>();
             if (audioSource["Bus"])
-                source.Bus = AudioBusFromString(audioSource["Bus"].as<std::string>());
+                source.Bus = audioSource["Bus"].as<uint64_t>(kAudioBusSFX); // the mixer bus's id
             if (audioSource["Spatial"])
                 source.Spatial = audioSource["Spatial"].as<bool>();
             if (audioSource["MinDistance"])
@@ -2309,6 +2326,20 @@ namespace Nox
 
         if (entity["AudioListenerComponent"])
             deserializedEntity.AddComponent<AudioListenerComponent>();
+
+        if (const YAML::Node audioVolume = entity["AudioVolumeComponent"])
+        {
+            auto& volume = deserializedEntity.AddComponent<AudioVolumeComponent>();
+            volume.HalfExtents = audioVolume["HalfExtents"].as<glm::vec3>(volume.HalfExtents);
+            volume.Priority = audioVolume["Priority"].as<int32_t>(volume.Priority);
+            volume.ReverbBus = audioVolume["ReverbBus"].as<uint64_t>(volume.ReverbBus);
+            volume.ReverbSend = audioVolume["ReverbSend"].as<float>(volume.ReverbSend);
+            volume.InteriorVolume = audioVolume["InteriorVolume"].as<float>(volume.InteriorVolume);
+            volume.InteriorLowPass = audioVolume["InteriorLowPass"].as<float>(volume.InteriorLowPass);
+            volume.ExteriorVolume = audioVolume["ExteriorVolume"].as<float>(volume.ExteriorVolume);
+            volume.ExteriorLowPass = audioVolume["ExteriorLowPass"].as<float>(volume.ExteriorLowPass);
+            volume.FadeTime = audioVolume["FadeTime"].as<float>(volume.FadeTime);
+        }
 
         if (auto levelVolume = entity["LevelStreamingVolumeComponent"])
         {

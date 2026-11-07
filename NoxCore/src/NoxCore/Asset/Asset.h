@@ -33,7 +33,9 @@ namespace Nox
 
         AudioClip, // Audio/AudioClip.h: a sound file (.wav, .ogg, .flac, .mp3), played by AudioSourceComponent
 
-        AudioGraph // NodeGraph/NodeGraphAsset.h wrapping a NodeGraph whose Domain is "AudioGraph" (.naudiograph): a procedural sound
+        AudioGraph, // NodeGraph/NodeGraphAsset.h wrapping a NodeGraph whose Domain is "AudioGraph" (.naudiograph): a procedural sound
+
+        AudioMixer // Audio/AudioMixer.h: the project's buses, effects, sends and snapshots (.nmixer), run by AudioMixer
     };
 
     // Where an asset is on its way into memory (§5.11.2). A request starts the load once; the asset is usable when Ready.

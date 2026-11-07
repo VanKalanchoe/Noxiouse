@@ -234,6 +234,11 @@ namespace Nox
 
         // 3. The assets the scenes need.
         std::vector<AssetHandle> roots{ config.StartScene };
+        // The project's mixer (and the impulse responses its convolution reverbs name).
+        if (const AssetHandle mixer = assetManager->FindHandleByPath(config.AudioMixer, AssetType::AudioMixer))
+            roots.push_back(mixer);
+        else
+            report.Warnings.push_back("The project's audio mixer (" + config.AudioMixer.generic_string() + ") is not in the asset registry: the game uses the default buses");
         if (settings.AllScenes)
         {
             for (const auto& [handle, metadata] : assetManager->GetAssetRegistry())

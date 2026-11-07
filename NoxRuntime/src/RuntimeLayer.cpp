@@ -1,4 +1,5 @@
 #include "RuntimeLayer.h"
+#include "NoxCore/Audio/AudioMixer.h"
 
 #include <unordered_set>
 
@@ -58,6 +59,7 @@ namespace Nox
         // The project's quality preset ("Auto": the one this GPU should run, the fallback on smaller RT cards).
         m_Renderer->ApplyQualitySetting(Project::GetActive()->GetConfig().RenderQuality);
         m_Renderer->ApplyProjectRendererSettings(Project::GetActive()->GetConfig().Renderer);
+        AudioMixer::LoadProjectMixer(false); // its buses, effects and snapshots
 
         // The project's window mode (Borderless by default); "--windowed" on the command line keeps a window (testing).
         {

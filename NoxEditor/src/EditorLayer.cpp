@@ -1,4 +1,5 @@
 #include "EditorLayer.h"
+#include "NoxCore/Audio/AudioMixer.h"
 
 #include <algorithm>
 #include <cstring>
@@ -130,6 +131,14 @@ namespace Nox
 
         m_AssetOpeners[AssetType::AnimationGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
         m_AssetOpeners[AssetType::AudioGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
+        m_AssetOpeners[AssetType::AudioMixer] = [this](AssetHandle handle)
+        {
+            // The panel edits the project's mixer (Project > Audio Mixer path); another .nmixer is not what plays.
+            const std::filesystem::path path = Project::GetActiveAssetDirectory() / Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle).FilePath;
+            if (!AudioMixer::GetPath().empty() && std::filesystem::weakly_canonical(path) != std::filesystem::weakly_canonical(AudioMixer::GetPath()))
+                NOX_CORE_WARN("{} is not the project's mixer ({}); the Mixer panel shows the project's", path.filename().string(), AudioMixer::GetPath().filename().string());
+            m_MixerPanel.Focus();
+        };
         m_AssetOpeners[AssetType::Prefab] = [this](AssetHandle handle) { OpenPrefabMode(handle); };
         // A scene (from a Level Streaming Volume's list, say): opened for editing, as a double click in the Content Browser does.
         m_AssetOpeners[AssetType::Scene] = [this](AssetHandle handle) { OpenScene(handle); };
@@ -653,6 +662,9 @@ namespace Nox
                 bool levelsOpen = m_LevelsPanel.IsOpen();
                 if (ImGui::MenuItem("Levels", nullptr, &levelsOpen))
                     m_LevelsPanel.SetOpen(levelsOpen);
+                bool mixerOpen = m_MixerPanel.IsOpen();
+                if (ImGui::MenuItem("Mixer", nullptr, &mixerOpen))
+                    m_MixerPanel.SetOpen(mixerOpen);
 
                 // Up to four viewports, each with its own camera (docs/Future.md item 5). A layout snaps them into place; a
                 // viewport's tab can then be dragged anywhere and the splitters resized.
@@ -754,6 +766,7 @@ namespace Nox
         m_ContentBrowserPanel->OnImGuiRender();
         m_RenderGraphPanel->OnImGuiRender();
         m_ProfilerPanel.OnImGuiRender();
+        m_MixerPanel.OnImGuiRender();
         {
             // The camera the cells stream around: the primary camera in Play, the editor camera in Simulate; editing, what the editor
             // camera looks at (where a world opens its cells).
@@ -2843,23 +2856,35 @@ namespace Nox
             }
         }
 
-        // Level Streaming Volumes: their boxes while editing and simulating (Unreal shows its volumes in the editor), in orange.
+        // Level Streaming Volumes (orange) and Audio Volumes (blue): their boxes while editing and simulating (Unreal shows its volumes
+        // in the editor).
         if (m_SceneState != SceneState::Play)
         {
             constexpr glm::vec4 kVolumeColor(1.0f, 0.55f, 0.1f, 0.9f);
+            constexpr glm::vec4 kAudioVolumeColor(0.3f, 0.6f, 1.0f, 0.9f);
             constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
-            auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, LevelStreamingVolumeComponent>();
-            for (auto entity : view)
+            auto drawBox = [&](const WorldTransformComponent& wtc, const glm::vec3& halfExtents, const glm::vec4& color)
             {
-                auto [wtc, volume] = view.get<WorldTransformComponent, LevelStreamingVolumeComponent>(entity);
                 glm::vec3 corners[8];
                 for (int i = 0; i < 8; ++i)
                 {
                     const glm::vec3 sign((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
-                    corners[i] = glm::vec3(m_Renderer->ToRenderSpace(wtc.WorldMatrix) * glm::vec4(sign * volume.HalfExtents, 1.0f));
+                    corners[i] = glm::vec3(m_Renderer->ToRenderSpace(wtc.WorldMatrix) * glm::vec4(sign * halfExtents, 1.0f));
                 }
                 for (const auto& edge : edges)
-                    m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], kVolumeColor);
+                    m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], color);
+            };
+            auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, LevelStreamingVolumeComponent>();
+            for (auto entity : view)
+            {
+                auto [wtc, volume] = view.get<WorldTransformComponent, LevelStreamingVolumeComponent>(entity);
+                drawBox(wtc, volume.HalfExtents, kVolumeColor);
+            }
+            auto audioView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, AudioVolumeComponent>();
+            for (auto entity : audioView)
+            {
+                auto [wtc, volume] = audioView.get<WorldTransformComponent, AudioVolumeComponent>(entity);
+                drawBox(wtc, volume.HalfExtents, kAudioVolumeColor);
             }
         }
 
@@ -3132,6 +3157,7 @@ namespace Nox
             m_Renderer->ApplyQualitySetting(Project::GetActive()->GetConfig().RenderQuality);
             m_Renderer->ApplyProjectRendererSettings(Project::GetActive()->GetConfig().Renderer);
             Project::GetActive()->GetEditorAssetManager()->Init();
+            AudioMixer::LoadProjectMixer(true); // its buses and effects (made with the default ones if the project has none yet)
             // The project's scripts (at startup ScriptEngine::Initialize loads them, after this).
             if (ScriptEngine::IsInitialized())
                 ScriptEngine::LoadProjectAssembly();
@@ -5555,6 +5581,8 @@ namespace Nox
 
     void EditorLayer::SaveScene()
     {
+        if (AudioMixer::IsDirty())
+            AudioMixer::Save(); // Ctrl+S saves the project's mixer too (Unity's Save Project)
         EndTimelinePreviews(); // the scene as it is, not posed by a preview (which resumes next frame)
         if (m_PrefabMode.Active)
         {

@@ -18,6 +18,7 @@
 #include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Utils/PlatformUtils.h"
+#include "NoxCore/Audio/AudioMixer.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/MaterialVariants.h"
 #include "NoxCore/Scene/ParticleSystem.h"
@@ -834,20 +835,26 @@ namespace Nox
             return 0;
         }
 
-        // A bus by its name ("Music"); a name that is no bus is reported, not taken as Master.
-        bool FindAudioBus(const std::string& name, AudioBus& outBus, const char* call)
+        // A mixer bus by its name ("Music", any letter case); a name that is no bus is reported (with the buses there are), not taken
+        // as Master.
+        bool FindAudioBus(const std::string& name, uint64_t& outBus, const char* call)
         {
-            outBus = AudioBusFromString(name);
-            if (outBus != AudioBus::Master || name == "Master")
+            if (const AudioMixerBus* bus = AudioMixer::FindBus(name))
+            {
+                outBus = bus->Id;
                 return true;
-            NOX_CORE_ERROR("[C#] {}: no bus '{}' (Master, Music, SFX, Voice, UI, Ambience)", call, name);
+            }
+            std::string list;
+            for (const AudioMixerBus& bus : AudioMixer::GetData().Buses)
+                list += (list.empty() ? "" : ", ") + bus.Name;
+            NOX_CORE_ERROR("[C#] {}: no bus '{}' in the mixer ({})", call, name, list);
             return false;
         }
 
         void AudioPlayOneShot(Coral::String path, double x, double y, double z, float volume, Coral::Bool32 spatial, Coral::String busName)
         {
             if (!s_Scene || !OnMainThread("Audio.PlayOneShot")) return;
-            AudioBus bus;
+            uint64_t bus = 0;
             if (!FindAudioBus(std::string(busName), bus, "Audio.PlayOneShot"))
                 return;
             if (const AssetHandle sound = FindSound(std::string(path), "Audio.PlayOneShot"))
@@ -856,16 +863,31 @@ namespace Nox
 
         void AudioSetBusVolume(Coral::String busName, float volume)
         {
-            AudioBus bus;
+            uint64_t bus = 0;
             if (OnMainThread("Audio.SetBusVolume") && FindAudioBus(std::string(busName), bus, "Audio.SetBusVolume"))
-                AudioEngine::SetBusVolume(bus, volume);
+                AudioMixer::SetGameVolume(bus, volume); // on top of the mix (a game's options menu)
         }
 
         float AudioGetBusVolume(Coral::String busName)
         {
-            AudioBus bus;
-            return FindAudioBus(std::string(busName), bus, "Audio.GetBusVolume") ? AudioEngine::GetBusVolume(bus) : 0.0f;
+            uint64_t bus = 0;
+            return FindAudioBus(std::string(busName), bus, "Audio.GetBusVolume") ? AudioMixer::GetGameVolume(bus) : 0.0f;
         }
+
+        Coral::Bool32 AudioSetSnapshot(Coral::String name, float seconds)
+        {
+            if (!OnMainThread("Audio.SetSnapshot"))
+                return false;
+            const std::string snapshot(name);
+            if (AudioMixer::SetSnapshot(snapshot, seconds))
+                return true;
+            std::string list = "Default";
+            for (const AudioMixerSnapshot& candidate : AudioMixer::GetData().Snapshots)
+                list += ", " + candidate.Name;
+            NOX_CORE_ERROR("[C#] Audio.SetSnapshot: no snapshot '{}' in the mixer ({})", snapshot, list);
+            return false;
+        }
+
 
         Entity FindAudioSourceEntity(uint64_t entityID)
         {
@@ -1294,6 +1316,7 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Audio_PlayOneShot", reinterpret_cast<void*>(&AudioPlayOneShot));
         assembly.AddInternalCall("Nox.InternalCalls", "Audio_SetBusVolume", reinterpret_cast<void*>(&AudioSetBusVolume));
         assembly.AddInternalCall("Nox.InternalCalls", "Audio_GetBusVolume", reinterpret_cast<void*>(&AudioGetBusVolume));
+        assembly.AddInternalCall("Nox.InternalCalls", "Audio_SetSnapshot", reinterpret_cast<void*>(&AudioSetSnapshot));
         assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_Play", reinterpret_cast<void*>(&AudioSourcePlay));
         assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_Stop", reinterpret_cast<void*>(&AudioSourceStop));
         assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_IsPlaying", reinterpret_cast<void*>(&AudioSourceIsPlaying));

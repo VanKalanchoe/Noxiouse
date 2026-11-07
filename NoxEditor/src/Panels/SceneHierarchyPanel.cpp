@@ -9,6 +9,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Audio/AudioMixer.h"
 #include "NoxCore/NodeGraph/NodeGraphAsset.h"
 #include "NoxCore/Animation/Skeleton.h"
 #include "NoxCore/Asset/Material.h"
@@ -31,6 +32,27 @@
 
 namespace Nox
 {
+    namespace
+    {
+        // A mixer bus by name (the project's mixer, Window > Mixer). `allowNone`: a "None" entry (id 0).
+        void AudioBusCombo(const char* label, uint64_t& bus, bool allowNone)
+        {
+            const AudioMixerBus* current = AudioMixer::FindBus(bus);
+            const std::string preview = current ? current->Name : (bus == 0 ? std::string("None") : "(missing bus: Master)");
+            if (ImGui::BeginCombo(label, preview.c_str()))
+            {
+                if (allowNone && ImGui::Selectable("None", bus == 0))
+                    bus = 0;
+                for (const AudioMixerBus& candidate : AudioMixer::GetData().Buses)
+                {
+                    if (ImGui::Selectable(candidate.Name.c_str(), candidate.Id == bus))
+                        bus = candidate.Id;
+                }
+                ImGui::EndCombo();
+            }
+        }
+    }
+
     namespace
     {
         // A 2D collider's surface material (BoxCollider2DComponent / CircleCollider2DComponent), with presets like Unity's
@@ -1142,6 +1164,7 @@ namespace Nox
             DisplayAddComponentEntry<TimelinePlayerComponent>("Timeline Player");
             DisplayAddComponentEntry<AudioSourceComponent>("Audio Source");
             DisplayAddComponentEntry<AudioListenerComponent>("Audio Listener");
+            DisplayAddComponentEntry<AudioVolumeComponent>("Audio Volume");
             DisplayAddComponentEntry<LevelStreamingVolumeComponent>("Level Streaming Volume");
             DisplayAddComponentEntry<WorldPartitionComponent>("World Partition");
             DisplayAddComponentEntry<WorldStreamingSourceComponent>("World Streaming Source");
@@ -2417,17 +2440,8 @@ namespace Nox
             ImGui::Checkbox("Play On Start", &component.PlayOnStart);
             ImGui::SetItemTooltip("Plays when Play or Simulate starts, or when the entity is switched on in Play (else a script calls Play).");
 
-            constexpr AudioBus kBuses[] = { AudioBus::SFX, AudioBus::Music, AudioBus::Voice, AudioBus::Ambience, AudioBus::UI, AudioBus::Master };
-            if (ImGui::BeginCombo("Bus", std::string(AudioBusToString(component.Bus)).c_str()))
-            {
-                for (AudioBus bus : kBuses)
-                {
-                    if (ImGui::Selectable(std::string(AudioBusToString(bus)).c_str(), component.Bus == bus))
-                        component.Bus = bus;
-                }
-                ImGui::EndCombo();
-            }
-            ImGui::SetItemTooltip("The mixer bus it plays into: each has a volume (Audio.SetBusVolume), all go into Master. UI keeps playing while the game is paused.");
+            AudioBusCombo("Bus", component.Bus, false);
+            ImGui::SetItemTooltip("The mixer bus it plays into (Window > Mixer): its fader, effects and sends. A bus that plays while paused (UI) keeps playing when the game is paused.");
 
             ImGui::Checkbox("3D", &component.Spatial);
             ImGui::SetItemTooltip("3D: panned and attenuated around the listener, with Doppler. 2D: as the file is (music, UI).");
@@ -2522,6 +2536,30 @@ namespace Nox
         {
             ImGui::TextWrapped("The ears of the game's sound: put it on the player's camera. Without one, the primary camera listens "
                                "(Simulate: the editor camera).");
+        });
+
+        DrawComponent<AudioVolumeComponent>("Audio Volume", entity, [](auto& component)
+        {
+            ImGui::DragFloat3("Half Extents", &component.HalfExtents.x, WorldUnits::FromMeters(0.05f), 0.0f, 1e9f, "%.2f");
+            ImGui::SetItemTooltip("Half the box's size on each axis, in world units, in the entity's space (it turns and scales with the entity).");
+            ImGui::DragInt("Priority", &component.Priority);
+            ImGui::SetItemTooltip("Where volumes overlap, the one with the highest priority counts (a small room inside a big hall: give the room a higher one).");
+            ImGui::SeparatorText("Reverb");
+            AudioBusCombo("Reverb Bus", component.ReverbBus, true);
+            ImGui::SetItemTooltip("3D sounds inside the box send to this bus (a bus with a Reverb effect: the default mixer's Reverb bus). Give each kind of room its own bus to switch reverbs between rooms.");
+            ImGui::SliderFloat("Reverb Send", &component.ReverbSend, 0.0f, 1.0f, "%.2f");
+            ImGui::SetItemTooltip("How much of each sound inside goes to the reverb bus (linear).");
+            ImGui::SeparatorText("Walls");
+            ImGui::SliderFloat("Interior Volume", &component.InteriorVolume, 0.0f, 1.0f, "%.2f");
+            ImGui::SetItemTooltip("A sound inside the box heard from outside it: turned down to this.");
+            ImGui::SliderFloat("Interior Low Pass", &component.InteriorLowPass, 100.0f, 20000.0f, "%.0f Hz", ImGuiSliderFlags_Logarithmic);
+            ImGui::SetItemTooltip("A sound inside heard from outside: its highs cut above this (20000: not filtered).");
+            ImGui::SliderFloat("Exterior Volume", &component.ExteriorVolume, 0.0f, 1.0f, "%.2f");
+            ImGui::SetItemTooltip("A sound outside the box heard from inside it: turned down to this.");
+            ImGui::SliderFloat("Exterior Low Pass", &component.ExteriorLowPass, 100.0f, 20000.0f, "%.0f Hz", ImGuiSliderFlags_Logarithmic);
+            ImGui::SetItemTooltip("A sound outside heard from inside: its highs cut above this (20000: not filtered).");
+            ImGui::DragFloat("Fade Time", &component.FadeTime, 0.01f, 0.0f, 10.0f, "%.2f s");
+            ImGui::SetItemTooltip("How long walking in or out takes to blend the volume, filter and reverb send.");
         });
 
         DrawComponent<LevelStreamingVolumeComponent>("Level Streaming Volume", entity, [this](auto& component)

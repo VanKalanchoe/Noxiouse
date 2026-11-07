@@ -6,11 +6,14 @@
 // jump in a parameter never clicks; trigger handling is sample-accurate (a Wave Player starts at the frame its Play fired).
 
 #include "AudioGraph.h"
+#include "AudioDSP.h"
+#include "AudioEffects.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <memory>
 
 #include "NoxCore/NodeGraph/NodeType.h"
 
@@ -141,8 +144,8 @@ namespace Nox
             }
         };
 
-        float DbToLinear(float db) { return std::pow(10.0f, db / 20.0f); }
-        float LinearToDb(float linear) { return 20.0f * std::log10(std::max(linear, 1e-10f)); }
+        using AudioDSP::DbToLinear;
+        using AudioDSP::LinearToDb;
         float SemitonesToRatio(float semitones) { return std::exp2(semitones / 12.0f); }
 
         // The two triggers' events in order (Stop before Play at the same frame, so a Stop + Play retriggers).
@@ -162,55 +165,10 @@ namespace Nox
             return count;
         }
 
-        // RBJ cookbook biquad (Robert Bristow-Johnson's Audio EQ Cookbook), transposed direct form II.
-        enum class BiquadType : int32_t { LowPass, HighPass, BandPass, Notch, Peak, LowShelf, HighShelf };
-        struct Biquad
-        {
-            float B0 = 1, B1 = 0, B2 = 0, A1 = 0, A2 = 0;
-            float Z1 = 0, Z2 = 0;
-
-            void Set(BiquadType type, float frequency, float q, float gainDb, float sampleRate)
-            {
-                frequency = std::clamp(frequency, 10.0f, sampleRate * 0.49f);
-                q = std::max(q, 0.025f);
-                const float w0 = kTwoPi * frequency / sampleRate;
-                const float cosw = std::cos(w0), sinw = std::sin(w0);
-                const float alpha = sinw / (2.0f * q);
-                const float a = std::pow(10.0f, gainDb / 40.0f);
-                float b0 = 1, b1 = 0, b2 = 0, a0 = 1, a1 = 0, a2 = 0;
-                switch (type)
-                {
-                case BiquadType::LowPass:  b0 = (1 - cosw) / 2; b1 = 1 - cosw; b2 = b0; a0 = 1 + alpha; a1 = -2 * cosw; a2 = 1 - alpha; break;
-                case BiquadType::HighPass: b0 = (1 + cosw) / 2; b1 = -(1 + cosw); b2 = b0; a0 = 1 + alpha; a1 = -2 * cosw; a2 = 1 - alpha; break;
-                case BiquadType::BandPass: b0 = alpha; b1 = 0; b2 = -alpha; a0 = 1 + alpha; a1 = -2 * cosw; a2 = 1 - alpha; break; // 0 dB peak
-                case BiquadType::Notch:    b0 = 1; b1 = -2 * cosw; b2 = 1; a0 = 1 + alpha; a1 = -2 * cosw; a2 = 1 - alpha; break;
-                case BiquadType::Peak:     b0 = 1 + alpha * a; b1 = -2 * cosw; b2 = 1 - alpha * a; a0 = 1 + alpha / a; a1 = -2 * cosw; a2 = 1 - alpha / a; break;
-                case BiquadType::LowShelf:
-                {
-                    const float s = 2 * std::sqrt(a) * alpha;
-                    b0 = a * ((a + 1) - (a - 1) * cosw + s); b1 = 2 * a * ((a - 1) - (a + 1) * cosw); b2 = a * ((a + 1) - (a - 1) * cosw - s);
-                    a0 = (a + 1) + (a - 1) * cosw + s; a1 = -2 * ((a - 1) + (a + 1) * cosw); a2 = (a + 1) + (a - 1) * cosw - s;
-                    break;
-                }
-                case BiquadType::HighShelf:
-                {
-                    const float s = 2 * std::sqrt(a) * alpha;
-                    b0 = a * ((a + 1) + (a - 1) * cosw + s); b1 = -2 * a * ((a - 1) + (a + 1) * cosw); b2 = a * ((a + 1) + (a - 1) * cosw - s);
-                    a0 = (a + 1) - (a - 1) * cosw + s; a1 = 2 * ((a - 1) - (a + 1) * cosw); a2 = (a + 1) - (a - 1) * cosw - s;
-                    break;
-                }
-                }
-                B0 = b0 / a0; B1 = b1 / a0; B2 = b2 / a0; A1 = a1 / a0; A2 = a2 / a0;
-            }
-            float Process(float x)
-            {
-                const float y = B0 * x + Z1;
-                Z1 = B1 * x - A1 * y + Z2;
-                Z2 = B2 * x - A2 * y;
-                return y;
-            }
-        };
-        constexpr uint32_t kCoefficientStep = 32; // filters recompute their coefficients this often, from smoothly moving parameters
+        using AudioDSP::Biquad;
+        using AudioDSP::BiquadType;
+        using AudioDSP::FrequencyRamp;
+        using AudioDSP::kCoefficientStep;
 
         // PolyBLEP / PolyBLAMP residuals (Valimaki et al.): the band-limiting corrections for a step / a corner at phase 0.
         float PolyBlep(float t, float dt)
@@ -1659,26 +1617,6 @@ namespace Nox
 
         // ---- Filters ---------------------------------------------------------------------------------------------------------
 
-        // A frequency moving smoothly from the last block's to this block's: interpolated in octaves (what the ear hears as even).
-        struct FrequencyRamp
-        {
-            float Previous = 0.0f;
-            bool Started = false;
-            void Begin(float target, float sampleRate, float& from, float& to)
-            {
-                target = std::clamp(target, 10.0f, sampleRate * 0.49f);
-                if (!Started)
-                {
-                    Previous = target;
-                    Started = true;
-                }
-                from = Previous;
-                to = target;
-                Previous = target;
-            }
-            static float At(float from, float to, float t) { return from * std::pow(to / from, t); }
-        };
-
         // Low pass / high pass / band pass / notch / peak / shelves (RBJ cookbook).
         struct BiquadFilter
         {
@@ -1841,6 +1779,84 @@ namespace Nox
                     out[n] = state.Bands[2].Process(state.Bands[1].Process(state.Bands[0].Process(in[n])));
             }
         };
+
+        // ---- Effects (the mixer's bus effects as nodes, AudioEffects.h) ------------------------------------------------------
+
+        // In Left, In Right (unconnected: the left one -- a mono sound in, stereo out), Sidechain for the dynamics effects, then one
+        // input per number / toggle parameter; choices are node options, the Convolution Reverb's impulse response a clip property.
+        // Out Left, Out Right, and Gain Reduction (dB) for the dynamics effects.
+        template <AudioEffectType Type>
+        struct EffectNode
+        {
+            struct State
+            {
+                std::unique_ptr<AudioEffect> Effect;
+                uint32_t FirstParameterPin = 2;
+                std::vector<int32_t> PinParameter; // per input after FirstParameterPin: the effect's parameter index
+                float Left[N] = {};
+                float Right[N] = {};
+            };
+            static void Init(State& state, AudioNodeSetup& setup)
+            {
+                const AudioEffectInfo& info = GetAudioEffectInfo(Type);
+                const AudioClip* impulse = info.ImpulseResponse ? setup.Clip(setup.Handle("Impulse Response")) : nullptr;
+                state.Effect = CreateAudioEffect(Type, setup.SampleRate(), impulse);
+                state.FirstParameterPin = info.Sidechain ? 3u : 2u;
+                for (size_t i = 0; i < info.Parameters.size(); ++i)
+                {
+                    const AudioEffectParameterInfo& parameter = info.Parameters[i];
+                    if (parameter.Options.empty())
+                        state.PinParameter.push_back(static_cast<int32_t>(i));
+                    else
+                        state.Effect->SetParameter(static_cast<uint32_t>(i), static_cast<float>(setup.Int(parameter.Name, static_cast<int32_t>(parameter.Default))));
+                }
+            }
+            static void Process(AudioNodeRun& run, State& state)
+            {
+                const float* inLeft = run.Audio(0);
+                const float* inRight = run.IsConnected(1) ? run.Audio(1) : inLeft;
+                std::memcpy(state.Left, inLeft, sizeof(state.Left));
+                std::memcpy(state.Right, inRight, sizeof(state.Right));
+                for (size_t i = 0; i < state.PinParameter.size(); ++i)
+                    state.Effect->SetParameter(static_cast<uint32_t>(state.PinParameter[i]), run.Float(state.FirstParameterPin + static_cast<uint32_t>(i)));
+                const float* key = state.FirstParameterPin == 3 && run.IsConnected(2) ? run.Audio(2) : nullptr;
+                state.Effect->Process(state.Left, state.Right, N, key, key);
+                std::memcpy(run.AudioOut(0), state.Left, sizeof(state.Left));
+                std::memcpy(run.AudioOut(1), state.Right, sizeof(state.Right));
+                if (GetAudioEffectInfo(Type).ReportsGainReduction)
+                    run.SetFloat(2, state.Effect->GetGainReductionDb());
+            }
+        };
+
+        template <AudioEffectType Type>
+        void RegisterEffectNode()
+        {
+            const AudioEffectInfo& info = GetAudioEffectInfo(Type);
+            std::vector<PinSpec> inputs = { A("In Left"), A("In Right") };
+            if (info.Sidechain)
+                inputs.push_back(A("Sidechain"));
+            for (const AudioEffectParameterInfo& parameter : info.Parameters)
+            {
+                if (!parameter.Options.empty())
+                    continue;
+                if (parameter.Toggle)
+                    inputs.push_back(B(parameter.Name.c_str(), parameter.Default >= 0.5f));
+                else
+                    inputs.push_back(F(parameter.Name.c_str(), parameter.Default, parameter.Min, parameter.Max));
+            }
+            std::vector<NodePinDesc> outputs = { { "Out Left", "Audio" }, { "Out Right", "Audio" } };
+            if (info.ReportsGainReduction)
+                outputs.push_back({ "Gain Reduction", "Float" });
+            NodeTypeDesc desc = Desc(info.Name.c_str(), "Effects", std::move(inputs), std::move(outputs));
+            for (const AudioEffectParameterInfo& parameter : info.Parameters)
+            {
+                if (!parameter.Options.empty())
+                    Option(desc, parameter.Name.c_str(), parameter.Options, static_cast<int32_t>(parameter.Default));
+            }
+            if (info.ImpulseResponse)
+                ClipProperty(desc, "Impulse Response");
+            Register<EffectNode<Type>>(std::move(desc));
+        }
     }
 
     void RegisterAudioGraphNodeTypes()
@@ -2078,6 +2094,21 @@ namespace Nox
         Register<ParametricEQ>(Desc("Parametric EQ", "Filters",
             { A("In"), F("Low Frequency", 200.0f), F("Low Gain", 0.0f, -24.0f, 24.0f), F("Mid Frequency", 1000.0f), F("Mid Gain", 0.0f, -24.0f, 24.0f),
               F("Mid Q", 1.0f), F("High Frequency", 5000.0f), F("High Gain", 0.0f, -24.0f, 24.0f) }, monoOut));
+
+        // Effects.
+        RegisterEffectNode<AudioEffectType::EQ>();
+        RegisterEffectNode<AudioEffectType::Filter>();
+        RegisterEffectNode<AudioEffectType::Compressor>();
+        RegisterEffectNode<AudioEffectType::Limiter>();
+        RegisterEffectNode<AudioEffectType::Gate>();
+        RegisterEffectNode<AudioEffectType::Delay>();
+        RegisterEffectNode<AudioEffectType::Reverb>();
+        RegisterEffectNode<AudioEffectType::ConvolutionReverb>();
+        RegisterEffectNode<AudioEffectType::Chorus>();
+        RegisterEffectNode<AudioEffectType::Flanger>();
+        RegisterEffectNode<AudioEffectType::Phaser>();
+        RegisterEffectNode<AudioEffectType::Distortion>();
+        RegisterEffectNode<AudioEffectType::Bitcrusher>();
     }
 
     NodeGraph CreateEmptyAudioGraph()

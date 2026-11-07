@@ -15,6 +15,7 @@
 #include "Panels/ProfilerPanel.h"
 #include "Panels/WorldPartitionPanel.h"
 #include "Panels/LevelsPanel.h"
+#include "Panels/MixerPanel.h"
 #include "NoxCore/Scene/HLODBuilder.h"
 #include "StreamingTestWorld.h"
 #include "Panels/RenderGraphPanel.h"
@@ -328,6 +329,7 @@ namespace Nox
         ProfilerPanel m_ProfilerPanel;
         WorldPartitionPanel m_WorldPartitionPanel;
         LevelsPanel m_LevelsPanel;
+        MixerPanel m_MixerPanel;
         // Build HLODs, while it runs (stepped every frame; Play, another scene, undo cancel it).
         Scope<HLODBuilder> m_HLODBuild;
         // Create > Streaming Test World (§5.13.4): its settings dialog, and the generation while it runs (stepped every frame; the

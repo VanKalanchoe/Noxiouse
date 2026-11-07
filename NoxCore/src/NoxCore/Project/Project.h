@@ -10,6 +10,9 @@
 
 namespace Nox
 {
+    // Where a project's mixer is when its .nproject does not say (docs/Audio_Architecture_Plan_2026.md §7).
+    inline constexpr const char* kDefaultAudioMixerPath = "Audio/Mixer.nmixer";
+
     struct ProjectConfig
     {
         std::string Name = "Untitled";
@@ -31,6 +34,8 @@ namespace Nox
         // Settings kept on top of the preset (ray tracing resolution, GI, ...), and the packaged game's window mode.
         ProjectRendererSettings Renderer;
         std::string WindowMode = kDefaultWindowMode;
+        // The mixer every sound plays through (.nmixer, relative to AssetDirectory): its buses, effects and snapshots.
+        std::filesystem::path AudioMixer = kDefaultAudioMixerPath;
     };
     
     class Project : public RefCounted

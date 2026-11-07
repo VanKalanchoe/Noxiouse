@@ -21,10 +21,19 @@ public static class Audio
         InternalCalls.PlayOneShot(clipPath, default, volume, false, bus);
 
     /// <summary>
-    /// A bus's volume, linear (0 silent, 1 as mixed): <c>"Master"</c>, <c>"Music"</c>, <c>"SFX"</c>, <c>"Voice"</c>, <c>"UI"</c>,
-    /// <c>"Ambience"</c> -- what a game's options menu sets. Every sound on the bus follows it, smoothly.
+    /// A bus's volume, linear (0 silent, 1 as mixed), on top of the mix the Mixer panel sets -- what a game's options menu sets. Buses
+    /// are the project mixer's, by name (any letter case): a new mixer has <c>"Master"</c>, <c>"Music"</c>, <c>"SFX"</c>,
+    /// <c>"Voice"</c>, <c>"UI"</c>, <c>"Ambience"</c> and <c>"Reverb"</c>. Every sound on the bus follows it, smoothly. Back to 1 when
+    /// Play stops.
     /// </summary>
     public static void SetBusVolume(string bus, float volume) => InternalCalls.SetBusVolume(bus, volume);
 
     public static float GetBusVolume(string bus) => InternalCalls.GetBusVolume(bus);
+
+    /// <summary>
+    /// Blends the mix to one of the mixer's snapshots over <paramref name="blendSeconds"/> (0: at once) -- <c>"Pause"</c> when the
+    /// pause menu opens, <c>"Underwater"</c> when the camera dives; <c>"Default"</c> goes back to the mix itself. False (and an error in
+    /// the console listing the snapshots) when the mixer has no such snapshot. Back to Default when Play stops.
+    /// </summary>
+    public static bool SetSnapshot(string name, float blendSeconds = 0.5f) => InternalCalls.SetSnapshot(name, blendSeconds);
 }

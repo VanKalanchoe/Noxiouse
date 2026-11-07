@@ -252,7 +252,7 @@ namespace Nox
         bool IsAudioRunning() const { return m_AudioRunning; } // Play or Simulate
         // A sound (a clip or an audio graph) played once (Audio.PlayOneShot): at a point (3D, the default Min / Max Distance) or as it is
         // (2D); played as soon as it is loaded. Stopped with the rest when Play ends.
-        void PlayOneShot(AssetHandle sound, const glm::dvec3& position, float volume, bool spatial, AudioBus bus);
+        void PlayOneShot(AssetHandle sound, const glm::dvec3& position, float volume, bool spatial, uint64_t bus);
         // An Audio Source's audio graph parameter (AudioSourceComponent.SetFloat / SetInt / SetBool): kept for its next Play this
         // session, and sent to its sound if it plays; a trigger parameter (Trigger) fires on the playing sound.
         void SetAudioSourceParameter(Entity entity, const std::string& name, const NodeGraphValue& value);
@@ -395,6 +395,23 @@ namespace Nox
         };
         std::vector<PendingOneShot> m_PendingOneShots;
         bool StartOneShot(PendingOneShot& shot); // false: its sound is still loading
+        // 3D one-shots playing: Audio Volumes keep filtering them while they play.
+        struct OneShotVoice
+        {
+            AudioVoiceHandle Voice = 0;
+            glm::dvec3 Position{ 0.0 };
+            AudioVoiceEnvironment Environment;
+        };
+        std::vector<OneShotVoice> m_OneShotVoices;
+        // Where the Audio Volumes want a 3D sound at `position` heard by the listener now, and how fast it gets there.
+        struct AudioEnvironment
+        {
+            AudioVoiceEnvironment Target;
+            float FadeTime = 0.5f;
+        };
+        AudioEnvironment AudioEnvironmentAt(const glm::dvec3& position) const;
+        glm::dvec3 m_AudioListenerPosition{ 0.0 };
+        std::chrono::steady_clock::time_point m_AudioLastUpdate{}; // (the volumes' blending runs on real time: also while paused)
         std::vector<UUID> m_PendingDestroy;
         std::vector<UUID> m_PendingScriptStart;
         std::unordered_set<UUID> m_PendingPhysics3D;

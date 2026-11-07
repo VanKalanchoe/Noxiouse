@@ -562,7 +562,7 @@ namespace Nox
         float Pitch = 1.0f;    // playback rate (an audio graph's Wave Players and oscillators follow it)
         bool Loop = false;     // (clips; a graph loops by itself)
         bool PlayOnStart = true;
-        AudioBus Bus = AudioBus::SFX;
+        uint64_t Bus = kAudioBusSFX; // the mixer bus it plays into, by id (AudioMixer.h)
         bool Spatial = true;
         AudioSpatialSettings Spatialization; // Min / Max Distance, attenuation curve, Doppler
         std::unordered_map<std::string, NodeGraphValue> GraphParameters; // overrides of the graph's defaults (saved)
@@ -570,6 +570,7 @@ namespace Nox
         // Runtime only.
         AudioVoiceHandle Voice = 0;
         bool PendingPlay = false; // asked to play while its sound was still loading: plays once it is in
+        AudioVoiceEnvironment Environment; // where Audio Volumes put it now (blending toward where they want it)
         std::unordered_map<std::string, NodeGraphValue> RuntimeParameters; // what scripts set (over the overrides), for this Play session
 
         AudioSourceComponent() = default;
@@ -589,6 +590,24 @@ namespace Nox
     struct AudioListenerComponent
     {
         bool Listening = true; // (a member: entt keeps no instances of empty types)
+    };
+
+    // A box where sound changes (docs/Audio_Architecture_Plan_2026.md §4; Unreal's Audio Volume, Godot's Area3D reverb bus): 3D sounds
+    // inside it send to its Reverb Bus, and between inside and outside sounds are turned down and muffled -- a room's walls. A sound
+    // inside heard from outside gets the Interior volume and low pass; a sound outside heard from inside gets the Exterior ones.
+    // Overlapping volumes: the highest Priority counts. The box is HalfExtents in the entity's space (it moves, turns and scales with
+    // it). Changes blend in over Fade Time.
+    struct AudioVolumeComponent
+    {
+        glm::vec3 HalfExtents{ WorldUnits::FromMeters(5.0f), WorldUnits::FromMeters(2.5f), WorldUnits::FromMeters(5.0f) };
+        int32_t Priority = 0;
+        uint64_t ReverbBus = kAudioBusReverb; // the mixer bus 3D sounds inside send to (0: none)
+        float ReverbSend = 0.5f;              // linear
+        float InteriorVolume = 0.5f;          // linear
+        float InteriorLowPass = 2000.0f;      // Hz (20000: none)
+        float ExteriorVolume = 0.5f;
+        float ExteriorLowPass = 2000.0f;
+        float FadeTime = 0.5f;                // seconds
     };
 
     // A particle emitter (docs/Hybrid_Renderer_Plan_2026-10.md §6, V1 / V2): particles spawned around the entity and simulated on
@@ -1110,7 +1129,7 @@ namespace Nox
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
         MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent,
-        TimelinePlayerComponent, AudioSourceComponent, AudioListenerComponent, ParticleEmitterComponent, SpriteRendererComponent,
+        TimelinePlayerComponent, AudioSourceComponent, AudioListenerComponent, AudioVolumeComponent, ParticleEmitterComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,

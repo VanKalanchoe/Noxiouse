@@ -18,6 +18,7 @@
 #include "NoxCore/Animation/AnimationGraphNodes.h"
 #include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Audio/AudioGraph.h"
+#include "NoxCore/Audio/AudioMixer.h"
 
 namespace Nox
 {
@@ -31,6 +32,7 @@ namespace Nox
 
         m_JobSystem = std::make_unique<JobSystem>();
         AudioEngine::Init(); // its own mixer and stream threads, apart from the JobSystem (docs/Audio_Architecture_Plan_2026.md §8)
+        AudioMixer::Init();  // the default buses, until a project's mixer is loaded
 
         if (!m_Specification.WorkingDirectory.empty())
             std::filesystem::current_path(m_Specification.WorkingDirectory);
@@ -70,6 +72,7 @@ namespace Nox
         IsEngineShuttingDown = true;
 
         PopLayer<ImGuiLayer>();
+        AudioMixer::Shutdown();
         AudioEngine::Shutdown(); // (what the layers stop on their way out after this finds no voices: a no-op)
 
         s_Application = nullptr;
@@ -101,7 +104,9 @@ namespace Nox
                 for (const std::unique_ptr<Layer>& layer : m_LayerStack)
                     layer->OnUpdate(timestep);
             }
-            // After the scene set the listener and its sources' positions: voices that ended are released, the rest sent to the mixer.
+            // After the scene set the listener and its sources' positions: the mixer's values and snapshot blend, then voices that
+            // ended are released and the rest sent to the mixer thread.
+            AudioMixer::Update(timestep);
             AudioEngine::Update(timestep);
 
             // NOTE: rendering can be done elsewhere (eg. render thread)
