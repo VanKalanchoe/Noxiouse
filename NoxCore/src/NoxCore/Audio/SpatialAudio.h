@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -101,6 +102,36 @@ namespace Nox
         // Traces every source's occlusion and transmission (a few rays each, against the committed scene).
         static void RunDirect();
         static SourceOutputs GetSourceOutputs(IPLSource source);
+
+        // ---- Reflections (A4b): rays bounced off the scene give each nearby voice its early reflections and reverb tail ---------
+        // Traced on Steam Audio's own reflection thread against a second copy of the acoustic scene (changed only between runs, so
+        // occlusion above never waits for it), for a budget of the voices nearest the listener: each gets the reflections of one of
+        // a pool of reflection sources. Each voice's response (ambisonics, order 1) is convolved through Steam Audio's reflection
+        // mixer, decoded once for all.
+        struct ReflectionSettings
+        {
+            bool Enabled = true;
+            int32_t Rays = 4096;         // rays from the listener each run
+            int32_t Bounces = 4;
+            float Duration = 1.0f;       // seconds of response simulated and convolved (up to MaxReflectionDuration)
+            int32_t MaxSources = 4;      // voices with reflections at once (up to MaxReflectionSources): ~0.15-0.3 ms of mixing each
+            float Interval = 0.1f;       // seconds between runs at most often
+        };
+        static constexpr int32_t MaxReflectionSources = 16;
+        static constexpr float MaxReflectionDuration = 1.5f;
+        static constexpr int32_t ReflectionOrder = 1;
+        static constexpr int32_t ReflectionChannels = 4; // (order + 1)^2
+        static void SetReflectionSettings(const ReflectionSettings& settings);
+        static ReflectionSettings GetReflectionSettings();
+        // The reflection thread is not running (a new run can start; its last results can be read).
+        static bool ReflectionsIdle();
+        // True once after each finished run: GetReflectionParams then gives its results.
+        static bool TakeReflectionResults();
+        // Starts a run (when idle) for the pool slots given a position (world units); the others are left out.
+        static void StartReflections(const std::vector<std::pair<int32_t, glm::dvec3>>& sources);
+        // The effect parameters a pool slot's last run produced (false: none yet).
+        static bool GetReflectionParams(int32_t slot, IPLReflectionEffectParams& out);
+        static float GetLastReflectionMilliseconds();
 
         // Meters around the origin (what Steam Audio sees) from world units.
         static IPLVector3 ToAcoustic(const glm::dvec3& world);

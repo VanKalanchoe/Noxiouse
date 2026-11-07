@@ -120,7 +120,10 @@ namespace Nox
             VoiceBus,
             EffectParameter,
             EffectBypass,
-            SendGain
+            SendGain,
+            VoiceReflections,
+            ListenerBasis,
+            ReflectionsOutput
         };
 
         struct MixerLayout;
@@ -154,6 +157,11 @@ namespace Nox
             float Occlusion = 1.0f;
             float Transmission[3] = { 1.0f, 1.0f, 1.0f };
             float AirAbsorption[3] = { 1.0f, 1.0f, 1.0f };
+            float Attenuation = 1.0f;     // the distance curve (Steam Audio voices: their gains are without it)
+            float ReflectionGain = 0.0f;  // what goes into its reflections
+            // VoiceReflections: the pool slot (Parameter, -1: none) and its effect parameters; ListenerBasis: right, up, ahead.
+            IPLReflectionEffectParams Reflection{};
+            float Basis[9] = {};
             // Start (fade in), Stop / StopGroup (fade out), BusGain (gain)
             float Value = 0.0f;
             bool Flag = false; // Loop, paused
@@ -189,6 +197,10 @@ namespace Nox
             uint8_t Spatial = 0;
             IPLDirectEffectParams Direct{};
             float Direction[3] = { 0.0f, 0.0f, -1.0f };
+            float Attenuation = 1.0f, AttenuationApplied = 1.0f;
+            float ReflectionGain = 0.0f, ReflectionApplied = 0.0f;
+            int32_t ReflectionSlot = -1;
+            IPLReflectionEffectParams Reflection{};
             int64_t Frame = 0; // the playhead: decoded clip frame, or a streamed voice's frame counted from its start
             double Fraction = 0.0;
             float Rate = 1.0f;
@@ -216,6 +228,7 @@ namespace Nox
             bool HasPrevious = false;
             AudioVoiceEnvironment Environment;
             IPLSource Source = nullptr; // Steam Audio's simulation of it (3D voices with occlusion or air absorption)
+            int32_t ReflectionSlot = -1; // its reflection pool slot (the nearest voices get one)
             SpatialAudio::SourceOutputs Direct;
         };
 
@@ -269,8 +282,10 @@ namespace Nox
             float GainL = 0.0f;
             float GainR = 0.0f;
             float Rate = 1.0f;
-            uint8_t Spatial = 0;    // Steam Audio: 1 panning, 2 binaural (the gains are then one, unpanned)
+            uint8_t Spatial = 0;    // Steam Audio: 1 panning, 2 binaural (the gains are then one, unpanned, without the distance curve)
             glm::vec3 Direction{ 0.0f, 0.0f, -1.0f };
+            float Attenuation = 1.0f;
+            float ReflectionGain = 0.0f;
         };
 
         struct State
@@ -308,6 +323,35 @@ namespace Nox
             alignas(16) float SpatialRight[kBlock] = {};
             bool Headphones = true; // (game side)
             bool SteamAudio = false; // its context, HRTF and every slot's effects are there
+            // Reflections (mixer side): the pool's effects, which voice each serves, their ambisonic sum and its decoder.
+            std::array<IPLReflectionEffect, SpatialAudio::MaxReflectionSources> ReflectionEffects{};
+            std::array<int32_t, SpatialAudio::MaxReflectionSources> ReflectionOwner{};
+            // A voice that ended: its reflections ring on (silence in) until the response has passed.
+            std::array<uint32_t, SpatialAudio::MaxReflectionSources> ReflectionTailBlocks{};
+            std::array<IPLReflectionEffectParams, SpatialAudio::MaxReflectionSources> ReflectionTailParams{};
+            IPLAmbisonicsDecodeEffect ReflectionDecode = nullptr;
+            IPLReflectionMixer ReflectionMixer = nullptr; // (the voices' convolutions summed in the frequency domain: one inverse FFT)
+            IPLint32 ReflectionIrSize = 48000;
+            alignas(16) float Ambisonics[SpatialAudio::ReflectionChannels][kBlock] = {};
+            alignas(16) float AmbisonicsVoice[SpatialAudio::ReflectionChannels][kBlock] = {};
+            alignas(16) float ReflectionInput[kBlock] = {};
+            float ListenerBasis[9] = { 1, 0, 0, 0, 1, 0, 0, 0, -1 };
+            bool ReflectionsBinaural = true;
+            bool ReflectionsOn = false;
+            int32_t ReflectionsBus = 0;
+            float ReflectionsLevel = 1.0f, ReflectionsApplied = 1.0f;
+            // Reflections (game side).
+            AudioReflectionSettings Reflections;
+            bool ReflectionsSent = false;
+            std::array<int32_t, SpatialAudio::MaxReflectionSources> ReflectionVoice{}; // pool slot -> voice slot (-1: free)
+            double LastReflectionStart = -1e9;
+            std::array<double, SpatialAudio::MaxReflectionSources> ReflectionFreedAt{}; // (new voices take the slot free longest: tails ring out)
+            // Each slot's last results and where they were simulated: a new voice near there uses them at once (a footstep has ended
+            // before a new run could finish).
+            std::array<IPLReflectionEffectParams, SpatialAudio::MaxReflectionSources> ReflectionParams{};
+            std::array<glm::dvec3, SpatialAudio::MaxReflectionSources> ReflectionRunPosition{};
+            std::array<glm::dvec3, SpatialAudio::MaxReflectionSources> ReflectionResultPosition{};
+            std::array<bool, SpatialAudio::MaxReflectionSources> ReflectionValid{};
 
             // Game side.
             std::array<GameVoice, AudioEngine::MaxVoices> GameVoices;
@@ -380,6 +424,8 @@ namespace Nox
                 voice.Direct.airAbsorption[band] = command.AirAbsorption[band];
                 voice.Direction[band] = command.Direction[band];
             }
+            voice.Attenuation = command.Attenuation;
+            voice.ReflectionGain = command.ReflectionGain;
         }
 
         void ApplyCommand(State& state, const Command& command)
@@ -410,6 +456,9 @@ namespace Nox
                 voice.LowPassFilter[1].Reset();
                 voice.LowPassActive = command.LowPass < kLowPassOff;
                 ApplySpatial(voice, command);
+                voice.AttenuationApplied = voice.Attenuation;
+                voice.ReflectionApplied = voice.ReflectionGain;
+                voice.ReflectionSlot = -1;
                 if (state.DirectEffects[command.Slot])
                 {
                     iplDirectEffectReset(state.DirectEffects[command.Slot]);
@@ -534,6 +583,30 @@ namespace Nox
                             effect.Instance->SetParameter(command.Index, command.Value);
                     }
                 }
+                break;
+            case CommandType::VoiceReflections:
+            {
+                MixVoice& voice = state.MixVoices[command.Slot];
+                const int32_t slot = command.Parameter;
+                voice.ReflectionSlot = slot >= 0 && slot < SpatialAudio::MaxReflectionSources && state.ReflectionEffects[slot] ? slot : -1;
+                voice.Reflection = command.Reflection;
+                if (voice.ReflectionSlot >= 0 && state.ReflectionOwner[slot] != static_cast<int32_t>(command.Slot))
+                {
+                    // A new voice in the slot: the effect goes on (the last voice's tail rings out under the new input -- the next
+                    // footstep keeps the one before's reverb), its own tail pass ends.
+                    state.ReflectionTailBlocks[slot] = 0;
+                    state.ReflectionOwner[slot] = static_cast<int32_t>(command.Slot);
+                }
+                break;
+            }
+            case CommandType::ListenerBasis:
+                std::memcpy(state.ListenerBasis, command.Basis, sizeof(state.ListenerBasis));
+                state.ReflectionsBinaural = command.Flag;
+                break;
+            case CommandType::ReflectionsOutput:
+                state.ReflectionsOn = command.Flag && state.ReflectionDecode;
+                state.ReflectionsBus = command.Bus;
+                state.ReflectionsLevel = command.Value;
                 break;
             case CommandType::SendGain:
                 if (state.Layout && command.Bus < state.Layout->Buses.size())
@@ -757,8 +830,38 @@ namespace Nox
             if (voice.Spatial == 0 || !state.DirectEffects[slot])
                 return;
             float* buffer = state.VoiceBuffer.data();
-            for (uint32_t i = 0; i < kBlock; ++i)
-                state.SpatialMono[i] = buffer[i * 2];
+            // Its reflections first (without the distance curve: the simulated response carries the distance), into the
+            // ambisonic sum the decoder turns into stereo once all voices are in.
+            if (voice.ReflectionSlot >= 0 && voice.Reflection.ir && state.ReflectionsOn)
+            {
+                const float step = (voice.ReflectionGain - voice.ReflectionApplied) / static_cast<float>(kBlock);
+                float gain = voice.ReflectionApplied;
+                for (uint32_t i = 0; i < kBlock; ++i)
+                {
+                    gain += step;
+                    state.ReflectionInput[i] = buffer[i * 2] * gain;
+                }
+                float* input = state.ReflectionInput;
+                float* channels[SpatialAudio::ReflectionChannels];
+                for (int c = 0; c < SpatialAudio::ReflectionChannels; ++c)
+                    channels[c] = state.AmbisonicsVoice[c];
+                IPLAudioBuffer reflectionIn{ 1, static_cast<IPLint32>(kBlock), &input };
+                IPLAudioBuffer reflectionOut{ SpatialAudio::ReflectionChannels, static_cast<IPLint32>(kBlock), channels };
+                iplReflectionEffectApply(state.ReflectionEffects[voice.ReflectionSlot], &voice.Reflection, &reflectionIn, &reflectionOut, state.ReflectionMixer);
+                state.ReflectionIrSize = voice.Reflection.irSize;
+            }
+            voice.ReflectionApplied = voice.ReflectionGain;
+            // The direct sound: the distance curve, ramped.
+            {
+                const float step = (voice.Attenuation - voice.AttenuationApplied) / static_cast<float>(kBlock);
+                float gain = voice.AttenuationApplied;
+                for (uint32_t i = 0; i < kBlock; ++i)
+                {
+                    gain += step;
+                    state.SpatialMono[i] = buffer[i * 2] * gain;
+                }
+                voice.AttenuationApplied = voice.Attenuation;
+            }
             float* mono = state.SpatialMono;
             float* direct = state.SpatialDirect;
             float* stereo[2] = { state.SpatialLeft, state.SpatialRight };
@@ -971,12 +1074,62 @@ namespace Nox
                 RouteVoice(state, voice, layout);
                 if (!running)
                 {
+                    if (voice.ReflectionSlot >= 0 && voice.Reflection.ir && state.ReflectionsOn)
+                    {
+                        state.ReflectionTailBlocks[voice.ReflectionSlot] =
+                            static_cast<uint32_t>(SpatialAudio::MaxReflectionDuration * static_cast<float>(state.SampleRate)) / kBlock + 1;
+                        state.ReflectionTailParams[voice.ReflectionSlot] = voice.Reflection;
+                    }
+                    voice.ReflectionSlot = -1;
                     voice.Active = false;
                     voice.Clip = nullptr;
                     voice.Stream = nullptr;
                     voice.Graph = nullptr;
                     state.Finished.Push({ slot }); // (room for every slot: a slot is reused only after its event is read)
                 }
+            }
+
+            // Every voice's reflections, decoded once (HRTF or panning, turned with the listener) into the reflections' bus.
+            if (state.ReflectionsOn)
+            {
+                // The tails of voices that ended.
+                std::memset(state.ReflectionInput, 0, sizeof(state.ReflectionInput));
+                for (int32_t slot = 0; slot < SpatialAudio::MaxReflectionSources; ++slot)
+                {
+                    if (state.ReflectionTailBlocks[slot] == 0)
+                        continue;
+                    --state.ReflectionTailBlocks[slot];
+                    float* input = state.ReflectionInput;
+                    float* channels[SpatialAudio::ReflectionChannels];
+                    for (int c = 0; c < SpatialAudio::ReflectionChannels; ++c)
+                        channels[c] = state.AmbisonicsVoice[c];
+                    IPLAudioBuffer silence{ 1, static_cast<IPLint32>(kBlock), &input };
+                    IPLAudioBuffer tail{ SpatialAudio::ReflectionChannels, static_cast<IPLint32>(kBlock), channels };
+                    iplReflectionEffectApply(state.ReflectionEffects[slot], &state.ReflectionTailParams[slot], &silence, &tail, state.ReflectionMixer);
+                }
+                float* channels[SpatialAudio::ReflectionChannels];
+                for (int c = 0; c < SpatialAudio::ReflectionChannels; ++c)
+                    channels[c] = state.Ambisonics[c];
+                float* stereo[2] = { state.SpatialLeft, state.SpatialRight };
+                IPLAudioBuffer ambisonics{ SpatialAudio::ReflectionChannels, static_cast<IPLint32>(kBlock), channels };
+                IPLAudioBuffer out{ 2, static_cast<IPLint32>(kBlock), stereo };
+                IPLReflectionEffectParams mixParams{};
+                mixParams.type = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION;
+                mixParams.numChannels = SpatialAudio::ReflectionChannels;
+                mixParams.irSize = state.ReflectionIrSize;
+                iplReflectionMixerApply(state.ReflectionMixer, &mixParams, &ambisonics);
+                IPLAmbisonicsDecodeEffectParams params{};
+                params.order = SpatialAudio::ReflectionOrder;
+                params.hrtf = SpatialAudio::Hrtf();
+                const float* b = state.ListenerBasis;
+                params.orientation.right = { b[0], b[1], b[2] };
+                params.orientation.up = { b[3], b[4], b[5] };
+                params.orientation.ahead = { b[6], b[7], b[8] };
+                params.binaural = state.ReflectionsBinaural ? IPL_TRUE : IPL_FALSE;
+                iplAmbisonicsDecodeEffectApply(state.ReflectionDecode, &params, &ambisonics, &out);
+                RuntimeBus& target = layout.Buses[static_cast<size_t>(state.ReflectionsBus) < layout.Buses.size() ? state.ReflectionsBus : 0];
+                AddInto(target, state.SpatialLeft, state.SpatialRight, state.ReflectionsApplied, state.ReflectionsLevel);
+                state.ReflectionsApplied = state.ReflectionsLevel;
             }
 
             for (uint32_t index : layout.Order)
@@ -1222,7 +1375,12 @@ namespace Nox
                 {
                     const AudioSpatialization mode = desc.Spatialization.Spatialization;
                     params.Spatial = mode == AudioSpatialization::Binaural || (mode == AudioSpatialization::Default && state.Headphones) ? 2 : 1;
-                    params.GainL = params.GainR = gain;
+                    // Its gain without the distance curve (the mixer applies the curve to the direct sound only); its reflections
+                    // fade out over the last fifth of Max Distance.
+                    params.GainL = params.GainR = volume;
+                    params.Attenuation = Attenuate(distance, desc.Spatialization);
+                    const float maximum = std::max(desc.Spatialization.MaxDistance, 0.01f);
+                    params.ReflectionGain = desc.Spatialization.Reflections ? std::clamp((1.0f - distance / maximum) * 5.0f, 0.0f, 1.0f) : 0.0f;
                     if (distance > 1e-4f)
                         params.Direction = glm::normalize(glm::conjugate(state.ListenerOrientation) * offset);
                 }
@@ -1257,6 +1415,8 @@ namespace Nox
             if (voice.Source && settings.Occlusion)
                 flags |= IPL_DIRECTEFFECTFLAGS_APPLYOCCLUSION | IPL_DIRECTEFFECTFLAGS_APPLYTRANSMISSION;
             command.DirectFlags = static_cast<uint8_t>(flags);
+            command.Attenuation = params.Attenuation;
+            command.ReflectionGain = params.ReflectionGain;
             command.Occlusion = voice.Direct.Occlusion;
             for (int band = 0; band < 3; ++band)
             {
@@ -1292,6 +1452,12 @@ namespace Nox
         {
             GameVoice& voice = state.GameVoices[slot];
             SpatialAudio::ReleaseSource(voice.Source);
+            if (voice.ReflectionSlot >= 0)
+            {
+                state.ReflectionVoice[voice.ReflectionSlot] = -1;
+                state.ReflectionFreedAt[voice.ReflectionSlot] = static_cast<double>(std::chrono::steady_clock::now().time_since_epoch().count()) * 1e-9;
+            }
+            voice.ReflectionSlot = -1;
             if (voice.Stream)
             {
                 std::scoped_lock lock(state.StreamMutex);
@@ -1475,6 +1641,147 @@ namespace Nox
                 delete retired;
         }
 
+        // Reflections (game thread, every frame): the listener's orientation to the decoder; when the reflection thread is idle,
+        // the last run's results to their voices, then a new run for the nearest voices (a voice keeps its pool slot while it stays
+        // among them, so its response is not reset).
+        void UpdateReflections(State& state, float metersPerUnit)
+        {
+            const glm::quat& q = state.ListenerOrientation;
+            const glm::vec3 right = q * glm::vec3(1.0f, 0.0f, 0.0f), up = q * glm::vec3(0.0f, 1.0f, 0.0f), ahead = q * glm::vec3(0.0f, 0.0f, -1.0f);
+            Command basis;
+            basis.Type = CommandType::ListenerBasis;
+            const float values[9] = { right.x, right.y, right.z, up.x, up.y, up.z, ahead.x, ahead.y, ahead.z };
+            std::memcpy(basis.Basis, values, sizeof(values));
+            basis.Flag = state.Headphones;
+            Push(state, basis);
+
+            const AudioReflectionSettings& settings = state.Reflections;
+            const bool enabled = settings.Enabled && settings.MaxSources > 0 && state.ReflectionDecode;
+            if (!state.ReflectionsSent)
+            {
+                Command output;
+                output.Type = CommandType::ReflectionsOutput;
+                output.Flag = enabled;
+                output.Bus = static_cast<uint16_t>(std::max(BusOf(state, settings.Bus), 0));
+                output.Value = AudioDSP::DbToGain(settings.LevelDb);
+                Push(state, output);
+                state.ReflectionsSent = true;
+            }
+            auto release = [&](int32_t slot)
+            {
+                const int32_t voiceSlot = state.ReflectionVoice[slot];
+                if (voiceSlot < 0)
+                    return;
+                state.GameVoices[voiceSlot].ReflectionSlot = -1;
+                state.ReflectionVoice[slot] = -1;
+                state.ReflectionFreedAt[slot] = static_cast<double>(std::chrono::steady_clock::now().time_since_epoch().count()) * 1e-9;
+                Command command;
+                command.Type = CommandType::VoiceReflections;
+                command.Slot = static_cast<uint32_t>(voiceSlot);
+                command.Parameter = -1;
+                Push(state, command);
+            };
+            if (!enabled)
+            {
+                for (int32_t slot = 0; slot < SpatialAudio::MaxReflectionSources; ++slot)
+                    release(slot);
+                return;
+            }
+            if (!SpatialAudio::ReflectionsIdle())
+                return;
+            if (SpatialAudio::TakeReflectionResults())
+            {
+                for (int32_t slot = 0; slot < SpatialAudio::MaxReflectionSources; ++slot)
+                {
+                    const int32_t voiceSlot = state.ReflectionVoice[slot];
+                    Command command;
+                    if (!SpatialAudio::GetReflectionParams(slot, command.Reflection))
+                        continue;
+                    state.ReflectionParams[slot] = command.Reflection;
+                    state.ReflectionResultPosition[slot] = state.ReflectionRunPosition[slot];
+                    state.ReflectionValid[slot] = true;
+                    if (voiceSlot < 0)
+                        continue;
+                    command.Type = CommandType::VoiceReflections;
+                    command.Slot = static_cast<uint32_t>(voiceSlot);
+                    command.Parameter = slot;
+                    Push(state, command);
+                }
+            }
+            const double now = static_cast<double>(std::chrono::steady_clock::now().time_since_epoch().count()) * 1e-9;
+            if (now - state.LastReflectionStart < 0.1)
+                return;
+            state.LastReflectionStart = now;
+
+            // The nearest audible 3D voices that want reflections.
+            std::vector<std::pair<float, uint32_t>> candidates;
+            for (uint32_t slot = 0; slot < AudioEngine::MaxVoices; ++slot)
+            {
+                const GameVoice& voice = state.GameVoices[slot];
+                if (!voice.Alive || voice.StopSent || !voice.Desc.Spatial || !voice.Desc.Spatialization.Reflections)
+                    continue;
+                const float distance = static_cast<float>(glm::length(voice.Desc.Position - state.ListenerPosition)) * metersPerUnit;
+                if (distance <= voice.Desc.Spatialization.MaxDistance)
+                    candidates.emplace_back(distance, slot);
+            }
+            std::sort(candidates.begin(), candidates.end());
+            const size_t budget = std::min<size_t>(static_cast<size_t>(std::min(settings.MaxSources, SpatialAudio::MaxReflectionSources)), candidates.size());
+            std::array<bool, AudioEngine::MaxVoices> chosen{};
+            for (size_t i = 0; i < budget; ++i)
+                chosen[candidates[i].second] = true;
+            for (int32_t slot = 0; slot < SpatialAudio::MaxReflectionSources; ++slot)
+                if (state.ReflectionVoice[slot] >= 0 && !chosen[state.ReflectionVoice[slot]])
+                    release(slot);
+            for (size_t i = 0; i < budget; ++i)
+            {
+                GameVoice& voice = state.GameVoices[candidates[i].second];
+                if (voice.ReflectionSlot >= 0)
+                    continue;
+                // The free slot last simulated nearest to it (its response is used at once), else the one free longest.
+                constexpr float kReuseMeters = 8.0f;
+                int32_t best = -1;
+                float bestDistance = kReuseMeters;
+                for (int32_t slot = 0; slot < SpatialAudio::MaxReflectionSources; ++slot)
+                {
+                    if (state.ReflectionVoice[slot] >= 0 || !state.ReflectionValid[slot])
+                        continue;
+                    const float distance = static_cast<float>(glm::length(state.ReflectionResultPosition[slot] - voice.Desc.Position)) * metersPerUnit;
+                    if (distance < bestDistance)
+                    {
+                        best = slot;
+                        bestDistance = distance;
+                    }
+                }
+                const bool reuse = best >= 0;
+                if (!reuse)
+                    for (int32_t slot = 0; slot < SpatialAudio::MaxReflectionSources; ++slot)
+                        if (state.ReflectionVoice[slot] < 0 && (best < 0 || state.ReflectionFreedAt[slot] < state.ReflectionFreedAt[best]))
+                            best = slot;
+                if (best < 0)
+                    break;
+                state.ReflectionVoice[best] = static_cast<int32_t>(candidates[i].second);
+                voice.ReflectionSlot = best;
+                if (reuse)
+                {
+                    Command command;
+                    command.Type = CommandType::VoiceReflections;
+                    command.Slot = candidates[i].second;
+                    command.Parameter = best;
+                    command.Reflection = state.ReflectionParams[best];
+                    Push(state, command);
+                }
+            }
+            std::vector<std::pair<int32_t, glm::dvec3>> sources;
+            for (int32_t slot = 0; slot < SpatialAudio::MaxReflectionSources; ++slot)
+            {
+                if (state.ReflectionVoice[slot] < 0)
+                    continue;
+                state.ReflectionRunPosition[slot] = state.GameVoices[state.ReflectionVoice[slot]].Desc.Position;
+                sources.emplace_back(slot, state.ReflectionRunPosition[slot]);
+            }
+            SpatialAudio::StartReflections(sources);
+        }
+
         AudioMixerLayoutDesc MasterOnlyLayout()
         {
             AudioMixerLayoutDesc desc;
@@ -1535,6 +1842,27 @@ namespace Nox
                           iplBinauralEffectCreate(SpatialAudio::Context(), &audio, &binaural, &state.BinauralEffects[slot]) == IPL_STATUS_SUCCESS &&
                           iplPanningEffectCreate(SpatialAudio::Context(), &audio, &panning, &state.PanningEffects[slot]) == IPL_STATUS_SUCCESS;
             }
+            // Reflections: the pool's convolution effects, the mixer they sum into, and one decoder.
+            IPLReflectionEffectSettings reflection{};
+            reflection.type = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION;
+            reflection.irSize = static_cast<IPLint32>(SpatialAudio::MaxReflectionDuration * static_cast<float>(state.SampleRate));
+            reflection.numChannels = SpatialAudio::ReflectionChannels;
+            for (IPLReflectionEffect& effect : state.ReflectionEffects)
+                if (created && iplReflectionEffectCreate(SpatialAudio::Context(), &audio, &reflection, &effect) != IPL_STATUS_SUCCESS)
+                    effect = nullptr;
+            IPLAmbisonicsDecodeEffectSettings decode{};
+            decode.speakerLayout.type = IPL_SPEAKERLAYOUTTYPE_STEREO;
+            decode.hrtf = SpatialAudio::Hrtf();
+            decode.maxOrder = SpatialAudio::ReflectionOrder;
+            if (created && (iplAmbisonicsDecodeEffectCreate(SpatialAudio::Context(), &audio, &decode, &state.ReflectionDecode) != IPL_STATUS_SUCCESS ||
+                            iplReflectionMixerCreate(SpatialAudio::Context(), &audio, &reflection, &state.ReflectionMixer) != IPL_STATUS_SUCCESS))
+            {
+                if (state.ReflectionDecode)
+                    iplAmbisonicsDecodeEffectRelease(&state.ReflectionDecode);
+                state.ReflectionDecode = nullptr; // (no reflections)
+            }
+            state.ReflectionOwner.fill(-1);
+            state.ReflectionVoice.fill(-1);
             state.SteamAudio = created;
             if (!created)
                 NOX_CORE_ERROR("Steam Audio: the voices' effects could not be created -- 3D sounds are panned without it");
@@ -1590,6 +1918,13 @@ namespace Nox
                 if (state.PanningEffects[slot]) iplPanningEffectRelease(&state.PanningEffects[slot]);
                 SpatialAudio::ReleaseSource(state.GameVoices[slot].Source);
             }
+            for (IPLReflectionEffect& effect : state.ReflectionEffects)
+                if (effect)
+                    iplReflectionEffectRelease(&effect);
+            if (state.ReflectionDecode)
+                iplAmbisonicsDecodeEffectRelease(&state.ReflectionDecode);
+            if (state.ReflectionMixer)
+                iplReflectionMixerRelease(&state.ReflectionMixer);
             SpatialAudio::Shutdown();
         }
         delete s_State;
@@ -1929,6 +2264,26 @@ namespace Nox
         SpatialAudio::SetListener(position, s_State->ListenerOrientation);
     }
 
+    void AudioEngine::SetReflections(const AudioReflectionSettings& settings)
+    {
+        if (!s_State || (s_State->Reflections == settings && s_State->ReflectionsSent))
+            return;
+        s_State->Reflections = settings;
+        s_State->ReflectionsSent = false; // (sent with the next Update)
+        SpatialAudio::ReflectionSettings simulation;
+        simulation.Enabled = settings.Enabled;
+        simulation.Rays = settings.Rays;
+        simulation.Bounces = settings.Bounces;
+        simulation.Duration = settings.Duration;
+        simulation.MaxSources = settings.MaxSources;
+        SpatialAudio::SetReflectionSettings(simulation);
+    }
+
+    float AudioEngine::GetReflectionMilliseconds()
+    {
+        return SpatialAudio::GetLastReflectionMilliseconds();
+    }
+
     void AudioEngine::SetHeadphones(bool headphones)
     {
         if (s_State)
@@ -1973,6 +2328,7 @@ namespace Nox
             Push(state, set);
         }
         state.GameLayout = layout;
+        state.ReflectionsSent = false; // (the reflections' bus index in this layout)
         state.BusIndex.clear();
         for (uint32_t b = 0; b < layout->Buses.size(); ++b)
             state.BusIndex.emplace(layout->Buses[b].Id, b);
@@ -2121,6 +2477,7 @@ namespace Nox
                     if (voice.Source)
                         voice.Direct = SpatialAudio::GetSourceOutputs(voice.Source);
             }
+            UpdateReflections(state, metersPerUnit);
         }
 
         for (uint32_t slot = 0; slot < MaxVoices; ++slot)

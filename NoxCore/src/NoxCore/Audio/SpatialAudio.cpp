@@ -1,12 +1,19 @@
 #include "SpatialAudio.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/WorldUnits.h"
+#include "NoxCore/Profiling/Profiler.h"
 
 namespace Nox
 {
@@ -15,6 +22,8 @@ namespace Nox
         constexpr double kRebaseMeters = 1000.0;  // the origin moves to the listener once it is this far (floats keep ~0.1 mm there)
         constexpr int32_t kOcclusionSamples = 16; // volumetric occlusion: rays to points over the source's sphere
         constexpr int32_t kTransmissionRays = 3;  // up to this many surfaces passed through count for transmission
+        constexpr int32_t kMaxRays = 16384;
+        constexpr int32_t kDiffuseSamples = 32;
 
         struct SubScene
         {
@@ -27,19 +36,26 @@ namespace Nox
             uint64_t Triangles = 0;
         };
 
+        // One placement, in both scenes: the occlusion scene (changed at once, traced on the game thread) and the reflection scene
+        // (brought up to date only between reflection runs, traced on the reflection thread). Both use the same sub-scene.
         struct PlacedInstance
         {
             std::string MeshKey;
             glm::dmat4 World{ 1.0 };
-            IPLInstancedMesh Handle = nullptr;
+            IPLInstancedMesh Direct = nullptr;
+            IPLInstancedMesh Reflect = nullptr;
+            bool ReflectMoved = false; // its transform changed since the reflection scene last took it
+            bool Removed = false;      // gone: out of the reflection scene at the next chance, then forgotten
         };
 
         struct State
         {
             IPLContext Context = nullptr;
             IPLHRTF Hrtf = nullptr;
-            IPLScene Scene = nullptr;
+            IPLScene Scene = nullptr;            // occlusion
             IPLSimulator Simulator = nullptr;
+            IPLScene ReflectScene = nullptr;     // reflections
+            IPLSimulator ReflectSimulator = nullptr;
             uint32_t SampleRate = 48000;
             uint32_t FrameSize = 256;
             glm::dvec3 Origin{ 0.0 };
@@ -49,8 +65,25 @@ namespace Nox
             std::unordered_map<uint64_t, PlacedInstance> Instances;
             bool SceneDirty = false;
             bool SimulatorDirty = false;
+            bool ReflectDirty = false;
+
+            // Reflections: the pool of reflection sources, the thread that traces them.
+            std::array<IPLSource, SpatialAudio::MaxReflectionSources> Pool{};
+            std::array<bool, SpatialAudio::MaxReflectionSources> PoolAdded{};
+            std::array<bool, SpatialAudio::MaxReflectionSources> PoolHasResults{};
+            SpatialAudio::ReflectionSettings Settings;
+            std::thread ReflectThread;
+            std::mutex ReflectMutex;
+            std::condition_variable ReflectWake;
+            bool ReflectRequested = false;    // (under ReflectMutex)
+            bool ReflectQuit = false;         // (under ReflectMutex)
+            std::atomic<bool> ReflectRunning{ false };
+            std::atomic<bool> ReflectFinished{ false };
+            std::atomic<float> ReflectMilliseconds{ 0.0f };
+            std::vector<IPLInstancedMesh> RetiredReflect; // placements replaced: out of the reflection scene at the next sync
         };
         State* s_State = nullptr;
+        uint32_t s_MaterialVersion = 1;
 
         void IPLCALL LogCallback(IPLLogLevel level, const char* message)
         {
@@ -86,6 +119,20 @@ namespace Nox
             out.elements[3][0] = out.elements[3][1] = out.elements[3][2] = 0.0f;
             out.elements[3][3] = 1.0f;
             return out;
+        }
+
+        IPLCoordinateSpace3 ListenerSpace(const State& state, IPLVector3 origin)
+        {
+            const glm::quat& q = state.ListenerOrientation;
+            const glm::vec3 right = q * glm::vec3(1.0f, 0.0f, 0.0f);
+            const glm::vec3 up = q * glm::vec3(0.0f, 1.0f, 0.0f);
+            const glm::vec3 ahead = q * glm::vec3(0.0f, 0.0f, -1.0f);
+            IPLCoordinateSpace3 space{};
+            space.right = { right.x, right.y, right.z };
+            space.up = { up.x, up.y, up.z };
+            space.ahead = { ahead.x, ahead.y, ahead.z };
+            space.origin = origin;
+            return space;
         }
 
         bool BuildSubScene(State& state, SubScene& sub, const AcousticMesh& mesh)
@@ -142,15 +189,6 @@ namespace Nox
             return true;
         }
 
-        void ReleaseInstance(State& state, PlacedInstance& instance)
-        {
-            if (!instance.Handle)
-                return;
-            iplInstancedMeshRemove(instance.Handle, state.Scene);
-            iplInstancedMeshRelease(&instance.Handle);
-            state.SceneDirty = true;
-        }
-
         void ReleaseSubScene(SubScene& sub)
         {
             if (sub.Mesh)
@@ -159,47 +197,140 @@ namespace Nox
                 iplSceneRelease(&sub.Scene);
         }
 
-        // An instance whose mesh is built gets its handle.
-        void Place(State& state, PlacedInstance& instance)
+        IPLInstancedMesh CreateInstanced(const State& state, IPLScene scene, IPLScene subScene, const glm::dmat4& world)
         {
-            if (instance.Handle)
+            IPLInstancedMeshSettings settings{};
+            settings.subScene = subScene;
+            settings.transform = AcousticTransform(state, world);
+            IPLInstancedMesh mesh = nullptr;
+            if (iplInstancedMeshCreate(scene, &settings, &mesh) != IPL_STATUS_SUCCESS)
+                return nullptr;
+            iplInstancedMeshAdd(mesh, scene);
+            return mesh;
+        }
+
+        void RemoveInstanced(IPLScene scene, IPLInstancedMesh& mesh)
+        {
+            if (!mesh)
+                return;
+            iplInstancedMeshRemove(mesh, scene);
+            iplInstancedMeshRelease(&mesh);
+        }
+
+        // The occlusion scene's part of an instance: at once.
+        void PlaceDirect(State& state, PlacedInstance& instance)
+        {
+            if (instance.Direct || instance.Removed)
                 return;
             const auto found = state.Meshes.find(instance.MeshKey);
             if (found == state.Meshes.end() || !found->second.Scene)
                 return;
-            IPLInstancedMeshSettings settings{};
-            settings.subScene = found->second.Scene;
-            settings.transform = AcousticTransform(state, instance.World);
-            if (iplInstancedMeshCreate(state.Scene, &settings, &instance.Handle) != IPL_STATUS_SUCCESS)
-            {
-                instance.Handle = nullptr;
-                return;
-            }
-            iplInstancedMeshAdd(instance.Handle, state.Scene);
+            instance.Direct = CreateInstanced(state, state.Scene, found->second.Scene, instance.World);
             state.SceneDirty = true;
+            state.ReflectDirty = true;
         }
 
         void PlaceInstance(State& state, uint64_t key, const std::string& meshKey, const glm::dmat4& world)
         {
             auto [entry, added] = state.Instances.try_emplace(key);
             PlacedInstance& instance = entry->second;
-            if (!added && instance.MeshKey == meshKey)
+            if (!added && instance.MeshKey == meshKey && !instance.Removed)
             {
                 if (instance.World == world)
                     return;
                 instance.World = world; // moved: a new transform
-                if (instance.Handle)
+                if (instance.Direct)
                 {
-                    iplInstancedMeshUpdateTransform(instance.Handle, state.Scene, AcousticTransform(state, world));
+                    iplInstancedMeshUpdateTransform(instance.Direct, state.Scene, AcousticTransform(state, world));
                     state.SceneDirty = true;
                 }
+                instance.ReflectMoved = true;
+                state.ReflectDirty = true;
                 return;
             }
-            ReleaseInstance(state, instance);
-            instance.MeshKey = meshKey;
-            instance.World = world;
-            Place(state, instance);
+            if (!added && instance.MeshKey != meshKey)
+            {
+                // Another mesh: the old placement goes (from the reflection scene when it is next brought up to date).
+                RemoveInstanced(state.Scene, instance.Direct);
+                state.SceneDirty = true;
+                if (instance.Reflect)
+                {
+                    state.RetiredReflect.push_back(instance.Reflect);
+                    instance.Reflect = nullptr;
+                }
+            }
+            PlacedInstance& placed = state.Instances[key];
+            placed.MeshKey = meshKey;
+            placed.World = world;
+            placed.Removed = false;
+            placed.ReflectMoved = true;
+            state.ReflectDirty = true;
+            PlaceDirect(state, placed);
         }
+
+        // Brings the reflection scene up to date (only while the reflection thread is idle) and commits it.
+        void SyncReflectScene(State& state)
+        {
+            if (!state.ReflectDirty)
+                return;
+            for (IPLInstancedMesh& mesh : state.RetiredReflect)
+                RemoveInstanced(state.ReflectScene, mesh);
+            state.RetiredReflect.clear();
+            for (auto it = state.Instances.begin(); it != state.Instances.end();)
+            {
+                PlacedInstance& instance = it->second;
+                if (instance.Removed)
+                {
+                    RemoveInstanced(state.ReflectScene, instance.Reflect);
+                    if (!instance.Direct)
+                    {
+                        it = state.Instances.erase(it);
+                        continue;
+                    }
+                }
+                else if (!instance.Reflect)
+                {
+                    const auto found = state.Meshes.find(instance.MeshKey);
+                    if (found != state.Meshes.end() && found->second.Scene)
+                        instance.Reflect = CreateInstanced(state, state.ReflectScene, found->second.Scene, instance.World);
+                    instance.ReflectMoved = false;
+                }
+                else if (instance.ReflectMoved)
+                {
+                    iplInstancedMeshUpdateTransform(instance.Reflect, state.ReflectScene, AcousticTransform(state, instance.World));
+                    instance.ReflectMoved = false;
+                }
+                ++it;
+            }
+            iplSceneCommit(state.ReflectScene);
+            iplSimulatorCommit(state.ReflectSimulator);
+            state.ReflectDirty = false;
+        }
+
+        void ReflectionThread(State* state)
+        {
+            Profiler::Get().SetThreadName("Audio Reflections");
+            for (;;)
+            {
+                {
+                    std::unique_lock lock(state->ReflectMutex);
+                    state->ReflectWake.wait(lock, [state] { return state->ReflectRequested || state->ReflectQuit; });
+                    if (state->ReflectQuit)
+                        return;
+                    state->ReflectRequested = false;
+                }
+                const auto begin = std::chrono::steady_clock::now();
+                {
+                    NOX_PROFILE_SCOPE("Steam Audio Reflections");
+                    iplSimulatorRunReflections(state->ReflectSimulator);
+                }
+                state->ReflectMilliseconds.store(std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - begin).count(), std::memory_order_relaxed);
+                state->ReflectFinished.store(true, std::memory_order_release);
+                state->ReflectRunning.store(false, std::memory_order_release);
+            }
+        }
+
+        bool Idle(const State& state) { return !state.ReflectRunning.load(std::memory_order_acquire); }
     }
 
     AcousticMaterial ResolveAcousticMaterial(AcousticMaterial chosen, float metallic, float transmission, bool blended)
@@ -243,30 +374,51 @@ namespace Nox
         }
         IPLSceneSettings sceneSettings{};
         sceneSettings.type = IPL_SCENETYPE_DEFAULT;
-        IPLSimulationSettings simulationSettings{};
-        simulationSettings.flags = IPL_SIMULATIONFLAGS_DIRECT;
-        simulationSettings.sceneType = IPL_SCENETYPE_DEFAULT;
-        simulationSettings.reflectionType = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION;
-        simulationSettings.maxNumOcclusionSamples = kOcclusionSamples;
-        simulationSettings.maxNumSources = 128;
-        simulationSettings.numThreads = 1;
-        simulationSettings.samplingRate = static_cast<IPLint32>(sampleRate);
-        simulationSettings.frameSize = static_cast<IPLint32>(frameSize);
-        if (iplSceneCreate(state->Context, &sceneSettings, &state->Scene) != IPL_STATUS_SUCCESS ||
-            iplSimulatorCreate(state->Context, &simulationSettings, &state->Simulator) != IPL_STATUS_SUCCESS)
+        IPLSimulationSettings direct{};
+        direct.flags = IPL_SIMULATIONFLAGS_DIRECT;
+        direct.sceneType = IPL_SCENETYPE_DEFAULT;
+        direct.reflectionType = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION;
+        direct.maxNumOcclusionSamples = kOcclusionSamples;
+        direct.maxNumSources = 128;
+        direct.numThreads = 1;
+        direct.samplingRate = static_cast<IPLint32>(sampleRate);
+        direct.frameSize = static_cast<IPLint32>(frameSize);
+        IPLSimulationSettings reflect = direct;
+        reflect.flags = IPL_SIMULATIONFLAGS_REFLECTIONS;
+        reflect.maxNumRays = kMaxRays;
+        reflect.numDiffuseSamples = kDiffuseSamples;
+        reflect.maxDuration = MaxReflectionDuration;
+        reflect.maxOrder = ReflectionOrder;
+        reflect.maxNumSources = MaxReflectionSources;
+        reflect.numThreads = std::max(1u, std::min(4u, std::thread::hardware_concurrency() / 4));
+        const bool created = iplSceneCreate(state->Context, &sceneSettings, &state->Scene) == IPL_STATUS_SUCCESS &&
+                             iplSimulatorCreate(state->Context, &direct, &state->Simulator) == IPL_STATUS_SUCCESS &&
+                             iplSceneCreate(state->Context, &sceneSettings, &state->ReflectScene) == IPL_STATUS_SUCCESS &&
+                             iplSimulatorCreate(state->Context, &reflect, &state->ReflectSimulator) == IPL_STATUS_SUCCESS;
+        if (!created)
         {
-            NOX_CORE_ERROR("Steam Audio: the acoustic scene / simulator could not be created");
-            if (state->Scene)
-                iplSceneRelease(&state->Scene);
+            NOX_CORE_ERROR("Steam Audio: the acoustic scene / simulators could not be created");
+            if (state->ReflectSimulator) iplSimulatorRelease(&state->ReflectSimulator);
+            if (state->ReflectScene) iplSceneRelease(&state->ReflectScene);
+            if (state->Simulator) iplSimulatorRelease(&state->Simulator);
+            if (state->Scene) iplSceneRelease(&state->Scene);
             iplHRTFRelease(&state->Hrtf);
             iplContextRelease(&state->Context);
             return false;
         }
-        iplSceneCommit(state->Scene);
+        for (IPLScene scene : { state->Scene, state->ReflectScene })
+            iplSceneCommit(scene);
         iplSimulatorSetScene(state->Simulator, state->Scene);
         iplSimulatorCommit(state->Simulator);
+        iplSimulatorSetScene(state->ReflectSimulator, state->ReflectScene);
+        IPLSourceSettings poolSettings{};
+        poolSettings.flags = IPL_SIMULATIONFLAGS_REFLECTIONS;
+        for (IPLSource& source : state->Pool)
+            iplSourceCreate(state->ReflectSimulator, &poolSettings, &source);
+        iplSimulatorCommit(state->ReflectSimulator);
+        state->ReflectThread = std::thread(ReflectionThread, state.get());
         s_State = state.release();
-        NOX_CORE_INFO("Steam Audio {}.{}.{}: HRTF, occlusion and transmission on", STEAMAUDIO_VERSION_MAJOR, STEAMAUDIO_VERSION_MINOR, STEAMAUDIO_VERSION_PATCH);
+        NOX_CORE_INFO("Steam Audio {}.{}.{}: HRTF, occlusion, transmission and reflections on", STEAMAUDIO_VERSION_MAJOR, STEAMAUDIO_VERSION_MINOR, STEAMAUDIO_VERSION_PATCH);
         return true;
     }
 
@@ -274,11 +426,25 @@ namespace Nox
     {
         if (!s_State)
             return;
-        ClearInstances();
         State& state = *s_State;
+        {
+            std::scoped_lock lock(state.ReflectMutex);
+            state.ReflectQuit = true;
+        }
+        state.ReflectWake.notify_all();
+        state.ReflectThread.join();
+        ClearInstances();
         for (auto& [key, sub] : state.Meshes)
             ReleaseSubScene(sub); // (a read still running owns its own data: it finishes into nothing)
         state.Meshes.clear();
+        for (size_t i = 0; i < state.Pool.size(); ++i)
+        {
+            if (state.PoolAdded[i])
+                iplSourceRemove(state.Pool[i], state.ReflectSimulator);
+            iplSourceRelease(&state.Pool[i]);
+        }
+        iplSimulatorRelease(&state.ReflectSimulator);
+        iplSceneRelease(&state.ReflectScene);
         iplSimulatorRelease(&state.Simulator);
         iplSceneRelease(&state.Scene);
         iplHRTFRelease(&state.Hrtf);
@@ -326,11 +492,14 @@ namespace Nox
     {
         if (!s_State)
             return;
-        const auto found = s_State->Instances.find(key);
-        if (found == s_State->Instances.end())
+        State& state = *s_State;
+        const auto found = state.Instances.find(key);
+        if (found == state.Instances.end() || found->second.Removed)
             return;
-        ReleaseInstance(*s_State, found->second);
-        s_State->Instances.erase(found);
+        RemoveInstanced(state.Scene, found->second.Direct);
+        state.SceneDirty = true;
+        found->second.Removed = true; // (out of the reflection scene at the next sync)
+        state.ReflectDirty = true;
     }
 
     void SpatialAudio::ClearInstances()
@@ -338,9 +507,18 @@ namespace Nox
         if (!s_State)
             return;
         State& state = *s_State;
+        // The reflection thread finishes its run first (it traces the reflection scene).
+        while (!Idle(state))
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         for (auto& [key, instance] : state.Instances)
-            ReleaseInstance(state, instance);
+        {
+            RemoveInstanced(state.Scene, instance.Direct);
+            RemoveInstanced(state.ReflectScene, instance.Reflect);
+        }
         state.Instances.clear();
+        for (IPLInstancedMesh& mesh : state.RetiredReflect)
+            RemoveInstanced(state.ReflectScene, mesh);
+        state.RetiredReflect.clear();
         // The built meshes go too (a reimported mesh is read again next time); reads still running finish first.
         for (auto it = state.Meshes.begin(); it != state.Meshes.end();)
         {
@@ -354,7 +532,11 @@ namespace Nox
         }
         iplSceneCommit(state.Scene);
         iplSimulatorCommit(state.Simulator);
+        iplSceneCommit(state.ReflectScene);
+        iplSimulatorCommit(state.ReflectSimulator);
+        state.PoolHasResults.fill(false);
         state.SceneDirty = false;
+        state.ReflectDirty = false;
     }
 
     void SpatialAudio::UpdateScene(const glm::dvec3& listener)
@@ -376,17 +558,21 @@ namespace Nox
         }
         if (built)
             for (auto& [key, instance] : state.Instances)
-                Place(state, instance);
+                PlaceDirect(state, instance);
 
-        // The origin follows the listener (every instance's transform then moves with it).
+        // The origin follows the listener (every instance's transform then moves with it) -- between reflection runs only.
         const double metersPerUnit = static_cast<double>(WorldUnits::ToMeters(1.0f));
-        if (glm::length(listener - state.Origin) * metersPerUnit > kRebaseMeters)
+        if (glm::length(listener - state.Origin) * metersPerUnit > kRebaseMeters && Idle(state))
         {
             state.Origin = listener;
             for (auto& [key, instance] : state.Instances)
-                if (instance.Handle)
-                    iplInstancedMeshUpdateTransform(instance.Handle, state.Scene, AcousticTransform(state, instance.World));
+            {
+                if (instance.Direct)
+                    iplInstancedMeshUpdateTransform(instance.Direct, state.Scene, AcousticTransform(state, instance.World));
+                instance.ReflectMoved = true;
+            }
             state.SceneDirty = true;
+            state.ReflectDirty = true;
         }
         if (state.SceneDirty)
         {
@@ -394,6 +580,8 @@ namespace Nox
             state.SceneDirty = false;
             state.SimulatorDirty = true;
         }
+        if (Idle(state))
+            SyncReflectScene(state);
     }
 
     SpatialAudio::SceneStats SpatialAudio::GetSceneStats()
@@ -408,18 +596,13 @@ namespace Nox
         }
         for (const auto& [key, instance] : s_State->Instances)
         {
-            if (!instance.Handle)
+            if (!instance.Direct)
                 continue;
             ++stats.Instances;
             if (const auto found = s_State->Meshes.find(instance.MeshKey); found != s_State->Meshes.end())
                 stats.Triangles += found->second.Triangles;
         }
         return stats;
-    }
-
-    namespace
-    {
-        uint32_t s_MaterialVersion = 1;
     }
 
     void SpatialAudio::MaterialsChanged() { ++s_MaterialVersion; }
@@ -494,15 +677,8 @@ namespace Nox
             iplSimulatorCommit(state.Simulator);
             state.SimulatorDirty = false;
         }
-        const glm::quat& q = state.ListenerOrientation;
-        const glm::vec3 right = q * glm::vec3(1.0f, 0.0f, 0.0f);
-        const glm::vec3 up = q * glm::vec3(0.0f, 1.0f, 0.0f);
-        const glm::vec3 ahead = q * glm::vec3(0.0f, 0.0f, -1.0f);
         IPLSimulationSharedInputs shared{};
-        shared.listener.right = { right.x, right.y, right.z };
-        shared.listener.up = { up.x, up.y, up.z };
-        shared.listener.ahead = { ahead.x, ahead.y, ahead.z };
-        shared.listener.origin = ToAcoustic(state.ListenerPosition);
+        shared.listener = ListenerSpace(state, ToAcoustic(state.ListenerPosition));
         iplSimulatorSetSharedInputs(state.Simulator, IPL_SIMULATIONFLAGS_DIRECT, &shared);
         iplSimulatorRunDirect(state.Simulator);
     }
@@ -521,5 +697,114 @@ namespace Nox
             result.AirAbsorption[band] = outputs.direct.airAbsorption[band];
         }
         return result;
+    }
+
+    void SpatialAudio::SetReflectionSettings(const ReflectionSettings& settings)
+    {
+        if (!s_State)
+            return;
+        ReflectionSettings& stored = s_State->Settings;
+        stored = settings;
+        stored.Rays = std::clamp(stored.Rays, 256, kMaxRays);
+        stored.Bounces = std::clamp(stored.Bounces, 1, 32);
+        stored.Duration = std::clamp(stored.Duration, 0.1f, MaxReflectionDuration);
+        stored.MaxSources = std::clamp(stored.MaxSources, 0, MaxReflectionSources);
+        stored.Interval = std::max(stored.Interval, 0.0f);
+    }
+
+    SpatialAudio::ReflectionSettings SpatialAudio::GetReflectionSettings()
+    {
+        return s_State ? s_State->Settings : ReflectionSettings{};
+    }
+
+    bool SpatialAudio::ReflectionsIdle() { return s_State && Idle(*s_State); }
+
+    bool SpatialAudio::TakeReflectionResults()
+    {
+        return s_State && Idle(*s_State) && s_State->ReflectFinished.exchange(false, std::memory_order_acq_rel);
+    }
+
+    void SpatialAudio::StartReflections(const std::vector<std::pair<int32_t, glm::dvec3>>& sources)
+    {
+        if (!s_State || !Idle(*s_State))
+            return;
+        State& state = *s_State;
+        SyncReflectScene(state);
+        // The pool slots in this run in the simulator, the others out.
+        std::array<bool, MaxReflectionSources> wanted{};
+        for (const auto& [slot, position] : sources)
+            if (slot >= 0 && slot < MaxReflectionSources)
+                wanted[slot] = true;
+        bool changed = false;
+        for (int32_t slot = 0; slot < MaxReflectionSources; ++slot)
+        {
+            if (wanted[slot] == state.PoolAdded[slot])
+                continue;
+            if (wanted[slot])
+                iplSourceAdd(state.Pool[slot], state.ReflectSimulator);
+            else
+            {
+                iplSourceRemove(state.Pool[slot], state.ReflectSimulator);
+                state.PoolHasResults[slot] = false;
+            }
+            state.PoolAdded[slot] = wanted[slot];
+            changed = true;
+        }
+        if (changed)
+            iplSimulatorCommit(state.ReflectSimulator);
+        if (sources.empty())
+            return;
+        for (const auto& [slot, position] : sources)
+        {
+            if (slot < 0 || slot >= MaxReflectionSources)
+                continue;
+            IPLSimulationInputs inputs{};
+            inputs.flags = IPL_SIMULATIONFLAGS_REFLECTIONS;
+            inputs.source.origin = ToAcoustic(position);
+            inputs.source.right = { 1.0f, 0.0f, 0.0f };
+            inputs.source.up = { 0.0f, 1.0f, 0.0f };
+            inputs.source.ahead = { 0.0f, 0.0f, -1.0f };
+            inputs.distanceAttenuationModel.type = IPL_DISTANCEATTENUATIONTYPE_DEFAULT;
+            inputs.airAbsorptionModel.type = IPL_AIRABSORPTIONTYPE_DEFAULT;
+            inputs.reverbScale[0] = inputs.reverbScale[1] = inputs.reverbScale[2] = 1.0f;
+            inputs.baked = IPL_FALSE;
+            iplSourceSetInputs(state.Pool[slot], IPL_SIMULATIONFLAGS_REFLECTIONS, &inputs);
+        }
+        IPLSimulationSharedInputs shared{};
+        shared.listener = ListenerSpace(state, ToAcoustic(state.ListenerPosition));
+        shared.numRays = state.Settings.Rays;
+        shared.numBounces = state.Settings.Bounces;
+        shared.duration = state.Settings.Duration;
+        shared.order = ReflectionOrder;
+        shared.irradianceMinDistance = 1.0f;
+        iplSimulatorSetSharedInputs(state.ReflectSimulator, IPL_SIMULATIONFLAGS_REFLECTIONS, &shared);
+        for (const auto& [slot, position] : sources)
+            if (slot >= 0 && slot < MaxReflectionSources)
+                state.PoolHasResults[slot] = true; // (results once this run finishes)
+        state.ReflectRunning.store(true, std::memory_order_release);
+        {
+            std::scoped_lock lock(state.ReflectMutex);
+            state.ReflectRequested = true;
+        }
+        state.ReflectWake.notify_one();
+    }
+
+    bool SpatialAudio::GetReflectionParams(int32_t slot, IPLReflectionEffectParams& out)
+    {
+        if (!s_State || slot < 0 || slot >= MaxReflectionSources || !s_State->PoolHasResults[slot] || !s_State->PoolAdded[slot])
+            return false;
+        IPLSimulationOutputs outputs{};
+        iplSourceGetOutputs(s_State->Pool[slot], IPL_SIMULATIONFLAGS_REFLECTIONS, &outputs);
+        out = outputs.reflections;
+        out.type = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION;
+        out.numChannels = ReflectionChannels;
+        if (out.irSize <= 0)
+            out.irSize = static_cast<IPLint32>(s_State->Settings.Duration * static_cast<float>(s_State->SampleRate));
+        return out.ir != nullptr;
+    }
+
+    float SpatialAudio::GetLastReflectionMilliseconds()
+    {
+        return s_State ? s_State->ReflectMilliseconds.load(std::memory_order_relaxed) : 0.0f;
     }
 }

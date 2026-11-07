@@ -93,6 +93,8 @@ namespace Nox
         // 3D sounds whose Spatialization is Default: binaural (HRTF, headphones) or panned (speakers). A game's options menu changes
         // it at run time (Audio.SetHeadphones).
         bool Headphones = true;
+        // Steam Audio's real-time reflections (A4b): budget, quality and where they are heard.
+        AudioReflectionSettings Reflections;
 
         AudioMixerBus* FindBus(uint64_t id);
         const AudioMixerBus* FindBus(uint64_t id) const;

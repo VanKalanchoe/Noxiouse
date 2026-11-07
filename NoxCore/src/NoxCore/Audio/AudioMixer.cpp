@@ -169,6 +169,15 @@ namespace Nox
         out << YAML::BeginMap;
         out << YAML::Key << "AudioMixer" << YAML::Value << YAML::BeginMap;
         out << YAML::Key << "Headphones" << YAML::Value << data.Headphones;
+        out << YAML::Key << "Reflections" << YAML::Value << YAML::BeginMap;
+        out << YAML::Key << "Enabled" << YAML::Value << data.Reflections.Enabled;
+        out << YAML::Key << "Rays" << YAML::Value << data.Reflections.Rays;
+        out << YAML::Key << "Bounces" << YAML::Value << data.Reflections.Bounces;
+        out << YAML::Key << "Duration" << YAML::Value << data.Reflections.Duration;
+        out << YAML::Key << "MaxSources" << YAML::Value << data.Reflections.MaxSources;
+        out << YAML::Key << "Bus" << YAML::Value << data.Reflections.Bus;
+        out << YAML::Key << "LevelDb" << YAML::Value << data.Reflections.LevelDb;
+        out << YAML::EndMap;
         out << YAML::Key << "Buses" << YAML::Value << YAML::BeginSeq;
         for (const AudioMixerBus& bus : data.Buses)
         {
@@ -286,6 +295,16 @@ namespace Nox
         try
         {
             data.Headphones = root["Headphones"].as<bool>(true);
+            if (const YAML::Node reflections = root["Reflections"])
+            {
+                data.Reflections.Enabled = reflections["Enabled"].as<bool>(true);
+                data.Reflections.Rays = reflections["Rays"].as<int32_t>(4096);
+                data.Reflections.Bounces = reflections["Bounces"].as<int32_t>(4);
+                data.Reflections.Duration = reflections["Duration"].as<float>(1.0f);
+                data.Reflections.MaxSources = reflections["MaxSources"].as<int32_t>(4);
+                data.Reflections.Bus = reflections["Bus"].as<uint64_t>(kAudioBusMaster);
+                data.Reflections.LevelDb = reflections["LevelDb"].as<float>(0.0f);
+            }
             for (const YAML::Node& node : root["Buses"])
             {
                 AudioMixerBus bus;
@@ -863,6 +882,7 @@ namespace Nox
             return;
         }
         AudioEngine::SetHeadphones(state.GameHeadphones >= 0 ? state.GameHeadphones != 0 : state.Data.Headphones);
+        AudioEngine::SetReflections(state.Data.Reflections);
         const bool blending = state.BlendDuration > 0.0f;
         if (!state.ValuesChanged && !blending)
             return;

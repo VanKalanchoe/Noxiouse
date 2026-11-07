@@ -2469,6 +2469,9 @@ namespace Nox
                     spatial.Spatialization = static_cast<AudioSpatialization>(mode);
                 ImGui::SetItemTooltip("How it reaches the ears (Steam Audio). Binaural (HRTF): for headphones -- above, below and behind are heard.\n"
                                       "Panning: left / right, for speakers. Default: the Mixer's Headphones setting (a game's options: Audio.SetHeadphones).");
+                ImGui::Checkbox("Reflections", &spatial.Reflections);
+                ImGui::SetItemTooltip("Echoes and reverb from the level's geometry (Steam Audio), when it is among the nearest sounds\n"
+                                      "(Mixer > Acoustics > Voices).");
                 ImGui::Checkbox("Air Absorption", &spatial.AirAbsorption);
                 ImGui::SetItemTooltip("Far away, the highs fade (air absorbs them): a distant sound gets duller.");
                 ImGui::Checkbox("Occlusion", &spatial.Occlusion);

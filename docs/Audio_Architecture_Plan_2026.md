@@ -1,7 +1,7 @@
 # Audio and the Audio Graph -- architecture plan (2026-11-06)
 
-> Status: **A1 Core, A2 Audio graph and A3 Mixer built and tested; A4a Steam Audio (HRTF, air absorption, occlusion / transmission)
-> built (2026-11-07)**, waiting for the user's test before A4b (reflections, baked probes, pathing) (see §11 "... as built"). Backlog C4. This plan covers
+> Status: **A1 Core, A2 Audio graph, A3 Mixer and A4a Steam Audio (HRTF, occlusion) built and tested; A4b real-time reflections built
+> (2026-11-07)**, waiting for the user's test before A4c (baked reverb probes, pathing) (see §11 "... as built"). Backlog C4. This plan covers
 > the whole audio system the graph needs, not just the graph. Phase gates as in the other plans: each phase is built, then tested by
 > the user, before the next one starts.
 
@@ -520,4 +520,30 @@ probes and pathing with a Bake button).
   1.1 ms a frame on the game thread; A1-A3 suites still pass; ThreadSanitizer clean.
 - **Next, A4b:** real-time reflections (per-source convolution through a reflection mixer, a budget of sources and rays), baked reverb
   probes per level and pathing (a Bake button, as HLODs), the reflections' output bus.
+
+### A4b as built (2026-11-07): real-time reflections
+
+- **Two acoustic scenes:** the occlusion scene (changed at once, traced on the game thread) and a reflection scene with the same
+  placements (the sub-scenes are shared) that is brought up to date and committed only between reflection runs -- so occlusion never
+  waits for the reflection thread and no commit races a run. The origin rebases only between runs too.
+- **Reflection thread** ("Audio Reflections"): Steam Audio's own simulator for reflections (up to 16384 rays, 32 diffuse samples, order-1
+  ambisonics, up to 1.5 s, its own worker threads), woken by the game thread; a run takes ~12 ms for a closed room.
+- **Budget:** a pool of 16 reflection sources; each run (at most every 0.1 s, when the previous one finished) gives the nearest audible
+  3D voices with Reflections on (Mixer > Acoustics > Voices, 4 by default) one each. A voice keeps its slot while it stays among them.
+  A new voice takes the free slot last simulated nearest to it (within 8 m) and uses that slot's response at once -- a footstep is over
+  before a new run could finish, and consecutive steps reuse the previous step's response.
+- **Mixer thread:** per pool slot a convolution reflection effect (1.5 s, 4 channels) summing into Steam Audio's reflection mixer (one
+  inverse FFT for all), then one ambisonics decoder (HRTF with Headphones, else panning; turned with the listener) into the reflections'
+  bus (Mixer > Acoustics > Output Bus, Master by default; Level). The input is the voice without the engine's distance curve (the simulated
+  response carries the distance), faded out over the last fifth of Max Distance. A slot passed to another voice is not reset (the last
+  voice's tail rings out under the new input); a voice that ends keeps feeding silence until its response has passed (its tail).
+- **Why convolution, not hybrid:** Steam Audio 4.8.1's real-time simulation here returned no parametric reverb estimate (reverb times at
+  their 0.1 s placeholder, EQ 0), so the hybrid tail would have been silent; convolution through the mixer is what Steam Audio documents as
+  its fast path. Cost ~0.15-0.3 ms of mixing per reflecting voice.
+- **Settings (Mixer > Acoustics..., saved in the .nmixer):** Reflections on / off, Voices, Rays, Bounces, Duration, Output Bus, Level, and
+  the last run's time. Audio Source: **Reflections** (per sound).
+- **Tests:** a closed 10 x 4 x 8 m concrete room: 120-440 ms after a 100 ms burst ended the output peaks at 0.51 with reflections and 0.0
+  without (the burst reusing a nearby slot's response from its first block); 64 binaural voices with occlusion and 4 with reflections:
+  1.86 ms a mixer block in the harness's container; A1-A4a suites pass; ThreadSanitizer: no engine race.
+- **Next, A4c:** baked reverb probes per level and pathing (sound around corners), a Bake button like HLODs.
 

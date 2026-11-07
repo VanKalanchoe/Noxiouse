@@ -732,6 +732,7 @@ namespace Nox
             out << YAML::Key << "AirAbsorption" << YAML::Value << source.Spatialization.AirAbsorption;
             out << YAML::Key << "Occlusion" << YAML::Value << source.Spatialization.Occlusion;
             out << YAML::Key << "SourceRadius" << YAML::Value << source.Spatialization.SourceRadius;
+            out << YAML::Key << "Reflections" << YAML::Value << source.Spatialization.Reflections;
             if (!source.GraphParameters.empty())
             {
                 out << YAML::Key << "GraphParameters" << YAML::Value << YAML::BeginSeq;
@@ -2322,6 +2323,7 @@ namespace Nox
             source.Spatialization.AirAbsorption = audioSource["AirAbsorption"].as<bool>(true);
             source.Spatialization.Occlusion = audioSource["Occlusion"].as<bool>(true);
             source.Spatialization.SourceRadius = audioSource["SourceRadius"].as<float>(0.5f);
+            source.Spatialization.Reflections = audioSource["Reflections"].as<bool>(true);
             if (const YAML::Node parameters = audioSource["GraphParameters"])
             {
                 for (const auto& parameter : parameters)

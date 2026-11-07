@@ -257,6 +257,35 @@ namespace Nox
         ImGui::SetItemTooltip("3D sounds set to Default Spatialization: binaural (Steam Audio's HRTF: above, below and behind are heard -- for\n"
                               "headphones) or panned left / right (for speakers). A game's options menu changes it: Audio.SetHeadphones.");
         ImGui::SameLine();
+        if (ImGui::Button("Acoustics..."))
+            ImGui::OpenPopup("Acoustics");
+        ImGui::SetItemTooltip("Steam Audio's real-time reflections: rays bounced off the level give the nearest sounds their echoes and reverb.");
+        if (ImGui::BeginPopup("Acoustics"))
+        {
+            AudioReflectionSettings& reflections = data.Reflections;
+            bool changed = ImGui::Checkbox("Reflections", &reflections.Enabled);
+            ImGui::SetItemTooltip("Real-time reflections from the level's geometry (its static meshes and their acoustic materials).");
+            changed |= ImGui::SliderInt("Voices", &reflections.MaxSources, 0, SpatialAudio::MaxReflectionSources);
+            ImGui::SetItemTooltip("How many sounds get reflections at once: the nearest ones (each costs mixer time).");
+            changed |= ImGui::SliderInt("Rays", &reflections.Rays, 256, 16384, "%d", ImGuiSliderFlags_Logarithmic);
+            ImGui::SetItemTooltip("Rays traced from the listener each run: more is smoother and costs more on the reflection thread.");
+            changed |= ImGui::SliderInt("Bounces", &reflections.Bounces, 1, 16);
+            changed |= ImGui::SliderFloat("Duration", &reflections.Duration, 0.1f, SpatialAudio::MaxReflectionDuration, "%.2f s");
+            ImGui::SetItemTooltip("How much of each sound's response is simulated (its first 0.1 s convolved, the rest a parametric reverb).");
+            uint64_t bus = reflections.Bus;
+            if (BusCombo("Output Bus", data, reflections.Bus, false, [](const AudioMixerBus&) { return true; }, bus))
+            {
+                reflections.Bus = bus;
+                changed = true;
+            }
+            ImGui::SetItemTooltip("The bus the reflections are heard through (Master by default).");
+            changed |= ImGui::SliderFloat("Level", &reflections.LevelDb, kFaderMinDb, 12.0f, "%.1f dB");
+            ImGui::TextDisabled("Last run: %.1f ms on the reflection thread", AudioEngine::GetReflectionMilliseconds());
+            if (changed)
+                Changed(false);
+            ImGui::EndPopup();
+        }
+        ImGui::SameLine();
         ImGui::TextDisabled("%s", AudioMixer::GetPath().empty() ? "(no project: the default buses)" : AudioMixer::GetPath().filename().string().c_str());
         // The acoustic scene (Steam Audio's geometry: the running scene's static meshes).
         const SpatialAudio::SceneStats acoustic = SpatialAudio::GetSceneStats();

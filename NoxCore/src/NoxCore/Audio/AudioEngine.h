@@ -31,6 +31,20 @@ namespace Nox
         bool AirAbsorption = true;
         bool Occlusion = true;     // muffled by geometry in the way, passing through by its acoustic material (transmission)
         float SourceRadius = 0.5f; // meters: the sound's size for occlusion -- partly hidden behind a corner is partly occluded
+        bool Reflections = true;   // gets real-time reflections when it is among the nearest (the reflections' budget)
+    };
+
+    // Steam Audio's real-time reflections (§6, A4b): the mixer's Acoustics settings.
+    struct AudioReflectionSettings
+    {
+        bool Enabled = true;
+        int32_t Rays = 4096;
+        int32_t Bounces = 4;
+        float Duration = 1.0f;      // seconds
+        int32_t MaxSources = 4;     // voices with reflections at once (the nearest; each convolution costs mixer time)
+        uint64_t Bus = kAudioBusMaster; // where the reflections are heard
+        float LevelDb = 0.0f;
+        bool operator==(const AudioReflectionSettings&) const = default;
     };
 
     // Where a 3D voice is heard from (Audio Volumes, AudioMixer.h): an interior / exterior volume and low pass, and a send to a
@@ -188,6 +202,8 @@ namespace Nox
         // bus's index in it: ramped or smoothed by the mixer, never a click.
         // Headphones: 3D sounds whose Spatialization is Default use the HRTF (binaural); speakers: panning.
         static void SetHeadphones(bool headphones);
+        static void SetReflections(const AudioReflectionSettings& settings);
+        static float GetReflectionMilliseconds(); // the last reflection run's time on its thread
         static bool GetHeadphones();
 
         static void SetMixerLayout(const AudioMixerLayoutDesc& layout);
