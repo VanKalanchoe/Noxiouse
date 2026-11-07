@@ -340,6 +340,7 @@ namespace Nox
             bool ReflectionsOn = false;
             int32_t ReflectionsBus = 0;
             float ReflectionsLevel = 1.0f, ReflectionsApplied = 1.0f;
+            float ReflectionsPower = 0.0f; // (the reflections' meter: mean power over ~300 ms)
             // Reflections (game side).
             AudioReflectionSettings Reflections;
             bool ReflectionsSent = false;
@@ -388,6 +389,7 @@ namespace Nox
             std::atomic<float> MixMax{ 0.0f };
             std::array<std::atomic<float>, AudioEngine::MaxBuses * 5> BusMeters{}; // per bus: peak L / R, RMS L / R, gain reduction
             std::array<std::atomic<float>, AudioEngine::MaxVoices * 2> VoicePeak{};
+            std::array<std::atomic<float>, 2> ReflectionsMeter{}; // the reflections' output alone: peak, RMS
             std::atomic<bool> MixerReady{ false };
         };
 
@@ -1131,6 +1133,21 @@ namespace Nox
                 AddInto(target, state.SpatialLeft, state.SpatialRight, state.ReflectionsApplied, state.ReflectionsLevel);
                 state.ReflectionsApplied = state.ReflectionsLevel;
             }
+            // The reflections' own meter (what they add to their bus, alone): peak and RMS like a bus's.
+            {
+                float sum = 0.0f, peak = 0.0f;
+                if (state.ReflectionsOn)
+                    for (uint32_t i = 0; i < kBlock; ++i)
+                    {
+                        const float l = state.SpatialLeft[i] * state.ReflectionsLevel, r = state.SpatialRight[i] * state.ReflectionsLevel;
+                        sum += 0.5f * (l * l + r * r);
+                        peak = std::max(peak, std::max(std::fabs(l), std::fabs(r)));
+                    }
+                const float rmsCoefficient = std::exp(-static_cast<float>(kBlock) / (0.3f * static_cast<float>(state.SampleRate)));
+                state.ReflectionsPower = rmsCoefficient * state.ReflectionsPower + (1.0f - rmsCoefficient) * sum / static_cast<float>(kBlock);
+                state.ReflectionsMeter[0].store(std::max(state.ReflectionsMeter[0].load(std::memory_order_relaxed) * 0.985f, peak), std::memory_order_relaxed);
+                state.ReflectionsMeter[1].store(std::sqrt(state.ReflectionsPower), std::memory_order_relaxed);
+            }
 
             for (uint32_t index : layout.Order)
                 ProcessBus(state, layout, index);
@@ -1687,9 +1704,8 @@ namespace Nox
                     release(slot);
                 return;
             }
-            if (!SpatialAudio::ReflectionsIdle())
-                return;
-            if (SpatialAudio::TakeReflectionResults())
+            const bool idle = SpatialAudio::ReflectionsIdle();
+            if (idle && SpatialAudio::TakeReflectionResults())
             {
                 for (int32_t slot = 0; slot < SpatialAudio::MaxReflectionSources; ++slot)
                 {
@@ -1708,12 +1724,8 @@ namespace Nox
                     Push(state, command);
                 }
             }
-            const double now = static_cast<double>(std::chrono::steady_clock::now().time_since_epoch().count()) * 1e-9;
-            if (now - state.LastReflectionStart < 0.1)
-                return;
-            state.LastReflectionStart = now;
-
-            // The nearest audible 3D voices that want reflections.
+            // The nearest audible 3D voices that want reflections: chosen every frame, so a sound started this frame takes a slot (and
+            // the response already simulated near it) from its first block -- a footstep or a shot is over before the next run.
             std::vector<std::pair<float, uint32_t>> candidates;
             for (uint32_t slot = 0; slot < AudioEngine::MaxVoices; ++slot)
             {
@@ -1771,6 +1783,12 @@ namespace Nox
                     Push(state, command);
                 }
             }
+
+            // A new run (the voices' positions now) once the last has finished, at most every Interval.
+            const double now = static_cast<double>(std::chrono::steady_clock::now().time_since_epoch().count()) * 1e-9;
+            if (!idle || now - state.LastReflectionStart < static_cast<double>(SpatialAudio::GetReflectionSettings().Interval))
+                return;
+            state.LastReflectionStart = now;
             std::vector<std::pair<int32_t, glm::dvec3>> sources;
             for (int32_t slot = 0; slot < SpatialAudio::MaxReflectionSources; ++slot)
             {
@@ -2282,6 +2300,19 @@ namespace Nox
     float AudioEngine::GetReflectionMilliseconds()
     {
         return SpatialAudio::GetLastReflectionMilliseconds();
+    }
+
+    AudioEngine::ReflectionStats AudioEngine::GetReflectionStats()
+    {
+        ReflectionStats stats;
+        if (!IsAvailable())
+            return stats;
+        stats.Milliseconds = SpatialAudio::GetLastReflectionMilliseconds();
+        stats.Peak = s_State->ReflectionsMeter[0].load(std::memory_order_relaxed);
+        stats.Rms = s_State->ReflectionsMeter[1].load(std::memory_order_relaxed);
+        for (int32_t voice : s_State->ReflectionVoice)
+            stats.Voices += voice >= 0 ? 1 : 0;
+        return stats;
     }
 
     void AudioEngine::SetHeadphones(bool headphones)

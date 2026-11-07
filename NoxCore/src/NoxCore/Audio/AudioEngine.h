@@ -204,6 +204,13 @@ namespace Nox
         static void SetHeadphones(bool headphones);
         static void SetReflections(const AudioReflectionSettings& settings);
         static float GetReflectionMilliseconds(); // the last reflection run's time on its thread
+        struct ReflectionStats
+        {
+            float Milliseconds = 0.0f; // the last run's time on the reflection thread
+            float Peak = 0.0f, Rms = 0.0f; // linear: what the reflections alone add to their bus (after Level)
+            int32_t Voices = 0;            // voices with reflections now
+        };
+        static ReflectionStats GetReflectionStats();
         static bool GetHeadphones();
 
         static void SetMixerLayout(const AudioMixerLayoutDesc& layout);

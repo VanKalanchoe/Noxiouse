@@ -271,7 +271,7 @@ namespace Nox
             ImGui::SetItemTooltip("Rays traced from the listener each run: more is smoother and costs more on the reflection thread.");
             changed |= ImGui::SliderInt("Bounces", &reflections.Bounces, 1, 16);
             changed |= ImGui::SliderFloat("Duration", &reflections.Duration, 0.1f, SpatialAudio::MaxReflectionDuration, "%.2f s");
-            ImGui::SetItemTooltip("How much of each sound's response is simulated (its first 0.1 s convolved, the rest a parametric reverb).");
+            ImGui::SetItemTooltip("How long each sound's response (echoes and reverb tail) is simulated and convolved: longer rings longer and costs more mixer time.");
             uint64_t bus = reflections.Bus;
             if (BusCombo("Output Bus", data, reflections.Bus, false, [](const AudioMixerBus&) { return true; }, bus))
             {
@@ -280,7 +280,14 @@ namespace Nox
             }
             ImGui::SetItemTooltip("The bus the reflections are heard through (Master by default).");
             changed |= ImGui::SliderFloat("Level", &reflections.LevelDb, kFaderMinDb, 12.0f, "%.1f dB");
-            ImGui::TextDisabled("Last run: %.1f ms on the reflection thread", AudioEngine::GetReflectionMilliseconds());
+            // What the reflections alone add to their bus (the bus's own meter also has whatever else plays through it).
+            const AudioEngine::ReflectionStats stats = AudioEngine::GetReflectionStats();
+            auto toDb = [](float gain) { return gain > 1e-5f ? 20.0f * std::log10(gain) : -100.0f; };
+            ImGui::Text("Reflections out: RMS %.1f dB, peak %.1f dB", toDb(stats.Rms), toDb(stats.Peak));
+            ImGui::SetItemTooltip("The reflections alone, after Level -- the Output Bus's meter also shows everything else routed through it\n"
+                                  "(sounds playing on it, an Audio Volume's reverb send).");
+            ImGui::TextDisabled("%d voice%s with reflections | last run %.1f ms on the reflection thread", stats.Voices, stats.Voices == 1 ? "" : "s",
+                                stats.Milliseconds);
             if (changed)
                 Changed(false);
             ImGui::EndPopup();

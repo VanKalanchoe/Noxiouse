@@ -528,8 +528,8 @@ probes and pathing with a Bake button).
   waits for the reflection thread and no commit races a run. The origin rebases only between runs too.
 - **Reflection thread** ("Audio Reflections"): Steam Audio's own simulator for reflections (up to 16384 rays, 32 diffuse samples, order-1
   ambisonics, up to 1.5 s, its own worker threads), woken by the game thread; a run takes ~12 ms for a closed room.
-- **Budget:** a pool of 16 reflection sources; each run (at most every 0.1 s, when the previous one finished) gives the nearest audible
-  3D voices with Reflections on (Mixer > Acoustics > Voices, 4 by default) one each. A voice keeps its slot while it stays among them.
+- **Budget:** a pool of 16 reflection sources; every frame the nearest audible 3D voices with Reflections on (Mixer > Acoustics >
+  Voices, 4 by default) get one each, and a run (at most every 0.1 s, when the previous one finished) simulates them. A voice keeps its slot while it stays among them.
   A new voice takes the free slot last simulated nearest to it (within 8 m) and uses that slot's response at once -- a footstep is over
   before a new run could finish, and consecutive steps reuse the previous step's response.
 - **Mixer thread:** per pool slot a convolution reflection effect (1.5 s, 4 channels) summing into Steam Audio's reflection mixer (one
@@ -541,9 +541,15 @@ probes and pathing with a Bake button).
   their 0.1 s placeholder, EQ 0), so the hybrid tail would have been silent; convolution through the mixer is what Steam Audio documents as
   its fast path. Cost ~0.15-0.3 ms of mixing per reflecting voice.
 - **Settings (Mixer > Acoustics..., saved in the .nmixer):** Reflections on / off, Voices, Rays, Bounces, Duration, Output Bus, Level, and
-  the last run's time. Audio Source: **Reflections** (per sound).
+  the last run's time, and a meter of the reflections alone (RMS / peak after Level). Audio Source: **Reflections** (per sound).
 - **Tests:** a closed 10 x 4 x 8 m concrete room: 120-440 ms after a 100 ms burst ended the output peaks at 0.51 with reflections and 0.0
   without (the burst reusing a nearby slot's response from its first block); 64 binaural voices with occlusion and 4 with reflections:
   1.86 ms a mixer block in the harness's container; A1-A4a suites pass; ThreadSanitizer: no engine race.
+- **Fix after the user's test (2026-11-07):** slots were assigned only when a run started (every 0.1 s), so a sound shorter than that
+  could end before it had reflections (a 50 ms burst in the closed room: no tail); now assigned every frame. Measured in the user's room
+  (10 x 4 x 8 m, speaker at 1.5 m, listener 2.5 m away, looping noise, reflections alone): closed concrete -15.6 dB RMS, closed carpet
+  -22.2, ceiling + 2 walls removed -32.6 (with six instances of one cube mesh, three removed while playing: -15.4 -> -27.9 -> -15.5 put
+  back). Tail after a burst at 4 bounces: gone by 0.2-0.3 s; 16 bounces ~0.5 s; 32 bounces ~1 s (run 13 -> 45 -> 79 ms in the container)
+  -- real-time bounces stay at Steam Audio's default 4 (early reflections); the long tail is A4c's baked reverb.
 - **Next, A4c:** baked reverb probes per level and pathing (sound around corners), a Bake button like HLODs.
 
