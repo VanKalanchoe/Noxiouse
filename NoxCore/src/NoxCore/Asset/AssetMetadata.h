@@ -74,6 +74,8 @@ namespace Nox
     struct AudioImportSettings
     {
         AudioLoadType LoadType = AudioLoadType::Auto;
+        // Material assets: what the surface does to sound (Steam Audio's acoustic scene; Audio/AudioTypes.h).
+        AcousticMaterial Acoustic = AcousticMaterial::Auto;
     };
 
     struct AssetMetadata

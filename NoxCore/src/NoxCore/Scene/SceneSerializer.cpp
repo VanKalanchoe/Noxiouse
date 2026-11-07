@@ -728,6 +728,10 @@ namespace Nox
             out << YAML::Key << "MaxDistance" << YAML::Value << source.Spatialization.MaxDistance;
             out << YAML::Key << "Attenuation" << YAML::Value << std::string(AudioAttenuationToString(source.Spatialization.Attenuation));
             out << YAML::Key << "DopplerLevel" << YAML::Value << source.Spatialization.DopplerLevel;
+            out << YAML::Key << "Spatialization" << YAML::Value << std::string(AudioSpatializationToString(source.Spatialization.Spatialization));
+            out << YAML::Key << "AirAbsorption" << YAML::Value << source.Spatialization.AirAbsorption;
+            out << YAML::Key << "Occlusion" << YAML::Value << source.Spatialization.Occlusion;
+            out << YAML::Key << "SourceRadius" << YAML::Value << source.Spatialization.SourceRadius;
             if (!source.GraphParameters.empty())
             {
                 out << YAML::Key << "GraphParameters" << YAML::Value << YAML::BeginSeq;
@@ -2313,6 +2317,11 @@ namespace Nox
                 source.Spatialization.Attenuation = AudioAttenuationFromString(audioSource["Attenuation"].as<std::string>());
             if (audioSource["DopplerLevel"])
                 source.Spatialization.DopplerLevel = audioSource["DopplerLevel"].as<float>();
+            if (audioSource["Spatialization"])
+                source.Spatialization.Spatialization = AudioSpatializationFromString(audioSource["Spatialization"].as<std::string>());
+            source.Spatialization.AirAbsorption = audioSource["AirAbsorption"].as<bool>(true);
+            source.Spatialization.Occlusion = audioSource["Occlusion"].as<bool>(true);
+            source.Spatialization.SourceRadius = audioSource["SourceRadius"].as<float>(0.5f);
             if (const YAML::Node parameters = audioSource["GraphParameters"])
             {
                 for (const auto& parameter : parameters)

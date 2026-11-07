@@ -1,7 +1,7 @@
 # Audio and the Audio Graph -- architecture plan (2026-11-06)
 
-> Status: **A1 Core and A2 Audio graph built and tested (2026-11-06); A3 Mixer built (2026-11-07)**, waiting for the user's test before
-> A4 (see §11 "A1 as built", "A2 as built", "A3 as built"). Backlog C4. This plan covers
+> Status: **A1 Core, A2 Audio graph and A3 Mixer built and tested; A4a Steam Audio (HRTF, air absorption, occlusion / transmission)
+> built (2026-11-07)**, waiting for the user's test before A4b (reflections, baked probes, pathing) (see §11 "... as built"). Backlog C4. This plan covers
 > the whole audio system the graph needs, not just the graph. Phase gates as in the other plans: each phase is built, then tested by
 > the user, before the next one starts.
 
@@ -479,4 +479,45 @@ Each phase lands with the docs-site pages updated and the manual's walkthrough, 
   1 kHz cutoff, sidechain compressor -17.98 dB for -18; snapshot blend -10 dB half way, solo, game volume, a bus added while voices
   play, save / load round trip, the default project mixer created; ThreadSanitizer clean; A1 and A2 suites still pass.
 - **Not in A3:** graphs inside graphs and the Curve node (moved to A5 with the notifies); HRTF / occlusion / Steam Audio reverb (A4).
+
+### A4a as built (2026-11-07): Steam Audio -- HRTF, air absorption, occlusion and transmission
+
+A4 is built in two halves, each tested by the user: **A4a** (this) and **A4b** (real-time reflections with a budget, baked reverb
+probes and pathing with a Bake button).
+
+- **Library:** Steam Audio 4.8.1 (Valve, Apache 2.0), the prebuilt SDK that `scripts/install_windows_dependencies.bat` downloads into
+  `NoxCore/vendors/steamaudio`; NoxCore links `phonon.lib`, the editor's build copies `phonon.dll` next to it (the runtime and packaged
+  games take it from there).
+- **`Audio/SpatialAudio.h`:** the context (AVX2 at most), the default HRTF, the acoustic scene and the simulator. Without Steam Audio
+  (it failed to start) the engine pans 3D voices itself, as before.
+- **Per voice on the mixer thread:** every voice slot has a direct, binaural and panning effect made at startup. A 3D voice is rendered
+  summed to one channel with its gain (volume x the engine's distance curve x Audio Volumes), then Steam Audio's **direct effect** applies
+  air absorption (3-band EQ) and occlusion / frequency-dependent transmission, then the **binaural effect** (HRTF, bilinear interpolation)
+  or the **panning effect** turns it into stereo in the direction the listener hears it from. Then its low pass and sends, as in A3.
+- **Spatialization:** per source Default / Panning / Binaural; Default follows the mixer's **Headphones** setting (Mixer panel toolbar),
+  which a game's options menu overrides (`Audio.Headphones`, reset when Play stops).
+- **Occlusion (game thread, every frame, as Steam Audio's docs advise -- no lag):** an `IPLSource` per audible 3D voice with Occlusion or
+  Air Absorption (released beyond Max Distance), volumetric occlusion (16 rays to points over the Source Radius sphere: half hidden is half
+  occluded), up to 3 surfaces passed through for transmission, the simulator's air absorption model; the results go to the mixer with the
+  voice's update.
+- **Acoustic scene:** the running scene's static meshes (skinned / animated ones left out, as HLODs leave them). Each mesh asset + its
+  submeshes' acoustic materials is one sub-scene: its cooked file read on a worker (the LOD 0 cluster triangles, welded, as physics' mesh
+  colliders read them), each submesh simplified to about a quarter (meshoptimizer, at most 1 % of its size moved, borders locked), then built
+  on the game thread. Each entity places an instanced mesh with its transform: moving one is a transform update; switched off, destroyed or
+  its world-partition cell unloaded removes it. Positions are meters around an origin that follows the listener (rebased past 1 km).
+  Cleared when Play / Simulate stops.
+- **Acoustic Material:** a material asset's (Material editor > Acoustic Material; kept in its asset registry entry, so `.nmat` files and
+  cooked meshes are unchanged): Steam Audio's presets Generic, Brick, Concrete, Ceramic, Gravel, Carpet, Glass, Plaster, Wood, Metal, Rock
+  (absorption, scattering, transmission at low / mid / high); **Auto** picks Glass for transmissive / blended materials, Metal for metallic
+  ones, else Generic. Changing it re-reads a playing scene's walls.
+- **Audio Source:** Spatialization, Air Absorption, Occlusion, Source Radius (Inspector, scene files).
+- **Scripts (API 19):** `Audio.Headphones` (get / set).
+- **Tests (harness, the Linux build of the same SDK, null device):** HRTF: a source 5 m to the left 15.7 dB louder in the left ear, to the
+  right 17.1 dB in the right one, in front within 2.1 dB (the measured head's own asymmetry), a turned listener hears the front source on
+  its right; panning 44 dB left / right; a concrete wall: occlusion 0, transmission 0.015 / 0.002 / 0.001 exactly the preset, 37.6 dB under
+  the open path for white noise; glass 0.060 / 0.044 / 0.011; a source half behind a wall's edge occlusion 0.44; wall removed: 1.0; air
+  absorption at 150 m 0.97 / 0.78 / 0.07; 64 binaural voices with occlusion against 2000 triangles: 0.79 ms a mixer block (of 5.33),
+  1.1 ms a frame on the game thread; A1-A3 suites still pass; ThreadSanitizer clean.
+- **Next, A4b:** real-time reflections (per-source convolution through a reflection mixer, a budget of sources and rays), baked reverb
+  probes per level and pathing (a Bake button, as HLODs), the reflections' output bus.
 

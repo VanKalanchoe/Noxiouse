@@ -96,6 +96,13 @@ if(WIN32)
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/development"
     )
 
+    # Steam Audio's runtime (the runtime and packaged games load it from here too)
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/NoxCore/vendors/steamaudio/lib/windows-x64/phonon.dll"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+    )
+
     # Copy NRD runtime binaries next to the editor executable
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different

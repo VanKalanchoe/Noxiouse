@@ -874,6 +874,17 @@ namespace Nox
             return FindAudioBus(std::string(busName), bus, "Audio.GetBusVolume") ? AudioMixer::GetGameVolume(bus) : 0.0f;
         }
 
+        void AudioSetHeadphones(Coral::Bool32 headphones)
+        {
+            if (OnMainThread("Audio.SetHeadphones"))
+                AudioMixer::SetGameHeadphones(headphones != 0);
+        }
+
+        Coral::Bool32 AudioGetHeadphones()
+        {
+            return AudioMixer::GetHeadphones();
+        }
+
         Coral::Bool32 AudioSetSnapshot(Coral::String name, float seconds)
         {
             if (!OnMainThread("Audio.SetSnapshot"))
@@ -1317,6 +1328,8 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Audio_SetBusVolume", reinterpret_cast<void*>(&AudioSetBusVolume));
         assembly.AddInternalCall("Nox.InternalCalls", "Audio_GetBusVolume", reinterpret_cast<void*>(&AudioGetBusVolume));
         assembly.AddInternalCall("Nox.InternalCalls", "Audio_SetSnapshot", reinterpret_cast<void*>(&AudioSetSnapshot));
+        assembly.AddInternalCall("Nox.InternalCalls", "Audio_SetHeadphones", reinterpret_cast<void*>(&AudioSetHeadphones));
+        assembly.AddInternalCall("Nox.InternalCalls", "Audio_GetHeadphones", reinterpret_cast<void*>(&AudioGetHeadphones));
         assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_Play", reinterpret_cast<void*>(&AudioSourcePlay));
         assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_Stop", reinterpret_cast<void*>(&AudioSourceStop));
         assembly.AddInternalCall("Nox.InternalCalls", "AudioSource_IsPlaying", reinterpret_cast<void*>(&AudioSourceIsPlaying));

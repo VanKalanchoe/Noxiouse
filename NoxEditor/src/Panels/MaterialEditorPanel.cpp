@@ -1,4 +1,5 @@
 #include "MaterialEditorPanel.h"
+#include "NoxCore/Audio/SpatialAudio.h"
 
 #include <filesystem>
 
@@ -74,6 +75,39 @@ namespace Nox
 
     void MaterialEditorPanel::DrawProperties(AssetHandle handle, MaterialData& data)
     {
+        // What the surface does to sound (Steam Audio's acoustic scene): saved in the asset registry, not the .nmat.
+        if (handle != 0 && Project::GetActive())
+        {
+            auto assets = Project::GetActive()->GetEditorAssetManager();
+            const AcousticMaterial chosen = assets->GetMetadata(handle).AudioSettings.Acoustic;
+            const AcousticMaterial resolved = ResolveAcousticMaterial(chosen, data.MetallicFactor, data.TransmissionFactor, data.Mode == AlphaMode::Blend);
+            const std::string preview = chosen == AcousticMaterial::Auto ? "Auto (" + std::string(AcousticMaterialToString(resolved)) + ")"
+                                                                         : std::string(AcousticMaterialToString(chosen));
+            if (ImGui::BeginCombo("Acoustic Material", preview.c_str()))
+            {
+                for (uint8_t i = 0; i < static_cast<uint8_t>(AcousticMaterial::Count); ++i)
+                {
+                    const AcousticMaterial option = static_cast<AcousticMaterial>(i);
+                    if (ImGui::Selectable(std::string(AcousticMaterialToString(option)).c_str(), option == chosen))
+                    {
+                        assets->SetAcousticMaterial(handle, option);
+                        SpatialAudio::MaterialsChanged(); // (a playing scene re-reads its walls)
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::IsItemHovered())
+            {
+                const AcousticMaterialProperties& properties = GetAcousticMaterialProperties(resolved);
+                ImGui::SetTooltip("What this surface does to sound (Steam Audio): how much a wall of it lets through and absorbs.\n"
+                                  "Auto: Glass for transparent / transmissive materials, Metal for metallic ones, else Generic.\n"
+                                  "%s lets through %.1f %% / %.1f %% / %.1f %% (low / mid / high) and absorbs %.0f %% / %.0f %% / %.0f %%.",
+                                  std::string(AcousticMaterialToString(resolved)).c_str(), properties.Transmission[0] * 100.0f,
+                                  properties.Transmission[1] * 100.0f, properties.Transmission[2] * 100.0f, properties.Absorption[0] * 100.0f,
+                                  properties.Absorption[1] * 100.0f, properties.Absorption[2] * 100.0f);
+            }
+            ImGui::Separator();
+        }
         bool changed = false;
         // The renderer shades with the factors of the material's workflow only (PackMaterial):
         // specular-glossiness materials (e.g. Bistro) use Diffuse/Specular/Glossiness.

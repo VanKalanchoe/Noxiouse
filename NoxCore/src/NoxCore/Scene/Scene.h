@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -411,6 +412,23 @@ namespace Nox
         };
         AudioEnvironment AudioEnvironmentAt(const glm::dvec3& position) const;
         glm::dvec3 m_AudioListenerPosition{ 0.0 };
+        // The acoustic scene (Steam Audio, SpatialAudio.h): the static meshes placed in it, by entity id; re-placed when one moves,
+        // its mesh or materials change, removed when it goes.
+        struct AcousticEntry
+        {
+            AssetHandle Mesh = 0;
+            uint32_t FirstSubmesh = 0;
+            uint32_t SubmeshCount = 0;
+            glm::dmat4 World{ 1.0 };
+            std::vector<AcousticMaterial> Materials;
+            bool Placed = false;
+            uint64_t Seen = 0;
+        };
+        std::unordered_map<uint64_t, AcousticEntry> m_AcousticEntries;
+        uint64_t m_AcousticFrame = 0;
+        uint32_t m_AcousticMaterialVersion = 0;
+        void UpdateAcousticScene();
+        bool ResolveAcousticMaterials(entt::entity entity, std::vector<AcousticMaterial>& outMaterials) const;
         std::chrono::steady_clock::time_point m_AudioLastUpdate{}; // (the volumes' blending runs on real time: also while paused)
         std::vector<UUID> m_PendingDestroy;
         std::vector<UUID> m_PendingScriptStart;

@@ -154,6 +154,23 @@ if not exist "%DEST_DIR%" (
         echo NRD already installed in "%NRD_DIR%", skipping.
     )
 
+    rem Steam Audio (Valve, Apache 2.0): HRTF, occlusion / transmission, reflections (docs/Audio_Architecture_Plan_2026.md, A4)
+    set STEAMAUDIO_VERSION=4.8.1
+    set STEAMAUDIO_URL=https://github.com/ValveSoftware/steam-audio/releases/download/v%STEAMAUDIO_VERSION%/steamaudio_%STEAMAUDIO_VERSION%.zip
+    set "STEAMAUDIO_DIR=%VENDORS_DIR%\steamaudio"
+
+    if not exist "%STEAMAUDIO_DIR%\include\phonon.h" (
+        echo Downloading Steam Audio %STEAMAUDIO_VERSION%...
+        curl -L "%STEAMAUDIO_URL%" -o "%TEMP%\steamaudio.zip" || exit /b 1
+        echo Extracting Steam Audio...
+        rem The archive holds a "steamaudio" folder (include, lib per platform, doc).
+        tar -xf "%TEMP%\steamaudio.zip" -C "%VENDORS_DIR%"
+        del "%TEMP%\steamaudio.zip"
+        echo Steam Audio installed in "%STEAMAUDIO_DIR%".
+    ) else (
+        echo Steam Audio already installed in "%STEAMAUDIO_DIR%", skipping.
+    )
+
     rem RTXDI (NVIDIA RTX Direct Illumination SDK - Library Only)
     rem Note: RTXDI-Library repository does not have git tags/releases; main branch HEAD is the official v3.1.0 library SDK.
     set "RTXDI_DIR=%VENDORS_DIR%\RTXDI"

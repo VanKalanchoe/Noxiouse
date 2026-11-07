@@ -441,6 +441,15 @@ namespace Nox
         ReimportAsset(handle, true);
     }
 
+    void EditorAssetManager::SetAcousticMaterial(AssetHandle handle, AcousticMaterial material)
+    {
+        const auto found = m_AssetRegistry.find(handle);
+        if (m_ReadOnly || found == m_AssetRegistry.end() || found->second.Type != AssetType::Material || found->second.AudioSettings.Acoustic == material)
+            return;
+        found->second.AudioSettings.Acoustic = material;
+        SerializeAssetRegistry();
+    }
+
     void EditorAssetManager::OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath)
     {
         // Runs on the watcher thread: only queue the path, Update() matches it against the registry.
@@ -1972,6 +1981,13 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (metadata.Type == AssetType::Material && metadata.AudioSettings.Acoustic != AcousticMaterial::Auto)
+        {
+            out << YAML::Key << "AudioSettings" << YAML::Value << YAML::BeginMap;
+            out << YAML::Key << "AcousticMaterial" << YAML::Value << std::string(AcousticMaterialToString(metadata.AudioSettings.Acoustic));
+            out << YAML::EndMap;
+        }
+
         if (metadata.Type == AssetType::AudioClip && metadata.AudioSettings.LoadType != AudioLoadType::Auto)
         {
             out << YAML::Key << "AudioSettings" << YAML::Value << YAML::BeginMap;
@@ -2241,6 +2257,8 @@ namespace Nox
             {
                 if (audioNode["LoadType"])
                     metadata.AudioSettings.LoadType = AudioLoadTypeFromString(audioNode["LoadType"].as<std::string>());
+                if (audioNode["AcousticMaterial"])
+                    metadata.AudioSettings.Acoustic = AcousticMaterialFromString(audioNode["AcousticMaterial"].as<std::string>());
             }
 
             if (auto settingsNode = node["MeshSettings"])

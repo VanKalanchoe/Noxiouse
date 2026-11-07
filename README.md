@@ -36,7 +36,7 @@ The setup scripts target Windows with Visual Studio 2026 and ClangCL.
 2. Fetch the git submodules in `NoxCore/vendors/` (taskflow, imgui, ImGuizmo, tinygltf, meshoptimizer, msdf-atlas-gen,
    JoltPhysics, tracy, OffsetAllocator, bc7enc_rdo, VulkanMemoryAllocator-Hpp, xatlas, bcdec, miniaudio): `git submodule update --init`.
 3. Run `scripts/install_windows_dependencies.bat`. It installs vcpkg into `NoxCore/vendors/vcpkg` and the vcpkg packages
-   (SDL3, GLM, EnTT, spdlog, xxHash, yaml-cpp, Box2D, stb, KTX, tinyobjloader, ...), and downloads Slang, NVIDIA Streamline,
+   (SDL3, GLM, EnTT, spdlog, xxHash, yaml-cpp, Box2D, stb, KTX, tinyobjloader, ...), and downloads Slang, Steam Audio, NVIDIA Streamline,
    NRD, the RTXDI library and filewatch into `NoxCore/vendors/`.
 4. Put [imgui-node-editor](https://github.com/thedmd/imgui-node-editor) (master) in `NoxCore/vendors/imgui-node-editor`. The
    script does not fetch it; `NoxCore/CMakeLists.txt` lists the files it compiles, including `utilities/drawing.cpp` and

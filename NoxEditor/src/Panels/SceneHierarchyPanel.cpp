@@ -2463,6 +2463,22 @@ namespace Nox
                                       "Linear: straight from full to silent. None: no falloff. All reach silence at Max Distance.");
                 ImGui::DragFloat("Doppler Level", &spatial.DopplerLevel, 0.01f, 0.0f, 5.0f, "%.2f");
                 ImGui::SetItemTooltip("The pitch shift of moving sounds: 0 off, 1 physical (speed of sound 343 m/s).");
+                constexpr const char* kModes[] = { "Default", "Panning", "Binaural (HRTF)" };
+                int mode = static_cast<int>(spatial.Spatialization);
+                if (ImGui::Combo("Spatialization", &mode, kModes, IM_ARRAYSIZE(kModes)))
+                    spatial.Spatialization = static_cast<AudioSpatialization>(mode);
+                ImGui::SetItemTooltip("How it reaches the ears (Steam Audio). Binaural (HRTF): for headphones -- above, below and behind are heard.\n"
+                                      "Panning: left / right, for speakers. Default: the Mixer's Headphones setting (a game's options: Audio.SetHeadphones).");
+                ImGui::Checkbox("Air Absorption", &spatial.AirAbsorption);
+                ImGui::SetItemTooltip("Far away, the highs fade (air absorbs them): a distant sound gets duller.");
+                ImGui::Checkbox("Occlusion", &spatial.Occlusion);
+                ImGui::SetItemTooltip("Walls and objects between it and the listener muffle it, by their materials' Acoustic Material\n"
+                                      "(concrete lets almost nothing through, glass and wood more). Static meshes are the acoustic geometry.");
+                if (spatial.Occlusion)
+                {
+                    ImGui::DragFloat("Source Radius", &spatial.SourceRadius, 0.01f, 0.01f, 50.0f, "%.2f m");
+                    ImGui::SetItemTooltip("The sound's size for occlusion: half hidden behind a corner is half occluded (a fade, not a click).");
+                }
             }
 
             // An audio graph's parameters: its defaults unless changed here (this entity's own, saved; Reset follows the default

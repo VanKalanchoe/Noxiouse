@@ -25,6 +25,9 @@
 #include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Audio/AudioGraph.h"
 #include "NoxCore/Audio/AudioMixer.h"
+#include "NoxCore/Audio/SpatialAudio.h"
+#include "NoxCore/Asset/Material.h"
+#include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/NodeGraph/NodeGraphAsset.h"
 #include "NoxCore/Physics/Physics2D.h"
 #include "NoxCore/Physics/Physics3DScene.h"
@@ -1808,6 +1811,8 @@ namespace Nox
         AudioEngine::StopGroup(AudioVoiceGroup::Game);
         AudioEngine::SetGroupPaused(AudioVoiceGroup::Game, false);
         AudioMixer::ResetGameState(); // the snapshot and the bus volumes the game set: back to the mix
+        SpatialAudio::ClearInstances(); // the acoustic scene goes with the running scene
+        m_AcousticEntries.clear();
         m_PendingOneShots.clear();
         m_OneShotVoices.clear();
         for (auto handle : m_Registry.view<AudioSourceComponent>())
@@ -1973,6 +1978,7 @@ namespace Nox
         const glm::mat3 basis(glm::normalize(glm::vec3(listener[0])), glm::normalize(glm::vec3(listener[1])), glm::normalize(glm::vec3(listener[2])));
         AudioEngine::SetListener(glm::dvec3(listener[3]), glm::quat_cast(basis));
         m_AudioListenerPosition = glm::dvec3(listener[3]);
+        UpdateAcousticScene();
         const auto now = std::chrono::steady_clock::now();
         const float deltaSeconds = m_AudioLastUpdate == std::chrono::steady_clock::time_point{} ? 0.0f
             : std::min(std::chrono::duration<float>(now - m_AudioLastUpdate).count(), 0.25f);
@@ -2033,6 +2039,119 @@ namespace Nox
             AudioEngine::SetVoiceEnvironment(shot.Voice, shot.Environment);
             return false;
         });
+    }
+
+    bool Scene::ResolveAcousticMaterials(entt::entity entity, std::vector<AcousticMaterial>& outMaterials) const
+    {
+        // Each submesh's material as the renderer picks it (the entity's override, else the mesh's .nmat, else the material cooked
+        // into the mesh); its acoustic material from the material asset's registry entry, Auto resolved from how it looks.
+        const MeshComponent& component = m_Registry.get<MeshComponent>(entity);
+        const AssetType type = AssetManager::GetAssetType(component.Mesh);
+        const StaticMesh* staticMesh = type == AssetType::StaticMesh ? AssetManager::FindLoadedAsset<StaticMesh>(component.Mesh) : nullptr;
+        const Mesh* mesh = type == AssetType::Mesh ? AssetManager::FindLoadedAsset<Mesh>(component.Mesh) : nullptr;
+        if (!staticMesh && !mesh)
+            return false; // (not loaded yet: tried again next frame)
+        const uint64_t total = staticMesh ? staticMesh->GetSubMeshCount() : mesh->GetSubMeshCount();
+        const std::vector<AssetHandle>& meshMaterials = staticMesh ? staticMesh->GetMaterialAssets() : mesh->GetMaterialAssets();
+        const MaterialComponent* overrides = m_Registry.try_get<MaterialComponent>(entity);
+        const uint64_t first = std::min<uint64_t>(component.SubmeshIndex, total);
+        const uint64_t count = component.SubmeshCount == UINT32_MAX ? total : std::max(component.SubmeshCount, 1u);
+        const uint64_t last = std::min(first + count, total);
+        outMaterials.clear();
+        for (uint64_t submesh = first; submesh < last; ++submesh)
+        {
+            AssetHandle asset = overrides && submesh < overrides->MaterialAssets.size() ? overrides->MaterialAssets[submesh] : AssetHandle(0);
+            if (asset == 0 && submesh < meshMaterials.size())
+                asset = meshMaterials[submesh];
+            const MaterialData* data = staticMesh ? &staticMesh->GetMaterial(submesh) : &mesh->GetMaterial(submesh);
+            AcousticMaterial chosen = AcousticMaterial::Auto;
+            if (asset != 0 && AssetManager::GetAssetType(asset) == AssetType::Material)
+            {
+                chosen = AssetManager::GetMetadata(asset).AudioSettings.Acoustic;
+                if (const Material* material = AssetManager::FindLoadedAsset<Material>(asset))
+                    data = &material->GetData();
+            }
+            outMaterials.push_back(ResolveAcousticMaterial(chosen, data->MetallicFactor, data->TransmissionFactor, data->Mode == AlphaMode::Blend));
+        }
+        return !outMaterials.empty();
+    }
+
+    void Scene::UpdateAcousticScene()
+    {
+        if (!SpatialAudio::IsAvailable())
+            return;
+        NOX_PROFILE_SCOPE("Acoustic Scene");
+        const uint64_t frame = ++m_AcousticFrame;
+        const bool materialsChanged = SpatialAudio::GetMaterialVersion() != m_AcousticMaterialVersion;
+        m_AcousticMaterialVersion = SpatialAudio::GetMaterialVersion();
+        auto underAnimator = [this](entt::entity entity)
+        {
+            for (int depth = 0; entity != entt::null && depth < 1024; ++depth)
+            {
+                if (m_Registry.all_of<AnimatorComponent>(entity))
+                    return true;
+                const auto* relationship = m_Registry.try_get<RelationshipComponent>(entity);
+                if (!relationship || relationship->Parent == 0)
+                    return false;
+                const auto found = m_EntityMap.find(relationship->Parent);
+                entity = found != m_EntityMap.end() ? found->second : entt::null;
+            }
+            return false;
+        };
+        // Static meshes (skinned and animated ones are left out, as Steam Audio's plugins and HLODs leave them).
+        for (auto handle : m_Registry.view<MeshComponent, WorldTransformComponent, IDComponent>(entt::exclude<InactiveInHierarchyComponent>))
+        {
+            const MeshComponent& component = m_Registry.get<MeshComponent>(handle);
+            const uint64_t key = static_cast<uint64_t>(m_Registry.get<IDComponent>(handle).ID);
+            const glm::dmat4& world = m_Registry.get<WorldTransformComponent>(handle).WorldMatrix;
+            AcousticEntry& entry = m_AcousticEntries[key];
+            const bool rebuild = entry.Seen == 0 || entry.Mesh != component.Mesh || entry.FirstSubmesh != component.SubmeshIndex ||
+                                 entry.SubmeshCount != component.SubmeshCount || (materialsChanged && entry.Placed);
+            entry.Seen = frame;
+            if (rebuild)
+            {
+                const AssetType type = AssetManager::GetAssetType(component.Mesh);
+                if ((type != AssetType::StaticMesh && type != AssetType::Mesh) || underAnimator(handle))
+                {
+                    entry.Mesh = component.Mesh; // (looked at: not acoustic geometry)
+                    entry.FirstSubmesh = component.SubmeshIndex;
+                    entry.SubmeshCount = component.SubmeshCount;
+                    continue;
+                }
+                if (!ResolveAcousticMaterials(handle, entry.Materials))
+                {
+                    entry.Mesh = 0; // (its mesh is still loading: again next frame)
+                    continue;
+                }
+                entry.Mesh = component.Mesh;
+                entry.FirstSubmesh = component.SubmeshIndex;
+                entry.SubmeshCount = component.SubmeshCount;
+            }
+            else if (!entry.Placed || entry.World == world)
+                continue;
+            entry.World = world;
+            entry.Placed = true;
+            SpatialAudio::Instance instance;
+            instance.Mesh = component.Mesh;
+            instance.FirstSubmesh = component.SubmeshIndex;
+            instance.SubmeshCount = component.SubmeshCount;
+            instance.Materials = entry.Materials;
+            instance.World = world;
+            SpatialAudio::SetInstance(key, instance);
+        }
+        // Gone (destroyed, switched off, its cell unloaded): out of the acoustic scene.
+        for (auto it = m_AcousticEntries.begin(); it != m_AcousticEntries.end();)
+        {
+            if (it->second.Seen == frame)
+            {
+                ++it;
+                continue;
+            }
+            if (it->second.Placed)
+                SpatialAudio::RemoveInstance(it->first);
+            it = m_AcousticEntries.erase(it);
+        }
+        SpatialAudio::UpdateScene(m_AudioListenerPosition);
     }
 
     Scene::AudioEnvironment Scene::AudioEnvironmentAt(const glm::dvec3& position) const

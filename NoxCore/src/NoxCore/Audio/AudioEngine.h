@@ -26,6 +26,11 @@ namespace Nox
         float MaxDistance = 50.0f; // silent from here
         AudioAttenuation Attenuation = AudioAttenuation::Inverse;
         float DopplerLevel = 1.0f; // 0 = no Doppler shift, 1 = physical (speed of sound 343 m/s)
+        // Steam Audio (§6): how it reaches the ears, the highs fading with distance, walls between it and the listener.
+        AudioSpatialization Spatialization = AudioSpatialization::Default;
+        bool AirAbsorption = true;
+        bool Occlusion = true;     // muffled by geometry in the way, passing through by its acoustic material (transmission)
+        float SourceRadius = 0.5f; // meters: the sound's size for occlusion -- partly hidden behind a corner is partly occluded
     };
 
     // Where a 3D voice is heard from (Audio Volumes, AudioMixer.h): an interior / exterior volume and low pass, and a send to a
@@ -181,6 +186,10 @@ namespace Nox
         // routing at the start of a block; an effect whose bus id, effect id, type and impulse response are unchanged keeps its
         // instance, so a reverb's tail and a compressor's envelope carry on. The rest changes values in the running layout, by the
         // bus's index in it: ramped or smoothed by the mixer, never a click.
+        // Headphones: 3D sounds whose Spatialization is Default use the HRTF (binaural); speakers: panning.
+        static void SetHeadphones(bool headphones);
+        static bool GetHeadphones();
+
         static void SetMixerLayout(const AudioMixerLayoutDesc& layout);
         static void SetBusGain(uint32_t bus, float gain); // linear
         static void SetEffectParameter(uint32_t bus, uint32_t effect, uint32_t parameter, float value);

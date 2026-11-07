@@ -36,4 +36,15 @@ public static class Audio
     /// the console listing the snapshots) when the mixer has no such snapshot. Back to Default when Play stops.
     /// </summary>
     public static bool SetSnapshot(string name, float blendSeconds = 0.5f) => InternalCalls.SetSnapshot(name, blendSeconds);
+
+    /// <summary>
+    /// Headphones (true: 3D sounds through Steam Audio's HRTF -- above, below and behind are heard) or speakers (false: panned left /
+    /// right) -- a game's options menu. Sounds whose Spatialization is Default follow it; the mixer's Headphones setting is used until
+    /// a script sets it, and again when Play stops.
+    /// </summary>
+    public static bool Headphones
+    {
+        get => InternalCalls.GetHeadphones();
+        set => InternalCalls.SetHeadphones(value);
+    }
 }

@@ -49,6 +49,51 @@ namespace Nox
         Count
     };
 
+    // How a 3D sound reaches the ears (docs/Audio_Architecture_Plan_2026.md §6; Steam Audio): Panning for speakers, Binaural (HRTF)
+    // for headphones -- sounds above, below and behind are heard there. Default follows the game's output setting (the mixer's
+    // Headphones, a game's options menu: Audio.SetHeadphones).
+    enum class AudioSpatialization : uint8_t
+    {
+        Default = 0,
+        Panning,
+        Binaural
+    };
+
+    std::string_view AudioSpatializationToString(AudioSpatialization mode);
+    AudioSpatialization AudioSpatializationFromString(std::string_view name);
+
+    // What a surface does to sound (Steam Audio's material presets, as its Unity / Unreal plugins ship them): how much it absorbs and
+    // lets through at low / mid / high frequencies, how much it scatters. A material asset's acoustic material (its asset registry
+    // entry); Auto picks one from how the material looks (metal, glass, the rest Generic).
+    enum class AcousticMaterial : uint8_t
+    {
+        Auto = 0,
+        Generic,
+        Brick,
+        Concrete,
+        Ceramic,
+        Gravel,
+        Carpet,
+        Glass,
+        Plaster,
+        Wood,
+        Metal,
+        Rock,
+        Count
+    };
+
+    struct AcousticMaterialProperties
+    {
+        float Absorption[3];   // low (< 800 Hz), mid (800 Hz - 8 kHz), high (> 8 kHz): the energy taken by a bounce
+        float Scattering;      // the share reflected diffusely
+        float Transmission[3]; // the share passing through (a wall's thickness included)
+    };
+
+    std::string_view AcousticMaterialToString(AcousticMaterial material);
+    AcousticMaterial AcousticMaterialFromString(std::string_view name);
+    // Auto is Generic here (the caller resolves Auto from the material first).
+    const AcousticMaterialProperties& GetAcousticMaterialProperties(AcousticMaterial material);
+
     // A playing voice: 0 is none. Slot and generation, so a handle of a voice that ended never reaches the voice now in its slot.
     using AudioVoiceHandle = uint64_t;
 }

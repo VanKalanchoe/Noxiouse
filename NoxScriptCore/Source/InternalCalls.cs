@@ -75,6 +75,8 @@ internal static unsafe class InternalCalls
     private static delegate*<NativeString, float, void> Audio_SetBusVolume;
     private static delegate*<NativeString, float> Audio_GetBusVolume;
     private static delegate*<NativeString, float, uint> Audio_SetSnapshot;
+    private static delegate*<uint, void> Audio_SetHeadphones;
+    private static delegate*<uint> Audio_GetHeadphones;
     private static delegate*<ulong, void> AudioSource_Play;
     private static delegate*<ulong, float, void> AudioSource_Stop;
     private static delegate*<ulong, uint> AudioSource_IsPlaying;
@@ -393,6 +395,10 @@ internal static unsafe class InternalCalls
         using NativeString nativeBus = new(bus);
         return Audio_GetBusVolume(nativeBus);
     }
+
+    internal static void SetHeadphones(bool headphones) => Audio_SetHeadphones(headphones ? 1u : 0u);
+
+    internal static bool GetHeadphones() => Audio_GetHeadphones() != 0;
 
     internal static bool SetSnapshot(string name, float seconds)
     {

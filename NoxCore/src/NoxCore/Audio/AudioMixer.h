@@ -90,6 +90,9 @@ namespace Nox
     {
         std::vector<AudioMixerBus> Buses;          // [0] is Master
         std::vector<AudioMixerSnapshot> Snapshots; // besides the Default mix
+        // 3D sounds whose Spatialization is Default: binaural (HRTF, headphones) or panned (speakers). A game's options menu changes
+        // it at run time (Audio.SetHeadphones).
+        bool Headphones = true;
 
         AudioMixerBus* FindBus(uint64_t id);
         const AudioMixerBus* FindBus(uint64_t id) const;
@@ -159,6 +162,9 @@ namespace Nox
         static int32_t GetBusIndex(uint64_t id);                     // in the engine's layout (meters); -1: none
         static void SetGameVolume(uint64_t bus, float volume);       // linear, on top of the mix (a game's options menu)
         static float GetGameVolume(uint64_t bus);
+        // The game's own choice of output (an options menu), over the mixer's Headphones; reset when Play stops.
+        static void SetGameHeadphones(bool headphones);
+        static bool GetHeadphones();
         // Blends to a snapshot ("Default": the mix itself) over `seconds`. False when there is no such snapshot.
         static bool SetSnapshot(std::string_view name, float seconds);
         static std::string GetSnapshot();

@@ -168,6 +168,7 @@ namespace Nox
         YAML::Emitter out;
         out << YAML::BeginMap;
         out << YAML::Key << "AudioMixer" << YAML::Value << YAML::BeginMap;
+        out << YAML::Key << "Headphones" << YAML::Value << data.Headphones;
         out << YAML::Key << "Buses" << YAML::Value << YAML::BeginSeq;
         for (const AudioMixerBus& bus : data.Buses)
         {
@@ -284,6 +285,7 @@ namespace Nox
         AudioMixerData data;
         try
         {
+            data.Headphones = root["Headphones"].as<bool>(true);
             for (const YAML::Node& node : root["Buses"])
             {
                 AudioMixerBus bus;
@@ -419,6 +421,7 @@ namespace Nox
             std::vector<float> SentValue; // per slot
             std::vector<uint8_t> SentBypass; // per effect, flattened
             std::unordered_map<uint64_t, float> GameVolume;
+            int8_t GameHeadphones = -1; // -1: the mixer's setting
             std::vector<AssetHandle> WaitingImpulses; // rebuild once these are loaded
         };
         MixerState* s_Mixer = nullptr;
@@ -859,6 +862,7 @@ namespace Nox
             Rebuild(state);
             return;
         }
+        AudioEngine::SetHeadphones(state.GameHeadphones >= 0 ? state.GameHeadphones != 0 : state.Data.Headphones);
         const bool blending = state.BlendDuration > 0.0f;
         if (!state.ValuesChanged && !blending)
             return;
@@ -909,6 +913,14 @@ namespace Nox
         return found != M().GameVolume.end() ? found->second : 1.0f;
     }
 
+    void AudioMixer::SetGameHeadphones(bool headphones) { M().GameHeadphones = headphones ? 1 : 0; }
+
+    bool AudioMixer::GetHeadphones()
+    {
+        const MixerState& state = M();
+        return state.GameHeadphones >= 0 ? state.GameHeadphones != 0 : state.Data.Headphones;
+    }
+
     bool AudioMixer::SetSnapshot(std::string_view name, float seconds)
     {
         MixerState& state = M();
@@ -942,6 +954,7 @@ namespace Nox
     {
         MixerState& state = M();
         state.GameVolume.clear();
+        state.GameHeadphones = -1;
         state.ActiveSnapshot = state.EditedSnapshot;
         state.BlendDuration = 0.0f;
         state.ValuesChanged = true;

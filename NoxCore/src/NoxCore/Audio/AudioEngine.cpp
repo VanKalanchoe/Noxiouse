@@ -20,6 +20,7 @@
 
 #include "AudioDSP.h"
 #include "AudioGraph.h"
+#include "SpatialAudio.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Profiling/Profiler.h"
@@ -146,6 +147,13 @@ namespace Nox
             float Rate = 1.0f;
             float LowPass = 20000.0f;
             float SendGain = 0.0f;
+            // Start / Update: Steam Audio spatialization (Spatial 0: none -- 2D, or the engine's own panning).
+            uint8_t Spatial = 0;      // 1 panning, 2 binaural
+            uint8_t DirectFlags = 0;  // IPLDirectEffectFlags
+            float Direction[3] = { 0.0f, 0.0f, -1.0f }; // listener space
+            float Occlusion = 1.0f;
+            float Transmission[3] = { 1.0f, 1.0f, 1.0f };
+            float AirAbsorption[3] = { 1.0f, 1.0f, 1.0f };
             // Start (fade in), Stop / StopGroup (fade out), BusGain (gain)
             float Value = 0.0f;
             bool Flag = false; // Loop, paused
@@ -177,6 +185,10 @@ namespace Nox
             bool LowPassActive = false;
             AudioDSP::FrequencyRamp LowPassRamp;
             AudioDSP::Biquad LowPassFilter[2];
+            // Steam Audio (§6).
+            uint8_t Spatial = 0;
+            IPLDirectEffectParams Direct{};
+            float Direction[3] = { 0.0f, 0.0f, -1.0f };
             int64_t Frame = 0; // the playhead: decoded clip frame, or a streamed voice's frame counted from its start
             double Fraction = 0.0;
             float Rate = 1.0f;
@@ -203,6 +215,8 @@ namespace Nox
             glm::vec3 Velocity{ 0.0f };
             bool HasPrevious = false;
             AudioVoiceEnvironment Environment;
+            IPLSource Source = nullptr; // Steam Audio's simulation of it (3D voices with occlusion or air absorption)
+            SpatialAudio::SourceOutputs Direct;
         };
 
         // ---- The mixer's buses as they run (built on the game thread from an AudioMixerLayoutDesc, swapped in by a command) -----
@@ -255,6 +269,8 @@ namespace Nox
             float GainL = 0.0f;
             float GainR = 0.0f;
             float Rate = 1.0f;
+            uint8_t Spatial = 0;    // Steam Audio: 1 panning, 2 binaural (the gains are then one, unpanned)
+            glm::vec3 Direction{ 0.0f, 0.0f, -1.0f };
         };
 
         struct State
@@ -282,6 +298,16 @@ namespace Nox
             std::array<bool, kGroupCount> GroupPaused{};
             std::array<float, kBlock * 2> VoiceBuffer{}; // one voice's block, interleaved
             std::array<float, kBlock * 2> Block{};
+            // Steam Audio, per voice slot (created at start: nothing allocates while mixing).
+            std::array<IPLDirectEffect, AudioEngine::MaxVoices> DirectEffects{};
+            std::array<IPLBinauralEffect, AudioEngine::MaxVoices> BinauralEffects{};
+            std::array<IPLPanningEffect, AudioEngine::MaxVoices> PanningEffects{};
+            alignas(16) float SpatialMono[kBlock] = {};
+            alignas(16) float SpatialDirect[kBlock] = {};
+            alignas(16) float SpatialLeft[kBlock] = {};
+            alignas(16) float SpatialRight[kBlock] = {};
+            bool Headphones = true; // (game side)
+            bool SteamAudio = false; // its context, HRTF and every slot's effects are there
 
             // Game side.
             std::array<GameVoice, AudioEngine::MaxVoices> GameVoices;
@@ -339,6 +365,23 @@ namespace Nox
         }
 #endif
 
+        // A voice's Steam Audio parameters from a Start / Update command.
+        void ApplySpatial(MixVoice& voice, const Command& command)
+        {
+            voice.Spatial = command.Spatial;
+            voice.Direct.flags = static_cast<IPLDirectEffectFlags>(command.DirectFlags);
+            voice.Direct.transmissionType = IPL_TRANSMISSIONTYPE_FREQDEPENDENT;
+            voice.Direct.distanceAttenuation = 1.0f; // (the engine's own curve is in the voice's gain)
+            voice.Direct.directivity = 1.0f;
+            voice.Direct.occlusion = command.Occlusion;
+            for (int band = 0; band < 3; ++band)
+            {
+                voice.Direct.transmission[band] = command.Transmission[band];
+                voice.Direct.airAbsorption[band] = command.AirAbsorption[band];
+                voice.Direction[band] = command.Direction[band];
+            }
+        }
+
         void ApplyCommand(State& state, const Command& command)
         {
             switch (command.Type)
@@ -366,6 +409,13 @@ namespace Nox
                 voice.LowPassFilter[0].Reset();
                 voice.LowPassFilter[1].Reset();
                 voice.LowPassActive = command.LowPass < kLowPassOff;
+                ApplySpatial(voice, command);
+                if (state.DirectEffects[command.Slot])
+                {
+                    iplDirectEffectReset(state.DirectEffects[command.Slot]);
+                    iplBinauralEffectReset(state.BinauralEffects[command.Slot]);
+                    iplPanningEffectReset(state.PanningEffects[command.Slot]);
+                }
                 if (voice.LowPassActive)
                 {
                     float from, to;
@@ -401,6 +451,7 @@ namespace Nox
                 voice.LowPass = command.LowPass;
                 voice.SendBus = command.SendBus;
                 voice.SendGain = command.SendGain;
+                ApplySpatial(voice, command);
                 break;
             }
             case CommandType::SetLoop:
@@ -699,6 +750,50 @@ namespace Nox
             return running && !faded;
         }
 
+        // Steam Audio on a 3D voice's block (in state.VoiceBuffer, its channels equal: summed and unpanned): the direct effect (air
+        // absorption, occlusion, transmission -- a 3-band EQ and gain), then the HRTF (binaural) or panning into stereo.
+        void SpatializeVoice(State& state, MixVoice& voice, uint32_t slot)
+        {
+            if (voice.Spatial == 0 || !state.DirectEffects[slot])
+                return;
+            float* buffer = state.VoiceBuffer.data();
+            for (uint32_t i = 0; i < kBlock; ++i)
+                state.SpatialMono[i] = buffer[i * 2];
+            float* mono = state.SpatialMono;
+            float* direct = state.SpatialDirect;
+            float* stereo[2] = { state.SpatialLeft, state.SpatialRight };
+            IPLAudioBuffer in{ 1, static_cast<IPLint32>(kBlock), &mono };
+            IPLAudioBuffer filtered{ 1, static_cast<IPLint32>(kBlock), &direct };
+            IPLAudioBuffer out{ 2, static_cast<IPLint32>(kBlock), stereo };
+            IPLAudioBuffer* source = &in;
+            if (voice.Direct.flags != 0)
+            {
+                iplDirectEffectApply(state.DirectEffects[slot], &voice.Direct, &in, &filtered);
+                source = &filtered;
+            }
+            const IPLVector3 direction{ voice.Direction[0], voice.Direction[1], voice.Direction[2] };
+            if (voice.Spatial == 2)
+            {
+                IPLBinauralEffectParams params{};
+                params.direction = direction;
+                params.interpolation = IPL_HRTFINTERPOLATION_BILINEAR;
+                params.spatialBlend = 1.0f;
+                params.hrtf = SpatialAudio::Hrtf();
+                iplBinauralEffectApply(state.BinauralEffects[slot], &params, source, &out);
+            }
+            else
+            {
+                IPLPanningEffectParams params{};
+                params.direction = direction;
+                iplPanningEffectApply(state.PanningEffects[slot], &params, source, &out);
+            }
+            for (uint32_t i = 0; i < kBlock; ++i)
+            {
+                buffer[i * 2] = state.SpatialLeft[i];
+                buffer[i * 2 + 1] = state.SpatialRight[i];
+            }
+        }
+
         // A voice's block (in state.VoiceBuffer) into its bus and its environment send: the low pass first (an interior / exterior
         // muffle, its cutoff moving in octaves), the send's gain ramped.
         void RouteVoice(State& state, MixVoice& voice, MixerLayout& layout)
@@ -872,6 +967,7 @@ namespace Nox
                 state.VoiceBuffer.fill(0.0f);
                 const bool running = voice.Graph ? MixGraphBlock(state, voice, state.VoiceBuffer.data(), slot)
                                                  : MixVoiceBlock(state, voice, state.VoiceBuffer.data());
+                SpatializeVoice(state, voice, slot);
                 RouteVoice(state, voice, layout);
                 if (!running)
                 {
@@ -1121,6 +1217,15 @@ namespace Nox
                 const float angle = (pan + 1.0f) * 0.25f * glm::pi<float>();
                 params.GainL = std::cos(angle) * gain;
                 params.GainR = std::sin(angle) * gain;
+                // Steam Audio pans it instead (HRTF or its panning, on the mixer thread): one gain, and the direction it comes from.
+                if (state.SteamAudio)
+                {
+                    const AudioSpatialization mode = desc.Spatialization.Spatialization;
+                    params.Spatial = mode == AudioSpatialization::Binaural || (mode == AudioSpatialization::Default && state.Headphones) ? 2 : 1;
+                    params.GainL = params.GainR = gain;
+                    if (distance > 1e-4f)
+                        params.Direction = glm::normalize(glm::conjugate(state.ListenerOrientation) * offset);
+                }
 
                 // Doppler (OpenAL's model): speeds along the line from the source to the listener.
                 const float level = std::max(desc.Spatialization.DopplerLevel, 0.0f);
@@ -1136,6 +1241,28 @@ namespace Nox
             const float clipRate = desc.Clip ? static_cast<float>(desc.Clip->GetSampleRate()) : static_cast<float>(state.SampleRate);
             params.Rate = std::clamp(std::max(desc.Pitch, 0.0f) * doppler * clipRate / static_cast<float>(state.SampleRate), 0.0f, kMaxRate);
             return params;
+        }
+
+        // A command's Steam Audio part: how it is panned, where from, and the simulation's occlusion / transmission / air absorption.
+        void FillSpatial(Command& command, const MixParams& params, const GameVoice& voice)
+        {
+            command.Spatial = params.Spatial;
+            command.Direction[0] = params.Direction.x;
+            command.Direction[1] = params.Direction.y;
+            command.Direction[2] = params.Direction.z;
+            const AudioSpatialSettings& settings = voice.Desc.Spatialization;
+            uint32_t flags = 0;
+            if (voice.Source && settings.AirAbsorption)
+                flags |= IPL_DIRECTEFFECTFLAGS_APPLYAIRABSORPTION;
+            if (voice.Source && settings.Occlusion)
+                flags |= IPL_DIRECTEFFECTFLAGS_APPLYOCCLUSION | IPL_DIRECTEFFECTFLAGS_APPLYTRANSMISSION;
+            command.DirectFlags = static_cast<uint8_t>(flags);
+            command.Occlusion = voice.Direct.Occlusion;
+            for (int band = 0; band < 3; ++band)
+            {
+                command.Transmission[band] = voice.Direct.Transmission[band];
+                command.AirAbsorption[band] = voice.Direct.AirAbsorption[band];
+            }
         }
 
         // Velocity from the position change, smoothed, with teleports ignored.
@@ -1164,6 +1291,7 @@ namespace Nox
         void ReleaseVoice(State& state, uint32_t slot)
         {
             GameVoice& voice = state.GameVoices[slot];
+            SpatialAudio::ReleaseSource(voice.Source);
             if (voice.Stream)
             {
                 std::scoped_lock lock(state.StreamMutex);
@@ -1391,6 +1519,26 @@ namespace Nox
         state.Layout = BuildLayout(state, MasterOnlyLayout());
         state.GameLayout = state.Layout;
         state.BusIndex = { { kAudioBusMaster, 0u } };
+        // Steam Audio: its context and HRTF, and every voice slot's direct, binaural and panning effects (made once: nothing
+        // allocates while mixing). Without it, 3D voices are panned by the engine itself.
+        if (SpatialAudio::Init(state.SampleRate, kBlock))
+        {
+            IPLAudioSettings audio{ static_cast<IPLint32>(state.SampleRate), static_cast<IPLint32>(kBlock) };
+            IPLDirectEffectSettings direct{ 1 };
+            IPLBinauralEffectSettings binaural{ SpatialAudio::Hrtf() };
+            IPLPanningEffectSettings panning{};
+            panning.speakerLayout.type = IPL_SPEAKERLAYOUTTYPE_STEREO;
+            bool created = true;
+            for (uint32_t slot = 0; slot < MaxVoices && created; ++slot)
+            {
+                created = iplDirectEffectCreate(SpatialAudio::Context(), &audio, &direct, &state.DirectEffects[slot]) == IPL_STATUS_SUCCESS &&
+                          iplBinauralEffectCreate(SpatialAudio::Context(), &audio, &binaural, &state.BinauralEffects[slot]) == IPL_STATUS_SUCCESS &&
+                          iplPanningEffectCreate(SpatialAudio::Context(), &audio, &panning, &state.PanningEffects[slot]) == IPL_STATUS_SUCCESS;
+            }
+            state.SteamAudio = created;
+            if (!created)
+                NOX_CORE_ERROR("Steam Audio: the voices' effects could not be created -- 3D sounds are panned without it");
+        }
         if (ma_pcm_rb_init(ma_format_f32, 2, kOutputRingFrames, nullptr, nullptr, &state.Output) != MA_SUCCESS ||
             ma_event_init(&state.MixerWake) != MA_SUCCESS)
         {
@@ -1435,6 +1583,14 @@ namespace Nox
                 if (command.Type == CommandType::SetLayout && command.Layout != state.Layout)
                     delete command.Layout;
             delete state.Layout;
+            for (uint32_t slot = 0; slot < MaxVoices; ++slot)
+            {
+                if (state.DirectEffects[slot]) iplDirectEffectRelease(&state.DirectEffects[slot]);
+                if (state.BinauralEffects[slot]) iplBinauralEffectRelease(&state.BinauralEffects[slot]);
+                if (state.PanningEffects[slot]) iplPanningEffectRelease(&state.PanningEffects[slot]);
+                SpatialAudio::ReleaseSource(state.GameVoices[slot].Source);
+            }
+            SpatialAudio::Shutdown();
         }
         delete s_State;
         s_State = nullptr;
@@ -1512,6 +1668,7 @@ namespace Nox
         command.GainL = params.GainL;
         command.GainR = params.GainR;
         command.Rate = params.Rate;
+        FillSpatial(command, params, voice);
         command.Value = std::max(desc.FadeIn, 0.0f);
         command.Flag = desc.Loop;
         command.LowPass = desc.Environment.LowPassHz;
@@ -1583,6 +1740,7 @@ namespace Nox
         command.GainL = params.GainL;
         command.GainR = params.GainR;
         command.Rate = params.Rate;
+        FillSpatial(command, params, voice);
         command.Value = std::max(desc.FadeIn, 0.0f);
         command.LowPass = desc.Environment.LowPassHz;
         command.SendBus = static_cast<int16_t>(desc.Environment.SendBus ? BusOf(state, desc.Environment.SendBus) : -1);
@@ -1768,6 +1926,18 @@ namespace Nox
             return;
         s_State->ListenerPosition = position;
         s_State->ListenerOrientation = glm::normalize(orientation);
+        SpatialAudio::SetListener(position, s_State->ListenerOrientation);
+    }
+
+    void AudioEngine::SetHeadphones(bool headphones)
+    {
+        if (s_State)
+            s_State->Headphones = headphones; // (the next Update sends every 3D voice its new spatialization)
+    }
+
+    bool AudioEngine::GetHeadphones()
+    {
+        return !s_State || s_State->Headphones;
     }
 
     void AudioEngine::SetVoiceEnvironment(AudioVoiceHandle handle, const AudioVoiceEnvironment& environment)
@@ -1913,6 +2083,46 @@ namespace Nox
 
         TrackVelocity(state.ListenerPosition, state.ListenerPrevious, state.ListenerHasPrevious, state.ListenerVelocity, deltaSeconds);
 
+        // Steam Audio's simulation: every audible 3D voice that wants occlusion or air absorption traced against the acoustic
+        // scene (here, on the game thread, as its docs advise for occlusion: no lag between a source moving and its sound).
+        if (state.SteamAudio)
+        {
+            NOX_PROFILE_SCOPE("Audio Occlusion");
+            const float metersPerUnit = WorldUnits::ToMeters(1.0f);
+            bool any = false;
+            for (GameVoice& voice : state.GameVoices)
+            {
+                const AudioSpatialSettings& settings = voice.Desc.Spatialization;
+                const bool wanted = voice.Alive && !voice.StopSent && voice.Desc.Spatial && (settings.Occlusion || settings.AirAbsorption) &&
+                                    glm::length(voice.Desc.Position - state.ListenerPosition) * metersPerUnit <= settings.MaxDistance;
+                if (!wanted)
+                {
+                    if (voice.Source)
+                    {
+                        SpatialAudio::ReleaseSource(voice.Source);
+                        voice.Direct = {};
+                    }
+                    continue;
+                }
+                if (!voice.Source)
+                    voice.Source = SpatialAudio::CreateSource();
+                SpatialAudio::SourceInputs inputs;
+                inputs.Position = voice.Desc.Position;
+                inputs.Occlusion = settings.Occlusion;
+                inputs.AirAbsorption = settings.AirAbsorption;
+                inputs.Radius = settings.SourceRadius;
+                SpatialAudio::SetSourceInputs(voice.Source, inputs);
+                any = true;
+            }
+            if (any)
+            {
+                SpatialAudio::RunDirect();
+                for (GameVoice& voice : state.GameVoices)
+                    if (voice.Source)
+                        voice.Direct = SpatialAudio::GetSourceOutputs(voice.Source);
+            }
+        }
+
         for (uint32_t slot = 0; slot < MaxVoices; ++slot)
         {
             GameVoice& voice = state.GameVoices[slot];
@@ -1927,6 +2137,7 @@ namespace Nox
             command.GainL = params.GainL;
             command.GainR = params.GainR;
             command.Rate = params.Rate;
+            FillSpatial(command, params, voice);
             command.LowPass = voice.Environment.LowPassHz;
             command.SendBus = static_cast<int16_t>(voice.Environment.SendBus ? BusOf(state, voice.Environment.SendBus) : -1);
             command.SendGain = command.SendBus >= 0 ? std::max(voice.Environment.SendLevel, 0.0f) : 0.0f;

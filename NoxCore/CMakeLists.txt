@@ -45,6 +45,18 @@ else()
     )
 endif()
 
+# Steam Audio (Valve's spatial audio: HRTF, occlusion / transmission, reflections; docs/Audio_Architecture_Plan_2026.md, A4), the
+# prebuilt SDK scripts/install_windows_dependencies.bat puts in vendors/steamaudio. phonon.dll is copied next to the editor.
+set(STEAMAUDIO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/steamaudio")
+if(WIN32)
+    set(STEAMAUDIO_LIB "${STEAMAUDIO_DIR}/lib/windows-x64/phonon.lib")
+else()
+    set(STEAMAUDIO_LIB "${STEAMAUDIO_DIR}/lib/linux-x64/libphonon.so")
+endif()
+if(NOT EXISTS "${STEAMAUDIO_DIR}/include/phonon.h")
+    message(FATAL_ERROR "Steam Audio is missing: run scripts/install_windows_dependencies.bat (it downloads it into NoxCore/vendors/steamaudio)")
+endif()
+
 set(STREAMLINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/Streamline")
 set(STREAMLINE_INCLUDE_DIR "${STREAMLINE_DIR}/include")
 set(STREAMLINE_LIB "${STREAMLINE_DIR}/lib/x64/sl.interposer.lib")
@@ -200,7 +212,7 @@ if(MSVC)
     target_link_libraries(${PROJECT_NAME} INTERFACE delayimp)
 endif()
 
-target_link_libraries (${PROJECT_NAME} PUBLIC Coral.Native Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader "${STREAMLINE_LIB}" ${NRD_LIBS} Jolt)
+target_link_libraries (${PROJECT_NAME} PUBLIC Coral.Native Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader "${STREAMLINE_LIB}" ${NRD_LIBS} "${STEAMAUDIO_LIB}" Jolt)
 if(WIN32)
     target_link_libraries(${PROJECT_NAME} PUBLIC d3d12 dxgi dxguid)
     if(TARGET D3D12MemoryAllocator)
@@ -214,7 +226,7 @@ target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${C
 target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${IMGUIZMO_DIR} ${IMGUI_NODE_EDITOR_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/filewatch ${CMAKE_CURRENT_SOURCE_DIR}/vendors/JoltPhysics)
 
 # Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR} ${OFFSETALLOCATOR_DIR} ${BC7ENC_DIR} ${XATLAS_DIR} ${BCDEC_DIR} ${STREAMLINE_INCLUDE_DIR} ${NRD_INCLUDE_DIR} ${NRD_INTEGRATION_DIR} ${RTXDI_INCLUDE_DIR} ${RTXDI_SHADERS_DIR})
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR} ${OFFSETALLOCATOR_DIR} ${BC7ENC_DIR} ${XATLAS_DIR} ${BCDEC_DIR} ${STREAMLINE_INCLUDE_DIR} ${STEAMAUDIO_DIR}/include ${NRD_INCLUDE_DIR} ${NRD_INTEGRATION_DIR} ${RTXDI_INCLUDE_DIR} ${RTXDI_SHADERS_DIR})
 target_include_directories(${PROJECT_NAME} PRIVATE ${CLUSTERLOD_DIR})
 target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${MINIAUDIO_DIR})
 target_compile_definitions(${PROJECT_NAME} PRIVATE MA_NO_ENCODING MA_NO_GENERATION MA_NO_ENGINE MA_NO_NODE_GRAPH MA_NO_RESOURCE_MANAGER)

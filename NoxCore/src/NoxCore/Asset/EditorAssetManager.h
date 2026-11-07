@@ -47,6 +47,8 @@ namespace Nox
         // A sound's Load Type (Audio/AudioTypes.h): saved in the registry, and the clip reloaded with it if it is loaded (playing
         // voices keep the clip they started with).
         void SetAudioImportSettings(AssetHandle handle, const AudioImportSettings& settings);
+        // A material's acoustic material (saved in the registry; the playing acoustic scene picks it up).
+        void SetAcousticMaterial(AssetHandle handle, AcousticMaterial material);
         
         void ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType = AssetType::None, const MeshImportSettings& meshSettings = {});
         // Registers an asset file that already exists (relative to the asset directory) and returns its handle.

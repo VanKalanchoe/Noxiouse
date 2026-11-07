@@ -11,6 +11,7 @@
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Audio/AudioDSP.h"
+#include "NoxCore/Audio/SpatialAudio.h"
 #include "NoxCore/Core/UUID.h"
 #include "NoxCore/Project/Project.h"
 
@@ -251,7 +252,20 @@ namespace Nox
             Redo(data);
         ImGui::EndDisabled();
         ImGui::SameLine();
+        if (ImGui::Checkbox("Headphones (HRTF)", &data.Headphones))
+            Changed(false);
+        ImGui::SetItemTooltip("3D sounds set to Default Spatialization: binaural (Steam Audio's HRTF: above, below and behind are heard -- for\n"
+                              "headphones) or panned left / right (for speakers). A game's options menu changes it: Audio.SetHeadphones.");
+        ImGui::SameLine();
         ImGui::TextDisabled("%s", AudioMixer::GetPath().empty() ? "(no project: the default buses)" : AudioMixer::GetPath().filename().string().c_str());
+        // The acoustic scene (Steam Audio's geometry: the running scene's static meshes).
+        const SpatialAudio::SceneStats acoustic = SpatialAudio::GetSceneStats();
+        if (acoustic.Instances > 0 || acoustic.Building > 0)
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled("| acoustic scene: %u meshes placed, %.1fk triangles%s", acoustic.Instances, static_cast<double>(acoustic.Triangles) / 1000.0,
+                                acoustic.Building > 0 ? (" (" + std::to_string(acoustic.Building) + " building)").c_str() : "");
+        }
     }
 
     void MixerPanel::DrawSnapshots(AudioMixerData& data)
