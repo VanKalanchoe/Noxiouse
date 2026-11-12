@@ -31,6 +31,16 @@ namespace Nox {
         float Fraction = 0.0f; // [0, 1] along ray
     };
 
+    // A contact that began between two bodies, one of which reports them (an Impact Sound on it): Unreal's hit event.
+    struct PhysicsContact3D
+    {
+        Entity A{};                 // the bodies' entities (A: the first, or invalid for one without)
+        Entity B{};
+        glm::dvec3 Position{ 0.0 }; // world (double precision)
+        glm::vec3 Normal{ 0.0f, 1.0f, 0.0f }; // out of A, into B
+        float ApproachSpeed = 0.0f; // m/s: how fast they closed in along the normal (before the solver stopped them)
+    };
+
     struct ShapeCastHit
     {
         bool Hit = false;

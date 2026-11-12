@@ -5,6 +5,7 @@
 
 #include "NoxCore/Core/UUID.h"
 #include "NoxCore/Tasks/JobSystem.h"
+#include "NoxCore/Audio/AudioTypes.h"
 #include "ThumbnailCache.h"
 
 struct ImGuiPayload;
@@ -171,6 +172,10 @@ namespace Nox
         AssetHandle m_ReferencesAsset = 0;
         std::vector<std::string> m_References;
         bool m_OpenReferencesDialog = false;
+        // Sound Settings (clips and audio graphs): priority and concurrency, edited for the selected sounds and saved on OK.
+        AssetHandle m_SoundSettingsAsset = 0;
+        AudioSoundSettings m_SoundSettings;
+        bool m_OpenSoundSettingsDialog = false;
         // Replace References: from (the asset), to (picked in the dialog among the same type).
         AssetHandle m_ReplaceFrom = 0;
         AssetHandle m_ReplaceTo = 0;

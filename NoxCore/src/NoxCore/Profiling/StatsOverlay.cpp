@@ -5,6 +5,7 @@
 
 #include <SDL3/SDL_cpuinfo.h>
 
+#include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/MSDFData.h"
 #include "NoxCore/Renderer/Renderer.h"
@@ -163,6 +164,24 @@ namespace Nox
             m_Cursor.y += SectionGap;
             for (const ProfileCounterStats& counter : m_Counters)
                 DrawLabelLine(Format("{}   {:.0f}", counter.Name, counter.Value), TextColor);
+        }
+
+        // Audio (Unreal's stat audio): voices real / virtual against the budget, the mixer thread's block time against its deadline.
+        if (AudioEngine::IsAvailable())
+        {
+            const AudioStats audio = AudioEngine::GetStats();
+            m_Cursor.y += SectionGap;
+            DrawLabelLine(Format("Audio  {} voices: {} real / {} virtual (budget {}), {} streaming", audio.Voices, audio.RealVoices,
+                                 audio.VirtualVoices, audio.MaxRealVoices, audio.StreamingVoices),
+                          audio.RealVoices >= audio.MaxRealVoices && audio.MaxRealVoices > 0 ? WarningColor : TextColor);
+            const bool late = audio.MixBlockMaxMilliseconds > audio.BlockMilliseconds;
+            DrawLabelLine(Format("Mixer  {:.2f} ms avg, {:.2f} max per {:.2f} ms block | {} underruns, {} stream starvations",
+                                 audio.MixBlockMilliseconds, audio.MixBlockMaxMilliseconds, audio.BlockMilliseconds, audio.Underruns,
+                                 audio.StreamStarvations), late || audio.Underruns > 0 ? WarningColor : TextColor);
+            const AudioEngine::ReflectionStats reflections = AudioEngine::GetReflectionStats();
+            if (reflections.Voices > 0 || reflections.PathingVoices > 0 || reflections.ListenerReverb)
+                DrawLabelLine(Format("Acoustics  {} reflection voices, {} pathing, listener reverb {} | {:.1f} ms per run", reflections.Voices,
+                                     reflections.PathingVoices, reflections.ListenerReverb ? "on" : "off", reflections.Milliseconds), TextColor);
         }
 
         m_Cursor = secondColumn;

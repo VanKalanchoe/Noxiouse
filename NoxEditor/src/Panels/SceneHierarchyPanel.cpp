@@ -52,6 +52,86 @@ namespace Nox
                 ImGui::EndCombo();
             }
         }
+
+        // A sound asset (an audio clip or an audio graph) by name, or dropped from the Content Browser.
+        void SoundAssetCombo(const char* label, AssetHandle& sound)
+        {
+            const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
+            const std::string current = sound != 0 && registry.contains(sound)
+                ? registry.at(sound).FilePath.filename().string() : std::string("None");
+            if (ImGui::BeginCombo(label, current.c_str()))
+            {
+                if (ImGui::Selectable("None", sound == 0))
+                    sound = 0;
+                for (const auto& [handle, metadata] : registry)
+                {
+                    if (metadata.Type != AssetType::AudioClip && metadata.Type != AssetType::AudioGraph)
+                        continue;
+                    ImGui::PushID(static_cast<int>(static_cast<uint64_t>(handle) & 0x7fffffff));
+                    if (ImGui::Selectable(metadata.FilePath.filename().string().c_str(), sound == handle))
+                        sound = handle;
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+                        ImGui::SetTooltip("%s", metadata.FilePath.generic_string().c_str());
+                    ImGui::PopID();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SetItemTooltip("An audio clip (.wav / .ogg / .flac / .mp3) or an audio graph (.naudiograph).");
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    const AssetHandle handle = *static_cast<const AssetHandle*>(payload->Data);
+                    const AssetType type = AssetManager::GetAssetType(handle);
+                    if (type == AssetType::AudioClip || type == AssetType::AudioGraph)
+                        sound = handle;
+                }
+                ImGui::EndDragDropTarget();
+            }
+        }
+
+        // A 3D sound's spatial settings (Audio Source, Impact Sound).
+        void DrawAudioSpatialSettings(AudioSpatialSettings& spatial)
+        {
+            ImGui::DragFloat("Min Distance", &spatial.MinDistance, 0.05f, 0.01f, 10000.0f, "%.2f m");
+            ImGui::SetItemTooltip("Full volume up to here.");
+            ImGui::DragFloat("Max Distance", &spatial.MaxDistance, 0.5f, 0.02f, 100000.0f, "%.1f m");
+            ImGui::SetItemTooltip("Silent from here.");
+            spatial.MinDistance = std::max(spatial.MinDistance, 0.01f);
+            spatial.MaxDistance = std::max(spatial.MaxDistance, spatial.MinDistance + 0.01f);
+            constexpr AudioAttenuation kCurves[] = { AudioAttenuation::Inverse, AudioAttenuation::InverseSquare, AudioAttenuation::Linear, AudioAttenuation::None };
+            constexpr const char* kCurveNames[] = { "Inverse", "Inverse Square", "Linear", "None" };
+            int curve = static_cast<int>(spatial.Attenuation);
+            if (ImGui::Combo("Attenuation", &curve, kCurveNames, IM_ARRAYSIZE(kCurveNames)))
+                spatial.Attenuation = kCurves[curve];
+            ImGui::SetItemTooltip("Inverse: as a sound falls off in the open (-6 dB per doubling of distance). Inverse Square: faster, stays local.\n"
+                                  "Linear: straight from full to silent. None: no falloff. All reach silence at Max Distance.");
+            ImGui::DragFloat("Doppler Level", &spatial.DopplerLevel, 0.01f, 0.0f, 5.0f, "%.2f");
+            ImGui::SetItemTooltip("The pitch shift of moving sounds: 0 off, 1 physical (speed of sound 343 m/s).");
+            constexpr const char* kModes[] = { "Default", "Panning", "Binaural (HRTF)" };
+            int mode = static_cast<int>(spatial.Spatialization);
+            if (ImGui::Combo("Spatialization", &mode, kModes, IM_ARRAYSIZE(kModes)))
+                spatial.Spatialization = static_cast<AudioSpatialization>(mode);
+            ImGui::SetItemTooltip("How it reaches the ears (Steam Audio). Binaural (HRTF): for headphones -- above, below and behind are heard.\n"
+                                  "Panning: left / right, for speakers. Default: the Mixer's Headphones setting (a game's options: Audio.SetHeadphones).");
+            ImGui::Checkbox("Reflections", &spatial.Reflections);
+            ImGui::SetItemTooltip("Echoes and reverb from the level's geometry (Steam Audio), when it is among the nearest sounds\n"
+                                  "(Mixer > Acoustics > Voices).");
+            ImGui::Checkbox("Pathing", &spatial.Pathing);
+            ImGui::SetItemTooltip("Heard around corners and through doors (Steam Audio's pathing): what a wall takes from the direct sound\n"
+                                  "comes along the paths baked in the Acoustic Probe Volume the listener is in. Needs Occlusion on and a\n"
+                                  "baked volume around the sound and the listener (Mixer > Acoustics > Pathing Voices: how many at once).");
+            ImGui::Checkbox("Air Absorption", &spatial.AirAbsorption);
+            ImGui::SetItemTooltip("Far away, the highs fade (air absorbs them): a distant sound gets duller.");
+            ImGui::Checkbox("Occlusion", &spatial.Occlusion);
+            ImGui::SetItemTooltip("Walls and objects between it and the listener muffle it, by their materials' Acoustic Material\n"
+                                  "(concrete lets almost nothing through, glass and wood more). Static meshes are the acoustic geometry.");
+            if (spatial.Occlusion)
+            {
+                ImGui::DragFloat("Source Radius", &spatial.SourceRadius, 0.01f, 0.01f, 50.0f, "%.2f m");
+                ImGui::SetItemTooltip("The sound's size for occlusion: half hidden behind a corner is half occluded (a fade, not a click).");
+            }
+        }
     }
 
     namespace
@@ -1164,6 +1244,7 @@ namespace Nox
             DisplayAddComponentEntry<AnimatorComponent>("Animator");
             DisplayAddComponentEntry<TimelinePlayerComponent>("Timeline Player");
             DisplayAddComponentEntry<AudioSourceComponent>("Audio Source");
+            DisplayAddComponentEntry<ImpactSoundComponent>("Impact Sound");
             DisplayAddComponentEntry<AudioListenerComponent>("Audio Listener");
             DisplayAddComponentEntry<AudioVolumeComponent>("Audio Volume");
             DisplayAddComponentEntry<AcousticProbeVolumeComponent>("Acoustic Probe Volume");
@@ -2394,38 +2475,7 @@ namespace Nox
         DrawComponent<AudioSourceComponent>("Audio Source", entity, [this, entity](auto& component)
         {
             // The sound: a sound file or an audio graph in the project (drop one from the Content Browser).
-            const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
-            const std::string current = component.Sound != 0 && registry.contains(component.Sound)
-                ? registry.at(component.Sound).FilePath.filename().string() : std::string("None");
-            if (ImGui::BeginCombo("Sound", current.c_str()))
-            {
-                if (ImGui::Selectable("None", component.Sound == 0))
-                    component.Sound = 0;
-                for (const auto& [handle, metadata] : registry)
-                {
-                    if (metadata.Type != AssetType::AudioClip && metadata.Type != AssetType::AudioGraph)
-                        continue;
-                    ImGui::PushID(static_cast<int>(static_cast<uint64_t>(handle) & 0x7fffffff));
-                    if (ImGui::Selectable(metadata.FilePath.filename().string().c_str(), component.Sound == handle))
-                        component.Sound = handle;
-                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
-                        ImGui::SetTooltip("%s", metadata.FilePath.generic_string().c_str());
-                    ImGui::PopID();
-                }
-                ImGui::EndCombo();
-            }
-            ImGui::SetItemTooltip("An audio clip (.wav / .ogg / .flac / .mp3) or an audio graph (.naudiograph).");
-            if (ImGui::BeginDragDropTarget())
-            {
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
-                {
-                    const AssetHandle handle = *static_cast<const AssetHandle*>(payload->Data);
-                    const AssetType type = AssetManager::GetAssetType(handle);
-                    if (type == AssetType::AudioClip || type == AssetType::AudioGraph)
-                        component.Sound = handle;
-                }
-                ImGui::EndDragDropTarget();
-            }
+            SoundAssetCombo("Sound", component.Sound);
             const bool isGraph = component.Sound != 0 && AssetManager::GetAssetType(component.Sound) == AssetType::AudioGraph;
             if (isGraph)
             {
@@ -2448,47 +2498,7 @@ namespace Nox
             ImGui::Checkbox("3D", &component.Spatial);
             ImGui::SetItemTooltip("3D: panned and attenuated around the listener, with Doppler. 2D: as the file is (music, UI).");
             if (component.Spatial)
-            {
-                AudioSpatialSettings& spatial = component.Spatialization;
-                ImGui::DragFloat("Min Distance", &spatial.MinDistance, 0.05f, 0.01f, 10000.0f, "%.2f m");
-                ImGui::SetItemTooltip("Full volume up to here.");
-                ImGui::DragFloat("Max Distance", &spatial.MaxDistance, 0.5f, 0.02f, 100000.0f, "%.1f m");
-                ImGui::SetItemTooltip("Silent from here.");
-                spatial.MinDistance = std::max(spatial.MinDistance, 0.01f);
-                spatial.MaxDistance = std::max(spatial.MaxDistance, spatial.MinDistance + 0.01f);
-                constexpr AudioAttenuation kCurves[] = { AudioAttenuation::Inverse, AudioAttenuation::InverseSquare, AudioAttenuation::Linear, AudioAttenuation::None };
-                constexpr const char* kCurveNames[] = { "Inverse", "Inverse Square", "Linear", "None" };
-                int curve = static_cast<int>(spatial.Attenuation);
-                if (ImGui::Combo("Attenuation", &curve, kCurveNames, IM_ARRAYSIZE(kCurveNames)))
-                    spatial.Attenuation = kCurves[curve];
-                ImGui::SetItemTooltip("Inverse: as a sound falls off in the open (-6 dB per doubling of distance). Inverse Square: faster, stays local.\n"
-                                      "Linear: straight from full to silent. None: no falloff. All reach silence at Max Distance.");
-                ImGui::DragFloat("Doppler Level", &spatial.DopplerLevel, 0.01f, 0.0f, 5.0f, "%.2f");
-                ImGui::SetItemTooltip("The pitch shift of moving sounds: 0 off, 1 physical (speed of sound 343 m/s).");
-                constexpr const char* kModes[] = { "Default", "Panning", "Binaural (HRTF)" };
-                int mode = static_cast<int>(spatial.Spatialization);
-                if (ImGui::Combo("Spatialization", &mode, kModes, IM_ARRAYSIZE(kModes)))
-                    spatial.Spatialization = static_cast<AudioSpatialization>(mode);
-                ImGui::SetItemTooltip("How it reaches the ears (Steam Audio). Binaural (HRTF): for headphones -- above, below and behind are heard.\n"
-                                      "Panning: left / right, for speakers. Default: the Mixer's Headphones setting (a game's options: Audio.SetHeadphones).");
-                ImGui::Checkbox("Reflections", &spatial.Reflections);
-                ImGui::SetItemTooltip("Echoes and reverb from the level's geometry (Steam Audio), when it is among the nearest sounds\n"
-                                      "(Mixer > Acoustics > Voices).");
-                ImGui::Checkbox("Pathing", &spatial.Pathing);
-                ImGui::SetItemTooltip("Heard around corners and through doors (Steam Audio's pathing): what a wall takes from the direct sound\n"
-                                      "comes along the paths baked in the Acoustic Probe Volume the listener is in. Needs Occlusion on and a\n"
-                                      "baked volume around the sound and the listener (Mixer > Acoustics > Pathing Voices: how many at once).");
-                ImGui::Checkbox("Air Absorption", &spatial.AirAbsorption);
-                ImGui::SetItemTooltip("Far away, the highs fade (air absorbs them): a distant sound gets duller.");
-                ImGui::Checkbox("Occlusion", &spatial.Occlusion);
-                ImGui::SetItemTooltip("Walls and objects between it and the listener muffle it, by their materials' Acoustic Material\n"
-                                      "(concrete lets almost nothing through, glass and wood more). Static meshes are the acoustic geometry.");
-                if (spatial.Occlusion)
-                {
-                    ImGui::DragFloat("Source Radius", &spatial.SourceRadius, 0.01f, 0.01f, 50.0f, "%.2f m");
-                    ImGui::SetItemTooltip("The sound's size for occlusion: half hidden behind a corner is half occluded (a fade, not a click).");
-                }
-            }
+                DrawAudioSpatialSettings(component.Spatialization);
 
             // An audio graph's parameters: its defaults unless changed here (this entity's own, saved; Reset follows the default
             // again), as the Animator's. In Play a change reaches the playing sound at once.
@@ -2554,6 +2564,33 @@ namespace Nox
                     ImGui::SameLine();
                     ImGui::TextDisabled("playing");
                 }
+            }
+        });
+
+        const bool hasBody = entity.HasComponent<RigidBody3DComponent>();
+        DrawComponent<ImpactSoundComponent>("Impact Sound", entity, [hasBody](auto& component)
+        {
+            if (!hasBody)
+                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Needs a 3D Rigid Body on this entity.");
+            SoundAssetCombo("Sound", component.Sound);
+            ImGui::SliderFloat("Volume", &component.Volume, 0.0f, 1.0f, "%.2f");
+            ImGui::SetItemTooltip("At Max Speed and above. Softer hits are quieter: the volume follows the speed of the hit.");
+            ImGui::DragFloat("Min Speed", &component.MinSpeed, 0.05f, 0.0f, 100.0f, "%.2f m/s");
+            ImGui::SetItemTooltip("Hits slower than this are silent (a body settling, a light touch). Resting and rolling are not hits.");
+            ImGui::DragFloat("Max Speed", &component.MaxSpeed, 0.1f, 0.01f, 200.0f, "%.1f m/s");
+            ImGui::SetItemTooltip("Full volume from this speed (how fast the two bodies close in at the contact).");
+            component.MinSpeed = std::max(component.MinSpeed, 0.0f);
+            component.MaxSpeed = std::max(component.MaxSpeed, 0.01f);
+            ImGui::DragFloat("Pitch Variation", &component.PitchVariation, 0.005f, 0.0f, 0.5f, "+/- %.3f");
+            ImGui::SetItemTooltip("Each hit's pitch is random within this (0.05: +/- 5%%), so repeated hits do not sound copied.");
+            ImGui::DragFloat("Cooldown", &component.Cooldown, 0.005f, 0.0f, 5.0f, "%.3f s");
+            ImGui::SetItemTooltip("No new impact sound from this body sooner than this (one bounce is several contacts).\n"
+                                  "The sound's own Sound Settings (Content Browser) limit how many play at once in a pile-up.");
+            AudioBusCombo("Bus", component.Bus, false);
+            if (ImGui::TreeNode("3D Settings"))
+            {
+                DrawAudioSpatialSettings(component.Spatialization);
+                ImGui::TreePop();
             }
         });
 
@@ -3190,6 +3227,11 @@ namespace Nox
             ImGui::DragFloatRange2("Spin", &component.SpinMin, &component.SpinMax, 1.0f, -3600.0f, 3600.0f, "%.0f deg/s", "%.0f deg/s");
             ImGui::Checkbox("Local Space", &component.LocalSpace);
             ImGui::SetItemTooltip("Particles move with the entity (a jet's flame). Off: they stay where they were spawned (a trail of smoke).");
+            SoundAssetCombo("Burst Sound", component.BurstSound);
+            ImGui::SetItemTooltip("Played at the emitter with every burst: a loop's Burst (when Burst is above 0) and a script's Emit. Its\n"
+                                  "Sound Settings (Content Browser) limit how many play at once.");
+            if (component.BurstSound != 0)
+                ImGui::SliderFloat("Burst Sound Volume", &component.BurstSoundVolume, 0.0f, 1.0f, "%.2f");
 
             ImGui::SeparatorText("Look");
             ImGui::DragFloat("Size Start", &component.SizeStart, 0.005f, 0.0f, 1000.0f, "%.3f m");

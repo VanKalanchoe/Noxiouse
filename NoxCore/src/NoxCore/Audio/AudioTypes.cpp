@@ -36,6 +36,26 @@ namespace Nox
         return 1.0f;
     }
 
+    std::string_view AudioConcurrencyRuleToString(AudioConcurrencyRule rule)
+    {
+        switch (rule)
+        {
+        case AudioConcurrencyRule::PreventNew: return "PreventNew";
+        case AudioConcurrencyRule::StopOldest: return "StopOldest";
+        case AudioConcurrencyRule::StopFarthest: return "StopFarthest";
+        case AudioConcurrencyRule::StopQuietest: return "StopQuietest";
+        }
+        return "StopFarthest";
+    }
+
+    AudioConcurrencyRule AudioConcurrencyRuleFromString(std::string_view name)
+    {
+        if (name == "PreventNew") return AudioConcurrencyRule::PreventNew;
+        if (name == "StopOldest") return AudioConcurrencyRule::StopOldest;
+        if (name == "StopQuietest") return AudioConcurrencyRule::StopQuietest;
+        return AudioConcurrencyRule::StopFarthest;
+    }
+
     std::string_view AudioListenerReverbToString(AudioListenerReverb reverb)
     {
         switch (reverb)

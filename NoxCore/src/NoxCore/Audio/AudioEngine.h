@@ -81,6 +81,10 @@ namespace Nox
         float StartTime = 0.0f; // seconds into the clip (clips only)
         float FadeIn = 0.0f;    // seconds
         AudioVoiceEnvironment Environment; // Audio Volumes' filtering and reverb send, from the first block (SetVoiceEnvironment after)
+        // The sound asset it is (0: none, e.g. a preview) and that asset's priority and concurrency (AudioSoundSettings): instances
+        // of the same asset are counted together.
+        uint64_t SoundAsset = 0;
+        AudioSoundSettings Sound;
     };
 
     struct AudioStats
@@ -90,6 +94,9 @@ namespace Nox
         uint32_t SampleRate = 0;
         uint32_t PeriodFrames = 0; // what the device asks for per callback
         uint32_t Voices = 0;
+        uint32_t RealVoices = 0;         // mixed (spatialized, through their effects and buses)
+        uint32_t VirtualVoices = 0;      // inaudible or beyond the real-voice budget: their playhead goes on, nothing is mixed
+        uint32_t MaxRealVoices = 0;
         uint32_t StreamingVoices = 0;
         uint64_t Underruns = 0;          // device callbacks the mixer had not filled (a click)
         uint64_t StreamStarvations = 0;  // blocks a stream had no decoded audio for (disk too slow)
@@ -220,6 +227,11 @@ namespace Nox
         };
         static ReflectionStats GetReflectionStats();
         static bool GetHeadphones();
+        // Real voices at most (Wwise's / Unreal's virtual voices): beyond it, the quietest x lowest-priority playing sounds are
+        // virtual -- their playhead goes on, nothing of them is mixed -- and become real again (faded in) when they rank higher.
+        // Sounds out of earshot (beyond their Max Distance) are always virtual.
+        static void SetMaxRealVoices(uint32_t count);
+        static uint32_t GetMaxRealVoices();
 
         static void SetMixerLayout(const AudioMixerLayoutDesc& layout);
         static void SetBusGain(uint32_t bus, float gain); // linear

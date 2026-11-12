@@ -1452,6 +1452,14 @@ namespace Nox
                 ImGui::EndMenu();
             }
         }
+        // Unreal's Sound Concurrency and Priority on the sound: how many of it may play at once, and which sounds stay real when there
+        // are more than the mixer's Real Voices.
+        if ((metadata.Type == AssetType::AudioClip || metadata.Type == AssetType::AudioGraph) && ImGui::MenuItem("Sound Settings..."))
+        {
+            m_SoundSettingsAsset = handle;
+            m_SoundSettings = metadata.AudioSettings.Sound;
+            m_OpenSoundSettingsDialog = true;
+        }
         if (metadata.Type == AssetType::Prefab && ImGui::MenuItem("Create Variant"))
         {
             m_HasVariantRequest = true;
@@ -1634,6 +1642,77 @@ namespace Nox
             for (const std::string& user : m_References)
                 ImGui::BulletText("%s", user.c_str());
             if (ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape))
+                ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
+        if (m_OpenSoundSettingsDialog)
+        {
+            ImGui::OpenPopup("Sound Settings");
+            m_OpenSoundSettingsDialog = false;
+        }
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        if (ImGui::BeginPopupModal("Sound Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            uint32_t sounds = 0;
+            for (AssetHandle selected : m_Selected)
+            {
+                const AssetType type = assets->GetAssetType(selected);
+                sounds += type == AssetType::AudioClip || type == AssetType::AudioGraph;
+            }
+            if (sounds > 1)
+                ImGui::Text("%u selected sounds", sounds);
+            else
+                ImGui::Text("%s", assets->GetMetadata(m_SoundSettingsAsset).FilePath.filename().generic_string().c_str());
+            ImGui::Separator();
+            AudioSoundSettings& sound = m_SoundSettings;
+            ImGui::SetNextItemWidth(200.0f);
+            ImGui::DragFloat("Priority", &sound.Priority, 0.05f, 0.0f, 100.0f, "%.2f");
+            sound.Priority = std::max(sound.Priority, 0.0f);
+            ImGui::SetItemTooltip("With more sounds playing than the mixer's Real Voices, the loudest x highest-priority ones are mixed;\n"
+                                  "the rest are virtual (silent, their playhead goes on) until they rank higher. 1 = normal.");
+            int maxCount = static_cast<int>(sound.MaxCount);
+            ImGui::SetNextItemWidth(200.0f);
+            if (ImGui::DragInt("Max Count", &maxCount, 0.1f, 0, 256, maxCount == 0 ? "No limit" : "%d"))
+                sound.MaxCount = static_cast<uint32_t>(std::max(maxCount, 0));
+            ImGui::SetItemTooltip("How many of this sound may play at once (Unreal's Sound Concurrency). 0: no limit.");
+            ImGui::BeginDisabled(sound.MaxCount == 0);
+            constexpr AudioConcurrencyRule kRules[] = { AudioConcurrencyRule::StopFarthest, AudioConcurrencyRule::StopOldest, AudioConcurrencyRule::StopQuietest,
+                                                        AudioConcurrencyRule::PreventNew };
+            constexpr const char* kRuleNames[] = { "Stop Farthest", "Stop Oldest", "Stop Quietest", "Prevent New" };
+            int rule = 0;
+            for (int i = 0; i < 4; ++i)
+                if (kRules[i] == sound.Rule)
+                    rule = i;
+            ImGui::SetNextItemWidth(200.0f);
+            if (ImGui::Combo("When Full", &rule, kRuleNames, 4))
+                sound.Rule = kRules[rule];
+            ImGui::SetItemTooltip("At Max Count, a new one stops the farthest / oldest / quietest playing one (it does not start if it\n"
+                                  "would itself be the farthest or quietest), or does not start (Prevent New).");
+            ImGui::EndDisabled();
+            ImGui::SetNextItemWidth(200.0f);
+            ImGui::DragFloat("Retrigger Time", &sound.RetriggerTime, 0.005f, 0.0f, 10.0f, sound.RetriggerTime <= 0.0f ? "Off" : "%.3f s");
+            sound.RetriggerTime = std::max(sound.RetriggerTime, 0.0f);
+            ImGui::SetItemTooltip("A new one does not start sooner than this after the last one started (e.g. impacts in a pile-up).");
+            ImGui::Separator();
+            if (ImGui::Button("OK", ImVec2(90.0f, 0.0f)))
+            {
+                for (AssetHandle selected : m_Selected)
+                {
+                    const AssetType type = assets->GetAssetType(selected);
+                    if (type == AssetType::AudioClip || type == AssetType::AudioGraph)
+                        assets->SetSoundSettings(selected, m_SoundSettings);
+                }
+                if (!m_Selected.contains(m_SoundSettingsAsset))
+                    assets->SetSoundSettings(m_SoundSettingsAsset, m_SoundSettings);
+                RefreshAssetTree(); // (the tiles hold copies of the metadata)
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Defaults", ImVec2(90.0f, 0.0f)))
+                m_SoundSettings = {};
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(90.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape))
                 ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
         }

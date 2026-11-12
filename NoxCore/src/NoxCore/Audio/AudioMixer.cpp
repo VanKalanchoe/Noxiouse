@@ -169,6 +169,7 @@ namespace Nox
         out << YAML::BeginMap;
         out << YAML::Key << "AudioMixer" << YAML::Value << YAML::BeginMap;
         out << YAML::Key << "Headphones" << YAML::Value << data.Headphones;
+        out << YAML::Key << "RealVoices" << YAML::Value << data.RealVoices;
         out << YAML::Key << "Reflections" << YAML::Value << YAML::BeginMap;
         out << YAML::Key << "Enabled" << YAML::Value << data.Reflections.Enabled;
         out << YAML::Key << "Rays" << YAML::Value << data.Reflections.Rays;
@@ -297,6 +298,7 @@ namespace Nox
         try
         {
             data.Headphones = root["Headphones"].as<bool>(true);
+            data.RealVoices = std::clamp<uint32_t>(root["RealVoices"].as<uint32_t>(64), 1, AudioEngine::MaxVoices);
             if (const YAML::Node reflections = root["Reflections"])
             {
                 data.Reflections.Enabled = reflections["Enabled"].as<bool>(true);
@@ -887,6 +889,7 @@ namespace Nox
         }
         AudioEngine::SetHeadphones(state.GameHeadphones >= 0 ? state.GameHeadphones != 0 : state.Data.Headphones);
         AudioEngine::SetReflections(state.Data.Reflections);
+        AudioEngine::SetMaxRealVoices(state.Data.RealVoices);
         const bool blending = state.BlendDuration > 0.0f;
         if (!state.ValuesChanged && !blending)
             return;

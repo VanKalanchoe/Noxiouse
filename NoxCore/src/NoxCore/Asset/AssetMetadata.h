@@ -76,6 +76,8 @@ namespace Nox
         AudioLoadType LoadType = AudioLoadType::Auto;
         // Material assets: what the surface does to sound (Steam Audio's acoustic scene; Audio/AudioTypes.h).
         AcousticMaterial Acoustic = AcousticMaterial::Auto;
+        // Audio clips and audio graphs: priority and concurrency (Content Browser > Sound Settings).
+        AudioSoundSettings Sound;
     };
 
     struct AssetMetadata

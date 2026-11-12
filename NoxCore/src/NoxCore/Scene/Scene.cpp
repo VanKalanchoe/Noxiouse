@@ -329,6 +329,9 @@ namespace Nox
         m_Registry.on_construct<PlaneCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
         m_Registry.on_destroy<PlaneCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
         m_Registry.on_construct<MeshCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        // (a body reports its contacts when it is made with an Impact Sound on it)
+        m_Registry.on_construct<ImpactSoundComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
+        m_Registry.on_destroy<ImpactSoundComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
         m_Registry.on_destroy<MeshCollider3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
         m_Registry.on_construct<PhysicsJoint3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
         m_Registry.on_destroy<PhysicsJoint3DComponent>().connect<&Scene::OnPhysics3DComponentChanged>(*this);
@@ -618,22 +621,31 @@ namespace Nox
         for (auto entity : m_Registry.view<TimelinePlayerComponent>())
             outHandles.insert(m_Registry.get<TimelinePlayerComponent>(entity).Timeline);
 
-        for (auto entity : m_Registry.view<AudioSourceComponent>())
+        auto addSound = [&outHandles](AssetHandle sound)
         {
-            const AssetHandle sound = m_Registry.get<AudioSourceComponent>(entity).Sound;
+            if (sound == 0)
+                return;
             outHandles.insert(sound);
             // An audio graph's clips are the scene's too (kept loaded with it).
-            if (const NodeGraphAsset* graph = sound != 0 && AssetManager::GetAssetType(sound) == AssetType::AudioGraph
+            if (const NodeGraphAsset* graph = AssetManager::GetAssetType(sound) == AssetType::AudioGraph
                     ? AssetManager::FindLoadedAsset<NodeGraphAsset>(sound) : nullptr)
             {
                 std::vector<AssetHandle> clips;
                 AudioGraphProgram::CollectClips(graph->Graph, clips);
                 outHandles.insert(clips.begin(), clips.end());
             }
-        }
+        };
+        for (auto entity : m_Registry.view<AudioSourceComponent>())
+            addSound(m_Registry.get<AudioSourceComponent>(entity).Sound);
+        for (auto entity : m_Registry.view<ImpactSoundComponent>())
+            addSound(m_Registry.get<ImpactSoundComponent>(entity).Sound);
 
         for (auto entity : m_Registry.view<ParticleEmitterComponent>())
-            outHandles.insert(m_Registry.get<ParticleEmitterComponent>(entity).Texture);
+        {
+            const auto& emitter = m_Registry.get<ParticleEmitterComponent>(entity);
+            outHandles.insert(emitter.Texture);
+            addSound(emitter.BurstSound);
+        }
 
         for (auto entity : m_Registry.view<SpriteRendererComponent>())
             outHandles.insert(m_Registry.get<SpriteRendererComponent>(entity).Texture);
@@ -1826,6 +1838,17 @@ namespace Nox
         }
     }
 
+    namespace
+    {
+        // The sound asset's priority and concurrency (Content Browser > Sound Settings, in the asset registry): instances of one
+        // asset are counted together by the engine.
+        void ApplySoundSettings(AudioPlayDesc& desc, AssetHandle sound)
+        {
+            desc.SoundAsset = static_cast<uint64_t>(sound);
+            desc.Sound = AssetManager::GetMetadata(sound).AudioSettings.Sound;
+        }
+    }
+
     void Scene::PlayAudioSource(Entity entity)
     {
         if (!m_AudioRunning || !entity || !entity.HasComponent<AudioSourceComponent>() || m_Registry.all_of<InactiveInHierarchyComponent>(entity))
@@ -1877,6 +1900,7 @@ namespace Nox
             desc.Position = entity.GetComponent<TransformComponent>().Translation;
         source.Environment = desc.Spatial ? AudioEnvironmentAt(desc.Position).Target : AudioVoiceEnvironment{};
         desc.Environment = source.Environment;
+        ApplySoundSettings(desc, source.Sound);
         source.Voice = AudioEngine::Play(desc);
     }
 
@@ -1900,16 +1924,24 @@ namespace Nox
 
     void Scene::PlayOneShot(AssetHandle sound, const glm::dvec3& position, float volume, bool spatial, uint64_t bus)
     {
+        AudioPlayDesc desc;
+        desc.Volume = volume;
+        desc.Bus = bus;
+        desc.Spatial = spatial;
+        desc.Position = position;
+        PlayOneShot(sound, desc);
+    }
+
+    void Scene::PlayOneShot(AssetHandle sound, const AudioPlayDesc& desc)
+    {
         const AssetType type = sound != 0 ? AssetManager::GetAssetType(sound) : AssetType::None;
         if (!m_AudioRunning || (type != AssetType::AudioClip && type != AssetType::AudioGraph))
             return;
         PendingOneShot shot;
         shot.Sound = sound;
-        shot.Desc.Volume = volume;
-        shot.Desc.Bus = bus;
+        shot.Desc = desc;
         shot.Desc.Group = AudioVoiceGroup::Game;
-        shot.Desc.Spatial = spatial;
-        shot.Desc.Position = position;
+        ApplySoundSettings(shot.Desc, sound);
         if (!StartOneShot(shot))
             m_PendingOneShots.push_back(std::move(shot));
     }
@@ -1962,6 +1994,58 @@ namespace Nox
             AudioEngine::FireGraphParameter(source.Voice, program->FindParameter(name));
     }
 
+    void Scene::PlayEventSounds()
+    {
+        auto random = [this]() { // [-1, 1) (xorshift)
+            m_EventSoundRandom ^= m_EventSoundRandom << 13;
+            m_EventSoundRandom ^= m_EventSoundRandom >> 17;
+            m_EventSoundRandom ^= m_EventSoundRandom << 5;
+            return static_cast<float>(m_EventSoundRandom >> 8) * (2.0f / 16777216.0f) - 1.0f;
+        };
+        const double now = static_cast<double>(std::chrono::steady_clock::now().time_since_epoch().count()) * 1e-9;
+
+        // Impacts: each body with an Impact Sound that began a contact at Min Speed or faster (once per Cooldown).
+        if (m_Physics3DScene)
+        {
+            std::vector<PhysicsContact3D> contacts;
+            m_Physics3DScene->TakeContacts(contacts);
+            for (const PhysicsContact3D& contact : contacts)
+            {
+                for (Entity entity : { contact.A, contact.B })
+                {
+                    if (!entity || !m_Registry.valid(entity) || m_Registry.all_of<InactiveInHierarchyComponent>(entity))
+                        continue;
+                    auto* impact = m_Registry.try_get<ImpactSoundComponent>(entity);
+                    if (!impact || impact->Sound == 0 || contact.ApproachSpeed < impact->MinSpeed || now - impact->LastImpact < impact->Cooldown)
+                        continue;
+                    impact->LastImpact = now;
+                    AudioPlayDesc desc;
+                    desc.Volume = impact->Volume * std::clamp(contact.ApproachSpeed / std::max(impact->MaxSpeed, 0.01f), 0.0f, 1.0f);
+                    desc.Pitch = std::max(1.0f + impact->PitchVariation * random(), 0.1f);
+                    desc.Bus = impact->Bus;
+                    desc.Spatial = true;
+                    desc.Spatialization = impact->Spatialization;
+                    desc.Position = contact.Position;
+                    PlayOneShot(impact->Sound, desc);
+                }
+            }
+        }
+
+        // Particle bursts.
+        for (auto handle : m_Registry.view<ParticleEmitterComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>))
+        {
+            ParticleEmitterComponent& emitter = m_Registry.get<ParticleEmitterComponent>(handle);
+            if (emitter.BurstSound == 0 || emitter.Simulation.BurstEvents == 0)
+                continue;
+            emitter.Simulation.BurstEvents = 0; // (played: a frame the particles do not step does not play it again)
+            AudioPlayDesc desc;
+            desc.Volume = emitter.BurstSoundVolume;
+            desc.Spatial = true;
+            desc.Position = m_Registry.get<WorldTransformComponent>(handle).GetPosition();
+            PlayOneShot(emitter.BurstSound, desc);
+        }
+    }
+
     void Scene::UpdateAudio(const glm::dmat4& cameraWorld)
     {
         if (!m_AudioRunning)
@@ -2002,6 +2086,8 @@ namespace Nox
             else
                 current.SendLevel += (wanted.Target.SendLevel - current.SendLevel) * t;
         };
+
+        PlayEventSounds();
 
         // One-shots whose sound has come in since.
         std::erase_if(m_PendingOneShots, [this](PendingOneShot& shot) { return StartOneShot(shot); });
@@ -3036,7 +3122,7 @@ namespace Nox
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
             PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent,
-            AudioSourceComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
+            AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
             CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent, PhysicsJoint3DComponent, CollisionFilter3DComponent,
@@ -3651,6 +3737,11 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<AcousticProbeVolumeComponent>(Entity entity, AcousticProbeVolumeComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<ImpactSoundComponent>(Entity entity, ImpactSoundComponent& component)
     {
     }
 

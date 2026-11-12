@@ -32,6 +32,27 @@ namespace Nox
 
     std::string_view AudioAttenuationToString(AudioAttenuation attenuation);
 
+    // A sound asset's playback rules (docs/Audio_Architecture_Plan_2026.md §11 "A5a as built"; Unreal keeps them on the sound asset
+    // too -- Priority and Concurrency): how many of its instances play at once and what happens to the next one, and how it ranks
+    // when more sounds play than the real-voice budget mixes.
+    enum class AudioConcurrencyRule : uint8_t
+    {
+        PreventNew = 0,     // the new one does not start
+        StopOldest,         // the one playing longest stops for it
+        StopFarthest,       // the one farthest from the listener stops (the new one does not start when it would be the farthest)
+        StopQuietest        // the one heard most quietly stops (the new one does not start when it would be the quietest)
+    };
+    std::string_view AudioConcurrencyRuleToString(AudioConcurrencyRule rule);
+    AudioConcurrencyRule AudioConcurrencyRuleFromString(std::string_view name);
+    struct AudioSoundSettings
+    {
+        float Priority = 1.0f;       // 0..100: with more sounds than the real-voice budget, the louder x higher-priority ones are mixed
+        uint32_t MaxCount = 0;       // instances at once (0: no limit)
+        AudioConcurrencyRule Rule = AudioConcurrencyRule::StopFarthest;
+        float RetriggerTime = 0.0f;  // seconds: an instance started sooner than this after the last one is not started
+        bool operator==(const AudioSoundSettings&) const = default;
+    };
+
     // The reverb at the listener that the Acoustic Reverb effect applies (Steam Audio's listener-centric reverb, its Unity
     // listener's Reverb Type): none, traced in real time from the listener, or looked up in the baked probes of the Acoustic Probe
     // Volume the listener is in (none outside every baked volume).

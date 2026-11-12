@@ -586,6 +586,37 @@ namespace Nox
         }
     };
 
+    // A sound when the body hits something (Unreal's hit events driving an impact sound, Unity's OnCollisionEnter + PlayOneShot): on
+    // an entity with a 3D rigid body, every contact it begins at Min Speed or faster plays Sound there, louder the harder the hit --
+    // its volume follows the speed the two closed in at (sound pressure grows with the impact velocity), full at Max Speed. Resting
+    // and rolling contacts are not new contacts and are silent. The sound's own Sound Settings (Max Count, Retrigger Time) keep a
+    // pile-up from playing a hundred at once.
+    struct ImpactSoundComponent
+    {
+        AssetHandle Sound = 0;     // an AudioClip or an AudioGraph
+        float Volume = 1.0f;       // at Max Speed and above
+        float MinSpeed = 0.5f;     // m/s: slower contacts are silent
+        float MaxSpeed = 8.0f;     // m/s: full volume
+        float PitchVariation = 0.05f; // +/- random pitch per hit (no two hits alike)
+        float Cooldown = 0.08f;    // seconds: this body plays no new impact sooner (a bounce's several contacts are one hit)
+        uint64_t Bus = kAudioBusSFX;
+        AudioSpatialSettings Spatialization; // Min / Max Distance, curve, occlusion...
+
+        // Runtime only.
+        double LastImpact = -1e9;  // scene time of its last impact sound
+
+        ImpactSoundComponent() = default;
+        ImpactSoundComponent(const ImpactSoundComponent& other)
+            : Sound(other.Sound), Volume(other.Volume), MinSpeed(other.MinSpeed), MaxSpeed(other.MaxSpeed), PitchVariation(other.PitchVariation),
+              Cooldown(other.Cooldown), Bus(other.Bus), Spatialization(other.Spatialization) {}
+        ImpactSoundComponent& operator=(const ImpactSoundComponent& other)
+        {
+            Sound = other.Sound; Volume = other.Volume; MinSpeed = other.MinSpeed; MaxSpeed = other.MaxSpeed; PitchVariation = other.PitchVariation;
+            Cooldown = other.Cooldown; Bus = other.Bus; Spatialization = other.Spatialization;
+            return *this;
+        }
+    };
+
     // The ears (Unity's AudioListener): usually on the player's camera. Without one, the primary camera listens (Play) or the editor
     // camera (Simulate). With several, the first active one is used (split screen is later).
     struct AudioListenerComponent
@@ -663,6 +694,7 @@ namespace Nox
         uint32_t Random = 0x9E3779B9u;
         bool BurstDone = false;
         uint32_t PendingBurst = 0;      // Emit(count) from scripts, spawned on the next update
+        uint32_t BurstEvents = 0;       // bursts spawned by the last Simulate (a loop's Burst, an Emit): the burst sound plays
         bool Started = false;
         // Large world coordinates (Niagara's LWC tile): world-space particles are relative to this point in float. It follows the
         // emitter (ParticleSystem::Simulate), so their precision is that of a position near the emitter wherever it is.
@@ -723,6 +755,9 @@ namespace Nox
         bool SoftParticles = true;      // fade out where they meet geometry instead of cutting into it
         float SoftDistance = 0.3f;      // meters
         bool LocalSpace = false;        // particles move with the entity
+        // A sound with every burst (Niagara's Play Audio on spawn burst): a loop's Burst and a script's Emit, at the emitter.
+        AssetHandle BurstSound = 0;     // an AudioClip or an AudioGraph
+        float BurstSoundVolume = 1.0f;
 
         ParticleSimulation Simulation;
 
@@ -1143,7 +1178,7 @@ namespace Nox
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
         MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent,
-        TimelinePlayerComponent, AudioSourceComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, ParticleEmitterComponent, SpriteRendererComponent,
+        TimelinePlayerComponent, AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, ParticleEmitterComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,

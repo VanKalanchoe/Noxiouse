@@ -437,9 +437,19 @@ namespace Nox
             return;
         if (found->second.AudioSettings.LoadType == settings.LoadType)
             return;
-        found->second.AudioSettings = settings;
+        found->second.AudioSettings.LoadType = settings.LoadType; // (its sound settings kept)
         SerializeAssetRegistry();
         ReimportAsset(handle, true);
+    }
+
+    void EditorAssetManager::SetSoundSettings(AssetHandle handle, const AudioSoundSettings& settings)
+    {
+        const auto found = m_AssetRegistry.find(handle);
+        if (m_ReadOnly || found == m_AssetRegistry.end() || (found->second.Type != AssetType::AudioClip && found->second.Type != AssetType::AudioGraph) ||
+            found->second.AudioSettings.Sound == settings)
+            return;
+        found->second.AudioSettings.Sound = settings;
+        SerializeAssetRegistry(); // (read when a sound starts: nothing to reload)
     }
 
     void EditorAssetManager::SetAcousticMaterial(AssetHandle handle, AcousticMaterial material)
@@ -1990,10 +2000,22 @@ namespace Nox
             out << YAML::EndMap;
         }
 
-        if (metadata.Type == AssetType::AudioClip && metadata.AudioSettings.LoadType != AudioLoadType::Auto)
+        const bool soundAsset = metadata.Type == AssetType::AudioClip || metadata.Type == AssetType::AudioGraph;
+        const bool customLoad = metadata.Type == AssetType::AudioClip && metadata.AudioSettings.LoadType != AudioLoadType::Auto;
+        const bool customSound = soundAsset && !(metadata.AudioSettings.Sound == AudioSoundSettings{});
+        if (customLoad || customSound)
         {
             out << YAML::Key << "AudioSettings" << YAML::Value << YAML::BeginMap;
-            out << YAML::Key << "LoadType" << YAML::Value << std::string(AudioLoadTypeToString(metadata.AudioSettings.LoadType));
+            if (customLoad)
+                out << YAML::Key << "LoadType" << YAML::Value << std::string(AudioLoadTypeToString(metadata.AudioSettings.LoadType));
+            if (customSound)
+            {
+                const AudioSoundSettings& sound = metadata.AudioSettings.Sound;
+                out << YAML::Key << "Priority" << YAML::Value << sound.Priority;
+                out << YAML::Key << "MaxCount" << YAML::Value << sound.MaxCount;
+                out << YAML::Key << "ConcurrencyRule" << YAML::Value << std::string(AudioConcurrencyRuleToString(sound.Rule));
+                out << YAML::Key << "RetriggerTime" << YAML::Value << sound.RetriggerTime;
+            }
             out << YAML::EndMap;
         }
 
@@ -2261,6 +2283,12 @@ namespace Nox
                     metadata.AudioSettings.LoadType = AudioLoadTypeFromString(audioNode["LoadType"].as<std::string>());
                 if (audioNode["AcousticMaterial"])
                     metadata.AudioSettings.Acoustic = AcousticMaterialFromString(audioNode["AcousticMaterial"].as<std::string>());
+                AudioSoundSettings& sound = metadata.AudioSettings.Sound;
+                sound.Priority = audioNode["Priority"].as<float>(sound.Priority);
+                sound.MaxCount = audioNode["MaxCount"].as<uint32_t>(sound.MaxCount);
+                if (audioNode["ConcurrencyRule"])
+                    sound.Rule = AudioConcurrencyRuleFromString(audioNode["ConcurrencyRule"].as<std::string>());
+                sound.RetriggerTime = audioNode["RetriggerTime"].as<float>(sound.RetriggerTime);
             }
 
             if (auto settingsNode = node["MeshSettings"])

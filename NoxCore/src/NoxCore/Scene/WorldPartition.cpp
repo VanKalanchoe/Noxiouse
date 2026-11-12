@@ -97,7 +97,7 @@ namespace Nox
                    entity.HasComponent<SpotLightComponent>() || entity.HasComponent<RectLightComponent>() ||
                    entity.HasComponent<DiscLightComponent>() || entity.HasComponent<ReflectionProbeComponent>() || entity.HasComponent<IrradianceVolumeComponent>() || entity.HasComponent<SpriteRendererComponent>() ||
                    entity.HasComponent<CircleRendererComponent>() || entity.HasComponent<ParticleEmitterComponent>() ||
-                   entity.HasComponent<AudioSourceComponent>() ||
+                   entity.HasComponent<AudioSourceComponent>() || entity.HasComponent<ImpactSoundComponent>() ||
                    entity.HasComponent<TextComponent>() || entity.HasComponent<RigidBody3DComponent>() ||
                    entity.HasComponent<RigidBody2DComponent>() || entity.HasComponent<BoxCollider3DComponent>() ||
                    entity.HasComponent<SphereCollider3DComponent>() || entity.HasComponent<CapsuleCollider3DComponent>() ||

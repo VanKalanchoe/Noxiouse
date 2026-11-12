@@ -242,7 +242,8 @@ namespace Nox {
 
         m_PhysicsSystem->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f)); // Jolt's own native unit (meters/s^2): not a world-unit value, untouched
         m_RollingResistance = std::make_unique<JoltRollingResistance>();
-        m_PhysicsSystem->SetContactListener(m_RollingResistance.get());
+        m_ContactEvents = std::make_unique<JoltContactEvents>(m_RollingResistance.get());
+        m_PhysicsSystem->SetContactListener(m_ContactEvents.get());
 
         // Create bodies for all entities currently possessing RigidBody3DComponent
         if (m_Scene)
@@ -590,6 +591,8 @@ namespace Nox {
         uint32_t entIdVal = static_cast<uint32_t>(entity);
         m_EntityToBodyMap[entIdVal] = body->GetID();
         m_BodyToEntityMap[bodyIdVal] = entity;
+        if (entity.HasComponent<ImpactSoundComponent>())
+            m_ContactEvents->SetReporting(body->GetID(), true);
     }
 
     JPH::Ref<JPH::Shape> JoltPhysics3DScene::MeshColliderShape(const MeshCollider3DComponent& collider, bool convex)
@@ -775,6 +778,7 @@ namespace Nox {
                 bodyInterface.RemoveBody(bodyId);
                 bodyInterface.DestroyBody(bodyId);
                 m_RollingResistance->Untrack(bodyId);
+                m_ContactEvents->SetReporting(bodyId, false);
 
                 m_BodyToEntityMap.erase(bodyId.GetIndexAndSequenceNumber());
             }
@@ -1400,6 +1404,28 @@ namespace Nox {
             return JoltUtils::ToGLM(bodyInterface.GetAngularVelocity(it->second));
         }
         return glm::vec3(0.0f);
+    }
+
+    void JoltPhysics3DScene::TakeContacts(std::vector<PhysicsContact3D>& out)
+    {
+        out.clear();
+        if (!m_ContactEvents)
+            return;
+        m_ContactEvents->Take(m_TakenContacts);
+        out.reserve(m_TakenContacts.size());
+        auto entityOf = [this](JPH::BodyID body) {
+            const auto found = m_BodyToEntityMap.find(body.GetIndexAndSequenceNumber());
+            return found != m_BodyToEntityMap.end() ? found->second : Entity{};
+        };
+        for (const JoltContactEvents::Contact& contact : m_TakenContacts)
+        {
+            PhysicsContact3D& result = out.emplace_back();
+            result.A = entityOf(contact.Body1);
+            result.B = entityOf(contact.Body2);
+            result.Position = ToWorld(JoltUtils::ToGLMPosition(contact.Position));
+            result.Normal = JoltUtils::ToGLM(contact.Normal);
+            result.ApproachSpeed = contact.ApproachSpeed / NativeUnitsPerMeter();
+        }
     }
 
 } // namespace Nox

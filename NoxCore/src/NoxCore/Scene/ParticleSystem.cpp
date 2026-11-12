@@ -127,6 +127,7 @@ namespace Nox::ParticleSystem
         ParticleSimulation& simulation = emitter.Simulation;
         if (!simulation.Started)
             Restart(emitter);
+        simulation.BurstEvents = 0;
         // World-space particles live relative to the simulation's origin (large world coordinates). It moves to the emitter when
         // there is nothing to carry over, or once the emitter is a kilometre away (the particles are moved with it).
         const glm::dvec3 emitterPosition(worldTransform[3]);
@@ -171,6 +172,7 @@ namespace Nox::ParticleSystem
         {
             Spawn(emitter, world, simulation.PendingBurst);
             simulation.PendingBurst = 0;
+            ++simulation.BurstEvents;
         }
         if (!emitter.Emitting)
             return;
@@ -179,6 +181,7 @@ namespace Nox::ParticleSystem
         {
             Spawn(emitter, world, emitter.Burst);
             simulation.BurstDone = true;
+            simulation.BurstEvents += emitter.Burst > 0;
         }
         if (emitter.Looping || simulation.Time < duration)
         {

@@ -13,6 +13,7 @@
 #include <SDL3/SDL_cpuinfo.h>
 #include <SDL3/SDL_time.h>
 
+#include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "Profiler.h"
@@ -383,6 +384,19 @@ namespace Nox
             report += "\nCounters\n";
             for (const ProfileCounterStats& counter : counters)
                 std::format_to(std::back_inserter(report), "{}: {:.0f}\n", counter.Name, counter.Value);
+        }
+
+        if (AudioEngine::IsAvailable())
+        {
+            const AudioStats audio = AudioEngine::GetStats();
+            const AudioEngine::ReflectionStats reflections = AudioEngine::GetReflectionStats();
+            std::format_to(std::back_inserter(report), "\nAudio\n{} ({} Hz, {}-frame device period)\n", audio.DeviceName, audio.SampleRate, audio.PeriodFrames);
+            std::format_to(std::back_inserter(report), "Voices: {} ({} real, {} virtual, budget {}), {} streaming\n", audio.Voices, audio.RealVoices,
+                           audio.VirtualVoices, audio.MaxRealVoices, audio.StreamingVoices);
+            std::format_to(std::back_inserter(report), "Mixer block: {:.3f} ms avg, {:.3f} ms max of {:.3f} ms; {} underruns, {} stream starvations\n",
+                           audio.MixBlockMilliseconds, audio.MixBlockMaxMilliseconds, audio.BlockMilliseconds, audio.Underruns, audio.StreamStarvations);
+            std::format_to(std::back_inserter(report), "Acoustics: {} reflection voices, {} pathing voices, listener reverb {}, {:.2f} ms per run\n",
+                           reflections.Voices, reflections.PathingVoices, reflections.ListenerReverb ? "on" : "off", reflections.Milliseconds);
         }
 
         // Nox.log is opened relative to the working directory, so this lands next to it.

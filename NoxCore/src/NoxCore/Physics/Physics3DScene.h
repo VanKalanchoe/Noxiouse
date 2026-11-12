@@ -63,6 +63,9 @@ namespace Nox {
         virtual std::vector<Entity> OverlapSphere(const glm::dvec3& center, float radius,
                                                   uint16_t layerMask = PhysicsLayers::MASK_ALL) = 0;
 
+        // The contacts begun since the last call by bodies whose entity has an Impact Sound (ImpactSoundComponent), after Step.
+        virtual void TakeContacts(std::vector<PhysicsContact3D>& out) { out.clear(); }
+
         // Forces & Velocities
         virtual void AddForce(Entity entity, const glm::vec3& force) = 0;
         virtual void AddImpulse(Entity entity, const glm::vec3& impulse) = 0;

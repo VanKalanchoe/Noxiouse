@@ -257,6 +257,25 @@ namespace Nox
         ImGui::SetItemTooltip("3D sounds set to Default Spatialization: binaural (Steam Audio's HRTF: above, below and behind are heard -- for\n"
                               "headphones) or panned left / right (for speakers). A game's options menu changes it: Audio.SetHeadphones.");
         ImGui::SameLine();
+        {
+            int realVoices = static_cast<int>(data.RealVoices);
+            ImGui::SetNextItemWidth(70.0f);
+            if (ImGui::DragInt("Real Voices", &realVoices, 0.25f, 1, static_cast<int>(AudioEngine::MaxVoices)))
+            {
+                data.RealVoices = static_cast<uint32_t>(std::clamp(realVoices, 1, static_cast<int>(AudioEngine::MaxVoices)));
+                Changed(false);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+            {
+                const AudioStats voiceStats = AudioEngine::GetStats();
+                ImGui::SetTooltip("How many sounds are mixed at most (of %u voices). Beyond it the quietest x lowest-priority ones are virtual:\n"
+                                  "silent, their playhead going on, faded back in when they rank higher. Sounds out of earshot are always\n"
+                                  "virtual. Priority is a sound's own setting: Content Browser > right-click > Sound Settings.\n\n"
+                                  "Now: %u playing, %u real, %u virtual.",
+                                  AudioEngine::MaxVoices, voiceStats.Voices, voiceStats.RealVoices, voiceStats.VirtualVoices);
+            }
+        }
+        ImGui::SameLine();
         if (ImGui::Button("Acoustics..."))
             ImGui::OpenPopup("Acoustics");
         ImGui::SetItemTooltip("Steam Audio's real-time reflections: rays bounced off the level give the nearest sounds their echoes and reverb.");

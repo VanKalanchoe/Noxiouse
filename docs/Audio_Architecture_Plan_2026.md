@@ -354,6 +354,8 @@ Clip paths are under the asset folder with the extension optional; a bus name th
 | **A3 Mixer** | Bus tree asset, effect chains, sends, ducking, snapshots, Mixer panel with meters; Audio Volumes (reverb zones, interior / exterior); the delay / reverb / dynamics nodes | Dialogue ducks music; entering a room switches reverb; a Pause snapshot |
 | **A4 Steam Audio** | HRTF binaural, air absorption; occlusion / transmission with acoustic materials (geometry from the static meshes, streamed with world cells); real-time reflections with a budget; baked reverb probes and pathing per level (a Bake button like HLODs) | A sound behind a wall is muffled and comes through the door; Bistro's streets sound different from its interiors |
 | **A5 Integrations** | Play Sound notifies with surface types, a sequencer audio track, impact sounds, profiler lane and stats, concurrency and virtual voices tuned | A character's footsteps change on grass / stone; a cutscene with music and dialogue |
+| A5a (built 2026-11-12) | Priority and concurrency on sound assets, real / virtual voices with a budget, audio stats, Impact Sound component (Jolt contact events), particle burst sounds | A tumbling pile clacks, never more than Max Count at once |
+| A5b | Play Sound notifies with surface types, sequencer audio track, graphs inside graphs and the Curve node | Footsteps change on grass / stone; a cutscene with music and dialogue |
 
 Each phase lands with the docs-site pages updated and the manual's walkthrough, like the other systems.
 
@@ -602,3 +604,47 @@ plugin's scripts and native effects, the core's path simulator and simulation ma
   suites pass; ThreadSanitizer: no engine race (its remaining reports are the harness reading mixer state, and one inside Steam
   Audio's uninstrumented library).
 
+### A5a as built (2026-11-12): voice management, impact sounds, particle sounds
+
+Voices handled the way Unreal (Sound Concurrency, priority, virtual voices) and Wwise (playback limits, virtual voice behaviour) do it:
+
+- **Sound Settings on the sound asset** (Content Browser > Sound Settings..., clips and audio graphs; stored in the asset registry
+  beside the Load Type, no reimport): **Priority**, **Max Count**, **When Full** (Stop Farthest -- Unreal's default resolution --,
+  Stop Oldest, Stop Quietest, Prevent New), **Retrigger Time**. The concurrency group is the sound itself (Unreal's "limit to owner /
+  per sound" case): every Audio Source, one-shot, impact and particle sound playing it counts together. At Max Count a new instance
+  either stops the chosen one (20 ms fade) or is refused -- Stop Farthest / Stop Quietest refuse the new one when it would itself be
+  the farthest / quietest (Unreal's behaviour), so a far impact cannot cut a near one. Unreal's "Stop Lowest Priority" is not offered:
+  within one sound every instance has the same priority.
+- **Real and virtual voices** (Mixer toolbar > Real Voices, 64 of the 128 voices, saved in the .nmixer): every frame the game thread
+  ranks the playing voices by how loud they are heard (volume x Audio Volume x distance curve) x priority; the first Real Voices are
+  real, the rest virtual. Out of earshot (below -80 dB: beyond Max Distance, volume 0) is always virtual. A real voice ranks 25%
+  (~2 dB) higher (hysteresis), and a new voice starts virtual when the budget's worth of real voices outrank it (it is never heard for
+  a frame and then cut). **A virtual voice** still runs its source every block -- clip playhead, stream, or graph -- so it comes back
+  where it would be (Wwise's "play from elapsed time"); it skips Steam Audio (no occlusion traced on the game thread; no direct, binaural,
+  reflection or pathing effect on the mixer), its low pass and its bus: no cost beyond decoding. A voice ranked real again is traced
+  in that same frame, before its first heard block. Real <-> virtual is a one-block gain ramp (5 ms), and its Steam Audio effects are reset when it is
+  heard again (their state is from before the silence). Virtual voices are left out of the reflection and pathing budgets.
+- **Stats:** AudioStats gains RealVoices / VirtualVoices / MaxRealVoices. The stats overlay's detailed view has an Audio section
+  (voices real / virtual against the budget, the mixer block's average and slowest time against its deadline, underruns, stream
+  starvations, the acoustics' voices and run time); the saved stats report the same. The Mixer's Real Voices tooltip shows the live
+  counts.
+- **Impact Sound** (component, on an entity with a 3D rigid body; Unreal's hit events, Unity's OnCollisionEnter + PlayOneShot): a new
+  engine contact feed -- **JoltContactEvents**, now Jolt's contact listener, forwards every callback to the rolling resistance and
+  notes the contacts that *begin* on bodies that report them (bodies made with an Impact Sound): the contact points' middle, the
+  normal, and the approach speed -- the bodies' velocities at that point before the solver resolves the contact (Jolt's
+  OnContactAdded runs before it). IPhysics3DScene::TakeContacts hands them over (world positions, m/s); the scene plays the sound
+  there, volume = Volume x speed / Max Speed (sound pressure grows with the impact velocity), silent below Min Speed, Pitch Variation,
+  Cooldown per body, Bus and 3D settings. Resting and rolling are persisted contacts, not new ones: silent.
+- **Particle burst sound** (Particle Emitter > Burst Sound / Volume; Niagara's audio on spawn burst): played at the emitter with each
+  loop's Burst and each script Emit.
+- Scene: Scene::PlayOneShot(sound, AudioPlayDesc) for any voice setting; every play fills the sound's asset id and settings into the
+  AudioPlayDesc. The 3D settings UI and serialization are shared by Audio Source and Impact Sound.
+- **Tests:** voice harness (the real AudioEngine): a virtual voice adds nothing to the mix while its playhead advances exactly as a
+  real one's (1024 = 1024 frames after 4 blocks); real again it ramps 0.2 -> 0.4 over one block, then both; virtual again it ramps
+  out. Stop Farthest at Max Count 2 (10 / 20 / 5 m: the 20 m one stopped, a 30 m one refused); Prevent New; Stop Oldest; Stop Quietest
+  (0.05 stopped for 0.08, 0.01 refused); Retrigger 0.1 s (refused at once, played after 0.12 s); budget 3 of 7 voices: the 3 nearest
+  real, one beyond Max Distance virtual, the mixer agrees; priority 10 at 30 m outranks a 15 m voice; hysteresis keeps a real voice
+  against one 1.5% louder and gives way to one 4x louder; volume 0 virtual, back up real. Jolt contacts (the real listener on
+  Jolt): a ball dropped 2 m reports 6.27 m/s (theory 6.26), its bounce 3.15 (restitution 0.5), then 1.61, 0.91; resting a further
+  second and rolling at 3 m/s begin no contacts; a body not reporting gives none; rolling resistance still works behind the new
+  listener. All A1-A4c suites pass.

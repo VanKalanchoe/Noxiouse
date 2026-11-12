@@ -47,6 +47,8 @@ namespace Nox
         // A sound's Load Type (Audio/AudioTypes.h): saved in the registry, and the clip reloaded with it if it is loaded (playing
         // voices keep the clip they started with).
         void SetAudioImportSettings(AssetHandle handle, const AudioImportSettings& settings);
+        // An audio clip's or audio graph's priority and concurrency (AudioImportSettings::Sound).
+        void SetSoundSettings(AssetHandle handle, const AudioSoundSettings& settings);
         // A material's acoustic material (saved in the registry; the playing acoustic scene picks it up).
         void SetAcousticMaterial(AssetHandle handle, AcousticMaterial material);
         

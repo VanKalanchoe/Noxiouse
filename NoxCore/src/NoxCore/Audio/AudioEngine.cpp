@@ -125,7 +125,8 @@ namespace Nox
             ListenerBasis,
             ReflectionsOutput,
             VoicePathing,
-            ListenerReverb
+            ListenerReverb,
+            VoiceVirtual
         };
 
         struct MixerLayout;
@@ -175,6 +176,7 @@ namespace Nox
             // its first blocks are never heard through a wall.
             bool WaitForSimulation = false;
             bool Simulated = false;
+            bool Virtual = false; // Start: begins virtual (out of earshot); VoiceVirtual: becomes virtual / real
         };
 
         struct FinishedEvent
@@ -189,6 +191,10 @@ namespace Nox
             bool Paused = false;
             bool Stopping = false;
             bool Waiting = false; // for its first occlusion (Command::WaitForSimulation)
+            // Virtual: its source still runs (the playhead goes on) but it is not spatialized or mixed; faded out / in over a block.
+            bool Virtual = false;
+            float AudibleApplied = 1.0f;
+            bool ResetEffects = false; // real again after being silent: its spatial effects start clean
             const AudioClip* Clip = nullptr;
             StreamState* Stream = nullptr;
             AudioGraphInstance* Graph = nullptr;
@@ -247,6 +253,8 @@ namespace Nox
             int32_t PathingSlot = -1;    // its pathing pool slot (the nearest with Pathing on get one)
             bool PathingValid = false;   // its paths were found (the last run's)
             bool Simulated = false;      // its occlusion has been traced once (the mixer holds it until then)
+            bool Virtual = false;        // not mixed (out of earshot, or beyond the real-voice budget)
+            double StartedAt = 0.0;      // seconds (steady clock): concurrency's Stop Oldest
             SpatialAudio::SourceOutputs Direct;
         };
 
@@ -407,6 +415,8 @@ namespace Nox
             bool ListenerHasPrevious = false;
             glm::vec3 ListenerVelocity{ 0.0f };
             double LastVoiceLimitWarning = -1e9;
+            uint32_t MaxRealVoices = 64;
+            std::unordered_map<uint64_t, double> LastSoundStart; // per sound asset: concurrency's Retrigger Time
 
             // Stream thread.
             std::mutex StreamMutex;
@@ -487,6 +497,9 @@ namespace Nox
                 voice.Paused = false;
                 voice.Stopping = false;
                 voice.Waiting = command.WaitForSimulation;
+                voice.Virtual = command.Virtual;
+                voice.AudibleApplied = command.Virtual ? 0.0f : 1.0f;
+                voice.ResetEffects = false;
                 voice.Clip = command.Clip;
                 voice.Stream = command.Stream;
                 voice.Graph = command.Graph;
@@ -673,6 +686,14 @@ namespace Nox
                 voice.PathingOn = command.Flag && state.PathEffects[command.Slot];
                 std::memcpy(voice.PathEq, command.PathEq, sizeof(voice.PathEq));
                 std::memcpy(voice.PathSh, command.PathSh, sizeof(voice.PathSh));
+                break;
+            }
+            case CommandType::VoiceVirtual:
+            {
+                MixVoice& voice = state.MixVoices[command.Slot];
+                if (voice.Virtual && !command.Flag && voice.AudibleApplied <= 0.0f)
+                    voice.ResetEffects = true; // (its effects' state is from before the silence)
+                voice.Virtual = command.Flag;
                 break;
             }
             case CommandType::ListenerReverb:
@@ -1185,8 +1206,39 @@ namespace Nox
                 {
                     running = voice.Graph ? MixGraphBlock(state, voice, state.VoiceBuffer.data(), slot)
                                           : MixVoiceBlock(state, voice, state.VoiceBuffer.data());
-                    SpatializeVoice(state, voice, slot);
-                    RouteVoice(state, voice, layout);
+                    // A virtual voice's source ran (its playhead is where it would be); the rest -- Steam Audio, its bus -- only
+                    // while it fades out, and from its first block back.
+                    if (!voice.Virtual || voice.AudibleApplied > 0.0f)
+                    {
+                        if (voice.ResetEffects)
+                        {
+                            voice.ResetEffects = false;
+                            if (state.DirectEffects[slot])
+                            {
+                                iplDirectEffectReset(state.DirectEffects[slot]);
+                                iplBinauralEffectReset(state.BinauralEffects[slot]);
+                                iplPanningEffectReset(state.PanningEffects[slot]);
+                            }
+                            if (state.PathEffects[slot])
+                                iplPathEffectReset(state.PathEffects[slot]);
+                        }
+                        SpatializeVoice(state, voice, slot);
+                        const float target = voice.Virtual ? 0.0f : 1.0f;
+                        if (target != 1.0f || voice.AudibleApplied != 1.0f)
+                        {
+                            const float step = (target - voice.AudibleApplied) / static_cast<float>(kBlock);
+                            float gain = voice.AudibleApplied;
+                            float* buffer = state.VoiceBuffer.data();
+                            for (uint32_t i = 0; i < kBlock; ++i)
+                            {
+                                gain += step;
+                                buffer[i * 2] *= gain;
+                                buffer[i * 2 + 1] *= gain;
+                            }
+                        }
+                        voice.AudibleApplied = target;
+                        RouteVoice(state, voice, layout);
+                    }
                 }
                 if (!running)
                 {
@@ -1507,6 +1559,101 @@ namespace Nox
             const float clipRate = desc.Clip ? static_cast<float>(desc.Clip->GetSampleRate()) : static_cast<float>(state.SampleRate);
             params.Rate = std::clamp(std::max(desc.Pitch, 0.0f) * doppler * clipRate / static_cast<float>(state.SampleRate), 0.0f, kMaxRate);
             return params;
+        }
+
+        // How loud a voice is heard, before the mixer's buses: its volume, its Audio Volume's, its distance curve (0: out of earshot).
+        float Audibility(const State& state, const AudioPlayDesc& desc, const AudioVoiceEnvironment& environment)
+        {
+            float gain = std::max(desc.Volume, 0.0f) * std::max(environment.Volume, 0.0f);
+            if (desc.Spatial)
+                gain *= Attenuate(static_cast<float>(glm::length(desc.Position - state.ListenerPosition)) * WorldUnits::ToMeters(1.0f), desc.Spatialization);
+            return gain;
+        }
+        constexpr float kInaudible = 1e-4f; // -80 dB
+
+        // A real voice's ranking score (AudioEngine::Update): how loud x its priority, 25% more while real (hysteresis).
+        constexpr float kRealBonus = 1.25f;
+        float VoiceScore(const State& state, const GameVoice& voice)
+        {
+            return Audibility(state, voice.Desc, voice.Environment) * std::max(voice.Desc.Sound.Priority, 0.0f) * (voice.Virtual ? 1.0f : kRealBonus);
+        }
+
+        // A new voice starts virtual out of earshot, or when as many real voices outrank it as the budget allows: it is not heard for a
+        // frame and then cut (or pushes out a real one only by the hysteresis margin, like Update's ranking).
+        bool StartsVirtual(const State& state, const AudioPlayDesc& desc, uint32_t self)
+        {
+            const float audibility = Audibility(state, desc, desc.Environment);
+            if (audibility < kInaudible)
+                return true;
+            const float score = audibility * std::max(desc.Sound.Priority, 0.0f);
+            uint32_t above = 0;
+            for (uint32_t slot = 0; slot < AudioEngine::MaxVoices; ++slot)
+            {
+                const GameVoice& voice = state.GameVoices[slot];
+                if (slot != self && voice.Alive && !voice.StopSent && !voice.Virtual && VoiceScore(state, voice) >= score)
+                    ++above;
+            }
+            return above >= state.MaxRealVoices;
+        }
+
+        double Now() { return static_cast<double>(std::chrono::steady_clock::now().time_since_epoch().count()) * 1e-9; }
+
+        // A new instance of a sound asset against its concurrency (Unreal's Sound Concurrency): its Retrigger Time, and at Max
+        // Count the rule -- refuse it, or stop one of the playing ones for it. False: it does not start.
+        bool AdmitVoice(State& state, const AudioPlayDesc& desc)
+        {
+            if (desc.SoundAsset == 0)
+                return true;
+            const AudioSoundSettings& settings = desc.Sound;
+            const double now = Now();
+            if (settings.RetriggerTime > 0.0f)
+                if (const auto found = state.LastSoundStart.find(desc.SoundAsset);
+                    found != state.LastSoundStart.end() && now - found->second < static_cast<double>(settings.RetriggerTime))
+                    return false;
+            if (settings.MaxCount > 0)
+            {
+                const float metersPerUnit = WorldUnits::ToMeters(1.0f);
+                const float newDistance = desc.Spatial ? static_cast<float>(glm::length(desc.Position - state.ListenerPosition)) * metersPerUnit : 0.0f;
+                const float newAudibility = Audibility(state, desc, desc.Environment);
+                for (;;)
+                {
+                    uint32_t count = 0;
+                    int32_t victim = -1;
+                    float victimValue = 0.0f;
+                    for (uint32_t slot = 0; slot < AudioEngine::MaxVoices; ++slot)
+                    {
+                        const GameVoice& voice = state.GameVoices[slot];
+                        if (!voice.Alive || voice.StopSent || voice.Desc.SoundAsset != desc.SoundAsset)
+                            continue;
+                        ++count;
+                        float value = 0.0f;
+                        switch (settings.Rule)
+                        {
+                        case AudioConcurrencyRule::StopOldest: value = static_cast<float>(-voice.StartedAt); break; // (smallest start: largest value)
+                        case AudioConcurrencyRule::StopFarthest:
+                            value = voice.Desc.Spatial ? static_cast<float>(glm::length(voice.Desc.Position - state.ListenerPosition)) * metersPerUnit : 0.0f;
+                            break;
+                        case AudioConcurrencyRule::StopQuietest: value = -Audibility(state, voice.Desc, voice.Environment); break;
+                        case AudioConcurrencyRule::PreventNew: break;
+                        }
+                        if (victim < 0 || value > victimValue)
+                        {
+                            victim = static_cast<int32_t>(slot);
+                            victimValue = value;
+                        }
+                    }
+                    if (count < settings.MaxCount)
+                        break;
+                    if (settings.Rule == AudioConcurrencyRule::PreventNew ||
+                        (settings.Rule == AudioConcurrencyRule::StopFarthest && newDistance >= victimValue) ||
+                        (settings.Rule == AudioConcurrencyRule::StopQuietest && -newAudibility >= victimValue))
+                        return false; // (the new one would be the one to go)
+                    const GameVoice& stopped = state.GameVoices[victim];
+                    AudioEngine::Stop((static_cast<uint64_t>(stopped.Generation) << 32) | static_cast<uint32_t>(victim), 0.02f);
+                }
+            }
+            state.LastSoundStart[desc.SoundAsset] = now;
+            return true;
         }
 
         // A new voice will be traced by the direct simulation (AudioEngine::Update): it then waits for its first result.
@@ -2031,7 +2178,7 @@ namespace Nox
             for (uint32_t slot = 0; slot < AudioEngine::MaxVoices; ++slot)
             {
                 const GameVoice& voice = state.GameVoices[slot];
-                if (!voice.Alive || voice.StopSent || !voice.Desc.Spatial)
+                if (!voice.Alive || voice.StopSent || voice.Virtual || !voice.Desc.Spatial) // (a virtual voice is not heard)
                     continue;
                 const float distance = static_cast<float>(glm::length(voice.Desc.Position - state.ListenerPosition)) * metersPerUnit;
                 if (distance > voice.Desc.Spatialization.MaxDistance)
@@ -2328,6 +2475,8 @@ namespace Nox
         if (!desc.Clip || desc.Clip->GetChannels() == 0)
             return 0;
         State& state = *s_State;
+        if (!AdmitVoice(state, desc))
+            return 0;
         if (state.FreeSlots.empty())
         {
             const double now = static_cast<double>(std::chrono::steady_clock::now().time_since_epoch().count()) * 1e-9;
@@ -2388,6 +2537,9 @@ namespace Nox
         command.Rate = params.Rate;
         FillSpatial(command, params, voice);
         command.WaitForSimulation = WillSimulate(state, desc);
+        voice.StartedAt = Now();
+        voice.Virtual = StartsVirtual(state, desc, slot);
+        command.Virtual = voice.Virtual;
         command.Value = std::max(desc.FadeIn, 0.0f);
         command.Flag = desc.Loop;
         command.LowPass = desc.Environment.LowPassHz;
@@ -2431,6 +2583,8 @@ namespace Nox
     AudioVoiceHandle AudioEngine::PlayGraph(const AudioPlayDesc& desc)
     {
         State& state = *s_State;
+        if (!AdmitVoice(state, desc))
+            return 0;
         const uint32_t slot = TakeSlot(state);
         if (slot == UINT32_MAX)
             return 0;
@@ -2461,6 +2615,9 @@ namespace Nox
         command.Rate = params.Rate;
         FillSpatial(command, params, voice);
         command.WaitForSimulation = WillSimulate(state, desc);
+        voice.StartedAt = Now();
+        voice.Virtual = StartsVirtual(state, desc, slot);
+        command.Virtual = voice.Virtual;
         command.Value = std::max(desc.FadeIn, 0.0f);
         command.LowPass = desc.Environment.LowPassHz;
         command.SendBus = static_cast<int16_t>(desc.Environment.SendBus ? BusOf(state, desc.Environment.SendBus) : -1);
@@ -2846,6 +3003,38 @@ namespace Nox
 
         TrackVelocity(state.ListenerPosition, state.ListenerPrevious, state.ListenerHasPrevious, state.ListenerVelocity, deltaSeconds);
 
+        // Real and virtual voices: out of earshot is virtual; the rest ranked by how loud they are heard x their priority, the
+        // first MaxRealVoices real (a real one ranks 25% higher, ~2 dB: two close sounds do not swap back and forth every frame).
+        {
+            std::vector<std::pair<float, uint32_t>> ranked;
+            std::array<bool, MaxVoices> wantVirtual{};
+            for (uint32_t slot = 0; slot < MaxVoices; ++slot)
+            {
+                GameVoice& voice = state.GameVoices[slot];
+                if (!voice.Alive || voice.StopSent)
+                    continue;
+                if (Audibility(state, voice.Desc, voice.Environment) < kInaudible)
+                    wantVirtual[slot] = true;
+                else
+                    ranked.emplace_back(VoiceScore(state, voice), slot);
+            }
+            std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+            for (size_t i = state.MaxRealVoices; i < ranked.size(); ++i)
+                wantVirtual[ranked[i].second] = true;
+            for (uint32_t slot = 0; slot < MaxVoices; ++slot)
+            {
+                GameVoice& voice = state.GameVoices[slot];
+                if (!voice.Alive || voice.StopSent || voice.Virtual == wantVirtual[slot])
+                    continue;
+                voice.Virtual = wantVirtual[slot];
+                Command command;
+                command.Type = CommandType::VoiceVirtual;
+                command.Slot = slot;
+                command.Flag = voice.Virtual;
+                Push(state, command);
+            }
+        }
+
         // Steam Audio's simulation: every audible 3D voice that wants occlusion or air absorption traced against the acoustic
         // scene (here, on the game thread, as its docs advise for occlusion: no lag between a source moving and its sound).
         if (state.SteamAudio)
@@ -2856,7 +3045,8 @@ namespace Nox
             for (GameVoice& voice : state.GameVoices)
             {
                 const AudioSpatialSettings& settings = voice.Desc.Spatialization;
-                const bool wanted = voice.Alive && !voice.StopSent && voice.Desc.Spatial && (settings.Occlusion || settings.AirAbsorption) &&
+                // (not a virtual voice: one ranked real again this frame is traced now, before its first heard block)
+                const bool wanted = voice.Alive && !voice.StopSent && !voice.Virtual && voice.Desc.Spatial && (settings.Occlusion || settings.AirAbsorption) &&
                                     glm::length(voice.Desc.Position - state.ListenerPosition) * metersPerUnit <= settings.MaxDistance;
                 if (!wanted)
                 {
@@ -2928,6 +3118,7 @@ namespace Nox
             if (!voice.Alive)
                 continue;
             ++stats.Voices;
+            ++(voice.Virtual ? stats.VirtualVoices : stats.RealVoices);
             if (voice.Stream || (voice.Graph && !voice.Graph->GetStreams().empty()))
                 ++stats.StreamingVoices;
         }
@@ -2936,6 +3127,18 @@ namespace Nox
         stats.MixBlockMilliseconds = state.MixAverage.load(std::memory_order_relaxed);
         stats.MixBlockMaxMilliseconds = state.MixMax.exchange(0.0f, std::memory_order_relaxed);
         stats.BlockMilliseconds = 1000.0f * static_cast<float>(kBlock) / static_cast<float>(state.SampleRate);
+        stats.MaxRealVoices = state.MaxRealVoices;
         return stats;
+    }
+
+    void AudioEngine::SetMaxRealVoices(uint32_t count)
+    {
+        if (s_State)
+            s_State->MaxRealVoices = std::clamp<uint32_t>(count, 1, MaxVoices);
+    }
+
+    uint32_t AudioEngine::GetMaxRealVoices()
+    {
+        return s_State ? s_State->MaxRealVoices : 64;
     }
 }

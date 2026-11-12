@@ -328,6 +328,40 @@ namespace Nox
         return root && root.HasComponent<PrefabInstanceComponent>();
     }
 
+    // A 3D sound's spatial settings (Audio Source, Impact Sound): keys in the component's map.
+    static void EmitSpatialSettings(YAML::Emitter& out, const AudioSpatialSettings& spatial)
+    {
+        out << YAML::Key << "MinDistance" << YAML::Value << spatial.MinDistance;
+        out << YAML::Key << "MaxDistance" << YAML::Value << spatial.MaxDistance;
+        out << YAML::Key << "Attenuation" << YAML::Value << std::string(AudioAttenuationToString(spatial.Attenuation));
+        out << YAML::Key << "DopplerLevel" << YAML::Value << spatial.DopplerLevel;
+        out << YAML::Key << "Spatialization" << YAML::Value << std::string(AudioSpatializationToString(spatial.Spatialization));
+        out << YAML::Key << "AirAbsorption" << YAML::Value << spatial.AirAbsorption;
+        out << YAML::Key << "Occlusion" << YAML::Value << spatial.Occlusion;
+        out << YAML::Key << "SourceRadius" << YAML::Value << spatial.SourceRadius;
+        out << YAML::Key << "Reflections" << YAML::Value << spatial.Reflections;
+        out << YAML::Key << "Pathing" << YAML::Value << spatial.Pathing;
+    }
+
+    static void ReadSpatialSettings(const YAML::Node& node, AudioSpatialSettings& spatial)
+    {
+        if (node["MinDistance"])
+            spatial.MinDistance = node["MinDistance"].as<float>();
+        if (node["MaxDistance"])
+            spatial.MaxDistance = node["MaxDistance"].as<float>();
+        if (node["Attenuation"])
+            spatial.Attenuation = AudioAttenuationFromString(node["Attenuation"].as<std::string>());
+        if (node["DopplerLevel"])
+            spatial.DopplerLevel = node["DopplerLevel"].as<float>();
+        if (node["Spatialization"])
+            spatial.Spatialization = AudioSpatializationFromString(node["Spatialization"].as<std::string>());
+        spatial.AirAbsorption = node["AirAbsorption"].as<bool>(true);
+        spatial.Occlusion = node["Occlusion"].as<bool>(true);
+        spatial.SourceRadius = node["SourceRadius"].as<float>(0.5f);
+        spatial.Reflections = node["Reflections"].as<bool>(true);
+        spatial.Pathing = node["Pathing"].as<bool>(false);
+    }
+
     static void SerializeEntity(YAML::Emitter& out, Scene& scene, Entity entity, bool full = false)
     {
         NOX_CORE_ASSERT(entity.HasComponent<IDComponent>(), "Entity does not have an ID component!");
@@ -724,16 +758,7 @@ namespace Nox
             out << YAML::Key << "PlayOnStart" << YAML::Value << source.PlayOnStart;
             out << YAML::Key << "Bus" << YAML::Value << source.Bus;
             out << YAML::Key << "Spatial" << YAML::Value << source.Spatial;
-            out << YAML::Key << "MinDistance" << YAML::Value << source.Spatialization.MinDistance;
-            out << YAML::Key << "MaxDistance" << YAML::Value << source.Spatialization.MaxDistance;
-            out << YAML::Key << "Attenuation" << YAML::Value << std::string(AudioAttenuationToString(source.Spatialization.Attenuation));
-            out << YAML::Key << "DopplerLevel" << YAML::Value << source.Spatialization.DopplerLevel;
-            out << YAML::Key << "Spatialization" << YAML::Value << std::string(AudioSpatializationToString(source.Spatialization.Spatialization));
-            out << YAML::Key << "AirAbsorption" << YAML::Value << source.Spatialization.AirAbsorption;
-            out << YAML::Key << "Occlusion" << YAML::Value << source.Spatialization.Occlusion;
-            out << YAML::Key << "SourceRadius" << YAML::Value << source.Spatialization.SourceRadius;
-            out << YAML::Key << "Reflections" << YAML::Value << source.Spatialization.Reflections;
-            out << YAML::Key << "Pathing" << YAML::Value << source.Spatialization.Pathing;
+            EmitSpatialSettings(out, source.Spatialization);
             if (!source.GraphParameters.empty())
             {
                 out << YAML::Key << "GraphParameters" << YAML::Value << YAML::BeginSeq;
@@ -754,6 +779,22 @@ namespace Nox
         {
             out << YAML::Key << "AudioListenerComponent";
             out << YAML::BeginMap;
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<ImpactSoundComponent>())
+        {
+            const auto& impact = entity.GetComponent<ImpactSoundComponent>();
+            out << YAML::Key << "ImpactSoundComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Sound" << YAML::Value << impact.Sound;
+            out << YAML::Key << "Volume" << YAML::Value << impact.Volume;
+            out << YAML::Key << "MinSpeed" << YAML::Value << impact.MinSpeed;
+            out << YAML::Key << "MaxSpeed" << YAML::Value << impact.MaxSpeed;
+            out << YAML::Key << "PitchVariation" << YAML::Value << impact.PitchVariation;
+            out << YAML::Key << "Cooldown" << YAML::Value << impact.Cooldown;
+            out << YAML::Key << "Bus" << YAML::Value << impact.Bus;
+            EmitSpatialSettings(out, impact.Spatialization);
             out << YAML::EndMap;
         }
 
@@ -891,6 +932,11 @@ namespace Nox
             out << YAML::Key << "SoftParticles" << YAML::Value << emitter.SoftParticles;
             out << YAML::Key << "SoftDistance" << YAML::Value << emitter.SoftDistance;
             out << YAML::Key << "LocalSpace" << YAML::Value << emitter.LocalSpace;
+            if (emitter.BurstSound != 0)
+            {
+                out << YAML::Key << "BurstSound" << YAML::Value << emitter.BurstSound;
+                out << YAML::Key << "BurstSoundVolume" << YAML::Value << emitter.BurstSoundVolume;
+            }
             out << YAML::EndMap;
         }
 
@@ -2334,21 +2380,7 @@ namespace Nox
                 source.Bus = audioSource["Bus"].as<uint64_t>(kAudioBusSFX); // the mixer bus's id
             if (audioSource["Spatial"])
                 source.Spatial = audioSource["Spatial"].as<bool>();
-            if (audioSource["MinDistance"])
-                source.Spatialization.MinDistance = audioSource["MinDistance"].as<float>();
-            if (audioSource["MaxDistance"])
-                source.Spatialization.MaxDistance = audioSource["MaxDistance"].as<float>();
-            if (audioSource["Attenuation"])
-                source.Spatialization.Attenuation = AudioAttenuationFromString(audioSource["Attenuation"].as<std::string>());
-            if (audioSource["DopplerLevel"])
-                source.Spatialization.DopplerLevel = audioSource["DopplerLevel"].as<float>();
-            if (audioSource["Spatialization"])
-                source.Spatialization.Spatialization = AudioSpatializationFromString(audioSource["Spatialization"].as<std::string>());
-            source.Spatialization.AirAbsorption = audioSource["AirAbsorption"].as<bool>(true);
-            source.Spatialization.Occlusion = audioSource["Occlusion"].as<bool>(true);
-            source.Spatialization.SourceRadius = audioSource["SourceRadius"].as<float>(0.5f);
-            source.Spatialization.Reflections = audioSource["Reflections"].as<bool>(true);
-            source.Spatialization.Pathing = audioSource["Pathing"].as<bool>(false);
+            ReadSpatialSettings(audioSource, source.Spatialization);
             if (const YAML::Node parameters = audioSource["GraphParameters"])
             {
                 for (const auto& parameter : parameters)
@@ -2362,6 +2394,19 @@ namespace Nox
 
         if (entity["AudioListenerComponent"])
             deserializedEntity.AddComponent<AudioListenerComponent>();
+
+        if (const YAML::Node impactSound = entity["ImpactSoundComponent"])
+        {
+            auto& impact = deserializedEntity.AddComponent<ImpactSoundComponent>();
+            impact.Sound = impactSound["Sound"].as<AssetHandle>(impact.Sound);
+            impact.Volume = impactSound["Volume"].as<float>(impact.Volume);
+            impact.MinSpeed = impactSound["MinSpeed"].as<float>(impact.MinSpeed);
+            impact.MaxSpeed = impactSound["MaxSpeed"].as<float>(impact.MaxSpeed);
+            impact.PitchVariation = impactSound["PitchVariation"].as<float>(impact.PitchVariation);
+            impact.Cooldown = impactSound["Cooldown"].as<float>(impact.Cooldown);
+            impact.Bus = impactSound["Bus"].as<uint64_t>(impact.Bus);
+            ReadSpatialSettings(impactSound, impact.Spatialization);
+        }
 
         if (const YAML::Node audioVolume = entity["AudioVolumeComponent"])
         {
@@ -2503,6 +2548,8 @@ namespace Nox
             read("SoftParticles", emitter.SoftParticles);
             read("SoftDistance", emitter.SoftDistance);
             read("LocalSpace", emitter.LocalSpace);
+            read("BurstSound", emitter.BurstSound);
+            read("BurstSoundVolume", emitter.BurstSoundVolume);
         }
 
         auto animatorComponent = entity["AnimatorComponent"];

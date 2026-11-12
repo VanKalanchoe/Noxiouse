@@ -254,6 +254,8 @@ namespace Nox
         // A sound (a clip or an audio graph) played once (Audio.PlayOneShot): at a point (3D, the default Min / Max Distance) or as it is
         // (2D); played as soon as it is loaded. Stopped with the rest when Play ends.
         void PlayOneShot(AssetHandle sound, const glm::dvec3& position, float volume, bool spatial, uint64_t bus);
+        // The same with every voice setting (distance curve, pitch, ...): Impact Sound and particle sounds.
+        void PlayOneShot(AssetHandle sound, const AudioPlayDesc& desc);
         // An Audio Source's audio graph parameter (AudioSourceComponent.SetFloat / SetInt / SetBool): kept for its next Play this
         // session, and sent to its sound if it plays; a trigger parameter (Trigger) fires on the playing sound.
         void SetAudioSourceParameter(Entity entity, const std::string& name, const NodeGraphValue& value);
@@ -363,6 +365,9 @@ namespace Nox
         void StartAudio();
         void StopAudio();
         void UpdateAudio(const glm::dmat4& cameraWorld);
+        // Sounds from the frame's events: Impact Sounds from the contacts physics began, particle burst sounds.
+        void PlayEventSounds();
+        uint32_t m_EventSoundRandom = 0x2545F491u;
         void OnAudioSourceDestroyed(entt::registry& registry, entt::entity entity);
 
         const std::vector<glm::mat4>* GetBoneTransforms(entt::entity entity, const glm::dmat4& meshWorld);

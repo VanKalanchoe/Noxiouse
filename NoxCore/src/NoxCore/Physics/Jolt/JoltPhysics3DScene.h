@@ -1,6 +1,7 @@
 #pragma once
 
 #include "NoxCore/Physics/Physics3DScene.h"
+#include "NoxCore/Physics/Jolt/JoltContactEvents.h"
 #include "NoxCore/Physics/Jolt/JoltRollingResistance.h"
 #include "NoxCore/Physics/Jolt/NoxJoltJobSystem.h"
 
@@ -59,6 +60,8 @@ namespace Nox
         virtual void SetAngularVelocity(Entity entity, const glm::vec3& velocity) override;
         virtual glm::vec3 GetAngularVelocity(Entity entity) const override;
 
+        virtual void TakeContacts(std::vector<PhysicsContact3D>& out) override;
+
         JPH::PhysicsSystem& GetPhysicsSystem() { return *m_PhysicsSystem; }
         const JPH::PhysicsSystem& GetPhysicsSystem() const { return *m_PhysicsSystem; }
 
@@ -91,6 +94,8 @@ namespace Nox
         std::unique_ptr<NoxJoltJobSystem> m_JobSystem;
         // The physics system's contact listener: declared before it, so it outlives it.
         std::unique_ptr<JoltRollingResistance> m_RollingResistance;
+        std::unique_ptr<JoltContactEvents> m_ContactEvents; // the listener: rolling resistance behind it
+        std::vector<JoltContactEvents::Contact> m_TakenContacts;
         std::unique_ptr<JPH::PhysicsSystem> m_PhysicsSystem;
 
         struct JoltFilterData;
