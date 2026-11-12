@@ -178,20 +178,37 @@ namespace Nox
 
         for (GraphNode& node : graph.Nodes)
         {
+            if (node.TypeName == kRerouteNodeType)
+            {
+                DrawRerouteNode(graph, node);
+                continue;
+            }
             const NodeTypeDesc* type = TypeOf(graph, node);
             if (type)
                 DrawNode(graph, node, *type, onGraphEdited);
         }
 
+        // Wires in their type's color (Unreal's), so a wire through reroutes is followed by its color.
         for (const GraphLink& link : graph.Links)
         {
             ed::PinId from = MakePinId(link.FromNode, link.FromPin, true);
             ed::PinId to = MakePinId(link.ToNode, link.ToPin, false);
-            ed::Link(MakeLinkId(link.ToNode, link.ToPin), from, to);
+            ImVec4 color(1.0f, 1.0f, 1.0f, 1.0f);
+            if (const GraphNode* fromNode = FindNodeById(graph, link.FromNode))
+                if (const NodeTypeDesc* fromType = TypeOf(graph, *fromNode))
+                {
+                    const NodePinList pins = ResolveNodePins(*fromType, fromNode->Properties);
+                    if (link.FromPin < pins.Outputs.size() && !pins.Outputs[link.FromPin].Type.empty())
+                        color = PinColor(pins.Outputs[link.FromPin].Type);
+                }
+            ed::Link(MakeLinkId(link.ToNode, link.ToPin), from, to, color);
         }
 
         HandleLinkCreation(graph, onGraphEdited);
         HandleDeletion(graph, onGraphEdited);
+        // Double-click on a wire: a reroute node there (put in once suspended, at the mouse in canvas space).
+        if (const ed::LinkId clickedLink = ed::GetDoubleClickedLink())
+            m_DoubleClickedLink = clickedLink.Get();
 
         // Double-clicking a node that owns sub graphs (a state machine) asks the panel to open its state view.
         if (outOpenNode)
@@ -215,6 +232,12 @@ namespace Nox
         // Context menus escape the canvas' pan/zoom transform, so they're raised and drawn while suspended --
         // the canonical imgui-node-editor pattern (its own blueprints-example does the same).
         ed::Suspend();
+
+        if (m_DoubleClickedLink != 0)
+        {
+            InsertReroute(graph, m_DoubleClickedLink, ImGui::GetMousePos(), onGraphEdited);
+            m_DoubleClickedLink = 0;
+        }
 
         ed::NodeId contextNodeId;
         if (ed::ShowNodeContextMenu(&contextNodeId))
@@ -679,16 +702,45 @@ namespace Nox
                     const NodeTypeDesc* toType = toGraphNode ? TypeOf(graph, *toGraphNode) : nullptr;
 
                     bool valid = false;
+                    GraphNode* retype = nullptr; // an untyped (or unconnected) reroute takes the other end's type
+                    std::string retypeTo;
                     if (fromType && toType)
                     {
                         const NodePinList fromPins = ResolveNodePins(*fromType, fromGraphNode->Properties);
                         const NodePinList toPins = ResolveNodePins(*toType, toGraphNode->Properties);
-                        valid = fromPin < (uint32_t)fromPins.Outputs.size() && toPin < (uint32_t)toPins.Inputs.size() &&
-                                fromPins.Outputs[fromPin].Type == toPins.Inputs[toPin].Type;
+                        if (fromPin < (uint32_t)fromPins.Outputs.size() && toPin < (uint32_t)toPins.Inputs.size())
+                        {
+                            const std::string& a = fromPins.Outputs[fromPin].Type;
+                            const std::string& b = toPins.Inputs[toPin].Type;
+                            auto retypable = [&](const GraphNode& node, const std::string& type)
+                            {
+                                if (node.TypeName != kRerouteNodeType)
+                                    return false;
+                                const bool linked = std::any_of(graph.Links.begin(), graph.Links.end(),
+                                    [&](const GraphLink& l) { return l.FromNode == node.Id || l.ToNode == node.Id; });
+                                return type.empty() || !linked;
+                            };
+                            if (!a.empty() && a == b)
+                                valid = true;
+                            else if (!a.empty() && retypable(*toGraphNode, b))
+                            {
+                                retype = toGraphNode;
+                                retypeTo = a;
+                                valid = true;
+                            }
+                            else if (!b.empty() && retypable(*fromGraphNode, a))
+                            {
+                                retype = fromGraphNode;
+                                retypeTo = b;
+                                valid = true;
+                            }
+                        }
                     }
 
                     if (valid && ed::AcceptNewItem())
                     {
+                        if (retype)
+                            retype->Properties[kRerouteTypeProperty] = retypeTo;
                         // An input pin takes one link; a new one into it replaces whatever was there.
                         graph.Links.erase(std::remove_if(graph.Links.begin(), graph.Links.end(),
                             [&](const GraphLink& l) { return l.ToNode == toNode && l.ToPin == toPin; }), graph.Links.end());
@@ -745,6 +797,80 @@ namespace Nox
             }
         }
         ed::EndDelete();
+    }
+
+    void ThedmdCanvasBackend::DrawRerouteNode(NodeGraph& graph, GraphNode& node)
+    {
+        const ed::NodeId nodeId(node.Id);
+        if (m_SeededPositions.insert(node.Id).second)
+            ed::SetNodePosition(nodeId, ImVec2(node.EditorPosition.x, node.EditorPosition.y));
+        const auto found = node.Properties.find(kRerouteTypeProperty);
+        const std::string* typeName = found != node.Properties.end() ? std::get_if<std::string>(&found->second) : nullptr;
+        const std::string pinType = typeName ? *typeName : std::string();
+        const ImVec4 color = pinType.empty() ? ImVec4(0.7f, 0.7f, 0.7f, 1.0f) : PinColor(pinType);
+        const bool inLinked = std::any_of(graph.Links.begin(), graph.Links.end(), [&](const GraphLink& l) { return l.ToNode == node.Id; });
+        const bool outLinked = std::any_of(graph.Links.begin(), graph.Links.end(), [&](const GraphLink& l) { return l.FromNode == node.Id; });
+
+        // A compact node (no header, no properties): the two pins side by side, the wires meeting at its middle.
+        ed::PushStyleVar(ed::StyleVar_NodePadding, ImVec4(3.0f, 3.0f, 3.0f, 3.0f));
+        ed::PushStyleVar(ed::StyleVar_NodeRounding, 8.0f);
+        ed::BeginNode(nodeId);
+        ImGui::PushID(static_cast<int>(node.Id));
+        constexpr ImVec2 kKnot(10.0f, 12.0f);
+        ed::BeginPin(MakePinId(node.Id, 0, false), ed::PinKind::Input);
+        ed::PinPivotAlignment(ImVec2(1.0f, 0.5f));
+        DrawPinIcon(kKnot, PinShapeOf(pinType), inLinked, color);
+        ed::EndPin();
+        ImGui::SameLine(0.0f, 0.0f);
+        ed::BeginPin(MakePinId(node.Id, 0, true), ed::PinKind::Output);
+        ed::PinPivotAlignment(ImVec2(0.0f, 0.5f));
+        DrawPinIcon(kKnot, PinShapeOf(pinType), outLinked, color);
+        ed::EndPin();
+        ImGui::PopID();
+        ed::EndNode();
+        ed::PopStyleVar(2);
+        const ImVec2 position = ed::GetNodePosition(nodeId); // (saved with the graph, as every node's)
+        node.EditorPosition = { position.x, position.y };
+        if (ed::GetHoveredNode() == nodeId)
+        {
+            ed::Suspend();
+            ImGui::SetTooltip(pinType.empty() ? "Reroute (connect a wire: it takes that wire's type)" : "Reroute (%s)", pinType.c_str());
+            ed::Resume();
+        }
+    }
+
+    void ThedmdCanvasBackend::InsertReroute(NodeGraph& graph, uint64_t linkId, const ImVec2& screenPos, const std::function<void()>& onGraphEdited)
+    {
+        uint32_t toNode = 0, toPin = 0;
+        bool isOutput = false;
+        DecodePinId(ed::PinId(linkId), toNode, toPin, isOutput);
+        const auto linkIt = std::find_if(graph.Links.begin(), graph.Links.end(), [&](const GraphLink& l) { return l.ToNode == toNode && l.ToPin == toPin; });
+        if (linkIt == graph.Links.end())
+            return;
+        const GraphLink link = *linkIt;
+        // The wire's type: what its output end carries.
+        std::string pinType;
+        if (const GraphNode* fromNode = FindNodeById(graph, link.FromNode))
+            if (const NodeTypeDesc* fromType = TypeOf(graph, *fromNode))
+            {
+                const NodePinList pins = ResolveNodePins(*fromType, fromNode->Properties);
+                if (link.FromPin < pins.Outputs.size())
+                    pinType = pins.Outputs[link.FromPin].Type;
+            }
+        GraphNode reroute;
+        reroute.Id = graph.NextNodeId++;
+        reroute.TypeName = kRerouteNodeType;
+        reroute.Properties[kRerouteTypeProperty] = pinType;
+        const ImVec2 canvas = ed::ScreenToCanvas(screenPos);
+        const ImVec2 position(canvas.x - 13.0f, canvas.y - 9.0f); // (centred on the click)
+        reroute.EditorPosition = { position.x, position.y };
+        graph.Nodes.push_back(reroute);
+        m_SeededPositions.insert(reroute.Id);
+        ed::SetNodePosition(ed::NodeId(reroute.Id), position);
+        graph.Links.erase(linkIt);
+        graph.Links.push_back({ link.FromNode, link.FromPin, reroute.Id, 0 });
+        graph.Links.push_back({ reroute.Id, 0, link.ToNode, link.ToPin });
+        onGraphEdited();
     }
 
     void ThedmdCanvasBackend::CreateNode(NodeGraph& graph, const NodeTypeDesc& type, const std::string* parameterName,

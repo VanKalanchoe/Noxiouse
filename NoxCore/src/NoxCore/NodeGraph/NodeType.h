@@ -113,6 +113,14 @@ namespace Nox
         return pins;
     }
 
+    // Unreal's reroute node (a knot): a bend point in a wire, one input and one output of the wire's type ("Type", a string property:
+    // set from the wire it is put on, or the first wire connected to an untyped one). Only the editor sees it: the compiler takes
+    // every reroute out (what feeds it feeds what it fed) before compiling, so no domain runs one.
+    inline constexpr const char* kRerouteNodeType = "Reroute";
+    inline constexpr const char* kRerouteTypeProperty = "Type";
+    // Registers the Reroute node type in `domain` (each graph domain calls it with its node types).
+    void RegisterRerouteNodeType(const std::string& domain);
+
     // Process-wide registry of node types, shared by every domain. Domain-agnostic: it only stores and looks up
     // NodeTypeDesc by (Domain, TypeName) -- this is what makes the graph core reusable for a future domain
     // (e.g. an audio graph) without touching anything under NodeGraph/.

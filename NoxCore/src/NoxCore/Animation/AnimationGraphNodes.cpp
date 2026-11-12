@@ -736,6 +736,7 @@ namespace Nox
 
     void RegisterAnimationGraphNodeTypes()
     {
+        RegisterRerouteNodeType(kAnimationGraphDomain); // (wire bend points: taken out before compiling)
         NodeTypeRegistry::Register({
             /* TypeName          */ "Clip",
             /* Domain            */ kAnimationGraphDomain,

@@ -55,6 +55,10 @@ namespace Nox
         void DrawBonePickerButton(uint32_t nodeId, const std::string& propertyName, const std::string& current);
         void DrawPendingBonePicker(NodeGraph& graph, const std::function<void()>& onGraphEdited);
         void HandleLinkCreation(NodeGraph& graph, const std::function<void()>& onGraphEdited);
+        // Unreal's reroute node: a small dot with an input and an output of its wire's type. Double-clicking a wire puts one there.
+        void DrawRerouteNode(NodeGraph& graph, GraphNode& node);
+        void InsertReroute(NodeGraph& graph, uint64_t linkId, const ImVec2& screenPos, const std::function<void()>& onGraphEdited);
+        uint64_t m_DoubleClickedLink = 0;
         void HandleDeletion(NodeGraph& graph, const std::function<void()>& onGraphEdited);
         void ShowCreateNodeMenu(NodeGraph& graph, const std::vector<GraphParameter>& parameters, const std::function<void()>& onGraphEdited);
         // Adds a node of `type` (seeded with its default properties) at a screen position, optionally pointing

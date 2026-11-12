@@ -1424,6 +1424,7 @@ window.NOX_MANUAL_PAGES = [
             "",
             "1. Content Browser > **+ Add > Audio Graph**, name it, **Create**. It opens with its Output node.",
             "2. Right-click the canvas to add nodes (type to search). Drag from a pin to a pin to connect.",
+            "   **Reroute nodes** (Unreal's knots, in every node graph -- audio and animation): **double-click a wire** to put a small dot on it, then drag the dot to bend the wire around other nodes; several wires can leave one dot. Right-click > **Routing > Reroute** makes a loose one that takes the type of the first wire you connect. Wires are drawn in their type's color. Reroutes are only for tidiness: they are taken out when the graph compiles (no cost when it plays).",
             "3. In the graph window's **Preview** section press **Play**. You hear it while you edit:",
             "   - changing a number on a node changes the playing sound;",
             "   - adding or connecting nodes restarts it with the new graph;",

@@ -1,5 +1,6 @@
 #include "GraphCompiler.h"
 
+#include <algorithm>
 #include <functional>
 #include <queue>
 #include <unordered_map>
@@ -19,8 +20,54 @@ namespace Nox
         };
     }
 
+    namespace
+    {
+        // The graph without its reroute nodes: a link out of a reroute starts where the chain of reroutes before it is fed from (or
+        // goes, when nothing feeds it: the input it reached is unconnected, its literal counts); links into reroutes go.
+        NodeGraph WithoutReroutes(const NodeGraph& graph)
+        {
+            std::unordered_map<uint32_t, const GraphLink*> feed; // reroute id -> the link into it
+            std::unordered_set<uint32_t> reroutes;
+            for (const GraphNode& node : graph.Nodes)
+                if (node.TypeName == kRerouteNodeType)
+                    reroutes.insert(node.Id);
+            for (const GraphLink& link : graph.Links)
+                if (reroutes.contains(link.ToNode))
+                    feed[link.ToNode] = &link;
+            NodeGraph flat = graph;
+            flat.Nodes.clear();
+            flat.Links.clear();
+            for (const GraphNode& node : graph.Nodes)
+                if (!reroutes.contains(node.Id))
+                    flat.Nodes.push_back(node);
+            for (const GraphLink& link : graph.Links)
+            {
+                if (reroutes.contains(link.ToNode))
+                    continue;
+                GraphLink resolved = link;
+                bool fed = true;
+                for (size_t guard = 0; reroutes.contains(resolved.FromNode) && guard <= reroutes.size(); ++guard)
+                {
+                    const auto source = feed.find(resolved.FromNode);
+                    if (source == feed.end())
+                    {
+                        fed = false;
+                        break;
+                    }
+                    resolved.FromNode = source->second->FromNode;
+                    resolved.FromPin = source->second->FromPin;
+                }
+                if (fed && !reroutes.contains(resolved.FromNode))
+                    flat.Links.push_back(resolved);
+            }
+            return flat;
+        }
+    }
+
     CompiledGraph GraphCompiler::Compile(const NodeGraph& graph)
     {
+        if (std::any_of(graph.Nodes.begin(), graph.Nodes.end(), [](const GraphNode& node) { return node.TypeName == kRerouteNodeType; }))
+            return Compile(WithoutReroutes(graph));
         CompiledGraph result;
 
         if (graph.Nodes.empty())

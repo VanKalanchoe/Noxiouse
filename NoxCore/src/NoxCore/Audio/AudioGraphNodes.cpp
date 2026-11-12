@@ -1875,6 +1875,7 @@ namespace Nox
 
     void RegisterAudioGraphNodeTypes()
     {
+        RegisterRerouteNodeType(kAudioGraphDomain); // (wire bend points: taken out before compiling)
         const std::vector<NodePinDesc> stereoOut = { { "Out Left", "Audio" }, { "Out Right", "Audio" } };
         const std::vector<NodePinDesc> monoOut = { { "Out", "Audio" } };
         const std::vector<NodePinDesc> valueOut = { { "Value", "Float" } };
