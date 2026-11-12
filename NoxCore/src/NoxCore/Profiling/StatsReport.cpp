@@ -209,7 +209,7 @@ namespace Nox
                 else
                     AppendSetting(out, "Ambient occlusion: off");
                 if (renderer.getSSREnabled())
-                    AppendSetting(out, "Screen-space reflections: ON{} | {:.0f} m | {} steps | roughness < {:.2f}",
+                    AppendSetting(out, "Screen-space reflections: ON{} | {:.0f} m | {} iterations (Hi-Z) | roughness < {:.2f}",
                                   renderer.getRayTracingEnabled() && renderer.getRayTracingReflections() ? " (RT reflections take precedence)" : "",
                                   WorldUnits::ToMeters(renderer.getSSRMaxDistance()), renderer.getSSRMaxSteps(), renderer.getSSRMaxRoughness());
                 if (renderer.getSSGIEnabled())

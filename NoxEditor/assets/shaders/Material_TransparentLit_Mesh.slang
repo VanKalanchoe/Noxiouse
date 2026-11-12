@@ -816,7 +816,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     // frame, its blur mips for the roughness), over the environment / probes / volume above where it finds something on screen. The
     // glass showed only those (the sky, indoors) where the opaque surfaces around it reflected the room.
     if (tracedReflectionWeight < 1.0 && ubo->transparentSSRDepthTextureIndex != 0xFFFFFFFF && pushConstant.refractionTextureIndex != 0xFFFFFFFF &&
-        ubo->transparentSSRNormalTextureIndex != 0xFFFFFFFF && perceptualRoughness < ubo->ssrMaxRoughness && ubo->brdfLutIndex != 0xFFFFFFFF)
+        ubo->transparentSSRNormalTextureIndex != 0xFFFFFFFF && ubo->transparentSSRHiZTextureIndex != 0xFFFFFFFF && perceptualRoughness < ubo->ssrMaxRoughness && ubo->brdfLutIndex != 0xFFFFFFFF)
     {
         Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->transparentSSRDepthTextureIndex, 0));
         uint depthWidth, depthHeight;
@@ -824,14 +824,12 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         const float2 viewportSize = float2(float(depthWidth), float(depthHeight));
         const float3 reflected = normalize(reflect(-v, n));
         const float3 start = vertIn.worldPos + n * raster_surface_bias(ubo, vertIn.worldPos, 0.01 * ubo->unitsPerMeter);
-        const int2 pixel = int2(vertIn.pos.xy);
-        // The steps' offset fixed per pixel (SSR.slang's): a still camera gives the same reflection every frame.
-        const float noise = frac(52.9829189 * frac(0.06711056 * float(pixel.x) + 0.00583715 * float(pixel.y)));
+        Texture2D<float> hizTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->transparentSSRHiZTextureIndex, 0));
         float2 hitUV;
         float hitDepth;
-        float facingFade;
-        if (ssr_march(ubo, depthTex, start, reflected, ubo->ssrMaxDistance, ubo->ssrThickness, ubo->ssrMaxSteps, viewportSize, noise, hitUV,
-                      hitDepth, facingFade))
+        float rayConfidence;
+        if (ssr_march(ubo, depthTex, hizTex, ubo->transparentSSRHiZLevels, start, reflected, ubo->ssrMaxDistance, ubo->ssrThickness,
+                      ubo->ssrMaxSteps, viewportSize, hitUV, hitDepth, rayConfidence))
         {
             const int2 hitPixel = int2(hitUV * viewportSize);
             Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->transparentSSRNormalTextureIndex, 0));
@@ -857,7 +855,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
 
                 const float roughnessFade = saturate((ubo->ssrMaxRoughness - perceptualRoughness) / 0.15);
                 const float distanceFade = 1.0 - smoothstep(0.8, 1.0, hitDistance / max(ubo->ssrMaxDistance, 1e-4));
-                const float confidence = facingFade * roughnessFade * distanceFade * ssr_edge_fade(hitUV) * (1.0 - tracedReflectionWeight);
+                const float confidence = rayConfidence * roughnessFade * distanceFade * ssr_edge_fade(hitUV) * (1.0 - tracedReflectionWeight);
                 Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
                 const float2 brdf = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)), float2(NdotV, 1.0 - perceptualRoughness), 0).rg;
                 ambientSpecular = lerp(ambientSpecular, radiance * (specularColor * brdf.x + specularEnvironmentR90 * brdf.y), confidence);

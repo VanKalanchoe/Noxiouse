@@ -769,6 +769,8 @@ struct UniformBufferObject
     // transparentSSRDepthTextureIndex 0xFFFFFFFF: none this frame (RT reflections run, SSR off, no refraction source).
     uint32_t transparentSSRDepthTextureIndex;
     uint32_t transparentSSRNormalTextureIndex;
+    uint32_t transparentSSRHiZTextureIndex; // the closest-depth pyramid of that depth (HiZBuild.slang keepClosest)
+    uint32_t transparentSSRHiZLevels;
     uint32_t ssrMaxSteps;
     float ssrMaxDistance;   // world units
     float ssrThickness;     // world units
@@ -1761,6 +1763,8 @@ struct PushConstantHiZBuild
     uint32_t height;
     uint32_t sourceMip;
     uint32_t sourceIsDepth; // 1: level 0 from the depth buffer
+    uint32_t keepClosest;   // 0: the farthest depth of the texels covered (occlusion culling), 1: the closest (SSR's Hi-Z tracing)
+    uint32_t padding;
 };
 
 STATIC_CONST uint32_t MESHLET_CULL_FRUSTUM = 1;     // PushConstantMeshlets.meshletCulling
@@ -2556,7 +2560,8 @@ struct PushConstantSSR
     float thickness;    // world units: how far behind a surface the ray may be and still hit it
     float maxRoughness; // rougher surfaces keep the environment / probes
     uint32_t frameIndex;
-    uint32_t padding[2];
+    uint32_t hizTextureIndex; // the closest-depth pyramid (HiZBuild.slang keepClosest): Hi-Z levels 1.. (level 0: the depth)
+    uint32_t hizLevels;       // its mips
 };
 
 // SSR's roughness filter (SSR.slang filterMain; Godot's SSR filter): the trace blurred on its own surface by roughness, this frame

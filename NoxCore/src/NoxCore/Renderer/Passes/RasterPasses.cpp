@@ -1484,6 +1484,7 @@ namespace Nox
                     {
                         builder.Read(resources.TransparentReflectionDepth);
                         builder.Read(resources.GBufferNormal);
+                        builder.Read(resources.TransparentReflectionHiZ);
                     }
                 },
                 [this, res = &resources, refraction](RGPassContext& context)
@@ -1531,6 +1532,7 @@ namespace Nox
                 {
                     builder.Read(resources.TransparentReflectionDepth);
                     builder.Read(resources.GBufferNormal);
+                    builder.Read(resources.TransparentReflectionHiZ);
                 }
             },
             [this, res = &resources](RGPassContext& context)
@@ -1618,7 +1620,7 @@ namespace Nox
         if (!m_ssrEnabled || m_frame.rtReflectionsAdded || m_frame.renderExtent.width == 0 || m_frame.renderExtent.height == 0)
             return;
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        if (!resources.RefractionSource.IsValid() || !resources.GBufferNormal.IsValid())
+        if (!resources.RefractionSource.IsValid() || !resources.GBufferNormal.IsValid() || !m_hiZBuildPipeline)
             return;
         // The depth the transparent passes test against is their depth target: they cannot sample it while it is bound. A copy (as
         // the previous-frame snapshot's), made once the opaque surfaces are all in it.
@@ -1636,6 +1638,9 @@ namespace Nox
                 context.Cmd().copyTexture(context.Texture(res->Depth), context.Texture(res->TransparentReflectionDepth), m_frame.renderExtent.width,
                                           m_frame.renderExtent.height);
             });
+        uint32_t hizLevels = 0;
+        resources.TransparentReflectionHiZ = addSSRHiZPass(resources.TransparentReflectionDepth, "Transparent Reflection Hi-Z", hizLevels);
+        uniformData.transparentSSRHiZLevels = hizLevels;
         uniformData.ssrMaxSteps = m_ssrMaxSteps;
         uniformData.ssrMaxDistance = WorldUnits::FromMeters(m_ssrMaxDistanceMeters);
         uniformData.ssrThickness = WorldUnits::FromMeters(m_ssrThicknessMeters);

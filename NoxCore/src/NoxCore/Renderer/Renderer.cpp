@@ -5465,6 +5465,8 @@ namespace Nox
         const bool transparentSSR = resources.TransparentReflectionDepth.IsValid();
         uniformData.transparentSSRDepthTextureIndex = transparentSSR ? graph.GetSlotOr(resources.TransparentReflectionDepth, NoTexture) : NoTexture;
         uniformData.transparentSSRNormalTextureIndex = transparentSSR ? graph.GetSlotOr(resources.GBufferNormal, NoTexture) : NoTexture;
+        uniformData.transparentSSRHiZTextureIndex = transparentSSR && resources.TransparentReflectionHiZ.IsValid()
+                                                        ? graph.GetSlotOr(resources.TransparentReflectionHiZ, NoTexture) : NoTexture;
         // AVBOIT's prepasses test each fragment against the scene depth (they draw at the volume's resolution, without it attached).
         uniformData.avboitDepthTextureIndex = frame.avboitAdded ? graph.GetSlotOr(resources.Depth, NoTexture) : NoTexture;
         if (!frame.avboitAdded)

@@ -64,7 +64,7 @@ namespace Nox
             m_ssrHistoryValid = false;
 
         // Nothing to reflect yet (the first frame, a new size), or the RT reflections run: only the history is written this frame.
-        if (!m_ssrHistoryValid || m_frame.rtReflectionsAdded || !m_ssrEnabled || !m_ssrFilterPipeline)
+        if (!m_ssrHistoryValid || m_frame.rtReflectionsAdded || !m_ssrEnabled || !m_ssrFilterPipeline || !m_hiZBuildPipeline)
             return;
 
         RGTextureDesc ssrDesc;
@@ -73,17 +73,20 @@ namespace Nox
         resources.SSR = m_renderGraph.CreateTexture("SSR", ssrDesc);
         m_frame.ssrAdded = true;
         const RGTexture historyRead = resources.SSRHistory[m_ssrHistoryIndex];
+        uint32_t hizLevels = 0;
+        const RGTexture hiZ = addSSRHiZPass(resources.Depth, "SSR Hi-Z", hizLevels);
         m_renderGraph.AddPass("SSR", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.Depth);
+                builder.Read(hiZ);
                 builder.Read(resources.GBufferNormal);
                 builder.Read(resources.GBufferMaterial);
                 builder.Read(historyRead);
                 builder.ColorTarget(rawSSR, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
-            [this, res = &resources, historyRead, mips = historyDesc.MipLevels](RGPassContext& context)
+            [this, res = &resources, historyRead, hiZ, hizLevels, mips = historyDesc.MipLevels](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ssrPipeline);
@@ -107,6 +110,8 @@ namespace Nox
                 push.thickness = WorldUnits::FromMeters(m_ssrThicknessMeters);
                 push.maxRoughness = m_ssrMaxRoughness;
                 push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                push.hizTextureIndex = context.Slot(hiZ);
+                push.hizLevels = hizLevels;
                 cmd.pushData(&push, sizeof(push));
                 cmd.drawMeshTasks(1, 1, 1);
             });
@@ -139,6 +144,54 @@ namespace Nox
                 cmd.pushData(&push, sizeof(push));
                 cmd.drawMeshTasks(1, 1, 1);
             });
+    }
+
+    RGTexture Renderer::addSSRHiZPass(RGTexture depth, const char* name, uint32_t& mipLevels)
+    {
+        RGTextureDesc desc;
+        desc.Size = RGSize::Absolute;
+        desc.Width = std::max(m_frame.renderExtent.width / 2, 1u);
+        desc.Height = std::max(m_frame.renderExtent.height / 2, 1u);
+        desc.Format = NRI::ImageFormat::R32_SFLOAT;
+        desc.Usage = NRI::TextureUsage::Storage;
+        desc.MipLevels = 1;
+        for (uint32_t size = std::max(desc.Width, desc.Height); size > 1; size >>= 1)
+            ++desc.MipLevels;
+        mipLevels = desc.MipLevels;
+        const RGTexture pyramid = m_renderGraph.CreateTexture(name, desc);
+        m_renderGraph.AddPass(name, RGPassFlags::None,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(depth);
+                builder.Write(pyramid, RGTextureAccess::StorageWrite);
+            },
+            [this, depth, pyramid, desc](RGPassContext& context)
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_hiZBuildPipeline);
+                // Mip 0 reduces the depth buffer, every next mip the one before it (as the culling pyramid, addHiZBuildPass).
+                for (uint32_t mip = 0; mip < desc.MipLevels; ++mip)
+                {
+                    if (mip > 0)
+                    {
+                        const NRI::TextureBarrierDesc barrier{ &context.Texture(pyramid),
+                                                               { NRI::AccessBits::ShaderWrite, NRI::StageBits::Compute },
+                                                               { NRI::AccessBits::ShaderRead, NRI::StageBits::Compute } };
+                        cmd.resourceBarriers(std::span<const NRI::TextureBarrierDesc>(&barrier, 1), {});
+                    }
+                    shaderio::PushConstantHiZBuild push{};
+                    push.sourceTextureIndex = mip == 0 ? context.Slot(depth) : context.Slot(pyramid);
+                    push.outputStorageIndex = context.StorageSlot(pyramid, mip);
+                    push.width = std::max(desc.Width >> mip, 1u);
+                    push.height = std::max(desc.Height >> mip, 1u);
+                    push.sourceMip = mip == 0 ? 0 : mip - 1;
+                    push.sourceIsDepth = mip == 0 ? 1 : 0;
+                    push.keepClosest = 1;
+                    cmd.pushData(&push, sizeof(push));
+                    cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
+                }
+            });
+        return pyramid;
     }
 
     void Renderer::addSSGIPasses()

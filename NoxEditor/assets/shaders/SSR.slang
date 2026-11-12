@@ -117,18 +117,17 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant)
 
     // The ray: the mirror direction, the same every frame (Godot's SSR): roughness is the blur of what it finds (the cone's mip of the
     // lit scene, below), not random directions. A sampled lobe (stochastic SSR, UE4 / Frostbite / FidelityFX) needs a heavy denoiser
-    // and still showed as grain; this has no noise to remove. The steps' offset is fixed per pixel: a still camera gives the same
-    // reflection every frame.
-    const float noise = frac(52.9829189 * frac(0.06711056 * float(pixelCoord.x) + 0.00583715 * float(pixelCoord.y)));
+    // and still showed as grain; this has no noise to remove.
     const float3 R = reflect(-V, N);
 
-    // The march through this frame's depth (SSRCommon.slang).
+    // The Hi-Z trace through this frame's depth (SSRCommon.slang).
     const float3 start = worldPos + N * raster_surface_bias(ubo, worldPos, 0.01 * ubo->unitsPerMeter);
+    Texture2D<float> hizTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.hizTextureIndex, 0));
     float2 hitUV;
     float hitDepth;
-    float facingFade;
-    if (!ssr_march(ubo, depthTex, start, R, pushConstant.maxDistance, pushConstant.thickness, pushConstant.maxSteps, viewportSize, noise,
-                   hitUV, hitDepth, facingFade))
+    float rayConfidence;
+    if (!ssr_march(ubo, depthTex, hizTex, pushConstant.hizLevels, start, R, pushConstant.maxDistance, pushConstant.thickness,
+                   pushConstant.maxSteps, viewportSize, hitUV, hitDepth, rayConfidence))
         return float4(0.0);
     const int2 hitPixel = int2(hitUV * viewportSize);
     const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
@@ -161,7 +160,7 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant)
 
     const float roughnessFade = saturate((pushConstant.maxRoughness - roughness) / 0.15);
     const float distanceFade = 1.0 - smoothstep(0.8, 1.0, hitDistance / max(pushConstant.maxDistance, 1e-4));
-    const float confidence = facingFade * roughnessFade * distanceFade * ssr_edge_fade(hitUV) * ssr_edge_fade(previousUV);
+    const float confidence = rayConfidence * roughnessFade * distanceFade * ssr_edge_fade(hitUV) * ssr_edge_fade(previousUV);
     return float4(max(radiance, float3(0.0)), confidence);
 }
 

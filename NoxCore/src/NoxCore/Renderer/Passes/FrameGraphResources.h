@@ -49,6 +49,7 @@ namespace Nox
         RGTexture HDRScene;
         RGTexture RefractionSource; // the lit scene behind transparent surfaces with blur mips (addForward3DPass, glass in view)
         RGTexture TransparentReflectionDepth; // this frame's opaque depth, readable while the transparent passes draw (their SSR)
+        RGTexture TransparentReflectionHiZ;   // ...and its closest-depth pyramid (SSR's Hi-Z tracing)
         RGTexture OITAccum;  // order-independent transparency: weighted premultiplied color and alpha (Renderer::setOITEnabled)
         RGTexture OITReveal; // ...and the product of (1 - alpha), how much of the scene behind still shows
         RGTexture AutoExposure;

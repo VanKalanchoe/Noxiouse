@@ -1251,6 +1251,9 @@ namespace Nox
         void createSSRPipeline(bool forceCompile = false);
         void addSSRPass();
         void addSSRHistoryPass();
+        // SSR's Hi-Z: the closest depth of every 2 x 2, 4 x 4 ... block of `depth` (HiZBuild.slang keepClosest), half its size at mip 0
+        // (level 0 of the trace is the depth itself). Returns the pyramid; `mipLevels` its mips.
+        RGTexture addSSRHiZPass(RGTexture depth, const char* name, uint32_t& mipLevels);
         void addSSGIPasses();
         void createVolumetricFogPipelines(bool forceCompile = false);
         void addVolumetricFogPass();
@@ -1744,7 +1747,7 @@ namespace Nox
         bool m_ssrEnabled = true; // SSR where the RT reflections do not run
         float m_ssrMaxDistanceMeters = 50.0f;
         float m_ssrThicknessMeters = 0.3f;
-        uint32_t m_ssrMaxSteps = 64;
+        uint32_t m_ssrMaxSteps = 128; // Hi-Z iterations (AMD FidelityFX SSSR's default)
         // SSR for the glossy surfaces (floors, glass, metal, wet): rougher ones keep the reflection probes. On rough cloth and plaster
         // the lobe's rays scatter wide (grain) and what they find is mostly near the screen's edges (a visible hand-over); UE's SSR
         // likewise leaves rough materials to the reflection captures.

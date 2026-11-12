@@ -1911,8 +1911,10 @@ namespace Nox
                 ImGui::SetItemTooltip("How far behind a surface on screen the ray may pass and still count as hitting it.");
                 int steps = static_cast<int>(m_Renderer->getSSRMaxSteps());
                 ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderInt("Max Steps##SSR", &steps, 8, 256))
+                if (ImGui::SliderInt("Max Iterations##SSR", &steps, 8, 256))
                     m_Renderer->setSSRMaxSteps(static_cast<uint32_t>(steps));
+                ImGui::SetItemTooltip("Steps of the Hi-Z trace (tile edge to tile edge of the depth pyramid, coarser over empty space):\n"
+                                      "a ray that has not found its surface by then gets none. 128 reaches across the screen.");
                 float maxRoughness = m_Renderer->getSSRMaxRoughness();
                 ImGui::SetNextItemWidth(160.0f);
                 if (ImGui::SliderFloat("Max Roughness##SSR", &maxRoughness, 0.05f, 1.0f, "%.2f"))
