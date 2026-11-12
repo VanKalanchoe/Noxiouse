@@ -17,7 +17,6 @@
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_keyboard.h>
-#include <SDL3/SDL_process.h>
 #include <SDL3/SDL_video.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
@@ -47,6 +46,7 @@
 #include "GamePackager.h"
 #include "ProjectManager/ProjectLibrary.h"
 #include "ProjectManager/ProjectManagerLayer.h"
+#include "ProjectManager/ProcessLauncher.h"
 
 namespace Nox
 {
@@ -118,8 +118,9 @@ namespace Nox
         }
     }
 
-    EditorLayer::EditorLayer(std::filesystem::path projectFile) : Layer("EditorLayer")
+    EditorLayer::EditorLayer(std::filesystem::path projectFile, bool createBasicScene) : Layer("EditorLayer")
     {
+        m_CreateBasicScene = createBasicScene;
         NOX_INFO("EditorLayer Start");
 
         auto& app = Application::Get();
@@ -860,6 +861,38 @@ namespace Nox
             ImGui::Separator();
         }
 #endif
+
+        // The scene the project opens with and a packaged game starts in (Unreal's Editor Startup Map / Game Default Map). A project
+        // without one takes the first scene saved.
+        {
+            ProjectConfig& config = Project::GetActive()->GetConfig();
+            const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
+            std::string current = "(none: an empty scene)";
+            if (config.StartScene != 0)
+            {
+                const auto found = registry.find(config.StartScene);
+                current = found != registry.end() ? found->second.FilePath.generic_string() : std::string("(missing scene)");
+            }
+            ImGui::SetNextItemWidth(260.0f);
+            if (ImGui::BeginCombo("Start Scene", current.c_str()))
+            {
+                std::vector<std::pair<std::string, AssetHandle>> scenes;
+                for (const auto& [handle, metadata] : registry)
+                    if (metadata.Type == AssetType::Scene)
+                        scenes.emplace_back(metadata.FilePath.generic_string(), handle);
+                std::sort(scenes.begin(), scenes.end());
+                if (scenes.empty())
+                    ImGui::TextDisabled("No scenes yet: save one (File > Save Scene As...)");
+                for (const auto& [name, handle] : scenes)
+                    if (ImGui::Selectable(name.c_str(), handle == config.StartScene))
+                    {
+                        config.StartScene = handle;
+                        Project::SaveActive();
+                    }
+                ImGui::EndCombo();
+            }
+            ImGui::SetItemTooltip("The scene the editor opens this project with, and the packaged game starts in.");
+        }
 
         // Render quality presets (docs/Hybrid_Renderer_Plan_2026-10.md §2), saved in the project file.
         {
@@ -3127,6 +3160,7 @@ namespace Nox
             NOX_CORE_ERROR("New Project: {}", error);
             return false;
         }
+        m_CreateBasicScene = true; // (the Basic template, like the Project Manager's default)
         return OpenProject(projectFile);
     }
 
@@ -3165,6 +3199,88 @@ namespace Nox
         }
     }
 
+    AssetHandle EditorLayer::RegisterSceneAsset(const std::filesystem::path& scenePath)
+    {
+        Ref<Project> project = Project::GetActive();
+        if (!project || scenePath.empty())
+            return 0;
+        auto assets = project->GetEditorAssetManager();
+        std::error_code error;
+        const std::filesystem::path relative = std::filesystem::relative(scenePath, Project::GetActiveAssetDirectory(), error);
+        if (error || relative.empty() || relative.native().starts_with(std::filesystem::path("..").native()))
+            return 0; // saved outside the project's assets: not one of its scenes
+        AssetHandle handle = assets->FindHandleByPath(relative, AssetType::Scene);
+        if (handle == 0)
+        {
+            assets->ImportAsset(relative, relative, AssetType::Scene);
+            handle = assets->FindHandleByPath(relative, AssetType::Scene);
+        }
+        return handle;
+    }
+
+    void EditorLayer::AdoptStartSceneIfNone(const std::filesystem::path& scenePath)
+    {
+        Ref<Project> project = Project::GetActive();
+        if (!project || project->GetConfig().StartScene != 0)
+            return;
+        // Unreal's Editor Startup Map / Game Default Map: a project without one takes the first scene saved (Settings > Start Scene
+        // changes it).
+        if (const AssetHandle handle = RegisterSceneAsset(scenePath); handle != 0)
+        {
+            project->GetConfig().StartScene = handle;
+            Project::SaveActive();
+            NOX_CORE_INFO("Start Scene: {} (the project opens with it; Settings > Start Scene changes it)", scenePath.filename().string());
+        }
+    }
+
+    void EditorLayer::CreateBasicScene()
+    {
+        NewScene();
+        Scene& scene = *m_EditorScene;
+
+        // The sky: the procedural atmosphere with clouds, sun and moon (and its height fog off by default, as the component is).
+        Entity sky = scene.CreateEntity("Sky");
+        sky.AddComponent<EnvironmentLightComponent>().Source = EnvironmentSource::ProceduralSky;
+
+        // The sun the sky follows: daylight intensity, 54 degrees up (the sky's own default sun, as a light that can be moved).
+        Entity sun = scene.CreateEntity("Sun");
+        sun.AddComponent<DirectionalLightComponent>().Intensity = DefaultSkySunIntensity;
+        sun.GetComponent<TransformComponent>().Rotation = glm::eulerAngles(DefaultSkySunRotation());
+        sun.MarkTransformDirty();
+
+        // A 50 m floor (the 1 m Plane shape, scaled) with a static box collider a little below its surface, so a character stands on it.
+        if (const AssetHandle plane = GetShapeAsset(PrimitiveShape::Plane); plane != 0)
+        {
+            Entity floor = scene.CreateEntity("Floor");
+            auto& instance = floor.AddComponent<ModelInstanceComponent>();
+            instance.Model = plane;
+            instance.AtFileLayout = true;
+            floor.GetComponent<TransformComponent>().Scale = glm::vec3(50.0f, 1.0f, 50.0f);
+            floor.MarkTransformDirty();
+            floor.AddComponent<RigidBody3DComponent>().Type = RigidBody3DComponent::BodyType::Static;
+            auto& box = floor.AddComponent<BoxCollider3DComponent>();
+            box.HalfExtents = glm::vec3(WorldUnits::FromMeters(0.5f), WorldUnits::FromMeters(0.05f), WorldUnits::FromMeters(0.5f));
+            box.Offset = glm::vec3(0.0f, -WorldUnits::FromMeters(0.05f), 0.0f);
+            AssetManager::RequestAsset(plane);
+        }
+
+        // What Play looks through: 2 m up, 8 m back, looking slightly down at the middle of the floor.
+        Entity camera = scene.CreateEntity("Camera");
+        camera.AddComponent<CameraComponent>().Primary = true;
+        auto& cameraTransform = camera.GetComponent<TransformComponent>();
+        cameraTransform.Translation = glm::dvec3(0.0, WorldUnits::FromMeters(2.0f), WorldUnits::FromMeters(8.0f));
+        cameraTransform.Rotation = glm::vec3(glm::radians(-12.0f), 0.0f, 0.0f);
+        camera.MarkTransformDirty();
+
+        const std::filesystem::path path = Project::GetActiveAssetDirectory() / "Scenes" / "Main.nox";
+        std::error_code error;
+        std::filesystem::create_directories(path.parent_path(), error);
+        SerializeScene(m_EditorScene, path);
+        m_EditorScenePath = path;
+        AdoptStartSceneIfNone(path);
+        m_HistoryCheckRequested = true;
+    }
+
     void EditorLayer::OpenProjectManager()
     {
         // Unreal / Godot: the project browser is a fresh editor process, this one closes (one project per editor process: the
@@ -3173,23 +3289,23 @@ namespace Nox
         const ApplicationCommandLineArgs& args = Application::Get().GetSpecification().CommandLineArgs;
         // This executable by its full path (argv[0] can be relative); the new process starts in this one's working directory, where
         // the editor's assets are found.
-        const std::string fileName = args.Count > 0 && args.Args[0] ? std::filesystem::path(args.Args[0]).filename().string() : std::string("NoxEditor");
-        const std::string executable = (std::filesystem::path(base ? base : "") / fileName).string();
-        std::vector<std::string> arguments{ executable, "--project-manager" };
+        std::filesystem::path fileName = args.Count > 0 && args.Args[0] ? std::filesystem::path(args.Args[0]).filename() : std::filesystem::path("NoxEditor");
+#ifdef _WIN32
+        if (!fileName.has_extension())
+            fileName += ".exe";
+#endif
+        const std::filesystem::path executable = std::filesystem::path(base ? base : "") / fileName;
+        std::vector<std::string> arguments{ "--project-manager" };
         for (int index = 1; index < args.Count; ++index)
             if (ApplicationCommandLineArgs::IsSwitch(args.Args[index]) && std::string_view(args.Args[index]) != "--project-manager")
                 arguments.emplace_back(args.Args[index]);
-        std::vector<const char*> argv;
-        for (const std::string& argument : arguments)
-            argv.push_back(argument.c_str());
-        argv.push_back(nullptr);
-        SDL_Process* process = SDL_CreateProcess(argv.data(), false);
-        if (!process)
+        std::string error;
+        if (!LaunchDetachedProcess(executable, arguments, error))
         {
-            NOX_CORE_ERROR("Project Manager: cannot start {}: {}", executable, SDL_GetError());
+            NOX_CORE_ERROR("Project Manager: cannot start {}: {}", executable.generic_string(), error);
             return;
         }
-        SDL_DestroyProcess(process); // (only this handle: the new editor keeps running)
+        NOX_CORE_INFO("Project Manager: started {} --project-manager; this editor closes", executable.generic_string());
         Application::Shutdown();
     }
 
@@ -3271,6 +3387,9 @@ namespace Nox
                 if (m_ActiveScene && m_ActiveScene != m_EditorScene)
                     m_ActiveScene->CollectAssetReferences(handles);
             });
+            if (m_CreateBasicScene && Project::GetActive()->GetConfig().StartScene == 0)
+                CreateBasicScene();
+            m_CreateBasicScene = false;
             return true;
         }
         NOX_CORE_ERROR("Could not open the project '{}'", path.string());
@@ -5754,6 +5873,7 @@ namespace Nox
         if (!m_EditorScenePath.empty())
         {
             SerializeScene(m_ActiveScene, m_EditorScenePath);
+            AdoptStartSceneIfNone(m_EditorScenePath);
         }
         else
         {
@@ -5776,6 +5896,7 @@ namespace Nox
             m_ActiveScene->CopyWorldCellsTo(filepath);
             SerializeScene(m_ActiveScene, filepath);
             m_EditorScenePath = filepath;
+            AdoptStartSceneIfNone(filepath);
         }
     }
 

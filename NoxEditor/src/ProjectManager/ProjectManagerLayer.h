@@ -34,7 +34,8 @@ namespace Nox
             std::string Modified; // "3 hours ago"
         };
         void Refresh();
-        void Open(const std::filesystem::path& projectFile);
+        // `createBasicScene`: a project just made from the Basic template (the editor makes and saves its first scene).
+        void Open(const std::filesystem::path& projectFile, bool createBasicScene = false);
         void DrawProjectList(float height);
         void DrawNewProject();
 
@@ -43,6 +44,7 @@ namespace Nox
         char m_Search[128] = "";
         char m_Name[65] = "MyGame";
         char m_Location[1024] = "";
+        int m_Template = 0; // 0: Basic, 1: Blank
         int m_Units = 0;   // 0: centimeters (100 units per meter), 1: meters
         int m_Quality = 0; // index into the quality names
         bool m_CreateScripts = true;

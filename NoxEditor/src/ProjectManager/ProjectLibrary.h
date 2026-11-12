@@ -28,8 +28,13 @@ namespace Nox::ProjectLibrary
     // The sample project of the repository the editor was built in (Facerun), if the editor runs from its build folder there.
     std::filesystem::path FindSampleProject();
 
+    // What a new project starts with (Unreal's templates): Basic opens on a level with a sky, a sun, a floor and a camera (Unreal's
+    // default "Basic" level); Blank on nothing at all (black until something is added).
+    enum class ProjectTemplate { Basic, Blank };
+
     struct NewProjectSettings
     {
+        ProjectTemplate Template = ProjectTemplate::Basic;
         std::string Name;                 // also the C# namespace and assembly: letters, digits, '_', not starting with a digit
         std::filesystem::path Location;   // the project's folder is Location/Name
         float WorldUnitsPerMeter = 100.0f;// 100 = 1 unit is 1 cm (Unreal), 1 = 1 unit is 1 m (Godot, Unity)

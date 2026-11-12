@@ -111,7 +111,7 @@ namespace Nox
         m_Selected = m_Projects.empty() ? -1 : std::clamp(m_Selected, 0, static_cast<int>(m_Projects.size()) - 1);
     }
 
-    void ProjectManagerLayer::Open(const std::filesystem::path& projectFile)
+    void ProjectManagerLayer::Open(const std::filesystem::path& projectFile, bool createBasicScene)
     {
         std::error_code error;
         if (m_Opening)
@@ -125,11 +125,11 @@ namespace Nox
         m_Opening = true;
         // After this frame: this layer goes, the editor comes with the project (the layers are not walked then).
         const std::filesystem::path file = projectFile;
-        Application::Get().QueueAfterFrame([file]()
+        Application::Get().QueueAfterFrame([file, createBasicScene]()
         {
             Application& app = Application::Get();
             app.PopLayer<ProjectManagerLayer>();
-            app.PushLayer<EditorLayer>(file);
+            app.PushLayer<EditorLayer>(file, createBasicScene);
         });
     }
 
@@ -306,6 +306,16 @@ namespace Nox
             ImGui::SameLine(labelWidth);
         };
 
+        label("Template");
+        ImGui::RadioButton("Basic", &m_Template, 0);
+        ImGui::SetItemTooltip("Starts on a scene with a procedural sky (clouds, sun, moon at night), a sun light, a 50 m floor\n"
+                              "with collision and a camera: Unreal's default level. Saved as Scenes/Main, the project's Start Scene.");
+        ImGui::SameLine();
+        ImGui::RadioButton("Blank", &m_Template, 1);
+        ImGui::SetItemTooltip("Starts on an empty scene: nothing in it, so the view is black until you add a sky or lights.");
+        ImGui::SameLine();
+        ImGui::TextDisabled(m_Template == 0 ? "(sky, sun, floor, camera)" : "(empty, black)");
+
         label("Project Name");
         ImGui::SetNextItemWidth(-1.0f);
         ImGui::InputText("##name", m_Name, sizeof(m_Name));
@@ -350,6 +360,7 @@ namespace Nox
         settings.WorldUnitsPerMeter = m_Units == 0 ? 100.0f : 1.0f;
         settings.RenderQuality = qualities[m_Quality];
         settings.CreateScripts = m_CreateScripts;
+        settings.Template = m_Template == 0 ? ProjectLibrary::ProjectTemplate::Basic : ProjectLibrary::ProjectTemplate::Blank;
         const std::string problem = ProjectLibrary::ValidateNewProject(settings);
 
         ImGui::Spacing();
@@ -359,7 +370,9 @@ namespace Nox
         {
             ImGui::TextDisabled("Creates:");
             ImGui::TextWrapped("%s", (settings.Location / settings.Name / (settings.Name + ".nproj")).generic_string().c_str());
-            ImGui::TextDisabled("with Assets/ (Scenes, Scripts) and a .gitignore.");
+            ImGui::TextDisabled(settings.Template == ProjectLibrary::ProjectTemplate::Basic
+                                    ? "with Assets/ (Scenes with the Main scene, Scripts) and a .gitignore."
+                                    : "with Assets/ (Scenes, Scripts) and a .gitignore.");
         }
         else
             ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.35f, 1.0f), "%s", problem.c_str());
@@ -373,7 +386,7 @@ namespace Nox
             if (projectFile.empty())
                 m_Error = "New Project: " + error;
             else
-                Open(projectFile);
+                Open(projectFile, settings.Template == ProjectLibrary::ProjectTemplate::Basic);
         }
         ImGui::EndDisabled();
     }

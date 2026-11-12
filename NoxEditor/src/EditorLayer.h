@@ -35,7 +35,9 @@ namespace Nox
     {
     public:
         // `projectFile`: the project to open (from the command line or the Project Manager); empty asks for one.
-        explicit EditorLayer(std::filesystem::path projectFile = {});
+        // `createBasicScene`: the project was just made from the Basic template; its first scene (sky, sun, floor, camera) is made
+        // and saved as its Start Scene.
+        explicit EditorLayer(std::filesystem::path projectFile = {}, bool createBasicScene = false);
         ~EditorLayer() override;
         
         void OnEvent(Event& event) override;
@@ -63,6 +65,13 @@ namespace Nox
         bool OpenStartupProject(const std::filesystem::path& failed = {});
         // File > Project Manager...: a new editor process showing the Project Manager, this one closes.
         void OpenProjectManager();
+        // The Basic template's scene (Unreal's default level): a procedural sky, a sun, a floor with collision and a camera, saved as
+        // Assets/Scenes/Main.nox and made the Start Scene.
+        void CreateBasicScene();
+        // The scene file's asset (registered if it is not yet), and, while the project has no Start Scene, that scene becomes it.
+        AssetHandle RegisterSceneAsset(const std::filesystem::path& scenePath);
+        void AdoptStartSceneIfNone(const std::filesystem::path& scenePath);
+        bool m_CreateBasicScene = false;
         void SaveProject();
         
         // Each viewport's camera per scene, in <project>/Cache/EditorCameras.txt: a scene opens where it was looked at last.
