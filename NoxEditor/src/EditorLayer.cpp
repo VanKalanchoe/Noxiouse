@@ -3785,6 +3785,9 @@ namespace Nox
                 // !!! This is where the RenderTarget image is displayed !!!
                 // Whole pixels, like the render target: a fractional size resamples the image by a fraction of a pixel.
                 ImGui::Image(textureID, ImVec2(std::floor(viewportPanelSize.x), std::floor(viewportPanelSize.y)));
+                if (m_SceneState != SceneState::Play) // (Play looks through the game's camera)
+                    DrawViewportOrientation(ImGui::GetWindowDrawList(), ImVec2(m_ViewportBounds[0].x, m_ViewportBounds[0].y),
+                                            ImVec2(m_ViewportBounds[1].x, m_ViewportBounds[1].y), m_EditorCamera);
             }
         }
         ImVec2 mousePos = ImGui::GetMousePos();
@@ -4140,6 +4143,8 @@ namespace Nox
             ImGui::Image(texture->getImTextureID(), ImVec2(std::floor(available.x), std::floor(available.y)));
 
         ImDrawList* draw = ImGui::GetWindowDrawList();
+        if (texture)
+            DrawViewportOrientation(draw, origin, ImVec2(origin.x + available.x, origin.y + available.y), slot.Camera);
 
         // Where the gizmo of the selected entity is (its axes, not draggable here: a click makes this the active viewport, where it is).
         Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
@@ -4204,6 +4209,38 @@ namespace Nox
         draw->AddText(ImVec2(labelMin.x + 6.0f, labelMin.y + 3.0f), IM_COL32(230, 230, 230, 255), viewName);
 
         ImGui::End();
+    }
+
+    void EditorLayer::DrawViewportOrientation(ImDrawList* draw, ImVec2 min, ImVec2 max, const EditorCamera& camera)
+    {
+        if (max.x - min.x < 120.0f || max.y - min.y < 120.0f)
+            return;
+        // The axis triad: each world axis turned into the view (the view matrix's rotation), drawn back to front.
+        const glm::mat3 view(camera.GetGizmoView(camera.GetPosition())); // (x right, y up, z toward the viewer)
+        const ImVec2 center(min.x + 42.0f, max.y - 42.0f);
+        const float length = 28.0f;
+        struct Axis { glm::vec3 InView; ImU32 Color; const char* Name; };
+        Axis axes[3] = { { view * glm::vec3(1, 0, 0), IM_COL32(235, 70, 70, 255), "X" },
+                         { view * glm::vec3(0, 1, 0), IM_COL32(90, 210, 90, 255), "Y" },
+                         { view * glm::vec3(0, 0, 1), IM_COL32(80, 140, 250, 255), "Z" } };
+        std::sort(std::begin(axes), std::end(axes), [](const Axis& a, const Axis& b) { return a.InView.z < b.InView.z; }); // (away first)
+        draw->AddCircleFilled(center, length + 10.0f, IM_COL32(0, 0, 0, 90));
+        for (const Axis& axis : axes)
+        {
+            const ImVec2 end(center.x + axis.InView.x * length, center.y - axis.InView.y * length);
+            draw->AddLine(center, end, axis.Color, 2.0f);
+            draw->AddText(ImVec2(end.x - 3.5f, end.y - 7.0f), axis.Color, axis.Name);
+        }
+        // Where the camera is (the same numbers as an entity's Translation, so a position in a guide can be found).
+        const glm::dvec3 position = camera.GetPosition();
+        const double meters = static_cast<double>(WorldUnits::ToMeters(1.0f));
+        char text[160];
+        std::snprintf(text, sizeof(text), "Camera  X %.0f  Y %.0f  Z %.0f   (%.1f, %.1f, %.1f m)", position.x, position.y, position.z,
+                      position.x * meters, position.y * meters, position.z * meters);
+        const ImVec2 textPos(min.x + 90.0f, max.y - 24.0f);
+        const ImVec2 size = ImGui::CalcTextSize(text);
+        draw->AddRectFilled(ImVec2(textPos.x - 5.0f, textPos.y - 3.0f), ImVec2(textPos.x + size.x + 5.0f, textPos.y + size.y + 3.0f), IM_COL32(0, 0, 0, 150), 3.0f);
+        draw->AddText(textPos, IM_COL32(230, 230, 230, 255), text);
     }
 
     void EditorLayer::ApplyViewportLayout(ViewportLayout layout, ImGuiID dockSpace, ImVec2 size)

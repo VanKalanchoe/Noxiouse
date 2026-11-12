@@ -131,6 +131,9 @@ namespace Nox
         // Snapping (like Unreal's viewport toolbar): one switch, and a step each for location (in cm), rotation (degrees) and scale.
         // Ctrl inverts it while held. The location step is in cm whatever the world unit is (WorldUnits converts).
         void UI_ViewportOverlay();
+        // The world axes as the camera sees them (Unreal's axis triad, the viewport's lower-left corner) and where the camera is, in
+        // world units as the Inspector shows Translation (and meters).
+        void DrawViewportOrientation(ImDrawList* draw, ImVec2 min, ImVec2 max, const EditorCamera& camera);
         // The world grid on the ground plane (y = 0): cells of the snap step (sparser far from the ground), every tenth line stronger, the
         // axes coloured, fading out with distance. Thin lines of the 2D overlay pass, so it is depth tested.
         void DrawWorldGrid();

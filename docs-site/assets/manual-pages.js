@@ -186,6 +186,8 @@ window.NOX_MANUAL_PAGES = [
             "| **Pan Viewport** | `Hold Middle Click Drag` | Pans the camera parallel to the screen plane. |",
             "| **Focus on Entity** | `F` | Centers and frames the selected entity in the active viewport. |",
             "",
+            "**Where am I?** Each viewport's lower-left corner shows the world axes as the camera sees them (red X, green Y up, blue Z -- Unreal's axis triad) and the camera's position, `Camera X ... Y ... Z ...`, in the same units as an entity's Translation (meters in brackets). Double-clicking an entity in the hierarchy also flies the camera to it.",
+            "",
             "---",
             "",
             "## Transform Gizmos (`W`, `E`, `R`)",
