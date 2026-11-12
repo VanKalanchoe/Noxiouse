@@ -33,7 +33,7 @@ namespace Nox
                 out << YAML::Key << "PhysicalSurfaces" << YAML::Value << YAML::Flow << config.PhysicalSurfaces;
                 const ProjectRendererSettings& renderer = config.Renderer;
                 if (renderer.RayTracingResolution >= 0 || renderer.DiffuseGI >= 0 || renderer.ShadowedLights >= 0 || renderer.OIT >= 0 || renderer.TAA >= 0 ||
-                    renderer.SunShadows >= 0 || renderer.LocalShadows >= 0 || renderer.ContactShadows >= 0 ||
+                    renderer.Shadows >= 0 || renderer.SunShadows >= 0 || renderer.LocalShadows >= 0 || renderer.ContactShadows >= 0 ||
                     renderer.SSAOMethod >= 0 || renderer.SSR >= 0 || renderer.SSGI >= 0 || renderer.VolumetricFog >= 0 ||
                     renderer.Bloom >= 0 || renderer.DepthOfField >= 0 || renderer.MotionBlur >= 0)
                 {
@@ -43,6 +43,7 @@ namespace Nox
                     if (renderer.ShadowedLights >= 0) out << YAML::Key << "ShadowedLights" << YAML::Value << renderer.ShadowedLights;
                     if (renderer.OIT >= 0) out << YAML::Key << "OIT" << YAML::Value << renderer.OIT;
                     if (renderer.TAA >= 0) out << YAML::Key << "TAA" << YAML::Value << renderer.TAA;
+                    if (renderer.Shadows >= 0) out << YAML::Key << "Shadows" << YAML::Value << renderer.Shadows;
                     if (renderer.SunShadows >= 0) out << YAML::Key << "SunShadows" << YAML::Value << renderer.SunShadows;
                     if (renderer.LocalShadows >= 0) out << YAML::Key << "LocalShadows" << YAML::Value << renderer.LocalShadows;
                     if (renderer.ContactShadows >= 0) out << YAML::Key << "ContactShadows" << YAML::Value << renderer.ContactShadows;
@@ -118,6 +119,7 @@ namespace Nox
             read("ShadowedLights", config.Renderer.ShadowedLights);
             read("OIT", config.Renderer.OIT);
             read("TAA", config.Renderer.TAA);
+            read("Shadows", config.Renderer.Shadows);
             read("SunShadows", config.Renderer.SunShadows);
             read("LocalShadows", config.Renderer.LocalShadows);
             read("ContactShadows", config.Renderer.ContactShadows);

@@ -993,6 +993,7 @@ namespace Nox
                 choice("Ray Tracing Resolution##Project", saved.RayTracingResolution, { { 1, "Full" }, { 2, "Half" } });
                 choice("Diffuse GI##Project", saved.DiffuseGI, { { 0, "Environment (IBL)" }, { 1, "DDGI" }, { 2, "ReSTIR GI" }, { 3, "Screen Probes" }, { 4, "Raster Probe Volume" } });
                 choice("Shadowed Lights##Project", saved.ShadowedLights, { { 0, "All" }, { 1, "1" }, { 2, "2" }, { 4, "4" }, { 8, "8" } });
+                choice("Shadows##Project", saved.Shadows, { { 0, "Off" }, { 1, "On" } });
                 choice("Sun Shadows##Project", saved.SunShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
                 choice("Local Light Shadows##Project", saved.LocalShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
                 choice("Contact Shadows##Project", saved.ContactShadows, { { 0, "Off" }, { 1, "On" } });
@@ -1502,20 +1503,40 @@ namespace Nox
             }
         }
 
-        // The sun's shadows: the RT shadow mask or its raster version (RS1), to measure one against the other.
+        // Shadows: on / off for every light and method (raster and hybrid alike), then each light's method -- ray traced (while Ray
+        // Tracing Shadows run) or shadow maps, which a Ray Traced light falls back to otherwise (as in Unreal).
         ImGui::Separator();
-        ImGui::Text("Sun Shadows");
+        ImGui::Text("Shadows");
         {
+            bool shadows = m_Renderer->getShadowsEnabled();
+            if (ImGui::Checkbox("Shadows", &shadows))
+                m_Renderer->setShadowsEnabled(shadows);
+            ImGui::SetItemTooltip("Every shadow, whatever renders it: the sun's and the other lights' shadow maps, ray traced shadow\n"
+                                  "rays and contact shadows (Unreal's Show > Shadows). Off: lights shine everywhere they reach.\n"
+                                  "The path tracer always traces its shadows.");
+            ImGui::BeginDisabled(!shadows);
+            // Ray traced shadows run only with ray tracing on and its Ray Tracing Shadows ticked; a light set to Ray Traced otherwise
+            // gets shadow maps.
+            const bool rayTracedAvailable = m_Renderer->getRayTracingEnabled() && m_Renderer->getRayTracingShadows();
+            auto fallbackNote = [&](bool rayTracedChosen)
+            {
+                if (!rayTracedChosen || rayTracedAvailable)
+                    return;
+                ImGui::SameLine();
+                ImGui::TextDisabled("(shadow maps: %s)", m_Renderer->getRayTracingEnabled() ? "Ray Tracing Shadows off" : "ray tracing off");
+            };
+
             const char* sunShadowModes[] = { "Ray Traced", "Shadow Maps" };
             int sunShadowMode = static_cast<int>(m_Renderer->getSunShadowMode());
             ImGui::SetNextItemWidth(180.0f);
             if (ImGui::Combo("Sun Shadows", &sunShadowMode, sunShadowModes, IM_ARRAYSIZE(sunShadowModes)))
                 m_Renderer->setSunShadowMode(static_cast<Renderer::SunShadowMode>(sunShadowMode));
-            ImGui::SetItemTooltip("Ray Traced: the sun's soft shadow from one ray a pixel towards its disc, denoised by NRD SIGMA\n"
-                                  "(needs Ray Tracing Shadows). Shadow Maps: cascaded shadow maps (UE5's directional light without\n"
-                                  "virtual shadow maps), raster, with or without ray tracing. Both write the same shadow mask, so\n"
-                                  "they compare directly. Other lights keep their RT shadow rays either way.");
-            if (m_Renderer->getSunShadowMode() == Renderer::SunShadowMode::ShadowMaps)
+            ImGui::SetItemTooltip("Ray Traced: the sun's soft shadow from one ray a pixel towards its disc, denoised by NRD SIGMA,\n"
+                                  "while ray tracing and its Ray Tracing Shadows are on -- otherwise shadow maps. Shadow Maps:\n"
+                                  "cascaded shadow maps (UE5's directional light without virtual shadow maps), raster, with or\n"
+                                  "without ray tracing. Both write the same shadow mask, so they compare directly.");
+            fallbackNote(m_Renderer->getSunShadowMode() == Renderer::SunShadowMode::RayTraced);
+            if (m_Renderer->getSunShadowMode() == Renderer::SunShadowMode::ShadowMaps || !rayTracedAvailable)
             {
                 ImGui::Indent();
                 const uint32_t resolutions[] = { 1024, 2048, 4096 };
@@ -1595,11 +1616,13 @@ namespace Nox
             ImGui::SetNextItemWidth(180.0f);
             if (ImGui::Combo("Local Light Shadows", &localShadowMode, localShadowModes, IM_ARRAYSIZE(localShadowModes)))
                 m_Renderer->setLocalShadowMode(static_cast<Renderer::LocalShadowMode>(localShadowMode));
-            ImGui::SetItemTooltip("Spot, point, rect and disc lights. Ray Traced: shadow rays in the lighting (Ray Tracing Shadows,\n"
-                                  "Shadowed Lights per Pixel). Shadow Maps: the most important lights get shadow maps in one atlas\n"
-                                  "(a spot light one view, the others a cube of six), sized by how big they are on screen; the\n"
-                                  "rest keep their rays. Filter and bias are the sun's settings above.");
-            if (m_Renderer->getLocalShadowMode() == Renderer::LocalShadowMode::ShadowMaps)
+            ImGui::SetItemTooltip("Spot, point, rect and disc lights. Ray Traced: shadow rays in the lighting (Shadowed Lights per\n"
+                                  "Pixel), while ray tracing and its Ray Tracing Shadows are on -- otherwise shadow maps. Shadow\n"
+                                  "Maps: the most important lights get shadow maps in one atlas (a spot light one view, the others\n"
+                                  "a cube of six), sized by how big they are on screen; the rest keep their rays when ray traced\n"
+                                  "shadows run, else are unshadowed. Filter and bias are the sun's settings above.");
+            fallbackNote(m_Renderer->getLocalShadowMode() == Renderer::LocalShadowMode::RayTraced);
+            if (m_Renderer->getLocalShadowMode() == Renderer::LocalShadowMode::ShadowMaps || !rayTracedAvailable)
             {
                 ImGui::Indent();
                 int maxLights = static_cast<int>(m_Renderer->getLocalShadowMaxLights());
@@ -1646,6 +1669,7 @@ namespace Nox
                     m_Renderer->setContactShadowSamples(static_cast<uint32_t>(samples));
                 ImGui::Unindent();
             }
+            ImGui::EndDisabled();
         }
 
         ImGui::Separator();
@@ -2035,6 +2059,8 @@ namespace Nox
                 {
                     m_Renderer->setRayTracingShadows(rtShadows);
                 }
+                ImGui::SetItemTooltip("Lights whose shadows are set to Ray Traced (Shadows, above) trace shadow rays. Off: they use\n"
+                                      "shadow maps instead. To turn shadows off altogether: the Shadows checkbox above.");
                 if (rtShadows)
                 {
                     int shadowLights = static_cast<int>(m_Renderer->getShadowRayLightLimit());

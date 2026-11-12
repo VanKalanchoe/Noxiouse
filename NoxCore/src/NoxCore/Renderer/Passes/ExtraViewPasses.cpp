@@ -240,7 +240,7 @@ namespace Nox
             // The scene's particles, from this camera (asset previews have none): blended like the camera's, without OIT.
             if (!view.Preview && !(flags & ExtraViewNoParticles) && !m_particleBatches.empty() && m_particlePipeline && m_particleBuffers.size() > frameIndex && m_particleBuffers[frameIndex])
             {
-                const bool particleShadows = m_rayTracingEnabled && m_rayTracingShadows && resources.TLAS.IsValid();
+                const bool particleShadows = getRayTracedShadowsActive() && resources.TLAS.IsValid();
                 m_renderGraph.AddPass(kParticleNames[index], RGPassFlags::Raster,
                     [&](RGBuilder& builder)
                     {

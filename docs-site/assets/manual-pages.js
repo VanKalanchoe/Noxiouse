@@ -1091,6 +1091,8 @@ window.NOX_MANUAL_PAGES = [
             "",
             "For Raster GI, place an entity with an **Irradiance Volume** component over the area (Add Component > Irradiance Volume): its probes hold the bounce light the volume covers. **Reflection Probe** components give SSR something to fall back to off screen.",
             "",
+            "**Shadows** (Settings > Shadows): one checkbox turns every shadow on or off, in raster and hybrid alike. Below it, **Sun Shadows** and **Local Light Shadows** pick the method: **Ray Traced** while ray tracing and its **Ray Tracing Shadows** are on, otherwise these lights fall back to **Shadow Maps** (as in Unreal; the setting shows \"(shadow maps: ...)\" then), or **Shadow Maps** always. The shadow map settings show whenever shadow maps are in use. **Project Settings > Shadows** saves On / Off into the project.",
+            "",
             "Every feature can also be set on its own below the preset (it becomes **Custom** for the session); **Project Settings** saves your choices on top of the preset into the project.",
             "",
             "## Volumetric Fog & Post Effects",

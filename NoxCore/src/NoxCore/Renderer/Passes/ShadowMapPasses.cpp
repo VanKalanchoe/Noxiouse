@@ -71,7 +71,8 @@ namespace Nox
         const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
         const bool cullingReady = std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return pipeline != nullptr; });
         m_shadowCascadesDrawn = 0;
-        if (m_sunShadowMode != SunShadowMode::ShadowMaps || pathTracing || m_shadowMaskLightIndex == ~0u ||
+        // (Set to Ray Traced without ray traced shadows running: shadow maps all the same -- getSunShadowMapsActive.)
+        if (!getSunShadowMapsActive() || pathTracing || m_shadowMaskLightIndex == ~0u ||
             m_shadowMaskLightIndex >= m_lightBufferObjects.size() || entryCount == 0 || !cullingReady ||
             !m_shadowDepthPipeline || !m_shadowDepthMaskPipeline || !m_shadowMapResolvePipeline)
         {
@@ -405,7 +406,7 @@ namespace Nox
     void Renderer::updateShadowMapUniforms()
     {
         // Contact shadows (the lighting applies them where a shadow map shadowed).
-        uniformData.contactShadowLength = m_contactShadows ? WorldUnits::FromMeters(m_contactShadowLengthMeters) : 0.0f;
+        uniformData.contactShadowLength = m_contactShadows && m_shadowsEnabled ? WorldUnits::FromMeters(m_contactShadowLengthMeters) : 0.0f;
         uniformData.contactShadowSamples = m_contactShadowSamples;
         uniformData.sunShadowCascadesReference = 0;
         if (!m_frame.shadowMapsAdded)
@@ -482,7 +483,7 @@ namespace Nox
         const bool pathTracing = m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19;
         const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
         const bool cullingReady = std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return pipeline != nullptr; });
-        if (m_localShadowMode != LocalShadowMode::ShadowMaps || pathTracing || entryCount == 0 || !cullingReady ||
+        if (!getLocalShadowMapsActive() || pathTracing || entryCount == 0 || !cullingReady ||
             !m_shadowDepthPipeline || !m_shadowDepthMaskPipeline)
             return;
 

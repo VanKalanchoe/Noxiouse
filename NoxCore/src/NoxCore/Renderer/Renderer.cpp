@@ -922,6 +922,7 @@ namespace Nox
         setRayTracingResolutionDivisor(preset.RTDivisor);
         setShadowRayLightLimit(preset.ShadowRayLights);
         setSunShadowMode(preset.SunShadows);
+        setShadowsEnabled(true); // every rung has shadows
         setLocalShadowMode(preset.LocalShadows);
         setContactShadowsEnabled(preset.ContactShadows);
         setSSREnabled(preset.SSR);
@@ -953,7 +954,7 @@ namespace Nox
             const bool exposureMatches = (preset.AutoExposure < 0 || m_viewportAutoExposure == (preset.AutoExposure != 0)) &&
                                          (preset.OIT < 0 || (m_oitEnabled == (preset.OIT != 0) &&
                                                              (preset.OIT == 0 || (m_oitMethod == OITMethod::AVBOIT) == (preset.OIT == 2))));
-            if (!m_pathTracingEnabled && m_rayTracingEnabled == preset.RayTracing && m_rayTracingShadows == preset.RTShadows &&
+            if (!m_pathTracingEnabled && m_shadowsEnabled && m_rayTracingEnabled == preset.RayTracing && m_rayTracingShadows == preset.RTShadows &&
                 m_rayTracingReflections == preset.RTReflections && ssaoMatches && m_diffuseGIMode == preset.DiffuseGI &&
                 m_directLightingMode == preset.DirectLighting && m_rtRefractionEnabled == preset.RTRefraction && upscaleMatches &&
                 m_rtSubsample == preset.RTDivisor && m_shadowRayLightLimit == preset.ShadowRayLights &&
@@ -1043,6 +1044,8 @@ namespace Nox
         }
         if (settings.TAA >= 0)
             setTAAEnabled(settings.TAA != 0);
+        if (settings.Shadows >= 0)
+            setShadowsEnabled(settings.Shadows != 0);
         if (settings.SunShadows >= 0 && settings.SunShadows <= 1)
             setSunShadowMode(static_cast<SunShadowMode>(settings.SunShadows));
         if (settings.LocalShadows >= 0 && settings.LocalShadows <= 1)
@@ -4600,7 +4603,7 @@ namespace Nox
         const bool isDDGI = m_rayTracingEnabled && (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17);
         const bool isReSTIRGI = m_rayTracingEnabled && isReSTIRGIRequested();
         const bool isScreenProbeGI = m_rayTracingEnabled && m_diffuseGIMode == 3;
-        const bool isHybridRT = m_rayTracingEnabled && (m_rayTracingShadows || m_rayTracingReflections || m_rtaoEnabled);
+        const bool isHybridRT = m_rayTracingEnabled && (getRayTracedShadowsActive() || m_rayTracingReflections || m_rtaoEnabled);
         if (!isPathTracing && !isDDGI && !isReSTIRGI && !isScreenProbeGI && !isHybridRT)
             return;
 
@@ -6207,7 +6210,7 @@ namespace Nox
         // zeroes uniformData.tlasDeviceAddress: RTAO's own trace_occlusion_ray checks that and silently reports "no
         // hit" for every ray, which read as "RTAO does nothing" even though the TLAS itself was never the problem
         // (turning shadows or reflections on happened to keep a valid TLAS around for RTAO to piggyback on).
-        bool isHybridRT = m_rayTracingEnabled && (m_rayTracingShadows || m_rayTracingReflections || m_rtaoEnabled);
+        bool isHybridRT = m_rayTracingEnabled && (getRayTracedShadowsActive() || m_rayTracingReflections || m_rtaoEnabled);
 
         if (!isPathTracing && !isDDGI && !isReSTIRGI && !isScreenProbeGI && !isHybridRT)
         {
@@ -6315,7 +6318,7 @@ namespace Nox
         // 4. Update UBO flags (ready for updateUniformBuffer!)
         uniformData.tlasDeviceAddress = m_sceneTLAS ? m_sceneTLAS->getDeviceAddress() : 0;
         uniformData.tlasHeapIndex = m_tlasHeapIndex;
-        uniformData.enableRTShadows = (m_rayTracingEnabled && m_rayTracingShadows) ? 1 : 0;
+        uniformData.enableRTShadows = getRayTracedShadowsActive() ? 1 : 0;
         uniformData.enableRTReflections = (m_rayTracingEnabled && m_rayTracingReflections) ? 1 : 0;
 
         m_hasTLASBuild = true;

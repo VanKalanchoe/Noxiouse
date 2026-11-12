@@ -1117,7 +1117,7 @@ namespace Nox
         bool lit = false;
         for (const ParticleBatch& batch : m_particleBatches)
             lit |= batch.Settings.Lit;
-        const bool shadows = lit && m_rayTracingEnabled && m_rayTracingShadows;
+        const bool shadows = lit && getRayTracedShadowsActive();
         const uint64_t particles = m_particleBuffers[frameIndex]->getDeviceAddress();
         const uint64_t uniforms = m_uniformBuffers[frameIndex]->getDeviceAddress();
 

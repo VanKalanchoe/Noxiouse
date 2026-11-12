@@ -538,6 +538,22 @@ namespace Nox
             }
         }
         bool getRayTracingShadows() const { return m_rayTracingShadows; }
+        // Every shadow on or off, whatever the method (UE's Show > Shadows / r.ShadowQuality 0): sun and local light shadow maps, RT
+        // shadow rays, contact shadows.
+        void setShadowsEnabled(bool enabled)
+        {
+            if (m_shadowsEnabled != enabled)
+            {
+                m_shadowsEnabled = enabled;
+                m_renderGraph.ResetHistory(NRDHistoryKey);
+            }
+        }
+        bool getShadowsEnabled() const { return m_shadowsEnabled; }
+        // What shadows the lights get this frame. Ray traced only while Ray Tracing Shadows run (ray tracing on, its shadows on); a
+        // light set to Ray Traced otherwise falls back to shadow maps, as Unreal's ray traced shadows do without ray tracing.
+        bool getRayTracedShadowsActive() const { return m_shadowsEnabled && m_rayTracingEnabled && m_rayTracingShadows; }
+        bool getSunShadowMapsActive() const { return m_shadowsEnabled && (m_sunShadowMode == SunShadowMode::ShadowMaps || !getRayTracedShadowsActive()); }
+        bool getLocalShadowMapsActive() const { return m_shadowsEnabled && (m_localShadowMode == LocalShadowMode::ShadowMaps || !getRayTracedShadowsActive()); }
         // The sun's shadows (RS1; Passes/ShadowMapPasses.cpp): ray traced (the RT shadow mask, with Ray Traced Shadows on) or cascaded
         // shadow maps resolved into the same mask -- raster, with or without ray tracing, measured against the RT version. Other lights
         // keep their RT shadow rays.
@@ -1740,6 +1756,7 @@ namespace Nox
         uint32_t m_ssgiHistoryIndex = 0;
         bool m_ssgiRanLastFrame = false;
         bool m_contactShadows = false;
+        bool m_shadowsEnabled = true; // setShadowsEnabled
         float m_contactShadowLengthMeters = 0.3f;
         uint32_t m_contactShadowSamples = 12;
         std::unique_ptr<NRI::Pipeline> m_nrdGuidesPipeline = nullptr; // NRD view Z + normal/roughness (NRDGuides.slang)
