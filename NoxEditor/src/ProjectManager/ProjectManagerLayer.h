@@ -34,13 +34,14 @@ namespace Nox
             bool Exists = false;
             bool Sample = false;
             std::string Modified; // "3 hours ago"
-            Ref<Texture2D> Thumbnail; // Saved/Thumbnail.png, when the project has one
+            Ref<Texture2D> Thumbnail; // ProjectLibrary::FindProjectPicture: its own picture, its screenshot or its template's
         };
         void Refresh();
         // `createBasicScene`: a project just made from the Basic template (the editor makes and saves its first scene).
         void Open(const std::filesystem::path& projectFile, bool createBasicScene = false);
         void DrawProjectList(float height);
         void DrawNewProject();
+        void DrawTemplateTiles();
 
         std::vector<Entry> m_Projects;
         int m_Selected = -1;
@@ -48,6 +49,7 @@ namespace Nox
         char m_Name[65] = "MyGame";
         char m_Location[1024] = "";
         int m_Template = 0; // 0: Basic, 1: Blank
+        Ref<Texture2D> m_TemplatePictures[2]; // ProjectLibrary::TemplatePicturePath of each
         int m_Units = 0;   // 0: centimeters (100 units per meter), 1: meters
         int m_Quality = 0; // index into the quality names
         bool m_CreateScripts = true;

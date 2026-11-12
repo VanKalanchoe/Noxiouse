@@ -28,6 +28,10 @@ namespace Nox::ProjectLibrary
     // The project's picture in the Project Manager (Unreal's Saved/AutoScreenshot.png): the editor's view, taken when a scene is saved
     // and once after the project opens if it has none.
     std::filesystem::path ThumbnailPath(const std::filesystem::path& projectDirectory);
+    // The picture the Project Manager shows for a project, the first that exists (as Unreal's Project Browser): the project's own
+    // <Name>.png beside its .nproj (a picture chosen for it, Unreal's <Project>.png), its screenshot (ThumbnailPath), the picture of the
+    // template it was made from (copied into Saved/ when it was made, until it has a screenshot). Empty: none.
+    std::filesystem::path FindProjectPicture(const std::filesystem::path& projectFile);
 
     // The sample project of the repository the editor was built in (Facerun), if the editor runs from its build folder there.
     std::filesystem::path FindSampleProject();
@@ -35,6 +39,8 @@ namespace Nox::ProjectLibrary
     // What a new project starts with (Unreal's templates): Basic opens on a level with a sky, a sun, a floor and a camera (Unreal's
     // default "Basic" level); Blank on nothing at all (black until something is added).
     enum class ProjectTemplate { Basic, Blank };
+    // The template's picture (shipped with the editor, Unreal's template Media/ images): assets/Templates/<Template>.png, 16:9.
+    std::filesystem::path TemplatePicturePath(ProjectTemplate projectTemplate);
 
     struct NewProjectSettings
     {

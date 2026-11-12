@@ -74,6 +74,11 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/assets/Templates/CSharpBehaviour.cs.template"
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/Templates/CSharpBehaviour.cs.template"
+        # The Project Manager's template pictures
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/Templates/Basic.png"
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/Templates/Blank.png"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/Templates"
     )
 
     # -------------------------------------------------------------------------

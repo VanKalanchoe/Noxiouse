@@ -179,6 +179,33 @@ namespace Nox::ProjectLibrary
         return projectDirectory / "Saved" / "Thumbnail.png";
     }
 
+    namespace
+    {
+        std::filesystem::path TemplateThumbnailPath(const std::filesystem::path& projectDirectory)
+        {
+            return projectDirectory / "Saved" / "TemplateThumbnail.png";
+        }
+    }
+
+    std::filesystem::path FindProjectPicture(const std::filesystem::path& projectFile)
+    {
+        const std::filesystem::path directory = projectFile.parent_path();
+        for (const std::filesystem::path& candidate : { directory / (projectFile.stem().string() + ".png"), ThumbnailPath(directory),
+                                                        TemplateThumbnailPath(directory) })
+        {
+            std::error_code error;
+            if (std::filesystem::is_regular_file(candidate, error))
+                return candidate;
+        }
+        return {};
+    }
+
+    std::filesystem::path TemplatePicturePath(ProjectTemplate projectTemplate)
+    {
+        // Relative to the editor's working folder, as its other assets (NoxEditor/).
+        return projectTemplate == ProjectTemplate::Basic ? "assets/Templates/Basic.png" : "assets/Templates/Blank.png";
+    }
+
     std::filesystem::path FindSampleProject()
     {
         const char* base = SDL_GetBasePath();
@@ -317,6 +344,15 @@ namespace Nox::ProjectLibrary
 
         if (settings.CreateScripts && !CreateScriptsProject(directory, assets, name, error))
             return {};
+
+        // The template's picture stands for the project in the Project Manager until the editor takes its screenshot (a missing
+        // picture is no reason to fail: the list then shows its initial).
+        {
+            std::error_code pictureError;
+            const std::filesystem::path picture = TemplateThumbnailPath(directory);
+            std::filesystem::create_directories(picture.parent_path(), pictureError);
+            std::filesystem::copy_file(TemplatePicturePath(settings.Template), picture, std::filesystem::copy_options::overwrite_existing, pictureError);
+        }
 
         SetDefaultProjectLocation(settings.Location);
         return projectFile;

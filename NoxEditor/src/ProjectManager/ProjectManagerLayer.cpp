@@ -74,6 +74,15 @@ namespace Nox
         SDL_SetWindowTitle(Application::Get().getWindow()->getHandle(), "Nox Project Manager");
         std::snprintf(m_Location, sizeof(m_Location), "%s", ProjectLibrary::GetDefaultProjectLocation().generic_string().c_str());
         m_OpenLast = ProjectLibrary::GetOpenLastProjectAtStartup();
+        // The templates' pictures (missing ones: the tile says so).
+        for (int i = 0; i < 2; ++i)
+        {
+            std::error_code error;
+            const std::filesystem::path picture = ProjectLibrary::TemplatePicturePath(i == 0 ? ProjectLibrary::ProjectTemplate::Basic
+                                                                                             : ProjectLibrary::ProjectTemplate::Blank);
+            if (std::filesystem::exists(picture, error))
+                m_TemplatePictures[i] = TextureImporter::LoadTexture2D(picture, { .flip = false, .generateMips = false });
+        }
         Refresh();
     }
 
@@ -115,9 +124,8 @@ namespace Nox
         }
         for (Entry& entry : m_Projects)
         {
-            std::error_code error;
-            const std::filesystem::path picture = ProjectLibrary::ThumbnailPath(entry.File.parent_path());
-            if (entry.Exists && std::filesystem::exists(picture, error))
+            const std::filesystem::path picture = entry.Exists ? ProjectLibrary::FindProjectPicture(entry.File) : std::filesystem::path();
+            if (!picture.empty())
                 entry.Thumbnail = TextureImporter::LoadTexture2D(picture, { .flip = false, .generateMips = false });
         }
         m_Selected = m_Projects.empty() ? -1 : std::clamp(m_Selected, 0, static_cast<int>(m_Projects.size()) - 1);
@@ -128,6 +136,9 @@ namespace Nox
         for (Entry& entry : m_Projects)
             if (entry.Thumbnail)
                 Renderer::DeferAssetRelease(entry.Thumbnail);
+        for (Ref<Texture2D>& picture : m_TemplatePictures)
+            if (picture)
+                Renderer::DeferAssetRelease(picture);
     }
 
     void ProjectManagerLayer::Open(const std::filesystem::path& projectFile, bool createBasicScene)
@@ -325,6 +336,59 @@ namespace Nox
             Open(m_Projects[open].File);
     }
 
+    void ProjectManagerLayer::DrawTemplateTiles()
+    {
+        // Unreal's template browser: a tile per template with its picture, its name and what it starts with; click to pick.
+        struct TemplateInfo
+        {
+            const char* Name;
+            const char* Summary;
+            const char* Tooltip;
+        };
+        static constexpr TemplateInfo kTemplates[2] = {
+            { "Basic", "Sky, sun, floor, camera",
+              "Starts on a scene with a procedural sky (clouds, sun, moon at night), a sun light, a 50 m floor\n"
+              "with collision and a camera: Unreal's default level. Saved as Scenes/Main, the project's Start Scene." },
+            { "Blank", "Empty scene",
+              "Starts on an empty scene: nothing in it, so the view is black until you add a sky or lights." },
+        };
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float width = std::min((ImGui::GetContentRegionAvail().x - style.ItemSpacing.x) * 0.5f, 240.0f);
+        const ImVec2 picture(width, width * 9.0f / 16.0f);
+        const float textHeight = ImGui::GetTextLineHeightWithSpacing() * 2.0f + 6.0f;
+        for (int i = 0; i < 2; ++i)
+        {
+            if (i > 0)
+                ImGui::SameLine();
+            ImGui::PushID(i);
+            if (ImGui::InvisibleButton("##template", ImVec2(picture.x, picture.y + textHeight)))
+                m_Template = i;
+            ImGui::SetItemTooltip("%s", kTemplates[i].Tooltip);
+            const bool selected = m_Template == i;
+            const bool hovered = ImGui::IsItemHovered();
+            const ImVec2 min = ImGui::GetItemRectMin();
+            const ImVec2 max = ImGui::GetItemRectMax();
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            drawList->AddRectFilled(min, max, ImGui::GetColorU32(selected ? ImGuiCol_HeaderActive : hovered ? ImGuiCol_HeaderHovered : ImGuiCol_FrameBg), 6.0f);
+            const ImVec2 imageMin(min.x + 4.0f, min.y + 4.0f);
+            const ImVec2 imageMax(max.x - 4.0f, min.y + picture.y - 4.0f);
+            if (m_TemplatePictures[i] && m_TemplatePictures[i]->getImTextureID())
+                drawList->AddImageRounded(m_TemplatePictures[i]->getImTextureID(), imageMin, imageMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32_WHITE, 4.0f);
+            else
+            {
+                drawList->AddRectFilled(imageMin, imageMax, IM_COL32(20, 22, 28, 255), 4.0f);
+                drawList->AddText(ImVec2(imageMin.x + 8.0f, imageMin.y + 8.0f), ImGui::GetColorU32(ImGuiCol_TextDisabled), "(no picture)");
+            }
+            if (selected)
+                drawList->AddRect(min, max, IM_COL32(90, 160, 255, 255), 6.0f, 0, 2.0f);
+            const float textY = min.y + picture.y + 2.0f;
+            drawList->AddText(ImVec2(min.x + 8.0f, textY), ImGui::GetColorU32(ImGuiCol_Text), kTemplates[i].Name);
+            drawList->AddText(ImVec2(min.x + 8.0f, textY + ImGui::GetTextLineHeightWithSpacing()), ImGui::GetColorU32(ImGuiCol_TextDisabled),
+                              kTemplates[i].Summary);
+            ImGui::PopID();
+        }
+    }
+
     void ProjectManagerLayer::DrawNewProject()
     {
         ImGui::TextUnformatted("New Project");
@@ -339,15 +403,8 @@ namespace Nox
             ImGui::SameLine(labelWidth);
         };
 
-        label("Template");
-        ImGui::RadioButton("Basic", &m_Template, 0);
-        ImGui::SetItemTooltip("Starts on a scene with a procedural sky (clouds, sun, moon at night), a sun light, a 50 m floor\n"
-                              "with collision and a camera: Unreal's default level. Saved as Scenes/Main, the project's Start Scene.");
-        ImGui::SameLine();
-        ImGui::RadioButton("Blank", &m_Template, 1);
-        ImGui::SetItemTooltip("Starts on an empty scene: nothing in it, so the view is black until you add a sky or lights.");
-        ImGui::SameLine();
-        ImGui::TextDisabled(m_Template == 0 ? "(sky, sun, floor, camera)" : "(empty, black)");
+        DrawTemplateTiles();
+        ImGui::Spacing();
 
         label("Project Name");
         ImGui::SetNextItemWidth(-1.0f);
