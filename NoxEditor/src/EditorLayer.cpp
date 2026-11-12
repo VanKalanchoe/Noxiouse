@@ -2692,7 +2692,7 @@ namespace Nox
                 return false;
             }
 
-            if (m_ViewportHovered && !ImGuizmo::IsOver() && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
+            if (m_ViewportHovered && !GizmoTakesMouse() && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
             {
                 bool shift = Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
                 bool control = Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
@@ -3786,14 +3786,15 @@ namespace Nox
                 // Whole pixels, like the render target: a fractional size resamples the image by a fraction of a pixel.
                 ImGui::Image(textureID, ImVec2(std::floor(viewportPanelSize.x), std::floor(viewportPanelSize.y)));
                 if (m_SceneState != SceneState::Play) // (Play looks through the game's camera)
-                    DrawViewportOrientation(ImGui::GetWindowDrawList(), ImVec2(m_ViewportBounds[0].x, m_ViewportBounds[0].y),
-                                            ImVec2(m_ViewportBounds[1].x, m_ViewportBounds[1].y), m_EditorCamera);
+                    DrawViewportCameraPosition(ImGui::GetWindowDrawList(), ImVec2(m_ViewportBounds[0].x, m_ViewportBounds[0].y),
+                                               ImVec2(m_ViewportBounds[1].x, m_ViewportBounds[1].y), m_EditorCamera);
             }
         }
         ImVec2 mousePos = ImGui::GetMousePos();
 
         // Only initiate box select when dragging on viewport and not using gizmos/alt-orbit
-        if (m_ViewportHovered && !ImGuizmo::IsUsing() && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
+        if (m_ViewportHovered && !ImGuizmo::IsUsing() && !ImGuizmo::IsViewManipulateHovered() && !ImGuizmo::IsUsingViewManipulate() &&
+            !Input::IsKeyPressed(SDL_SCANCODE_LALT))
         {
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             {
@@ -3803,7 +3804,7 @@ namespace Nox
 
             if (ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.0f) && !m_IsBoxSelecting)
             {
-                if (!ImGuizmo::IsOver())
+                if (!GizmoTakesMouse())
                 {
                     m_IsBoxSelecting = true;
                 }
@@ -4012,6 +4013,8 @@ namespace Nox
             ImGui::EndDragDropTarget();
         }
 
+        UpdateViewCube();
+
         // Gizmos
         //maybe be a callback you subscribe to instead
         Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
@@ -4144,7 +4147,7 @@ namespace Nox
 
         ImDrawList* draw = ImGui::GetWindowDrawList();
         if (texture)
-            DrawViewportOrientation(draw, origin, ImVec2(origin.x + available.x, origin.y + available.y), slot.Camera);
+            DrawViewportCameraPosition(draw, origin, ImVec2(origin.x + available.x, origin.y + available.y), slot.Camera);
 
         // Where the gizmo of the selected entity is (its axes, not draggable here: a click makes this the active viewport, where it is).
         Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
@@ -4211,36 +4214,64 @@ namespace Nox
         ImGui::End();
     }
 
-    void EditorLayer::DrawViewportOrientation(ImDrawList* draw, ImVec2 min, ImVec2 max, const EditorCamera& camera)
+    void EditorLayer::DrawViewportCameraPosition(ImDrawList* draw, ImVec2 min, ImVec2 max, const EditorCamera& camera)
     {
-        if (max.x - min.x < 120.0f || max.y - min.y < 120.0f)
+        if (max.x - min.x < 120.0f || max.y - min.y < 60.0f)
             return;
-        // The axis triad: each world axis turned into the view (the view matrix's rotation), drawn back to front.
-        const glm::mat3 view(camera.GetGizmoView(camera.GetPosition())); // (x right, y up, z toward the viewer)
-        const ImVec2 center(min.x + 42.0f, max.y - 42.0f);
-        const float length = 28.0f;
-        struct Axis { glm::vec3 InView; ImU32 Color; const char* Name; };
-        Axis axes[3] = { { view * glm::vec3(1, 0, 0), IM_COL32(235, 70, 70, 255), "X" },
-                         { view * glm::vec3(0, 1, 0), IM_COL32(90, 210, 90, 255), "Y" },
-                         { view * glm::vec3(0, 0, 1), IM_COL32(80, 140, 250, 255), "Z" } };
-        std::sort(std::begin(axes), std::end(axes), [](const Axis& a, const Axis& b) { return a.InView.z < b.InView.z; }); // (away first)
-        draw->AddCircleFilled(center, length + 10.0f, IM_COL32(0, 0, 0, 90));
-        for (const Axis& axis : axes)
-        {
-            const ImVec2 end(center.x + axis.InView.x * length, center.y - axis.InView.y * length);
-            draw->AddLine(center, end, axis.Color, 2.0f);
-            draw->AddText(ImVec2(end.x - 3.5f, end.y - 7.0f), axis.Color, axis.Name);
-        }
-        // Where the camera is (the same numbers as an entity's Translation, so a position in a guide can be found).
+        // The same numbers as an entity's Translation, so a position in a guide can be found.
         const glm::dvec3 position = camera.GetPosition();
         const double meters = static_cast<double>(WorldUnits::ToMeters(1.0f));
         char text[160];
         std::snprintf(text, sizeof(text), "Camera  X %.0f  Y %.0f  Z %.0f   (%.1f, %.1f, %.1f m)", position.x, position.y, position.z,
                       position.x * meters, position.y * meters, position.z * meters);
-        const ImVec2 textPos(min.x + 90.0f, max.y - 24.0f);
+        const ImVec2 textPos(min.x + 10.0f, max.y - 24.0f);
         const ImVec2 size = ImGui::CalcTextSize(text);
         draw->AddRectFilled(ImVec2(textPos.x - 5.0f, textPos.y - 3.0f), ImVec2(textPos.x + size.x + 5.0f, textPos.y + size.y + 3.0f), IM_COL32(0, 0, 0, 150), 3.0f);
         draw->AddText(textPos, IM_COL32(230, 230, 230, 255), text);
+    }
+
+    void EditorLayer::UpdateViewCube()
+    {
+        if (m_SceneState == SceneState::Play || m_EditorCamera.IsOrthographic())
+            return;
+        const float width = m_ViewportBounds[1].x - m_ViewportBounds[0].x, height = m_ViewportBounds[1].y - m_ViewportBounds[0].y;
+        constexpr float kCube = 110.0f;
+        if (width < kCube * 2.0f || height < kCube * 2.0f)
+            return;
+        // ImGuizmo's ViewManipulate, the form that sets its context itself (the one after Manipulate reads the projection Manipulate
+        // left): called before the selection's gizmo, which then sets the context back to the selected entity.
+        glm::mat4 view = m_EditorCamera.GetGizmoView(m_Renderer->GetRenderOrigin());
+        const glm::mat4 before = view;
+        const glm::mat4 projection = m_EditorCamera.GetGizmoProjection();
+        glm::mat4 identity(1.0f);
+        ImGuizmo::SetDrawlist();
+        ImGuizmo::SetRect(m_ViewportBounds[0].x, m_ViewportBounds[0].y, width, height);
+        ImGuizmo::ViewManipulate(glm::value_ptr(view), glm::value_ptr(projection), ImGuizmo::TRANSLATE, ImGuizmo::LOCAL, glm::value_ptr(identity),
+                                 m_EditorCamera.GetDistance(), ImVec2(m_ViewportBounds[1].x - kCube - 10.0f, m_ViewportBounds[1].y - kCube - 10.0f),
+                                 ImVec2(kCube, kCube), 0x00000000);
+        if (view == before)
+            return;
+        // The camera turned to the cube's view: its pitch and yaw from where it now looks (EditorCamera's orientation is
+        // quat(-pitch, -yaw, 0): forward = (-cos a sin b, sin a, -cos a cos b) with a = -pitch, b = -yaw); the focal point stays.
+        const glm::mat4 world = glm::inverse(view);
+        const glm::vec3 forward = glm::normalize(-glm::vec3(world[2]));
+        const glm::vec3 up = glm::normalize(glm::vec3(world[1]));
+        const float a = std::asin(std::clamp(forward.y, -1.0f, 1.0f));
+        float b = std::atan2(-forward.x, -forward.z);
+        if (std::cos(a) < 1e-4f) // straight up or down: the yaw from the up vector (u = (sin a sin b, cos a, sin a cos b))
+        {
+            const float side = a > 0.0f ? 1.0f : -1.0f;
+            b = std::atan2(side * up.x, side * up.z);
+        }
+        m_EditorCamera.SetOrientation(-a, -b);
+    }
+
+    bool EditorLayer::GizmoTakesMouse() const
+    {
+        if (ImGuizmo::IsViewManipulateHovered() || ImGuizmo::IsUsingViewManipulate())
+            return true;
+        const Entity selected = m_SceneHierarchyPanel.GetSelectedEntity();
+        return selected && m_GizmoType != -1 && ImGuizmo::IsOver();
     }
 
     void EditorLayer::ApplyViewportLayout(ViewportLayout layout, ImGuiID dockSpace, ImVec2 size)
