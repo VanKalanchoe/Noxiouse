@@ -29,6 +29,9 @@ namespace Nox
                         // loop, 1: the child loops within the section); the child's tracks find their targets from the track's target
         MaterialParameter, // the target's material parameter the track names (TimelineTrack::Parameter: "Base Color", "Roughness"...),
                            // over its MaterialComponent::Parameters, on every slot (MaterialComponent::SequencerParameters)
+        Audio,          // UE's Audio track: each key starts a section playing its sound (TimelineKey::Asset, a clip or an audio graph);
+                        // Value = (length, 0: the sound's length; start offset in the sound, s; volume; 3D, 1: at the track's target,
+                        // 0: 2D). Played while the timeline plays (from the right place when it starts inside a section), stopped on pause
         Count
     };
 
@@ -45,6 +48,7 @@ namespace Nox
         glm::vec4 Value{ 0.0f };
         TimelineInterpolation Interpolation = TimelineInterpolation::Smooth; // from this key to the next
         std::string Event;
+        AssetHandle Asset = 0; // Audio: the section's sound
     };
 
     struct TimelineTrack
@@ -54,6 +58,14 @@ namespace Nox
         std::string Parameter; // MorphWeight: the morph target's name
         std::vector<TimelineKey> Keys; // sorted by time
         bool Muted = false;
+    };
+
+    // An Audio track section playing (TimelinePlayerComponent, the Timeline window's preview): its voice (AudioVoiceHandle) and the
+    // time in its sound when last seen -- a jump (a loop, a seek) starts it again from the right place.
+    struct TimelineAudioVoice
+    {
+        uint64_t Voice = 0;
+        float SoundTime = 0.0f;
     };
 
     class Timeline : public Asset
@@ -86,6 +98,9 @@ namespace Nox
         // A Sub-Timeline track's section at `time`: the child timeline's time there (true), or false outside every section.
         // `childDuration`: the child's length (a section of length 0 runs that long). `section`: the key that starts it.
         bool SubTimelineAt(const TimelineTrack& track, float time, float childDuration, float& outChildTime, int* section = nullptr);
+        // An Audio track's section at `time`: the section's key (index) and the time in its sound there, or false outside every
+        // section. `soundLength(asset)`: a sound's length in seconds (0: unknown or endless -- the section runs to its Length, or on).
+        bool AudioSectionAt(const TimelineTrack& track, float time, float (*soundLength)(AssetHandle), int& outSection, float& outSoundTime);
         void SortKeys(TimelineTrack& track);
     }
 }

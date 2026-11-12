@@ -92,5 +92,8 @@ namespace Nox
         std::optional<Snapshot> m_Snapshot;
 
         char m_NewEventName[64] = "Event";
+        // The Audio tracks' sections playing while the preview plays (Editor voices; stopped on pause, scrubbing, Play mode, closing).
+        std::unordered_map<uint64_t, TimelineAudioVoice> m_PreviewAudio;
+        void StopPreviewAudio();
     };
 }

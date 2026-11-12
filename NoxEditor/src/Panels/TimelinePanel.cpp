@@ -13,6 +13,9 @@
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/TimelineImporter.h"
+#include "NoxCore/Audio/AudioClip.h"
+#include "NoxCore/Audio/AudioEngine.h"
+#include "AudioWidgets.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Scene/Entity.h"
@@ -126,8 +129,16 @@ namespace Nox
         m_Snapshot = std::move(snapshot);
     }
 
+    void TimelinePanel::StopPreviewAudio()
+    {
+        for (const auto& [id, section] : m_PreviewAudio)
+            AudioEngine::Stop(section.Voice, 0.1f);
+        m_PreviewAudio.clear();
+    }
+
     void TimelinePanel::EndPreview()
     {
+        StopPreviewAudio();
         if (!m_Snapshot)
             return;
         if (Scene* scene = m_Snapshot->SceneRef.get())
@@ -308,7 +319,14 @@ namespace Nox
             }
             else if (m_AutoKey && !m_Playing)
                 AutoKey(*timeline, *scene, player);
+            // The Audio tracks heard while it plays (as in Play: from the right place in each section; silent when paused).
+            std::vector<Scene::TimelineAudioSection> sections;
+            if (m_Playing)
+                scene->CollectTimelineAudio(player, *timeline, m_Time, sections);
+            scene->SyncTimelineAudio(sections, m_PreviewAudio, AudioVoiceGroup::Editor);
         }
+        else
+            StopPreviewAudio();
         ImGui::End();
     }
 
@@ -422,6 +440,7 @@ namespace Nox
                     propertyItem(TimelineProperty::CameraCut);
                 }
                 propertyItem(TimelineProperty::SubTimeline); // the timeline to play is dropped on the track (details below)
+                propertyItem(TimelineProperty::Audio);       // sections of sounds (picked in the details below), 2D or at this entity
                 ImGui::EndMenu();
             }
             if (entity.HasComponent<RelationshipComponent>())
@@ -530,6 +549,11 @@ namespace Nox
                 key.Event = m_CutCamera;
                 key.Interpolation = TimelineInterpolation::Constant;
             }
+            else if (addKey && track.Property == TimelineProperty::Audio)
+            {
+                key.Value = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f); // the whole sound, from its start, full volume, 2D
+                key.Interpolation = TimelineInterpolation::Constant;
+            }
             else if (addKey && track.Property == TimelineProperty::SubTimeline)
             {
                 key.Value = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f); // the whole child, from its start, at its own speed
@@ -561,6 +585,7 @@ namespace Nox
             ImGui::SetItemTooltip(track.Property == TimelineProperty::Event       ? "Adds an event key at the playhead (named below)"
                                   : track.Property == TimelineProperty::CameraCut ? "Cuts to the camera picked below at the playhead (in Play)"
                                   : track.Property == TimelineProperty::SubTimeline ? "Starts a section of the dropped timeline at the playhead"
+                                  : track.Property == TimelineProperty::Audio ? "Starts a sound section at the playhead (pick its sound below)"
                                                                                   : "Keys the target's current value at the playhead (move it with the gizmo first)");
             ImGui::SameLine();
             if (ImGui::SmallButton("X"))
@@ -571,6 +596,32 @@ namespace Nox
             const float laneTop = rowMin.y;
             draw->AddRectFilled(ImVec2(laneLeft, laneTop), ImVec2(laneLeft + laneWidth, laneTop + LaneHeight - 2.0f),
                                 trackSelected ? IM_COL32(52, 52, 64, 255) : IM_COL32(36, 36, 42, 255));
+            // An Audio track's sections as bars: from the key for its Length (or what is left of its sound), up to the next section.
+            if (track.Property == TimelineProperty::Audio)
+            {
+                for (size_t k = 0; k < track.Keys.size(); ++k)
+                {
+                    const TimelineKey& section = track.Keys[k];
+                    float length = section.Value.x;
+                    if (length <= 0.0f)
+                    {
+                        const AudioClip* clip = section.Asset != 0 && AssetManager::GetAssetType(section.Asset) == AssetType::AudioClip
+                            ? AssetManager::FindLoadedAsset<AudioClip>(section.Asset) : nullptr;
+                        if (section.Asset != 0 && !clip)
+                            AssetManager::RequestAsset(section.Asset);
+                        length = clip ? std::max(clip->GetDuration() - std::max(section.Value.y, 0.0f), 0.0f) : duration;
+                    }
+                    float end = std::min(section.Time + length, duration);
+                    if (k + 1 < track.Keys.size())
+                        end = std::min(end, track.Keys[k + 1].Time);
+                    const ImVec2 a(timeToX(section.Time), laneTop + 3.0f), b(timeToX(end), laneTop + LaneHeight - 5.0f);
+                    draw->AddRectFilled(a, b, section.Asset != 0 ? IM_COL32(60, 120, 90, 200) : IM_COL32(110, 60, 60, 200), 3.0f);
+                    const std::string label = section.Asset != 0 ? AssetManager::GetMetadata(section.Asset).FilePath.stem().string() : std::string("(no sound)");
+                    draw->PushClipRect(a, b, true);
+                    draw->AddText(ImVec2(a.x + 9.0f, a.y + 1.0f), IM_COL32(230, 230, 230, 255), label.c_str());
+                    draw->PopClipRect();
+                }
+            }
             for (int keyIndex = 0; keyIndex < static_cast<int>(track.Keys.size()); ++keyIndex)
             {
                 TimelineKey& key = track.Keys[keyIndex];
@@ -924,6 +975,31 @@ namespace Nox
                 key.Value.w = loop ? 1.0f : 0.0f;
                 changed = true;
             }
+            break;
+        }
+        case TimelineProperty::Audio:
+        {
+            changed |= SoundAssetCombo("Sound", key.Asset);
+            ImGui::SetNextItemWidth(100.0f);
+            ImGui::DragFloat("Length", &key.Value.x, 0.01f, 0.0f, 3600.0f, key.Value.x > 0.0f ? "%.2f s" : "whole sound");
+            changed |= ImGui::IsItemDeactivatedAfterEdit();
+            ImGui::SetItemTooltip("How long the section plays (0: to the end of the sound). The next section starts its own sound anyway.");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(100.0f);
+            ImGui::DragFloat("Start in sound", &key.Value.y, 0.01f, 0.0f, 3600.0f, "%.2f s");
+            changed |= ImGui::IsItemDeactivatedAfterEdit();
+            ImGui::SetItemTooltip("Where in the sound the section begins (skips its start). Audio graphs always play from their beginning.");
+            ImGui::SetNextItemWidth(100.0f);
+            ImGui::SliderFloat("Volume", &key.Value.z, 0.0f, 1.0f, "%.2f");
+            changed |= ImGui::IsItemDeactivatedAfterEdit();
+            ImGui::SameLine();
+            bool spatial = key.Value.w > 0.5f;
+            if (ImGui::Checkbox("3D (at the track's entity)", &spatial))
+            {
+                key.Value.w = spatial ? 1.0f : 0.0f;
+                changed = true;
+            }
+            ImGui::SetItemTooltip("3D: heard from the track's target entity (it follows it). Off: 2D, as the file is (music, dialogue).");
             break;
         }
         case TimelineProperty::Event:

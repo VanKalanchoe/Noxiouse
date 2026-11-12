@@ -1801,6 +1801,7 @@ namespace Nox
             player.Time = 0.0f;
             player.Playing = player.PlayOnStart;
             player.FiredEvents.clear();
+            player.AudioSections.clear();
         }
     }
 
@@ -2713,7 +2714,133 @@ namespace Nox
             }
 
             ApplyTimeline(Entity(handle, this), *timeline, player.Time, true);
+            UpdateTimelineAudio(Entity(handle, this), player, *timeline);
         }
+    }
+
+    namespace
+    {
+        // A section's sound length for TimelineEvaluation::AudioSectionAt: a clip's duration once loaded; an audio graph has none (it
+        // plays until its section's Length, or the next section).
+        float TimelineSoundLength(AssetHandle sound)
+        {
+            if (AssetManager::GetAssetType(sound) != AssetType::AudioClip)
+                return 0.0f;
+            const AudioClip* clip = AssetManager::FindLoadedAsset<AudioClip>(sound);
+            return clip ? clip->GetDuration() : 0.0f;
+        }
+    }
+
+    void Scene::CollectTimelineAudio(Entity playerEntity, const Timeline& timeline, float time, std::vector<TimelineAudioSection>& out)
+    {
+        auto mix = [](uint64_t seed, uint64_t value) { return (seed ^ value) * 1099511628211ull; }; // FNV-1a step
+        auto collect = [&](auto& self, const Timeline& current, Entity root, float at, uint64_t path, int depth) -> void
+        {
+            for (size_t index = 0; index < current.Tracks.size(); ++index)
+            {
+                const TimelineTrack& track = current.Tracks[index];
+                if (track.Muted || track.Keys.empty())
+                    continue;
+                const uint64_t trackPath = mix(path, index + 1);
+                if (track.Property == TimelineProperty::SubTimeline && depth < 8)
+                {
+                    const Timeline* child = SubTimelineOf(track, m_MissingAssets.Local());
+                    float childTime = 0.0f;
+                    if (child && TimelineEvaluation::SubTimelineAt(track, at, child->Duration, childTime))
+                        if (Entity target = FindTimelineTarget(root, track.Target))
+                            self(self, *child, target, childTime, trackPath, depth + 1);
+                }
+                else if (track.Property == TimelineProperty::Audio)
+                {
+                    int section = -1;
+                    float soundTime = 0.0f;
+                    if (TimelineEvaluation::AudioSectionAt(track, at, &TimelineSoundLength, section, soundTime))
+                    {
+                        Entity target = FindTimelineTarget(root, track.Target);
+                        out.push_back({ mix(trackPath, static_cast<uint64_t>(section) + 1), &track.Keys[section], soundTime,
+                                        target ? target.GetUUID() : UUID(0) });
+                    }
+                }
+            }
+        };
+        collect(collect, timeline, playerEntity, time, 1469598103934665603ull, 0);
+    }
+
+    void Scene::SyncTimelineAudio(const std::vector<TimelineAudioSection>& wanted, std::unordered_map<uint64_t, TimelineAudioVoice>& sections,
+                                  AudioVoiceGroup group)
+    {
+        // Sections no longer wanted stop (a short fade); a wanted one whose sound time jumped (a loop, a seek) starts over.
+        for (auto it = sections.begin(); it != sections.end();)
+        {
+            const auto found = std::find_if(wanted.begin(), wanted.end(), [&](const TimelineAudioSection& w) { return w.Id == it->first; });
+            const bool jumped = found != wanted.end() && (found->SoundTime < it->second.SoundTime - 0.05f || found->SoundTime > it->second.SoundTime + 0.5f);
+            if (found == wanted.end() || jumped)
+            {
+                AudioEngine::Stop(it->second.Voice, 0.1f);
+                it = sections.erase(it);
+                continue;
+            }
+            it->second.SoundTime = found->SoundTime;
+            ++it;
+        }
+        for (const TimelineAudioSection& section : wanted)
+        {
+            const TimelineKey& key = *section.Key;
+            Entity target = section.Target != 0 ? GetEntityByUUID(section.Target) : Entity();
+            const bool spatial = key.Value.w > 0.5f && target;
+            const glm::dvec3 position = spatial && target.HasComponent<WorldTransformComponent>()
+                ? target.GetComponent<WorldTransformComponent>().GetPosition() : glm::dvec3(0.0);
+            if (const auto playing = sections.find(section.Id); playing != sections.end())
+            {
+                if (spatial)
+                    AudioEngine::SetPosition(playing->second.Voice, position); // (follows its target)
+                continue;
+            }
+            // Started from where the section is now (a clip; an audio graph from its beginning), once its sound is in.
+            AudioPlayDesc desc;
+            if (AssetManager::GetAssetType(key.Asset) == AssetType::AudioGraph)
+            {
+                std::string error;
+                desc.Graph = GetAudioGraphProgram(key.Asset, &error);
+                if (!desc.Graph)
+                {
+                    if (!error.empty())
+                        sections[section.Id] = { 0, section.SoundTime }; // (does not compile: in the log, not retried)
+                    continue;
+                }
+            }
+            else
+            {
+                const AssetState state = AssetManager::RequestAsset(key.Asset);
+                if (state != AssetState::Ready)
+                {
+                    if (state == AssetState::Failed)
+                        sections[section.Id] = { 0, section.SoundTime };
+                    continue; // (loading: started next frame, from where the section is then)
+                }
+                desc.Clip = AssetManager::GetAsset<AudioClip>(key.Asset);
+                desc.StartTime = section.SoundTime;
+            }
+            desc.Volume = key.Value.z;
+            desc.Group = group;
+            desc.Spatial = spatial;
+            desc.Position = position;
+            if (spatial)
+                desc.Environment = AudioEnvironmentAt(position).Target;
+            ApplySoundSettings(desc, key.Asset);
+            sections[section.Id] = { AudioEngine::Play(desc), section.SoundTime };
+        }
+    }
+
+    void Scene::UpdateTimelineAudio(Entity playerEntity, TimelinePlayerComponent& player, const Timeline& timeline)
+    {
+        if (!m_AudioRunning)
+            return;
+        // None while the player is paused or stopped (UE stops a sequence's audio on pause).
+        std::vector<TimelineAudioSection> wanted;
+        if (player.Playing)
+            CollectTimelineAudio(playerEntity, timeline, player.Time, wanted);
+        SyncTimelineAudio(wanted, player.AudioSections, AudioVoiceGroup::Game);
     }
 
     void Scene::UpdateAnimators()

@@ -19,6 +19,7 @@
 
 #include "box2d/box2d.h"
 #include "NoxCore/Animation/Animator.h"
+#include "NoxCore/Animation/Timeline.h"
 #include "NoxCore/Animation/AnimationGraphInstance.h"
 
 #include "NoxCore/Renderer/Font.h"
@@ -547,9 +548,17 @@ namespace Nox
         float Time = 0.0f;
         bool Playing = false;
         std::vector<std::string> FiredEvents; // the event keys the last update passed, handed to the scripts as OnAnimationEvent(name)
+        // The Audio tracks' playing sections (by track path and key).
+        std::unordered_map<uint64_t, TimelineAudioVoice> AudioSections;
 
         TimelinePlayerComponent() = default;
-        TimelinePlayerComponent(const TimelinePlayerComponent&) = default;
+        TimelinePlayerComponent(const TimelinePlayerComponent& other)
+            : Timeline(other.Timeline), PlayOnStart(other.PlayOnStart), Speed(other.Speed) {} // (not the playing state)
+        TimelinePlayerComponent& operator=(const TimelinePlayerComponent& other)
+        {
+            Timeline = other.Timeline; PlayOnStart = other.PlayOnStart; Speed = other.Speed;
+            return *this;
+        }
     };
 
     // A sound on an entity (docs/Audio_Architecture_Plan_2026.md §4; Unity's AudioSource, Unreal's Audio Component): plays its Sound --

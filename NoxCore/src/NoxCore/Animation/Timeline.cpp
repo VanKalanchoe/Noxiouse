@@ -20,6 +20,7 @@ namespace Nox::TimelineEvaluation
         case TimelineProperty::MorphWeight: return "Morph Weight";
         case TimelineProperty::SubTimeline: return "Sub-Timeline";
         case TimelineProperty::MaterialParameter: return "Material Parameter";
+        case TimelineProperty::Audio: return "Audio";
         default: return "Unknown";
         }
     }
@@ -121,7 +122,35 @@ namespace Nox::TimelineEvaluation
 
     bool HasNamedKeys(TimelineProperty property)
     {
-        return property == TimelineProperty::Event || property == TimelineProperty::CameraCut || property == TimelineProperty::SubTimeline;
+        return property == TimelineProperty::Event || property == TimelineProperty::CameraCut || property == TimelineProperty::SubTimeline ||
+               property == TimelineProperty::Audio;
+    }
+
+    bool AudioSectionAt(const TimelineTrack& track, float time, float (*soundLength)(AssetHandle), int& outSection, float& outSoundTime)
+    {
+        if (track.Property != TimelineProperty::Audio)
+            return false;
+        // The last section that started at or before `time`, while it lasts: its Length, else what is left of its sound after the
+        // start offset (an endless sound -- an audio graph -- until the next section).
+        int found = -1;
+        for (int k = 0; k < static_cast<int>(track.Keys.size()) && track.Keys[k].Time <= time; ++k)
+            found = k;
+        if (found < 0 || track.Keys[found].Asset == 0)
+            return false;
+        const TimelineKey& key = track.Keys[found];
+        const float offset = std::max(key.Value.y, 0.0f);
+        float length = key.Value.x;
+        if (length <= 0.0f)
+        {
+            const float sound = soundLength ? soundLength(key.Asset) : 0.0f;
+            length = sound > 0.0f ? std::max(sound - offset, 0.0f) : 1e30f;
+        }
+        const float local = time - key.Time;
+        if (local >= length)
+            return false;
+        outSection = found;
+        outSoundTime = offset + local;
+        return true;
     }
 
     bool SubTimelineAt(const TimelineTrack& track, float time, float childDuration, float& outChildTime, int* section)

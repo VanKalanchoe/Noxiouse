@@ -29,6 +29,8 @@ namespace Nox
     class IPhysics3DScene;
     class SceneLoader;
     class Timeline;
+    struct TimelineKey;
+    struct TimelineAudioVoice;
 
     class Scene : public Asset
     {
@@ -91,6 +93,19 @@ namespace Nox
         void PreviewTimeline(Entity player, float time);
         // A timeline track's target: the entity reached from the player by a path of child names ("" = the player itself).
         Entity FindTimelineTarget(Entity player, const std::string& path);
+        // The Audio tracks' sections sounding at `time` (its Sub-Timelines' included): an id per track path and section, the key, the
+        // time in its sound, the track's target. SyncTimelineAudio starts / keeps / stops the voices for them in `sections` (Play: the
+        // player's, Game group; the Timeline window's preview: its own, Editor group).
+        struct TimelineAudioSection
+        {
+            uint64_t Id = 0;
+            const TimelineKey* Key = nullptr;
+            float SoundTime = 0.0f;
+            UUID Target = 0; // 0: none
+        };
+        void CollectTimelineAudio(Entity player, const Timeline& timeline, float time, std::vector<TimelineAudioSection>& out);
+        void SyncTimelineAudio(const std::vector<TimelineAudioSection>& wanted, std::unordered_map<uint64_t, TimelineAudioVoice>& sections,
+                               AudioVoiceGroup group);
 
         // True once after entities were destroyed since the last call, i.e. assets may have become unused.
         bool ConsumeAssetReferencesChanged() { return std::exchange(m_AssetReferencesChanged, false); }
@@ -358,6 +373,8 @@ namespace Nox
         void ApplyTimeline(Entity player, const Timeline& timeline, float time, bool cameraCuts = false, int depth = 0);
         // The event names the playhead passed from `from` to `to`, the Sub-Timelines' included.
         void CollectTimelineEvents(const Timeline& timeline, float from, float to, bool wrapped, std::vector<std::string>& out, int depth = 0);
+        // The Audio tracks' sections at the player's time, its Sub-Timelines' included: started, kept, or stopped (paused, outside).
+        void UpdateTimelineAudio(Entity playerEntity, TimelinePlayerComponent& player, const Timeline& timeline);
         void SubmitLights();
         void Submit2D();
         // Particle emitters (ParticleSystem.h): simulated every frame the scene steps (the editor's too), restarted by Play / Simulate.

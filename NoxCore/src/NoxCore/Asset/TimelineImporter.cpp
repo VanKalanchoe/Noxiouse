@@ -80,6 +80,8 @@ namespace Nox
                 else
                 {
                     out << YAML::Key << "Value" << YAML::Value << YAML::Flow << YAML::BeginSeq << key.Value.x << key.Value.y << key.Value.z << key.Value.w << YAML::EndSeq;
+                    if (track.Property == TimelineProperty::Audio)
+                        out << YAML::Key << "Sound" << YAML::Value << static_cast<uint64_t>(key.Asset);
                     if (!TimelineEvaluation::HasNamedKeys(track.Property))
                         out << YAML::Key << "Interpolation" << YAML::Value << InterpolationName(key.Interpolation);
                 }
@@ -143,6 +145,8 @@ namespace Nox
                     key.Interpolation = ParseInterpolation(keyNode["Interpolation"].as<std::string>());
                 if (keyNode["Event"])
                     key.Event = keyNode["Event"].as<std::string>();
+                if (keyNode["Sound"])
+                    key.Asset = keyNode["Sound"].as<uint64_t>();
                 track.Keys.push_back(std::move(key));
             }
             TimelineEvaluation::SortKeys(track);
