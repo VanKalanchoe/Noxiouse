@@ -367,6 +367,9 @@ namespace Nox
             // The reverb at the listener (A4c), for the Acoustic Reverb effects (mixer side).
             IPLReflectionEffectParams ListenerReverbParams{};
             bool ListenerReverbValid = false;
+            // The simulation's sources whose responses the mixer reads (Steam Audio's triple buffers: read on this thread only).
+            std::array<IPLSource, SpatialAudio::MaxReflectionSources> ReflectionSources{};
+            IPLSource ListenerReverbSource = nullptr;
             // Reflections (game side).
             AudioReflectionSettings Reflections;
             bool ReflectionsSent = false;
@@ -442,6 +445,18 @@ namespace Nox
 #endif
 
         // A voice's Steam Audio parameters from a Start / Update command.
+        // Mixer thread: a source's latest response (Steam Audio's triple buffer: the read side swaps in what the simulation committed),
+        // into the parameters the game thread sent. False: none.
+        bool FetchResponse(IPLSource source, IPLReflectionEffectParams& params)
+        {
+            if (!source)
+                return false;
+            IPLSimulationOutputs outputs{};
+            iplSourceGetOutputs(source, IPL_SIMULATIONFLAGS_REFLECTIONS, &outputs);
+            params.ir = outputs.reflections.ir;
+            return params.ir != nullptr;
+        }
+
         void ApplySpatial(MixVoice& voice, const Command& command)
         {
             voice.Spatial = command.Spatial;
@@ -889,7 +904,8 @@ namespace Nox
             float* buffer = state.VoiceBuffer.data();
             // Its reflections first (without the distance curve: the simulated response carries the distance), into the
             // ambisonic sum the decoder turns into stereo once all voices are in.
-            if (voice.ReflectionSlot >= 0 && voice.Reflection.ir && state.ReflectionsOn)
+            if (voice.ReflectionSlot >= 0 && voice.Reflection.irSize > 0 && state.ReflectionsOn &&
+                FetchResponse(state.ReflectionSources[voice.ReflectionSlot], voice.Reflection))
             {
                 const float step = (voice.ReflectionGain - voice.ReflectionApplied) / static_cast<float>(kBlock);
                 float gain = voice.ReflectionApplied;
@@ -1174,7 +1190,7 @@ namespace Nox
                 }
                 if (!running)
                 {
-                    if (voice.ReflectionSlot >= 0 && voice.Reflection.ir && state.ReflectionsOn)
+                    if (voice.ReflectionSlot >= 0 && voice.Reflection.irSize > 0 && state.ReflectionsOn)
                     {
                         state.ReflectionTailBlocks[voice.ReflectionSlot] =
                             static_cast<uint32_t>(SpatialAudio::MaxReflectionDuration * static_cast<float>(state.SampleRate)) / kBlock + 1;
@@ -1205,6 +1221,8 @@ namespace Nox
                         channels[c] = state.AmbisonicsVoice[c];
                     IPLAudioBuffer silence{ 1, static_cast<IPLint32>(kBlock), &input };
                     IPLAudioBuffer tail{ SpatialAudio::ReflectionChannels, static_cast<IPLint32>(kBlock), channels };
+                    if (!FetchResponse(state.ReflectionSources[slot], state.ReflectionTailParams[slot]))
+                        continue;
                     iplReflectionEffectApply(state.ReflectionEffects[slot], &state.ReflectionTailParams[slot], &silence, &tail, state.ReflectionMixer);
                 }
                 float* channels[SpatialAudio::ReflectionChannels];
@@ -1625,12 +1643,15 @@ namespace Nox
                     }
                     return;
                 }
-                const bool valid = m_State.ListenerReverbValid;
+                bool valid = m_State.ListenerReverbValid;
                 if (valid)
                 {
                     m_Params = m_State.ListenerReverbParams;
-                    m_HasParams = true;
+                    valid = FetchResponse(m_State.ListenerReverbSource, m_Params);
+                    m_HasParams |= valid;
                 }
+                else if (m_HasParams)
+                    FetchResponse(m_State.ListenerReverbSource, m_Params); // (the last response, to ring out)
                 for (uint32_t i = 0; i < kBlock; ++i)
                     m_Mono[i] = valid ? 0.5f * (left[i] + right[i]) : 0.0f;
                 if (m_HasParams)
@@ -2220,6 +2241,9 @@ namespace Nox
             state.ReflectionOwner.fill(-1);
             state.ReflectionVoice.fill(-1);
             state.PathingVoice.fill(-1);
+            for (int32_t slot = 0; slot < SpatialAudio::MaxReflectionSources; ++slot)
+                state.ReflectionSources[slot] = SpatialAudio::ReflectionSource(slot);
+            state.ListenerReverbSource = SpatialAudio::ListenerReverbSource();
             state.SteamAudio = created;
             if (!created)
                 NOX_CORE_ERROR("Steam Audio: the voices' effects could not be created -- 3D sounds are panned without it");

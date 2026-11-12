@@ -10,6 +10,7 @@
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Audio/AudioMixer.h"
+#include "NoxCore/Audio/SpatialAudio.h"
 #include "NoxCore/NodeGraph/NodeGraphAsset.h"
 #include "NoxCore/Animation/Skeleton.h"
 #include "NoxCore/Asset/Material.h"
@@ -1165,6 +1166,7 @@ namespace Nox
             DisplayAddComponentEntry<AudioSourceComponent>("Audio Source");
             DisplayAddComponentEntry<AudioListenerComponent>("Audio Listener");
             DisplayAddComponentEntry<AudioVolumeComponent>("Audio Volume");
+            DisplayAddComponentEntry<AcousticProbeVolumeComponent>("Acoustic Probe Volume");
             DisplayAddComponentEntry<LevelStreamingVolumeComponent>("Level Streaming Volume");
             DisplayAddComponentEntry<WorldPartitionComponent>("World Partition");
             DisplayAddComponentEntry<WorldStreamingSourceComponent>("World Streaming Source");
@@ -2472,6 +2474,10 @@ namespace Nox
                 ImGui::Checkbox("Reflections", &spatial.Reflections);
                 ImGui::SetItemTooltip("Echoes and reverb from the level's geometry (Steam Audio), when it is among the nearest sounds\n"
                                       "(Mixer > Acoustics > Voices).");
+                ImGui::Checkbox("Pathing", &spatial.Pathing);
+                ImGui::SetItemTooltip("Heard around corners and through doors (Steam Audio's pathing): what a wall takes from the direct sound\n"
+                                      "comes along the paths baked in the Acoustic Probe Volume the listener is in. Needs Occlusion on and a\n"
+                                      "baked volume around the sound and the listener (Mixer > Acoustics > Pathing Voices: how many at once).");
                 ImGui::Checkbox("Air Absorption", &spatial.AirAbsorption);
                 ImGui::SetItemTooltip("Far away, the highs fade (air absorbs them): a distant sound gets duller.");
                 ImGui::Checkbox("Occlusion", &spatial.Occlusion);
@@ -2579,6 +2585,90 @@ namespace Nox
             ImGui::SetItemTooltip("A sound outside heard from inside: its highs cut above this (20000: not filtered).");
             ImGui::DragFloat("Fade Time", &component.FadeTime, 0.01f, 0.0f, 10.0f, "%.2f s");
             ImGui::SetItemTooltip("How long walking in or out takes to blend the volume, filter and reverb send.");
+        });
+
+        const UUID acousticId = entity.GetUUID();
+        const glm::dmat4 acousticWorld = entity.HasComponent<WorldTransformComponent>() ? entity.GetComponent<WorldTransformComponent>().WorldMatrix : glm::dmat4(1.0);
+        DrawComponent<AcousticProbeVolumeComponent>("Acoustic Probe Volume", entity, [this, acousticId, acousticWorld](auto& component)
+        {
+            AcousticBakeSettings& bake = component.Settings;
+            ImGui::DragFloat3("Half Extents", &component.HalfExtents.x, WorldUnits::FromMeters(0.05f), 0.0f, 1e9f, "%.2f");
+            ImGui::SetItemTooltip("Half the box's size on each axis, in world units, in the entity's space. Probes are placed over the floors inside it:\n"
+                                  "make it cover the rooms the listener walks through (its bottom below the floor, its top below the ceiling is fine).");
+            ImGui::SeparatorText("Probes");
+            ImGui::DragFloat("Spacing", &bake.Spacing, 0.05f, 0.25f, 50.0f, "%.2f m");
+            ImGui::SetItemTooltip("Meters between probes. Smaller follows the rooms more closely and bakes longer (Steam Audio's default: 5 m;\n"
+                                  "small rooms want 1.5 - 3 m: a room needs probes inside it).");
+            ImGui::DragFloat("Height", &bake.Height, 0.01f, 0.0f, 10.0f, "%.2f m");
+            ImGui::SetItemTooltip("Meters above the floor the probes sit at: an ear's height (1.5 m).");
+            ImGui::Checkbox("Reverb", &bake.Reverb);
+            ImGui::SetItemTooltip("Bake the reverb heard at each probe: the Acoustic Reverb effect plays it where the listener is\n"
+                                  "(Mixer > Acoustics > Listener Reverb: Baked).");
+            ImGui::SameLine();
+            ImGui::Checkbox("Pathing", &bake.Pathing);
+            ImGui::SetItemTooltip("Bake the paths between probes: Audio Sources with Pathing are heard around corners and through doors.");
+            if (ImGui::TreeNode("Advanced"))
+            {
+                ImGui::DragInt("Rays", &bake.Rays, 64.0f, 1024, 65536);
+                ImGui::SetItemTooltip("Reverb: rays traced from each probe (Steam Audio's default 16384).");
+                ImGui::DragInt("Bounces", &bake.Bounces, 0.2f, 1, 64);
+                ImGui::SetItemTooltip("Reverb: reflections followed per ray. More: a longer, fuller tail (default 16; 32-64 for halls) and a longer bake.");
+                ImGui::DragFloat("Duration", &bake.Duration, 0.01f, 0.1f, SpatialAudio::MaxReflectionDuration, "%.2f s");
+                ImGui::SetItemTooltip("Reverb: seconds of response kept per probe (memory and mixing cost grow with it).");
+                ImGui::DragInt("Visibility Samples", &bake.VisSamples, 0.1f, 1, 32);
+                ImGui::DragFloat("Visibility Radius", &bake.VisRadius, 0.01f, 0.0f, 2.0f, "%.2f m");
+                ImGui::DragFloat("Visibility Threshold", &bake.VisThreshold, 0.005f, 0.0f, 1.0f, "%.2f");
+                ImGui::DragFloat("Visibility Range", &bake.VisRange, 1.0f, 0.0f, 1000.0f, "%.0f m");
+                ImGui::DragFloat("Path Range", &bake.PathRange, 1.0f, 0.0f, 1000.0f, "%.0f m");
+                ImGui::SetItemTooltip("Pathing: two probes see each other when this share of the rays between points around them\n"
+                                      "(Samples, Radius) is clear; paths longer than Path Range are not kept (Steam Audio's defaults).");
+                ImGui::TreePop();
+            }
+
+            ImGui::SeparatorText("Bake");
+            // What was baked: the probes, their size, when; stale when the box or the settings changed since.
+            const glm::dmat4 box = acousticWorld * glm::scale(glm::dmat4(1.0), glm::dvec3(component.HalfExtents) * 2.0);
+            if (component.BakedData != 0)
+            {
+                const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
+                const auto found = registry.find(component.BakedData);
+                const std::string name = found != registry.end() ? found->second.FilePath.filename().string() : std::string("(missing)");
+                ImGui::TextDisabled("%s", name.c_str());
+                if (found != registry.end() && AssetManager::RequestAsset(component.BakedData) == AssetState::Ready)
+                {
+                    const Ref<AcousticData> data = AssetManager::GetAsset<AcousticData>(component.BakedData);
+                    ImGui::Text("%u probes, %.1f MB", data->ProbeCount, static_cast<double>(data->ProbeBatch.size()) / (1024.0 * 1024.0));
+                    bool moved = false;
+                    for (int column = 0; column < 4; ++column)
+                        moved |= glm::any(glm::greaterThan(glm::abs(data->Volume[column] - box[column]), glm::dvec4(1e-3)));
+                    if (moved || !(data->Settings == bake))
+                        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Out of date: %s changed since the bake", moved ? "the box" : "the settings");
+                }
+            }
+            else
+                ImGui::TextDisabled("Not baked");
+            const AcousticBakeStatus status = m_AcousticBakeStatus ? m_AcousticBakeStatus() : AcousticBakeStatus{};
+            if (status.Running)
+            {
+                ImGui::ProgressBar(status.Progress, ImVec2(-FLT_MIN, 0.0f), status.Status.c_str());
+                if (ImGui::Button("Cancel") && m_CancelAcousticBake)
+                    m_CancelAcousticBake();
+            }
+            else
+            {
+                ImGui::BeginDisabled(!m_BakeAcoustics || m_Context->IsRunning());
+                if (ImGui::Button("Bake"))
+                    m_BakeAcoustics(acousticId);
+                ImGui::SetItemTooltip("Bake this volume against the level's static meshes and their Acoustic Materials (on a thread: the editor\n"
+                                      "stays usable). The data is saved in Assets/Acoustics/<scene>/ and the scene saved with it.");
+                ImGui::SameLine();
+                if (ImGui::Button("Bake All Volumes"))
+                    m_BakeAcoustics(0);
+                ImGui::SetItemTooltip("Bake every Acoustic Probe Volume in the scene.");
+                ImGui::EndDisabled();
+                if (m_Context->IsRunning())
+                    ImGui::TextDisabled("(Stop Play / Simulate to bake)");
+            }
         });
 
         DrawComponent<LevelStreamingVolumeComponent>("Level Streaming Volume", entity, [this](auto& component)

@@ -224,6 +224,12 @@ namespace Nox
                     ++done;
                     continue;
                 }
+                std::vector<glm::vec3> positions(static_cast<size_t>(probeCount));
+                for (int32_t p = 0; p < probeCount; ++p)
+                {
+                    const IPLVector3 center = iplProbeArrayGetProbe(probes, p).center;
+                    positions[static_cast<size_t>(p)] = glm::vec3(glm::dvec3(center.x, center.y, center.z) / metersPerUnit);
+                }
                 IPLProbeBatch batch = nullptr;
                 iplProbeBatchCreate(context, &batch);
                 iplProbeBatchAddProbeArray(batch, probes);
@@ -284,6 +290,7 @@ namespace Nox
                 data->Origin = origin;
                 data->Volume = volume.Box;
                 data->ProbeCount = static_cast<uint32_t>(probeCount);
+                data->ProbePositions = std::move(positions);
                 data->Settings = settings;
                 data->BakedAt = static_cast<uint64_t>(std::time(nullptr));
                 iplSerializedObjectRelease(&serialized);

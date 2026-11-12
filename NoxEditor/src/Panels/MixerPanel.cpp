@@ -280,6 +280,19 @@ namespace Nox
             }
             ImGui::SetItemTooltip("The bus the reflections are heard through (Master by default).");
             changed |= ImGui::SliderFloat("Level", &reflections.LevelDb, kFaderMinDb, 12.0f, "%.1f dB");
+            ImGui::SeparatorText("Baked acoustics");
+            constexpr const char* kReverbModes[] = { "Off", "Real time", "Baked" };
+            int reverbMode = static_cast<int>(reflections.ListenerReverb);
+            if (ImGui::Combo("Listener Reverb", &reverbMode, kReverbModes, IM_ARRAYSIZE(kReverbModes)))
+            {
+                reflections.ListenerReverb = static_cast<AudioListenerReverb>(reverbMode);
+                changed = true;
+            }
+            ImGui::SetItemTooltip("The reverb an Acoustic Reverb effect applies (add one to a bus that sounds send to, like Reverb):\n"
+                                  "Baked: looked up in the Acoustic Probe Volume the listener is in (none outside every baked volume);\n"
+                                  "Real time: traced from the listener (one more reflection source); Off: none.");
+            changed |= ImGui::SliderInt("Pathing Voices", &reflections.PathingSources, 0, SpatialAudio::MaxPathingSources);
+            ImGui::SetItemTooltip("How many sounds with Pathing find their way around corners at once (the nearest).");
             // What the reflections alone add to their bus (the bus's own meter also has whatever else plays through it).
             const AudioEngine::ReflectionStats stats = AudioEngine::GetReflectionStats();
             auto toDb = [](float gain) { return gain > 1e-5f ? 20.0f * std::log10(gain) : -100.0f; };
@@ -288,6 +301,10 @@ namespace Nox
                                   "(sounds playing on it, an Audio Volume's reverb send).");
             ImGui::TextDisabled("%d voice%s with reflections | last run %.1f ms on the reflection thread", stats.Voices, stats.Voices == 1 ? "" : "s",
                                 stats.Milliseconds);
+            const SpatialAudio::ProbeStats probes = SpatialAudio::GetProbeStats();
+            ImGui::TextDisabled("Probe volumes: %u baked in, %u active (%u probes) | listener %s | reverb at listener: %s | %d voice%s with paths",
+                                probes.Batches, probes.Active, probes.Probes, probes.ListenerInside ? "inside one" : "outside them",
+                                stats.ListenerReverb ? "yes" : "no", stats.PathingVoices, stats.PathingVoices == 1 ? "" : "s");
             if (changed)
                 Changed(false);
             ImGui::EndPopup();

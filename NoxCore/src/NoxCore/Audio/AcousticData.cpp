@@ -13,7 +13,7 @@ namespace Nox
         constexpr char kMagic[4] = { 'N', 'X', 'A', 'C' };
 
         // The file, little-endian as written by the editor's platforms: magic, version, origin (3 doubles), volume (16 doubles,
-        // column-major), probe count, settings, baked-at time, then the probe batch's size and bytes.
+        // column-major), probe count, probe positions, settings, baked-at time, then the probe batch's size and bytes.
         struct Writer
         {
             std::vector<char> Bytes;
@@ -60,6 +60,10 @@ namespace Nox
             for (int row = 0; row < 4; ++row)
                 out.Put(data.Volume[column][row]);
         out.Put(data.ProbeCount);
+        out.Put(static_cast<uint32_t>(data.ProbePositions.size()));
+        for (const glm::vec3& probe : data.ProbePositions)
+            for (int i = 0; i < 3; ++i)
+                out.Put(probe[i]);
         const AcousticBakeSettings& s = data.Settings;
         out.Put(s.Spacing);
         out.Put(s.Height);
@@ -108,6 +112,16 @@ namespace Nox
             for (int row = 0; row < 4; ++row)
                 data->Volume[column][row] = in.Get<double>();
         data->ProbeCount = in.Get<uint32_t>();
+        const uint32_t positions = in.Get<uint32_t>();
+        if (!in.Ok || positions > (bytes.size() - in.Offset) / 12)
+        {
+            NOX_CORE_WARN("Acoustic data {}: truncated", path.generic_string());
+            return {};
+        }
+        data->ProbePositions.resize(positions);
+        for (glm::vec3& probe : data->ProbePositions)
+            for (int i = 0; i < 3; ++i)
+                probe[i] = in.Get<float>();
         AcousticBakeSettings& s = data->Settings;
         s.Spacing = in.Get<float>();
         s.Height = in.Get<float>();

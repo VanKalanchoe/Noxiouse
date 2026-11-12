@@ -43,6 +43,20 @@ namespace Nox
         void SetFocusEntityCallback(std::function<void(Entity)> callback) { m_FocusEntity = std::move(callback); }
         // Right-click > Shapes > Cube / Sphere / ...: EditorLayer places the shape, in the folder (or "" for the top level).
         void SetCreateShapeCallback(std::function<void(PrimitiveShape, const std::string&)> callback) { m_CreateShape = std::move(callback); }
+        // An Acoustic Probe Volume's Bake / Bake All / Cancel: EditorLayer bakes (the volume's id, 0 = every volume) on its thread;
+        // the status shows in the Inspector while it runs.
+        struct AcousticBakeStatus
+        {
+            bool Running = false;
+            float Progress = 0.0f;
+            std::string Status;
+        };
+        void SetAcousticBakeCallbacks(std::function<void(UUID)> bake, std::function<void()> cancel, std::function<AcousticBakeStatus()> status)
+        {
+            m_BakeAcoustics = std::move(bake);
+            m_CancelAcousticBake = std::move(cancel);
+            m_AcousticBakeStatus = std::move(status);
+        }
 
         ImVec2 left;
         bool leftFocused;
@@ -91,5 +105,8 @@ namespace Nox
         std::function<void(UUID)> m_CreatePrefabFromEntity;
         std::function<void(Entity)> m_FocusEntity;
         std::function<void(PrimitiveShape, const std::string&)> m_CreateShape;
+        std::function<void(UUID)> m_BakeAcoustics;
+        std::function<void()> m_CancelAcousticBake;
+        std::function<AcousticBakeStatus()> m_AcousticBakeStatus;
     };
 }

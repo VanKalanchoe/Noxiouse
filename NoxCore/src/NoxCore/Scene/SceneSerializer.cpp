@@ -733,6 +733,7 @@ namespace Nox
             out << YAML::Key << "Occlusion" << YAML::Value << source.Spatialization.Occlusion;
             out << YAML::Key << "SourceRadius" << YAML::Value << source.Spatialization.SourceRadius;
             out << YAML::Key << "Reflections" << YAML::Value << source.Spatialization.Reflections;
+            out << YAML::Key << "Pathing" << YAML::Value << source.Spatialization.Pathing;
             if (!source.GraphParameters.empty())
             {
                 out << YAML::Key << "GraphParameters" << YAML::Value << YAML::BeginSeq;
@@ -770,6 +771,29 @@ namespace Nox
             out << YAML::Key << "ExteriorVolume" << YAML::Value << volume.ExteriorVolume;
             out << YAML::Key << "ExteriorLowPass" << YAML::Value << volume.ExteriorLowPass;
             out << YAML::Key << "FadeTime" << YAML::Value << volume.FadeTime;
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<AcousticProbeVolumeComponent>())
+        {
+            const auto& volume = entity.GetComponent<AcousticProbeVolumeComponent>();
+            const AcousticBakeSettings& bake = volume.Settings;
+            out << YAML::Key << "AcousticProbeVolumeComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "HalfExtents" << YAML::Value << volume.HalfExtents;
+            out << YAML::Key << "Spacing" << YAML::Value << bake.Spacing;
+            out << YAML::Key << "Height" << YAML::Value << bake.Height;
+            out << YAML::Key << "Reverb" << YAML::Value << bake.Reverb;
+            out << YAML::Key << "Pathing" << YAML::Value << bake.Pathing;
+            out << YAML::Key << "Rays" << YAML::Value << bake.Rays;
+            out << YAML::Key << "Bounces" << YAML::Value << bake.Bounces;
+            out << YAML::Key << "Duration" << YAML::Value << bake.Duration;
+            out << YAML::Key << "VisSamples" << YAML::Value << bake.VisSamples;
+            out << YAML::Key << "VisRadius" << YAML::Value << bake.VisRadius;
+            out << YAML::Key << "VisThreshold" << YAML::Value << bake.VisThreshold;
+            out << YAML::Key << "VisRange" << YAML::Value << bake.VisRange;
+            out << YAML::Key << "PathRange" << YAML::Value << bake.PathRange;
+            out << YAML::Key << "BakedData" << YAML::Value << static_cast<uint64_t>(volume.BakedData);
             out << YAML::EndMap;
         }
 
@@ -2324,6 +2348,7 @@ namespace Nox
             source.Spatialization.Occlusion = audioSource["Occlusion"].as<bool>(true);
             source.Spatialization.SourceRadius = audioSource["SourceRadius"].as<float>(0.5f);
             source.Spatialization.Reflections = audioSource["Reflections"].as<bool>(true);
+            source.Spatialization.Pathing = audioSource["Pathing"].as<bool>(false);
             if (const YAML::Node parameters = audioSource["GraphParameters"])
             {
                 for (const auto& parameter : parameters)
@@ -2350,6 +2375,26 @@ namespace Nox
             volume.ExteriorVolume = audioVolume["ExteriorVolume"].as<float>(volume.ExteriorVolume);
             volume.ExteriorLowPass = audioVolume["ExteriorLowPass"].as<float>(volume.ExteriorLowPass);
             volume.FadeTime = audioVolume["FadeTime"].as<float>(volume.FadeTime);
+        }
+
+        if (const YAML::Node probeVolume = entity["AcousticProbeVolumeComponent"])
+        {
+            auto& volume = deserializedEntity.AddComponent<AcousticProbeVolumeComponent>();
+            AcousticBakeSettings& bake = volume.Settings;
+            volume.HalfExtents = probeVolume["HalfExtents"].as<glm::vec3>(volume.HalfExtents);
+            bake.Spacing = probeVolume["Spacing"].as<float>(bake.Spacing);
+            bake.Height = probeVolume["Height"].as<float>(bake.Height);
+            bake.Reverb = probeVolume["Reverb"].as<bool>(bake.Reverb);
+            bake.Pathing = probeVolume["Pathing"].as<bool>(bake.Pathing);
+            bake.Rays = probeVolume["Rays"].as<int32_t>(bake.Rays);
+            bake.Bounces = probeVolume["Bounces"].as<int32_t>(bake.Bounces);
+            bake.Duration = probeVolume["Duration"].as<float>(bake.Duration);
+            bake.VisSamples = probeVolume["VisSamples"].as<int32_t>(bake.VisSamples);
+            bake.VisRadius = probeVolume["VisRadius"].as<float>(bake.VisRadius);
+            bake.VisThreshold = probeVolume["VisThreshold"].as<float>(bake.VisThreshold);
+            bake.VisRange = probeVolume["VisRange"].as<float>(bake.VisRange);
+            bake.PathRange = probeVolume["PathRange"].as<float>(bake.PathRange);
+            volume.BakedData = probeVolume["BakedData"].as<uint64_t>(0);
         }
 
         if (auto levelVolume = entity["LevelStreamingVolumeComponent"])

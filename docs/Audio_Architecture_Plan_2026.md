@@ -1,7 +1,7 @@
 # Audio and the Audio Graph -- architecture plan (2026-11-06)
 
-> Status: **A1 Core, A2 Audio graph, A3 Mixer and A4a Steam Audio (HRTF, occlusion) built and tested; A4b real-time reflections built
-> (2026-11-07)**, waiting for the user's test before A4c (baked reverb probes, pathing) (see §11 "... as built"). Backlog C4. This plan covers
+> Status: **A1 Core, A2 Audio graph, A3 Mixer, A4a Steam Audio (HRTF, occlusion) and A4b real-time reflections built and tested;
+> A4c baked acoustics (probe volumes, baked reverb, pathing) built (2026-11-12)**, waiting for the user's test (see §11 "... as built"). Backlog C4. This plan covers
 > the whole audio system the graph needs, not just the graph. Phase gates as in the other plans: each phase is built, then tested by
 > the user, before the next one starts.
 
@@ -551,5 +551,54 @@ probes and pathing with a Bake button).
   -22.2, ceiling + 2 walls removed -32.6 (with six instances of one cube mesh, three removed while playing: -15.4 -> -27.9 -> -15.5 put
   back). Tail after a burst at 4 bounces: gone by 0.2-0.3 s; 16 bounces ~0.5 s; 32 bounces ~1 s (run 13 -> 45 -> 79 ms in the container)
   -- real-time bounces stay at Steam Audio's default 4 (early reflections); the long tail is A4c's baked reverb.
-- **Next, A4c:** baked reverb probes per level and pathing (sound around corners), a Bake button like HLODs.
+
+### A4c as built (2026-11-12): baked acoustics -- probe volumes, the reverb at the listener, pathing
+
+Steam Audio's baking workflow as its Unity plugin has it, checked against its source (github.com/ValveSoftware/steam-audio: the Unity
+plugin's scripts and native effects, the core's path simulator and simulation manager) and measured in the harness:
+
+- **Acoustic Probe Volume** (component; Steam Audio's Probe Batch): a box (Half Extents in the entity's space) with its bake settings --
+  probes uniform over the floors inside it (Spacing 5 m, Height 1.5 m: Steam Audio's defaults), Reverb and Pathing on / off, and the
+  advanced ones (16384 rays, 16 bounces, 1 s; visibility 4 samples, 1 m, 0.1, ranges 1000 m). **Each volume bakes its own data**
+  (`.nacoustics`, new asset type AcousticData: Steam Audio's serialized probe batch, the frame and box it was baked in, the probe
+  positions for the editor), as the Unity plugin keeps one baked asset per probe batch -- so a volume in a sub-level or a world cell
+  brings its acoustics in and out with it.
+- **Bake** (the volume's Inspector: Bake / Bake All Volumes / Cancel, a progress bar): the editor gathers the scene's static meshes as
+  the acoustic scene takes them and runs AcousticBaker on its own thread (minutes for a large level: not a JobSystem task) with Steam
+  Audio's worker threads (half the cores); per volume: probes, the reverb at each (convolution, order 1), the paths between probes.
+  Written to `Assets/Acoustics/<scene>/<volume>_<id>.nacoustics` (rebaked in place), set on the volume, the scene saved. The
+  Inspector shows the probes, the size and "Out of date" when the box or the settings changed since; the viewport draws the volume
+  (green) and the selected one's probes. Packaging takes the data along (the scene names it).
+- **Frames:** probes are positions, so the acoustic origin (A4a: it followed the listener every 1 km) now sits on a 1 km grid -- the
+  grid point nearest the listener, kept until 3/4 of a cell away, and inside a baked volume that volume's own; a volume bakes around the
+  grid point nearest its center and is in the simulation while that is the origin (floats keep ~0.1 mm within the cell).
+- **The reverb at the listener** (Steam Audio's listener-centric reverb): a source at the listener in the reflection simulator --
+  Baked: looked up in the probes of the volume the listener is in (none outside every baked volume); Real time: traced like a
+  reflection source; Off (Mixer > Acoustics > Listener Reverb, saved in the .nmixer). Simulated only while an Acoustic Reverb effect is
+  in the mix.
+- **Acoustic Reverb** (a new bus effect; Steam Audio's reverb mixer effect): what reaches its bus, summed to mono, convolved with the
+  reverb at the listener, decoded to stereo turned with the listener (HRTF optional, off as Steam Audio's default); Wet / Dry.
+  Outside every baked volume silence goes in and the last reverb rings out.
+- **Pathing** (Audio Source > Pathing, off by default as in Steam Audio): the nearest voices with it (Mixer > Acoustics > Pathing
+  Voices, 8) get a pathing source; after the reflections, the reflection thread finds their paths through the probes of the volume
+  the listener is in (validated against the scene and alternate paths found, Steam Audio's defaults), the voice's own distance curve
+  measured along them (Steam Audio's distance callback). Each voice slot has a path effect (order 1, HRTF when the voice is binaural).
+  **Mix:** Steam Audio returns the straight line as the path when nothing blocks it, and its Unity plugin adds pathing to the full
+  direct sound (a source in plain view gets both); here pathing fills only what occlusion takes from the direct sound (its share 1 -
+  occlusion, as Steam Audio applies transmission "only to the occluded portion"): nothing doubles in plain view, and paths take over
+  smoothly as a source goes behind a corner.
+- **Steam Audio's outputs on the mixer thread:** a source's response is a triple buffer whose read side swaps on each
+  iplSourceGetOutputs -- meant for the audio thread (its Unity plugin calls it in the mixer callback). A4b called it on the game thread,
+  where it could swap the buffer the mixer was convolving with; the game thread now only decides which slot has results, and the mixer
+  fetches the responses itself every block (the reflection pool and the listener's reverb).
+- **Fix:** a voice whose occlusion is traced now waits silent until its first result (the same frame, a few ms): its first blocks were
+  heard unoccluded through walls (a burst behind a concrete wall measured -55 dB instead of -83 dB, depending on timing).
+- **Probe placement transform:** Steam Audio's probe volume is the unit cube centered on the origin (-0.5 .. 0.5), row-major like the
+  instanced meshes (checked: 66 probes over the two-room test box, a full grid).
+- **Tests (harness: two 8 x 3 x 8 m concrete rooms joined by a 1 m door, one volume over both):** 66 probes at 1.5 m baked in 4 s
+  (344 KB); saved and loaded back identical; a cancelled bake gives nothing. Through the engine: the baked reverb in room A -20 dB after
+  a 50 ms burst, -44 dB at 0.3-0.5 s (16 bounces); outside the volume nothing; real time -24 dB. A source in room B around the corner
+  -82.6 dB without pathing, -49 dB with (the path through the door, EQ 0.73 / 0.39 / 0.23); in plain view -25.1 / -25.0 dB. All A1-A4b
+  suites pass; ThreadSanitizer: no engine race (its remaining reports are the harness reading mixer state, and one inside Steam
+  Audio's uninstrumented library).
 

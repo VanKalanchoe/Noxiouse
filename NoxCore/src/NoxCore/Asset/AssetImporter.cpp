@@ -17,6 +17,7 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Audio/AudioClip.h"
+#include "NoxCore/Audio/AcousticData.h"
 
 namespace Nox
 {
@@ -84,6 +85,13 @@ namespace Nox
                 return {};
             clip->Handle = h;
             return Ref<Asset>(clip);
+        }},
+        { AssetType::AcousticData, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
+            Ref<AcousticData> data = LoadAcousticData(Project::GetActiveAssetDirectory() / meta.FilePath);
+            if (!data)
+                return {};
+            data->Handle = h;
+            return Ref<Asset>(data);
         }}
     };
     

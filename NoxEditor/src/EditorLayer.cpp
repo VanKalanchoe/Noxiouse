@@ -201,6 +201,13 @@ namespace Nox
             m_TimelinePanels.push_back(CreateScope<TimelinePanel>(handle));
         };
         m_SceneHierarchyPanel.SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
+        m_SceneHierarchyPanel.SetAcousticBakeCallbacks([this](UUID only) { StartAcousticBake(only); }, [this]() { CancelAcousticBake("cancelled"); },
+                                                       [this]() -> SceneHierarchyPanel::AcousticBakeStatus
+                                                       {
+                                                           if (!m_AcousticBake)
+                                                               return {};
+                                                           return { true, m_AcousticBake->GetProgress(), m_AcousticBake->GetStatus() };
+                                                       });
         m_SceneHierarchyPanel.SetFocusEntityCallback([this](Entity entity) { FocusOnEntity(entity); });
         m_SceneHierarchyPanel.SetPlaceAssetsCallback([this](const std::vector<AssetHandle>& handles, const std::string& folder)
         {
@@ -341,6 +348,8 @@ namespace Nox
                 SaveScene();
             NOX_CORE_INFO("Build HLODs: {} ({} HLODs)", failed ? "failed (see above)" : "done", built);
         }
+        if (m_AcousticBake && !m_AcousticBake->IsRunning())
+            FinishAcousticBake();
         UpdatePrefabModeDirty();
         m_ScriptBuilder.Update();
 
@@ -2890,6 +2899,28 @@ namespace Nox
                 auto [wtc, volume] = audioView.get<WorldTransformComponent, AudioVolumeComponent>(entity);
                 drawBox(wtc, volume.HalfExtents, kAudioVolumeColor);
             }
+            // Acoustic Probe Volumes (green), and the selected one's baked probes (small crosses, Steam Audio's probe gizmos).
+            constexpr glm::vec4 kProbeVolumeColor(0.35f, 0.9f, 0.55f, 0.9f);
+            auto probeView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, AcousticProbeVolumeComponent>();
+            const Entity selected = m_SceneHierarchyPanel.GetSelectedEntity();
+            for (auto entity : probeView)
+            {
+                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
+                    continue;
+                auto [wtc, volume] = probeView.get<WorldTransformComponent, AcousticProbeVolumeComponent>(entity);
+                drawBox(wtc, volume.HalfExtents, kProbeVolumeColor);
+                if (selected != Entity(entity, m_ActiveScene.get()) || volume.BakedData == 0 || AssetManager::RequestAsset(volume.BakedData) != AssetState::Ready)
+                    continue;
+                const Ref<AcousticData> data = AssetManager::GetAsset<AcousticData>(volume.BakedData);
+                const float arm = WorldUnits::FromMeters(0.15f);
+                for (const glm::vec3& probe : data->ProbePositions)
+                {
+                    const glm::vec3 p = glm::vec3(m_Renderer->ToRenderSpace(data->Origin + glm::dvec3(probe)));
+                    m_Renderer2D->DrawXRayLine(p - glm::vec3(arm, 0, 0), p + glm::vec3(arm, 0, 0), kProbeVolumeColor);
+                    m_Renderer2D->DrawXRayLine(p - glm::vec3(0, arm, 0), p + glm::vec3(0, arm, 0), kProbeVolumeColor);
+                    m_Renderer2D->DrawXRayLine(p - glm::vec3(0, 0, arm), p + glm::vec3(0, 0, arm), kProbeVolumeColor);
+                }
+            }
         }
 
         // A world's loaded cells: the content bounds of each, in green (World Partition panel, Show in Viewport).
@@ -3239,6 +3270,7 @@ namespace Nox
     void EditorLayer::NewScene()
     {
         CancelHLODBuild("new scene");
+        CancelAcousticBake("new scene");
         SaveEditorCameras();
         EndTimelinePreviews();
         m_HoveredEntity = Entity();
@@ -3286,6 +3318,7 @@ namespace Nox
         // the entities created a slice a frame (OnUpdate), and the scene swapped in once complete. Another scene opened meanwhile
         // replaces this load.
         CancelHLODBuild("another scene opened");
+        CancelAcousticBake("another scene opened");
         m_SceneLoad = CreateScope<SceneLoader>(Project::GetActiveAssetDirectory() / Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle));
         m_SceneLoadHandle = handle;
     }
@@ -5629,6 +5662,7 @@ namespace Nox
     void EditorLayer::OpenPrefabMode(AssetHandle handle)
     {
         CancelHLODBuild("prefab editing");
+        CancelAcousticBake("prefab editing");
         if (m_PrefabMode.Active)
         {
             NOX_CORE_WARN("Prefab Mode is already open for '{}': exit it first", m_PrefabMode.Name);
@@ -5937,10 +5971,110 @@ namespace Nox
         m_HLODBuild.reset();
     }
 
+    void EditorLayer::StartAcousticBake(UUID only)
+    {
+        if (m_AcousticBake || m_SceneLoad || m_SceneState != SceneState::Edit || m_PrefabMode.Active || !m_EditorScene || !SpatialAudio::IsAvailable())
+            return;
+        std::vector<AcousticBakeVolume> volumes;
+        auto view = m_EditorScene->GetAllEntitiesWith<AcousticProbeVolumeComponent, WorldTransformComponent>();
+        for (auto handle : view)
+        {
+            Entity entity(handle, m_EditorScene.get());
+            if (entity.HasComponent<InactiveInHierarchyComponent>() || (only != 0 && entity.GetUUID() != only))
+                continue;
+            const auto& [volume, wtc] = view.get<AcousticProbeVolumeComponent, WorldTransformComponent>(handle);
+            AcousticBakeVolume bake;
+            bake.Key = static_cast<uint64_t>(entity.GetUUID());
+            bake.Name = entity.GetName();
+            bake.Box = wtc.WorldMatrix * glm::scale(glm::dmat4(1.0), glm::dvec3(volume.HalfExtents) * 2.0);
+            bake.Settings = volume.Settings;
+            volumes.push_back(std::move(bake));
+        }
+        if (volumes.empty())
+        {
+            NOX_CORE_WARN("Bake acoustics: no (visible) Acoustic Probe Volume to bake");
+            return;
+        }
+        std::vector<AcousticInstance> instances;
+        if (const uint32_t loading = m_EditorScene->GatherAcousticInstances(instances); loading > 0)
+            NOX_CORE_WARN("Bake acoustics: {} meshes are still loading and are left out (bake again once they are in)", loading);
+        NOX_CORE_INFO("Bake acoustics: {} volume(s) against {} static meshes", volumes.size(), instances.size());
+        m_AcousticBake = CreateScope<AcousticBaker>();
+        m_AcousticBakeScene = m_EditorScene;
+        m_AcousticBake->Start(instances, {}, std::move(volumes));
+    }
+
+    void EditorLayer::FinishAcousticBake()
+    {
+        std::vector<AcousticBaker::Result> results = m_AcousticBake->TakeResults();
+        const bool cancelled = m_AcousticBake->WasCancelled();
+        m_AcousticBake.reset();
+        m_AcousticBakeScene = nullptr;
+        // (applied to the scene being edited, by the volumes' ids: an undo while baking replaced the scene object, not its entities)
+        if (cancelled || !m_EditorScene || !Project::GetActive())
+            return;
+        auto assets = Project::GetActive()->GetEditorAssetManager();
+        // Assets/Acoustics/<scene>/<volume>_<id>.nacoustics: one file per volume, rebaked in place.
+        const std::string sceneName = m_EditorScenePath.empty() ? std::string("Untitled") : m_EditorScenePath.stem().string();
+        auto fileName = [](std::string name)
+        {
+            for (char& c : name)
+                if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-' && c != '_')
+                    c = '_';
+            return name.empty() ? std::string("Volume") : name;
+        };
+        size_t baked = 0;
+        for (const AcousticBaker::Result& result : results)
+        {
+            Entity entity = m_EditorScene->GetEntityByUUID(result.Key);
+            const std::string name = entity ? entity.GetName() : std::string("(deleted volume)");
+            if (!result.Data)
+            {
+                NOX_CORE_ERROR("Bake acoustics: {}: {}", name, result.Error);
+                continue;
+            }
+            if (!entity || !entity.HasComponent<AcousticProbeVolumeComponent>())
+                continue;
+            const std::filesystem::path relative = std::filesystem::path("Acoustics") / sceneName / (fileName(name) + "_" + std::to_string(result.Key) + ".nacoustics");
+            if (!SaveAcousticData(Project::GetActiveAssetDirectory() / relative, *result.Data))
+            {
+                NOX_CORE_ERROR("Bake acoustics: {}: could not write {}", name, relative.generic_string());
+                continue;
+            }
+            AssetHandle handle = assets->FindHandleByPath(relative, AssetType::AcousticData);
+            if (handle == 0)
+            {
+                assets->ImportAsset(relative, relative, AssetType::AcousticData);
+                handle = assets->FindHandleByPath(relative, AssetType::AcousticData);
+            }
+            else
+                assets->ReimportAsset(handle, true); // (the loaded copy replaced by the new bake)
+            entity.GetComponent<AcousticProbeVolumeComponent>().BakedData = handle;
+            NOX_CORE_INFO("Bake acoustics: {}: {} probes, {:.1f} MB -> {}", name, result.Data->ProbeCount,
+                          static_cast<double>(result.Data->ProbeBatch.size()) / (1024.0 * 1024.0), relative.generic_string());
+            ++baked;
+        }
+        if (baked > 0 && !m_EditorScenePath.empty())
+            SaveScene(); // (the volumes name their new data)
+        else if (baked > 0)
+            NOX_CORE_WARN("Bake acoustics: save the scene to keep the volumes' baked data");
+    }
+
+    void EditorLayer::CancelAcousticBake(const char* reason)
+    {
+        if (!m_AcousticBake)
+            return;
+        NOX_CORE_WARN("Bake acoustics cancelled ({})", reason);
+        m_AcousticBake->Cancel();
+        m_AcousticBake.reset(); // (waits for the baker's thread: Steam Audio's bake stops within moments of the cancel)
+        m_AcousticBakeScene = nullptr;
+    }
+
     void EditorLayer::OnScenePlay()
     {
         m_EditorSceneReferencesValid = false; // (collected again for this session)
         CancelHLODBuild("Play");
+        CancelAcousticBake("Play");
         EndTimelinePreviews(); // Play copies the scene as it is
         SetViewMode(EditorViewMode::Perspective);
         if (m_SceneState == SceneState::Simulate)
@@ -5959,6 +6093,7 @@ namespace Nox
     {
         m_EditorSceneReferencesValid = false; // (collected again for this session)
         CancelHLODBuild("Simulate");
+        CancelAcousticBake("Simulate");
         EndTimelinePreviews();
         if (m_SceneState == SceneState::Play)
             OnSceneStop();

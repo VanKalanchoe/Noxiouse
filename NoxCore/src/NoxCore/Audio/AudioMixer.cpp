@@ -177,6 +177,8 @@ namespace Nox
         out << YAML::Key << "MaxSources" << YAML::Value << data.Reflections.MaxSources;
         out << YAML::Key << "Bus" << YAML::Value << data.Reflections.Bus;
         out << YAML::Key << "LevelDb" << YAML::Value << data.Reflections.LevelDb;
+        out << YAML::Key << "ListenerReverb" << YAML::Value << std::string(AudioListenerReverbToString(data.Reflections.ListenerReverb));
+        out << YAML::Key << "PathingSources" << YAML::Value << data.Reflections.PathingSources;
         out << YAML::EndMap;
         out << YAML::Key << "Buses" << YAML::Value << YAML::BeginSeq;
         for (const AudioMixerBus& bus : data.Buses)
@@ -304,6 +306,8 @@ namespace Nox
                 data.Reflections.MaxSources = reflections["MaxSources"].as<int32_t>(4);
                 data.Reflections.Bus = reflections["Bus"].as<uint64_t>(kAudioBusMaster);
                 data.Reflections.LevelDb = reflections["LevelDb"].as<float>(0.0f);
+                data.Reflections.ListenerReverb = AudioListenerReverbFromString(reflections["ListenerReverb"].as<std::string>("Baked"));
+                data.Reflections.PathingSources = reflections["PathingSources"].as<int32_t>(8);
             }
             for (const YAML::Node& node : root["Buses"])
             {

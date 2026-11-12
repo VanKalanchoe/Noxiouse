@@ -1812,7 +1812,9 @@ namespace Nox
         AudioEngine::SetGroupPaused(AudioVoiceGroup::Game, false);
         AudioMixer::ResetGameState(); // the snapshot and the bus volumes the game set: back to the mix
         SpatialAudio::ClearInstances(); // the acoustic scene goes with the running scene
+        SpatialAudio::ClearProbeBatches();
         m_AcousticEntries.clear();
+        m_AcousticBatches.clear();
         m_PendingOneShots.clear();
         m_OneShotVoices.clear();
         for (auto handle : m_Registry.view<AudioSourceComponent>())
@@ -2151,7 +2153,68 @@ namespace Nox
                 SpatialAudio::RemoveInstance(it->first);
             it = m_AcousticEntries.erase(it);
         }
+        // Acoustic Probe Volumes' baked data (A4c): in the simulation while their entity is (its level, its cell).
+        std::unordered_map<uint64_t, AssetHandle> batches;
+        for (auto handle : m_Registry.view<AcousticProbeVolumeComponent, IDComponent>(entt::exclude<InactiveInHierarchyComponent>))
+        {
+            const AssetHandle baked = m_Registry.get<AcousticProbeVolumeComponent>(handle).BakedData;
+            if (baked == 0 || AssetManager::GetAssetType(baked) != AssetType::AcousticData)
+                continue;
+            const uint64_t key = static_cast<uint64_t>(m_Registry.get<IDComponent>(handle).ID);
+            const AssetState state = AssetManager::RequestAsset(baked);
+            if (state == AssetState::Ready)
+            {
+                const auto found = m_AcousticBatches.find(key);
+                if (found == m_AcousticBatches.end() || found->second != baked)
+                    SpatialAudio::SetProbeBatch(key, AssetManager::GetAsset<AcousticData>(baked));
+                batches[key] = baked;
+            }
+            else if (const auto found = m_AcousticBatches.find(key); found != m_AcousticBatches.end() && found->second == baked)
+                batches[key] = baked; // (still in)
+        }
+        for (const auto& [key, baked] : m_AcousticBatches)
+            if (!batches.contains(key))
+                SpatialAudio::RemoveProbeBatch(key);
+        m_AcousticBatches = std::move(batches);
         SpatialAudio::UpdateScene(m_AudioListenerPosition);
+    }
+
+    uint32_t Scene::GatherAcousticInstances(std::vector<AcousticInstance>& out)
+    {
+        // The same meshes UpdateAcousticScene places: static, not under an animator, active.
+        uint32_t loading = 0;
+        for (auto handle : m_Registry.view<MeshComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>))
+        {
+            const MeshComponent& component = m_Registry.get<MeshComponent>(handle);
+            const AssetType type = AssetManager::GetAssetType(component.Mesh);
+            if (type != AssetType::StaticMesh && type != AssetType::Mesh)
+                continue;
+            bool animated = false;
+            entt::entity walk = handle;
+            for (int depth = 0; walk != entt::null && depth < 1024 && !animated; ++depth)
+            {
+                animated = m_Registry.all_of<AnimatorComponent>(walk);
+                const auto* relationship = m_Registry.try_get<RelationshipComponent>(walk);
+                if (!relationship || relationship->Parent == 0)
+                    break;
+                const auto found = m_EntityMap.find(relationship->Parent);
+                walk = found != m_EntityMap.end() ? found->second : entt::null;
+            }
+            if (animated)
+                continue;
+            AcousticInstance instance;
+            if (!ResolveAcousticMaterials(handle, instance.Materials))
+            {
+                ++loading;
+                continue;
+            }
+            instance.Mesh = component.Mesh;
+            instance.FirstSubmesh = component.SubmeshIndex;
+            instance.SubmeshCount = component.SubmeshCount;
+            instance.World = m_Registry.get<WorldTransformComponent>(handle).WorldMatrix;
+            out.push_back(std::move(instance));
+        }
+        return loading;
     }
 
     Scene::AudioEnvironment Scene::AudioEnvironmentAt(const glm::dvec3& position) const
@@ -2973,7 +3036,7 @@ namespace Nox
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
             PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent,
-            AudioSourceComponent, AudioListenerComponent, AudioVolumeComponent, FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
+            AudioSourceComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
             CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent, PhysicsJoint3DComponent, CollisionFilter3DComponent,
@@ -3583,6 +3646,11 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<AudioVolumeComponent>(Entity entity, AudioVolumeComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<AcousticProbeVolumeComponent>(Entity entity, AcousticProbeVolumeComponent& component)
     {
     }
 

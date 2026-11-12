@@ -17,6 +17,7 @@
 #include "Panels/LevelsPanel.h"
 #include "Panels/MixerPanel.h"
 #include "NoxCore/Scene/HLODBuilder.h"
+#include "NoxCore/Audio/AcousticBake.h"
 #include "StreamingTestWorld.h"
 #include "Panels/RenderGraphPanel.h"
 #include "Panels/NodeGraphEditorPanel.h"
@@ -343,6 +344,13 @@ namespace Nox
         void UI_StreamingTestWorld();
         void StartHLODBuild();
         void CancelHLODBuild(const char* reason);
+        // Acoustic Probe Volumes' Bake (A4c): on the baker's thread; done, each volume's data is written to
+        // Assets/Acoustics/<scene>/, registered and set on the volume, and the scene saved. Play, another scene cancel it.
+        Scope<AcousticBaker> m_AcousticBake;
+        Ref<Scene> m_AcousticBakeScene;
+        void StartAcousticBake(UUID only); // 0: every volume
+        void FinishAcousticBake();
+        void CancelAcousticBake(const char* reason);
         // A world's cells were loading or unloading last frame: once done, the undo history starts again (loading is not a step).
         bool m_WorldCellsBusy = false;
         // Open node-graph editors (docs/Animation_Graph_Architecture_Plan_2026.md Step 3), one per opened graph

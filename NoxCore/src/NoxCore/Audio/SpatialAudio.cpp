@@ -1008,13 +1008,21 @@ namespace Nox
     {
         if (!s_State || !s_State->ListenerAdded || !s_State->ListenerHasResults)
             return false;
-        IPLSimulationOutputs outputs{};
-        iplSourceGetOutputs(s_State->ListenerSource, IPL_SIMULATIONFLAGS_REFLECTIONS, &outputs);
-        out = outputs.reflections;
+        out = {};
         out.type = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION;
         out.numChannels = ReflectionChannels;
         out.irSize = static_cast<IPLint32>(s_State->ListenerIrSeconds * static_cast<float>(s_State->SampleRate));
-        return out.ir != nullptr;
+        return true;
+    }
+
+    IPLSource SpatialAudio::ReflectionSource(int32_t slot)
+    {
+        return s_State && slot >= 0 && slot < MaxReflectionSources ? s_State->Pool[slot] : nullptr;
+    }
+
+    IPLSource SpatialAudio::ListenerReverbSource()
+    {
+        return s_State ? s_State->ListenerSource : nullptr;
     }
 
     SpatialAudio::PathingOutputs SpatialAudio::GetPathingOutputs(int32_t slot)
@@ -1120,14 +1128,11 @@ namespace Nox
     {
         if (!s_State || slot < 0 || slot >= MaxReflectionSources || !s_State->PoolHasResults[slot] || !s_State->PoolAdded[slot])
             return false;
-        IPLSimulationOutputs outputs{};
-        iplSourceGetOutputs(s_State->Pool[slot], IPL_SIMULATIONFLAGS_REFLECTIONS, &outputs);
-        out = outputs.reflections;
+        out = {};
         out.type = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION;
         out.numChannels = ReflectionChannels;
-        if (out.irSize <= 0)
-            out.irSize = static_cast<IPLint32>(s_State->Settings.Duration * static_cast<float>(s_State->SampleRate));
-        return out.ir != nullptr;
+        out.irSize = static_cast<IPLint32>(s_State->Settings.Duration * static_cast<float>(s_State->SampleRate));
+        return true;
     }
 
     float SpatialAudio::GetLastReflectionMilliseconds()

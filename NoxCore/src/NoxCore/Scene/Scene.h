@@ -425,9 +425,15 @@ namespace Nox
             uint64_t Seen = 0;
         };
         std::unordered_map<uint64_t, AcousticEntry> m_AcousticEntries;
+        std::unordered_map<uint64_t, AssetHandle> m_AcousticBatches; // Acoustic Probe Volumes in the simulation: entity -> its baked data
         uint64_t m_AcousticFrame = 0;
         uint32_t m_AcousticMaterialVersion = 0;
         void UpdateAcousticScene();
+    public:
+        // The static meshes as the acoustic scene takes them (Acoustic Probe Volumes are baked against them). Returns how many were
+        // left out because their mesh or materials are still loading.
+        uint32_t GatherAcousticInstances(std::vector<AcousticInstance>& out);
+    private:
         bool ResolveAcousticMaterials(entt::entity entity, std::vector<AcousticMaterial>& outMaterials) const;
         std::chrono::steady_clock::time_point m_AudioLastUpdate{}; // (the volumes' blending runs on real time: also while paused)
         std::vector<UUID> m_PendingDestroy;

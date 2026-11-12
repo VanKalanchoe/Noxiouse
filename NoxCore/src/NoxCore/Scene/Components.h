@@ -25,6 +25,7 @@
 
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Audio/AudioEngine.h"
+#include "NoxCore/Audio/AcousticData.h"
 #include "NoxCore/Scripting/ScriptTypes.h"
 #include "NoxCore/Renderer/DataTypes.h"
 
@@ -610,6 +611,19 @@ namespace Nox
         float FadeTime = 0.5f;                // seconds
     };
 
+    // A box whose acoustics are baked (docs/Audio_Architecture_Plan_2026.md §11 "A4c as built"; Steam Audio's Probe Batch, as its
+    // Unity and Unreal plugins have it): sound probes over the floors inside it, the reverb heard at each (the Acoustic Reverb effect
+    // applies the one where the listener is) and the paths between them (sounds with Pathing find their way around corners). The
+    // Inspector's Bake writes BakedData (.nacoustics); the box is HalfExtents in the entity's space, and the bake keeps the box it
+    // was made for -- moved, resized or the level changed, bake it again. Each volume's data comes and goes with its entity (its
+    // level or world cell).
+    struct AcousticProbeVolumeComponent
+    {
+        glm::vec3 HalfExtents{ WorldUnits::FromMeters(5.0f), WorldUnits::FromMeters(2.5f), WorldUnits::FromMeters(5.0f) };
+        AcousticBakeSettings Settings;
+        AssetHandle BakedData = 0; // AcousticData
+    };
+
     // A particle emitter (docs/Hybrid_Renderer_Plan_2026-10.md §6, V1 / V2): particles spawned around the entity and simulated on
     // the CPU (Scene/ParticleSystem.h: gravity, drag, spin), drawn as camera-facing quads -- a texture (a flipbook sheet of
     // columns x rows frames) or soft round dots -- added (fire, sparks) or alpha blended (smoke, dust), optionally lit by the
@@ -1129,7 +1143,7 @@ namespace Nox
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
         MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent,
-        TimelinePlayerComponent, AudioSourceComponent, AudioListenerComponent, AudioVolumeComponent, ParticleEmitterComponent, SpriteRendererComponent,
+        TimelinePlayerComponent, AudioSourceComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, ParticleEmitterComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,

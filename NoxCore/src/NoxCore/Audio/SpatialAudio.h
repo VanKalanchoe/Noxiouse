@@ -54,14 +54,7 @@ namespace Nox
         static IPLHRTF Hrtf();
 
         // ---- The acoustic scene (the running scene's static meshes) ----------------------------------------------------------
-        struct Instance
-        {
-            AssetHandle Mesh = 0;
-            uint32_t FirstSubmesh = 0;
-            uint32_t SubmeshCount = 1;               // UINT32_MAX: all
-            std::vector<AcousticMaterial> Materials; // per submesh of the range (resolved: never Auto)
-            glm::dmat4 World{ 1.0 };                 // world units
-        };
+        using Instance = AcousticInstance;
         // By a key of the caller's (an entity's id): added, or updated (a new transform moves it; other changes rebuild it).
         static void SetInstance(uint64_t key, const Instance& instance);
         static void RemoveInstance(uint64_t key);
@@ -145,10 +138,16 @@ namespace Nox
         // given, and the listener's reverb (ReflectionSettings::Reverb); the slots not given are left out. False: no run started
         // (not idle, or nothing to simulate).
         static bool StartSimulation(const std::vector<std::pair<int32_t, glm::dvec3>>& reflections, const std::vector<PathingRequest>& pathing);
-        // The effect parameters a pool slot's last run produced (false: none yet).
+        // Whether a pool slot's last run produced a response, and the effect parameters to play it with -- all but the response
+        // itself: Steam Audio hands it out through a triple buffer the audio thread reads (its outputs, fetched on the mixer
+        // thread each block: ReflectionSource), never the game thread.
         static bool GetReflectionParams(int32_t slot, IPLReflectionEffectParams& out);
-        // The reverb at the listener from the last run (false: none -- Off, or Baked outside every baked volume).
+        // The same for the reverb at the listener (false: none -- Off, or Baked outside every baked volume).
         static bool GetListenerReverbParams(IPLReflectionEffectParams& out);
+        // The sources whose responses the mixer thread reads (iplSourceGetOutputs with IPL_SIMULATIONFLAGS_REFLECTIONS): fixed from
+        // Init to Shutdown.
+        static IPLSource ReflectionSource(int32_t slot);
+        static IPLSource ListenerReverbSource();
         // A pathing slot's last run: the paths' EQ and their directions (order-1 ambisonics, world space). Not valid when the
         // listener or the source was outside every active baked volume (no probes to find paths between).
         struct PathingOutputs

@@ -122,6 +122,7 @@ namespace Nox
         { ".nanimgraph", AssetType::AnimationGraph },
         { ".naudiograph", AssetType::AudioGraph },
         { ".nmixer", AssetType::AudioMixer },
+        { ".nacoustics", AssetType::AcousticData },
         { ".nprefab", AssetType::Prefab },
         { ".ntimeline", AssetType::Timeline },
         { ".ttf", AssetType::Font },
@@ -1005,6 +1006,7 @@ namespace Nox
         case AssetType::AnimationGraph:
         case AssetType::AudioGraph:
         case AssetType::AudioClip:
+        case AssetType::AcousticData:
         case AssetType::Timeline:
         case AssetType::Material:
         case AssetType::Texture2D:

@@ -8,9 +8,21 @@
 
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/core.h"
+#include "AudioTypes.h"
 
 namespace Nox
 {
+    // A static mesh as the acoustic scene places it (and a bake traces it): the triangles of a mesh asset's submesh range, each
+    // submesh's acoustic material, where it is.
+    struct AcousticInstance
+    {
+        AssetHandle Mesh = 0;
+        uint32_t FirstSubmesh = 0;
+        uint32_t SubmeshCount = 1;               // UINT32_MAX: all
+        std::vector<AcousticMaterial> Materials; // per submesh of the range (resolved: never Auto)
+        glm::dmat4 World{ 1.0 };                 // world units
+    };
+
     // How an Acoustic Probe Volume is baked (docs/Audio_Architecture_Plan_2026.md §11 "A4c as built"). The defaults are Steam Audio's
     // own (its Unity plugin's probe batch and baking settings).
     struct AcousticBakeSettings
@@ -41,6 +53,7 @@ namespace Nox
         glm::dvec3 Origin{ 0.0 };          // world units: the frame's origin (Steam Audio works in meters from here)
         glm::dmat4 Volume{ 1.0 };          // world units: the unit cube (-0.5 .. 0.5) onto the baked box
         uint32_t ProbeCount = 0;
+        std::vector<glm::vec3> ProbePositions; // world units from Origin (the editor draws them)
         AcousticBakeSettings Settings;
         uint64_t BakedAt = 0;              // seconds since 1970
         std::vector<uint8_t> ProbeBatch;   // Steam Audio's serialized probe batch
