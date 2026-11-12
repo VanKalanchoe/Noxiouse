@@ -1,6 +1,7 @@
 # pragma once
 
 #include <string>
+#include <vector>
 
 #include "NoxCore/Core/core.h"
 
@@ -36,6 +37,10 @@ namespace Nox
         std::string WindowMode = kDefaultWindowMode;
         // The mixer every sound plays through (.nmixer, relative to AssetDirectory): its buses, effects and snapshots.
         std::filesystem::path AudioMixer = kDefaultAudioMixerPath;
+        // Unreal's Physical Surface types (Project Settings > Physics): the names materials and bodies pick from; "Default" is
+        // always there (what a surface without one is).
+        std::vector<std::string> PhysicalSurfaces = { "Default", "Concrete", "Stone", "Grass", "Dirt", "Sand", "Gravel", "Wood",
+                                                      "Metal", "Water", "Snow", "Carpet", "Tile", "Glass" };
     };
     
     class Project : public RefCounted

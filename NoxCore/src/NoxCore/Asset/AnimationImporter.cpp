@@ -67,6 +67,17 @@ namespace Nox
                 notify.Time = entry["Time"] ? entry["Time"].as<float>() : 0.0f;
                 notify.Name = entry["Name"] ? entry["Name"].as<std::string>() : std::string();
                 notify.SyncMarker = entry["Sync"] && entry["Sync"].as<bool>();
+                if (const YAML::Node sound = entry["Sound"])
+                {
+                    notify.Sound = sound["Asset"].as<uint64_t>(0);
+                    notify.Bone = sound["Bone"].as<std::string>(std::string());
+                    notify.TraceSurface = sound["TraceSurface"].as<bool>(false);
+                    notify.TraceDistance = sound["TraceDistance"].as<float>(notify.TraceDistance);
+                    notify.Volume = sound["Volume"].as<float>(notify.Volume);
+                    notify.PitchVariation = sound["PitchVariation"].as<float>(notify.PitchVariation);
+                    for (const YAML::Node& surface : sound["Surfaces"])
+                        notify.SurfaceSounds.push_back({ surface["Surface"].as<std::string>(std::string()), AssetHandle(surface["Asset"].as<uint64_t>(0)) });
+                }
                 if (!notify.Name.empty())
                     notifies.push_back(std::move(notify));
             }
@@ -95,6 +106,26 @@ namespace Nox
             out << YAML::BeginMap << YAML::Key << "Time" << YAML::Value << notify.Time << YAML::Key << "Name" << YAML::Value << notify.Name;
             if (notify.SyncMarker)
                 out << YAML::Key << "Sync" << YAML::Value << true;
+            if (notify.HasSound())
+            {
+                out << YAML::Key << "Sound" << YAML::Value << YAML::BeginMap;
+                out << YAML::Key << "Asset" << YAML::Value << static_cast<uint64_t>(notify.Sound);
+                if (!notify.Bone.empty())
+                    out << YAML::Key << "Bone" << YAML::Value << notify.Bone;
+                out << YAML::Key << "TraceSurface" << YAML::Value << notify.TraceSurface;
+                out << YAML::Key << "TraceDistance" << YAML::Value << notify.TraceDistance;
+                out << YAML::Key << "Volume" << YAML::Value << notify.Volume;
+                out << YAML::Key << "PitchVariation" << YAML::Value << notify.PitchVariation;
+                if (!notify.SurfaceSounds.empty())
+                {
+                    out << YAML::Key << "Surfaces" << YAML::Value << YAML::BeginSeq;
+                    for (const AnimationNotify::SurfaceSound& surface : notify.SurfaceSounds)
+                        out << YAML::Flow << YAML::BeginMap << YAML::Key << "Surface" << YAML::Value << surface.Surface << YAML::Key << "Asset"
+                            << YAML::Value << static_cast<uint64_t>(surface.Sound) << YAML::EndMap;
+                    out << YAML::EndSeq;
+                }
+                out << YAML::EndMap;
+            }
             out << YAML::EndMap;
         }
         out << YAML::EndSeq << YAML::EndMap;

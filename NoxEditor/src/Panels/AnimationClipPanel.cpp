@@ -1,6 +1,7 @@
 #include "AnimationClipPanel.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <imgui.h>
 #include "misc/cpp/imgui_stdlib.h"
@@ -13,6 +14,8 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 #include "AssetPreviewRenderer.h"
+#include "AudioWidgets.h"
+#include "NoxCore/Animation/Skeleton.h"
 
 namespace Nox
 {
@@ -67,6 +70,97 @@ namespace Nox
         m_PreviewSkeleton = Project::GetActive()->GetEditorAssetManager()->FindSkeletonOf(mesh);
     }
 
+    bool AnimationClipPanel::DrawNotifySound(AnimationNotify& notify)
+    {
+        bool changed = false;
+        ImGui::Text("Play Sound: %s", notify.Name.c_str());
+        ImGui::Separator();
+        changed |= SoundAssetCombo("Sound", notify.Sound);
+        ImGui::SetItemTooltip("Played when a playhead crosses the notify -- or, with Trace Surface, when the surface below has no sound of\n"
+                              "its own in the list. Its Sound Settings (Content Browser) limit how many play at once.");
+
+        // The bone it plays at: the preview skeleton's bones, or typed.
+        const Skeleton* skeleton = m_PreviewSkeleton != 0 ? AssetManager::FindLoadedAsset<Skeleton>(m_PreviewSkeleton) : nullptr;
+        if (m_PreviewSkeleton != 0 && !skeleton)
+            AssetManager::RequestAsset(m_PreviewSkeleton);
+        if (ImGui::BeginCombo("Bone", notify.Bone.empty() ? "(the entity)" : notify.Bone.c_str()))
+        {
+            if (ImGui::Selectable("(the entity)", notify.Bone.empty()))
+            {
+                notify.Bone.clear();
+                changed = true;
+            }
+            if (skeleton)
+            {
+                for (const Node* node : skeleton->AllNodes)
+                {
+                    if (node && !node->Name.empty() && ImGui::Selectable(node->Name.c_str(), notify.Bone == node->Name))
+                    {
+                        notify.Bone = node->Name;
+                        changed = true;
+                    }
+                }
+            }
+            else
+                ImGui::TextDisabled("(no preview skeleton: type the name below)");
+            ImGui::EndCombo();
+        }
+        ImGui::SetItemTooltip("Where the sound plays (a foot for a footstep). The entity: its origin.");
+        ImGui::InputText("##bone", &notify.Bone);
+        changed |= ImGui::IsItemDeactivatedAfterEdit();
+
+        changed |= ImGui::Checkbox("Trace Surface", &notify.TraceSurface);
+        ImGui::SetItemTooltip("A ray goes down from the bone (from 20 cm above it); the physical surface it hits picks the sound from the list\n"
+                              "below (the material's Physical Surface, or the Rigidbody 3D's). No hit, or no sound for that surface: Sound.");
+        if (notify.TraceSurface)
+        {
+            ImGui::DragFloat("Trace Distance", &notify.TraceDistance, 0.01f, 0.0f, 10.0f, "%.2f m");
+            changed |= ImGui::IsItemDeactivatedAfterEdit();
+            ImGui::SetItemTooltip("How far below the bone the ground may be (the ray is this + 0.2 m long).");
+            ImGui::SeparatorText("Sounds by surface");
+            int remove = -1;
+            for (int i = 0; i < static_cast<int>(notify.SurfaceSounds.size()); ++i)
+            {
+                AnimationNotify::SurfaceSound& entry = notify.SurfaceSounds[i];
+                ImGui::PushID(i);
+                ImGui::SetNextItemWidth(130.0f);
+                changed |= PhysicalSurfaceCombo("##surface", entry.Surface, "Default");
+                if (entry.Surface.empty())
+                    entry.Surface = "Default";
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(200.0f);
+                changed |= SoundAssetCombo("##sound", entry.Sound);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("x"))
+                    remove = i;
+                ImGui::PopID();
+            }
+            if (remove >= 0)
+            {
+                notify.SurfaceSounds.erase(notify.SurfaceSounds.begin() + remove);
+                changed = true;
+            }
+            if (ImGui::SmallButton("Add Surface Sound"))
+            {
+                notify.SurfaceSounds.push_back({ "Grass", 0 });
+                changed = true;
+            }
+        }
+        ImGui::Separator();
+        ImGui::SliderFloat("Volume", &notify.Volume, 0.0f, 1.0f, "%.2f");
+        changed |= ImGui::IsItemDeactivatedAfterEdit();
+        ImGui::DragFloat("Pitch Variation", &notify.PitchVariation, 0.005f, 0.0f, 0.5f, "+/- %.3f");
+        changed |= ImGui::IsItemDeactivatedAfterEdit();
+        ImGui::SetItemTooltip("Each play's pitch is random within this (0.05: +/- 5%%): no two footsteps alike.");
+        if (notify.HasSound() && ImGui::Button("Remove Sound"))
+        {
+            notify.Sound = 0;
+            notify.SurfaceSounds.clear();
+            changed = true;
+        }
+        return changed;
+    }
+
     void AnimationClipPanel::DrawPreview(float duration)
     {
         const AnimationSequence* clip = AssetManager::FindLoadedAsset<AnimationSequence>(m_Clip);
@@ -100,7 +194,7 @@ namespace Nox
             if (clip)
             {
                 // Across the range's ends: the part up to the end, then from the start (the notifies of each).
-                std::vector<std::string> crossed;
+                std::vector<AnimationNotify> crossed;
                 if (wrapped && (rangeStart > 0.0f || rangeEnd < duration))
                 {
                     if (m_Speed >= 0.0f)
@@ -118,8 +212,16 @@ namespace Nox
                     CollectCrossedNotifies(*clip, previous, m_Cursor, wrapped, crossed);
                 if (!crossed.empty())
                 {
-                    m_LastNotify = crossed.back();
+                    m_LastNotify = crossed.back().Name;
                     m_LastNotifyAge = 0.0f;
+                }
+                // Their sounds, heard as the preview passes them (the default sound: no ground here to trace).
+                for (const AnimationNotify& notify : crossed)
+                {
+                    AssetHandle sound = notify.Sound;
+                    if (sound == 0 && !notify.SurfaceSounds.empty())
+                        sound = notify.SurfaceSounds.front().Sound;
+                    PlayPreviewSound(sound, notify.Volume);
                 }
             }
         }
@@ -266,12 +368,13 @@ namespace Nox
         }
         ImGui::SetItemTooltip("Scripts on the animated entity receive OnAnimationEvent(\"%s\") when a playhead crosses it.", m_NewName);
 
-        if (ImGui::BeginTable("##notifies", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY,
+        if (ImGui::BeginTable("##notifies", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY,
                               ImVec2(0.0f, std::max(ImGui::GetContentRegionAvail().y, 80.0f))))
         {
             ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 120.0f);
             ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("Sync", ImGuiTableColumnFlags_WidthFixed, 40.0f);
+            ImGui::TableSetupColumn("Sound", ImGuiTableColumnFlags_WidthFixed, 150.0f);
             ImGui::TableSetupColumn("##actions", ImGuiTableColumnFlags_WidthFixed, 110.0f);
             ImGui::TableHeadersRow();
             int remove = -1;
@@ -292,6 +395,27 @@ namespace Nox
                 changed |= ImGui::Checkbox("##sync", &notify.SyncMarker);
                 ImGui::SetItemTooltip("Sync marker: not raised as an event; blend spaces line their clips up at markers of the same name\n(e.g. L and R where each foot plants)");
                 ImGui::TableSetColumnIndex(3);
+                {
+                    // Play Sound: the sound's name (or how many surfaces it has sounds for), the settings in a popup.
+                    std::string label = "Add Sound...";
+                    if (notify.Sound != 0)
+                        label = AssetManager::GetMetadata(notify.Sound).FilePath.stem().string();
+                    else if (!notify.SurfaceSounds.empty())
+                        label = std::to_string(notify.SurfaceSounds.size()) + " surface sounds";
+                    if (!notify.SurfaceSounds.empty() && notify.Sound != 0)
+                        label += " +" + std::to_string(notify.SurfaceSounds.size());
+                    if (ImGui::Button((label + "##sound").c_str(), ImVec2(-1.0f, 0.0f)))
+                        ImGui::OpenPopup("Notify Sound");
+                    ImGui::SetItemTooltip("Play Sound: a sound this notify plays where the character is (or at a bone), optionally picked by the\n"
+                                          "physical surface under it (footsteps on grass, stone, wood).");
+                    ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f, 0.0f), ImVec2(600.0f, FLT_MAX));
+                    if (ImGui::BeginPopup("Notify Sound"))
+                    {
+                        changed |= DrawNotifySound(notify);
+                        ImGui::EndPopup();
+                    }
+                }
+                ImGui::TableSetColumnIndex(4);
                 if (ImGui::SmallButton("Go to"))
                     m_Cursor = notify.Time;
                 ImGui::SameLine();

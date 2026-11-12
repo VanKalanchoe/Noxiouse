@@ -85,6 +85,24 @@ namespace Nox
         float Time = 0.0f;
         std::string Name;
         bool SyncMarker = false;
+
+        // Play Sound (Unreal's AnimNotify_PlaySound, with the surface lookup of a footstep notify): crossing it plays Sound at Bone
+        // (the entity when empty). With Trace Surface, a ray goes down from there and the physical surface it hits (the material's,
+        // or the body's override) picks the sound from SurfaceSounds -- grass, stone, wood -- else Sound.
+        struct SurfaceSound
+        {
+            std::string Surface;
+            AssetHandle Sound = 0;
+        };
+        AssetHandle Sound = 0;                   // an AudioClip or an AudioGraph; 0 with no SurfaceSounds: no sound
+        std::vector<SurfaceSound> SurfaceSounds;
+        std::string Bone;
+        bool TraceSurface = false;
+        float TraceDistance = 0.5f;              // meters below the bone (the ray starts 0.2 m above it)
+        float Volume = 1.0f;
+        float PitchVariation = 0.05f;            // +/- random per play
+
+        bool HasSound() const { return Sound != 0 || !SurfaceSounds.empty(); }
     };
 
     class AnimationSequence : public Asset

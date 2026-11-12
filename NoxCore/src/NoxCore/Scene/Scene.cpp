@@ -1254,8 +1254,8 @@ namespace Nox
             std::vector<std::pair<entt::entity, std::string>> notifies;
             for (auto entity : m_Registry.view<AnimatorComponent, ScriptComponent>())
             {
-                for (const std::string& name : m_Registry.get<AnimatorComponent>(entity).FiredNotifies)
-                    notifies.emplace_back(entity, name);
+                for (const AnimationNotify& notify : m_Registry.get<AnimatorComponent>(entity).FiredNotifies)
+                    notifies.emplace_back(entity, notify.Name);
             }
             for (auto entity : m_Registry.view<TimelinePlayerComponent, ScriptComponent>())
             {
@@ -1994,6 +1994,99 @@ namespace Nox
             AudioEngine::FireGraphParameter(source.Voice, program->FindParameter(name));
     }
 
+    std::string Scene::GetPhysicalSurface(Entity entity, int32_t submesh)
+    {
+        if (!entity)
+            return "Default";
+        // The body's override: the entity's, or (a collider of a compound) the nearest body's above it.
+        for (Entity up = entity; up; up = up.GetParent())
+        {
+            if (const auto* body = m_Registry.try_get<RigidBody3DComponent>(up))
+            {
+                if (!body->PhysicalSurface.empty())
+                    return body->PhysicalSurface;
+                break;
+            }
+        }
+        // The material hit: a mesh collider's triangle's submesh, else the entity's first drawn submesh.
+        const auto* meshComponent = m_Registry.try_get<MeshComponent>(entity);
+        const auto* meshCollider = m_Registry.try_get<MeshCollider3DComponent>(entity);
+        AssetHandle mesh = 0;
+        uint64_t slot = 0;
+        if (meshCollider && submesh >= 0)
+        {
+            mesh = meshCollider->Mesh;
+            slot = static_cast<uint64_t>(submesh);
+        }
+        else if (meshComponent)
+        {
+            mesh = meshComponent->Mesh;
+            slot = meshComponent->SubmeshIndex;
+        }
+        AssetHandle material = 0;
+        // The entity's override of that slot (when it draws the same mesh), else the mesh's own .nmat.
+        if (const auto* overrides = m_Registry.try_get<MaterialComponent>(entity);
+            overrides && meshComponent && meshComponent->Mesh == mesh && slot < overrides->MaterialAssets.size())
+            material = overrides->MaterialAssets[slot];
+        if (material == 0 && mesh != 0)
+        {
+            const AssetType type = AssetManager::GetAssetType(mesh);
+            const std::vector<AssetHandle>* meshMaterials = nullptr;
+            if (const StaticMesh* staticMesh = type == AssetType::StaticMesh ? AssetManager::FindLoadedAsset<StaticMesh>(mesh) : nullptr)
+                meshMaterials = &staticMesh->GetMaterialAssets();
+            else if (const Mesh* skinned = type == AssetType::Mesh ? AssetManager::FindLoadedAsset<Mesh>(mesh) : nullptr)
+                meshMaterials = &skinned->GetMaterialAssets();
+            if (meshMaterials && slot < meshMaterials->size())
+                material = (*meshMaterials)[slot];
+        }
+        if (material != 0 && AssetManager::GetAssetType(material) == AssetType::Material)
+        {
+            std::string surface = AssetManager::GetMetadata(material).PhysicalSurface;
+            if (!surface.empty())
+                return surface;
+        }
+        return "Default";
+    }
+
+    bool Scene::GetBoneWorldPosition(entt::entity animatorEntity, const std::string& bone, glm::dvec3& out)
+    {
+        const auto* animator = m_Registry.try_get<AnimatorComponent>(animatorEntity);
+        const Skeleton* skeleton = animator && animator->Skeleton != 0 ? AssetManager::FindLoadedAsset<Skeleton>(animator->Skeleton) : nullptr;
+        if (!skeleton)
+            return false;
+        int32_t index = -1;
+        for (const Node* node : skeleton->AllNodes)
+        {
+            if (node && node->Name == bone)
+            {
+                index = node->Index;
+                break;
+            }
+        }
+        if (index < 0)
+            return false;
+        // A model's joint entity (its world transform is current after propagation), else the animator's own pose in its space.
+        if (!animator->NodeEntities.empty())
+        {
+            if (index >= static_cast<int32_t>(animator->NodeEntities.size()))
+                return false;
+            const auto joint = m_EntityMap.find(animator->NodeEntities[index]);
+            if (joint == m_EntityMap.end() || !m_Registry.valid(joint->second))
+                return false;
+            const auto* world = m_Registry.try_get<WorldTransformComponent>(joint->second);
+            if (!world)
+                return false;
+            out = world->GetPosition();
+            return true;
+        }
+        const std::vector<glm::mat4>& globals = animator->Graph != 0 ? animator->GraphGlobalMatrices : animator->Animator.GetGlobalBoneTransforms();
+        const auto* world = m_Registry.try_get<WorldTransformComponent>(animatorEntity);
+        if (index >= static_cast<int32_t>(globals.size()) || !world)
+            return false;
+        out = glm::dvec3(world->WorldMatrix * glm::dvec4(glm::dvec3(globals[index][3]), 1.0));
+        return true;
+    }
+
     void Scene::PlayEventSounds()
     {
         auto random = [this]() { // [-1, 1) (xorshift)
@@ -2027,6 +2120,58 @@ namespace Nox
                     desc.Spatialization = impact->Spatialization;
                     desc.Position = contact.Position;
                     PlayOneShot(impact->Sound, desc);
+                }
+            }
+        }
+
+        // Play Sound notifies the animators crossed this frame (only a frame the animations stepped: a paused one keeps last frame's).
+        if (m_FrameInput.StepAnimation)
+        {
+            const float meter = WorldUnits::FromMeters(1.0f);
+            for (auto handle : m_Registry.view<AnimatorComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>))
+            {
+                const AnimatorComponent& animator = m_Registry.get<AnimatorComponent>(handle);
+                for (const AnimationNotify& notify : animator.FiredNotifies)
+                {
+                    if (!notify.HasSound())
+                        continue;
+                    glm::dvec3 position = m_Registry.get<WorldTransformComponent>(handle).GetPosition();
+                    if (!notify.Bone.empty())
+                        GetBoneWorldPosition(handle, notify.Bone, position);
+                    AssetHandle sound = notify.Sound;
+                    if (notify.TraceSurface && !notify.SurfaceSounds.empty() && m_Physics3DScene)
+                    {
+                        // Down from just above the bone (it may be at or below the ground's surface), past it by Trace Distance.
+                        const double up = 0.2 * meter;
+                        RayCastHit hit;
+                        if (m_Physics3DScene->RayCast(position + glm::dvec3(0.0, up, 0.0), glm::vec3(0.0f, -1.0f, 0.0f),
+                                                      static_cast<float>(up) + std::max(notify.TraceDistance, 0.0f) * meter, hit))
+                        {
+                            bool onSelf = false; // (the character's own body: as the foot placement's rays)
+                            for (Entity entity = hit.HitEntity; entity && !onSelf; entity = entity.GetParent())
+                                onSelf = static_cast<entt::entity>(entity) == handle;
+                            if (!onSelf)
+                            {
+                                const std::string surface = GetPhysicalSurface(hit.HitEntity, hit.Submesh);
+                                for (const AnimationNotify::SurfaceSound& candidate : notify.SurfaceSounds)
+                                {
+                                    if (candidate.Sound != 0 && candidate.Surface == surface)
+                                    {
+                                        sound = candidate.Sound;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (sound == 0)
+                        continue;
+                    AudioPlayDesc desc;
+                    desc.Volume = notify.Volume;
+                    desc.Pitch = std::max(1.0f + notify.PitchVariation * random(), 0.1f);
+                    desc.Spatial = true;
+                    desc.Position = position;
+                    PlayOneShot(sound, desc);
                 }
             }
         }

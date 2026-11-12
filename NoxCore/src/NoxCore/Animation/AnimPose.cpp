@@ -249,7 +249,7 @@ namespace Nox
         out.Curves = std::move(curves);
     }
 
-    void CollectCrossedNotifies(const AnimationSequence& clip, float from, float to, bool wrapped, std::vector<std::string>& out)
+    void CollectCrossedNotifies(const AnimationSequence& clip, float from, float to, bool wrapped, std::vector<AnimationNotify>& out)
     {
         if (clip.Notifies.empty() || (from == to && !wrapped))
             return;
@@ -266,7 +266,7 @@ namespace Nox
             else
                 crossed = wrapped ? (t < from || t >= to) : (t < from && t >= to);
             if (crossed)
-                out.push_back(notify.Name);
+                out.push_back(notify); // (by value: the clip may be edited or reloaded before the notify is handled)
         }
     }
 

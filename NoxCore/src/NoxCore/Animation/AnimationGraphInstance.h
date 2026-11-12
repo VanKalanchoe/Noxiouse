@@ -66,7 +66,7 @@ namespace Nox
         bool IsMontagePlaying(const std::string& slot) const;
 
         // The notifies the playheads crossed in the last Evaluate (clips, blend spaces' leading clips, montages).
-        const std::vector<std::string>& GetFiredNotifies() const { return m_FiredNotifies; }
+        const std::vector<AnimationNotify>& GetFiredNotifies() const { return m_FiredNotifies; }
 
         // Root motion: Evaluate keeps the root bone in place horizontally and collects how far it moved (the skeleton's
         // model space, +Y up) for the caller to move the entity with. RootBone empty = the skin's first joint.
@@ -104,7 +104,7 @@ namespace Nox
         };
         std::vector<Montage> m_Montages;
         std::unordered_map<std::string, MontageSlotState> m_MontageSlots; // what the Slot nodes read, rebuilt each Evaluate
-        std::vector<std::string> m_FiredNotifies;
+        std::vector<AnimationNotify> m_FiredNotifies;
 
         glm::vec3 m_RootMotion{ 0.0f };
 

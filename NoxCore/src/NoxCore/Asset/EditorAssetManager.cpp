@@ -461,6 +461,15 @@ namespace Nox
         SerializeAssetRegistry();
     }
 
+    void EditorAssetManager::SetPhysicalSurface(AssetHandle handle, const std::string& surface)
+    {
+        const auto found = m_AssetRegistry.find(handle);
+        if (m_ReadOnly || found == m_AssetRegistry.end() || found->second.Type != AssetType::Material || found->second.PhysicalSurface == surface)
+            return;
+        found->second.PhysicalSurface = surface;
+        SerializeAssetRegistry();
+    }
+
     void EditorAssetManager::OnAssetModifiedOnDisk(const std::filesystem::path& absolutePath)
     {
         // Runs on the watcher thread: only queue the path, Update() matches it against the registry.
@@ -1993,6 +2002,8 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (metadata.Type == AssetType::Material && !metadata.PhysicalSurface.empty())
+            out << YAML::Key << "PhysicalSurface" << YAML::Value << metadata.PhysicalSurface;
         if (metadata.Type == AssetType::Material && metadata.AudioSettings.Acoustic != AcousticMaterial::Auto)
         {
             out << YAML::Key << "AudioSettings" << YAML::Value << YAML::BeginMap;
@@ -2277,6 +2288,8 @@ namespace Nox
                 }
             }
 
+            if (const YAML::Node surface = node["PhysicalSurface"])
+                metadata.PhysicalSurface = surface.as<std::string>();
             if (const YAML::Node audioNode = node["AudioSettings"])
             {
                 if (audioNode["LoadType"])

@@ -51,6 +51,8 @@ namespace Nox
         void SetSoundSettings(AssetHandle handle, const AudioSoundSettings& settings);
         // A material's acoustic material (saved in the registry; the playing acoustic scene picks it up).
         void SetAcousticMaterial(AssetHandle handle, AcousticMaterial material);
+        // A material's physical surface (empty: Default); saved in the registry.
+        void SetPhysicalSurface(AssetHandle handle, const std::string& surface);
         
         void ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType = AssetType::None, const MeshImportSettings& meshSettings = {});
         // Registers an asset file that already exists (relative to the asset directory) and returns its handle.

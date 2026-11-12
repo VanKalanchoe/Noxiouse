@@ -256,6 +256,11 @@ namespace Nox
         void PlayOneShot(AssetHandle sound, const glm::dvec3& position, float volume, bool spatial, uint64_t bus);
         // The same with every voice setting (distance curve, pitch, ...): Impact Sound and particle sounds.
         void PlayOneShot(AssetHandle sound, const AudioPlayDesc& desc);
+        // The physical surface (Project Settings: Physical Surfaces) of what a ray hit (RayCastHit's HitEntity and Submesh): the body's
+        // override (Rigidbody 3D > Physical Surface), else the hit material's (Material editor > Physical Surface), else "Default".
+        std::string GetPhysicalSurface(Entity entity, int32_t submesh = -1);
+        // A bone of the animator on `animatorEntity`, in world space. False: no such bone (or no skeleton yet).
+        bool GetBoneWorldPosition(entt::entity animatorEntity, const std::string& bone, glm::dvec3& out);
         // An Audio Source's audio graph parameter (AudioSourceComponent.SetFloat / SetInt / SetBool): kept for its next Play this
         // session, and sent to its sound if it plays; a trigger parameter (Trigger) fires on the playing sound.
         void SetAudioSourceParameter(Entity entity, const std::string& name, const NodeGraphValue& value);

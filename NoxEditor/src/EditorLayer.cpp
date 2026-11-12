@@ -964,6 +964,66 @@ namespace Nox
                 }
                 ImGui::TreePop();
             }
+
+            // Unreal's Physical Surface types (Project Settings > Physics): what materials and bodies can be underfoot.
+            if (ImGui::TreeNode("Physical Surfaces"))
+            {
+                ImGui::TextDisabled("Materials (Material editor) and bodies (Rigidbody 3D) pick one; footstep notifies play a sound per surface.");
+                std::vector<std::string>& surfaces = config.PhysicalSurfaces;
+                int remove = -1;
+                bool surfacesChanged = false;
+                for (int i = 0; i < static_cast<int>(surfaces.size()); ++i)
+                {
+                    ImGui::PushID(i);
+                    if (i == 0)
+                        ImGui::TextUnformatted("Default  (a surface without one; always there)");
+                    else
+                    {
+                        static std::string editing;
+                        static int editingIndex = -1;
+                        if (editingIndex != i)
+                            editing = surfaces[i];
+                        char buffer[64] = {};
+                        strncpy_s(buffer, editing.c_str(), sizeof(buffer) - 1);
+                        ImGui::SetNextItemWidth(180.0f);
+                        if (ImGui::InputText("##surface", buffer, sizeof(buffer)))
+                        {
+                            editing = buffer;
+                            editingIndex = i;
+                        }
+                        // Renamed when the edit ends, if the name is free (materials keep the old name: pick the new one there).
+                        if (ImGui::IsItemDeactivatedAfterEdit() && editingIndex == i)
+                        {
+                            if (!editing.empty() && std::find(surfaces.begin(), surfaces.end(), editing) == surfaces.end())
+                            {
+                                surfaces[i] = editing;
+                                surfacesChanged = true;
+                            }
+                            editingIndex = -1;
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Remove"))
+                            remove = i;
+                    }
+                    ImGui::PopID();
+                }
+                if (remove > 0)
+                {
+                    surfaces.erase(surfaces.begin() + remove);
+                    surfacesChanged = true;
+                }
+                if (ImGui::SmallButton("Add Surface"))
+                {
+                    std::string name = "New Surface";
+                    for (int suffix = 2; std::find(surfaces.begin(), surfaces.end(), name) != surfaces.end(); ++suffix)
+                        name = "New Surface " + std::to_string(suffix);
+                    surfaces.push_back(name);
+                    surfacesChanged = true;
+                }
+                if (surfacesChanged)
+                    Project::SaveActive();
+                ImGui::TreePop();
+            }
             ImGui::Separator();
         }
 

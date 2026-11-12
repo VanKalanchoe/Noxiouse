@@ -582,7 +582,7 @@ namespace Nox
         else
             ImGui::TextDisabled(skeleton ? "Loading..." : "Loading the skeleton...");
         if (!m_PreviewInstance->GetFiredNotifies().empty())
-            ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "Notify: %s", m_PreviewInstance->GetFiredNotifies().back().c_str());
+            ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "Notify: %s", m_PreviewInstance->GetFiredNotifies().back().Name.c_str());
     }
 
     void NodeGraphEditorPanel::OnImGuiRender()

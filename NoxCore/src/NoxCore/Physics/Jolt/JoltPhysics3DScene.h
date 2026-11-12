@@ -10,6 +10,7 @@
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/GroupFilter.h>
+#include <Jolt/Physics/Collision/PhysicsMaterial.h>
 #include <Jolt/Physics/Constraints/Constraint.h>
 
 #include <memory>
@@ -70,6 +71,11 @@ namespace Nox
         // shared by every body using that mesh this session.
         JPH::Ref<JPH::Shape> MeshColliderShape(const struct MeshCollider3DComponent& collider, bool convex);
         std::unordered_map<std::string, JPH::Ref<JPH::Shape>> m_MeshShapes;
+        // A mesh collider's triangles carry their submesh as a Jolt physics material (one per submesh index, shared), so a ray hit
+        // tells which submesh -- which material, which physical surface -- it struck (Unreal's per-face physical material).
+        const JPH::PhysicsMaterial* SubmeshMaterial(uint32_t submesh);
+        std::vector<JPH::Ref<JPH::PhysicsMaterial>> m_SubmeshMaterials;
+        std::unordered_map<const JPH::PhysicsMaterial*, uint32_t> m_SubmeshOfMaterial;
 
         // Joints (PhysicsJoint3DComponent) as Jolt constraints, all made again when anything they hold on to changed (a body is
         // destroyed: they go first, Jolt keeps pointers to their bodies).

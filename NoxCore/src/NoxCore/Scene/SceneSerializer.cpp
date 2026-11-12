@@ -1175,6 +1175,8 @@ namespace Nox
             out << YAML::Key << "AllowSleeping" << YAML::Value << rb3dComponent.AllowSleeping;
             out << YAML::Key << "IsSensor" << YAML::Value << rb3dComponent.IsSensor;
             out << YAML::Key << "Layer" << YAML::Value << rb3dComponent.Layer;
+            if (!rb3dComponent.PhysicalSurface.empty())
+                out << YAML::Key << "PhysicalSurface" << YAML::Value << rb3dComponent.PhysicalSurface;
 
             out << YAML::EndMap; // RigidBody3DComponent
         }
@@ -2796,6 +2798,7 @@ namespace Nox
         if (rigidbody3DComponent)
         {
             auto& rb3d = deserializedEntity.AddComponent<RigidBody3DComponent>();
+            rb3d.PhysicalSurface = rigidbody3DComponent["PhysicalSurface"].as<std::string>(std::string());
             if (rigidbody3DComponent["BodyType"])
                 rb3d.Type = Rigidbody3DTypeFromString(rigidbody3DComponent["BodyType"].as<std::string>());
             if (rigidbody3DComponent["MotionQuality"])

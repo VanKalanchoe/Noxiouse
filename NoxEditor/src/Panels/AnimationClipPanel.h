@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 
+#include "NoxCore/Animation/AnimationSequence.h"
 #include "NoxCore/Asset/Asset.h"
 
 namespace Nox
@@ -28,6 +29,8 @@ namespace Nox
         void FindPreviewModel();
         void SetPreviewMesh(AssetHandle mesh);
         void DrawPreview(float duration);
+        // A notify's Play Sound settings (the Sound column's popup). True when something changed.
+        bool DrawNotifySound(AnimationNotify& notify);
 
         AssetHandle m_Clip = 0;
         std::string m_Title;

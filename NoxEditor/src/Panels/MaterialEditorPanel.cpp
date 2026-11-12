@@ -1,5 +1,6 @@
 #include "MaterialEditorPanel.h"
 #include "NoxCore/Audio/SpatialAudio.h"
+#include "AudioWidgets.h"
 
 #include <filesystem>
 
@@ -106,6 +107,13 @@ namespace Nox
                                   properties.Transmission[1] * 100.0f, properties.Transmission[2] * 100.0f, properties.Absorption[0] * 100.0f,
                                   properties.Absorption[1] * 100.0f, properties.Absorption[2] * 100.0f);
             }
+            // The physical surface it is (Unreal's physical material Surface Type): footstep notifies pick their sound by it.
+            std::string surface = assets->GetMetadata(handle).PhysicalSurface;
+            if (PhysicalSurfaceCombo("Physical Surface", surface, "Default"))
+                assets->SetPhysicalSurface(handle, surface);
+            ImGui::SetItemTooltip("What the surface is underfoot: an animation's Play Sound notify with Trace Surface plays the sound it has for\n"
+                                  "this surface (grass, wood ...). The list is the project's: Settings > Physical Surfaces. A Rigidbody 3D's\n"
+                                  "Physical Surface overrides it for the whole body.");
             ImGui::Separator();
         }
         bool changed = false;

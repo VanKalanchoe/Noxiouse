@@ -606,17 +606,27 @@ namespace Nox {
         // The same triangles the editor draws (MeshColliderGeometry), in native units.
         std::vector<glm::vec3> positions;
         std::vector<uint32_t> indices;
-        if (!ReadMeshColliderTriangles(collider, positions, indices))
+        std::vector<uint32_t> submeshes;
+        if (!ReadMeshColliderTriangles(collider, positions, indices, &submeshes))
             return shape;
         const float nativePerWorld = PhysicsScale();
         JPH::VertexList vertices;
         vertices.reserve(positions.size());
         for (const glm::vec3& position : positions)
             vertices.push_back(JPH::Float3(position.x * nativePerWorld, position.y * nativePerWorld, position.z * nativePerWorld));
+        // Each triangle's material index: its submesh's place in this shape's material list (the submeshes it holds, in order).
         JPH::IndexedTriangleList triangles;
         triangles.reserve(indices.size() / 3);
+        JPH::PhysicsMaterialList materials;
+        std::unordered_map<uint32_t, uint32_t> materialIndex;
         for (size_t i = 0; i + 2 < indices.size(); i += 3)
-            triangles.push_back(JPH::IndexedTriangle(indices[i], indices[i + 1], indices[i + 2], 0));
+        {
+            const uint32_t submesh = i / 3 < submeshes.size() ? submeshes[i / 3] : 0;
+            auto [found, inserted] = materialIndex.try_emplace(submesh, static_cast<uint32_t>(materials.size()));
+            if (inserted)
+                materials.push_back(SubmeshMaterial(submesh));
+            triangles.push_back(JPH::IndexedTriangle(indices[i], indices[i + 1], indices[i + 2], found->second));
+        }
         if (triangles.empty())
             return shape;
 
@@ -631,13 +641,24 @@ namespace Nox {
         }
         else
         {
-            result = JPH::MeshShapeSettings(std::move(vertices), std::move(triangles)).Create();
+            result = JPH::MeshShapeSettings(std::move(vertices), std::move(triangles), std::move(materials)).Create();
         }
         if (result.HasError())
             SPDLOG_ERROR("Mesh collider of asset {}: {}", static_cast<uint64_t>(collider.Mesh), result.GetError().c_str());
         else
             shape = result.Get();
         return shape;
+    }
+
+    const JPH::PhysicsMaterial* JoltPhysics3DScene::SubmeshMaterial(uint32_t submesh)
+    {
+        while (m_SubmeshMaterials.size() <= submesh)
+        {
+            JPH::Ref<JPH::PhysicsMaterial> material = new JPH::PhysicsMaterial();
+            m_SubmeshOfMaterial[material.GetPtr()] = static_cast<uint32_t>(m_SubmeshMaterials.size());
+            m_SubmeshMaterials.push_back(material);
+        }
+        return m_SubmeshMaterials[submesh].GetPtr();
     }
 
     JPH::BodyID JoltPhysics3DScene::BodyAtOrAbove(Entity entity) const
@@ -1253,6 +1274,8 @@ namespace Nox {
             {
                 const JPH::Body& body = lock.GetBody();
                 outHit.Normal = JoltUtils::ToGLM(body.GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, ray.GetPointOnRay(hit.mFraction)));
+                if (const auto submesh = m_SubmeshOfMaterial.find(body.GetShape()->GetMaterial(hit.mSubShapeID2)); submesh != m_SubmeshOfMaterial.end())
+                    outHit.Submesh = static_cast<int32_t>(submesh->second);
             }
             return true;
         }

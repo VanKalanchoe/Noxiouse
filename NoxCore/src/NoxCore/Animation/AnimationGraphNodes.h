@@ -59,7 +59,7 @@ namespace Nox
         NodeGraphValue GetParameter(const std::string& name, const NodeGraphValue& fallback) const;
 
         // Notifies the playheads crossed this evaluation (null: nobody listens).
-        std::vector<std::string>* FiredNotifies = nullptr;
+        std::vector<AnimationNotify>* FiredNotifies = nullptr;
         // Montages by slot name (null or empty: none playing).
         const std::unordered_map<std::string, MontageSlotState>* Montages = nullptr;
 

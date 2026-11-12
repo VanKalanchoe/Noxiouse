@@ -29,6 +29,9 @@ namespace Nox {
         glm::vec3 Normal{ 0.0f, 1.0f, 0.0f };
         float Distance = 0.0f;
         float Fraction = 0.0f; // [0, 1] along ray
+        // A mesh collider's triangle: the submesh it belongs to (its material: what the hit surface is made of). -1: not a mesh
+        // collider's triangle (a box, sphere ... -- the entity's material counts).
+        int32_t Submesh = -1;
     };
 
     // A contact that began between two bodies, one of which reports them (an Impact Sound on it): Unreal's hit event.

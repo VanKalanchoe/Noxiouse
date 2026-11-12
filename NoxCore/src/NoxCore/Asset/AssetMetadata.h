@@ -88,6 +88,9 @@ namespace Nox
         TextureSpecification TextureSpec; // Import settings for Texture2D assets
         MeshImportSettings MeshSettings;  // Import settings for Mesh / StaticMesh assets
         AudioImportSettings AudioSettings; // Import settings for AudioClip assets
+        // Material assets: the physical surface it is (a name from the project's Physical Surfaces: "Grass", "Wood" ...; empty =
+        // Default), as Unreal's physical material's Surface Type -- footstep and impact sounds pick their sound by it.
+        std::string PhysicalSurface;
         // Where the asset was before it was renamed or moved (EditorAssetManager::MoveAsset): still found by those paths, which
         // materials (their textures) and meshes (their materials, derived from the mesh's name) name it by.
         std::vector<std::filesystem::path> FormerPaths;

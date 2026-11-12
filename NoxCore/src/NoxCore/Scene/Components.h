@@ -503,7 +503,7 @@ namespace Nox
         };
         std::unordered_map<std::string, IKTarget> IKTargets;
         // Runtime only: the notifies the last animation update crossed, handed to the scripts as OnAnimationEvent(name).
-        std::vector<std::string> FiredNotifies;
+        std::vector<AnimationNotify> FiredNotifies;
 
         // Runtime only: skinning matrices rebuilt from the joint entities each frame.
         std::vector<glm::mat4> SkinMatrices;
@@ -901,6 +901,9 @@ namespace Nox
     struct RigidBody3DComponent
     {
         enum class BodyType { Static = 0, Dynamic, Kinematic };
+        // The physical surface of the whole body, over its materials' (Unreal's Phys Material Override): a name from the project's
+        // Physical Surfaces; empty = from the material hit.
+        std::string PhysicalSurface;
         enum class MotionQuality { Discrete = 0, LinearCast };
 
         BodyType Type = BodyType::Dynamic;

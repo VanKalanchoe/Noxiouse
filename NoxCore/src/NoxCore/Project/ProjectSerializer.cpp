@@ -30,6 +30,7 @@ namespace Nox
                 out << YAML::Key << "RenderQuality" << YAML::Value << config.RenderQuality;
                 out << YAML::Key << "WindowMode" << YAML::Value << config.WindowMode;
                 out << YAML::Key << "AudioMixer" << YAML::Value << config.AudioMixer.generic_string();
+                out << YAML::Key << "PhysicalSurfaces" << YAML::Value << YAML::Flow << config.PhysicalSurfaces;
                 const ProjectRendererSettings& renderer = config.Renderer;
                 if (renderer.RayTracingResolution >= 0 || renderer.DiffuseGI >= 0 || renderer.ShadowedLights >= 0 || renderer.OIT >= 0 || renderer.TAA >= 0 ||
                     renderer.SunShadows >= 0 || renderer.LocalShadows >= 0 || renderer.ContactShadows >= 0 ||
@@ -97,6 +98,17 @@ namespace Nox
             config.WindowMode = projectNode["WindowMode"].as<std::string>();
         if (projectNode["AudioMixer"])
             config.AudioMixer = projectNode["AudioMixer"].as<std::string>();
+        if (const YAML::Node surfaces = projectNode["PhysicalSurfaces"]; surfaces && surfaces.IsSequence())
+        {
+            config.PhysicalSurfaces.clear();
+            for (const YAML::Node& surface : surfaces)
+                config.PhysicalSurfaces.push_back(surface.as<std::string>());
+        }
+        if (config.PhysicalSurfaces.empty() || config.PhysicalSurfaces.front() != "Default")
+        {
+            std::erase(config.PhysicalSurfaces, std::string("Default"));
+            config.PhysicalSurfaces.insert(config.PhysicalSurfaces.begin(), "Default");
+        }
         config.Renderer = {};
         if (const YAML::Node renderer = projectNode["Renderer"]; renderer && renderer.IsMap())
         {

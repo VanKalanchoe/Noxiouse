@@ -52,7 +52,7 @@ namespace Nox
 
     // The notifies a playhead crossed going from `from` to `to` (seconds, the direction of play; `wrapped`: it passed the
     // clip's end -- or start, playing backwards -- once in between), appended to `out`.
-    void CollectCrossedNotifies(const AnimationSequence& clip, float from, float to, bool wrapped, std::vector<std::string>& out);
+    void CollectCrossedNotifies(const AnimationSequence& clip, float from, float to, bool wrapped, std::vector<AnimationNotify>& out);
 
     // Sync markers (UE's marker-based sync): where `follower` plays while `leader` is at `leaderTime` -- between the follower's
     // markers with the same names as the two around the leader's playhead, the same fraction of the way. `fallbackTime` (the

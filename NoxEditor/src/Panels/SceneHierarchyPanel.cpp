@@ -30,6 +30,7 @@
 #include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/Utils/Utils.h"
 #include "MaterialEditorPanel.h"
+#include "AudioWidgets.h"
 
 namespace Nox
 {
@@ -103,43 +104,6 @@ namespace Nox
             ImGui::EndDisabled();
             ImGui::SetItemTooltip(hasMesh ? "Sizes the collider to this entity's mesh (its bounds), centered on it. A new collider is fitted when added."
                                           : "Needs a mesh on this entity (loaded).");
-        }
-
-        // A sound asset (an audio clip or an audio graph) by name, or dropped from the Content Browser.
-        void SoundAssetCombo(const char* label, AssetHandle& sound)
-        {
-            const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
-            const std::string current = sound != 0 && registry.contains(sound)
-                ? registry.at(sound).FilePath.filename().string() : std::string("None");
-            if (ImGui::BeginCombo(label, current.c_str()))
-            {
-                if (ImGui::Selectable("None", sound == 0))
-                    sound = 0;
-                for (const auto& [handle, metadata] : registry)
-                {
-                    if (metadata.Type != AssetType::AudioClip && metadata.Type != AssetType::AudioGraph)
-                        continue;
-                    ImGui::PushID(static_cast<int>(static_cast<uint64_t>(handle) & 0x7fffffff));
-                    if (ImGui::Selectable(metadata.FilePath.filename().string().c_str(), sound == handle))
-                        sound = handle;
-                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
-                        ImGui::SetTooltip("%s", metadata.FilePath.generic_string().c_str());
-                    ImGui::PopID();
-                }
-                ImGui::EndCombo();
-            }
-            ImGui::SetItemTooltip("An audio clip (.wav / .ogg / .flac / .mp3) or an audio graph (.naudiograph).");
-            if (ImGui::BeginDragDropTarget())
-            {
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
-                {
-                    const AssetHandle handle = *static_cast<const AssetHandle*>(payload->Data);
-                    const AssetType type = AssetManager::GetAssetType(handle);
-                    if (type == AssetType::AudioClip || type == AssetType::AudioGraph)
-                        sound = handle;
-                }
-                ImGui::EndDragDropTarget();
-            }
         }
 
         // A 3D sound's spatial settings (Audio Source, Impact Sound).
@@ -3565,6 +3529,9 @@ namespace Nox
             ImGui::DragFloat("Gravity Factor", &component.GravityFactor, 0.05f, -10.0f, 10.0f);
             ImGui::Checkbox("Allow Sleeping", &component.AllowSleeping);
             ImGui::Checkbox("Is Sensor", &component.IsSensor);
+            PhysicalSurfaceCombo("Physical Surface", component.PhysicalSurface, "From Material");
+            ImGui::SetItemTooltip("The surface of the whole body for footsteps (Unreal's Phys Material Override). From Material: the physical\n"
+                                  "surface of the material hit (per submesh on a mesh collider). The list: Settings > Physical Surfaces.");
         });
 
         DrawComponent<BoxCollider3DComponent>("Box Collider 3D", entity, [entity](auto& component)

@@ -20,10 +20,13 @@
 
 namespace Nox
 {
-    bool ReadMeshColliderTriangles(const MeshCollider3DComponent& collider, std::vector<glm::vec3>& vertices, std::vector<uint32_t>& indices)
+    bool ReadMeshColliderTriangles(const MeshCollider3DComponent& collider, std::vector<glm::vec3>& vertices, std::vector<uint32_t>& indices,
+                                   std::vector<uint32_t>* triangleSubmeshes)
     {
         vertices.clear();
         indices.clear();
+        if (triangleSubmeshes)
+            triangleSubmeshes->clear();
         const AssetType type = AssetManager::GetAssetType(collider.Mesh);
         if (type != AssetType::StaticMesh && type != AssetType::Mesh)
             return false;
@@ -48,6 +51,8 @@ namespace Nox
                 const shaderio::MeshletDraw& draw = data.Draws[index];
                 for (uint32_t triangle = 0; triangle < draw.triangleCount; ++triangle)
                 {
+                    if (triangleSubmeshes)
+                        triangleSubmeshes->push_back(static_cast<uint32_t>(submesh));
                     for (uint32_t corner = 0; corner < 3; ++corner)
                     {
                         const glm::vec3 position = data.Vertices[draw.globalVertexOffset +
