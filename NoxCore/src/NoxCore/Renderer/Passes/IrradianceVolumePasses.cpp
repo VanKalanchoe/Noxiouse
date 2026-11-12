@@ -151,7 +151,7 @@ namespace Nox
                     if (state.SurfaceCache)
                         m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(state.SurfaceCache) });
                 }
-                state.SH = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(glm::vec4) * 6 * probeCount, .usage = NRI::BufferUsage::Storage });
+                state.SH = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(glm::vec4) * shaderio::IrradianceProbeSHStride * probeCount, .usage = NRI::BufferUsage::Storage });
                 state.SurfaceCache = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(glm::uvec4) * 6ull * cacheFaceSize * cacheFaceSize * probeCount,
                                                                              .usage = NRI::BufferUsage::Storage });
             }
@@ -271,7 +271,7 @@ namespace Nox
         if (state.NeedsClear)
         {
             state.NeedsClear = false;
-            const uint64_t bytes = sizeof(glm::vec4) * 6 * state.ProbeCount;
+            const uint64_t bytes = sizeof(glm::vec4) * shaderio::IrradianceProbeSHStride * state.ProbeCount;
             m_renderGraph.AddPass("Irradiance Volume Clear", RGPassFlags::NeverCull,
                 [](RGBuilder&) {},
                 [shBuffer, bytes](RGPassContext& context)

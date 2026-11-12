@@ -2314,6 +2314,7 @@ struct GpuReflectionProbe
 // SH of the distance to what the probe sees and of its square (visibility: DDGI's Chebyshev test against walls between a probe and
 // the point).
 STATIC_CONST uint32_t IrradianceProbeFaceSize = 16;          // texels per side of a capture face
+STATIC_CONST uint32_t IrradianceProbeSHStride = 7;           // float4s per probe in GpuIrradianceVolume::probeSHReference
 STATIC_CONST uint32_t MaxIrradianceProbesPerFrame = 16;      // captures a frame
 STATIC_CONST uint32_t MaxIrradianceRelightsPerFrame = 4096;  // probes lit again a frame
 
@@ -2327,7 +2328,7 @@ struct GpuIrradianceVolume
     uint32_t countY;
     uint32_t countZ;
     uint32_t probeCount;
-    uint64_t probeSHReference; // float4[6] per probe (R, G, B SH, x = lit, distance SH, distance^2 SH), x fastest, then y, then z
+    uint64_t probeSHReference; // float4[IrradianceProbeSHStride] per probe (R, G, B SH, x = lit, distance SH, distance^2 SH, sky visibility SH), x fastest, then y, then z
     // uint4[6 x cacheFaceSize^2] per probe, face by face (+X, -X, +Y, -Y, +Z, -Z), rows down: x albedo rgb + sky fraction (unorm8 x4),
     // y emission rg (half x2), z emission b + distance (half x2), w the normal (octahedral, snorm16 x2).
     uint64_t surfaceCacheReference;

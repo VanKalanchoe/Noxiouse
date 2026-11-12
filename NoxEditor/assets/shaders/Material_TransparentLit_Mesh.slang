@@ -722,7 +722,16 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         }
     }
 
-    IBLResult ibl = getIBLContributionAt(ubo, iblInputs, n, environmentReflection, ao, vertIn.worldPos); // the reflection probes too
+    // The raster probe volume (no screen-probe GI or DDGI this frame): the sky's reflection only as far as its probes saw the sky
+    // around the reflected ray, the room's light from there elsewhere -- glass indoors reflected the sky picture before (the luma
+    // ratio below held back only part of it, and a mirror-like pane shows what is left).
+    float volumeSkyVisibility = 1.0;
+    float3 volumeOccludedRadiance = float3(0.0);
+    bool volumeReflection = false;
+    if (ubo->screenGITextureIndex == 0xFFFFFFFF && ubo->enableDDGI == 0)
+        volumeReflection = irradiance_volume_reflection(ubo, vertIn.worldPos, n, environmentReflection, volumeSkyVisibility, volumeOccludedRadiance);
+    IBLResult ibl = getIBLContributionOccluded(ubo, iblInputs, n, environmentReflection, ao, vertIn.worldPos, volumeSkyVisibility,
+                                               volumeOccludedRadiance); // the reflection probes too
     float3 ambientDiffuse = ibl.diffuse;
     float3 ambientSpecular = ibl.specular;
 
@@ -746,9 +755,14 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         if (irradiance_volume_lookup(ubo, vertIn.worldPos, n, volumeIrradiance, volumeWeight))
         {
             ambientDiffuse = lerp(ambientDiffuse, volumeIrradiance * diffuseColor, volumeWeight);
-            const float volumeLuma = dot(volumeIrradiance, float3(0.2126, 0.7152, 0.0722));
-            sceneSpecularOcclusion = lerp(1.0, saturate(volumeLuma / skyIrradianceLuma(ubo, n)), volumeWeight);
-            ambientSpecular *= sceneSpecularOcclusion;
+            if (volumeReflection)
+                sceneSpecularOcclusion = volumeSkyVisibility; // (applied in the reflection above, with the room's light)
+            else
+            {
+                const float volumeLuma = dot(volumeIrradiance, float3(0.2126, 0.7152, 0.0722));
+                sceneSpecularOcclusion = lerp(1.0, saturate(volumeLuma / skyIrradianceLuma(ubo, n)), volumeWeight);
+                ambientSpecular *= sceneSpecularOcclusion;
+            }
         }
     }
     // Screen-space GI: what its rays found for the opaque surface right behind -- a decal's wall (the same point along the pixel's

@@ -201,6 +201,8 @@ float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
 }
 
 IBLResult getIBLContributionAt(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos);
+IBLResult getIBLContributionOccluded(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos,
+                                     float skyVisibility, float3 occludedRadiance);
 
 IBLResult getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao)
 {
@@ -208,6 +210,15 @@ IBLResult getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, float3
 }
 
 IBLResult getIBLContributionAt(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos)
+{
+    return getIBLContributionOccluded(ubo, pbrInputs, n, reflection, ao, worldPos, 1.0, float3(0.0));
+}
+
+// The same with the sky's reflection seen only as far as `skyVisibility` says (0..1, the irradiance volume's sky occlusion,
+// irradiance_volume_reflection) and `occludedRadiance` -- the surroundings' light -- where it is hidden: Unreal's skylight occlusion.
+// The reflection probes, local captures that hold the room themselves, blend over that as over the sky.
+IBLResult getIBLContributionOccluded(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos,
+                                     float skyVisibility, float3 occludedRadiance)
 {
     if (ubo->irradianceMapIndex == 0xFFFFFFFF || ubo->prefilteredMapIndex == 0xFFFFFFFF || ubo->brdfLutIndex == 0xFFFFFFFF)
     {
@@ -232,6 +243,7 @@ IBLResult getIBLContributionAt(UniformBufferObject* ubo, PBRInfo pbrInputs, floa
     TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
     float4 prefilteredSample = prefilteredTex.SampleLevel(samplerPrefiltered, reflection, lod);
     float3 specularLight = prefilteredSample.rgb * ubo->scaleIBLAmbient;
+    specularLight = lerp(occludedRadiance, specularLight, saturate(skyVisibility));
     if (worldPos.x < 1e29)
         specularLight = reflection_probe_radiance(ubo, worldPos, reflection, pbrInputs.perceptualRoughness, specularLight);
 

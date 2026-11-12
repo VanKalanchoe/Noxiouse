@@ -616,7 +616,14 @@
             diffuseColor,
             specularColor
         );
-        IBLResult ibl = getIBLContributionAt(ubo, iblInputs, n, environmentReflection, occlusion, worldPos); // the reflection probes too
+        // The raster probe volume (Diffuse GI: Raster Probe Volume): the sky's reflection only as far as its probes saw the sky around
+        // the reflected ray, the room's light from there elsewhere (where SSR finds nothing on screen, it is what shows).
+        float volumeSkyVisibility = 1.0;
+        float3 volumeOccludedRadiance = float3(0.0);
+        const bool volumeReflection = pushConstant.diffuseGIMode == 4 &&
+                                      irradiance_volume_reflection(ubo, worldPos, n, environmentReflection, volumeSkyVisibility, volumeOccludedRadiance);
+        IBLResult ibl = getIBLContributionOccluded(ubo, iblInputs, n, environmentReflection, occlusion, worldPos, volumeSkyVisibility,
+                                                   volumeOccludedRadiance); // the reflection probes too
         float3 ambientDiffuse = ibl.diffuse;
         float3 ambientSpecular = ibl.specular;
 
@@ -666,10 +673,15 @@
             if (irradiance_volume_lookup(ubo, worldPos, n, volumeIrradiance, volumeWeight))
             {
                 ambientDiffuse = lerp(ambientDiffuse, volumeIrradiance * diffuseColor, volumeWeight);
-                // The sky's reflection only as far as the sky reaches this surface (as the other GI terms hold it back).
-                const float volumeLuma = dot(volumeIrradiance, float3(0.2126, 0.7152, 0.0722));
-                specularOcclusion = lerp(1.0, saturate(volumeLuma / skyIrradianceLuma(ubo, n)), volumeWeight);
-                ambientSpecular *= specularOcclusion;
+                // The sky's reflection only as far as the probes see the sky (applied in the reflection above, with the room's light).
+                if (volumeReflection)
+                    specularOcclusion = volumeSkyVisibility;
+                else
+                {
+                    const float volumeLuma = dot(volumeIrradiance, float3(0.2126, 0.7152, 0.0722));
+                    specularOcclusion = lerp(1.0, saturate(volumeLuma / skyIrradianceLuma(ubo, n)), volumeWeight);
+                    ambientSpecular *= specularOcclusion;
+                }
             }
         }
         else if ((pushConstant.diffuseGIMode == 1 || ubo->enableDDGI != 0) && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)

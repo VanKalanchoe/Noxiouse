@@ -8,7 +8,8 @@
 //                  unlit: Material_TransparentLit_Mesh.slang captureFragMain) into its surface cache (cacheFaceSize texels a face
 //                  side: each the average of the block of captured texels it covers -- diffuse albedo, emission, normal, distance
 //                  and how much of it is sky) and into the L1 SH of the distance it sees and of its square (the lookup's
-//                  visibility). Only when the probe is captured: when the volume changes or the scene near it does.
+//                  visibility) and of where it sees the sky (the reflections' sky occlusion, irradiance_volume_sky_visibility).
+//                  Only when the probe is captured: when the volume changes or the scene near it does.
 //   relightMain -- a probe lit again from its surface cache, every frame a share of the volume: each cache texel's surface lit
 //                  by the sun (through the volume's own sun shadow map, which covers the whole box), the point / spot / rect /
 //                  disc lights (their atlas shadow maps where they have one this frame), its emission and the light the volume
@@ -82,6 +83,7 @@ float3 probe_center(GpuIrradianceVolume* volume, uint probe)
 // --- packMain ----------------------------------------------------------------------------------------------------------------------
 
 groupshared float4 gDistanceSH[256][2];
+groupshared float4 gSkySH[256];
 
 [shader("compute")]
 [numthreads(16, 16, 1)]
@@ -99,7 +101,7 @@ void packMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
     const uint block = max(IrradianceProbeFaceSize / cacheSize, 1u);
     uint4* cache = (uint4*)volume->surfaceCacheReference + probe * 6u * cacheSize * cacheSize;
 
-    float4 shD = float4(0.0), shD2 = float4(0.0);
+    float4 shD = float4(0.0), shD2 = float4(0.0), shSky = float4(0.0);
     for (uint face = 0; face < 6; ++face)
     {
         const float2 ndc = face_ndc(threadId.x, threadId.y, faceSize);
@@ -113,6 +115,8 @@ void packMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
         const float4 basis = float4(0.282095, 0.488603 * direction.y, 0.488603 * direction.z, 0.488603 * direction.x) * solidAngle;
         shD += basis * distance;
         shD2 += basis * (distance * distance);
+        if (depth <= 0.0) // nothing drawn this way: the sky
+            shSky += basis;
 
         // The surface cache texel this thread's block makes (its first thread averages the block).
         if (threadId.x % block == 0 && threadId.y % block == 0)
@@ -158,6 +162,7 @@ void packMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
     }
     gDistanceSH[threadIndex][0] = shD;
     gDistanceSH[threadIndex][1] = shD2;
+    gSkySH[threadIndex] = shSky;
     GroupMemoryBarrierWithGroupSync();
     for (uint stride = 128; stride > 0; stride >>= 1)
     {
@@ -165,14 +170,16 @@ void packMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
         {
             gDistanceSH[threadIndex][0] += gDistanceSH[threadIndex + stride][0];
             gDistanceSH[threadIndex][1] += gDistanceSH[threadIndex + stride][1];
+            gSkySH[threadIndex] += gSkySH[threadIndex + stride];
         }
         GroupMemoryBarrierWithGroupSync();
     }
     if (threadIndex == 0)
     {
         float4* sh = (float4*)volume->probeSHReference;
-        sh[probe * 6 + 4] = gDistanceSH[0][0];
-        sh[probe * 6 + 5] = gDistanceSH[0][1];
+        sh[probe * IrradianceProbeSHStride + 4] = gDistanceSH[0][0];
+        sh[probe * IrradianceProbeSHStride + 5] = gDistanceSH[0][1];
+        sh[probe * IrradianceProbeSHStride + 6] = gSkySH[0];
     }
 }
 
@@ -326,9 +333,9 @@ void relightMain(uint3 groupId : SV_GroupID, uint threadIndex : SV_GroupIndex, u
     if (threadIndex == 0)
     {
         float4* sh = (float4*)volume->probeSHReference;
-        sh[probe * 6 + 0] = gRadianceSH[0][0];
-        sh[probe * 6 + 1] = gRadianceSH[0][1];
-        sh[probe * 6 + 2] = gRadianceSH[0][2];
-        sh[probe * 6 + 3] = float4(1.0, 0.0, 0.0, 0.0); // lit
+        sh[probe * IrradianceProbeSHStride + 0] = gRadianceSH[0][0];
+        sh[probe * IrradianceProbeSHStride + 1] = gRadianceSH[0][1];
+        sh[probe * IrradianceProbeSHStride + 2] = gRadianceSH[0][2];
+        sh[probe * IrradianceProbeSHStride + 3] = float4(1.0, 0.0, 0.0, 0.0); // lit
     }
 }
