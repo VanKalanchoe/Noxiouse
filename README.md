@@ -56,3 +56,7 @@ CMake options:
 Run the editor from `NoxEditor/` as the working directory (Visual Studio is set up that way) and open
 `Facerun/Facerun.nproj` (pass it on the command line or open it from the editor). `NoxRuntime <project.nproj>` plays a
 project's start scene. Timings are only compared in Release builds.
+
+Command-line switches start with `--` and can go anywhere on the line, before or after the project file: `--vk` / `--vulkan`
+(the default) or `--dx12` / `--d3d12` (Windows) pick the graphics API (the last one given wins), `--windowed` keeps the runtime in
+a window. The first argument that is not a switch is the project file; with none, the editor shows its project picker.

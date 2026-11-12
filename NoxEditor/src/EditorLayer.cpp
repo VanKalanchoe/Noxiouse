@@ -231,11 +231,10 @@ namespace Nox
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
 
-        auto commandLineArgs = Application::Get().GetSpecification().CommandLineArgs;
-        if (commandLineArgs.Count > 1)
+        // A project file on the command line (switches like --vk / --dx12 are not one).
+        if (const char* projectFilePath = Application::Get().GetSpecification().CommandLineArgs.FirstPositional())
         {
-            std::cout << "Loading Project: " << commandLineArgs[1] << std::endl;
-            auto projectFilePath = commandLineArgs[1];
+            std::cout << "Loading Project: " << projectFilePath << std::endl;
             OpenProject(projectFilePath);
         }
         else if (!OpenStartupProject())

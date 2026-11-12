@@ -322,15 +322,8 @@ namespace Nox
 
         NRI::GraphicsAPI api = NRI::GraphicsAPI::Vulkan;
 #ifdef _WIN32
-        const auto& args = Application::Get().GetSpecification().CommandLineArgs;
-        for (int i = 1; i < args.Count; ++i)
-        {
-            if (std::string_view(args[i]) == "--d3d12" || std::string_view(args[i]) == "--dx12")
-            {
-                api = NRI::GraphicsAPI::D3D12;
-                break;
-            }
-        }
+        if (Application::Get().GetSpecification().CommandLineArgs.WantsD3D12())
+            api = NRI::GraphicsAPI::D3D12;
 #endif
         m_device = NRI::Device::create(api, *m_window);
         NOX_CORE_ASSERT(m_device, "Failed to create NRI device");

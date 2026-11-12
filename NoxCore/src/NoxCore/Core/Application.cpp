@@ -41,15 +41,8 @@ namespace Nox
             m_Specification.WindowSpec.Ttile = m_Specification.Name;
 
 #ifdef _WIN32
-        for (int i = 1; i < m_Specification.CommandLineArgs.Count; ++i)
-        {
-            if (std::string_view(m_Specification.CommandLineArgs[i]) == "--d3d12" ||
-                std::string_view(m_Specification.CommandLineArgs[i]) == "--dx12")
-            {
-                m_Specification.WindowSpec.IsVulkan = false;
-                break;
-            }
-        }
+        if (m_Specification.CommandLineArgs.WantsD3D12())
+            m_Specification.WindowSpec.IsVulkan = false;
 #endif
         m_Window = std::make_shared<Window>(m_Specification.WindowSpec);
 

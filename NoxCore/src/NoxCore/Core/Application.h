@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <string_view>
 
 #include "Log.h"
 #include "NoxCore/Core/Window.h"
@@ -13,6 +14,8 @@ namespace Nox
     class JobSystem;
     class Application;
 
+    // The command line: switches start with "--" and may come anywhere (--vk, --dx12, --windowed); everything else is positional (the
+    // project file). Code asks for a switch or for the first positional argument -- never for args[1], which may be a switch.
     struct ApplicationCommandLineArgs
     {
         int Count = 0;
@@ -22,6 +25,37 @@ namespace Nox
         {
             /*VK_CORE_ASSERT(index < Count, "index out of range");*/
             return Args[index];
+        }
+
+        static bool IsSwitch(std::string_view argument) { return argument.size() > 2 && argument.substr(0, 2) == "--"; }
+        bool HasSwitch(std::string_view name) const
+        {
+            for (int index = 1; index < Count; ++index)
+                if (std::string_view(Args[index]) == name)
+                    return true;
+            return false;
+        }
+        // The first argument that is not a switch (the project file), or null.
+        const char* FirstPositional() const
+        {
+            for (int index = 1; index < Count; ++index)
+                if (!IsSwitch(Args[index]))
+                    return Args[index];
+            return nullptr;
+        }
+        // The graphics API asked for: --dx12 / --d3d12 (Windows) or --vk / --vulkan; the last one given wins; Vulkan by default.
+        bool WantsD3D12() const
+        {
+            bool d3d12 = false;
+            for (int index = 1; index < Count; ++index)
+            {
+                const std::string_view argument(Args[index]);
+                if (argument == "--dx12" || argument == "--d3d12")
+                    d3d12 = true;
+                else if (argument == "--vk" || argument == "--vulkan")
+                    d3d12 = false;
+            }
+            return d3d12;
         }
     };
 

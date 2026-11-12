@@ -64,9 +64,7 @@ namespace Nox
         // The project's window mode (Borderless by default); "--windowed" on the command line keeps a window (testing).
         {
             const ApplicationCommandLineArgs& args = Application::Get().GetSpecification().CommandLineArgs;
-            bool windowed = false;
-            for (int index = 1; index < args.Count; ++index)
-                windowed |= std::string_view(args[index]) == "--windowed";
+            const bool windowed = args.HasSwitch("--windowed");
             if (!windowed)
                 Application::Get().getWindow()->SetMode(ParseWindowMode(Project::GetActive()->GetConfig().WindowMode));
         }
@@ -162,8 +160,8 @@ namespace Nox
     std::filesystem::path RuntimeLayer::FindProjectFile() const
     {
         const ApplicationCommandLineArgs& args = Application::Get().GetSpecification().CommandLineArgs;
-        if (args.Count > 1)
-            return std::filesystem::path(args[1]);
+        if (const char* project = args.FirstPositional())
+            return std::filesystem::path(project);
 
         // A packaged game keeps its project in Game/ next to the executable (File > Package Game in the editor).
         const std::filesystem::path workingDirectory = std::filesystem::current_path();
