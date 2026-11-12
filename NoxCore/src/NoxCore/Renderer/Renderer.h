@@ -1329,6 +1329,10 @@ namespace Nox
         // AVBOIT's transmittance volume before the transparent surfaces are shaded (Passes/AVBOITPasses.cpp): the transparent meshes
         // (`meshes`: their draws are in this frame) and the alpha-blended particles, once per frame (the first OIT pass asks).
         void addAVBOITPasses(bool meshes);
+        // Raster glass's screen-space reflections (SSRCommon.slang): a copy of the opaque depth the transparent passes read while they
+        // draw into it, and the SSR settings in the uniforms -- with the refraction source (what the rays hit), where SSR stands in for
+        // the RT reflections.
+        void addTransparentReflectionInputs();
         void createAVBOITPipelines(bool forceCompile = false);
         void declareAVBOITPrepassInputs(RGBuilder& builder);
         // Lit transparent draws whose material transmits (glass) in this frame's draw list.
@@ -1737,7 +1741,7 @@ namespace Nox
         bool m_sceneBoundsValid = false;
         std::unique_ptr<NRI::Pipeline> m_ssrPipeline;
         std::unique_ptr<NRI::Pipeline> m_ssrFilterPipeline; // SSR.slang filterMain (the roughness blur)
-        bool m_ssrEnabled = false;
+        bool m_ssrEnabled = true; // SSR where the RT reflections do not run
         float m_ssrMaxDistanceMeters = 50.0f;
         float m_ssrThicknessMeters = 0.3f;
         uint32_t m_ssrMaxSteps = 64;

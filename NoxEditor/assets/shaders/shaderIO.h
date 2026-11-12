@@ -763,6 +763,16 @@ struct UniformBufferObject
     uint64_t avboitLutReference;        // AvboitDepthWarp: virtual slice -> physical slice (empty depth ranges skipped)
     uint64_t avboitExtinctionReference; // uint per froxel: the extinction splatted there, 3 x (8 + 2 overflow) bits
     uint64_t avboitOverflowReference;   // uint3 per column: the first slice each channel's extinction overflowed in
+
+    // Screen-space reflections of the transparent surfaces in raster (Renderer::addTransparentReflectionInputs; SSRCommon.slang):
+    // this frame's opaque depth and normals to march through, the lit scene behind them is the refraction source (push constants).
+    // transparentSSRDepthTextureIndex 0xFFFFFFFF: none this frame (RT reflections run, SSR off, no refraction source).
+    uint32_t transparentSSRDepthTextureIndex;
+    uint32_t transparentSSRNormalTextureIndex;
+    uint32_t ssrMaxSteps;
+    float ssrMaxDistance;   // world units
+    float ssrThickness;     // world units
+    float ssrMaxRoughness;
 };
 
 STATIC_CONST uint32_t OIT_WEIGHTED_BLENDED = 0;

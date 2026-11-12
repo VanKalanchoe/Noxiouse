@@ -28,6 +28,7 @@
 #include "HeightFog.slang"
 #include "ShadowMaps.slang"
 #include "IrradianceVolumeCommon.slang"
+#include "SSRCommon.slang"
 #include "OITShared.slang"
 
 import Math;
@@ -808,6 +809,60 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
         const float2 brdf = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)), float2(NdotV, 1.0 - perceptualRoughness), 0).rg;
         ambientSpecular = lerp(ambientSpecular, radiance * (specularColor * brdf.x + specularEnvironmentR90 * brdf.y), tracedReflectionWeight);
+    }
+
+    // Raster (no traced reflection): screen-space reflection, as the opaque surfaces get from SSR.slang -- the mirror ray marched
+    // through this frame's opaque depth (SSRCommon.slang), what it hits read from the refraction source (the opaque scene lit this
+    // frame, its blur mips for the roughness), over the environment / probes / volume above where it finds something on screen. The
+    // glass showed only those (the sky, indoors) where the opaque surfaces around it reflected the room.
+    if (tracedReflectionWeight < 1.0 && ubo->transparentSSRDepthTextureIndex != 0xFFFFFFFF && pushConstant.refractionTextureIndex != 0xFFFFFFFF &&
+        ubo->transparentSSRNormalTextureIndex != 0xFFFFFFFF && perceptualRoughness < ubo->ssrMaxRoughness && ubo->brdfLutIndex != 0xFFFFFFFF)
+    {
+        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->transparentSSRDepthTextureIndex, 0));
+        uint depthWidth, depthHeight;
+        depthTex.GetDimensions(depthWidth, depthHeight);
+        const float2 viewportSize = float2(float(depthWidth), float(depthHeight));
+        const float3 reflected = normalize(reflect(-v, n));
+        const float3 start = vertIn.worldPos + n * raster_surface_bias(ubo, vertIn.worldPos, 0.01 * ubo->unitsPerMeter);
+        const int2 pixel = int2(vertIn.pos.xy);
+        // The steps' offset fixed per pixel (SSR.slang's): a still camera gives the same reflection every frame.
+        const float noise = frac(52.9829189 * frac(0.06711056 * float(pixel.x) + 0.00583715 * float(pixel.y)));
+        float2 hitUV;
+        float hitDepth;
+        float facingFade;
+        if (ssr_march(ubo, depthTex, start, reflected, ubo->ssrMaxDistance, ubo->ssrThickness, ubo->ssrMaxSteps, viewportSize, noise, hitUV,
+                      hitDepth, facingFade))
+        {
+            const int2 hitPixel = int2(hitUV * viewportSize);
+            Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->transparentSSRNormalTextureIndex, 0));
+            const float3 hitNormalRaw = normalTex.Load(int3(hitPixel, 0)).rgb;
+            // The back of a surface (its front faces along the ray) is not what the reflection sees.
+            if (dot(hitNormalRaw, reflected) <= 0.1 * length(hitNormalRaw))
+            {
+                const float4 hitWorldH = mul(ubo->invViewProj, float4(hitUV.x * 2.0 - 1.0, 1.0 - hitUV.y * 2.0, hitDepth, 1.0));
+                const float3 hitWorld = hitWorldH.xyz / hitWorldH.w;
+                Texture2D refractionSource = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.refractionTextureIndex, 0));
+                uint sourceWidth, sourceHeight, sourceLevels;
+                refractionSource.GetDimensions(0, sourceWidth, sourceHeight, sourceLevels);
+                // The roughness' cone where the ray lands: its blur mip (SSR.slang's).
+                const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
+                const float hitDistance = length(hitWorld - start);
+                const float hitZ = max(mul(ubo->view, float4(hitWorld, 1.0)).z, nearPlane);
+                const float focal = mul(ubo->proj, float4(0.0, 1.0, 0.0, 0.0)).y;
+                const float coneDiameter = 2.0 * hitDistance * perceptualRoughness * perceptualRoughness;
+                const float conePixels = coneDiameter * focal * float(sourceHeight) / (2.0 * hitZ);
+                const float mip = clamp(log2(max(conePixels, 1.0)), 0.0, float(max(sourceLevels, 1u) - 1u));
+                SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+                const float3 radiance = max(refractionSource.SampleLevel(linearClamp, hitUV, mip).rgb, float3(0.0));
+
+                const float roughnessFade = saturate((ubo->ssrMaxRoughness - perceptualRoughness) / 0.15);
+                const float distanceFade = 1.0 - smoothstep(0.8, 1.0, hitDistance / max(ubo->ssrMaxDistance, 1e-4));
+                const float confidence = facingFade * roughnessFade * distanceFade * ssr_edge_fade(hitUV) * (1.0 - tracedReflectionWeight);
+                Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+                const float2 brdf = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)), float2(NdotV, 1.0 - perceptualRoughness), 0).rg;
+                ambientSpecular = lerp(ambientSpecular, radiance * (specularColor * brdf.x + specularEnvironmentR90 * brdf.y), confidence);
+            }
+        }
     }
 
     // The coat's and the sheen's ambient over the base's (lobe_ambient), each at its own roughness, occluded as the base's.

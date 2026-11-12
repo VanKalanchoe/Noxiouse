@@ -1,4 +1,5 @@
 #include "shaderIO.h"
+#include "SSRCommon.slang"
 
 // Screen-space reflections (RS4, Settings > Screen-Space Reflections; vs the RT reflections, Reflection.slang). UE5's / Godot's
 // approach: the mirror reflection ray marched in screen space through this frame's depth buffer (perspective-correct depth along the
@@ -38,19 +39,6 @@ void meshMain(out indices uint3 triangles[1], out vertices MSOutput vertices[3],
         vertices[threadID].pos = float4(positions[threadID], 0.0, 1.0);
     if (threadID == 0)
         triangles[0] = uint3(0, 1, 2);
-}
-
-float2 ssr_clip_to_uv(float4 clip)
-{
-    return float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5);
-}
-
-// Towards the screen's edges SSR knows less and less (what is beyond is unknown): it fades out over the outer 20 % smoothly, so
-// the environment / probes take over gradually, not at a line (UE's SSR edge fade).
-float ssr_edge_fade(float2 uv)
-{
-    const float2 edge = min(uv, 1.0 - uv);
-    return smoothstep(0.0, 0.2, min(edge.x, edge.y));
 }
 
 float4 traceReflection(MSOutput input, PushConstantSSR pushConstant);
@@ -134,85 +122,16 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant)
     const float noise = frac(52.9829189 * frac(0.06711056 * float(pixelCoord.x) + 0.00583715 * float(pixelCoord.y)));
     const float3 R = reflect(-V, N);
 
-    // Towards the camera the ray soon goes behind what the screen shows: faded out (the view's +z is forward).
-    const float3 viewR = mul(ubo->view, float4(R, 0.0)).xyz;
-    const float facingFade = saturate((viewR.z + 0.25) * 4.0);
-    if (facingFade <= 0.0)
-        return float4(0.0);
-
-    const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z; // depth x view distance (infinite reverse Z)
-    const float4x4 viewProj = mul(ubo->proj, ubo->view);
+    // The march through this frame's depth (SSRCommon.slang).
     const float3 start = worldPos + N * raster_surface_bias(ubo, worldPos, 0.01 * ubo->unitsPerMeter);
-    const float startZ = mul(ubo->view, float4(start, 1.0)).z;
-    float rayLength = pushConstant.maxDistance;
-    if (viewR.z < 0.0) // ends in front of the near plane otherwise
-        rayLength = min(rayLength, max(startZ - 2.0 * nearPlane, 0.0) / -viewR.z);
-    if (rayLength <= 0.0)
+    float2 hitUV;
+    float hitDepth;
+    float facingFade;
+    if (!ssr_march(ubo, depthTex, start, R, pushConstant.maxDistance, pushConstant.thickness, pushConstant.maxSteps, viewportSize, noise,
+                   hitUV, hitDepth, facingFade))
         return float4(0.0);
-
-    const float4 clip0 = mul(viewProj, float4(start, 1.0));
-    const float4 clip1 = mul(viewProj, float4(start + R * rayLength, 1.0));
-    const float2 uv0 = ssr_clip_to_uv(clip0);
-    const float2 uv1 = ssr_clip_to_uv(clip1);
-    const float invW0 = 1.0 / clip0.w;
-    const float invW1 = 1.0 / clip1.w;
-    // Where the segment leaves the screen: no steps past it.
-    float tEnd = 1.0;
-    const float2 duv = uv1 - uv0;
-    if (duv.x > 1e-6) tEnd = min(tEnd, (1.0 - uv0.x) / duv.x);
-    if (duv.x < -1e-6) tEnd = min(tEnd, -uv0.x / duv.x);
-    if (duv.y > 1e-6) tEnd = min(tEnd, (1.0 - uv0.y) / duv.y);
-    if (duv.y < -1e-6) tEnd = min(tEnd, -uv0.y / duv.y);
-    const float pixels = length(duv * viewportSize) * tEnd;
-    const uint steps = clamp(uint(ceil(pixels)), 4u, clamp(pushConstant.maxSteps, 4u, 256u));
-
-    float previousT = 0.0;
-    float hitT = -1.0;
-    for (uint i = 0; i < steps; ++i)
-    {
-        const float t = tEnd * (float(i) + noise) / float(steps);
-        const float2 sampleUV = lerp(uv0, uv1, t);
-        const float rayZ = 1.0 / lerp(invW0, invW1, t);
-        const float sceneDepth = depthTex.Load(int3(int2(sampleUV * viewportSize), 0)).r;
-        if (sceneDepth > 0.0)
-        {
-            const float behind = rayZ - nearPlane / sceneDepth;
-            // A hit: the ray just behind what the pixel shows, within the step's own depth span (it may have crossed the surface
-            // anywhere along the step: UE's ray cast tolerance), never more than the thickness. Unbounded, a long step at a grazing
-            // angle counted anything the ray passed behind as a hit -- thin fixtures, cables, an awning's housing -- reflections
-            // the RT reflections do not have, which moved as the camera changed what covered what.
-            const float stepZ = abs(rayZ - 1.0 / lerp(invW0, invW1, previousT));
-            const float tolerance = clamp(1.5 * stepZ, 0.02 * ubo->unitsPerMeter, pushConstant.thickness);
-            if (behind > 0.0 && behind < tolerance)
-            {
-                hitT = t;
-                break;
-            }
-        }
-        previousT = t;
-    }
-    if (hitT < 0.0)
-        return float4(0.0);
-
-    // Bisection between the last step in front and the first behind.
-    float lo = previousT;
-    float hi = hitT;
-    for (uint i = 0; i < 5; ++i)
-    {
-        const float mid = 0.5 * (lo + hi);
-        const float2 sampleUV = lerp(uv0, uv1, mid);
-        const float sceneDepth = depthTex.Load(int3(int2(sampleUV * viewportSize), 0)).r;
-        const float behind = 1.0 / lerp(invW0, invW1, mid) - (sceneDepth > 0.0 ? nearPlane / sceneDepth : 1e30);
-        if (behind > 0.0)
-            hi = mid;
-        else
-            lo = mid;
-    }
-    const float2 hitUV = lerp(uv0, uv1, hi);
     const int2 hitPixel = int2(hitUV * viewportSize);
-    const float hitDepth = depthTex.Load(int3(hitPixel, 0)).r;
-    if (hitDepth <= 0.0)
-        return float4(0.0);
+    const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
     const float4 hitWorldH = mul(pushConstant.invViewProj, float4(hitUV.x * 2.0 - 1.0, 1.0 - hitUV.y * 2.0, hitDepth, 1.0));
     const float3 hitWorld = hitWorldH.xyz / hitWorldH.w;
     // The back of a surface (its front faces along the ray): not what the reflection sees.

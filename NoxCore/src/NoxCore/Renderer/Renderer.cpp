@@ -819,7 +819,7 @@ namespace Nox
             // The raster versions (RS1-RS5): off on the RT rungs.
             bool ContactShadows = false;
             Renderer::SSAOMethod AmbientOcclusion = Renderer::SSAOMethod::Classic;
-            bool SSR = false;
+            bool SSR = true; // where the RT reflections do not run (ray tracing off, its reflections off): SSR stands in, as in Unreal
             bool SSGI = false;
             bool RayReconstruction = true; // DLSS Ray Reconstruction denoises the RT effects (where the GPU has it)
             int AutoExposure = -1;         // the viewport's Auto Exposure: 1 on, -1 left as it is
@@ -870,7 +870,7 @@ namespace Nox
                 preset.LocalShadows = Renderer::LocalShadowMode::ShadowMaps;
                 preset.ContactShadows = true;
                 preset.AmbientOcclusion = Renderer::SSAOMethod::GTAO;
-                preset.SSR = false;
+                preset.SSR = true; // (the RT reflections above take precedence; SSR when they are turned off)
                 preset.SSGI = true;
                 preset.RayReconstruction = false;
                 preset.AutoExposure = 1;
@@ -5461,6 +5461,10 @@ namespace Nox
         // The air's camera volume, for the forward passes' fog (deferred lighting gets it in its push constants).
         uniformData.aerialPerspectiveTextureIndex = resources.AerialPerspective.IsValid() ? graph.GetSlotOr(resources.AerialPerspective, NoTexture) : NoTexture;
         uniformData.aerialPerspectiveKmPerUnit = WorldUnits::ToMeters(1.0f) / 1000.0f * glm::max(m_proceduralSky.AerialPerspectiveScale, 0.0f);
+        // Raster glass's SSR (addTransparentReflectionInputs): the opaque depth copy and the normals it marches through.
+        const bool transparentSSR = resources.TransparentReflectionDepth.IsValid();
+        uniformData.transparentSSRDepthTextureIndex = transparentSSR ? graph.GetSlotOr(resources.TransparentReflectionDepth, NoTexture) : NoTexture;
+        uniformData.transparentSSRNormalTextureIndex = transparentSSR ? graph.GetSlotOr(resources.GBufferNormal, NoTexture) : NoTexture;
         // AVBOIT's prepasses test each fragment against the scene depth (they draw at the volume's resolution, without it attached).
         uniformData.avboitDepthTextureIndex = frame.avboitAdded ? graph.GetSlotOr(resources.Depth, NoTexture) : NoTexture;
         if (!frame.avboitAdded)

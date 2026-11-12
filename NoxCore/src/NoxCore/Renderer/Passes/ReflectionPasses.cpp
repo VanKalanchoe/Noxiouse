@@ -40,7 +40,9 @@ namespace Nox
         // The lit scene history serves SSR and the screen-space GI (addSSGIPasses).
         const bool pathTracing = m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19;
         const bool ssgiWanted = m_ssgiEnabled && (m_diffuseGIMode == 0 || m_diffuseGIMode == 4);
-        if ((!m_ssrEnabled && !ssgiWanted) || pathTracing || !m_ssrPipeline || !m_colorPyramidCopyPipeline || !m_colorPyramidDownsamplePipeline)
+        // (SSR stands in for the RT reflections: with them running, no history for it -- unless the screen-space GI wants one.)
+        const bool ssrWanted = m_ssrEnabled && !m_frame.rtReflectionsAdded;
+        if ((!ssrWanted && !ssgiWanted) || pathTracing || !m_ssrPipeline || !m_colorPyramidCopyPipeline || !m_colorPyramidDownsamplePipeline)
         {
             m_ssrHistoryValid = false;
             return;

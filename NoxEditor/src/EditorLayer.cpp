@@ -1885,10 +1885,16 @@ namespace Nox
             bool ssrEnabled = m_Renderer->getSSREnabled();
             if (ImGui::Checkbox("Screen-Space Reflections (SSR)", &ssrEnabled))
                 m_Renderer->setSSREnabled(ssrEnabled);
-            ImGui::SetItemTooltip("The mirror reflection marched through the depth buffer; what it hits is taken from last frame's\n"
-                                  "image (blurred for rough surfaces). Where it finds nothing on screen (off screen, behind\n"
-                                  "objects, towards the camera) the environment shows. Used where Ray Tracing Reflections are off\n"
-                                  "(they take precedence) -- to compare the two.");
+            ImGui::SetItemTooltip("The mirror reflection marched through the depth buffer; what it hits is taken from the lit image\n"
+                                  "(blurred for rough surfaces). Where it finds nothing on screen (off screen, behind objects,\n"
+                                  "towards the camera) the reflection probes / probe volume / environment show. Glass and other\n"
+                                  "transparent surfaces get it too. Runs wherever ray traced reflections do not (ray tracing off, or\n"
+                                  "Ray Tracing Reflections off), as in Unreal; with them on, they take precedence.");
+            if (ssrEnabled && m_Renderer->getRayTracingEnabled() && m_Renderer->getRayTracingReflections())
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled("(not used: ray traced reflections run)");
+            }
             if (ssrEnabled)
             {
                 ImGui::Indent();
@@ -2076,6 +2082,8 @@ namespace Nox
                 {
                     m_Renderer->setRayTracingReflections(rtReflections);
                 }
+                ImGui::SetItemTooltip("Reflections traced against the scene (what is off screen too). Off: Screen-Space Reflections\n"
+                                      "stand in, where they are on.");
 
                 bool rtaoEnabled = m_Renderer->getRTAOEnabled();
                 if (ImGui::Checkbox("Ray Tracing Ambient Occlusion (RTAO)", &rtaoEnabled))

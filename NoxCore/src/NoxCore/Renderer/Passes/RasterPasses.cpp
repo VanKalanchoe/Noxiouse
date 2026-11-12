@@ -1464,7 +1464,10 @@ namespace Nox
         if (oit)
         {
             if (refraction)
+            {
                 addRefractionSourcePasses();
+                addTransparentReflectionInputs();
+            }
             // AVBOIT: the transmittance volume of every transparent surface first (meshes and alpha-blended particles).
             addAVBOITPasses(true);
             ensureOITTargets();
@@ -1477,6 +1480,11 @@ namespace Nox
                     declareForward(builder, true);
                     if (refraction)
                         builder.Read(resources.RefractionSource);
+                    if (resources.TransparentReflectionDepth.IsValid())
+                    {
+                        builder.Read(resources.TransparentReflectionDepth);
+                        builder.Read(resources.GBufferNormal);
+                    }
                 },
                 [this, res = &resources, refraction](RGPassContext& context)
                 {
@@ -1510,6 +1518,7 @@ namespace Nox
         }
 
         addRefractionSourcePasses();
+        addTransparentReflectionInputs();
 
         // Transparent surfaces over the scene; glass refracts the copy.
         m_renderGraph.AddPass("Forward Transparent", RGPassFlags::Raster,
@@ -1518,6 +1527,11 @@ namespace Nox
                 builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
                 declareForward(builder, true);
                 builder.Read(resources.RefractionSource);
+                if (resources.TransparentReflectionDepth.IsValid())
+                {
+                    builder.Read(resources.TransparentReflectionDepth);
+                    builder.Read(resources.GBufferNormal);
+                }
             },
             [this, res = &resources](RGPassContext& context)
             {
@@ -1595,6 +1609,38 @@ namespace Nox
             return glm::vec2(0.0f);
         const glm::vec2 ndcOffset = glm::vec2(jittered) / jittered.w - glm::vec2(still) / still.w;
         return ndcOffset * glm::vec2(0.5f, -0.5f);
+    }
+
+    void Renderer::addTransparentReflectionInputs()
+    {
+        // SSR stands in for the RT reflections (as for the opaque surfaces, addSSRPass): with them running, glass takes its traced
+        // reflection or the probes'.
+        if (!m_ssrEnabled || m_frame.rtReflectionsAdded || m_frame.renderExtent.width == 0 || m_frame.renderExtent.height == 0)
+            return;
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (!resources.RefractionSource.IsValid() || !resources.GBufferNormal.IsValid())
+            return;
+        // The depth the transparent passes test against is their depth target: they cannot sample it while it is bound. A copy (as
+        // the previous-frame snapshot's), made once the opaque surfaces are all in it.
+        RGTextureDesc depthDesc;
+        depthDesc.Usage = NRI::TextureUsage::DepthStencilAttachment;
+        resources.TransparentReflectionDepth = m_renderGraph.CreateTexture("Transparent Reflection Depth", depthDesc);
+        m_renderGraph.AddPass("Transparent Reflection Depth", RGPassFlags::None,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.Depth, RGTextureAccess::CopySource);
+                builder.Write(resources.TransparentReflectionDepth, RGTextureAccess::CopyDestination);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                context.Cmd().copyTexture(context.Texture(res->Depth), context.Texture(res->TransparentReflectionDepth), m_frame.renderExtent.width,
+                                          m_frame.renderExtent.height);
+            });
+        uniformData.ssrMaxSteps = m_ssrMaxSteps;
+        uniformData.ssrMaxDistance = WorldUnits::FromMeters(m_ssrMaxDistanceMeters);
+        uniformData.ssrThickness = WorldUnits::FromMeters(m_ssrThicknessMeters);
+        uniformData.ssrMaxRoughness = m_ssrMaxRoughness;
+        // (the slots: resolveFrameUniforms, once the graph is compiled)
     }
 
     void Renderer::addRefractionSourcePasses()
