@@ -923,6 +923,19 @@ namespace Nox
         bool getWireframeOverlay() const { return m_wireframeOverlay; }
         void setOITEnabled(bool enabled) { m_oitEnabled = enabled; }
         bool getOITEnabled() const { return m_oitEnabled; }
+        // How OIT weights the layers (Passes/AVBOITPasses.cpp, OITShared.slang): AVBOIT (adaptive voxel-based OIT, Drobot, SIGGRAPH
+        // 2025; Unreal's AVBOIT): by the transmittance in front of each, from a low-resolution volume of every transparent surface
+        // built first -- in order wherever layers are a slice apart, glass tints what is behind it; weighted blended (McGuire and Bavoil
+        // 2013): by an ad hoc depth weight. Both resolve the tint of glass per color channel.
+        enum class OITMethod : uint8_t { WeightedBlended, AVBOIT };
+        void setOITMethod(OITMethod method) { m_oitMethod = method; }
+        OITMethod getOITMethod() const { return m_oitMethod; }
+        // AVBOIT's physical depth slices (16-256; memory: render size / 8 squared x slices x 8 bytes) and how far along the view ray
+        // they reach (meters); nearer than ~2 m they are about evenly spaced, beyond on a log curve, and empty depth ranges take none.
+        void setAVBOITSlices(uint32_t slices) { m_avboitSlices = std::clamp(slices, 16u, 256u); }
+        uint32_t getAVBOITSlices() const { return m_avboitSlices; }
+        void setAVBOITDistanceMeters(float meters) { m_avboitDistanceMeters = std::max(meters, 1.0f); }
+        float getAVBOITDistanceMeters() const { return m_avboitDistanceMeters; }
         // OIT is for the raster pipeline alone. The hybrid one sorts its glass back to front and traces through it (ray traced
         // glass, shadows, GI): blended OIT layers there averaged glass in front of glass into see-through.
         bool isOITActive() const { return m_oitEnabled && !m_rayTracingEnabled; }
@@ -1297,6 +1310,12 @@ namespace Nox
         // Whether the transparent buckets have draws this frame.
         bool hasTransparentDraws() const;
         void addOITCompositePass();
+        // AVBOIT's transmittance volume before the transparent surfaces are shaded (Passes/AVBOITPasses.cpp): the transparent meshes
+        // (`meshes`: their draws are in this frame) and the alpha-blended particles, once per frame (the first OIT pass asks).
+        // `refraction`: the glass is shaded over the refraction source this frame (its transmittance then is what it does not cover).
+        void addAVBOITPasses(bool meshes, bool refraction = false);
+        void createAVBOITPipelines(bool forceCompile = false);
+        void declareAVBOITPrepassInputs(RGBuilder& builder);
         // Lit transparent draws whose material transmits (glass) in this frame's draw list.
         bool hasTransmissiveDraws() const;
         // The skybox push constants of the sun's disc (procedural sky), without the uniforms and cubemap.
@@ -1447,6 +1466,27 @@ namespace Nox
         uint64_t m_particleBufferCapacity = 0;
         std::unique_ptr<NRI::Pipeline> m_particlePipeline;
         std::unique_ptr<NRI::Pipeline> m_particleOITPipeline; // alpha-blended particles into the OIT targets
+        // AVBOIT (Passes/AVBOITPasses.cpp): the prepasses' fragment stages (occupancy, splat) of the transparent lit / unlit meshes and
+        // the particles, the depth warp and the integration; its buffers and volume (sized for the render size and slices).
+        std::unique_ptr<NRI::Pipeline> m_transparentLitAVBOITOccupancyPipeline;
+        std::unique_ptr<NRI::Pipeline> m_transparentLitAVBOITSplatPipeline;
+        std::unique_ptr<NRI::Pipeline> m_unlitAVBOITOccupancyPipeline;
+        std::unique_ptr<NRI::Pipeline> m_unlitAVBOITSplatPipeline;
+        std::unique_ptr<NRI::Pipeline> m_particleAVBOITOccupancyPipeline;
+        std::unique_ptr<NRI::Pipeline> m_particleAVBOITSplatPipeline;
+        std::unique_ptr<NRI::Pipeline> m_avboitLutPipeline;
+        std::unique_ptr<NRI::Pipeline> m_avboitIntegratePipeline;
+        std::unique_ptr<NRI::Buffer> m_avboitOccupancy;
+        std::unique_ptr<NRI::Buffer> m_avboitDepthWarp;
+        std::unique_ptr<NRI::Buffer> m_avboitExtinction;
+        std::unique_ptr<NRI::Buffer> m_avboitOverflow;
+        Ref<Texture2D> m_avboitTransmittance;
+        uint32_t m_avboitTransmittanceStorage = ~0u;
+        glm::uvec3 m_avboitGrid{ 0 };
+        OITMethod m_oitMethod = OITMethod::AVBOIT;
+        uint32_t m_avboitSlices = 64;
+        float m_avboitDistanceMeters = 500.0f;
+        float m_avboitLinearMeters = 2.0f;
         std::unique_ptr<NRI::Pipeline> m_particleMotionPipeline; // their motion into the velocity target (DLSS / TAA)
         std::unique_ptr<NRI::Pipeline> m_colorPyramidDownsamplePipeline;
         bool m_refractionEnabled = true;
@@ -1791,6 +1831,7 @@ namespace Nox
             bool deferredLightingAdded = false;
             bool oitTargetsCreated = false; // resources.OITAccum / OITReveal exist this frame
             bool oitWritten = false;        // something was drawn into them (the next writer loads, the composite runs)
+            bool avboitAdded = false;       // AVBOIT's volume is built this frame (the shading passes weight by it)
             bool occlusionRawAdded = false; // SSAO or RTAO wrote resources.SSAORaw this frame (never both)
             bool ssaoAdded = false;         // resources.SSAO (the blurred result) is valid this frame
             bool dlssAdded = false;

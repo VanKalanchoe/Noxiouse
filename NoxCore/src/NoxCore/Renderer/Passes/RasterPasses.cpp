@@ -1040,7 +1040,7 @@ namespace Nox
         RGTextureDesc desc;
         desc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
         resources.OITAccum = m_renderGraph.CreateTexture("OIT Accumulation", desc);
-        desc.Format = NRI::ImageFormat::R16_SFLOAT;
+        // Revealage per color channel (what tinted glass lets through of each) and mono (a: the total coverage the resolve uses).
         resources.OITReveal = m_renderGraph.CreateTexture("OIT Revealage", desc);
         m_frame.oitTargetsCreated = true;
     }
@@ -1067,13 +1067,21 @@ namespace Nox
                 cmd.setDepthWriteEnable(false);
                 cmd.setColorBlendEnable(0, true);
                 cmd.setColorWriteMask(0, NRI::ColorComponent::All);
-                // The average over the scene, which keeps the revealage's share of itself (the shader's alpha); its alpha stays.
-                cmd.setColorBlendEquation(0, {
-                    .srcColorBlendFactor = NRI::BlendFactor::One, .dstColorBlendFactor = NRI::BlendFactor::SrcAlpha, .colorBlendOp = NRI::BlendOp::Add,
-                    .srcAlphaBlendFactor = NRI::BlendFactor::Zero, .dstAlphaBlendFactor = NRI::BlendFactor::One, .alphaBlendOp = NRI::BlendOp::Add });
                 shaderio::PushConstantOITComposite push{};
                 push.accumIndex = uniformData.imageHeapIndexOffset + context.Slot(res->OITAccum);
                 push.revealIndex = uniformData.imageHeapIndexOffset + context.Slot(res->OITReveal);
+                // 1. The scene times what the layers let through of it, per channel (tinted glass tints what is behind); alpha stays.
+                cmd.setColorBlendEquation(0, {
+                    .srcColorBlendFactor = NRI::BlendFactor::Zero, .dstColorBlendFactor = NRI::BlendFactor::SrcColor, .colorBlendOp = NRI::BlendOp::Add,
+                    .srcAlphaBlendFactor = NRI::BlendFactor::Zero, .dstAlphaBlendFactor = NRI::BlendFactor::One, .alphaBlendOp = NRI::BlendOp::Add });
+                push.mode = shaderio::OIT_COMPOSITE_MULTIPLY;
+                cmd.pushData(&push, sizeof(push));
+                cmd.draw(3, 1, 0, 0);
+                // 2. The layers' own light, normalized by their total coverage, added.
+                cmd.setColorBlendEquation(0, {
+                    .srcColorBlendFactor = NRI::BlendFactor::One, .dstColorBlendFactor = NRI::BlendFactor::One, .colorBlendOp = NRI::BlendOp::Add,
+                    .srcAlphaBlendFactor = NRI::BlendFactor::Zero, .dstAlphaBlendFactor = NRI::BlendFactor::One, .alphaBlendOp = NRI::BlendOp::Add });
+                push.mode = shaderio::OIT_COMPOSITE_ADD;
                 cmd.pushData(&push, sizeof(push));
                 cmd.draw(3, 1, 0, 0);
                 cmd.setColorBlendEnable(0, false);
@@ -1154,6 +1162,7 @@ namespace Nox
 
         if (!oitBatches.empty())
         {
+            addAVBOITPasses(false); // (built already when transparent meshes were drawn this frame)
             ensureOITTargets();
             const bool first = !m_frame.oitWritten;
             m_frame.oitWritten = true;
@@ -1456,6 +1465,8 @@ namespace Nox
         {
             if (refraction)
                 addRefractionSourcePasses();
+            // AVBOIT: the transmittance volume of every transparent surface first (meshes and alpha-blended particles).
+            addAVBOITPasses(true, refraction);
             ensureOITTargets();
             m_frame.oitWritten = true;
             m_renderGraph.AddPass("Transparent OIT", RGPassFlags::Raster,

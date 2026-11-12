@@ -13,6 +13,7 @@
 #include "DDGICommon.slang"
 #include "HeightFog.slang"
 #include "ShadowMaps.slang"
+#include "OITShared.slang"
 
 static const uint ParticlesPerGroup = 32;
 
@@ -182,7 +183,7 @@ float4 fragMain(ParticleVertex input, uniform PushConstantParticles pushConstant
 struct ParticleOITOutput
 {
     float4 accum : SV_Target0;
-    float reveal : SV_Target1;
+    float4 reveal : SV_Target1;
 };
 
 [shader("fragment")]
@@ -190,11 +191,36 @@ ParticleOITOutput fragMainOIT(ParticleVertex input, uniform PushConstantParticle
 {
     const float4 shaded = shadeParticle(input, pushConstant);
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    const OITOutput oit = oit_output(shaded, length(input.worldPos - ubo->cameraWorldPos.xyz) / ubo->unitsPerMeter);
+    const OITOutput oit = oit_output(ubo, shaded.rgb, float3(1.0 - saturate(shaded.a)), input.worldPos, input.pos.xy);
     ParticleOITOutput output;
     output.accum = oit.accum;
     output.reveal = oit.reveal;
     return output;
+}
+
+bool particleDepthFade(UniformBufferObject* ubo, ParticleVertex input, PushConstantParticles pushConstant, float2 pixel, out float fade);
+float4 particleTexel(UniformBufferObject* ubo, ParticleVertex input, PushConstantParticles pushConstant);
+
+// AVBOIT's prepasses (Renderer::addAVBOITPasses), at the transmittance volume's resolution: the alpha-blended particles' depth slices,
+// then their extinction (OITShared.slang). The scene depth is tested at the middle of the fragment's column.
+[shader("fragment")]
+void fragMainAVBOITOccupancy(ParticleVertex input, uniform PushConstantParticles pushConstant)
+{
+    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    float fade;
+    if (particleDepthFade(ubo, input, pushConstant, avboit_full_resolution_pixel(input.pos.xy), fade))
+        avboit_mark_occupied(ubo, length(input.worldPos - ubo->cameraWorldPos.xyz));
+}
+
+[shader("fragment")]
+void fragMainAVBOITSplat(ParticleVertex input, uniform PushConstantParticles pushConstant)
+{
+    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    float fade;
+    if (!particleDepthFade(ubo, input, pushConstant, avboit_full_resolution_pixel(input.pos.xy), fade))
+        return;
+    const float alpha = saturate(input.color.a * particleTexel(ubo, input, pushConstant).a * fade);
+    avboit_splat(ubo, uint2(input.pos.xy), length(input.worldPos - ubo->cameraWorldPos.xyz), float3(1.0 - alpha));
 }
 
 // The particles' motion into the velocity target (GBufferVelocity's convention: the uv offset to where the pixel was last frame),
@@ -212,31 +238,33 @@ float2 fragMainMotion(ParticleVertex input, uniform PushConstantParticles pushCo
     return (previousNDC - currentNDC) * float2(0.5, -0.5);
 }
 
-float4 shadeParticle(ParticleVertex input, PushConstantParticles pushConstant)
+// Behind the scene's geometry at `pixel` (full resolution): hidden (false). Soft: `fade` over the last softDistance in front of it.
+bool particleDepthFade(UniformBufferObject* ubo, ParticleVertex input, PushConstantParticles pushConstant, float2 pixel, out float fade)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    fade = 1.0;
+    if (pushConstant.depthTextureIndex == 0xFFFFFFFF)
+        return true;
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    uint width, height;
+    depthTex.GetDimensions(width, height);
+    const int2 texel = clamp(int2(pixel), int2(0), int2(int(width) - 1, int(height) - 1));
+    const float sceneDepth = depthTex.Load(int3(texel, 0));
+    if (sceneDepth <= 0.0) // reverse Z: 0 is the sky
+        return true;
+    const float2 uv = pixel / float2(width, height);
+    const float4 world = mul(ubo->invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, sceneDepth, 1.0));
+    const float sceneDistance = length(world.xyz / world.w - ubo->cameraWorldPos.xyz);
+    const float particleDistance = length(input.worldPos - ubo->cameraWorldPos.xyz);
+    if (particleDistance > sceneDistance)
+        return false;
+    if ((pushConstant.flags & PARTICLE_SOFT) != 0 && pushConstant.softDistance > 0.0)
+        fade = saturate((sceneDistance - particleDistance) / pushConstant.softDistance);
+    return true;
+}
 
-    // Behind the scene's geometry: hidden. Soft: fading over the last softDistance in front of it.
-    float fade = 1.0;
-    if (pushConstant.depthTextureIndex != 0xFFFFFFFF)
-    {
-        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
-        const float sceneDepth = depthTex.Load(int3(int2(input.pos.xy), 0));
-        if (sceneDepth > 0.0) // reverse Z: 0 is the sky
-        {
-            uint width, height;
-            depthTex.GetDimensions(width, height);
-            const float2 uv = (input.pos.xy) / float2(width, height);
-            const float4 world = mul(ubo->invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, sceneDepth, 1.0));
-            const float sceneDistance = length(world.xyz / world.w - ubo->cameraWorldPos.xyz);
-            const float particleDistance = length(input.worldPos - ubo->cameraWorldPos.xyz);
-            if (particleDistance > sceneDistance)
-                discard;
-            if ((pushConstant.flags & PARTICLE_SOFT) != 0 && pushConstant.softDistance > 0.0)
-                fade = saturate((sceneDistance - particleDistance) / pushConstant.softDistance);
-        }
-    }
-
+// The particle's texel: its flipbook frame, or a soft round dot without a texture.
+float4 particleTexel(UniformBufferObject* ubo, ParticleVertex input, PushConstantParticles pushConstant)
+{
     float4 texel = float4(1.0);
     if (pushConstant.textureIndex != 0xFFFFFFFF)
     {
@@ -257,6 +285,18 @@ float4 shadeParticle(ParticleVertex input, PushConstantParticles pushConstant)
         const float dot = saturate(1.0 - radius);
         texel.a = dot * dot * (3.0 - 2.0 * dot);
     }
+    return texel;
+}
+
+float4 shadeParticle(ParticleVertex input, PushConstantParticles pushConstant)
+{
+    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+
+    // Behind the scene's geometry: hidden. Soft: fading over the last softDistance in front of it.
+    float fade;
+    if (!particleDepthFade(ubo, input, pushConstant, input.pos.xy, fade))
+        discard;
+    const float4 texel = particleTexel(ubo, input, pushConstant);
 
     const float alpha = saturate(input.color.a * texel.a * fade);
     // The fog in front of it (aerial perspective, height fog): its light dimmed, and the fog's own light where it covers what is

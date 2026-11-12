@@ -28,6 +28,7 @@
 #include "HeightFog.slang"
 #include "ShadowMaps.slang"
 #include "IrradianceVolumeCommon.slang"
+#include "OITShared.slang"
 
 import Math;
 
@@ -284,25 +285,30 @@ struct FSOutput
 struct FSOutputOIT
 {
     float4 accum : SV_TARGET0;
-    float reveal : SV_TARGET1;
+    float4 reveal : SV_TARGET1; // rgb: per channel (tinted glass), a: mono (OITShared.slang)
     int entityID : SV_TARGET2;
 };
 
-FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant);
+// `transmittance`: what the surface lets through of what is behind it, per color channel (OITShared.slang: the OIT targets, AVBOIT's
+// extinction) -- its uncovered share plus, for glass, the transmission tinted by its base color, its volume's absorption and less its
+// Fresnel reflection, as the refraction path tints what it shows.
+FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant, out float3 transmittance);
 
 [shader("fragment")]
 FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
 {
-    return shadeTransparent(vertIn, isFrontFace, pushConstant);
+    float3 transmittance;
+    return shadeTransparent(vertIn, isFrontFace, pushConstant, transmittance);
 }
 
-// Order-independent transparency (Renderer::setOITEnabled): the same surface into the weighted blended targets.
+// Order-independent transparency (Renderer::setOITEnabled): the same surface into the OIT targets (OITShared.slang).
 [shader("fragment")]
 FSOutputOIT fragMainOIT(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
 {
-    const FSOutput shaded = shadeTransparent(vertIn, isFrontFace, pushConstant);
+    float3 transmittance;
+    const FSOutput shaded = shadeTransparent(vertIn, isFrontFace, pushConstant, transmittance);
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    const OITOutput oit = oit_output(shaded.color, length(vertIn.worldPos - ubo->cameraWorldPos.xyz) / ubo->unitsPerMeter);
+    const OITOutput oit = oit_output(ubo, shaded.color.rgb, transmittance, vertIn.worldPos, vertIn.pos.xy);
     FSOutputOIT output;
     output.accum = oit.accum;
     output.reveal = oit.reveal;
@@ -310,9 +316,33 @@ FSOutputOIT fragMainOIT(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, unif
     return output;
 }
 
-FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant)
+// AVBOIT's prepasses (Renderer::addAVBOITPasses), drawn at the transmittance volume's resolution: the depth slices the surface is in,
+// then its extinction (OITShared.slang).
+[shader("fragment")]
+void fragMainAVBOITOccupancy(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
+{
+    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    if (avboit_in_front_of_scene(ubo, vertIn.pos.xy, vertIn.pos.z))
+        avboit_mark_occupied(ubo, length(vertIn.worldPos - ubo->cameraWorldPos.xyz));
+}
+
+[shader("fragment")]
+void fragMainAVBOITSplat(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
+{
+    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    if (!avboit_in_front_of_scene(ubo, vertIn.pos.xy, vertIn.pos.z))
+        return;
+    // The full shading for its transmittance (alpha, transmission textures, Fresnel): at 1/64 of the pixels, a small share of the
+    // transparent pass.
+    float3 transmittance;
+    shadeTransparent(vertIn, isFrontFace, pushConstant, transmittance);
+    avboit_splat(ubo, uint2(vertIn.pos.xy), length(vertIn.worldPos - ubo->cameraWorldPos.xyz), transmittance);
+}
+
+FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant, out float3 transmittance)
 {
     FSOutput output;
+    transmittance = float3(1.0);
 
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     SceneInstances instances = SceneInstances(ubo);
@@ -502,6 +532,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         const float3 throughput = stackedGlass ? saturate(baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel)) : float3(0.0);
         output.color = float4(lerp(float3(1.0), throughput, coverage), 1.0);
         output.entityID = vertIn.entityID;
+        transmittance = output.color.rgb;
         return output;
     }
 
@@ -884,6 +915,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         color += behind * baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel) * lobeBelow;
         output.color = float4(color * coverage, coverage); // added in the glass's second pass (the alpha unused)
         output.entityID = vertIn.entityID;
+        transmittance = float3(1.0 - coverage); // what is behind is in its color already
         return output;
     }
 
@@ -892,6 +924,22 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     // Without the refraction source, the transmitted part lets the background through unbent.
     output.color = float4(color * coverage, coverage * diffuseAlpha);
     output.entityID = vertIn.entityID;
+
+    // What it lets through, per channel (the OIT targets; AVBOIT's extinction): the uncovered share, and through the glass the
+    // transmission tinted like the refraction path's -- its base color, its volume straight through, less its Fresnel reflection.
+    if (transmission > 0.0)
+    {
+        const float4x4 model = instance.modelMatrix;
+        const float modelScale = (length(float3(model[0][0], model[1][0], model[2][0])) + length(float3(model[0][1], model[1][1], model[2][1])) +
+                                  length(float3(model[0][2], model[1][2], model[2][2]))) / 3.0;
+        const float3 absorbed = volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale,
+                                                     instance.thickness * modelScale);
+        const float3 fresnel = specularEnvironmentR0 + (1.0 - specularEnvironmentR0) * pow(1.0 - NdotV, 5.0);
+        const float3 throughGlass = saturate(baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel) * absorbed * lobeBelow);
+        transmittance = (1.0 - coverage) + coverage * throughGlass;
+    }
+    else
+        transmittance = float3(1.0 - output.color.a);
 
     return output;
 }

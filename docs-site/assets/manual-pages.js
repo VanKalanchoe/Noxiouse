@@ -1096,7 +1096,16 @@ window.NOX_MANUAL_PAGES = [
             "## Volumetric Fog & Post Effects",
             "",
             "- **Settings > Volumetric Fog:** lit fog with light shafts (froxels), using whichever shadows are active.",
-            "- **Settings > Post Effects:** bloom, depth of field (from the camera's aperture and focus distance), motion blur, a color grading LUT, vignette, film grain, chromatic aberration, lens flares and sharpening."
+            "- **Settings > Post Effects:** bloom, depth of field (from the camera's aperture and focus distance), motion blur, a color grading LUT, vignette, film grain, chromatic aberration, lens flares and sharpening.",
+            "",
+            "## Order-Independent Transparency (raster)",
+            "",
+            "**Settings > Order-Independent Transparency** blends transparent meshes and alpha-blended particles in any order, so overlapping layers (smoke, foliage cards, glass behind glass) stop popping when the camera moves. Raster only: with ray tracing on, glass is sorted and traced through instead. **Method:**",
+            "",
+            "- **AVBOIT** (default; Adaptive Voxel-Based OIT, Activision, SIGGRAPH 2025 -- Unreal has it too): first builds a small volume (render size / 8, **Depth Slices** deep, only depths that hold transparent surfaces get slices) of how much light gets through at every depth, per color channel. Each layer is then weighted by what is really in front of it: near layers hide far ones as if sorted. **Max Distance** is how far the volume reaches.",
+            "- **Weighted Blended** (McGuire and Bavoil 2013): cheaper, weights layers by distance only, so stacked layers average out and look more see-through.",
+            "",
+            "With both, colored glass tints what is behind it (the revealage is kept per color channel). **Project Settings > Order-Independent Transparency** saves Off / Weighted Blended / AVBOIT into the project."
         ]
     },
 

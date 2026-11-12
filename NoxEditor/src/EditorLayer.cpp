@@ -1003,7 +1003,7 @@ namespace Nox
                 choice("Bloom##Project", saved.Bloom, { { 0, "Off" }, { 1, "On" } });
                 choice("Depth of Field##Project", saved.DepthOfField, { { 0, "Off" }, { 1, "On" } });
                 choice("Motion Blur##Project", saved.MotionBlur, { { 0, "Off" }, { 1, "On" } });
-                choice("Order-Independent Transparency##Project", saved.OIT, { { 0, "Off" }, { 1, "On" } });
+                choice("Order-Independent Transparency##Project", saved.OIT, { { 0, "Off" }, { 1, "Weighted Blended" }, { 2, "AVBOIT" } });
                 choice("Temporal Anti-Aliasing##Project", saved.TAA, { { 0, "Off" }, { 1, "On" } });
 
                 const char* windowModes[] = { "Windowed", "Borderless", "Fullscreen" };
@@ -1299,12 +1299,46 @@ namespace Nox
         if (ImGui::Checkbox("Order-Independent Transparency", &oit))
             m_Renderer->setOITEnabled(oit);
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Raster transparency only: transparent surfaces and alpha-blended particles blend in any order\n"
-                              "(weighted blended OIT), so overlapping layers (smoke, foliage cards) stop popping. It is an\n"
-                              "approximation: overlapping layers average out, so solid-looking transparents (glass in front of\n"
-                              "glass, thick leaves) look see-through. Off (sorted back to front) is usually better for glass.\n"
+            ImGui::SetTooltip("Raster transparency only: transparent surfaces and alpha-blended particles blend in any order, so\n"
+                              "overlapping layers (smoke, foliage cards, glass behind glass) stop popping as the camera moves.\n"
                               "Raster pipeline only: not used with ray tracing (hybrid sorts glass and traces through it) or by\n"
                               "the path tracer.");
+        ImGui::Indent();
+        ImGui::BeginDisabled(!oit);
+        const char* oitMethods[] = { "Weighted Blended", "AVBOIT" };
+        int oitMethod = static_cast<int>(m_Renderer->getOITMethod());
+        ImGui::SetNextItemWidth(180.0f);
+        if (ImGui::Combo("Method##OIT", &oitMethod, oitMethods, IM_ARRAYSIZE(oitMethods)))
+            m_Renderer->setOITMethod(static_cast<Renderer::OITMethod>(oitMethod));
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Weighted Blended (McGuire and Bavoil 2013): each layer weighted by a fixed curve of its distance.\n"
+                              "Cheap, but overlapping layers average out: glass in front of glass, thick smoke look see-through,\n"
+                              "and the order of near layers is guessed from distance alone.\n"
+                              "AVBOIT (Adaptive Voxel-Based OIT, Activision / SIGGRAPH 2025, Unreal's AVBOIT): first builds a\n"
+                              "low-resolution volume of how much light gets through every depth (render size / 8, the slices\n"
+                              "below), then weights each layer by what is really in front of it. Near layers hide far ones as\n"
+                              "when sorted, and per color channel: tinted glass tints what is behind it. Costs two extra cheap\n"
+                              "passes over the transparent surfaces at 1/64 of the pixels.");
+        if (m_Renderer->getOITMethod() == Renderer::OITMethod::AVBOIT)
+        {
+            int slices = static_cast<int>(m_Renderer->getAVBOITSlices());
+            ImGui::SetNextItemWidth(180.0f);
+            if (ImGui::SliderInt("Depth Slices##AVBOIT", &slices, 16, 256))
+                m_Renderer->setAVBOITSlices(static_cast<uint32_t>(slices));
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("The transmittance volume's depth resolution. Only depths with transparent surfaces in them\n"
+                                  "take slices (adaptive): 64 separates most scenes. More: layers close together are told apart\n"
+                                  "(more memory: width/8 x height/8 x slices x 4 bytes, twice).");
+            float distance = m_Renderer->getAVBOITDistanceMeters();
+            ImGui::SetNextItemWidth(180.0f);
+            if (ImGui::DragFloat("Max Distance (m)##AVBOIT", &distance, 5.0f, 10.0f, 10000.0f, "%.0f"))
+                m_Renderer->setAVBOITDistanceMeters(distance);
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("How far the volume reaches (logarithmic slices: finer close by). Transparent surfaces farther\n"
+                                  "away share its last slice.");
+        }
+        ImGui::EndDisabled();
+        ImGui::Unindent();
         ImGui::EndDisabled();
         if (pathTracing)
             lockedReason("path tracer");

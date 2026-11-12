@@ -364,10 +364,10 @@ namespace Nox
         watchShader("assets/shaders/Skybox.slang", "Skybox", [this]() { createSkyboxPipeline(true); });
         watchShader("assets/shaders/LightShapes.slang", "LightShapes", [this]() { createLightShapesPipeline(true); });
         // Unlit
-        watchShader("assets/shaders/Material_Unlit_Mesh.slang", "Unlit", [this]() { createUnlitPipeline(true); });
+        watchShader("assets/shaders/Material_Unlit_Mesh.slang", "Unlit", [this]() { createUnlitPipeline(true); createAVBOITPipelines(true); });
         watchShader("assets/shaders/Wireframe.slang", "Wireframe", [this]() { createWireframePipeline(true); });
-        watchShader("assets/shaders/Material_TransparentLit_Mesh.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); });
-        watchShader("assets/shaders/PBRLighting.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); });
+        watchShader("assets/shaders/Material_TransparentLit_Mesh.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); createAVBOITPipelines(true); });
+        watchShader("assets/shaders/PBRLighting.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); createAVBOITPipelines(true); });
         watchShader("assets/shaders/PBRLighting.slang", "DeferredLighting", [this]() { createDeferredLightingPipeline(true); });
         // Visibility Buffer
         watchShader("assets/shaders/VisibilityBuffer.slang", "VisBuffer", [this]() { createVisibilityPipeline(true); createShadowMapPipelines(true); });
@@ -393,8 +393,17 @@ namespace Nox
         watchShader("assets/shaders/PostProcess.slang", "PostProcess", [this]() { createPostProcessPipeline(true); });
         watchShader("assets/shaders/AutoExposure.slang", "AutoExposure", [this]() { createAutoExposurePipelines(true); });
         watchShader("assets/shaders/ColorPyramid.slang", "ColorPyramid", [this]() { createColorPyramidPipelines(true); });
-        watchShader("assets/shaders/Particles.slang", "Particles", [this]() { createParticlePipeline(true); });
+        watchShader("assets/shaders/Particles.slang", "Particles", [this]() { createParticlePipeline(true); createAVBOITPipelines(true); });
         watchShader("assets/shaders/OITComposite.slang", "OITComposite", [this]() { createOITCompositePipeline(true); });
+        watchShader("assets/shaders/AVBOITBuild.slang", "AVBOITBuild", [this]() { createAVBOITPipelines(true); });
+        // What every transparent shader includes (both OIT methods): those and AVBOIT's prepasses again.
+        watchShader("assets/shaders/OITShared.slang", "OITShared", [this]()
+        {
+            createUnlitPipeline(true);
+            createTransparentLitPipeline(true);
+            createParticlePipeline(true);
+            createAVBOITPipelines(true);
+        });
         watchShader("assets/shaders/TextureInspect.slang", "TextureInspect", [this]() { createTextureInspectPipeline(true); });
         watchShader("assets/shaders/InstanceCulling.slang", "InstanceCulling", [this]() { createInstanceCullingPipelines(true); });
         watchShader("assets/shaders/HiZBuild.slang", "HiZBuild", [this]() { createHiZBuildPipeline(true); });
@@ -611,6 +620,7 @@ namespace Nox
         createColorPyramidPipelines(false);
         createParticlePipeline(false);
         createOITCompositePipeline(false);
+        createAVBOITPipelines(false);
         createTextureInspectPipeline(false);
         createInstanceCullingPipelines(false);
         createHiZBuildPipeline(false);
@@ -813,7 +823,7 @@ namespace Nox
             bool SSGI = false;
             bool RayReconstruction = true; // DLSS Ray Reconstruction denoises the RT effects (where the GPU has it)
             int AutoExposure = -1;         // the viewport's Auto Exposure: 1 on, -1 left as it is
-            int OIT = -1;                  // order-independent transparency: 1 on, 0 off, -1 left as it is
+            int OIT = -1;                  // order-independent transparency: 0 off, 1 weighted blended, 2 AVBOIT, -1 left as it is
         };
 
         QualityPresetSettings GetQualityPresetSettings(Renderer::RenderQuality quality)
@@ -842,7 +852,7 @@ namespace Nox
                 preset.RTAO = true;
                 preset.RTRefraction = true;
                 preset.AutoExposure = 1;
-                preset.OIT = 1;
+                preset.OIT = 2; // AVBOIT
                 break;
             case Renderer::RenderQuality::RasterAll:
                 // Every raster version (shadow maps + contact shadows, GTAO, the raster probe volume + SSGI), DLSS Super Resolution,
@@ -864,7 +874,7 @@ namespace Nox
                 preset.SSGI = true;
                 preset.RayReconstruction = false;
                 preset.AutoExposure = 1;
-                preset.OIT = 1;
+                preset.OIT = 2; // AVBOIT
                 break;
             default:
                 break;
@@ -919,7 +929,11 @@ namespace Nox
         if (preset.AutoExposure >= 0)
             setViewportAutoExposure(preset.AutoExposure != 0);
         if (preset.OIT >= 0)
+        {
             setOITEnabled(preset.OIT != 0);
+            if (preset.OIT != 0)
+                setOITMethod(preset.OIT == 2 ? OITMethod::AVBOIT : OITMethod::WeightedBlended);
+        }
         // DDGI's probes trace in turn: a quarter a frame on the fallback rung, half on the others; two cascades on the fallback rung.
         // Under the screen probes DDGI is only the second bounce: a quarter of its probes a frame is plenty.
         m_ddgiUpdateStride = (quality == RenderQuality::Low || preset.DiffuseGI == 3) ? 4u : 2u;
@@ -937,7 +951,8 @@ namespace Nox
             const bool rrMatches = !isDLSSSupported() || !isDLSSRayReconstructionSupported() || m_dlssRayReconstructionEnabled == preset.RayReconstruction;
             const bool ssaoMatches = preset.RTAO ? m_rtaoEnabled : (m_ssaoEnabled && m_ssaoMethod == preset.AmbientOcclusion);
             const bool exposureMatches = (preset.AutoExposure < 0 || m_viewportAutoExposure == (preset.AutoExposure != 0)) &&
-                                         (preset.OIT < 0 || m_oitEnabled == (preset.OIT != 0));
+                                         (preset.OIT < 0 || (m_oitEnabled == (preset.OIT != 0) &&
+                                                             (preset.OIT == 0 || (m_oitMethod == OITMethod::AVBOIT) == (preset.OIT == 2))));
             if (!m_pathTracingEnabled && m_rayTracingEnabled == preset.RayTracing && m_rayTracingShadows == preset.RTShadows &&
                 m_rayTracingReflections == preset.RTReflections && ssaoMatches && m_diffuseGIMode == preset.DiffuseGI &&
                 m_directLightingMode == preset.DirectLighting && m_rtRefractionEnabled == preset.RTRefraction && upscaleMatches &&
@@ -1021,7 +1036,11 @@ namespace Nox
         if (settings.ShadowedLights >= 0)
             setShadowRayLightLimit(static_cast<uint32_t>(settings.ShadowedLights));
         if (settings.OIT >= 0)
+        {
             setOITEnabled(settings.OIT != 0);
+            if (settings.OIT != 0)
+                setOITMethod(settings.OIT == 2 ? OITMethod::AVBOIT : OITMethod::WeightedBlended);
+        }
         if (settings.TAA >= 0)
             setTAAEnabled(settings.TAA != 0);
         if (settings.SunShadows >= 0 && settings.SunShadows <= 1)
@@ -2062,7 +2081,7 @@ namespace Nox
         });
         m_unlitPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
 
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16_SFLOAT, NRI::ImageFormat::R32SINT };
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32SINT };
         desc.shaders.back().entryPoint = "fragMainOIT";
         m_unlitOITPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
@@ -2094,7 +2113,7 @@ namespace Nox
         });
         m_transparentLitPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
 
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16_SFLOAT, NRI::ImageFormat::R32SINT };
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32SINT };
         desc.shaders.back().entryPoint = "fragMainOIT";
         m_transparentLitOITPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
@@ -2575,7 +2594,7 @@ namespace Nox
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/Particles.slang" });
         m_particlePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
 
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16_SFLOAT };
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT };
         desc.shaders.back().entryPoint = "fragMainOIT";
         m_particleOITPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
 
@@ -5439,6 +5458,13 @@ namespace Nox
         // The air's camera volume, for the forward passes' fog (deferred lighting gets it in its push constants).
         uniformData.aerialPerspectiveTextureIndex = resources.AerialPerspective.IsValid() ? graph.GetSlotOr(resources.AerialPerspective, NoTexture) : NoTexture;
         uniformData.aerialPerspectiveKmPerUnit = WorldUnits::ToMeters(1.0f) / 1000.0f * glm::max(m_proceduralSky.AerialPerspectiveScale, 0.0f);
+        // AVBOIT's prepasses test each fragment against the scene depth (they draw at the volume's resolution, without it attached).
+        uniformData.avboitDepthTextureIndex = frame.avboitAdded ? graph.GetSlotOr(resources.Depth, NoTexture) : NoTexture;
+        if (!frame.avboitAdded)
+        {
+            uniformData.oitMode = shaderio::OIT_WEIGHTED_BLENDED;
+            uniformData.avboitTransmittanceTextureIndex = NoTexture;
+        }
 
         // ReSTIR GI: the denoised result when its NRD pass runs (NRD evaluation cannot fail once initialized), else raw.
         if (frame.restirGIAdded)

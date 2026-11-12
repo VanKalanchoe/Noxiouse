@@ -419,29 +419,7 @@ float3 volume_transmittance(float3 attenuationColor, float attenuationDistance, 
     return pow(max(attenuationColor, float3(1e-6)), float3(length / attenuationDistance));
 }
 
-// Weighted blended order-independent transparency (McGuire and Bavoil 2013), what a transparent fragment adds: to the
-// accumulation target (additive) its premultiplied color and alpha times a weight that favors the near ones, to the revealage
-// target (multiplied in: dst * (1 - alpha)) its alpha. OITComposite.slang divides the sum out over the scene behind.
-struct OITOutput
-{
-    float4 accum;
-    float reveal;
-};
-
-OITOutput oit_output(float4 premultiplied, float viewDistanceMeters)
-{
-    const float alpha = saturate(premultiplied.a);
-    const float z = max(viewDistanceMeters, 0.0);
-    // Eq. 9 of the paper, z in meters; the cap is lower than its 3e3: HDR colors in a half-float target overflow sooner.
-    float weight = alpha * clamp(10.0 / (1e-5 + pow(z / 5.0, 2.0) + pow(z / 200.0, 6.0)), 1e-2, 3e2);
-    const float brightest = max(max(premultiplied.r, premultiplied.g), premultiplied.b);
-    if (brightest * weight > 2048.0) // a few overlapping layers of the brightest still fit under the half float's 65504
-        weight = 2048.0 / brightest;
-    OITOutput output;
-    output.accum = float4(premultiplied.rgb, alpha) * weight;
-    output.reveal = alpha;
-    return output;
-}
+// Order-independent transparency (what a transparent fragment writes, both methods): OITShared.slang's oit_output.
 #endif
 
 // Ray tracing view of an instance (same slot as GpuInstance): everything the ray tracing shaders read at candidates and
@@ -770,6 +748,43 @@ struct UniformBufferObject
     uint32_t ssgiTextureIndex;
     uint32_t ssgiDepthTextureIndex;
     uint32_t ssgiPadding[3];
+    // Order-independent transparency (Settings > Order-Independent Transparency; OITShared.slang): OIT_WEIGHTED_BLENDED, or OIT_AVBOIT
+    // (adaptive voxel-based OIT, Drobot, SIGGRAPH 2025): each transparent fragment weighted by the transmittance of what is in front
+    // of it, read from a low-resolution volume built from every transparent surface first (OITShared.slang, Renderer::addAVBOITPasses).
+    uint32_t oitMode;
+    uint32_t avboitGridWidth;   // the volume's columns: the render size / AVBOIT_TILE_SIZE
+    uint32_t avboitGridHeight;
+    uint32_t avboitSlices;      // physical depth slices
+    float avboitDistance;       // world units: the slices end here, along the view ray
+    float avboitLinearDistance; // world units: the slices' log curve is nearly linear closer than this
+    uint32_t avboitTransmittanceTextureIndex; // Texture2DArray of the transmittance in front of each slice (rgb, a mono); 0xFFFFFFFF none
+    uint32_t avboitDepthTextureIndex;         // the scene depth, for the prepasses' own test (they draw at the volume's resolution)
+    uint64_t avboitOccupancyReference;  // uint[AVBOIT_VIRTUAL_SLICES / 32]: the virtual slices any transparent surface is in
+    uint64_t avboitLutReference;        // AvboitDepthWarp: virtual slice -> physical slice (empty depth ranges skipped)
+    uint64_t avboitExtinctionReference; // uint per froxel: the extinction splatted there, 3 x (8 + 2 overflow) bits
+    uint64_t avboitOverflowReference;   // uint3 per column: the first slice each channel's extinction overflowed in
+};
+
+STATIC_CONST uint32_t OIT_WEIGHTED_BLENDED = 0;
+STATIC_CONST uint32_t OIT_AVBOIT = 1;
+STATIC_CONST uint32_t AVBOIT_TILE_SIZE = 8;        // pixels per volume column side (the slides' 1/8 resolution)
+STATIC_CONST uint32_t AVBOIT_VIRTUAL_SLICES = 1024; // the finest depth resolution; halved until the occupied slices fit the physical ones
+
+// The adaptive depth warp (AVBOIT.slang): built each frame from the occupancy (AVBOITBuild.slang lutMain).
+struct AvboitDepthWarp
+{
+    uint32_t virtualShift; // the virtual resolution used: AVBOIT_VIRTUAL_SLICES >> virtualShift
+    uint32_t virtualCount;
+    uint32_t usedSlices;   // physical slices holding something
+    uint32_t padding;
+    uint32_t entries[AVBOIT_VIRTUAL_SLICES]; // physical slice (bits 0-15), occupied (bit 31)
+};
+
+struct PushConstantAVBOIT
+{
+    uint64_t matrixReference;
+    uint32_t transmittanceStorageIndex; // RWTexture2DArray<float4> (RGBA8) the integration writes
+    uint32_t padding;
 };
 
 // An emissive mesh instance as a light for the path tracer's direct light sampling: picked by weight (its emission's luminance
@@ -2113,7 +2128,11 @@ struct PushConstantOITComposite
 {
     uint32_t accumIndex;
     uint32_t revealIndex;
+    uint32_t mode;    // OIT_COMPOSITE_MULTIPLY: the scene times what the layers let through; OIT_COMPOSITE_ADD: the layers' light added
+    uint32_t padding;
 };
+STATIC_CONST uint32_t OIT_COMPOSITE_MULTIPLY = 0;
+STATIC_CONST uint32_t OIT_COMPOSITE_ADD = 1;
 
 struct PushConstantSkybox
 {

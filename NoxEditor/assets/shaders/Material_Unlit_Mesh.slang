@@ -1,6 +1,7 @@
  #include "shaderIO.h"
     #include "Math.slang"
     #include "HeightFog.slang"
+    #include "OITShared.slang"
 
     // Matches the exact vertex output from meshMain in Meshlet.slang
     struct VSOutput
@@ -25,7 +26,7 @@
     struct FSOutputOIT
     {
         float4 accum : SV_TARGET0;
-        float reveal : SV_TARGET1;
+        float4 reveal : SV_TARGET1;
         int entityID : SV_TARGET2;
     };
 
@@ -43,12 +44,32 @@
     {
         const FSOutput shaded = shadeUnlit(vertIn, pushConstant);
         UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-        const OITOutput oit = oit_output(shaded.color, length(vertIn.worldPos - ubo->cameraWorldPos.xyz) / ubo->unitsPerMeter);
+        // An unlit surface lets nothing through but its uncovered share.
+        const OITOutput oit = oit_output(ubo, shaded.color.rgb, float3(1.0 - saturate(shaded.color.a)), vertIn.worldPos, vertIn.pos.xy);
         FSOutputOIT output;
         output.accum = oit.accum;
         output.reveal = oit.reveal;
         output.entityID = shaded.entityID;
         return output;
+    }
+
+    // AVBOIT's prepasses (Renderer::addAVBOITPasses), at the transmittance volume's resolution (OITShared.slang).
+    [shader("fragment")]
+    void fragMainAVBOITOccupancy(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
+    {
+        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        if (avboit_in_front_of_scene(ubo, vertIn.pos.xy, vertIn.pos.z))
+            avboit_mark_occupied(ubo, length(vertIn.worldPos - ubo->cameraWorldPos.xyz));
+    }
+
+    [shader("fragment")]
+    void fragMainAVBOITSplat(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
+    {
+        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        if (!avboit_in_front_of_scene(ubo, vertIn.pos.xy, vertIn.pos.z))
+            return;
+        const FSOutput shaded = shadeUnlit(vertIn, pushConstant);
+        avboit_splat(ubo, uint2(vertIn.pos.xy), length(vertIn.worldPos - ubo->cameraWorldPos.xyz), float3(1.0 - saturate(shaded.color.a)));
     }
 
     FSOutput shadeUnlit(VSOutput vertIn, PushConstantMeshlets pushConstant)
