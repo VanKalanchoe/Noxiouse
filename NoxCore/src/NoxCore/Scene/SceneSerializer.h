@@ -91,6 +91,8 @@ namespace Nox
         // order of their IDs (the same entities, the same text) -- or a cell file's text with the roots' trees put in (merged by ID).
         static void WriteWorldPartition(YAML::Emitter& out, Scene& scene);
         static void ReadWorldPartition(Scene& scene, const YAML::Node& data);
+        // The scene document's hierarchy folders and which of them are folded (every load path: ReadScene, SceneLoader).
+        static void ReadFolders(Scene& scene, const YAML::Node& data);
         // Sub-levels (L1): the list in a scene file; an undo state also names each loaded sub-level's roots (its entities are in the
         // state) and the current level. Read after the entities.
         static void WriteSubLevels(YAML::Emitter& out, Scene& scene, bool forFile);

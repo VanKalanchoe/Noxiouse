@@ -3045,6 +3045,20 @@ namespace Nox
         return ReadScene(data);
     }
 
+    void SceneSerializer::ReadFolders(Scene& scene, const YAML::Node& data)
+    {
+        if (const YAML::Node folders = data["Folders"])
+        {
+            for (const YAML::Node& folder : folders)
+                scene.AddFolder(folder.as<std::string>());
+        }
+        if (const YAML::Node collapsed = data["CollapsedFolders"])
+        {
+            for (const YAML::Node& folder : collapsed)
+                scene.SetFolderCollapsed(folder.as<std::string>(), true);
+        }
+    }
+
     bool SceneSerializer::ReadScene(const YAML::Node& data)
     {
         if (!data["Scene"])
@@ -3053,16 +3067,7 @@ namespace Nox
         std::string sceneName = data["Scene"].as<std::string>();
         NOX_CORE_TRACE("Deserializing scene '{0}'", sceneName);
 
-        if (auto folders = data["Folders"])
-        {
-            for (const auto& folder : folders)
-                m_Scene->AddFolder(folder.as<std::string>());
-        }
-        if (auto collapsed = data["CollapsedFolders"])
-        {
-            for (const auto& folder : collapsed)
-                m_Scene->SetFolderCollapsed(folder.as<std::string>(), true);
-        }
+        ReadFolders(*m_Scene, data);
         ReadWorldPartition(*m_Scene, data);
 
         auto entities = data["Entities"];

@@ -98,10 +98,12 @@ namespace Nox
             m_AudioPreviewVoice = 0;
             m_AudioPreviewWanted = false;
         }
-        // An edit that only changed literals (dragging a frequency, a gain): into the playing sound, as MetaSounds does.
+        // The program changed: an edit of this graph, or of a graph it plays (an Audio Graph node's) -- the cache hands out a new
+        // program then, the same one otherwise. An edit that only changed literals (dragging a frequency, a gain) goes into the
+        // playing sound, as MetaSounds does.
+        const bool programChanged = program && program != m_AudioPreviewProgram;
         std::vector<std::pair<uint32_t, float>> literalChanges;
-        if (m_AudioPreviewVoice != 0 && program && m_AudioPreviewVersion != m_Asset->CompileVersion && m_AudioPreviewProgram &&
-            m_AudioPreviewProgram->LiteralChanges(*program, literalChanges))
+        if (m_AudioPreviewVoice != 0 && programChanged && m_AudioPreviewProgram && m_AudioPreviewProgram->LiteralChanges(*program, literalChanges))
         {
             for (const auto& [slot, value] : literalChanges)
                 AudioEngine::SetGraphConstant(m_AudioPreviewVoice, slot, value);
@@ -111,10 +113,9 @@ namespace Nox
             for (size_t i = 0; i < after.size() && i < before.size(); ++i)
                 if (after[i].Default != before[i].Default && !m_AudioPreviewValues.contains(after[i].Name))
                     AudioEngine::SetGraphParameter(m_AudioPreviewVoice, static_cast<int32_t>(i), after[i].Default);
-            m_AudioPreviewVersion = m_Asset->CompileVersion;
             m_AudioPreviewProgram = program;
         }
-        if (m_AudioPreviewWanted && program && (m_AudioPreviewVoice == 0 || m_AudioPreviewVersion != m_Asset->CompileVersion))
+        if (m_AudioPreviewWanted && program && (m_AudioPreviewVoice == 0 || program != m_AudioPreviewProgram))
         {
             // Any other edit: the new graph replaces the playing one (MetaSounds rebuilds its preview too), with the parameters set here.
             AudioEngine::Stop(m_AudioPreviewVoice, 0.02f);
@@ -125,7 +126,6 @@ namespace Nox
             desc.Group = AudioVoiceGroup::Editor;
             desc.FadeIn = m_AudioPreviewVoice != 0 ? 0.02f : 0.0f; // (crossfaded with the one it replaces)
             m_AudioPreviewVoice = AudioEngine::Play(desc);
-            m_AudioPreviewVersion = m_Asset->CompileVersion;
             m_AudioPreviewProgram = program;
             if (m_AudioPreviewVoice == 0)
                 m_AudioPreviewWanted = false;

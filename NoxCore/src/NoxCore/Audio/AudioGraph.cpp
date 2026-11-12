@@ -395,14 +395,16 @@ namespace Nox
         NodeGraph graph;
         std::vector<std::pair<AssetHandle, uint32_t>> dependencies;
         InlineContext context{ outMissing, outError, dependencies, {} };
-        if (!InlineGraphNodes(sourceGraph, graph, context))
+        const bool inlined = InlineGraphNodes(sourceGraph, graph, context);
+        // (also when it failed: a fix in a graph it plays -- a loop taken out -- must rebuild this one)
+        if (outDependencies)
+            *outDependencies = std::move(dependencies);
+        if (!inlined)
         {
             if (outError.empty())
                 outError = "loading the graphs it plays";
             return nullptr;
         }
-        if (outDependencies)
-            *outDependencies = std::move(dependencies);
 
         // Its clips, loaded.
         std::vector<AssetHandle> clips;

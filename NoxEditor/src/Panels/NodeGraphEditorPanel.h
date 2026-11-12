@@ -64,7 +64,6 @@ namespace Nox
         // Audio preview.
         uint64_t m_AudioPreviewVoice = 0; // AudioVoiceHandle
         bool m_AudioPreviewWanted = false;
-        uint32_t m_AudioPreviewVersion = 0;
         std::shared_ptr<const class AudioGraphProgram> m_AudioPreviewProgram; // what the playing preview runs
         std::unordered_map<std::string, NodeGraphValue> m_AudioPreviewValues;
         Ref<NodeGraphAsset> m_Asset;

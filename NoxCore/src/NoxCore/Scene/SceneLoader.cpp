@@ -183,11 +183,7 @@ namespace Nox
             try
             {
                 Scene& scene = *buildInto;
-                if (const YAML::Node folders = parsed.Document["Folders"])
-                {
-                    for (const YAML::Node& folder : folders)
-                        scene.AddFolder(folder.as<std::string>());
-                }
+                SceneSerializer::ReadFolders(scene, parsed.Document); // (folders, and the ones folded)
                 const size_t count = parsed.Entities && parsed.Entities.IsSequence() ? parsed.Entities.size() : 0;
                 parsed.Created.reserve(count);
                 for (size_t index = 0; index < count; ++index)
@@ -286,11 +282,7 @@ namespace Nox
             }
             if (m_Level != 0)
                 m_Created.reserve(m_Total);
-            if (const YAML::Node folders = parsed.Document["Folders"])
-            {
-                for (const YAML::Node& folder : folders)
-                    scene.AddFolder(folder.as<std::string>());
-            }
+            SceneSerializer::ReadFolders(scene, parsed.Document); // (folders, and the ones folded)
         }
 
         // The entities in file order (what ReadScene does), until the frame's slice is used up.
