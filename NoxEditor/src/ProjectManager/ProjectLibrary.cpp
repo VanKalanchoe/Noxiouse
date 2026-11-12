@@ -174,6 +174,11 @@ namespace Nox::ProjectLibrary
         return projectFile.stem().string();
     }
 
+    std::filesystem::path ThumbnailPath(const std::filesystem::path& projectDirectory)
+    {
+        return projectDirectory / "Saved" / "Thumbnail.png";
+    }
+
     std::filesystem::path FindSampleProject()
     {
         const char* base = SDL_GetBasePath();
@@ -307,7 +312,7 @@ namespace Nox::ProjectLibrary
             return {};
 
         // What version control should not keep: the editor's per-project caches and the scripts' build output.
-        WriteText(directory / ".gitignore", "Intermediate/\nBuild/\nAssets/Scripts/bin/\nAssets/Scripts/obj/\nAssets/Scripts/Binaries/\n.vs/\n", error);
+        WriteText(directory / ".gitignore", "Intermediate/\nSaved/\nBuild/\nAssets/Scripts/bin/\nAssets/Scripts/obj/\nAssets/Scripts/Binaries/\n.vs/\n", error);
         error.clear();
 
         if (settings.CreateScripts && !CreateScriptsProject(directory, assets, name, error))

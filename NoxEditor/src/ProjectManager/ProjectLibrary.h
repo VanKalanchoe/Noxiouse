@@ -25,6 +25,10 @@ namespace Nox::ProjectLibrary
     // The Name in a .nproj (its file name when it cannot be read).
     std::string ReadProjectName(const std::filesystem::path& projectFile);
 
+    // The project's picture in the Project Manager (Unreal's Saved/AutoScreenshot.png): the editor's view, taken when a scene is saved
+    // and once after the project opens if it has none.
+    std::filesystem::path ThumbnailPath(const std::filesystem::path& projectDirectory);
+
     // The sample project of the repository the editor was built in (Facerun), if the editor runs from its build folder there.
     std::filesystem::path FindSampleProject();
 

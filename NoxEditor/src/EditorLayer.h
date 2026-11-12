@@ -72,6 +72,13 @@ namespace Nox
         AssetHandle RegisterSceneAsset(const std::filesystem::path& scenePath);
         void AdoptStartSceneIfNone(const std::filesystem::path& scenePath);
         bool m_CreateBasicScene = false;
+        // The Basic scene's first view (Unreal's: above the floor, looking down at it); applied once the editor camera exists.
+        void ApplyBasicSceneView();
+        bool m_ApplyBasicSceneView = false;
+        // The project's picture for the Project Manager: the viewport read back, scaled down, written as Saved/Thumbnail.png.
+        void CaptureProjectThumbnail();
+        bool m_ThumbnailPending = false; // a project without a picture: taken a few seconds after it opened
+        float m_ThumbnailTimer = 0.0f;
         void SaveProject();
         
         // Each viewport's camera per scene, in <project>/Cache/EditorCameras.txt: a scene opens where it was looked at last.

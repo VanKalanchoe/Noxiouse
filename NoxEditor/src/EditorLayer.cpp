@@ -47,6 +47,7 @@
 #include "ProjectManager/ProjectLibrary.h"
 #include "ProjectManager/ProjectManagerLayer.h"
 #include "ProjectManager/ProcessLauncher.h"
+#include <stb_image_write.h>
 
 namespace Nox
 {
@@ -252,6 +253,8 @@ namespace Nox
         }
 
         m_EditorCamera = EditorCamera(30.0f, 1.778f, 0.01f, 1000.0f);
+        if (m_ApplyBasicSceneView)
+            ApplyBasicSceneView();
         constexpr const char* kViewportTitles[kMaxViewports] = { "Viewport", "Viewport 2", "Viewport 3", "Viewport 4" };
         for (int index = 0; index < kMaxViewports; ++index)
             m_Viewports[index].Title = kViewportTitles[index];
@@ -335,6 +338,16 @@ namespace Nox
     {
         if (!Project::GetActive())
             return; // closing: no project was opened
+        // A project without a picture for the Project Manager: the view a few seconds after it opened (the scene has drawn by then).
+        if (m_ThumbnailPending && m_SceneState == SceneState::Edit && !m_SceneLoad)
+        {
+            m_ThumbnailTimer += ts;
+            if (m_ThumbnailTimer > 4.0f)
+            {
+                m_ThumbnailPending = false;
+                CaptureProjectThumbnail();
+            }
+        }
         // A scene being opened: a slice of its entities each frame (8 ms), swapped in once complete.
         if (m_SceneLoad && m_SceneLoad->Step(8.0))
             FinishSceneLoad();
@@ -3238,12 +3251,18 @@ namespace Nox
         NewScene();
         Scene& scene = *m_EditorScene;
 
+        // The lights in an outliner folder of their own, as Unreal's template levels keep them ("Lighting").
+        const std::string lighting = "Lighting";
+        scene.AddFolder(lighting);
+
         // The sky: the procedural atmosphere with clouds, sun and moon (and its height fog off by default, as the component is).
         Entity sky = scene.CreateEntity("Sky");
         sky.AddComponent<EnvironmentLightComponent>().Source = EnvironmentSource::ProceduralSky;
+        sky.AddComponent<FolderComponent>(lighting);
 
         // The sun the sky follows: daylight intensity, 54 degrees up (the sky's own default sun, as a light that can be moved).
         Entity sun = scene.CreateEntity("Sun");
+        sun.AddComponent<FolderComponent>(lighting);
         sun.AddComponent<DirectionalLightComponent>().Intensity = DefaultSkySunIntensity;
         sun.GetComponent<TransformComponent>().Rotation = glm::eulerAngles(DefaultSkySunRotation());
         sun.MarkTransformDirty();
@@ -3279,6 +3298,68 @@ namespace Nox
         m_EditorScenePath = path;
         AdoptStartSceneIfNone(path);
         m_HistoryCheckRequested = true;
+        m_ApplyBasicSceneView = true;
+        ApplyBasicSceneView(); // (again once the editor camera is made, when this runs as the editor starts)
+    }
+
+    void EditorLayer::ApplyBasicSceneView()
+    {
+        // Unreal's view of a new level: from above one corner of the floor, 25 degrees down at its middle, 15 m away. (Before, the
+        // editor camera stood level with the floor and saw it edge-on: invisible until moved.)
+        m_EditorCamera.SetFocalPoint(glm::dvec3(0.0));
+        m_EditorCamera.SetDistance(WorldUnits::FromMeters(15.0f));
+        m_EditorCamera.SetOrientation(glm::radians(25.0f), glm::radians(35.0f));
+    }
+
+    void EditorLayer::CaptureProjectThumbnail()
+    {
+        Ref<Project> project = Project::GetActive();
+        Ref<Texture2D> image = m_Renderer->GetSceneResourceRef();
+        if (!project || !image || image->GetWidth() < 16 || image->GetHeight() < 16)
+            return;
+        const std::filesystem::path file = ProjectLibrary::ThumbnailPath(Project::GetActiveProjectDirectory());
+        const bool bgra = m_Renderer->IsSurfaceFormatBGRA();
+        m_Renderer->ReadbackTexture(std::move(image), [file, bgra](std::vector<uint8_t> pixels, uint32_t width, uint32_t height)
+        {
+            if (pixels.size() != static_cast<size_t>(width) * height * 4 || width == 0 || height == 0)
+                return;
+            // A 16:9 crop of the middle, scaled to 384 x 216 by averaging the texels each output texel covers.
+            constexpr uint32_t outWidth = 384, outHeight = 216;
+            uint32_t cropWidth = width, cropHeight = static_cast<uint32_t>(width * 9ull / 16ull);
+            if (cropHeight > height)
+            {
+                cropHeight = height;
+                cropWidth = static_cast<uint32_t>(height * 16ull / 9ull);
+            }
+            const uint32_t x0 = (width - cropWidth) / 2, y0 = (height - cropHeight) / 2;
+            std::vector<uint8_t> out(static_cast<size_t>(outWidth) * outHeight * 4);
+            for (uint32_t y = 0; y < outHeight; ++y)
+                for (uint32_t x = 0; x < outWidth; ++x)
+                {
+                    const uint32_t sx0 = x0 + x * cropWidth / outWidth, sx1 = std::max(sx0 + 1, x0 + (x + 1) * cropWidth / outWidth);
+                    const uint32_t sy0 = y0 + y * cropHeight / outHeight, sy1 = std::max(sy0 + 1, y0 + (y + 1) * cropHeight / outHeight);
+                    uint32_t sum[3] = { 0, 0, 0 }, count = 0;
+                    for (uint32_t sy = sy0; sy < sy1 && sy < height; ++sy)
+                        for (uint32_t sx = sx0; sx < sx1 && sx < width; ++sx)
+                        {
+                            const uint8_t* texel = &pixels[(static_cast<size_t>(sy) * width + sx) * 4];
+                            sum[0] += texel[0];
+                            sum[1] += texel[1];
+                            sum[2] += texel[2];
+                            ++count;
+                        }
+                    uint8_t* target = &out[(static_cast<size_t>(y) * outWidth + x) * 4];
+                    count = std::max(count, 1u);
+                    target[0] = static_cast<uint8_t>(sum[bgra ? 2 : 0] / count);
+                    target[1] = static_cast<uint8_t>(sum[1] / count);
+                    target[2] = static_cast<uint8_t>(sum[bgra ? 0 : 2] / count);
+                    target[3] = 255;
+                }
+            std::error_code error;
+            std::filesystem::create_directories(file.parent_path(), error);
+            if (!stbi_write_png(file.string().c_str(), outWidth, outHeight, 4, out.data(), outWidth * 4))
+                NOX_CORE_WARN("Project thumbnail: cannot write {}", file.generic_string());
+        });
     }
 
     void EditorLayer::OpenProjectManager()
@@ -3390,6 +3471,11 @@ namespace Nox
             if (m_CreateBasicScene && Project::GetActive()->GetConfig().StartScene == 0)
                 CreateBasicScene();
             m_CreateBasicScene = false;
+            {
+                std::error_code error;
+                m_ThumbnailPending = !std::filesystem::exists(ProjectLibrary::ThumbnailPath(Project::GetActiveProjectDirectory()), error);
+                m_ThumbnailTimer = 0.0f;
+            }
             return true;
         }
         NOX_CORE_ERROR("Could not open the project '{}'", path.string());
@@ -5874,6 +5960,7 @@ namespace Nox
         {
             SerializeScene(m_ActiveScene, m_EditorScenePath);
             AdoptStartSceneIfNone(m_EditorScenePath);
+            CaptureProjectThumbnail(); // (Unreal takes its project screenshot on save too)
         }
         else
         {
@@ -5897,6 +5984,7 @@ namespace Nox
             SerializeScene(m_ActiveScene, filepath);
             m_EditorScenePath = filepath;
             AdoptStartSceneIfNone(filepath);
+            CaptureProjectThumbnail();
         }
     }
 

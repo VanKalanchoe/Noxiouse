@@ -12,6 +12,7 @@
 #include "EditorLayer.h"
 #include "ProjectLibrary.h"
 #include "NoxCore/Core/Application.h"
+#include "NoxCore/Asset/TextureImporter.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Utils/Utils.h"
 
@@ -85,6 +86,10 @@ namespace Nox
 
     void ProjectManagerLayer::Refresh()
     {
+        // Pictures the last frames may still draw are released once those frames are done.
+        for (Entry& entry : m_Projects)
+            if (entry.Thumbnail)
+                Renderer::DeferAssetRelease(entry.Thumbnail);
         m_Projects.clear();
         for (const std::filesystem::path& file : ProjectLibrary::LoadRecentProjects())
         {
@@ -108,7 +113,21 @@ namespace Nox
             entry.Modified = Age(sample);
             m_Projects.push_back(std::move(entry));
         }
+        for (Entry& entry : m_Projects)
+        {
+            std::error_code error;
+            const std::filesystem::path picture = ProjectLibrary::ThumbnailPath(entry.File.parent_path());
+            if (entry.Exists && std::filesystem::exists(picture, error))
+                entry.Thumbnail = TextureImporter::LoadTexture2D(picture, { .flip = false, .generateMips = false });
+        }
         m_Selected = m_Projects.empty() ? -1 : std::clamp(m_Selected, 0, static_cast<int>(m_Projects.size()) - 1);
+    }
+
+    ProjectManagerLayer::~ProjectManagerLayer()
+    {
+        for (Entry& entry : m_Projects)
+            if (entry.Thumbnail)
+                Renderer::DeferAssetRelease(entry.Thumbnail);
     }
 
     void ProjectManagerLayer::Open(const std::filesystem::path& projectFile, bool createBasicScene)
@@ -191,19 +210,24 @@ namespace Nox
         ImGui::InputTextWithHint("##search", "Search projects...", m_Search, sizeof(m_Search));
         ImGui::Spacing();
 
+        // What the list does this frame happens after it is drawn (taking a project off the list rebuilds it, which must not happen
+        // halfway through drawing it or between a BeginDisabled and its EndDisabled).
+        int open = -1;
+        std::filesystem::path forget;
+
         const std::string filter = Lower(m_Search);
         const float buttonsHeight = ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
         ImGui::BeginChild("List", ImVec2(0.0f, ImGui::GetContentRegionAvail().y - buttonsHeight));
         if (m_Projects.empty())
             ImGui::TextDisabled("No projects yet: make one on the right, or Browse... for a .nproj file.");
-        int open = -1;
+        constexpr ImVec2 kThumbnail(128.0f, 72.0f); // 16:9, as the pictures are taken
         for (int i = 0; i < static_cast<int>(m_Projects.size()); ++i)
         {
             const Entry& entry = m_Projects[i];
             if (!filter.empty() && Lower(entry.Name + " " + entry.File.generic_string()).find(filter) == std::string::npos)
                 continue;
             ImGui::PushID(i);
-            const ImVec2 rowSize(0.0f, ImGui::GetTextLineHeightWithSpacing() * 2.0f + 4.0f);
+            const ImVec2 rowSize(0.0f, kThumbnail.y + 8.0f);
             if (ImGui::Selectable("##row", m_Selected == i, ImGuiSelectableFlags_AllowDoubleClick, rowSize))
             {
                 m_Selected = i;
@@ -219,28 +243,40 @@ namespace Nox
                 if (ImGui::MenuItem("Show in Folder", nullptr, false, entry.Exists))
                     ShowInFolder(entry.File.parent_path());
                 if (ImGui::MenuItem("Remove from List", nullptr, false, !entry.Sample))
-                {
-                    ProjectLibrary::ForgetRecentProject(entry.File);
-                    ImGui::EndPopup();
-                    ImGui::PopID();
-                    Refresh();
-                    break;
-                }
+                    forget = entry.File;
                 ImGui::EndPopup();
             }
-            // The name, and under it the path (red when the file is gone).
+
+            // The project's picture (or a tile with its initial until it has one), then its name and path (red when the file is gone).
             const ImVec2 rowMin = ImGui::GetItemRectMin();
+            const ImVec2 rowMax = ImGui::GetItemRectMax();
             ImDrawList* drawList = ImGui::GetWindowDrawList();
-            const ImVec2 namePos(rowMin.x + 6.0f, rowMin.y + 2.0f);
+            const ImVec2 imageMin(rowMin.x + 4.0f, rowMin.y + 4.0f);
+            const ImVec2 imageMax(imageMin.x + kThumbnail.x, imageMin.y + kThumbnail.y);
+            if (entry.Thumbnail && entry.Thumbnail->getImTextureID())
+                drawList->AddImageRounded(entry.Thumbnail->getImTextureID(), imageMin, imageMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32_WHITE, 4.0f);
+            else
+            {
+                drawList->AddRectFilled(imageMin, imageMax, IM_COL32(45, 55, 75, 255), 4.0f);
+                const std::string initial(1, entry.Name.empty() ? '?' : static_cast<char>(std::toupper(static_cast<unsigned char>(entry.Name.front()))));
+                const float fontSize = ImGui::GetFontSize() * 2.2f;
+                const ImVec2 textSize = ImGui::CalcTextSize(initial.c_str());
+                const float scale = fontSize / ImGui::GetFontSize();
+                drawList->AddText(ImGui::GetFont(), fontSize,
+                                  ImVec2(imageMin.x + (kThumbnail.x - textSize.x * scale) * 0.5f, imageMin.y + (kThumbnail.y - textSize.y * scale) * 0.5f),
+                                  IM_COL32(200, 210, 230, 255), initial.c_str());
+            }
+
+            const ImVec2 namePos(imageMax.x + 12.0f, rowMin.y + 10.0f);
             const std::string title = entry.Name + (entry.Sample ? "  (sample project)" : "");
             drawList->AddText(namePos, ImGui::GetColorU32(ImGuiCol_Text), title.c_str());
             if (!entry.Modified.empty())
             {
                 const float width = ImGui::CalcTextSize(entry.Modified.c_str()).x;
-                drawList->AddText(ImVec2(ImGui::GetItemRectMax().x - width - 6.0f, namePos.y), ImGui::GetColorU32(ImGuiCol_TextDisabled), entry.Modified.c_str());
+                drawList->AddText(ImVec2(rowMax.x - width - 6.0f, namePos.y), ImGui::GetColorU32(ImGuiCol_TextDisabled), entry.Modified.c_str());
             }
             const std::string path = entry.File.generic_string() + (entry.Exists ? "" : "   (missing)");
-            drawList->AddText(ImVec2(namePos.x, namePos.y + ImGui::GetTextLineHeightWithSpacing()),
+            drawList->AddText(ImVec2(namePos.x, namePos.y + ImGui::GetTextLineHeightWithSpacing() * 1.4f),
                               entry.Exists ? ImGui::GetColorU32(ImGuiCol_TextDisabled) : IM_COL32(230, 110, 100, 255), path.c_str());
             ImGui::PopID();
         }
@@ -253,11 +289,7 @@ namespace Nox
             if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))
                 open = m_Selected;
             else if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !m_Projects[m_Selected].Sample)
-            {
-                ProjectLibrary::ForgetRecentProject(m_Projects[m_Selected].File);
-                Refresh();
-                return;
-            }
+                forget = m_Projects[m_Selected].File;
         }
 
         ImGui::BeginDisabled(!hasSelection || !m_Projects[m_Selected].Exists);
@@ -275,11 +307,7 @@ namespace Nox
         ImGui::SameLine();
         ImGui::BeginDisabled(!hasSelection || m_Projects[m_Selected].Sample);
         if (ImGui::Button("Remove from List") && hasSelection)
-        {
-            ProjectLibrary::ForgetRecentProject(m_Projects[m_Selected].File);
-            Refresh();
-            return;
-        }
+            forget = m_Projects[m_Selected].File;
         ImGui::EndDisabled();
         ImGui::SetItemTooltip("Only takes it off this list: no file is deleted.");
         ImGui::SameLine();
@@ -288,7 +316,12 @@ namespace Nox
             ShowInFolder(m_Projects[m_Selected].File.parent_path());
         ImGui::EndDisabled();
 
-        if (open >= 0 && open < static_cast<int>(m_Projects.size()))
+        if (!forget.empty())
+        {
+            ProjectLibrary::ForgetRecentProject(forget);
+            Refresh();
+        }
+        else if (open >= 0 && open < static_cast<int>(m_Projects.size()))
             Open(m_Projects[open].File);
     }
 

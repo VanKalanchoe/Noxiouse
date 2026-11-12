@@ -5,6 +5,8 @@
 #include <vector>
 
 #include "NoxCore/Core/Layer.h"
+#include "NoxCore/Core/Ref.h"
+#include "NRI/Texture.h"
 
 namespace Nox
 {
@@ -16,7 +18,7 @@ namespace Nox
     {
     public:
         ProjectManagerLayer();
-        ~ProjectManagerLayer() override = default;
+        ~ProjectManagerLayer() override;
 
         void OnImGuiRender() override;
 
@@ -32,6 +34,7 @@ namespace Nox
             bool Exists = false;
             bool Sample = false;
             std::string Modified; // "3 hours ago"
+            Ref<Texture2D> Thumbnail; // Saved/Thumbnail.png, when the project has one
         };
         void Refresh();
         // `createBasicScene`: a project just made from the Basic template (the editor makes and saves its first scene).

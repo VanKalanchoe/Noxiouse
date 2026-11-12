@@ -366,6 +366,9 @@ namespace Nox
         void SubmitLight(const glm::dmat4& transform, const DiscLightComponent& light);
 
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
+        // The same image as a reference (ReadbackTexture keeps it alive while it is copied), and the order its texels are read back in.
+        Ref<Texture2D> GetSceneResourceRef() const { return m_sceneResource; }
+        bool IsSurfaceFormatBGRA() const { return m_device && m_device->isSurfaceFormatBGRA(); }
 
         // Extra editor views (docs/Future.md item 5: the viewports besides the active one). Each draws another camera raster only --
         // forward-lit opaque, unlit, sky and transparent geometry, tonemapped, with the 2D overlay's world lines and its own grid -- into
