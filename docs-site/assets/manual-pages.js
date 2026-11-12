@@ -186,7 +186,7 @@ window.NOX_MANUAL_PAGES = [
             "| **Pan Viewport** | `Hold Middle Click Drag` | Pans the camera parallel to the screen plane. |",
             "| **Focus on Entity** | `F` | Centers and frames the selected entity in the active viewport. |",
             "",
-            "**Where am I?** The main viewport's lower-right corner has a view cube (ImGuizmo's): its faces show which way the axes run as the camera sees them; click a face, an edge or a corner to look along it, drag it to orbit (around the camera's focal point; perspective, Edit and Simulate). Each viewport's lower-left corner shows the camera's position, `Camera X ... Y ... Z ...`, in the same units as an entity's Translation (meters in brackets). Double-clicking an entity in the hierarchy flies the camera to it.",
+            "**Where am I?** Each viewport's lower-left corner shows the world axes as its camera sees them (Unreal's axis indicator: X red, Y green, Z blue). In the active viewport the letters are buttons: click one to view from that axis (around the camera's focal point), click it again to view from the opposite side. **Window > Viewports > <viewport> Options > Camera Position** shows where the camera is next to it, in the same units as an entity's Translation (meters in brackets); off by default, remembered per viewport. Double-clicking an entity in the hierarchy flies the camera to it.",
             "",
             "---",
             "",

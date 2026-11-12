@@ -131,13 +131,19 @@ namespace Nox
         // Snapping (like Unreal's viewport toolbar): one switch, and a step each for location (in cm), rotation (degrees) and scale.
         // Ctrl inverts it while held. The location step is in cm whatever the world unit is (WorldUnits converts).
         void UI_ViewportOverlay();
-        // Where the camera is, in the viewport's lower-left corner: world units as the Inspector shows Translation (and meters).
-        void DrawViewportCameraPosition(ImDrawList* draw, ImVec2 min, ImVec2 max, const EditorCamera& camera);
-        // ImGuizmo's view cube in the main viewport's corner (perspective, Edit / Simulate): the axes as the camera sees them; a click on
-        // a face, edge or corner turns the camera to look along it, a drag orbits -- around the camera's focal point.
-        void UpdateViewCube();
-        // A click in the viewport belongs to a gizmo (the selection's, or the view cube), not to picking or box selection.
+        // A viewport's lower-left corner (Unreal's axis indicator): the world axes as its camera sees them, X red, Y green, Z blue. In
+        // the active viewport the letters are buttons: a click turns the camera to view from that axis (again: from the opposite
+        // side), around its focal point. Returns whether a letter is under the mouse. And, when the viewport's Camera Position
+        // option is on, where the camera is (world units, as the Inspector shows Translation, and meters).
+        bool DrawAxisIndicator(ImDrawList* draw, ImVec2 min, ImVec2 max, EditorCamera& camera, bool clickable, bool showPosition);
+        // A click in the viewport belongs to a gizmo (the selection's) or the axis indicator, not to picking or box selection.
         bool GizmoTakesMouse() const;
+        bool m_AxisIndicatorHovered = false;
+        struct ViewTurn // a click on an axis letter: the camera's pitch / yaw eased to the new view
+        {
+            bool Active = false;
+            float FromPitch = 0.0f, FromYaw = 0.0f, ToPitch = 0.0f, ToYaw = 0.0f, Time = 0.0f;
+        } m_ViewTurn;
         // The world grid on the ground plane (y = 0): cells of the snap step (sparser far from the ground), every tenth line stronger, the
         // axes coloured, fading out with distance. Thin lines of the 2D overlay pass, so it is depth tested.
         void DrawWorldGrid();
@@ -290,6 +296,7 @@ namespace Nox
             bool ShowGrid = true;
             int ResolutionIndex = 0;  // full, half, quarter
             bool Realtime = true;     // off: drawn again only when its camera, its size, the scene or the selection change
+            bool ShowCameraPosition = false; // the camera's position next to the axis indicator (the Viewports menu)
             // What it was last drawn with (realtime off).
             glm::mat4 DrawnViewProjection{ 0.0f };
             glm::uvec2 DrawnSize{ 0, 0 };

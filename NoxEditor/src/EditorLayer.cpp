@@ -71,6 +71,7 @@ namespace Nox
             int Grid[4] = { 1, 1, 1, 1 };
             int Resolution[4] = { 0, 0, 0, 0 };
             int Realtime[4] = { 1, 1, 1, 1 };
+            int CameraPosition[4] = { 0, 0, 0, 0 };
         };
         ViewportIniState s_ViewportIni;
 
@@ -82,19 +83,20 @@ namespace Nox
             handler.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler*, const char*) -> void* { return &s_ViewportIni; };
             handler.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void*, const char* line)
             {
-                int index = 0, open = 0, view = 0, grid = 1, resolution = 0, realtime = 1;
+                int index = 0, open = 0, view = 0, grid = 1, resolution = 0, realtime = 1, cameraPosition = 0;
                 unsigned flags = Renderer::ExtraViewOutline;
-                const int read = sscanf(line, "Viewport%d=%d,%d,%u,%d,%d,%d", &index, &open, &view, &flags, &grid, &resolution, &realtime);
+                const int read = sscanf(line, "Viewport%d=%d,%d,%u,%d,%d,%d,%d", &index, &open, &view, &flags, &grid, &resolution, &realtime, &cameraPosition);
                 if (read >= 3 && index >= 0 && index < 4 && view >= 0 && view <= static_cast<int>(EditorViewMode::Right))
                 {
                     s_ViewportIni.Open[index] = index == 0 || open != 0;
                     s_ViewportIni.View[index] = view;
-                    if (read == 7) // the options (older files have the view only)
+                    if (read >= 7) // the options (older files have the view only)
                     {
                         s_ViewportIni.Flags[index] = flags;
                         s_ViewportIni.Grid[index] = grid;
                         s_ViewportIni.Resolution[index] = std::clamp(resolution, 0, 2);
                         s_ViewportIni.Realtime[index] = realtime;
+                        s_ViewportIni.CameraPosition[index] = read == 8 ? cameraPosition : 0;
                     }
                     s_ViewportIni.Loaded = true;
                 }
@@ -103,8 +105,9 @@ namespace Nox
             {
                 buffer->appendf("[%s][State]\n", self->TypeName);
                 for (int index = 0; index < 4; ++index)
-                    buffer->appendf("Viewport%d=%d,%d,%u,%d,%d,%d\n", index, s_ViewportIni.Open[index] ? 1 : 0, s_ViewportIni.View[index],
-                                    s_ViewportIni.Flags[index], s_ViewportIni.Grid[index], s_ViewportIni.Resolution[index], s_ViewportIni.Realtime[index]);
+                    buffer->appendf("Viewport%d=%d,%d,%u,%d,%d,%d,%d\n", index, s_ViewportIni.Open[index] ? 1 : 0, s_ViewportIni.View[index],
+                                    s_ViewportIni.Flags[index], s_ViewportIni.Grid[index], s_ViewportIni.Resolution[index], s_ViewportIni.Realtime[index],
+                                    s_ViewportIni.CameraPosition[index]);
                 buffer->append("\n");
             };
             ImGui::AddSettingsHandler(&handler);
@@ -3595,6 +3598,7 @@ namespace Nox
                 slot.ShowGrid = s_ViewportIni.Grid[index] != 0;
                 slot.ResolutionIndex = s_ViewportIni.Resolution[index];
                 slot.Realtime = s_ViewportIni.Realtime[index] != 0;
+                slot.ShowCameraPosition = s_ViewportIni.CameraPosition[index] != 0;
                 if (index > 0 && s_ViewportIni.Open[index])
                     OpenViewport(index);
             }
@@ -3607,6 +3611,7 @@ namespace Nox
             s_ViewportIni.Grid[index] = slot.ShowGrid ? 1 : 0;
             s_ViewportIni.Resolution[index] = slot.ResolutionIndex;
             s_ViewportIni.Realtime[index] = slot.Realtime ? 1 : 0;
+            s_ViewportIni.CameraPosition[index] = slot.ShowCameraPosition ? 1 : 0;
             if (index == m_ActiveViewport)
                 s_ViewportIni.View[index] = static_cast<int>(m_EditorCamera.GetViewMode());
             else if (slot.CameraSet)
@@ -3785,16 +3790,17 @@ namespace Nox
                 // !!! This is where the RenderTarget image is displayed !!!
                 // Whole pixels, like the render target: a fractional size resamples the image by a fraction of a pixel.
                 ImGui::Image(textureID, ImVec2(std::floor(viewportPanelSize.x), std::floor(viewportPanelSize.y)));
-                if (m_SceneState != SceneState::Play) // (Play looks through the game's camera)
-                    DrawViewportCameraPosition(ImGui::GetWindowDrawList(), ImVec2(m_ViewportBounds[0].x, m_ViewportBounds[0].y),
-                                               ImVec2(m_ViewportBounds[1].x, m_ViewportBounds[1].y), m_EditorCamera);
+                // (Play looks through the game's camera)
+                m_AxisIndicatorHovered = m_SceneState != SceneState::Play &&
+                                         DrawAxisIndicator(ImGui::GetWindowDrawList(), ImVec2(m_ViewportBounds[0].x, m_ViewportBounds[0].y),
+                                                           ImVec2(m_ViewportBounds[1].x, m_ViewportBounds[1].y), m_EditorCamera, true,
+                                                           m_Viewports[m_ActiveViewport].ShowCameraPosition);
             }
         }
         ImVec2 mousePos = ImGui::GetMousePos();
 
         // Only initiate box select when dragging on viewport and not using gizmos/alt-orbit
-        if (m_ViewportHovered && !ImGuizmo::IsUsing() && !ImGuizmo::IsViewManipulateHovered() && !ImGuizmo::IsUsingViewManipulate() &&
-            !Input::IsKeyPressed(SDL_SCANCODE_LALT))
+        if (m_ViewportHovered && !ImGuizmo::IsUsing() && !m_AxisIndicatorHovered && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
         {
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             {
@@ -4013,8 +4019,6 @@ namespace Nox
             ImGui::EndDragDropTarget();
         }
 
-        UpdateViewCube();
-
         // Gizmos
         //maybe be a callback you subscribe to instead
         Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
@@ -4146,8 +4150,8 @@ namespace Nox
             ImGui::Image(texture->getImTextureID(), ImVec2(std::floor(available.x), std::floor(available.y)));
 
         ImDrawList* draw = ImGui::GetWindowDrawList();
-        if (texture)
-            DrawViewportCameraPosition(draw, origin, ImVec2(origin.x + available.x, origin.y + available.y), slot.Camera);
+        if (texture) // (not clickable here: a click makes this the active viewport first)
+            DrawAxisIndicator(draw, origin, ImVec2(origin.x + available.x, origin.y + available.y), slot.Camera, false, slot.ShowCameraPosition);
 
         // Where the gizmo of the selected entity is (its axes, not draggable here: a click makes this the active viewport, where it is).
         Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
@@ -4214,61 +4218,100 @@ namespace Nox
         ImGui::End();
     }
 
-    void EditorLayer::DrawViewportCameraPosition(ImDrawList* draw, ImVec2 min, ImVec2 max, const EditorCamera& camera)
+    bool EditorLayer::DrawAxisIndicator(ImDrawList* draw, ImVec2 min, ImVec2 max, EditorCamera& camera, bool clickable, bool showPosition)
     {
-        if (max.x - min.x < 120.0f || max.y - min.y < 60.0f)
-            return;
-        // The same numbers as an entity's Translation, so a position in a guide can be found.
-        const glm::dvec3 position = camera.GetPosition();
-        const double meters = static_cast<double>(WorldUnits::ToMeters(1.0f));
-        char text[160];
-        std::snprintf(text, sizeof(text), "Camera  X %.0f  Y %.0f  Z %.0f   (%.1f, %.1f, %.1f m)", position.x, position.y, position.z,
-                      position.x * meters, position.y * meters, position.z * meters);
-        const ImVec2 textPos(min.x + 10.0f, max.y - 24.0f);
-        const ImVec2 size = ImGui::CalcTextSize(text);
-        draw->AddRectFilled(ImVec2(textPos.x - 5.0f, textPos.y - 3.0f), ImVec2(textPos.x + size.x + 5.0f, textPos.y + size.y + 3.0f), IM_COL32(0, 0, 0, 150), 3.0f);
-        draw->AddText(textPos, IM_COL32(230, 230, 230, 255), text);
-    }
-
-    void EditorLayer::UpdateViewCube()
-    {
-        if (m_SceneState == SceneState::Play || m_EditorCamera.IsOrthographic())
-            return;
-        const float width = m_ViewportBounds[1].x - m_ViewportBounds[0].x, height = m_ViewportBounds[1].y - m_ViewportBounds[0].y;
-        constexpr float kCube = 110.0f;
-        if (width < kCube * 2.0f || height < kCube * 2.0f)
-            return;
-        // ImGuizmo's ViewManipulate, the form that sets its context itself (the one after Manipulate reads the projection Manipulate
-        // left): called before the selection's gizmo, which then sets the context back to the selected entity.
-        glm::mat4 view = m_EditorCamera.GetGizmoView(m_Renderer->GetRenderOrigin());
-        const glm::mat4 before = view;
-        const glm::mat4 projection = m_EditorCamera.GetGizmoProjection();
-        glm::mat4 identity(1.0f);
-        ImGuizmo::SetDrawlist();
-        ImGuizmo::SetRect(m_ViewportBounds[0].x, m_ViewportBounds[0].y, width, height);
-        ImGuizmo::ViewManipulate(glm::value_ptr(view), glm::value_ptr(projection), ImGuizmo::TRANSLATE, ImGuizmo::LOCAL, glm::value_ptr(identity),
-                                 m_EditorCamera.GetDistance(), ImVec2(m_ViewportBounds[1].x - kCube - 10.0f, m_ViewportBounds[1].y - kCube - 10.0f),
-                                 ImVec2(kCube, kCube), 0x00000000);
-        if (view == before)
-            return;
-        // The camera turned to the cube's view: its pitch and yaw from where it now looks (EditorCamera's orientation is
-        // quat(-pitch, -yaw, 0): forward = (-cos a sin b, sin a, -cos a cos b) with a = -pitch, b = -yaw); the focal point stays.
-        const glm::mat4 world = glm::inverse(view);
-        const glm::vec3 forward = glm::normalize(-glm::vec3(world[2]));
-        const glm::vec3 up = glm::normalize(glm::vec3(world[1]));
-        const float a = std::asin(std::clamp(forward.y, -1.0f, 1.0f));
-        float b = std::atan2(-forward.x, -forward.z);
-        if (std::cos(a) < 1e-4f) // straight up or down: the yaw from the up vector (u = (sin a sin b, cos a, sin a cos b))
+        if (max.x - min.x < 90.0f || max.y - min.y < 90.0f)
+            return false;
+        clickable &= !camera.IsOrthographic(); // (an orthographic view's direction is its view mode's: Top, Front, ...)
+        // A turn under way (a letter clicked): eased over 0.2 s.
+        if (clickable && m_ViewTurn.Active)
         {
-            const float side = a > 0.0f ? 1.0f : -1.0f;
-            b = std::atan2(side * up.x, side * up.z);
+            m_ViewTurn.Time = std::min(m_ViewTurn.Time + ImGui::GetIO().DeltaTime / 0.2f, 1.0f);
+            const float t = m_ViewTurn.Time * m_ViewTurn.Time * (3.0f - 2.0f * m_ViewTurn.Time);
+            camera.SetOrientation(glm::mix(m_ViewTurn.FromPitch, m_ViewTurn.ToPitch, t), glm::mix(m_ViewTurn.FromYaw, m_ViewTurn.ToYaw, t));
+            m_ViewTurn.Active = m_ViewTurn.Time < 1.0f;
         }
-        m_EditorCamera.SetOrientation(-a, -b);
+
+        // Each world axis turned into the view (x right, y up, z toward the viewer), drawn back to front.
+        const glm::mat3 view(camera.GetGizmoView(camera.GetPosition()));
+        const ImVec2 center(min.x + 40.0f, max.y - 40.0f);
+        constexpr float kLength = 24.0f, kLabelRadius = 8.5f;
+        struct Axis { glm::vec3 World; glm::vec3 InView; ImU32 Color; const char* Name; };
+        Axis axes[3] = { { { 1, 0, 0 }, {}, IM_COL32(226, 74, 74, 255), "X" },
+                         { { 0, 1, 0 }, {}, IM_COL32(110, 196, 72, 255), "Y" },
+                         { { 0, 0, 1 }, {}, IM_COL32(74, 134, 232, 255), "Z" } };
+        for (Axis& axis : axes)
+            axis.InView = view * axis.World;
+        std::sort(std::begin(axes), std::end(axes), [](const Axis& a, const Axis& b) { return a.InView.z < b.InView.z; });
+        const ImVec2 mouse = ImGui::GetMousePos();
+        const Axis* hovered = nullptr;
+        if (clickable && ImGui::IsWindowHovered())
+        {
+            float nearest = kLabelRadius + 2.0f;
+            for (const Axis& axis : axes)
+            {
+                const ImVec2 end(center.x + axis.InView.x * kLength, center.y - axis.InView.y * kLength);
+                const float distance = std::hypot(mouse.x - end.x, mouse.y - end.y);
+                if (distance < nearest)
+                {
+                    nearest = distance;
+                    hovered = &axis;
+                }
+            }
+        }
+        for (const Axis& axis : axes)
+        {
+            const ImVec2 end(center.x + axis.InView.x * kLength, center.y - axis.InView.y * kLength);
+            const bool isHovered = hovered == &axis;
+            // A thin shadow under each line keeps it readable over a bright sky.
+            draw->AddLine(ImVec2(center.x + 1.0f, center.y + 1.0f), ImVec2(end.x + 1.0f, end.y + 1.0f), IM_COL32(0, 0, 0, 110), 2.0f);
+            draw->AddLine(center, end, axis.Color, 2.0f);
+            const ImVec2 textSize = ImGui::CalcTextSize(axis.Name);
+            if (isHovered)
+                draw->AddCircleFilled(end, kLabelRadius, axis.Color, 20);
+            else
+                draw->AddCircleFilled(end, kLabelRadius - 1.5f, IM_COL32(20, 20, 22, 170), 20);
+            draw->AddText(ImVec2(end.x - textSize.x * 0.5f, end.y - textSize.y * 0.5f), isHovered ? IM_COL32(255, 255, 255, 255) : axis.Color, axis.Name);
+        }
+
+        if (hovered)
+        {
+            // View from the axis (looking back along it toward the origin); from the opposite side when already looking that way.
+            const glm::vec3 forward = glm::normalize(-glm::vec3(glm::inverse(view)[2]));
+            const bool fromOpposite = glm::dot(forward, -hovered->World) > 0.999f;
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            ImGui::SetTooltip("View from %s%s (click again: from %s%s)", fromOpposite ? "-" : "+", hovered->Name, fromOpposite ? "+" : "-", hovered->Name);
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            {
+                const glm::vec3 target = fromOpposite ? hovered->World : -hovered->World;
+                // EditorCamera's orientation is quat(-pitch, -yaw, 0): forward = (-cos a sin b, sin a, -cos a cos b), a = -pitch, b = -yaw.
+                const float a = std::asin(std::clamp(target.y, -1.0f, 1.0f));
+                float b = std::abs(target.y) > 0.999f ? -camera.GetYaw() : std::atan2(-target.x, -target.z); // (straight up / down: the yaw kept)
+                const float fromYaw = camera.GetYaw();
+                float toYaw = -b;
+                toYaw = fromYaw + std::remainder(toYaw - fromYaw, glm::two_pi<float>()); // the short way round
+                m_ViewTurn = { true, camera.GetPitch(), fromYaw, -a, toYaw, 0.0f };
+            }
+        }
+
+        if (showPosition)
+        {
+            const glm::dvec3 position = camera.GetPosition();
+            const double meters = static_cast<double>(WorldUnits::ToMeters(1.0f));
+            char text[160];
+            std::snprintf(text, sizeof(text), "X %.0f  Y %.0f  Z %.0f  (%.1f, %.1f, %.1f m)", position.x, position.y, position.z,
+                          position.x * meters, position.y * meters, position.z * meters);
+            const ImVec2 textPos(center.x + kLength + 22.0f, max.y - 22.0f);
+            const ImVec2 size = ImGui::CalcTextSize(text);
+            draw->AddRectFilled(ImVec2(textPos.x - 5.0f, textPos.y - 3.0f), ImVec2(textPos.x + size.x + 5.0f, textPos.y + size.y + 3.0f), IM_COL32(20, 20, 22, 170), 3.0f);
+            draw->AddText(textPos, IM_COL32(225, 225, 225, 255), text);
+        }
+        return hovered != nullptr;
     }
 
     bool EditorLayer::GizmoTakesMouse() const
     {
-        if (ImGuizmo::IsViewManipulateHovered() || ImGuizmo::IsUsingViewManipulate())
+        if (m_AxisIndicatorHovered)
             return true;
         const Entity selected = m_SceneHierarchyPanel.GetSelectedEntity();
         return selected && m_GizmoType != -1 && ImGuizmo::IsOver();
@@ -4502,6 +4545,8 @@ namespace Nox
                 slot.ResolutionIndex = resolution;
         }
         ImGui::Separator();
+        ImGui::MenuItem("Camera Position", nullptr, &slot.ShowCameraPosition);
+        ImGui::SetItemTooltip("Where the camera is, next to the axis indicator in the lower-left corner (world units, as an entity's Translation).");
         ImGui::MenuItem("Realtime", nullptr, &slot.Realtime);
         ImGui::SetItemTooltip("Off: drawn again only when its camera, the scene or the selection change (always on in Play).");
         ImGui::EndMenu();
