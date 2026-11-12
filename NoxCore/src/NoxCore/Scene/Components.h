@@ -859,7 +859,7 @@ namespace Nox
     struct BoxCollider2DComponent
     {
         glm::vec2 Offset = { 0.0f, 0.0f };
-        glm::vec2 Size = { 0.5f, 0.5f };//1x1m scale object
+        glm::vec2 Size{ WorldUnits::FromMeters(0.5f), WorldUnits::FromMeters(0.5f) }; // half size (world units): a 1 x 1 m sprite
         
         // The surface material (Box2D's b2SurfaceMaterial; Inspector presets: Default, Ice, Rubber, Wood, Metal, Bouncy, Conveyor).
         float Density = 1.0f;              // kg per square meter
@@ -879,7 +879,7 @@ namespace Nox
     struct CircleCollider2DComponent
     {
         glm::vec2 Offset = { 0.0f, 0.0f };
-        float Radius = 0.5f;// idk 0.5 doesnt work for me maybe changed with box2d v3 ?1x1m scale object
+        float Radius = WorldUnits::FromMeters(0.5f); // world units: a 1 m circle
         
         // The surface material (Box2D's b2SurfaceMaterial; Inspector presets: Default, Ice, Rubber, Wood, Metal, Bouncy, Conveyor).
         float Density = 1.0f;              // kg per square meter
@@ -924,7 +924,9 @@ namespace Nox
 
     struct BoxCollider3DComponent
     {
-        glm::vec3 HalfExtents = { 0.5f, 0.5f, 0.5f };
+        // World units, like every length (WorldUnits: cm in a cm project); the defaults fit the 1 m shapes. Added in the editor to an
+        // entity with a mesh, it is fitted to the mesh (Unity's collider fit; Inspector > Fit to Mesh).
+        glm::vec3 HalfExtents{ WorldUnits::FromMeters(0.5f), WorldUnits::FromMeters(0.5f), WorldUnits::FromMeters(0.5f) };
         glm::vec3 Offset = { 0.0f, 0.0f, 0.0f };
 
         float Friction = 0.5f;
@@ -936,7 +938,7 @@ namespace Nox
 
     struct SphereCollider3DComponent
     {
-        float Radius = 0.5f;
+        float Radius = WorldUnits::FromMeters(0.5f); // world units: the 1 m Sphere shape
         glm::vec3 Offset = { 0.0f, 0.0f, 0.0f };
 
         float Friction = 0.5f;
@@ -951,8 +953,8 @@ namespace Nox
 
     struct CapsuleCollider3DComponent
     {
-        float HalfHeight = 0.5f;
-        float Radius = 0.5f;
+        float HalfHeight = WorldUnits::FromMeters(0.5f); // the straight part's (world units): the 2 m Capsule shape
+        float Radius = WorldUnits::FromMeters(0.5f);
         glm::vec3 Offset = { 0.0f, 0.0f, 0.0f };
 
         float Friction = 0.5f;
@@ -968,8 +970,8 @@ namespace Nox
     // A cylinder along the entity's Y (Jolt CylinderShape); with BottomRadius a cone or a frustum (Jolt TaperedCylinderShape).
     struct CylinderCollider3DComponent
     {
-        float HalfHeight = 0.5f;
-        float Radius = 0.5f;       // the top's, and the bottom's when BottomRadius is 0
+        float HalfHeight = WorldUnits::FromMeters(0.5f); // world units: the 1 m Cylinder shape
+        float Radius = WorldUnits::FromMeters(0.5f);     // the top's, and the bottom's when BottomRadius is 0
         float BottomRadius = 0.0f; // 0: Radius (a straight cylinder)
         glm::vec3 Offset = { 0.0f, 0.0f, 0.0f };
 
@@ -1116,7 +1118,7 @@ namespace Nox
     struct LevelStreamingVolumeComponent
     {
         std::vector<AssetHandle> Levels;
-        glm::vec3 HalfExtents = { 0.5f, 0.5f, 0.5f };
+        glm::vec3 HalfExtents{ WorldUnits::FromMeters(0.5f), WorldUnits::FromMeters(0.5f), WorldUnits::FromMeters(0.5f) };
         float UnloadDelay = 2.0f; // seconds outside before unloading: walking along the edge does not load and unload every frame
     };
 

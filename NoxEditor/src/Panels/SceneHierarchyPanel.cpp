@@ -53,6 +53,58 @@ namespace Nox
             }
         }
 
+        // A 3D collider fitted to the entity's own mesh (Unity sizes a new collider to the mesh's bounds): half extents / radius /
+        // half height in the entity's space (the body scales them by the transform), the offset to the mesh's center (the body does
+        // not scale offsets: the transform's scale is applied here). False: no mesh, or not loaded yet.
+        template <typename Collider>
+        bool FitColliderToMesh(Entity entity, Collider& collider)
+        {
+            glm::vec3 lowest, highest;
+            if (!ComputeLocalMeshBounds(entity, lowest, highest))
+                return false;
+            const glm::vec3 half = glm::max((highest - lowest) * 0.5f, glm::vec3(WorldUnits::FromMeters(0.001f)));
+            const glm::vec3 center = (highest + lowest) * 0.5f;
+            glm::vec3 scale(1.0f);
+            if (entity.HasComponent<WorldTransformComponent>())
+            {
+                const glm::dmat4& world = entity.GetComponent<WorldTransformComponent>().WorldMatrix;
+                scale = glm::vec3(glm::length(glm::dvec3(world[0])), glm::length(glm::dvec3(world[1])), glm::length(glm::dvec3(world[2])));
+            }
+            const float flat = std::max(half.x, half.z);
+            if constexpr (std::is_same_v<Collider, BoxCollider3DComponent>)
+                collider.HalfExtents = half;
+            else if constexpr (std::is_same_v<Collider, SphereCollider3DComponent>)
+                collider.Radius = std::max({ half.x, half.y, half.z });
+            else if constexpr (std::is_same_v<Collider, CapsuleCollider3DComponent>)
+            {
+                collider.Radius = flat;
+                collider.BottomRadius = 0.0f;
+                collider.HalfHeight = std::max(half.y - flat, WorldUnits::FromMeters(0.001f)); // (the straight part between the caps)
+            }
+            else if constexpr (std::is_same_v<Collider, CylinderCollider3DComponent>)
+            {
+                collider.Radius = flat;
+                collider.BottomRadius = 0.0f;
+                collider.HalfHeight = half.y;
+            }
+            collider.Offset = center * scale;
+            return true;
+        }
+
+        // The Inspector's Fit to Mesh button (disabled without a loaded mesh on the entity).
+        template <typename Collider>
+        void FitToMeshButton(Entity entity, Collider& collider)
+        {
+            glm::vec3 lowest, highest;
+            const bool hasMesh = ComputeLocalMeshBounds(entity, lowest, highest);
+            ImGui::BeginDisabled(!hasMesh);
+            if (ImGui::Button("Fit to Mesh"))
+                FitColliderToMesh(entity, collider);
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip(hasMesh ? "Sizes the collider to this entity's mesh (its bounds), centered on it. A new collider is fitted when added."
+                                          : "Needs a mesh on this entity (loaded).");
+        }
+
         // A sound asset (an audio clip or an audio graph) by name, or dropped from the Content Browser.
         void SoundAssetCombo(const char* label, AssetHandle& sound)
         {
@@ -271,6 +323,35 @@ namespace Nox
         return folders;
     }
 
+    std::vector<Entity> SceneHierarchyPanel::CollectFolderContents(const std::string& path) const
+    {
+        // The top-level entities filed in the folder or in one of its subfolders (their children go with them).
+        std::vector<Entity> contents;
+        const std::string prefix = path + "/";
+        for (auto handle : m_Context->m_Registry.view<FolderComponent>())
+        {
+            Entity entity(handle, m_Context.get());
+            const std::string& filed = entity.GetComponent<FolderComponent>().Path;
+            const bool hasParent = entity.HasComponent<RelationshipComponent>() && entity.GetComponent<RelationshipComponent>().Parent != 0;
+            if (!hasParent && (filed == path || filed.rfind(prefix, 0) == 0))
+                contents.push_back(entity);
+        }
+        return contents;
+    }
+
+    void SceneHierarchyPanel::SetFolderContentsActive(const std::string& path, bool active)
+    {
+        for (Entity entity : CollectFolderContents(path))
+        {
+            if (m_Context->IsEntityLocked(entity)) // (a locked level's entities are left as they are)
+                continue;
+            if (!active && !entity.HasComponent<InactiveComponent>())
+                entity.AddComponent<InactiveComponent>();
+            else if (active && entity.HasComponent<InactiveComponent>())
+                entity.RemoveComponent<InactiveComponent>();
+        }
+    }
+
     std::vector<Entity> SceneHierarchyPanel::CollectVisibleRows() const
     {
         // The same walk as OnImGuiRender / DrawFolderNode / DrawEntityNode draw.
@@ -330,6 +411,31 @@ namespace Nox
 
     namespace
     {
+        // Godot's / Unreal's eye: open (visible) or a closed lid with lashes (hidden), in the given item rectangle.
+        void DrawEyeIcon(ImVec2 min, ImVec2 max, bool open, ImU32 color)
+        {
+            const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+            const float r = (max.y - min.y) * 0.42f;
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            const ImVec2 left(centre.x - r, centre.y), right(centre.x + r, centre.y);
+            if (open)
+            {
+                drawList->AddBezierQuadratic(left, ImVec2(centre.x, centre.y - r * 1.25f), right, color, 1.5f);
+                drawList->AddBezierQuadratic(left, ImVec2(centre.x, centre.y + r * 1.25f), right, color, 1.5f);
+                drawList->AddCircleFilled(centre, r * 0.38f, color);
+            }
+            else
+            {
+                // A closed lid with three lashes.
+                drawList->AddBezierQuadratic(left, ImVec2(centre.x, centre.y + r * 1.1f), right, color, 1.5f);
+                for (float t : { -0.55f, 0.0f, 0.55f })
+                {
+                    const ImVec2 base(centre.x + t * r, centre.y + r * 0.55f * (1.0f - t * t * 0.6f));
+                    drawList->AddLine(base, ImVec2(base.x + t * r * 0.35f, base.y + r * 0.45f), color, 1.2f);
+                }
+            }
+        }
+
         std::string FolderLeaf(const std::string& path)
         {
             const size_t slash = path.rfind('/');
@@ -581,8 +687,9 @@ namespace Nox
     void SceneHierarchyPanel::DrawFolderNode(const std::string& path, const std::set<std::string>& allFolders)
     {
         ImGui::PushID(path.c_str());
-        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap;
         const std::string label = "[Folder]  " + FolderLeaf(path);
+        const float rowRight = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x; // (the eye at the row's right end)
         // Open or folded as the scene keeps it (saved with it): the same after reopening the scene, an undo, or a restart.
         ImGui::SetNextItemOpen(!m_Context->IsFolderCollapsed(path), ImGuiCond_Always);
         const bool opened = ImGui::TreeNodeEx("##folder", flags, "%s", label.c_str());
@@ -599,7 +706,31 @@ namespace Nox
         }
 
         bool deleteFolder = false;
-        if (ImGui::BeginPopupContextItem())
+        const bool rowContextMenu = ImGui::BeginPopupContextItem();
+        // (the eye is drawn after the context menu's check, which reads the tree node as the last item)
+        auto drawFolderEye = [&]()
+        {
+            // Unreal's Outliner folder eye: everything filed in the folder and its subfolders (and what is under those entities) shown
+            // or hidden in one click -- the entities' own eyes (Active). Open while anything in it is visible; a click hides all,
+            // or shows all when all are hidden. A locked level's entities are left as they are.
+            const std::vector<Entity> contents = CollectFolderContents(path);
+            bool anyVisible = false;
+            for (Entity entity : contents)
+                anyVisible |= !entity.HasComponent<InactiveComponent>();
+            const float size = ImGui::GetTextLineHeight();
+            ImGui::SameLine(rowRight - size - ImGui::GetStyle().ItemSpacing.x - (ImGui::GetWindowPos().x - ImGui::GetScrollX()));
+            const bool clicked = ImGui::InvisibleButton("##foldereye", ImVec2(size, size));
+            const bool hovered = ImGui::IsItemHovered();
+            if (clicked)
+                SetFolderContentsActive(path, !anyVisible);
+            if (hovered)
+                ImGui::SetTooltip(contents.empty() ? "Empty folder."
+                                  : anyVisible ? "Click to hide everything in this folder and its subfolders."
+                                               : "Everything in this folder is hidden. Click to show it all.");
+            const ImU32 color = ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled, contents.empty() ? 0.4f : 1.0f);
+            DrawEyeIcon(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), anyVisible || contents.empty(), color);
+        };
+        if (rowContextMenu)
         {
             if (ImGui::MenuItem("New Folder"))
                 m_Context->AddFolder(UniqueFolderPath(allFolders, path, "New Folder"));
@@ -621,10 +752,15 @@ namespace Nox
             }
             if (ImGui::MenuItem("Delete Folder"))
                 deleteFolder = true;
+            if (ImGui::MenuItem("Hide Contents"))
+                SetFolderContentsActive(path, false);
+            if (ImGui::MenuItem("Show Contents"))
+                SetFolderContentsActive(path, true);
             ImGui::Separator();
             DrawCreateShapeMenu(path);
             ImGui::EndPopup();
         }
+        drawFolderEye();
 
         if (opened)
         {
@@ -875,31 +1011,11 @@ namespace Nox
                                                "no animation, scripts not updated) -- the Inspector's Active box."
                                              : "Hidden (switched off). Click to show it again.");
 
-            const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
-            const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
-            const float r = size * 0.42f;
             const bool faint = selfActive && !m_Context->IsActiveInHierarchy(entity);
             ImU32 color = ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled);
             if (faint)
                 color = ImGui::GetColorU32(ImGuiCol_TextDisabled, 0.5f);
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-            const ImVec2 left(centre.x - r, centre.y), right(centre.x + r, centre.y);
-            if (selfActive)
-            {
-                drawList->AddBezierQuadratic(left, ImVec2(centre.x, centre.y - r * 1.25f), right, color, 1.5f);
-                drawList->AddBezierQuadratic(left, ImVec2(centre.x, centre.y + r * 1.25f), right, color, 1.5f);
-                drawList->AddCircleFilled(centre, r * 0.38f, color);
-            }
-            else
-            {
-                // A closed lid with three lashes.
-                drawList->AddBezierQuadratic(left, ImVec2(centre.x, centre.y + r * 1.1f), right, color, 1.5f);
-                for (float t : { -0.55f, 0.0f, 0.55f })
-                {
-                    const ImVec2 base(centre.x + t * r, centre.y + r * 0.55f * (1.0f - t * t * 0.6f));
-                    drawList->AddLine(base, ImVec2(base.x + t * r * 0.35f, base.y + r * 0.45f), color, 1.2f);
-                }
-            }
+            DrawEyeIcon(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), selfActive, color);
         }
 
         if (opened)
@@ -3451,16 +3567,19 @@ namespace Nox
             ImGui::Checkbox("Is Sensor", &component.IsSensor);
         });
 
-        DrawComponent<BoxCollider3DComponent>("Box Collider 3D", entity, [](auto& component)
+        DrawComponent<BoxCollider3DComponent>("Box Collider 3D", entity, [entity](auto& component)
         {
+            FitToMeshButton(entity, component);
             DrawLengthVec3Control("Half Extents", component.HalfExtents);
+            ImGui::SetItemTooltip("Half the box's size in the entity's space (a 1 m cube: 50 cm), scaled by its transform.");
             DrawLengthVec3Control("Offset", component.Offset);
             ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
             ImGui::DragFloat("Restitution", &component.Restitution, 0.01f, 0.0f, 1.0f);
         });
 
-        DrawComponent<SphereCollider3DComponent>("Sphere Collider 3D", entity, [](auto& component)
+        DrawComponent<SphereCollider3DComponent>("Sphere Collider 3D", entity, [entity](auto& component)
         {
+            FitToMeshButton(entity, component);
             DrawLengthControl("Radius", component.Radius);
             DrawLengthVec3Control("Offset", component.Offset);
             ImGui::DragFloat("Friction", &component.Friction, 0.01f, 0.0f, 1.0f);
@@ -3469,9 +3588,11 @@ namespace Nox
             ImGui::SetItemTooltip("Slows it down when it rolls, until it stops: ~0.01 a hard floor, ~0.05 grass or carpet.\n0: rolls on for minutes (damping alone slows it).");
         });
 
-        DrawComponent<CapsuleCollider3DComponent>("Capsule Collider 3D", entity, [](auto& component)
+        DrawComponent<CapsuleCollider3DComponent>("Capsule Collider 3D", entity, [entity](auto& component)
         {
+            FitToMeshButton(entity, component);
             DrawLengthControl("Half Height", component.HalfHeight);
+            ImGui::SetItemTooltip("Half the straight part between the two caps (the whole capsule is 2 x (Half Height + Radius) tall).");
             DrawLengthControl("Radius", component.Radius);
             DrawLengthControl("Bottom Radius", component.BottomRadius);
             ImGui::SetItemTooltip("0: the same as Radius (a straight capsule). Otherwise a tapered capsule: Radius at the top, this at the bottom.");
@@ -3482,8 +3603,9 @@ namespace Nox
             ImGui::SetItemTooltip("Slows it down when it rolls, until it stops: ~0.01 a hard floor, ~0.05 grass or carpet.\n0: rolls on for minutes (damping alone slows it).");
         });
 
-        DrawComponent<CylinderCollider3DComponent>("Cylinder Collider 3D", entity, [](auto& component)
+        DrawComponent<CylinderCollider3DComponent>("Cylinder Collider 3D", entity, [entity](auto& component)
         {
+            FitToMeshButton(entity, component);
             DrawLengthControl("Half Height", component.HalfHeight);
             DrawLengthControl("Radius", component.Radius);
             DrawLengthControl("Bottom Radius", component.BottomRadius);
@@ -3776,7 +3898,11 @@ namespace Nox
         {
             if (ImGui::MenuItem(entryName.c_str()))
             {
-                entity.AddComponent<T>();
+                T& added = entity.AddComponent<T>();
+                // A collider added to an entity with a mesh is fitted to it (Unity's behaviour), else the 1 m defaults.
+                if constexpr (std::is_same_v<T, BoxCollider3DComponent> || std::is_same_v<T, SphereCollider3DComponent> ||
+                              std::is_same_v<T, CapsuleCollider3DComponent> || std::is_same_v<T, CylinderCollider3DComponent>)
+                    FitColliderToMesh(entity, added);
                 ImGui::CloseCurrentPopup();
             }
         }

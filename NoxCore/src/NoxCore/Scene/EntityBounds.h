@@ -21,4 +21,8 @@ namespace Nox
 
     // `includeChildren` false: only this entity's own mesh (what a floor candidate is, in Snap to Floor).
     WorldBounds ComputeWorldBounds(Scene& scene, Entity entity, bool includeChildren = true);
+
+    // The entity's own mesh's box in its local space (before its transform): what a collider on it is sized in. False: no mesh, or not
+    // loaded yet.
+    bool ComputeLocalMeshBounds(Entity entity, glm::vec3& outMin, glm::vec3& outMax);
 }

@@ -76,6 +76,9 @@ namespace Nox
         // The entity rows in the order they are drawn (folders first, then the top-level entities), inside open folders and open
         // rows only: what a Shift-click selects a range of.
         std::vector<Entity> CollectVisibleRows() const;
+        // A folder's top-level entities, its subfolders' included; shown / hidden together (the folder's eye).
+        std::vector<Entity> CollectFolderContents(const std::string& path) const;
+        void SetFolderContentsActive(const std::string& path, bool active);
         void FileEntities(UUID dragged, const std::string& path);
         void AcceptAssetDrop(const std::string& folder);
         // The "Shapes" submenu of a right-click menu; shapes made from it are filed in `folder` ("" = top level).

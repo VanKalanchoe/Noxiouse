@@ -77,22 +77,20 @@ Noxiouse uses a multi-pool **Taskflow-backed Job System** (`JobSystem`) designed
 
 ### Plain-English Overview
 - **Zero-Overhead Telemetry (`Profiler`)**: Collects a 240-frame rolling ring buffer of CPU scope timings (`NOX_PROFILE_SCOPE`), worker task execution timelines, GPU pass timestamps & mesh/fragment invocation counts, process RAM / GPU VRAM usage, and asset/world streaming counters.
-- **In-Game F3 Overlay (`StatsOverlay` + `StatsOverlayLayer`)**: Press **F3** in either `NoxEditor` or `NoxRuntime` to cycle through a 5-page translucent HUD rendered directly via `Renderer2D` (works even in shipping `NoxRuntime` builds without Dear ImGui!):
-  - **Page 1 (`Summary`)**: FPS, frame time, 1% low, CPU/GPU/RenderThread ms, draw calls, instances, VRAM, and 120-frame sparkline.
-  - **Page 2 (`CPU Scopes`)**: Hierarchical CPU scope timings with average and max ms.
-  - **Page 3 (`GPU Passes`)**: Per-RenderGraph-pass GPU milliseconds and task/mesh/fragment shader invocations.
-  - **Page 4 (`Memory & Streaming`)**: Process RAM, VMA GPU budgets, Texture Streamer residency, Virtual Texture tiles, Geometry Streamer pages, and World Partition cell latency.
-  - **Page 5 (`Thread Timeline`)**: Horizontal Gantt chart of the Main Thread + all Frame/Background/IO worker threads.
-- **JSON & Chrome `about://tracing` Exporter (`StatsReport`)**: Press **Shift+F3** (or click Export in the Profiler panel) to dump a `.json` summary report and a `trace.json` Chrome Tracing / Perfetto timeline.
+- **F3 Stats (`StatsOverlayLayer`)**: **F3** shows / hides Nox Stats, **Shift+F3** resets min / max / avg, **Ctrl+F3** saves a report.
+  - **Editor: the Stats window (`StatsWindow`)**, a dockable ImGui window that scrolls: build and VSync, FPS, CPU / GPU frame times (last / avg / min / max), RAM / VRAM, Reset Stats and Save Report buttons; then collapsible sections -- **Audio** (voices real / virtual against the Real Voices budget, mixer block time, underruns, acoustics), **GPU passes**, **CPU scopes** (nested), **Memory** (heaps, VRAM by category with budgets), **Counters**. Also Settings > Stats Window (F3).
+  - **Game (`NoxRuntime`, no Dear ImGui): the text overlay (`StatsOverlay`)** in the top-left corner, drawn with `Renderer2D`'s screen-space MSDF text: FPS, CPU / GPU frame times, RAM / VRAM (and, detailed, the GPU / CPU tables, heaps, counters and audio).
+- **Stats report (`StatsReport`)**: Ctrl+F3 (or Save Report) writes `NoxStats_<date>.txt` next to `Nox.log`: frame times, memory, GPU / CPU scope tables, pipeline statistics, counters, audio.
 
 ### File-by-File Reference: `NoxCore/src/NoxCore/Profiling/` (10 Files)
 
 | File | Plain-English Summary & Key Types |
 | :--- | :--- |
 | [`Profiler.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/Profiler.h) & [`Profiler.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/Profiler.cpp) | Defines `NOX_PROFILE_FUNCTION()`, `NOX_PROFILE_SCOPE(name)`, `ProfileScopeTimer`, `FrameSample`, and the `Profiler` singleton storing the 240-frame ring buffer. |
-| [`StatsOverlay.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsOverlay.h) & [`StatsOverlay.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsOverlay.cpp) | Renders the 5-page **F3** HUD (`Summary`, `CPUScopes`, `GPUPasses`, `MemoryAndStreaming`, `ThreadTimeline`) using `Renderer2D` quads, lines, and MSDF text. |
-| [`StatsOverlayLayer.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsOverlayLayer.h) & [`StatsOverlayLayer.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsOverlayLayer.cpp) | Engine `Layer` that listens for **F3** (cycle overlay pages) and **Shift+F3** (write JSON + Chrome trace report to `profiling/`). |
-| [`StatsReport.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsReport.h) & [`StatsReport.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsReport.cpp) | Exports 240-frame profiling metrics to JSON (`WriteStatsReport`) and Chrome Tracing / Perfetto format (`WriteChromeTrace`). |
+| [`StatsOverlay.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsOverlay.h) & [`StatsOverlay.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsOverlay.cpp) | The game's F3 text overlay (no ImGui): `Renderer2D` screen-space quads and MSDF text. |
+| [`StatsWindow.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsWindow.h) & [`StatsWindow.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsWindow.cpp) | The editor's F3 Stats window (ImGui): frame times and memory, then collapsible Audio / GPU passes / CPU scopes / Memory / Counters sections. |
+| [`StatsOverlayLayer.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsOverlayLayer.h) & [`StatsOverlayLayer.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsOverlayLayer.cpp) | Engine `Layer`: **F3** shows / hides (the window in the editor, the overlay in a game), **Shift+F3** resets the stats, **Ctrl+F3** saves the report. |
+| [`StatsReport.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsReport.h) & [`StatsReport.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/StatsReport.cpp) | `SaveStatsReport`: the stats as text (`NoxStats_<date>.txt`). |
 | [`TracyBackend.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/TracyBackend.h) & [`TracyBackend.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Profiling/TracyBackend.cpp) | Bridges `Profiler` CPU zones, worker tasks, plots, and calibrated GPU timestamps into the **Tracy v0.14.1** profiler when built with `-DNOX_ENABLE_TRACY=ON`. |
 
 ---

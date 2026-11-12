@@ -12,6 +12,45 @@
 
 namespace Nox
 {
+    bool ComputeLocalMeshBounds(Entity entity, glm::vec3& outMin, glm::vec3& outMax)
+    {
+        if (!entity || !entity.HasComponent<MeshComponent>())
+            return false;
+        const MeshComponent& meshComponent = entity.GetComponent<MeshComponent>();
+        glm::vec3 lowest(FLT_MAX), highest(-FLT_MAX);
+        bool any = false;
+        auto addSubmeshes = [&](const auto& mesh)
+        {
+            const size_t total = mesh.GetSubMeshCount();
+            const size_t first = std::min<size_t>(meshComponent.SubmeshIndex, total);
+            const size_t count = meshComponent.SubmeshCount == UINT32_MAX ? total : std::max(meshComponent.SubmeshCount, 1u);
+            const size_t last = std::min(first + count, total);
+            for (size_t index = first; index < last; ++index)
+            {
+                const MeshHandle& submesh = mesh.GetSubMesh(index);
+                if (!submesh.hasBounds)
+                    continue;
+                lowest = glm::min(lowest, submesh.boundsMin);
+                highest = glm::max(highest, submesh.boundsMax);
+                any = true;
+            }
+        };
+        if (AssetManager::GetAssetType(meshComponent.Mesh) == AssetType::StaticMesh)
+        {
+            if (const StaticMesh* mesh = AssetManager::FindLoadedAsset<StaticMesh>(meshComponent.Mesh))
+                addSubmeshes(*mesh);
+        }
+        else if (const Mesh* mesh = AssetManager::FindLoadedAsset<Mesh>(meshComponent.Mesh))
+        {
+            addSubmeshes(*mesh);
+        }
+        if (!any)
+            return false;
+        outMin = lowest;
+        outMax = highest;
+        return true;
+    }
+
     WorldBounds ComputeWorldBounds(Scene& scene, Entity entity, bool includeChildren)
     {
         WorldBounds result;

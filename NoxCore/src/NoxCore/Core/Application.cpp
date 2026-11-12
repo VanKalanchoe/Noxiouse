@@ -53,8 +53,8 @@ namespace Nox
             m_ImGuiLayer = PushLayer<ImGuiLayer>(*renderer);
 
 #if NOX_PROFILE_STATS
-        // Nox Stats overlay (F3) for every app, drawn with the engine's screen-space text.
-        PushLayer<StatsOverlayLayer>(*renderer);
+        // Nox Stats (F3) for every app: an ImGui window in the editor, the engine's screen-space text in a game.
+        PushLayer<StatsOverlayLayer>(*renderer, m_Specification.isEditor);
 #endif
     }
 
