@@ -11,6 +11,8 @@ namespace Nox
         // These return empty string if cancelled
         static std::string OpenFile(const char* filter);
         static std::string SaveFile(const char* filter);
+        // A folder picked in the system's folder dialog, starting in `defaultLocation` when given.
+        static std::string OpenFolder(const char* defaultLocation = nullptr);
         
         static std::string LoadFileFromPath(const std::string& path);
         static std::vector<uint32_t> LoadSpvFromPath(const std::string& path);

@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <filesystem>
 #include <chrono>
 #include <functional>
 #include <optional>
@@ -33,7 +34,8 @@ namespace Nox
     class EditorLayer : public Layer
     {
     public:
-        EditorLayer();
+        // `projectFile`: the project to open (from the command line or the Project Manager); empty asks for one.
+        explicit EditorLayer(std::filesystem::path projectFile = {});
         ~EditorLayer() override;
         
         void OnEvent(Event& event) override;
@@ -56,9 +58,11 @@ namespace Nox
         // A .nproj picked in a dialog. False when cancelled or it did not load.
         bool OpenProject();
         bool OpenProject(const std::filesystem::path& path);
-        // Without a project on the command line: the most recent one, else the sample project above the editor's folder, else
-        // a choice of opening one, making one or quitting (asked again until one opens). False: the user chose to quit.
-        bool OpenStartupProject();
+        // No project given, or `failed` did not open: a choice of opening one, making one or quitting (asked again until one
+        // opens). False: the user chose to quit.
+        bool OpenStartupProject(const std::filesystem::path& failed = {});
+        // File > Project Manager...: a new editor process showing the Project Manager, this one closes.
+        void OpenProjectManager();
         void SaveProject();
         
         // Each viewport's camera per scene, in <project>/Cache/EditorCameras.txt: a scene opens where it was looked at last.

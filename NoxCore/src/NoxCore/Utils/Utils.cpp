@@ -55,7 +55,7 @@ namespace Nox
             SDL_Log("The current platform does not support fetching "
                     "the selected filter, or the user did not select"
                     " any filter.");
-        } else if (filter < SDL_arraysize(filters)) {
+        } else if (filters && filter < 2) { // (the dialogs pass two filters: theirs and "All files"; the folder dialog none)
             SDL_Log("The filter selected by the user is '%s' (%s).",
                     filters[filter].pattern, filters[filter].name);
         }
@@ -120,6 +120,19 @@ namespace Nox
         }
 
         // Return the selected file
+        return selectedFile;
+    }
+
+    std::string Utility::OpenFolder(const char* defaultLocation)
+    {
+        callbackDone = false;
+        selectedFile.clear();
+        SDL_ShowOpenFolderDialog(callback, nullptr, Application::Get().getWindow()->getHandle(), defaultLocation, false);
+        while (!callbackDone)
+        {
+            SDL_PumpEvents();
+            SDL_Delay(10);
+        }
         return selectedFile;
     }
 

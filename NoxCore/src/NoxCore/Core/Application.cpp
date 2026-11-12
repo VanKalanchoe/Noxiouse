@@ -122,6 +122,14 @@ namespace Nox
 
             // Frame sync point (§5.3): no frame graph task runs past this.
             m_JobSystem->ResetFrameArenas();
+
+            if (!m_AfterFrame.empty())
+            {
+                std::vector<std::function<void()>> actions = std::move(m_AfterFrame);
+                m_AfterFrame.clear();
+                for (std::function<void()>& action : actions)
+                    action();
+            }
         }
 
         NOX_PROFILE_FRAME();

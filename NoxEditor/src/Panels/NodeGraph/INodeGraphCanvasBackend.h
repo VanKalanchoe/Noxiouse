@@ -53,6 +53,9 @@ namespace Nox
         // unsaved, but nothing to recompile.
         virtual bool ConsumeLayoutEdited() { return false; }
 
+        // The graph was replaced (undo / redo): node positions are taken from it again, the view stays where it is.
+        virtual void ReloadGraph() {}
+
         // The bones a bone-name property (a node type's property hinted "Bone": IK nodes, Layered Blend) offers in its picker, in
         // the skeleton's tree order with their depth -- the panel's preview skeleton (Unreal's bone dropdown from the target
         // skeleton). Empty: no skeleton chosen; the picker says so and still takes a typed name.

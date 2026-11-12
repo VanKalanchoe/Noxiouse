@@ -1,4 +1,6 @@
 #pragma once
+#include <functional>
+#include <vector>
 #include <string>
 #include <string_view>
 
@@ -97,6 +99,10 @@ namespace Nox
             m_LayerStack.push_back(std::make_unique<TLayer>());    
         }*/
 
+        // Runs `action` once this frame is done (after it is drawn): for what must not happen while the layers are being walked, such
+        // as replacing one layer by another (the Project Manager handing over to the editor).
+        void QueueAfterFrame(std::function<void()> action) { m_AfterFrame.push_back(std::move(action)); }
+
         template <typename TLayer, typename... Args>
         requires(std::is_base_of_v<Layer, TLayer>)
         TLayer* PushLayer(Args&&... args)
@@ -154,6 +160,7 @@ namespace Nox
         std::unique_ptr<Renderer> renderer;
         // has to be last otherwise renderer cant free resoruces
         std::vector<std::unique_ptr<Layer>> m_LayerStack;
+        std::vector<std::function<void()>> m_AfterFrame;
         double m_LastFrameTime = 0.0;
     };
 

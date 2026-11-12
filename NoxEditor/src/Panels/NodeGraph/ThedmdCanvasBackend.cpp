@@ -1655,6 +1655,14 @@ namespace Nox
         return edited;
     }
 
+    void ThedmdCanvasBackend::ReloadGraph()
+    {
+        const bool fit = m_FitViewOnNextFrame, fitStates = m_FitStatesOnNextFrame;
+        ResetView();
+        m_FitViewOnNextFrame = fit; // (the view stays where it is)
+        m_FitStatesOnNextFrame = fitStates;
+    }
+
     void ThedmdCanvasBackend::ResetView()
     {
         // Another graph on the canvas (node ids are per graph): nothing of the last one's wires or positions carries over.

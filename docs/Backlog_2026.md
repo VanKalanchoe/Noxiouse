@@ -124,6 +124,14 @@ Built items many of which the user has not tested yet (marked "untested"); the p
 
 ## Done (recent)
 
+- 2026-11-12 (waiting for the user's test): **Project Manager** (`NoxEditor/src/ProjectManager/`): the editor opens with it when no
+  project is given -- recent projects (+ the Facerun sample), New Project (name, location, world units, render quality, C# scripts
+  project with an example Rotator referencing the editor's Nox.ScriptCore.dll, .gitignore), Browse, Show in Folder, Remove from List,
+  "Always open the last project at startup"; hands over to the editor in the same process; File > Project Manager... relaunches the
+  editor into it (one project per editor process, as Unreal / Godot); scripts never built are built when a project opens. Offline test:
+  project files made and read back, the generated C# project builds against Nox.ScriptCore. **Graph undo / redo** (Ctrl+Z / Ctrl+Y per
+  graph window, Edit menu, drags as one step).
+
 - 2026-11-12 (waiting for the user's test): node graph wires in every graph (audio, animation, a state's graph) routed orthogonally
   around the nodes like the state view's transitions (`NoxEditor/src/Panels/NodeGraph/WireRouter.*`: shortest path with corner cost over
   the lines along the node edges, then shared lines spread into lanes; offline test 58 wires / 42 nodes in 8.6 ms, all clear of nodes),

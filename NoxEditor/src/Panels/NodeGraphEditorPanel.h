@@ -47,6 +47,13 @@ namespace Nox
 
     private:
         void Save();
+        // History (Ctrl+Z / Ctrl+Y): the whole graph as it was after each finished edit. An edit is finished when no mouse button
+        // is held and no widget is active, so dragging a node or a slider is one step, not one per frame.
+        void MarkEdited() { m_Dirty = true; m_EditPending = true; }
+        void CommitHistory();
+        void Undo();
+        void Redo();
+        void RestoreGraph(NodeGraph graph);
         // The graph's declared parameters (add / rename / retype / default / delete), above the canvas. Backend-
         // independent: it edits NodeGraph::Parameters, which every canvas backend draws its own nodes from.
         void DrawParametersPanel();
@@ -81,6 +88,11 @@ namespace Nox
         uint32_t m_SelectedState = 0;
 
         Scope<INodeGraphCanvasBackend> m_Backend;
+
+        NodeGraph m_Committed;               // the graph after the last finished edit
+        std::vector<NodeGraph> m_UndoStack;  // older states, newest last
+        std::vector<NodeGraph> m_RedoStack;
+        bool m_EditPending = false;          // edited since m_Committed
 
         // The preview: its own graph instance (playheads, parameters), the mesh and skeleton it plays on.
         Scope<class AnimationGraphInstance> m_PreviewInstance;

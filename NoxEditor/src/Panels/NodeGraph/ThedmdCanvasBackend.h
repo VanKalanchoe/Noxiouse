@@ -37,6 +37,7 @@ namespace Nox
         void ResetView() override;
         void SetBoneList(std::vector<BoneEntry> bones, std::string skeletonName) override;
         bool ConsumeLayoutEdited() override;
+        void ReloadGraph() override;
 
     private:
         // Where a state box's two pins are this frame (canvas space).

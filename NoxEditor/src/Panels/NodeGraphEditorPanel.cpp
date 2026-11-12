@@ -62,6 +62,59 @@ namespace Nox
         // adding the new backend's own files under NodeGraph/) -- see
         // docs/Animation_Graph_Architecture_Plan_2026.md Step 3.
         m_Backend = CreateScope<ThedmdCanvasBackend>();
+        if (m_Asset)
+            m_Committed = m_Asset->Graph;
+    }
+
+    void NodeGraphEditorPanel::CommitHistory()
+    {
+        constexpr size_t kMaxSteps = 200;
+        m_UndoStack.push_back(std::move(m_Committed));
+        if (m_UndoStack.size() > kMaxSteps)
+            m_UndoStack.erase(m_UndoStack.begin());
+        m_Committed = m_Asset->Graph;
+        m_RedoStack.clear();
+        m_EditPending = false;
+    }
+
+    void NodeGraphEditorPanel::RestoreGraph(NodeGraph graph)
+    {
+        m_Asset->Graph = std::move(graph);
+        m_Committed = m_Asset->Graph;
+        m_EditPending = false;
+        m_Dirty = true;
+        m_Asset->Recompile();
+        // The canvas takes the node positions from the graph again (without moving the view); a state the path pointed into that
+        // no longer exists is dropped from the path when the canvas is drawn.
+        m_Backend->ReloadGraph();
+        m_SelectedTransition = -1;
+        m_SelectedState = 0;
+    }
+
+    void NodeGraphEditorPanel::Undo()
+    {
+        if (!m_Asset)
+            return;
+        if (m_EditPending)
+            CommitHistory(); // an edit not finished yet (Ctrl+Z while dragging) is undone as a step of its own
+        if (m_UndoStack.empty())
+            return;
+        m_RedoStack.push_back(m_Asset->Graph);
+        NodeGraph previous = std::move(m_UndoStack.back());
+        m_UndoStack.pop_back();
+        RestoreGraph(std::move(previous));
+    }
+
+    void NodeGraphEditorPanel::Redo()
+    {
+        if (!m_Asset || m_RedoStack.empty())
+            return;
+        if (m_EditPending)
+            return; // something was edited since the undo: redoing would throw it away
+        m_UndoStack.push_back(m_Asset->Graph);
+        NodeGraph next = std::move(m_RedoStack.back());
+        m_RedoStack.pop_back();
+        RestoreGraph(std::move(next));
     }
 
     NodeGraphEditorPanel::~NodeGraphEditorPanel()
@@ -312,7 +365,7 @@ namespace Nox
 
         if (edited)
         {
-            m_Dirty = true;
+            MarkEdited();
             m_Asset->Recompile();
         }
     }
@@ -450,7 +503,7 @@ namespace Nox
 
         if (edited)
         {
-            m_Dirty = true;
+            MarkEdited();
             m_Asset->Recompile();
         }
     }
@@ -615,6 +668,14 @@ namespace Nox
                         Save();
                     ImGui::EndMenu();
                 }
+                if (ImGui::BeginMenu("Edit"))
+                {
+                    if (ImGui::MenuItem("Undo", "Ctrl+Z", false, m_Asset && (m_EditPending || !m_UndoStack.empty())))
+                        Undo();
+                    if (ImGui::MenuItem("Redo", "Ctrl+Y / Ctrl+Shift+Z", false, m_Asset && !m_EditPending && !m_RedoStack.empty()))
+                        Redo();
+                    ImGui::EndMenu();
+                }
                 ImGui::EndMenuBar();
             }
 
@@ -622,6 +683,15 @@ namespace Nox
                 ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S))
             {
                 Save();
+            }
+            // Ctrl+Z / Ctrl+Y here undo this graph (the scene's history stands down while a graph window has the keyboard). Not while
+            // typing in a field: there they undo the text.
+            if (m_Asset && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput)
+            {
+                if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Z))
+                    Undo();
+                else if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Y) || ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z))
+                    Redo();
             }
 
             if (!m_Asset)
@@ -638,7 +708,7 @@ namespace Nox
 
                 auto onEdited = [this]()
                 {
-                    m_Dirty = true;
+                    MarkEdited();
                     m_Asset->Recompile();
                 };
 
@@ -722,10 +792,15 @@ namespace Nox
                     uint32_t openNode = 0;
                     m_Backend->Draw(*graph, m_Asset->Graph.Parameters, onEdited, &openNode);
                     if (m_Backend->ConsumeLayoutEdited())
-                        m_Dirty = true;
+                        MarkEdited(); // a node moved, a wire shaped: unsaved and undoable, nothing to recompile
                     if (openNode != 0)
                         m_Path.push_back(openNode);
                 }
+
+                // A finished edit becomes a history step.
+                if (m_EditPending && !ImGui::IsMouseDown(ImGuiMouseButton_Left) && !ImGui::IsMouseDown(ImGuiMouseButton_Right) &&
+                    !ImGui::IsAnyItemActive())
+                    CommitHistory();
             }
         }
         ImGui::End();
