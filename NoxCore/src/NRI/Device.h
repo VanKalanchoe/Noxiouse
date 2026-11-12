@@ -196,6 +196,9 @@ namespace NRI
         // Whether ImageFormat::Surface stores its texels blue first (B8G8R8A8: the Vulkan swap chain's usual format; D3D12's is
         // R8G8B8A8): what a read-back image of that format needs to know to be written as RGB.
         virtual bool isSurfaceFormatBGRA() const { return false; }
+        // Waits for the pipelines being built on worker threads (see PipelineVK) and logs how they were built; builds any that needs
+        // the shader compiler on this thread.
+        virtual void finishPipelineBuilds() {}
         virtual bool isMemoryBudgetSupported() const = 0;
         virtual void getMemoryStats(std::vector<MemoryHeapStats>& outHeaps) const = 0;
         // Estimated device memory of every live texture (§5.8.3 accounts for images through their descriptions).

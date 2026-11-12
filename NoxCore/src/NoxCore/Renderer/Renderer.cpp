@@ -325,8 +325,15 @@ namespace Nox
         if (Application::Get().GetSpecification().CommandLineArgs.WantsD3D12())
             api = NRI::GraphicsAPI::D3D12;
 #endif
+        // Start-up phases timed for the log (docs/Backlog_2026.md R11): the device (Streamline / NGX, Vulkan), then the pipelines.
+        const auto startupBegin = std::chrono::steady_clock::now();
+        auto millisecondsSince = [](std::chrono::steady_clock::time_point from)
+        {
+            return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - from).count();
+        };
         m_device = NRI::Device::create(api, *m_window);
         NOX_CORE_ASSERT(m_device, "Failed to create NRI device");
+        const double deviceMs = millisecondsSince(startupBegin);
 
         // Staging for every upload, right after the device: startup already uploads (textures, IBL inputs). A ring on
         // the transfer queue that streamed loads fill over several frames; oversized uploads get their own buffer.
@@ -343,7 +350,10 @@ namespace Nox
             // A progress window while pipelines are created, should shaders have to be compiled (first start, changed shaders).
             const char* basePath = SDL_GetBasePath();
             ShaderCompileSplash splash(std::filesystem::path(basePath ? basePath : "") / "shaders" / (m_isEditor ? "pipeline_count_editor.txt" : "pipeline_count.txt"));
+            const auto initBegin = std::chrono::steady_clock::now();
             initRenderer();
+            NOX_CORE_INFO("Renderer start-up: device {:.0f} ms (Streamline / NGX and Vulkan), pipelines and resources {:.0f} ms",
+                          deviceMs, millisecondsSince(initBegin));
         }
 
         // Outline
@@ -629,6 +639,9 @@ namespace Nox
         createReSTIRDIPipelines(false);
         // ReSTIR PT
         createReSTIRPTPipelines(false);
+        // The pipelines above were handed to worker threads where their shaders were cached (PipelineVK): all done before anything
+        // draws, those that need the shader compiler built here (with this progress window still up).
+        m_device->finishPipelineBuilds();
 
         createCommandPool();
         createUniformBuffers();

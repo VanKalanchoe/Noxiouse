@@ -10,6 +10,7 @@
 
 #include "SwapchainVK.h"
 #include "PipelineVK.h"
+#include <chrono>
 #include "CommandAllocatorVK.h"
 #include "CommandBufferVK.h"
 #include "TextureVK.h"
@@ -83,6 +84,16 @@ namespace NRI
     std::unique_ptr<Swapchain> DeviceVK::createSwapchain(const SwapchainDesc& desc)
     {
         return std::make_unique<SwapchainVK>(*this, desc);
+    }
+
+    void DeviceVK::finishPipelineBuilds()
+    {
+        const auto started = std::chrono::steady_clock::now();
+        const PipelineVK::BuildStats stats = PipelineVK::FinishPendingBuilds();
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+        if (stats.Parallel + stats.Compiled + stats.Failed > 0)
+            NOX_CORE_INFO("Pipelines: {} built in parallel, {} needed the shader compiler, {} failed (waited {:.0f} ms for them)",
+                          stats.Parallel, stats.Compiled, stats.Failed, ms);
     }
 
     std::unique_ptr<Pipeline> DeviceVK::createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler)

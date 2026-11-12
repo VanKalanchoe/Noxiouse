@@ -1,8 +1,14 @@
 #include "PipelineVK.h"
 
+#include <algorithm>
+#include <condition_variable>
+#include <deque>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <mutex>
+#include <thread>
+#include <unordered_set>
 #include <SDL3/SDL_filesystem.h>
 
 #include "DeviceVK.h"
@@ -21,7 +27,8 @@ namespace NRI
 
         std::filesystem::path path = std::filesystem::path(basePath) / "shaders";
 
-        std::filesystem::create_directories(path);
+        std::error_code error; // (pipelines are built on several threads at once: another may have just made it)
+        std::filesystem::create_directories(path, error);
 
         return path;
     }
@@ -33,7 +40,8 @@ namespace NRI
         if (!std::filesystem::exists(source)) NOX_CORE_ERROR("PipelineVK::shaderBinaryPath file not found: {}", source);
         
         auto folder = shaderFolder() / source.stem();
-        std::filesystem::create_directories(folder);
+        std::error_code folderError;
+        std::filesystem::create_directories(folder, folderError);
 
         std::string stage;
         switch (shaderDesc.stage)
@@ -166,7 +174,88 @@ namespace NRI
     
     // Cache of the last working binary data for each shader stage (populated on startup & compile)
     static std::unordered_map<std::string, std::vector<uint8_t>> s_lastWorkingBinaries;
-    
+    static std::mutex s_lastWorkingBinariesMutex;
+
+    namespace
+    {
+        // A pipeline being built on a worker found it needs the shader compiler (no binary, or the driver refused the binary): it is
+        // built again on the thread that first needs it -- at start-up the main thread, where the compile-progress window lives.
+        struct DeferredCompile {};
+
+        // The workers that build pipelines from cached binaries (Unreal's parallel PSO creation): creating a shader object is driver
+        // work that takes milliseconds each, ~200 of them at start-up, independent of each other.
+        class PipelineBuildPool
+        {
+        public:
+            static PipelineBuildPool& Get()
+            {
+                static PipelineBuildPool pool;
+                return pool;
+            }
+
+            void Submit(std::function<void()> job)
+            {
+                {
+                    std::lock_guard lock(m_mutex);
+                    m_jobs.push_back(std::move(job));
+                }
+                m_wake.notify_one();
+            }
+
+            ~PipelineBuildPool()
+            {
+                {
+                    std::lock_guard lock(m_mutex);
+                    m_stop = true;
+                }
+                m_wake.notify_all();
+                for (std::thread& worker : m_workers)
+                    worker.join();
+            }
+
+        private:
+            PipelineBuildPool()
+            {
+                const unsigned hardware = std::thread::hardware_concurrency();
+                const unsigned count = std::clamp(hardware > 1 ? hardware - 1 : 1u, 1u, 8u);
+                for (unsigned i = 0; i < count; ++i)
+                    m_workers.emplace_back([this]
+                    {
+                        while (true)
+                        {
+                            std::function<void()> job;
+                            {
+                                std::unique_lock lock(m_mutex);
+                                m_wake.wait(lock, [this] { return m_stop || !m_jobs.empty(); });
+                                if (m_jobs.empty())
+                                    return; // stopping, nothing left
+                                job = std::move(m_jobs.front());
+                                m_jobs.pop_front();
+                            }
+                            job();
+                        }
+                    });
+            }
+
+            std::mutex m_mutex;
+            std::condition_variable m_wake;
+            std::deque<std::function<void()>> m_jobs;
+            std::vector<std::thread> m_workers;
+            bool m_stop = false;
+        };
+
+        // Pipelines whose build was handed to the pool, for FinishPendingBuilds.
+        std::mutex s_pendingMutex;
+        std::unordered_set<PipelineVK*> s_pending;
+    }
+
+    std::vector<char> PipelineVK::compileShader(const ShaderStageDesc& shaderDesc, ShaderCompiler& compiler, bool forceCompile)
+    {
+        if (m_deferCompile)
+            throw DeferredCompile{};
+        return compileSpirvCached(shaderDesc, compiler, forceCompile);
+    }
+
     PipelineVK::PipelineVK(DeviceVK& device, const PipelineDesc& desc, ShaderCompiler& compiler) : m_deviceVK(device)
     {
         if (desc.shaders.empty())
@@ -180,6 +269,115 @@ namespace NRI
                 throw std::runtime_error("PipelineVK graphics pipeline contains a compute shader: " + shader.sourcePath);
         }
 
+        // Shader objects from cached binaries are built on the pool (the usual start-up); a hot reload (forceCompile), a ray tracing
+        // pipeline or the pipeline path build here, as before.
+        const bool async = m_deviceVK.isShaderObjectExtensionEnabled() && !desc.forceCompile &&
+                           (desc.type == PipelineType::Graphics || desc.type == PipelineType::Compute);
+        if (!async)
+        {
+            build(desc, compiler);
+            m_ready.store(true, std::memory_order_release);
+            return;
+        }
+        m_async = std::make_shared<AsyncBuild>();
+        m_async->Desc = desc;
+        m_async->Compiler = &compiler;
+        m_deferCompile = true;
+        {
+            std::lock_guard lock(s_pendingMutex);
+            s_pending.insert(this);
+        }
+        PipelineBuildPool::Get().Submit([this, state = m_async]
+        {
+            try
+            {
+                build(state->Desc, *state->Compiler);
+            }
+            catch (const DeferredCompile&)
+            {
+                state->NeedsSyncBuild = true;
+            }
+            catch (...)
+            {
+                state->Error = std::current_exception();
+            }
+            {
+                std::lock_guard lock(state->Mutex);
+                state->Done = true;
+            }
+            state->Finished.notify_all();
+        });
+    }
+
+    PipelineVK::~PipelineVK()
+    {
+        if (!m_async)
+            return;
+        {
+            // The job uses this object: it finishes first.
+            std::unique_lock lock(m_async->Mutex);
+            m_async->Finished.wait(lock, [this] { return m_async->Done; });
+        }
+        std::lock_guard lock(s_pendingMutex);
+        s_pending.erase(this);
+    }
+
+    void PipelineVK::ensureBuilt() const
+    {
+        if (m_ready.load(std::memory_order_acquire) || !m_async)
+            return;
+        std::unique_lock lock(m_async->Mutex);
+        m_async->Finished.wait(lock, [this] { return m_async->Done; });
+        if (m_async->NeedsSyncBuild)
+        {
+            // Again on this thread, with the compiler allowed (what the pool's build did is thrown away).
+            PipelineVK& self = const_cast<PipelineVK&>(*this);
+            self.m_pipeline = nullptr;
+            self.m_shaders.clear();
+            self.m_stages.clear();
+            self.m_rawShaders.clear();
+            self.m_deferCompile = false;
+            m_async->NeedsSyncBuild = false;
+            self.build(m_async->Desc, *m_async->Compiler);
+        }
+        if (m_async->Error)
+            std::rethrow_exception(m_async->Error);
+        m_ready.store(true, std::memory_order_release);
+    }
+
+    PipelineVK::BuildStats PipelineVK::FinishPendingBuilds()
+    {
+        BuildStats stats;
+        std::vector<PipelineVK*> pending;
+        {
+            std::lock_guard lock(s_pendingMutex);
+            pending.assign(s_pending.begin(), s_pending.end());
+        }
+        for (PipelineVK* pipeline : pending)
+        {
+            if (pipeline->m_ready.load(std::memory_order_acquire))
+                continue;
+            bool rebuilt = false;
+            {
+                std::lock_guard lock(pipeline->m_async->Mutex);
+                rebuilt = pipeline->m_async->Done && pipeline->m_async->NeedsSyncBuild;
+            }
+            try
+            {
+                pipeline->ensureBuilt();
+                ++(rebuilt ? stats.Compiled : stats.Parallel);
+            }
+            catch (const std::exception& e)
+            {
+                ++stats.Failed;
+                NOX_CORE_ERROR("PipelineVK: a pipeline failed to build: {}", e.what());
+            }
+        }
+        return stats;
+    }
+
+    void PipelineVK::build(const PipelineDesc& desc, ShaderCompiler& compiler)
+    {
         std::vector<std::vector<char>> tempBytecodeStorage(desc.shaders.size());
         bool useShaderObjects = m_deviceVK.isShaderObjectExtensionEnabled();
 
@@ -220,7 +418,10 @@ namespace NRI
                         NOX_CORE_INFO("PipelineVK loading shader binary: {}", binaryPath);
                         
                         auto binary = loadShaderBinary(binaryPath);
-                        s_lastWorkingBinaries[stageKey] = binary;
+                        {
+                            std::lock_guard lock(s_lastWorkingBinariesMutex);
+                            s_lastWorkingBinaries[stageKey] = binary;
+                        }
                         
                         binaryStorage.push_back(std::move(binary));
                         loadedFromBinary.push_back(true);
@@ -231,12 +432,13 @@ namespace NRI
 
                         try
                         {
-                            tempBytecodeStorage[i] = compileSpirvCached(shaderDesc, compiler, desc.forceCompile);
+                            tempBytecodeStorage[i] = compileShader(shaderDesc, compiler, desc.forceCompile);
                             loadedFromBinary.push_back(false);
                         }
                         catch (const std::exception& e)
                         {
                             // If Slang fails, fall back to the last working binary from memory!
+                            std::unique_lock binariesLock(s_lastWorkingBinariesMutex);
                             auto it = s_lastWorkingBinaries.find(stageKey);
                             if (it != s_lastWorkingBinaries.end())
                             {
@@ -330,7 +532,7 @@ namespace NRI
                         {
                             NOX_CORE_INFO("PipelineVK:PipelineVk Recompiling invalidated shader: {}", desc.shaders[i].sourcePath);
                             
-                            tempBytecodeStorage[i] = compileSpirvCached(desc.shaders[i], compiler, desc.forceCompile);
+                            tempBytecodeStorage[i] = compileShader(desc.shaders[i], compiler, desc.forceCompile);
                             
                             shaderCreateInfos[i].codeType = vk::ShaderCodeTypeEXT::eSpirv;
                             shaderCreateInfos[i].codeSize = tempBytecodeStorage[i].size();
@@ -372,7 +574,10 @@ namespace NRI
 
                         // Update in-memory fallback cache with the newly compiled working binary
                         std::string stageKey = desc.shaders[i].sourcePath + "." + desc.shaders[i].entryPoint;
-                        s_lastWorkingBinaries[stageKey] = data;
+                        {
+                            std::lock_guard lock(s_lastWorkingBinariesMutex);
+                            s_lastWorkingBinaries[stageKey] = data;
+                        }
                         
                         file.write(
                             reinterpret_cast<const char*>(data.data()),
@@ -393,7 +598,7 @@ namespace NRI
 
                 for (const auto& shaderDesc : desc.shaders)
                 {
-                    tempBytecodeStorage.emplace_back(compileSpirvCached(shaderDesc, compiler, desc.forceCompile));
+                    tempBytecodeStorage.emplace_back(compileShader(shaderDesc, compiler, desc.forceCompile));
                     temporaryModules.push_back(createShaderModule(tempBytecodeStorage.back()));
 
                     auto& allocatedModule = temporaryModules.back();
@@ -576,7 +781,7 @@ namespace NRI
                 else
                 {
                     NOX_CORE_INFO("PipelineVK compiling compute shader: {}", shaderDesc.sourcePath);
-                    spirvStorage = compileSpirvCached(shaderDesc, compiler, desc.forceCompile);
+                    spirvStorage = compileShader(shaderDesc, compiler, desc.forceCompile);
                 }
 
                 vk::ShaderCreateInfoEXT info
@@ -597,7 +802,7 @@ namespace NRI
                 if (m_shaders.empty() && loadedFromBinary)
                 {
                     NOX_CORE_WARN("PipelineVK compute binary incompatible. Recompiling SPIR-V...");
-                    spirvStorage = compileSpirvCached(shaderDesc, compiler, desc.forceCompile);
+                    spirvStorage = compileShader(shaderDesc, compiler, desc.forceCompile);
 
                     info.codeType = vk::ShaderCodeTypeEXT::eSpirv;
                     info.codeSize = spirvStorage.size();
@@ -622,7 +827,7 @@ namespace NRI
             }
     else
     {
-        tempBytecodeStorage.push_back(compileSpirvCached(shaderDesc, compiler, desc.forceCompile));
+        tempBytecodeStorage.push_back(compileShader(shaderDesc, compiler, desc.forceCompile));
         auto shaderModule = createShaderModule(tempBytecodeStorage.back());
 
         vk::PipelineShaderStageCreateInfo computeShaderStageInfo
@@ -660,7 +865,7 @@ namespace NRI
             for (size_t i = 0; i < desc.shaders.size(); ++i)
             {
                 const auto& shaderDesc = desc.shaders[i];
-                std::vector<char> spirvStorage = compileSpirvCached(shaderDesc, compiler, desc.forceCompile);
+                std::vector<char> spirvStorage = compileShader(shaderDesc, compiler, desc.forceCompile);
                 shaderModules.push_back(createShaderModule(spirvStorage));
 
                 vk::ShaderStageFlagBits vkStage = translateShaderStage(shaderDesc.stage);

@@ -80,6 +80,7 @@ namespace NRI
         vk::raii::SurfaceKHR& getSurface() { return m_surface; }
         vk::Format& getDepthFormat() { return m_depthFormat; }
         vk::SurfaceFormatKHR& getSurfaceFormat() { return m_surfaceFormat; }
+        void finishPipelineBuilds() override;
         bool isSurfaceFormatBGRA() const override
         {
             return m_surfaceFormat.format == vk::Format::eB8G8R8A8Srgb || m_surfaceFormat.format == vk::Format::eB8G8R8A8Unorm;
