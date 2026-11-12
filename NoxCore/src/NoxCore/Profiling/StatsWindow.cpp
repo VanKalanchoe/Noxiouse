@@ -51,7 +51,7 @@ namespace Nox
     void StatsWindow::Draw(Renderer& renderer, bool* open)
     {
         ImGui::SetNextWindowSize(ImVec2(520.0f, 620.0f), ImGuiCond_FirstUseEver);
-        if (!ImGui::Begin("Stats", open))
+        if (!ImGui::Begin("Nox Stats", open)) // (the editor has a "Stats" window of its own: renderer statistics)
         {
             ImGui::End();
             return;

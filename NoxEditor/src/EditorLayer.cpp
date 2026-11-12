@@ -831,7 +831,7 @@ namespace Nox
         if (StatsOverlayLayer* statsLayer = Application::Get().GetLayer<StatsOverlayLayer>())
         {
             bool statsVisible = statsLayer->IsVisible();
-            if (ImGui::Checkbox("Stats Window (F3)", &statsVisible))
+            if (ImGui::Checkbox("Nox Stats Window (F3)", &statsVisible))
                 statsLayer->SetVisible(statsVisible);
             ImGui::SetItemTooltip("Nox Stats in a window of its own (docks and scrolls): frame times, memory, then Audio, GPU passes,\n"
                                   "CPU scopes, Memory and Counters as sections you open.");
