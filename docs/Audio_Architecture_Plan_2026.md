@@ -355,7 +355,7 @@ Clip paths are under the asset folder with the extension optional; a bus name th
 | **A4 Steam Audio** | HRTF binaural, air absorption; occlusion / transmission with acoustic materials (geometry from the static meshes, streamed with world cells); real-time reflections with a budget; baked reverb probes and pathing per level (a Bake button like HLODs) | A sound behind a wall is muffled and comes through the door; Bistro's streets sound different from its interiors |
 | **A5 Integrations** | Play Sound notifies with surface types, a sequencer audio track, impact sounds, profiler lane and stats, concurrency and virtual voices tuned | A character's footsteps change on grass / stone; a cutscene with music and dialogue |
 | A5a (built 2026-11-12) | Priority and concurrency on sound assets, real / virtual voices with a budget, audio stats, Impact Sound component (Jolt contact events), particle burst sounds | A tumbling pile clacks, never more than Max Count at once |
-| A5b | Play Sound notifies with surface types, sequencer audio track, graphs inside graphs and the Curve node | Footsteps change on grass / stone; a cutscene with music and dialogue |
+| A5b (built 2026-11-12) | Physical surfaces, Play Sound notifies by surface, sequencer Audio track, graphs inside graphs (Audio Graph node), Curve node | Footsteps change on grass / stone; a cutscene with music and dialogue |
 
 Each phase lands with the docs-site pages updated and the manual's walkthrough, like the other systems.
 
@@ -648,3 +648,40 @@ Voices handled the way Unreal (Sound Concurrency, priority, virtual voices) and 
   Jolt): a ball dropped 2 m reports 6.27 m/s (theory 6.26), its bounce 3.15 (restitution 0.5), then 1.61, 0.91; resting a further
   second and rolling at 3 m/s begin no contacts; a body not reporting gives none; rolling resistance still works behind the new
   listener. All A1-A4c suites pass.
+
+### A5b as built (2026-11-12): footsteps by surface, sequencer audio, graphs inside graphs
+
+- **Physical Surfaces** (Unreal's Surface Types): the project's list (Settings > Physical Surfaces, saved in the .nproj; Default first and
+  always there); a material's Physical Surface (Material editor, in the asset registry beside its Acoustic Material); a body's override
+  (Rigidbody 3D > Physical Surface: Unreal's Phys Material Override). What a ray hit is made of: the body's override, else the material
+  of the part hit -- Jolt mesh colliders carry each triangle's submesh as a physics material, so a ray reports the submesh
+  (RayCastHit::Submesh, Unreal's per-face physical material) --, else the entity's first material, else Default.
+  Scene::GetPhysicalSurface.
+- **Play Sound notifies** (Unreal's AnimNotify_PlaySound with a footstep's surface lookup): a notify gets a Sound, a Bone it plays at,
+  Trace Surface (a ray down from 0.2 m above the bone, Trace Distance below it; the character's own body ignored, as foot placement's
+  rays) with Sounds by Surface, Volume and Pitch Variation; saved in the clip's .notifies. Crossed notifies now travel as notify objects
+  (by value: a clip edited or reloaded meanwhile cannot leave a dangling reference); the scene plays their sounds each frame the
+  animations step (not again while paused), 3D at the bone. Animation Clip editor: a Sound column with these settings (bones from the
+  preview skeleton); the preview plays the notify's default sound as it passes.
+- **Sequencer Audio track** (UE's Sequencer audio track): sections = keys with a sound (clip or audio graph), Length (0: the rest of the
+  sound), Start in sound, Volume, 3D at the track's entity or 2D. While a Timeline Player plays, each sounding section has a voice --
+  started from the right place when the playhead starts or lands inside it (clips; graphs from their beginning), restarted on a jump
+  (a loop, a seek: the sound time went back or ahead by more than 0.5 s), stopped (0.1 s fade) on pause, stop or leaving the section,
+  following its target in 3D; Sub-Timelines' audio too (one id per track path and section). The Timeline window draws sections as
+  bars with the sound's name and plays them while its preview plays (Editor voices). Scene::CollectTimelineAudio / SyncTimelineAudio.
+- **Audio Graph node** (MetaSounds' composition): plays another audio graph inside this one; its inputs are that graph's parameters,
+  its outputs its Output's pins. The build inlines it (AudioGraphProgram::Build, recursively) into one flat graph: what feeds a pin
+  feeds whatever read the parameter, an unconnected pin's literal (else the parameter's default) becomes the readers' literal, an
+  unconnected trigger never fires, the Output's sources feed what the node fed. A graph playing itself is refused with a reason. The
+  program cache rebuilds when a played graph is edited (each dependency's CompileVersion). Node types can now have per-node pins
+  (NodeTypeDesc::NodePins / ResolveNodePins: the compiler's link checks and the node editor use them).
+- **Curve** property type (NodeGraphCurve: keys, linear or smooth with Catmull-Rom tangents flat at the ends, Unreal's auto tangents)
+  for node graphs, serialized and edited in the node (a plot and the keys); the **Curve node** (Math) maps a value through it.
+- **Tests:** Jolt (real library): a mesh collider of two submeshes reports submesh 3 on one half and 7 on the other, through an
+  offset (RotatedTranslated) shape, nothing off the mesh. Audio sections: off before, on from the start with the offset added, off
+  after the clip's rest, a 2 s graph section and an endless one. Composition: a parent playing a child (Freq literal 1000, Level left
+  at its default) renders bit-identical (max difference 0) to the same graph by hand; a parent parameter wired to the node's pin and
+  changed mid-way, identical; a trigger through the node ends the voice on that block; two levels deep identical; both played graphs
+  reported as dependencies; a graph playing itself refused. Curve: linear(0.25) = 0.5, after the last key its value, smooth(0.5) = 1.0;
+  the Curve node at 0.25 driving a Gain gives a 0.500 peak. All earlier suites pass.
+
