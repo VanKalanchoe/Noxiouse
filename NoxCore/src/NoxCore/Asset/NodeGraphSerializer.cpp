@@ -197,6 +197,8 @@ namespace Nox
                 out << YAML::Key << "FromPin" << YAML::Value << link.FromPin;
                 out << YAML::Key << "ToNode" << YAML::Value << link.ToNode;
                 out << YAML::Key << "ToPin" << YAML::Value << link.ToPin;
+                if (!link.Route.empty())
+                    out << YAML::Key << "Route" << YAML::Value << YAML::Flow << link.Route;
                 out << YAML::EndMap;
             }
             out << YAML::EndSeq;
@@ -311,6 +313,8 @@ namespace Nox
                     link.FromPin = linkData["FromPin"].as<uint32_t>();
                     link.ToNode = linkData["ToNode"].as<uint32_t>();
                     link.ToPin = linkData["ToPin"].as<uint32_t>();
+                    if (const auto route = linkData["Route"]; route && route.IsSequence())
+                        link.Route = route.as<std::vector<float>>();
                     graph.Links.push_back(link);
                 }
             }

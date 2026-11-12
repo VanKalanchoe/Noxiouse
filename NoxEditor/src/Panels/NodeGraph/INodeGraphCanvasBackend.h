@@ -49,6 +49,10 @@ namespace Nox
         // The panel switched to another graph or view: forget per-view canvas state (node positions seeded, fit-to-content).
         virtual void ResetView() = 0;
 
+        // True once after the canvas changed only the layout (a node moved, a wire's route shaped by hand): the asset is then
+        // unsaved, but nothing to recompile.
+        virtual bool ConsumeLayoutEdited() { return false; }
+
         // The bones a bone-name property (a node type's property hinted "Bone": IK nodes, Layered Blend) offers in its picker, in
         // the skeleton's tree order with their depth -- the panel's preview skeleton (Unreal's bone dropdown from the target
         // skeleton). Empty: no skeleton chosen; the picker says so and still takes a typed name.

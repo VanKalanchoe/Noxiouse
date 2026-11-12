@@ -721,6 +721,8 @@ namespace Nox
                     UpdateBoneList();
                     uint32_t openNode = 0;
                     m_Backend->Draw(*graph, m_Asset->Graph.Parameters, onEdited, &openNode);
+                    if (m_Backend->ConsumeLayoutEdited())
+                        m_Dirty = true;
                     if (openNode != 0)
                         m_Path.push_back(openNode);
                 }

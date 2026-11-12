@@ -150,6 +150,19 @@ namespace Nox
             }
             return any;
         }
+
+        // The layer the graph's wires are drawn in: an empty node kept under the first node and below every node (z), whose
+        // background draw list sits under all the nodes (the node editor offers per-node layers only). Its id is above every pin id
+        // (node id << 20 | pin), so it never meets one.
+        constexpr uint64_t kGraphWireLayerNode = 1ull << 60;
+        bool IsGraphWireLayer(ed::NodeId node) { return node.Get() == kGraphWireLayerNode; }
+
+        constexpr float kWireCornerRadius = 8.0f;
+        constexpr float kWireLaneSpacing = 6.0f;  // between wires sharing a line
+        constexpr float kWireHitDistance = 6.0f;  // screen pixels around a wire that pick it
+        WireRouting::RouteSettings GraphRouteSettings() { return WireRouting::RouteSettings{}; }
+
+        ImU32 ToU32(const ImVec4& color) { return ImGui::ColorConvertFloat4ToU32(color); }
     }
 
     ThedmdCanvasBackend::ThedmdCanvasBackend()
@@ -174,8 +187,26 @@ namespace Nox
                                    uint32_t* outOpenNode)
     {
         ed::SetCurrentEditor(m_Context);
+        m_CanvasMin = ImGui::GetCursorScreenPos();
         ed::Begin("Canvas");
+        m_CanvasMax = ImVec2(m_CanvasMin.x + ed::GetScreenSize().x, m_CanvasMin.y + ed::GetScreenSize().y);
 
+        // A node made from an input pin's dropped wire: its right edge where the wire was dropped, once its width is known.
+        if (m_AlignNewNodeId != 0)
+        {
+            const ed::NodeId alignId(m_AlignNewNodeId);
+            const ImVec2 size = ed::GetNodeSize(alignId);
+            if (!FindNodeById(graph, m_AlignNewNodeId))
+                m_AlignNewNodeId = 0;
+            else if (size.x > 0.0f)
+            {
+                const ImVec2 position = ed::GetNodePosition(alignId);
+                ed::SetNodePosition(alignId, ImVec2(m_AlignNewNodeRight - size.x, position.y));
+                m_AlignNewNodeId = 0;
+            }
+        }
+
+        m_PinIcons.clear();
         for (GraphNode& node : graph.Nodes)
         {
             if (node.TypeName == kRerouteNodeType)
@@ -188,33 +219,43 @@ namespace Nox
                 DrawNode(graph, node, *type, onGraphEdited);
         }
 
-        // Wires in their type's color (Unreal's), so a wire through reroutes is followed by its color.
-        for (const GraphLink& link : graph.Links)
+        // Nodes the user moved leave the asset unsaved; a route shaped by hand whose two nodes moved together (a box selection
+        // dragged) moves with them, while moving only one end stretches it.
+        std::unordered_map<uint32_t, ImVec2> moved;
+        for (const GraphNode& node : graph.Nodes)
         {
-            ed::PinId from = MakePinId(link.FromNode, link.FromPin, true);
-            ed::PinId to = MakePinId(link.ToNode, link.ToPin, false);
-            ImVec4 color(1.0f, 1.0f, 1.0f, 1.0f);
-            if (const GraphNode* fromNode = FindNodeById(graph, link.FromNode))
-                if (const NodeTypeDesc* fromType = TypeOf(graph, *fromNode))
-                {
-                    const NodePinList pins = ResolveNodePins(*fromType, fromNode->Properties);
-                    if (link.FromPin < pins.Outputs.size() && !pins.Outputs[link.FromPin].Type.empty())
-                        color = PinColor(pins.Outputs[link.FromPin].Type);
-                }
-            ed::Link(MakeLinkId(link.ToNode, link.ToPin), from, to, color);
+            const ImVec2 now(node.EditorPosition.x, node.EditorPosition.y);
+            const auto previous = m_PreviousNodePositions.find(node.Id);
+            if (previous != m_PreviousNodePositions.end() && (previous->second.x != now.x || previous->second.y != now.y))
+                moved[node.Id] = ImVec2(now.x - previous->second.x, now.y - previous->second.y);
+            m_PreviousNodePositions[node.Id] = now;
         }
+        if (!moved.empty())
+        {
+            m_LayoutEdited = true;
+            for (GraphLink& link : graph.Links)
+            {
+                const auto from = moved.find(link.FromNode);
+                const auto to = moved.find(link.ToNode);
+                if (link.Route.empty() || from == moved.end() || to == moved.end() || from->second.x != to->second.x || from->second.y != to->second.y)
+                    continue;
+                for (size_t i = 0; i < link.Route.size(); ++i)
+                    link.Route[i] += i % 2 == 0 ? from->second.x : from->second.y;
+            }
+        }
+
+        // Wires in their type's color (Unreal's), so a wire through reroutes is followed by its color; routed with right angles
+        // around the nodes, under them.
+        DrawWires(graph);
 
         HandleLinkCreation(graph, onGraphEdited);
         HandleDeletion(graph, onGraphEdited);
-        // Double-click on a wire: a reroute node there (put in once suspended, at the mouse in canvas space).
-        if (const ed::LinkId clickedLink = ed::GetDoubleClickedLink())
-            m_DoubleClickedLink = clickedLink.Get();
 
         // Double-clicking a node that owns sub graphs (a state machine) asks the panel to open its state view.
         if (outOpenNode)
         {
             const ed::NodeId doubleClicked = ed::GetDoubleClickedNode();
-            if (doubleClicked)
+            if (doubleClicked && !IsGraphWireLayer(doubleClicked))
             {
                 GraphNode* clickedNode = FindNodeById(graph, static_cast<uint32_t>(doubleClicked.Get()));
                 const NodeTypeDesc* clickedType = clickedNode ? TypeOf(graph, *clickedNode) : nullptr;
@@ -233,6 +274,7 @@ namespace Nox
         // the canonical imgui-node-editor pattern (its own blueprints-example does the same).
         ed::Suspend();
 
+        HandleWireInput(graph, onGraphEdited);
         if (m_DoubleClickedLink != 0)
         {
             InsertReroute(graph, m_DoubleClickedLink, ImGui::GetMousePos(), onGraphEdited);
@@ -240,7 +282,7 @@ namespace Nox
         }
 
         ed::NodeId contextNodeId;
-        if (ed::ShowNodeContextMenu(&contextNodeId))
+        if (ed::ShowNodeContextMenu(&contextNodeId) && !IsGraphWireLayer(contextNodeId))
         {
             m_ContextNodeId = (uint32_t)contextNodeId.Get();
             ImGui::OpenPopup("NodeContext");
@@ -249,8 +291,22 @@ namespace Nox
         {
             m_CreateNodeScreenPos = ImGui::GetMousePos();
             m_CreateSearch[0] = '\0';
+            m_NewNodeFromPin = 0;
             ImGui::OpenPopup("CreateNode");
         }
+        if (m_OpenCreateFromPin)
+        {
+            m_OpenCreateFromPin = false;
+            m_CreateNodeScreenPos = ImGui::GetMousePos();
+            m_CreateSearch[0] = '\0';
+            ImGui::OpenPopup("CreateNode");
+        }
+        if (m_OpenWireContext)
+        {
+            m_OpenWireContext = false;
+            ImGui::OpenPopup("WireContext");
+        }
+        DrawWireContextMenu(graph, onGraphEdited);
 
         if (ImGui::BeginPopup("NodeContext"))
         {
@@ -267,6 +323,8 @@ namespace Nox
             ShowCreateNodeMenu(graph, parameters, onGraphEdited);
             ImGui::EndPopup();
         }
+        else
+            m_NewNodeFromPin = 0; // closed without picking one: the dropped wire is gone, nothing changed (Unreal's Escape)
 
         DrawPendingAssetPicker(graph, onGraphEdited);
         DrawPendingBonePicker(graph, onGraphEdited);
@@ -294,29 +352,38 @@ namespace Nox
         ImGui::PushID((int)node.Id);
         ImGui::PushItemWidth(120.0f);
 
+        // Everything but the output pins is laid out first, in one group, to know the node's width: the outputs then go at its
+        // right edge (each row ending flush with it) as the inputs start at its left edge, so every wire ends at the node's border.
+        ImGui::BeginGroup();
         ImGui::TextUnformatted(type.TypeName.c_str());
         // Captured in screen space (matching what GetNodeBackgroundDrawList expects, per the reference
         // BlueprintNodeBuilder::End()) so the header band below lines up with this row regardless of pan/zoom.
-        ImVec2 headerMin = ImGui::GetItemRectMin();
-        ImVec2 headerMax = ImGui::GetItemRectMax();
+        const ImVec2 headerMax = ImGui::GetItemRectMax();
         ImGui::Dummy(ImVec2(0.0f, 4.0f)); // room for the header band painted over this node after EndNode()
 
         const std::vector<GraphLink>& links = graph.Links;
+        const float pinsTop = ImGui::GetCursorScreenPos().y;
+        const ImGuiStyle& style = ImGui::GetStyle();
 
-        ImGui::BeginGroup();
         // The node's pins (a graph node's come from the graph it plays); its value inputs' literals seeded the first time.
         const NodePinList pins = ResolveNodePins(type, node.Properties);
         for (const auto& [name, literal] : pins.Literals)
             node.Properties.try_emplace(name, literal);
         const uint32_t inputCount = static_cast<uint32_t>(pins.Inputs.size());
+        const bool hasInputColumn = inputCount > 0 || !type.VariableInputs.empty();
+        if (hasInputColumn)
+            ImGui::BeginGroup();
         for (uint32_t p = 0; p < inputCount; p++)
         {
             bool connected = std::any_of(links.begin(), links.end(),
                 [&](const GraphLink& l) { return l.ToNode == node.Id && l.ToPin == p; });
 
             const NodePinDesc& pin = pins.Inputs[p];
-            ed::BeginPin(MakePinId(node.Id, p, false), ed::PinKind::Input);
+            const ed::PinId pinId = MakePinId(node.Id, p, false);
+            ed::BeginPin(pinId, ed::PinKind::Input);
             DrawPinIcon(kPinIconSize, PinShapeOf(pin.Type), connected, PinColor(pin.Type));
+            m_PinIcons[pinId.Get()] = { ImGui::GetItemRectMin(), ImGui::GetItemRectMax() };
+            ed::PinPivotRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax()); // a wire being dragged starts at the icon
             ImGui::SameLine();
             ImGui::TextUnformatted(pin.Name.c_str());
             if (ImGui::IsItemHovered())
@@ -353,26 +420,24 @@ namespace Nox
             }
             ImGui::PopID();
         }
-        ImGui::EndGroup();
+        if (hasInputColumn)
+            ImGui::EndGroup();
 
+        // The output column's room, beside the inputs (the pins themselves are drawn at the end, once the width is known).
+        const float rowHeight = std::max(kPinIconSize.y, ImGui::GetTextLineHeight());
+        std::vector<float> outputWidths;
+        float outputsWidth = 0.0f;
+        for (const NodePinDesc& pin : pins.Outputs)
+        {
+            outputWidths.push_back(ImGui::CalcTextSize(pin.Name.c_str()).x + style.ItemSpacing.x + kPinIconSize.x);
+            outputsWidth = std::max(outputsWidth, outputWidths.back());
+        }
         if (!pins.Outputs.empty())
         {
-            ImGui::SameLine();
-            ImGui::BeginGroup();
-            for (uint32_t p = 0; p < (uint32_t)pins.Outputs.size(); p++)
-            {
-                bool connected = std::any_of(links.begin(), links.end(),
-                    [&](const GraphLink& l) { return l.FromNode == node.Id && l.FromPin == p; });
-
-                ed::BeginPin(MakePinId(node.Id, p, true), ed::PinKind::Output);
-                ImGui::TextUnformatted(pins.Outputs[p].Name.c_str());
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", pins.Outputs[p].Type.c_str());
-                ImGui::SameLine();
-                DrawPinIcon(kPinIconSize, PinShapeOf(pins.Outputs[p].Type), connected, PinColor(pins.Outputs[p].Type));
-                ed::EndPin();
-            }
-            ImGui::EndGroup();
+            if (hasInputColumn)
+                ImGui::SameLine(0.0f, 16.0f);
+            const float count = static_cast<float>(pins.Outputs.size());
+            ImGui::Dummy(ImVec2(outputsWidth, count * rowHeight + (count - 1.0f) * style.ItemSpacing.y));
         }
 
         if (type.OwnsSubGraphs)
@@ -453,20 +518,43 @@ namespace Nox
             }
         }
 
+        ImGui::EndGroup();
+        const float rightEdge = ImGui::GetItemRectMax().x;
+
+        // The output pins, each row ending at the right edge.
+        for (uint32_t p = 0; p < static_cast<uint32_t>(pins.Outputs.size()); p++)
+        {
+            const bool connected = std::any_of(links.begin(), links.end(),
+                [&](const GraphLink& l) { return l.FromNode == node.Id && l.FromPin == p; });
+            ImGui::SetCursorScreenPos(ImVec2(rightEdge - outputWidths[p], pinsTop + static_cast<float>(p) * (rowHeight + style.ItemSpacing.y)));
+            const ed::PinId pinId = MakePinId(node.Id, p, true);
+            ed::BeginPin(pinId, ed::PinKind::Output);
+            ImGui::TextUnformatted(pins.Outputs[p].Name.c_str());
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", pins.Outputs[p].Type.c_str());
+            ImGui::SameLine();
+            DrawPinIcon(kPinIconSize, PinShapeOf(pins.Outputs[p].Type), connected, PinColor(pins.Outputs[p].Type));
+            m_PinIcons[pinId.Get()] = { ImGui::GetItemRectMin(), ImGui::GetItemRectMax() };
+            ed::PinPivotRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+            ed::EndPin();
+        }
+
         ImGui::PopItemWidth();
         ImGui::PopID();
         ed::EndNode();
 
-        // A flat category-colored, rounded top band -- see CategoryHeaderColor's comment for why this is
+        // A flat category-colored, rounded top band across the whole node -- see CategoryHeaderColor's comment for why this is
         // painted by hand instead of through the reference BlueprintNodeBuilder.
         if (ImGui::IsItemVisible())
         {
             ImDrawList* backgroundDrawList = ed::GetNodeBackgroundDrawList(nodeId);
             const float rounding = ed::GetStyle().NodeRounding;
             const float pad = 8.0f;
+            const ImVec2 nodeMin = ed::GetNodePosition(nodeId);
+            const ImVec2 nodeSize = ed::GetNodeSize(nodeId);
             backgroundDrawList->AddRectFilled(
-                ImVec2(headerMin.x - pad, headerMin.y - pad),
-                ImVec2(headerMax.x + pad, headerMax.y + pad),
+                ImVec2(nodeMin.x, nodeMin.y),
+                ImVec2(nodeMin.x + nodeSize.x, headerMax.y + pad),
                 CategoryHeaderColor(type.Category), rounding, ImDrawFlags_RoundCornersTop);
         }
 
@@ -753,6 +841,18 @@ namespace Nox
                     }
                 }
             }
+
+            // Unreal: a wire let go over empty canvas opens the create menu with the nodes that fit it; the one picked is connected.
+            ed::PinId newNodePin;
+            if (ed::QueryNewNode(&newNodePin))
+            {
+                ImGui::SetTooltip("+ Create Node");
+                if (ed::AcceptNewItem())
+                {
+                    m_NewNodeFromPin = newNodePin.Get();
+                    m_OpenCreateFromPin = true;
+                }
+            }
         }
         ed::EndCreate();
     }
@@ -781,6 +881,11 @@ namespace Nox
             ed::NodeId nodeId;
             while (ed::QueryDeletedNode(&nodeId))
             {
+                if (IsGraphWireLayer(nodeId))
+                {
+                    ed::RejectDeletedItem();
+                    continue;
+                }
                 if (!ed::AcceptDeletedItem())
                     continue;
 
@@ -817,14 +922,18 @@ namespace Nox
         ed::BeginNode(nodeId);
         ImGui::PushID(static_cast<int>(node.Id));
         constexpr ImVec2 kKnot(10.0f, 12.0f);
-        ed::BeginPin(MakePinId(node.Id, 0, false), ed::PinKind::Input);
+        const ed::PinId inputPin = MakePinId(node.Id, 0, false);
+        ed::BeginPin(inputPin, ed::PinKind::Input);
         ed::PinPivotAlignment(ImVec2(1.0f, 0.5f));
         DrawPinIcon(kKnot, PinShapeOf(pinType), inLinked, color);
+        m_PinIcons[inputPin.Get()] = { ImGui::GetItemRectMin(), ImGui::GetItemRectMax() };
         ed::EndPin();
         ImGui::SameLine(0.0f, 0.0f);
-        ed::BeginPin(MakePinId(node.Id, 0, true), ed::PinKind::Output);
+        const ed::PinId outputPin = MakePinId(node.Id, 0, true);
+        ed::BeginPin(outputPin, ed::PinKind::Output);
         ed::PinPivotAlignment(ImVec2(0.0f, 0.5f));
         DrawPinIcon(kKnot, PinShapeOf(pinType), outLinked, color);
+        m_PinIcons[outputPin.Get()] = { ImGui::GetItemRectMin(), ImGui::GetItemRectMax() };
         ed::EndPin();
         ImGui::PopID();
         ed::EndNode();
@@ -873,8 +982,453 @@ namespace Nox
         onGraphEdited();
     }
 
-    void ThedmdCanvasBackend::CreateNode(NodeGraph& graph, const NodeTypeDesc& type, const std::string* parameterName,
-                                         const ImVec2& screenPos, const std::function<void()>& onGraphEdited)
+    void ThedmdCanvasBackend::DrawWires(NodeGraph& graph)
+    {
+        using namespace WireRouting;
+        const RouteSettings settings = GraphRouteSettings();
+
+        // Every node is a box to route around.
+        std::vector<Rect> boxes;
+        std::vector<uint32_t> boxNodes;
+        std::unordered_map<uint32_t, int> boxOf;
+        for (const GraphNode& node : graph.Nodes)
+        {
+            const ImVec2 position = ed::GetNodePosition(ed::NodeId(node.Id));
+            const ImVec2 size = ed::GetNodeSize(ed::NodeId(node.Id));
+            if (size.x <= 0.0f || size.y <= 0.0f)
+                continue;
+            boxOf[node.Id] = static_cast<int>(boxes.size());
+            boxes.push_back({ position, ImVec2(position.x + size.x, position.y + size.y) });
+            boxNodes.push_back(node.Id);
+        }
+        m_Wires.clear();
+        if (boxes.empty())
+            return;
+
+        // The layer node, tucked under the first node (so it is never clicked) and below every node.
+        {
+            const ed::NodeId layer(kGraphWireLayerNode);
+            ed::SetNodePosition(layer, ImVec2(boxes.front().Min.x + 4.0f, boxes.front().Min.y + 4.0f));
+            ed::SetNodeZPosition(layer, -1.0e6f);
+            ed::PushStyleVar(ed::StyleVar_NodePadding, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            ed::PushStyleColor(ed::StyleColor_NodeBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            ed::PushStyleColor(ed::StyleColor_NodeBorder, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            ed::BeginNode(layer);
+            ImGui::Dummy(ImVec2(1.0f, 1.0f));
+            ed::EndNode();
+            ed::PopStyleColor(2);
+            ed::PopStyleVar();
+        }
+        ImDrawList* wireLayer = ed::GetNodeBackgroundDrawList(ed::NodeId(kGraphWireLayerNode));
+
+        // A route's key: its ends, its hand-shaped coordinates, and every node overlapping the area it was routed in (a node moved
+        // anywhere else cannot change it).
+        auto makeKey = [&](ImVec2 start, ImVec2 end, const std::vector<float>& manual, const Rect& area)
+        {
+            std::vector<float> key{ start.x, start.y, end.x, end.y, static_cast<float>(manual.size()) };
+            key.insert(key.end(), manual.begin(), manual.end());
+            if (manual.empty())
+                for (size_t k = 0; k < boxes.size(); ++k)
+                    if (boxes[k].Max.x > area.Min.x && boxes[k].Min.x < area.Max.x && boxes[k].Max.y > area.Min.y && boxes[k].Min.y < area.Max.y)
+                        key.insert(key.end(), { static_cast<float>(boxNodes[k]), boxes[k].Min.x, boxes[k].Min.y, boxes[k].Max.x, boxes[k].Max.y });
+            return key;
+        };
+
+        std::vector<std::vector<ImVec2>> routes;
+        std::vector<uint64_t> nets;
+        std::unordered_set<uint64_t> live;
+        for (const GraphLink& link : graph.Links)
+        {
+            const ed::PinId fromPin = MakePinId(link.FromNode, link.FromPin, true);
+            const ed::PinId toPin = MakePinId(link.ToNode, link.ToPin, false);
+            const auto fromIcon = m_PinIcons.find(fromPin.Get());
+            const auto toIcon = m_PinIcons.find(toPin.Get());
+            const auto fromBox = boxOf.find(link.FromNode);
+            const auto toBox = boxOf.find(link.ToNode);
+            if (fromIcon == m_PinIcons.end() || toIcon == m_PinIcons.end() || fromBox == boxOf.end() || toBox == boxOf.end())
+                continue;
+            const ImVec2 fromCentre(0.5f * (fromIcon->second.first.x + fromIcon->second.second.x), 0.5f * (fromIcon->second.first.y + fromIcon->second.second.y));
+            const ImVec2 toCentre(0.5f * (toIcon->second.first.x + toIcon->second.second.x), 0.5f * (toIcon->second.first.y + toIcon->second.second.y));
+            // The wire runs from the source node's right border to the target node's left border; inside the nodes it is drawn on
+            // them, from the border to the pin.
+            const ImVec2 start(boxes[fromBox->second].Max.x, fromCentre.y);
+            const ImVec2 end(boxes[toBox->second].Min.x, toCentre.y);
+
+            // A hand-shaped route keeps its legs, but its first / last vertical leg never goes back into the node it leaves / enters
+            // (an end moved past it). One vertical leg that cannot do both (the wire now runs backwards) gives way to the router.
+            std::vector<float> manual = link.Route;
+            if (manual.size() % 2 == 0 && !manual.empty())
+                manual.pop_back();
+            if (!manual.empty())
+            {
+                if (manual.size() == 1 && start.x + settings.Stub > end.x - settings.Stub)
+                    manual.clear();
+                else
+                {
+                    manual.front() = std::max(manual.front(), start.x + settings.Stub);
+                    manual.back() = std::min(manual.back(), end.x - settings.Stub);
+                }
+            }
+
+            const uint64_t linkId = MakeLinkId(link.ToNode, link.ToPin).Get();
+            live.insert(linkId);
+            WireCache& cache = m_WireCache[linkId];
+            if (cache.Route.empty() || makeKey(start, end, manual, cache.Area) != cache.Key)
+            {
+                cache.Route = manual.empty() ? RouteWire(start, end, boxes, settings) : RouteFromCoordinates(start, end, manual);
+                Rect area{ start, start };
+                for (const ImVec2& p : cache.Route)
+                {
+                    area.Min = ImVec2(std::min(area.Min.x, p.x), std::min(area.Min.y, p.y));
+                    area.Max = ImVec2(std::max(area.Max.x, p.x), std::max(area.Max.y, p.y));
+                }
+                const float grow = settings.Margin + settings.Stub;
+                cache.Area = { ImVec2(area.Min.x - grow, area.Min.y - grow), ImVec2(area.Max.x + grow, area.Max.y + grow) };
+                cache.Key = makeKey(start, end, manual, cache.Area);
+            }
+
+            ImVec4 color(1.0f, 1.0f, 1.0f, 1.0f);
+            if (const GraphNode* fromNode = FindNodeById(graph, link.FromNode))
+                if (const NodeTypeDesc* fromType = TypeOf(graph, *fromNode))
+                {
+                    const NodePinList pins = ResolveNodePins(*fromType, fromNode->Properties);
+                    if (link.FromPin < pins.Outputs.size() && !pins.Outputs[link.FromPin].Type.empty())
+                        color = PinColor(pins.Outputs[link.FromPin].Type);
+                }
+
+            routes.push_back(cache.Route);
+            nets.push_back(fromPin.Get());
+            DrawnWire wire;
+            wire.LinkId = linkId;
+            wire.Color = ToU32(color);
+            wire.FromNode = link.FromNode;
+            wire.ToNode = link.ToNode;
+            wire.FromPin = fromCentre;
+            wire.ToPin = toCentre;
+            m_Wires.push_back(std::move(wire));
+        }
+        for (auto it = m_WireCache.begin(); it != m_WireCache.end();)
+            it = live.contains(it->first) ? std::next(it) : m_WireCache.erase(it);
+        for (auto it = m_SelectedLinks.begin(); it != m_SelectedLinks.end();)
+            it = live.contains(*it) ? std::next(it) : m_SelectedLinks.erase(it);
+
+        // Wires of different pins running along one line are spread into lanes.
+        SeparateOverlaps(routes, nets, kWireLaneSpacing);
+        for (size_t i = 0; i < routes.size(); ++i)
+        {
+            Simplify(routes[i]);
+            m_Wires[i].Points = std::move(routes[i]);
+        }
+
+        // Plain wires first, then the ones standing out (hovered, selected, or of a selected node) on top of them.
+        auto drawWire = [&](const DrawnWire& wire, bool emphasized)
+        {
+            const bool selected = m_SelectedLinks.contains(wire.LinkId);
+            const bool hovered = wire.LinkId == m_HoveredLink;
+            const bool ofSelectedNode = ed::IsNodeSelected(ed::NodeId(wire.FromNode)) || ed::IsNodeSelected(ed::NodeId(wire.ToNode));
+            if ((selected || hovered || ofSelectedNode) != emphasized || wire.Points.size() < 2)
+                return;
+            const float thickness = hovered ? 3.5f : (selected || ofSelectedNode ? 3.0f : 2.0f);
+            ImDrawList* fromLayer = ed::GetNodeBackgroundDrawList(ed::NodeId(wire.FromNode));
+            ImDrawList* toLayer = ed::GetNodeBackgroundDrawList(ed::NodeId(wire.ToNode));
+            const ImVec2 start = wire.Points.front(), end = wire.Points.back();
+            if (selected)
+            {
+                // An orange outline, like a selected node's.
+                const ImU32 outline = IM_COL32(255, 176, 50, 255);
+                StrokeRoundedPolyline(wireLayer, wire.Points, outline, thickness + 3.0f, kWireCornerRadius);
+                fromLayer->AddLine(wire.FromPin, start, outline, thickness + 3.0f);
+                toLayer->AddLine(end, wire.ToPin, outline, thickness + 3.0f);
+            }
+            StrokeRoundedPolyline(wireLayer, wire.Points, wire.Color, thickness, kWireCornerRadius);
+            // From the pin to the node's border, on the node itself (the wire layer is under the node's background).
+            fromLayer->AddLine(wire.FromPin, start, wire.Color, thickness);
+            toLayer->AddLine(end, wire.ToPin, wire.Color, thickness);
+        };
+        for (const DrawnWire& wire : m_Wires)
+            drawWire(wire, false);
+        for (const DrawnWire& wire : m_Wires)
+            drawWire(wire, true);
+    }
+
+    void ThedmdCanvasBackend::HandleWireInput(NodeGraph& graph, const std::function<void()>& onGraphEdited)
+    {
+        const ImGuiIO& io = ImGui::GetIO();
+        const ImVec2 mouseScreen = ImGui::GetMousePos();
+        const ImVec2 mouse = ed::ScreenToCanvas(mouseScreen);
+        const float zoom = std::max(ed::GetCurrentZoom(), 0.01f);
+        const ImGuiID buttonId = ImGui::GetID("##WireHit");
+        const bool buttonActive = ImGui::GetActiveID() == buttonId;
+        const bool overCanvas = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::IsMouseHoveringRect(m_CanvasMin, m_CanvasMax, false);
+        auto findLink = [&](uint64_t linkId) -> GraphLink*
+        {
+            uint32_t toNode = 0, toPin = 0;
+            bool isOutput = false;
+            DecodePinId(ed::PinId(linkId), toNode, toPin, isOutput);
+            const auto it = std::find_if(graph.Links.begin(), graph.Links.end(), [&](const GraphLink& l) { return l.ToNode == toNode && l.ToPin == toPin; });
+            return it != graph.Links.end() ? &*it : nullptr;
+        };
+        auto findWire = [&](uint64_t linkId) -> const DrawnWire*
+        {
+            const auto it = std::find_if(m_Wires.begin(), m_Wires.end(), [&](const DrawnWire& w) { return w.LinkId == linkId; });
+            return it != m_Wires.end() ? &*it : nullptr;
+        };
+        auto breakLinks = [&](const std::function<bool(const GraphLink&)>& which)
+        {
+            const size_t before = graph.Links.size();
+            graph.Links.erase(std::remove_if(graph.Links.begin(), graph.Links.end(), which), graph.Links.end());
+            if (graph.Links.size() != before)
+                onGraphEdited();
+        };
+
+        // Unreal's Alt+click on a pin: break every link of that pin.
+        const ed::PinId hoveredPin = ed::GetHoveredPin();
+        if (hoveredPin && io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && overCanvas)
+        {
+            uint32_t pinNode = 0, pinIndex = 0;
+            bool isOutput = false;
+            DecodePinId(hoveredPin, pinNode, pinIndex, isOutput);
+            breakLinks([&](const GraphLink& l)
+            {
+                return isOutput ? (l.FromNode == pinNode && l.FromPin == pinIndex) : (l.ToNode == pinNode && l.ToPin == pinIndex);
+            });
+            return;
+        }
+
+        // The wire under the mouse (within a few pixels at any zoom), when no node or pin is.
+        m_HoveredLink = 0;
+        const ed::NodeId hoveredNode = ed::GetHoveredNode();
+        if (buttonActive || (!ImGui::IsAnyItemActive() && overCanvas && !hoveredPin &&
+                             (!hoveredNode || IsGraphWireLayer(hoveredNode))))
+        {
+            float nearest = kWireHitDistance / zoom;
+            for (const DrawnWire& wire : m_Wires)
+            {
+                float distance = 0.0f;
+                const int segment = WireRouting::NearestSegment(wire.Points, mouse, &distance);
+                if (segment >= 0 && distance < nearest)
+                {
+                    nearest = distance;
+                    m_HoveredLink = wire.LinkId;
+                }
+            }
+        }
+        if (buttonActive && m_PressedLink != 0)
+            m_HoveredLink = m_PressedLink;
+
+        // A click on a node or the background (not adding with Ctrl / Shift) drops the wire selection.
+        const bool additive = io.KeyCtrl || io.KeyShift;
+        if (!additive && !buttonActive && m_HoveredLink == 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && overCanvas)
+            m_SelectedLinks.clear();
+
+        // Pressing on a wire: an invisible button under the mouse takes the press, so the node editor starts no selection rectangle,
+        // and stays active while the mouse is held (a leg being dragged). Only submitted then: otherwise it would also take the mouse
+        // wheel's zoom away from the canvas wherever a wire is.
+        const bool pressed = ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+        if (buttonActive || (m_HoveredLink != 0 && pressed))
+        {
+            ImGui::SetCursorScreenPos(ImVec2(mouseScreen.x - 4.0f, mouseScreen.y - 4.0f));
+            ImGui::InvisibleButton("##WireHit", ImVec2(8.0f, 8.0f), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+            if (ImGui::IsItemActivated())
+            {
+                m_PressedLink = m_HoveredLink;
+                m_PressCanvasPos = mouse;
+                m_PressButton = ImGui::IsMouseClicked(ImGuiMouseButton_Right) ? ImGuiMouseButton_Right : ImGuiMouseButton_Left;
+                m_DraggingLeg = false;
+                if (m_PressButton == ImGuiMouseButton_Right)
+                {
+                    m_ContextLink = m_PressedLink;
+                    m_ContextScreenPos = mouseScreen;
+                    m_OpenWireContext = true;
+                    if (!m_SelectedLinks.contains(m_PressedLink))
+                    {
+                        ed::ClearSelection();
+                        m_SelectedLinks = { m_PressedLink };
+                    }
+                    m_PressedLink = 0;
+                }
+                else if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                {
+                    m_DoubleClickedLink = m_PressedLink; // a reroute node there
+                    m_PressedLink = 0;
+                }
+                else if (io.KeyAlt)
+                {
+                    const uint64_t linkId = m_PressedLink;
+                    m_PressedLink = 0;
+                    breakLinks([&](const GraphLink& l) { return MakeLinkId(l.ToNode, l.ToPin).Get() == linkId; });
+                }
+            }
+
+            // Dragging a leg sideways shapes the route by hand (kept with the graph; right-click > Reset Route undoes it).
+            if (ImGui::IsItemActive() && m_PressedLink != 0 && m_PressButton == ImGuiMouseButton_Left &&
+                ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.0f))
+            {
+                GraphLink* link = findLink(m_PressedLink);
+                const DrawnWire* wire = findWire(m_PressedLink);
+                const WireRouting::RouteSettings settings = GraphRouteSettings();
+                if (link && wire && !m_DraggingLeg)
+                {
+                    // The coordinates of the route as drawn (lanes included), so nothing jumps as the drag starts.
+                    m_DragCoordinates = WireRouting::RouteCoordinates(wire->Points);
+                    const int segment = WireRouting::NearestSegment(wire->Points, m_PressCanvasPos);
+                    const ImVec2 start = wire->Points.front(), end = wire->Points.back();
+                    if (wire->Points.size() == 2 && end.x - start.x > 2.0f * settings.Stub + 16.0f)
+                    {
+                        // A straight wire: dragging it up or down makes a step around the point it was grabbed at.
+                        const float left = std::clamp(m_PressCanvasPos.x - 24.0f, start.x + settings.Stub, end.x - settings.Stub - 16.0f);
+                        const float right = std::clamp(m_PressCanvasPos.x + 24.0f, left + 16.0f, end.x - settings.Stub);
+                        m_DragCoordinates = { left, start.y, right };
+                        m_DragIndex = 1;
+                        m_DragVertical = false;
+                        m_DraggingLeg = true;
+                    }
+                    else if (!m_DragCoordinates.empty() && segment >= 1 && segment + 2 < static_cast<int>(wire->Points.size()))
+                    {
+                        // Leg k (0 = the one out of the source pin) is coordinate k - 1: odd legs are vertical.
+                        m_DragIndex = segment - 1;
+                        m_DragVertical = segment % 2 == 1;
+                        m_DraggingLeg = true;
+                    }
+                    else
+                        m_PressedLink = 0; // the legs on the pins' rows stay where the pins are
+                }
+                if (link && wire && m_DraggingLeg && m_DragIndex >= 0 && m_DragIndex < static_cast<int>(m_DragCoordinates.size()))
+                {
+                    const ImVec2 start = wire->Points.front(), end = wire->Points.back();
+                    float value = m_DragVertical ? mouse.x : mouse.y;
+                    if (m_DragVertical && m_DragIndex == 0)
+                        value = std::max(value, start.x + settings.Stub);
+                    if (m_DragVertical && m_DragIndex + 1 == static_cast<int>(m_DragCoordinates.size()))
+                        value = std::min(value, end.x - settings.Stub);
+                    m_DragCoordinates[m_DragIndex] = value;
+                    link->Route = m_DragCoordinates;
+                }
+            }
+
+            if (ImGui::IsItemDeactivated())
+            {
+                if (m_DraggingLeg)
+                    m_LayoutEdited = true;
+                else if (m_PressedLink != 0 && m_PressButton == ImGuiMouseButton_Left)
+                {
+                    // A click: select the wire (Ctrl / Shift adds or removes it).
+                    if (!additive)
+                    {
+                        ed::ClearSelection();
+                        m_SelectedLinks = { m_PressedLink };
+                    }
+                    else if (!m_SelectedLinks.erase(m_PressedLink))
+                        m_SelectedLinks.insert(m_PressedLink);
+                }
+                m_PressedLink = 0;
+                m_DraggingLeg = false;
+            }
+        }
+
+        // Delete removes the selected wires (the node editor deletes the selected nodes).
+        if (!m_SelectedLinks.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
+        {
+            const std::unordered_set<uint64_t> doomed = std::move(m_SelectedLinks);
+            m_SelectedLinks.clear();
+            breakLinks([&](const GraphLink& l) { return doomed.contains(MakeLinkId(l.ToNode, l.ToPin).Get()); });
+        }
+    }
+
+    void ThedmdCanvasBackend::DrawWireContextMenu(NodeGraph& graph, const std::function<void()>& onGraphEdited)
+    {
+        if (!ImGui::BeginPopup("WireContext"))
+            return;
+        uint32_t toNode = 0, toPin = 0;
+        bool isOutput = false;
+        DecodePinId(ed::PinId(m_ContextLink), toNode, toPin, isOutput);
+        const auto link = std::find_if(graph.Links.begin(), graph.Links.end(), [&](const GraphLink& l) { return l.ToNode == toNode && l.ToPin == toPin; });
+        if (link == graph.Links.end())
+        {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+            return;
+        }
+        if (ImGui::MenuItem("Break Link"))
+        {
+            graph.Links.erase(link);
+            m_SelectedLinks.erase(m_ContextLink);
+            onGraphEdited();
+        }
+        else if (ImGui::MenuItem("Add Reroute Node"))
+            InsertReroute(graph, m_ContextLink, m_ContextScreenPos, onGraphEdited);
+        else
+        {
+            ImGui::BeginDisabled(link->Route.empty());
+            if (ImGui::MenuItem("Reset Route"))
+            {
+                link->Route.clear();
+                m_LayoutEdited = true;
+            }
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip(link->Route.empty() ? "Routed automatically (drag a leg of the wire to shape it by hand)"
+                                                      : "Route this wire automatically again, around the nodes");
+        }
+        ImGui::EndPopup();
+    }
+
+    void ThedmdCanvasBackend::ConnectNewNode(NodeGraph& graph, uint32_t newNodeId)
+    {
+        uint32_t pinNode = 0, pinIndex = 0;
+        bool fromOutput = false;
+        DecodePinId(ed::PinId(m_NewNodeFromPin), pinNode, pinIndex, fromOutput);
+        GraphNode* anchor = FindNodeById(graph, pinNode);
+        GraphNode* created = FindNodeById(graph, newNodeId);
+        const NodeTypeDesc* anchorType = anchor ? TypeOf(graph, *anchor) : nullptr;
+        const NodeTypeDesc* createdType = created ? TypeOf(graph, *created) : nullptr;
+        if (!anchorType || !createdType)
+            return;
+        const NodePinList anchorPins = ResolveNodePins(*anchorType, anchor->Properties);
+        const std::vector<NodePinDesc>& anchorList = fromOutput ? anchorPins.Outputs : anchorPins.Inputs;
+        if (pinIndex >= anchorList.size())
+            return;
+        const std::string wireType = anchorList[pinIndex].Type;
+
+        // The new node's first pin of the wire's type on the other side (a reroute's one pin, typed after the wire).
+        uint32_t createdPin = 0;
+        std::string createdPinType = wireType;
+        if (created->TypeName == kRerouteNodeType)
+        {
+            if (!wireType.empty())
+                created->Properties[kRerouteTypeProperty] = wireType;
+        }
+        else
+        {
+            const NodePinList pins = ResolveNodePins(*createdType, created->Properties);
+            const std::vector<NodePinDesc>& list = fromOutput ? pins.Inputs : pins.Outputs;
+            const auto found = std::find_if(list.begin(), list.end(), [&](const NodePinDesc& pin) { return wireType.empty() || pin.Type == wireType; });
+            if (found == list.end())
+                return;
+            createdPin = static_cast<uint32_t>(found - list.begin());
+            createdPinType = found->Type;
+        }
+        // An untyped reroute the wire came from takes the type of what it now connects to.
+        if (anchor->TypeName == kRerouteNodeType && wireType.empty() && !createdPinType.empty())
+            anchor->Properties[kRerouteTypeProperty] = createdPinType;
+
+        // An input takes one link: the new one replaces what was there.
+        if (fromOutput)
+        {
+            graph.Links.erase(std::remove_if(graph.Links.begin(), graph.Links.end(),
+                [&](const GraphLink& l) { return l.ToNode == newNodeId && l.ToPin == createdPin; }), graph.Links.end());
+            graph.Links.push_back({ pinNode, pinIndex, newNodeId, createdPin });
+        }
+        else
+        {
+            graph.Links.erase(std::remove_if(graph.Links.begin(), graph.Links.end(),
+                [&](const GraphLink& l) { return l.ToNode == pinNode && l.ToPin == pinIndex; }), graph.Links.end());
+            graph.Links.push_back({ newNodeId, createdPin, pinNode, pinIndex });
+        }
+    }
+
+    uint32_t ThedmdCanvasBackend::CreateNode(NodeGraph& graph, const NodeTypeDesc& type, const std::string* parameterName,
+                                             const ImVec2& screenPos, const std::function<void()>& onGraphEdited)
     {
         GraphNode node;
         node.Id = graph.NextNodeId++;
@@ -892,6 +1446,7 @@ namespace Nox
         ed::SetNodePosition(ed::NodeId(node.Id), canvasPos);
 
         onGraphEdited();
+        return node.Id;
     }
 
     void ThedmdCanvasBackend::HandleParameterDrop(NodeGraph& graph, const std::vector<GraphParameter>& parameters, const std::function<void()>& onGraphEdited)
@@ -916,10 +1471,50 @@ namespace Nox
 
     void ThedmdCanvasBackend::ShowCreateNodeMenu(NodeGraph& graph, const std::vector<GraphParameter>& parameters, const std::function<void()>& onGraphEdited)
     {
-        // Creates a node of `type` where the menu was opened, optionally pointing it at a graph parameter.
+        // Opened by a wire dropped on empty canvas (Unreal's context-sensitive menu): the pin it came from and the type it carries.
+        bool fromWire = false, fromOutput = false;
+        std::string wireType;
+        if (m_NewNodeFromPin != 0)
+        {
+            uint32_t pinNode = 0, pinIndex = 0;
+            DecodePinId(ed::PinId(m_NewNodeFromPin), pinNode, pinIndex, fromOutput);
+            const GraphNode* anchor = FindNodeById(graph, pinNode);
+            const NodeTypeDesc* anchorType = anchor ? TypeOf(graph, *anchor) : nullptr;
+            if (anchorType)
+            {
+                const NodePinList anchorPins = ResolveNodePins(*anchorType, anchor->Properties);
+                const std::vector<NodePinDesc>& list = fromOutput ? anchorPins.Outputs : anchorPins.Inputs;
+                if (pinIndex < list.size())
+                {
+                    fromWire = true;
+                    wireType = list[pinIndex].Type;
+                }
+            }
+        }
+
+        // Creates a node of `type` where the menu was opened, optionally pointing it at a graph parameter; from a dropped wire, next to
+        // where it was dropped (left of it for a wire from an input) and connected to it.
         auto createNode = [&](const NodeTypeDesc& type, const std::string* parameterName)
         {
-            CreateNode(graph, type, parameterName, m_CreateNodeScreenPos, onGraphEdited);
+            const uint32_t id = CreateNode(graph, type, parameterName, m_CreateNodeScreenPos, onGraphEdited);
+            if (!fromWire)
+                return;
+            const ImVec2 drop = ed::ScreenToCanvas(m_CreateNodeScreenPos);
+            ImVec2 position(drop.x + 10.0f, drop.y - 40.0f); // the first pin row about level with the drop point
+            if (type.TypeName == kRerouteNodeType)
+                position = ImVec2(drop.x - 13.0f, drop.y - 9.0f);
+            else if (!fromOutput)
+            {
+                position.x = drop.x - 200.0f;
+                m_AlignNewNodeId = id;
+                m_AlignNewNodeRight = drop.x - 10.0f;
+            }
+            ed::SetNodePosition(ed::NodeId(id), position);
+            if (GraphNode* created = FindNodeById(graph, id))
+                created->EditorPosition = { position.x, position.y };
+            ConnectNewNode(graph, id);
+            m_NewNodeFromPin = 0;
+            onGraphEdited();
         };
 
         // Every node this graph can create, as a flat list: each node type, and one "Get <name>" per declared
@@ -944,6 +1539,23 @@ namespace Nox
             for (const GraphParameter& parameter : parameters)
                 if (ParameterReader(graph.Domain, parameter) == &type)
                     entries.push_back({ "Variables", "Get " + parameter.Name, &type, &parameter.Name });
+        }
+
+        // From a dropped wire only the nodes with a pin that takes it (any reroute: it takes the wire's type).
+        if (fromWire)
+        {
+            entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const Entry& entry)
+            {
+                if (entry.Type->TypeName == kRerouteNodeType)
+                    return false;
+                std::unordered_map<std::string, NodeGraphValue> properties(entry.Type->DefaultProperties.begin(), entry.Type->DefaultProperties.end());
+                if (entry.Parameter)
+                    properties[kParameterReferenceProperty] = *entry.Parameter;
+                const NodePinList pins = ResolveNodePins(*entry.Type, properties);
+                const std::vector<NodePinDesc>& list = fromOutput ? pins.Inputs : pins.Outputs;
+                return std::none_of(list.begin(), list.end(), [&](const NodePinDesc& pin) { return wireType.empty() || pin.Type == wireType; });
+            }), entries.end());
+            ImGui::TextDisabled(fromOutput ? "Nodes taking %s" : "Nodes giving %s", wireType.empty() ? "any value" : wireType.c_str());
         }
 
         // Search box first, focused as the menu opens, like Unreal's action palette: type to filter across every
@@ -1036,8 +1648,25 @@ namespace Nox
         return NodeTypeRegistry::Find(graph.Domain, node.TypeName);
     }
 
+    bool ThedmdCanvasBackend::ConsumeLayoutEdited()
+    {
+        const bool edited = m_LayoutEdited;
+        m_LayoutEdited = false;
+        return edited;
+    }
+
     void ThedmdCanvasBackend::ResetView()
     {
+        // Another graph on the canvas (node ids are per graph): nothing of the last one's wires or positions carries over.
+        m_WireCache.clear();
+        m_Wires.clear();
+        m_PreviousNodePositions.clear();
+        m_SelectedLinks.clear();
+        m_HoveredLink = 0;
+        m_PressedLink = 0;
+        m_DraggingLeg = false;
+        m_NewNodeFromPin = 0;
+        m_AlignNewNodeId = 0;
         m_SeededPositions.clear();
         m_SeededStatePositions.clear();
         m_FitViewOnNextFrame = true;
@@ -1056,8 +1685,6 @@ namespace Nox
         bool IsWireLayer(ed::NodeId node) { return node.Get() == kWireLayerNode; }
 
         ImVec2 Add(ImVec2 a, ImVec2 b) { return ImVec2(a.x + b.x, a.y + b.y); }
-        ImVec2 Sub(ImVec2 a, ImVec2 b) { return ImVec2(a.x - b.x, a.y - b.y); }
-        ImVec2 Scale(ImVec2 a, float s) { return ImVec2(a.x * s, a.y * s); }
 
         struct Box
         {
@@ -1206,39 +1833,9 @@ namespace Nox
             return best;
         }
 
-        // A polyline with its corners rounded (each by up to `radius`, at most half of the shorter leg).
-        void StrokeRoundedPolyline(ImDrawList* drawList, const std::vector<ImVec2>& points, ImU32 color, float thickness, float radius)
-        {
-            if (points.size() < 2)
-                return;
-            drawList->PathLineTo(points.front());
-            for (size_t i = 1; i + 1 < points.size(); ++i)
-            {
-                const ImVec2 a = points[i - 1], c = points[i], b = points[i + 1];
-                const float inLength = std::abs(c.x - a.x) + std::abs(c.y - a.y);
-                const float outLength = std::abs(b.x - c.x) + std::abs(b.y - c.y);
-                const float r = std::min(radius, 0.5f * std::min(inLength, outLength));
-                if (r < 0.5f || inLength < 0.01f || outLength < 0.01f)
-                {
-                    drawList->PathLineTo(c);
-                    continue;
-                }
-                drawList->PathLineTo(Sub(c, Scale(Sub(c, a), r / inLength)));
-                drawList->PathBezierQuadraticCurveTo(c, Add(c, Scale(Sub(b, c), r / outLength)), 6);
-            }
-            drawList->PathLineTo(points.back());
-            drawList->PathStroke(color, thickness); // (ImGui 1.92.8 order: thickness, then flags)
-        }
+        using WireRouting::DistanceToSegment;
+        using WireRouting::StrokeRoundedPolyline;
 
-        float DistanceToSegment(ImVec2 p, ImVec2 a, ImVec2 b)
-        {
-            const ImVec2 ab = Sub(b, a), ap = Sub(p, a);
-            const float lengthSq = ab.x * ab.x + ab.y * ab.y;
-            const float t = lengthSq > 0.0f ? std::clamp((ap.x * ab.x + ap.y * ab.y) / lengthSq, 0.0f, 1.0f) : 0.0f;
-            const ImVec2 closest = Add(a, Scale(ab, t));
-            const ImVec2 d = Sub(p, closest);
-            return std::sqrt(d.x * d.x + d.y * d.y);
-        }
         ed::PinId StateInputPin(uint32_t stateId) { return ed::PinId(kStatePinBase + static_cast<uint64_t>(stateId) * 2); }
         ed::PinId StateOutputPin(uint32_t stateId) { return ed::PinId(kStatePinBase + static_cast<uint64_t>(stateId) * 2 + 1); }
         uint32_t PinState(ed::PinId pin) { return static_cast<uint32_t>((pin.Get() - kStatePinBase) >> 1); }

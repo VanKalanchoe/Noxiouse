@@ -74,6 +74,9 @@ namespace Nox
     {
         uint32_t FromNode = 0; uint32_t FromPin = 0;
         uint32_t ToNode = 0;   uint32_t ToPin = 0;
+        // Editor only: a wire route the user shaped by dragging its legs (canvas units): the x of its first vertical leg, the y of
+        // the horizontal leg after it, the x of the next vertical leg, ... Empty = routed automatically around the nodes.
+        std::vector<float> Route;
     };
 
     // A named value on the graph's blackboard (e.g. "Speed", "IsGrounded"), settable per-instance at runtime

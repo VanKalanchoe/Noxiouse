@@ -7,6 +7,7 @@
 #include <imgui_node_editor.h>
 
 #include "INodeGraphCanvasBackend.h"
+#include "WireRouter.h"
 #include "NoxCore/NodeGraph/NodeType.h"
 
 namespace Nox
@@ -35,6 +36,7 @@ namespace Nox
                               uint32_t& outOpenState, StateMachineSelection& selection) override;
         void ResetView() override;
         void SetBoneList(std::vector<BoneEntry> bones, std::string skeletonName) override;
+        bool ConsumeLayoutEdited() override;
 
     private:
         // Where a state box's two pins are this frame (canvas space).
@@ -55,6 +57,14 @@ namespace Nox
         void DrawBonePickerButton(uint32_t nodeId, const std::string& propertyName, const std::string& current);
         void DrawPendingBonePicker(NodeGraph& graph, const std::function<void()>& onGraphEdited);
         void HandleLinkCreation(NodeGraph& graph, const std::function<void()>& onGraphEdited);
+        // The graph's wires, routed orthogonally around the nodes (WireRouter) and drawn under them; see the .cpp.
+        void DrawWires(NodeGraph& graph);
+        // Hovering, clicking (select), Delete, double-click (reroute), right-click (menu) and dragging a leg of a wire; Alt+click on
+        // a pin breaks its links. Called suspended (screen space).
+        void HandleWireInput(NodeGraph& graph, const std::function<void()>& onGraphEdited);
+        void DrawWireContextMenu(NodeGraph& graph, const std::function<void()>& onGraphEdited);
+        // Connects a node just made from the create menu opened by dropping a wire on empty canvas to that wire's pin.
+        void ConnectNewNode(NodeGraph& graph, uint32_t newNodeId);
         // Unreal's reroute node: a small dot with an input and an output of its wire's type. Double-clicking a wire puts one there.
         void DrawRerouteNode(NodeGraph& graph, GraphNode& node);
         void InsertReroute(NodeGraph& graph, uint64_t linkId, const ImVec2& screenPos, const std::function<void()>& onGraphEdited);
@@ -63,8 +73,8 @@ namespace Nox
         void ShowCreateNodeMenu(NodeGraph& graph, const std::vector<GraphParameter>& parameters, const std::function<void()>& onGraphEdited);
         // Adds a node of `type` (seeded with its default properties) at a screen position, optionally pointing
         // it at a graph parameter -- shared by the create-node menu and the parameter drag-and-drop.
-        void CreateNode(NodeGraph& graph, const NodeTypeDesc& type, const std::string* parameterName, const ImVec2& screenPos,
-                        const std::function<void()>& onGraphEdited);
+        uint32_t CreateNode(NodeGraph& graph, const NodeTypeDesc& type, const std::string* parameterName, const ImVec2& screenPos,
+                            const std::function<void()>& onGraphEdited);
         // Accepts a parameter dragged from the panel's Parameters list (kNodeGraphParameterPayload) anywhere over
         // the canvas and creates a node reading it at the drop position.
         void HandleParameterDrop(NodeGraph& graph, const std::vector<GraphParameter>& parameters, const std::function<void()>& onGraphEdited);
@@ -108,5 +118,44 @@ namespace Nox
         std::string m_AssetPickerTypeHint;
         char m_AssetPickerFilter[64] = "";
         char m_CreateSearch[64] = ""; // the create-node menu's search box
+
+        // The graph's wires (DrawWires). A route is searched again only when its ends, its hand-shaped route or a node near it change.
+        struct WireCache
+        {
+            std::vector<float> Key;
+            std::vector<ImVec2> Route;
+            WireRouting::Rect Area{}; // the nodes overlapping this area are part of the key
+        };
+        struct DrawnWire
+        {
+            uint64_t LinkId = 0;
+            std::vector<ImVec2> Points; // this frame's route (canvas space), after the lanes are spread
+            ImU32 Color = 0;
+            uint32_t FromNode = 0, ToNode = 0;
+            ImVec2 FromPin{}, ToPin{}; // the pin icons' centres: the short legs inside the two nodes end there
+        };
+        std::unordered_map<uint64_t, WireCache> m_WireCache; // by link id
+        std::vector<DrawnWire> m_Wires;
+        std::unordered_map<uint64_t, std::pair<ImVec2, ImVec2>> m_PinIcons; // pin id -> its icon's rect this frame (canvas space)
+        std::unordered_map<uint32_t, ImVec2> m_PreviousNodePositions;      // to see nodes move (layout edits, routes moved along)
+        uint64_t m_HoveredLink = 0;
+        std::unordered_set<uint64_t> m_SelectedLinks;
+        uint64_t m_PressedLink = 0;   // the wire the mouse went down on (0 once the press is used up)
+        ImGuiMouseButton m_PressButton = ImGuiMouseButton_Left;
+        ImVec2 m_PressCanvasPos{};
+        bool m_DraggingLeg = false;   // a leg of m_PressedLink is being dragged
+        int m_DragIndex = -1;         // which of its route coordinates
+        bool m_DragVertical = false;
+        std::vector<float> m_DragCoordinates;
+        uint64_t m_ContextLink = 0;   // the wire whose menu is open
+        ImVec2 m_ContextScreenPos{};
+        bool m_OpenWireContext = false;
+        // Unreal: a wire dropped on empty canvas opens the create menu showing only nodes that fit it; the node picked is connected.
+        uint64_t m_NewNodeFromPin = 0;
+        bool m_OpenCreateFromPin = false;
+        uint32_t m_AlignNewNodeId = 0;  // a node made from an input pin's wire: put with its right edge at m_AlignNewNodeRight
+        float m_AlignNewNodeRight = 0.0f;
+        bool m_LayoutEdited = false;
+        ImVec2 m_CanvasMin{}, m_CanvasMax{}; // the canvas on screen (it shares its window with the panel's other sections)
     };
 }
