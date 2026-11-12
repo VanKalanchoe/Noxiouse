@@ -7,6 +7,7 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/NodeGraph/GraphCompiler.h"
 #include "NoxCore/NodeGraph/NodeType.h"
+#include "NoxCore/NodeGraph/NodeGraphAsset.h"
 
 namespace Nox
 {
@@ -91,6 +92,12 @@ namespace Nox
         return handle ? *handle : 0;
     }
 
+    const NodeGraphCurve* AudioNodeSetup::Curve(const std::string& name) const
+    {
+        const NodeGraphValue* value = FindLiteral(*m_Node, name);
+        return value ? std::get_if<NodeGraphCurve>(value) : nullptr;
+    }
+
     std::string AudioNodeSetup::String(const std::string& name) const
     {
         const NodeGraphValue* value = FindLiteral(*m_Node, name);
@@ -152,10 +159,218 @@ namespace Nox
 
     // ---- Program -------------------------------------------------------------------------------------------------------------------
 
+    namespace
+    {
+        // MetaSounds' composition: an Audio Graph node plays another audio graph inside this one. Before compiling, every such node
+        // is replaced by the graph it plays (itself inlined first) -- one flat graph, the same program and cost as if built by hand:
+        // - its inputs are that graph's parameters: what feeds the node's pin feeds whatever read the parameter (its Get nodes go);
+        //   an unconnected pin's literal (or the parameter's default) becomes the readers' literal; an unconnected trigger never fires;
+        // - its outputs are that graph's Output node's pins (Out Left, Out Right, On Finished): what fed them feeds what the node fed.
+        constexpr const char* kGraphNodeType = "Audio Graph";
+
+        struct InlineContext
+        {
+            std::vector<AssetHandle>& Missing;
+            std::string& Error;
+            std::vector<std::pair<AssetHandle, uint32_t>>& Dependencies;
+            std::vector<AssetHandle> Stack; // the graphs being inlined (one playing itself is refused)
+        };
+
+        uint64_t GraphNodeTarget(const GraphNode& node)
+        {
+            const auto found = node.Properties.find("Graph");
+            const uint64_t* handle = found != node.Properties.end() ? std::get_if<uint64_t>(&found->second) : nullptr;
+            return handle ? *handle : 0;
+        }
+
+        // The name of input pin `pin` of `node` (its literal's property name).
+        std::string InputPinName(const NodeGraph& graph, const GraphNode& node, uint32_t pin)
+        {
+            const NodeTypeDesc* type = NodeTypeRegistry::Find(graph.Domain, node.TypeName);
+            if (!type)
+                return {};
+            const NodePinList pins = ResolveNodePins(*type, node.Properties);
+            return pin < pins.Inputs.size() ? pins.Inputs[pin].Name : std::string();
+        }
+
+        bool InlineGraphNodes(const NodeGraph& input, NodeGraph& out, InlineContext& context)
+        {
+            out = input;
+            bool complete = true;
+            for (;;)
+            {
+                const auto nodeIt = std::find_if(out.Nodes.begin(), out.Nodes.end(), [](const GraphNode& node) { return node.TypeName == kGraphNodeType; });
+                if (nodeIt == out.Nodes.end())
+                    break;
+                const GraphNode graphNode = *nodeIt;
+                out.Nodes.erase(nodeIt);
+
+                // The links into and out of the node, taken off.
+                std::unordered_map<uint32_t, GraphLink> incoming; // by its input pin
+                std::vector<GraphLink> outgoing;
+                for (auto link = out.Links.begin(); link != out.Links.end();)
+                {
+                    if (link->ToNode == graphNode.Id)
+                        incoming[link->ToPin] = *link;
+                    else if (link->FromNode == graphNode.Id)
+                        outgoing.push_back(*link);
+                    else
+                    {
+                        ++link;
+                        continue;
+                    }
+                    link = out.Links.erase(link);
+                }
+
+                const AssetHandle handle(GraphNodeTarget(graphNode));
+                if (handle == 0 || AssetManager::GetAssetType(handle) != AssetType::AudioGraph)
+                    continue; // (none picked, or deleted: plays nothing)
+                if (std::find(context.Stack.begin(), context.Stack.end(), handle) != context.Stack.end())
+                {
+                    context.Error = "an Audio Graph node plays a graph that plays this one (a loop)";
+                    return false;
+                }
+                const AssetState state = AssetManager::RequestAsset(handle);
+                if (state == AssetState::Failed)
+                    continue;
+                const NodeGraphAsset* asset = state == AssetState::Ready ? AssetManager::FindLoadedAsset<NodeGraphAsset>(handle) : nullptr;
+                if (!asset)
+                {
+                    context.Missing.push_back(handle);
+                    complete = false;
+                    continue;
+                }
+                context.Dependencies.emplace_back(handle, asset->CompileVersion);
+                NodeGraph child;
+                context.Stack.push_back(handle);
+                const bool inlined = InlineGraphNodes(asset->Graph, child, context);
+                context.Stack.pop_back();
+                if (!inlined)
+                {
+                    if (!context.Error.empty())
+                        return false;
+                    complete = false;
+                    continue;
+                }
+
+                // The child's Output node (its sink) and its parameter readers stay out; the rest comes in with new ids.
+                uint32_t childOutput = child.OutputNode;
+                if (std::none_of(child.Nodes.begin(), child.Nodes.end(), [&](const GraphNode& node) { return node.Id == childOutput && node.TypeName == "Output"; }))
+                {
+                    const auto sink = std::find_if(child.Nodes.begin(), child.Nodes.end(), [](const GraphNode& node) { return node.TypeName == "Output"; });
+                    childOutput = sink != child.Nodes.end() ? sink->Id : kInvalidGraphIndex;
+                }
+                std::unordered_map<uint32_t, std::string> readers; // node id -> the parameter it reads
+                std::unordered_map<uint32_t, uint32_t> newId;
+                for (const GraphNode& node : child.Nodes)
+                {
+                    if (node.Id == childOutput)
+                        continue;
+                    if (const auto reference = node.Properties.find(kParameterReferenceProperty);
+                        reference != node.Properties.end() && node.TypeName.rfind("Get ", 0) == 0)
+                    {
+                        if (const std::string* name = std::get_if<std::string>(&reference->second))
+                        {
+                            readers[node.Id] = *name;
+                            continue;
+                        }
+                    }
+                    GraphNode copy = node;
+                    copy.Id = out.NextNodeId++;
+                    newId[node.Id] = copy.Id;
+                    out.Nodes.push_back(std::move(copy));
+                }
+                auto findNode = [&](uint32_t id) -> GraphNode*
+                {
+                    const auto found = std::find_if(out.Nodes.begin(), out.Nodes.end(), [&](const GraphNode& node) { return node.Id == id; });
+                    return found != out.Nodes.end() ? &*found : nullptr;
+                };
+                auto parameterIndex = [&](const std::string& name) -> int32_t
+                {
+                    for (size_t i = 0; i < child.Parameters.size(); ++i)
+                        if (child.Parameters[i].Name == name)
+                            return static_cast<int32_t>(i);
+                    return -1;
+                };
+
+                // What feeds a child pin that a reader fed: the node's input for that parameter -- a link (from, pin), or none.
+                struct Source
+                {
+                    bool Linked = false;
+                    uint32_t Node = 0, Pin = 0;
+                };
+                auto readerSource = [&](uint32_t readerId) -> Source
+                {
+                    const int32_t index = parameterIndex(readers[readerId]);
+                    if (index < 0)
+                        return {};
+                    const auto link = incoming.find(static_cast<uint32_t>(index));
+                    return link != incoming.end() ? Source{ true, link->second.FromNode, link->second.FromPin } : Source{};
+                };
+                auto readerLiteral = [&](uint32_t readerId) -> const NodeGraphValue*
+                {
+                    const int32_t index = parameterIndex(readers[readerId]);
+                    if (index < 0 || child.Parameters[index].IsTrigger)
+                        return nullptr;
+                    if (const auto literal = graphNode.Properties.find(child.Parameters[index].Name); literal != graphNode.Properties.end())
+                        return &literal->second;
+                    return &child.Parameters[index].DefaultValue;
+                };
+
+                std::unordered_map<uint32_t, Source> outputFeed; // child Output pin -> its source in `out`
+                for (const GraphLink& link : child.Links)
+                {
+                    Source from;
+                    if (readers.contains(link.FromNode))
+                        from = readerSource(link.FromNode);
+                    else if (const auto mapped = newId.find(link.FromNode); mapped != newId.end())
+                        from = { true, mapped->second, link.FromPin };
+                    if (link.ToNode == childOutput)
+                    {
+                        outputFeed[link.ToPin] = from;
+                        continue;
+                    }
+                    const auto to = newId.find(link.ToNode);
+                    if (to == newId.end())
+                        continue;
+                    if (from.Linked)
+                        out.Links.push_back({ from.Node, from.Pin, to->second, link.ToPin });
+                    else if (readers.contains(link.FromNode))
+                    {
+                        // An unconnected parameter input: its literal on the reading pin (a trigger: nothing, it never fires).
+                        if (const NodeGraphValue* literal = readerLiteral(link.FromNode))
+                            if (GraphNode* target = findNode(to->second))
+                                target->Properties[InputPinName(child, *target, link.ToPin)] = *literal;
+                    }
+                }
+                for (const GraphLink& link : outgoing)
+                {
+                    const auto feed = outputFeed.find(link.FromPin);
+                    if (feed != outputFeed.end() && feed->second.Linked)
+                        out.Links.push_back({ feed->second.Node, feed->second.Pin, link.ToNode, link.ToPin });
+                    // (else: nothing fed that output -- silence, or a trigger that never fires)
+                }
+            }
+            return complete;
+        }
+    }
+
     void AudioGraphProgram::CollectClips(const NodeGraph& graph, std::vector<AssetHandle>& outClips)
     {
         for (const GraphNode& node : graph.Nodes)
         {
+            if (node.TypeName == kGraphNodeType)
+            {
+                // The graph it plays, and that graph's clips (when it is loaded).
+                const AssetHandle handle(GraphNodeTarget(node));
+                if (handle == 0 || std::find(outClips.begin(), outClips.end(), handle) != outClips.end())
+                    continue;
+                outClips.push_back(handle);
+                if (const NodeGraphAsset* asset = AssetManager::GetAssetType(handle) == AssetType::AudioGraph
+                        ? AssetManager::FindLoadedAsset<NodeGraphAsset>(handle) : nullptr)
+                    CollectClips(asset->Graph, outClips);
+                continue;
+            }
             const NodeTypeDesc* type = NodeTypeRegistry::Find(graph.Domain, node.TypeName);
             if (!type)
                 continue;
@@ -171,9 +386,23 @@ namespace Nox
         }
     }
 
-    std::shared_ptr<AudioGraphProgram> AudioGraphProgram::Build(const NodeGraph& graph, std::vector<AssetHandle>& outMissing, std::string& outError)
+    std::shared_ptr<AudioGraphProgram> AudioGraphProgram::Build(const NodeGraph& sourceGraph, std::vector<AssetHandle>& outMissing, std::string& outError,
+                                                                std::vector<std::pair<AssetHandle, uint32_t>>* outDependencies)
     {
         auto program = std::make_shared<AudioGraphProgram>();
+
+        // The graphs its Audio Graph nodes play, inlined (loaded first).
+        NodeGraph graph;
+        std::vector<std::pair<AssetHandle, uint32_t>> dependencies;
+        InlineContext context{ outMissing, outError, dependencies, {} };
+        if (!InlineGraphNodes(sourceGraph, graph, context))
+        {
+            if (outError.empty())
+                outError = "loading the graphs it plays";
+            return nullptr;
+        }
+        if (outDependencies)
+            *outDependencies = std::move(dependencies);
 
         // Its clips, loaded.
         std::vector<AssetHandle> clips;

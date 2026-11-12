@@ -15,6 +15,8 @@
 #include <cstring>
 #include <memory>
 
+#include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/NodeGraph/NodeGraphAsset.h"
 #include "NoxCore/NodeGraph/NodeType.h"
 
 namespace Nox
@@ -1174,6 +1176,18 @@ namespace Nox
             }
         };
 
+        // A value through a curve (Unreal's float curve, MetaSounds' curve mapping): Value in, the curve's value at it out -- a speed
+        // to a volume, an RPM to a pitch, with the shape drawn rather than built from math nodes.
+        struct CurveMap
+        {
+            struct State
+            {
+                const NodeGraphCurve* Curve = nullptr; // (the program's: it outlives the voice's state)
+            };
+            static void Init(State& state, AudioNodeSetup& setup) { state.Curve = setup.Curve("Curve"); }
+            static void Process(AudioNodeRun& run, State& state) { run.SetFloat(0, state.Curve ? state.Curve->Evaluate(run.Float(0)) : run.Float(0)); }
+        };
+
         struct Lerp : NoInit
         {
             using State = NoState;
@@ -1881,6 +1895,35 @@ namespace Nox
         }
         Register<Output>(Desc("Output", "Sinks", { A("Out Left"), A("Out Right"), T("On Finished") }, {}));
 
+        // Composition (MetaSounds' graph node): another audio graph played inside this one. Its inputs are that graph's parameters,
+        // its outputs that graph's Output; the build inlines it (AudioGraphProgram::Build), so it has no implementation of its own.
+        {
+            NodeTypeDesc desc = Desc("Audio Graph", "Composition", {}, { { "Out Left", "Audio" }, { "Out Right", "Audio" }, { "On Finished", "Trigger" } });
+            Property(desc, "Graph", uint64_t(0));
+            desc.PropertyAssetTypeHints["Graph"] = "AssetType::AudioGraph";
+            desc.NodePins = [](const std::unordered_map<std::string, NodeGraphValue>& properties, NodePinList& out)
+            {
+                out.Outputs = { { "Out Left", "Audio" }, { "Out Right", "Audio" }, { "On Finished", "Trigger" } };
+                const auto found = properties.find("Graph");
+                const uint64_t* handle = found != properties.end() ? std::get_if<uint64_t>(&found->second) : nullptr;
+                if (!handle || *handle == 0 || AssetManager::GetAssetType(*handle) != AssetType::AudioGraph)
+                    return;
+                const NodeGraphAsset* graph = AssetManager::FindLoadedAsset<NodeGraphAsset>(*handle);
+                if (!graph)
+                {
+                    AssetManager::RequestAsset(*handle); // (its pins appear once it is in)
+                    return;
+                }
+                for (const GraphParameter& parameter : graph->Graph.Parameters)
+                {
+                    out.Inputs.push_back({ parameter.Name, GraphParameterTypeName(parameter) });
+                    if (!parameter.IsTrigger)
+                        out.Literals.emplace_back(parameter.Name, parameter.DefaultValue);
+                }
+            };
+            NodeTypeRegistry::Register(std::move(desc));
+        }
+
         // Sources.
         {
             NodeTypeDesc desc = Desc("Wave Player", "Sources",
@@ -1996,6 +2039,11 @@ namespace Nox
         Register<Unary<UnaryOp::Abs>>(Desc("Abs", "Math", { F("Value", 0.0f) }, valueOut));
         Register<MapRange>(Desc("Map Range", "Math", { F("Value", 0.0f), F("In Min", 0.0f), F("In Max", 1.0f), F("Out Min", 0.0f), F("Out Max", 1.0f), B("Clamp", true) }, valueOut));
         Register<Lerp>(Desc("Lerp", "Math", { F("A", 0.0f), F("B", 1.0f), F("Alpha", 0.5f, 0.0f, 1.0f) }, valueOut));
+        {
+            NodeTypeDesc desc = Desc("Curve", "Math", { F("Value", 0.0f) }, valueOut);
+            Property(desc, "Curve", NodeGraphCurve{ { { 0.0f, 0.0f }, { 1.0f, 1.0f } }, false });
+            Register<CurveMap>(std::move(desc));
+        }
         {
             NodeTypeDesc desc = Desc("Random Float", "Math", { T("Next"), F("Min", 0.0f), F("Max", 1.0f) }, valueOut);
             Property(desc, "Seed", int32_t(-1));

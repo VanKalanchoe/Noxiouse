@@ -281,13 +281,17 @@ namespace Nox
         const std::vector<GraphLink>& links = graph.Links;
 
         ImGui::BeginGroup();
-        const uint32_t inputCount = InputPinCount(type, node.Properties);
+        // The node's pins (a graph node's come from the graph it plays); its value inputs' literals seeded the first time.
+        const NodePinList pins = ResolveNodePins(type, node.Properties);
+        for (const auto& [name, literal] : pins.Literals)
+            node.Properties.try_emplace(name, literal);
+        const uint32_t inputCount = static_cast<uint32_t>(pins.Inputs.size());
         for (uint32_t p = 0; p < inputCount; p++)
         {
             bool connected = std::any_of(links.begin(), links.end(),
                 [&](const GraphLink& l) { return l.ToNode == node.Id && l.ToPin == p; });
 
-            const NodePinDesc pin = InputPin(type, p);
+            const NodePinDesc& pin = pins.Inputs[p];
             ed::BeginPin(MakePinId(node.Id, p, false), ed::PinKind::Input);
             DrawPinIcon(kPinIconSize, PinShapeOf(pin.Type), connected, PinColor(pin.Type));
             ImGui::SameLine();
@@ -328,21 +332,21 @@ namespace Nox
         }
         ImGui::EndGroup();
 
-        if (!type.Outputs.empty())
+        if (!pins.Outputs.empty())
         {
             ImGui::SameLine();
             ImGui::BeginGroup();
-            for (uint32_t p = 0; p < (uint32_t)type.Outputs.size(); p++)
+            for (uint32_t p = 0; p < (uint32_t)pins.Outputs.size(); p++)
             {
                 bool connected = std::any_of(links.begin(), links.end(),
                     [&](const GraphLink& l) { return l.FromNode == node.Id && l.FromPin == p; });
 
                 ed::BeginPin(MakePinId(node.Id, p, true), ed::PinKind::Output);
-                ImGui::TextUnformatted(type.Outputs[p].Name.c_str());
+                ImGui::TextUnformatted(pins.Outputs[p].Name.c_str());
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", type.Outputs[p].Type.c_str());
+                    ImGui::SetTooltip("%s", pins.Outputs[p].Type.c_str());
                 ImGui::SameLine();
-                DrawPinIcon(kPinIconSize, PinShapeOf(type.Outputs[p].Type), connected, PinColor(type.Outputs[p].Type));
+                DrawPinIcon(kPinIconSize, PinShapeOf(pins.Outputs[p].Type), connected, PinColor(pins.Outputs[p].Type));
                 ed::EndPin();
             }
             ImGui::EndGroup();
@@ -397,7 +401,7 @@ namespace Nox
                 // A pin's literal does nothing while a link feeds the pin: shown, but greyed out.
                 uint32_t pinIndex = UINT32_MAX;
                 for (uint32_t p = 0; p < inputCount && pinIndex == UINT32_MAX; ++p)
-                    if (InputPin(type, p).Name == name)
+                    if (pins.Inputs[p].Name == name)
                         pinIndex = p;
                 const bool pinConnected = pinIndex != UINT32_MAX &&
                     std::any_of(links.begin(), links.end(), [&](const GraphLink& l) { return l.ToNode == node.Id && l.ToPin == pinIndex; });
@@ -674,9 +678,14 @@ namespace Nox
                     const NodeTypeDesc* fromType = fromGraphNode ? TypeOf(graph, *fromGraphNode) : nullptr;
                     const NodeTypeDesc* toType = toGraphNode ? TypeOf(graph, *toGraphNode) : nullptr;
 
-                    bool valid = fromType && toType &&
-                                fromPin < (uint32_t)fromType->Outputs.size() && toPin < InputPinCount(*toType, toGraphNode->Properties) &&
-                                fromType->Outputs[fromPin].Type == InputPin(*toType, toPin).Type;
+                    bool valid = false;
+                    if (fromType && toType)
+                    {
+                        const NodePinList fromPins = ResolveNodePins(*fromType, fromGraphNode->Properties);
+                        const NodePinList toPins = ResolveNodePins(*toType, toGraphNode->Properties);
+                        valid = fromPin < (uint32_t)fromPins.Outputs.size() && toPin < (uint32_t)toPins.Inputs.size() &&
+                                fromPins.Outputs[fromPin].Type == toPins.Inputs[toPin].Type;
+                    }
 
                     if (valid && ed::AcceptNewItem())
                     {

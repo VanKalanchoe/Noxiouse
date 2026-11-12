@@ -55,6 +55,10 @@ namespace Nox
         std::string ParameterType;
         // For an int property that picks one of several options (an oscillator's waveform, a filter's type): their names, by value.
         std::unordered_map<std::string, std::vector<std::string>> PropertyEnums;
+        // Pins that depend on the node itself (MetaSounds' graph node: the graph it plays decides its inputs and outputs). Set: it
+        // gives this node's input and output pins from its properties, in place of Inputs, VariableInputs and Outputs (and the
+        // literals its value inputs start with).
+        std::function<void(const std::unordered_map<std::string, NodeGraphValue>& properties, struct NodePinList& out)> NodePins;
     };
 
     // How many copies of its type's VariableInput a node has (an int property; the editor's + / - pins change it).
@@ -84,6 +88,29 @@ namespace Nox
         const uint32_t groupSize = static_cast<uint32_t>(type.VariableInputs.size());
         const NodePinDesc& pin = type.VariableInputs[variable % groupSize];
         return { pin.Name + " " + std::to_string(variable / groupSize), pin.Type };
+    }
+
+    // A node's pins with NodeTypeDesc::NodePins taken into account: the editor and the compiler's link checks use these.
+    struct NodePinList
+    {
+        std::vector<NodePinDesc> Inputs;
+        std::vector<NodePinDesc> Outputs;
+        std::vector<std::pair<std::string, NodeGraphValue>> Literals; // NodePins: the value inputs' starting literals, by pin name
+    };
+    inline NodePinList ResolveNodePins(const NodeTypeDesc& type, const std::unordered_map<std::string, NodeGraphValue>& properties)
+    {
+        NodePinList pins;
+        if (type.NodePins)
+        {
+            type.NodePins(properties, pins);
+            return pins;
+        }
+        const uint32_t count = InputPinCount(type, properties);
+        pins.Inputs.reserve(count);
+        for (uint32_t index = 0; index < count; ++index)
+            pins.Inputs.push_back(InputPin(type, index));
+        pins.Outputs = type.Outputs;
+        return pins;
     }
 
     // Process-wide registry of node types, shared by every domain. Domain-agnostic: it only stores and looks up

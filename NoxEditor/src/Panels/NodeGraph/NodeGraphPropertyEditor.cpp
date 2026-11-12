@@ -51,6 +51,68 @@ namespace Nox
             ImGui::Text("%s: %s", name.c_str(), label.c_str());
             return false;
         }
+        if (NodeGraphCurve* curve = std::get_if<NodeGraphCurve>(&value))
+        {
+            // A small plot of the curve over its keys' range, then the keys (x, y) to drag, + / - and Smooth. (Inside a node only
+            // drag widgets work reliably: imgui-node-editor takes the clicks of free-drawn canvases.)
+            bool changed = false;
+            ImGui::TextUnformatted(name.c_str());
+            const ImVec2 size(200.0f, 80.0f);
+            const ImVec2 origin = ImGui::GetCursorScreenPos();
+            ImGui::Dummy(size);
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            draw->AddRectFilled(origin, ImVec2(origin.x + size.x, origin.y + size.y), IM_COL32(25, 25, 30, 255));
+            if (!curve->Keys.empty())
+            {
+                float x0 = curve->Keys.front().x, x1 = curve->Keys.back().x, y0 = curve->Keys.front().y, y1 = y0;
+                for (const glm::vec2& key : curve->Keys)
+                {
+                    y0 = std::min(y0, key.y);
+                    y1 = std::max(y1, key.y);
+                }
+                if (x1 - x0 < 1e-6f) x1 = x0 + 1.0f;
+                if (y1 - y0 < 1e-6f) { y0 -= 0.5f; y1 += 0.5f; }
+                auto toScreen = [&](float x, float y) { return ImVec2(origin.x + 4.0f + (x - x0) / (x1 - x0) * (size.x - 8.0f), origin.y + size.y - 4.0f - (y - y0) / (y1 - y0) * (size.y - 8.0f)); };
+                ImVec2 previous = toScreen(x0, curve->Evaluate(x0));
+                for (int i = 1; i <= 64; ++i)
+                {
+                    const float x = x0 + (x1 - x0) * static_cast<float>(i) / 64.0f;
+                    const ImVec2 point = toScreen(x, curve->Evaluate(x));
+                    draw->AddLine(previous, point, IM_COL32(120, 200, 255, 255), 1.5f);
+                    previous = point;
+                }
+                for (const glm::vec2& key : curve->Keys)
+                    draw->AddCircleFilled(toScreen(key.x, key.y), 3.0f, IM_COL32(255, 200, 70, 255));
+            }
+            int remove = -1;
+            bool sort = false; // (when a drag ends: re-sorting under the cursor would hand the drag to another key)
+            for (int i = 0; i < static_cast<int>(curve->Keys.size()); ++i)
+            {
+                ImGui::PushID(i);
+                if (ImGui::DragFloat2("##key", &curve->Keys[i].x, 0.01f))
+                    changed = true;
+                sort |= ImGui::IsItemDeactivatedAfterEdit();
+                ImGui::SameLine();
+                if (ImGui::SmallButton("x"))
+                    remove = i;
+                ImGui::PopID();
+            }
+            if (remove >= 0)
+            {
+                curve->Keys.erase(curve->Keys.begin() + remove);
+                changed = true;
+            }
+            if (ImGui::SmallButton("+ Key"))
+            {
+                curve->Keys.push_back(curve->Keys.empty() ? glm::vec2(0.0f) : curve->Keys.back() + glm::vec2(1.0f, 0.0f));
+                changed = sort = true;
+            }
+            ImGui::SameLine();
+            changed |= ImGui::Checkbox("Smooth", &curve->Smooth);
+            if (sort)
+                std::stable_sort(curve->Keys.begin(), curve->Keys.end(), [](const glm::vec2& a, const glm::vec2& b) { return a.x < b.x; });
+            return changed;
+        }
         if (std::string* s = std::get_if<std::string>(&value))
         {
             char buffer[256];

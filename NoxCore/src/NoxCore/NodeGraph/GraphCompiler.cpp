@@ -72,17 +72,19 @@ namespace Nox
             const NodeTypeDesc& fromType = *types[fromIndex];
             const NodeTypeDesc& toType = *types[toIndex];
 
-            if (link.FromPin >= fromType.Outputs.size() || link.ToPin >= InputPinCount(toType, graph.Nodes[toIndex].Properties))
+            const NodePinList fromPins = ResolveNodePins(fromType, graph.Nodes[fromIndex].Properties);
+            const NodePinList toPins = ResolveNodePins(toType, graph.Nodes[toIndex].Properties);
+            if (link.FromPin >= fromPins.Outputs.size() || link.ToPin >= toPins.Inputs.size())
             {
                 NOX_CORE_ERROR("GraphCompiler::Compile - link pin index out of range in graph '{}'", graph.Domain);
                 return CompiledGraph{};
             }
-            const NodePinDesc toPin = InputPin(toType, link.ToPin);
-            if (fromType.Outputs[link.FromPin].Type != toPin.Type)
+            const NodePinDesc& fromPin = fromPins.Outputs[link.FromPin];
+            const NodePinDesc& toPin = toPins.Inputs[link.ToPin];
+            if (fromPin.Type != toPin.Type)
             {
                 NOX_CORE_ERROR("GraphCompiler::Compile - pin type mismatch linking {}.{} ({}) to {}.{} ({})",
-                               fromType.TypeName, fromType.Outputs[link.FromPin].Name, fromType.Outputs[link.FromPin].Type,
-                               toType.TypeName, toPin.Name, toPin.Type);
+                               fromType.TypeName, fromPin.Name, fromPin.Type, toType.TypeName, toPin.Name, toPin.Type);
                 return CompiledGraph{};
             }
 
@@ -152,9 +154,10 @@ namespace Nox
                 }
                 compiled.SubGraphs.push_back(std::move(compiledSub));
             }
-            compiled.Inputs.resize(InputPinCount(*compiled.Type, compiled.Properties));
+            const NodePinList pins = ResolveNodePins(*compiled.Type, compiled.Properties);
+            compiled.Inputs.resize(pins.Inputs.size());
             compiled.OutputSlotBase = nextOutputSlot;
-            nextOutputSlot += (uint32_t)compiled.Type->Outputs.size();
+            nextOutputSlot += (uint32_t)pins.Outputs.size();
         }
 
         for (uint32_t toIndex = 0; toIndex < (uint32_t)graph.Nodes.size(); toIndex++)

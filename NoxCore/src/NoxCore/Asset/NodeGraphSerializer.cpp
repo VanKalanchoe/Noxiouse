@@ -71,6 +71,15 @@ namespace Nox
                 out << YAML::Key << "U64" << YAML::Value << v;
             else if constexpr (std::is_same_v<T, std::string>)
                 out << YAML::Key << "Str" << YAML::Value << v;
+            else if constexpr (std::is_same_v<T, NodeGraphCurve>)
+            {
+                out << YAML::Key << "Curve" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+                for (const glm::vec2& key : v.Keys)
+                    out << YAML::Flow << YAML::BeginSeq << key.x << key.y << YAML::EndSeq;
+                out << YAML::EndSeq;
+                if (v.Smooth)
+                    out << YAML::Key << "Smooth" << YAML::Value << true;
+            }
         }, value);
         out << YAML::EndMap;
     }
@@ -83,6 +92,17 @@ namespace Nox
         if (node["Vec2"]) { value = node["Vec2"].as<glm::vec2>(); return true; }
         if (node["U64"]) { value = node["U64"].as<uint64_t>(); return true; }
         if (node["Str"]) { value = node["Str"].as<std::string>(); return true; }
+        if (const YAML::Node keys = node["Curve"])
+        {
+            NodeGraphCurve curve;
+            for (const YAML::Node& key : keys)
+                if (key.IsSequence() && key.size() >= 2)
+                    curve.Keys.emplace_back(key[0].as<float>(), key[1].as<float>());
+            std::sort(curve.Keys.begin(), curve.Keys.end(), [](const glm::vec2& a, const glm::vec2& b) { return a.x < b.x; });
+            curve.Smooth = node["Smooth"] && node["Smooth"].as<bool>();
+            value = std::move(curve);
+            return true;
+        }
         return false;
     }
 

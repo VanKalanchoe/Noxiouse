@@ -70,6 +70,8 @@ namespace Nox
         bool Bool(const std::string& name, bool fallback = false) const;
         uint64_t Handle(const std::string& name) const;
         std::string String(const std::string& name) const;
+        // A curve property (NodeGraphCurve), in the program (it lives as long as the voice): null when the node has none.
+        const NodeGraphCurve* Curve(const std::string& name) const;
         const AudioClip* Clip(uint64_t handle) const; // null: none, or not an audio clip
         AudioClipStream* CreateStream();              // owned by the voice, filled by the engine's stream thread
         int32_t ParameterIndex(const std::string& name) const; // -1: none
@@ -177,8 +179,12 @@ namespace Nox
 
         // Compiles `graph`; the clips its nodes name must be loaded (the ones that are not are put in outMissing and the build fails --
         // ask for them and build again). Null with a reason in outError when the graph does not compile.
-        static std::shared_ptr<AudioGraphProgram> Build(const NodeGraph& graph, std::vector<AssetHandle>& outMissing, std::string& outError);
-        // The clips `graph` names (its nodes' audio clip properties).
+        // Audio Graph nodes (graphs inside the graph, MetaSounds' composition) are inlined first: the graphs they play must be loaded
+        // too (outMissing). outDependencies: those graphs and the CompileVersion each was built from (an edit of one rebuilds this).
+        static std::shared_ptr<AudioGraphProgram> Build(const NodeGraph& graph, std::vector<AssetHandle>& outMissing, std::string& outError,
+                                                        std::vector<std::pair<AssetHandle, uint32_t>>* outDependencies = nullptr);
+        // The clips `graph` names (its nodes' audio clip properties), and the graphs its Audio Graph nodes play with their clips
+        // (the ones loaded: what a scene keeps loaded and packaging takes along).
         static void CollectClips(const NodeGraph& graph, std::vector<AssetHandle>& outClips);
 
         int32_t FindParameter(const std::string& name) const;
