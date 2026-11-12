@@ -760,10 +760,12 @@
         // Screen-space reflections (Settings > Screen-Space Reflections) where the RT ones do not run: the reflected scene where SSR
         // found it, the environment / probes where its confidence is low (SSR.slang; premultiplied: rgb is light x confidence). Its
         // radiance is the lit scene: no sky occlusion.
+        float ssrConfidence = 0.0; // (debug view 24)
         if (!hasRTReflection && pushConstant.ssrTextureIndex != 0xFFFFFFFF && ubo->brdfLutIndex != 0xFFFFFFFF)
         {
             Texture2D ssrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssrTextureIndex, 0));
             const float4 ssr = ssrTex.Load(int3(pixelCoord, 0));
+            ssrConfidence = saturate(ssr.a);
             if (ssr.a > 0.0)
             {
                 SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
@@ -814,6 +816,19 @@
         }
 
         float3 iblColor = ambientDiffuse + ambientSpecular;
+
+        // Debug 24: where each pixel's reflection comes from -- green: the RT reflection or SSR found it, yellow: the room's light
+        // from the raster probe volume (SSR missed, sky hidden), red: the sky / environment (SSR missed, the probes see sky that way
+        // or there is no volume). Blended by how much of each.
+        if (pushConstant.debugMode == 24)
+        {
+            const float found = hasRTReflection ? 1.0 : ssrConfidence;
+            const float3 missed = lerp(float3(1.0, 0.85, 0.1), float3(1.0, 0.1, 0.1), saturate(volumeSkyVisibility));
+            return float4(lerp(missed, float3(0.1, 1.0, 0.2), found) * (0.35 + 0.65 * saturate(1.0 - perceptualRoughness)), 1.0);
+        }
+        // Debug 25: the reflections alone (the ambient specular: RT / SSR / probes / volume / environment, as lit).
+        if (pushConstant.debugMode == 25)
+            return float4(ambientSpecular, 1.0);
 
         // =========================================================================
         // DEBUG OUTPUT SELECTION

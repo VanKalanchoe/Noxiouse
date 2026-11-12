@@ -1120,7 +1120,9 @@ namespace Nox
             "20: Texture Streaming Mips (red: needs more, green: as needed, blue: more than needed)",
             "21: Cluster LOD Level (green: original, then yellow, orange, red, magenta, blue)",
             "22: Ambient Occlusion (SSAO/RTAO, white = unoccluded)",
-            "23: Geometry Streaming Pages (gray: not streamed, blue: root page, green: streamed page, cyan: original geometry)"
+            "23: Geometry Streaming Pages (gray: not streamed, blue: root page, green: streamed page, cyan: original geometry)",
+            "24: Reflection Source (green: RT / SSR found it, yellow: probe volume's room light, red: sky; darker = rougher)",
+            "25: Reflections Only (what each surface reflects)"
         };
         int currentMode = static_cast<int>(m_Renderer->getDebugMode());
         if (ImGui::Combo("PBR Debug View", &currentMode, debugModeNames, IM_ARRAYSIZE(debugModeNames)))
