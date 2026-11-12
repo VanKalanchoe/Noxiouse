@@ -92,14 +92,15 @@ namespace NRI
         const PipelineVK::BuildStats stats = PipelineVK::FinishPendingBuilds();
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
         if (stats.Parallel + stats.Compiled + stats.Failed > 0)
-            NOX_CORE_INFO("Pipelines: {} built in parallel, {} needed the shader compiler, {} failed (waited {:.0f} ms for them)",
+            NOX_CORE_INFO("Pipelines: {} built in parallel from the cache, {} compiled in parallel, {} failed (waited {:.0f} ms for them)",
                           stats.Parallel, stats.Compiled, stats.Failed, ms);
     }
 
     std::unique_ptr<Pipeline> DeviceVK::createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler)
     {
         auto pipeline = std::make_unique<PipelineVK>(*this, desc, compiler);
-        if (ShaderProgress* progress = GetShaderProgress(); progress && progress->OnPipelineCreated)
+        // (One built on the pool is counted when it is done: FinishPendingBuilds.)
+        if (ShaderProgress* progress = GetShaderProgress(); progress && progress->OnPipelineCreated && !pipeline->isBuiltOnPool())
             progress->OnPipelineCreated();
         return pipeline;
     }

@@ -1466,7 +1466,7 @@ namespace Nox
             if (refraction)
                 addRefractionSourcePasses();
             // AVBOIT: the transmittance volume of every transparent surface first (meshes and alpha-blended particles).
-            addAVBOITPasses(true, refraction);
+            addAVBOITPasses(true);
             ensureOITTargets();
             m_frame.oitWritten = true;
             m_renderGraph.AddPass("Transparent OIT", RGPassFlags::Raster,

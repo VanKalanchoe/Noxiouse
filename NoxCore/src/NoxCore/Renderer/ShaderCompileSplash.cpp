@@ -19,6 +19,8 @@ namespace Nox
         }
         m_Progress.OnCompile = [this](const std::string& source) { OnCompile(source); };
         m_Progress.OnPipelineCreated = [this]() { OnPipelineCreated(); };
+        m_Progress.OnIdle = [this]() { OnIdle(); };
+        m_MainThread = std::this_thread::get_id();
         NRI::SetShaderProgress(&m_Progress);
     }
 
@@ -40,25 +42,47 @@ namespace Nox
 
     void ShaderCompileSplash::OnCompile(const std::string& source)
     {
-        ++m_Compiles;
-        m_Current = std::filesystem::path(source).filename().string();
-        if (!m_Window)
         {
-            // The first real compile: from here on the start takes a while.
-            m_Window = SDL_CreateWindow("Noxiouse - compiling shaders", 560, 150, SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP);
-            if (m_Window)
-            {
-                SDL_SetWindowPosition(m_Window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-                m_Renderer = SDL_CreateRenderer(m_Window, nullptr);
-                SDL_ShowWindow(m_Window);
-            }
+            std::lock_guard lock(m_Mutex);
+            ++m_Compiles;
+            m_Current = std::filesystem::path(source).filename().string();
         }
+        // On a worker: the main thread draws it while it waits (OnIdle).
+        if (std::this_thread::get_id() != m_MainThread)
+            return;
+        EnsureWindow();
         Draw(true); // before the compile starts, so the name shown is the one it is busy with
+    }
+
+    void ShaderCompileSplash::EnsureWindow()
+    {
+        if (m_Window)
+            return;
+        {
+            std::lock_guard lock(m_Mutex);
+            if (m_Compiles == 0)
+                return; // everything from the cache so far: no window
+        }
+        // The first real compile: from here on the start takes a while.
+        m_Window = SDL_CreateWindow("Noxiouse - compiling shaders", 560, 150, SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP);
+        if (m_Window)
+        {
+            SDL_SetWindowPosition(m_Window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+            m_Renderer = SDL_CreateRenderer(m_Window, nullptr);
+            SDL_ShowWindow(m_Window);
+        }
     }
 
     void ShaderCompileSplash::OnPipelineCreated()
     {
         ++m_Pipelines;
+        EnsureWindow();
+        Draw(false);
+    }
+
+    void ShaderCompileSplash::OnIdle()
+    {
+        EnsureWindow();
         Draw(false);
     }
 
@@ -92,12 +116,19 @@ namespace Nox
         SDL_SetRenderDrawColor(m_Renderer, 70, 140, 255, 255);
         SDL_RenderFillRect(m_Renderer, &bar);
 
+        uint32_t compiles = 0;
+        std::string current;
+        {
+            std::lock_guard lock(m_Mutex);
+            compiles = m_Compiles;
+            current = m_Current;
+        }
         char line[160];
         std::snprintf(line, sizeof(line), "%u%%   pipeline %u of ~%u, %u shader files compiled", static_cast<uint32_t>(fraction * 100.0f), m_Pipelines,
-                      m_Expected, m_Compiles);
+                      m_Expected, compiles);
         SDL_SetRenderDrawColor(m_Renderer, 210, 210, 210, 255);
         SDL_RenderDebugText(m_Renderer, 20.0f, 96.0f, line);
-        std::snprintf(line, sizeof(line), "Compiling %s", m_Current.c_str());
+        std::snprintf(line, sizeof(line), "Compiling %s (and others in parallel)", current.c_str());
         SDL_SetRenderDrawColor(m_Renderer, 150, 150, 150, 255);
         SDL_RenderDebugText(m_Renderer, 20.0f, 116.0f, line);
         SDL_RenderPresent(m_Renderer);

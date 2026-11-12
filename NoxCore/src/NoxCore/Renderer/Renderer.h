@@ -1312,8 +1312,7 @@ namespace Nox
         void addOITCompositePass();
         // AVBOIT's transmittance volume before the transparent surfaces are shaded (Passes/AVBOITPasses.cpp): the transparent meshes
         // (`meshes`: their draws are in this frame) and the alpha-blended particles, once per frame (the first OIT pass asks).
-        // `refraction`: the glass is shaded over the refraction source this frame (its transmittance then is what it does not cover).
-        void addAVBOITPasses(bool meshes, bool refraction = false);
+        void addAVBOITPasses(bool meshes);
         void createAVBOITPipelines(bool forceCompile = false);
         void declareAVBOITPrepassInputs(RGBuilder& builder);
         // Lit transparent draws whose material transmits (glass) in this frame's draw list.

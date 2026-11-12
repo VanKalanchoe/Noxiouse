@@ -17,19 +17,21 @@ namespace NRI
     class PipelineVK final : public Pipeline
     {
     public:
-        // A shader-object pipeline from cached binaries is built on worker threads (the start-up's ~200 pipelines at once); every
-        // accessor waits for it to be done. FinishPendingBuilds waits for all of them (end of the renderer's start-up), building
-        // again on the calling thread any that needs the shader compiler.
+        // A shader-object pipeline is built on worker threads (the start-up's ~200 pipelines at once, compiling sources that have no
+        // cached binary there too); every accessor waits for it to be done. FinishPendingBuilds waits for all of them (end of the
+        // renderer's start-up), drawing the compile progress meanwhile.
         PipelineVK(DeviceVK& device, const PipelineDesc& desc, ShaderCompiler& compiler);
         ~PipelineVK() override;
 
         struct BuildStats
         {
-            uint32_t Parallel = 0; // built on the workers
-            uint32_t Compiled = 0; // needed the compiler: built on the calling thread
+            uint32_t Parallel = 0; // built on the workers from cached binaries
+            uint32_t Compiled = 0; // built on the workers, compiling at least one source
             uint32_t Failed = 0;
         };
         static BuildStats FinishPendingBuilds();
+        // Built on the pool (FinishPendingBuilds reports it to the progress as created), or here.
+        bool isBuiltOnPool() const;
         
         bool isShaderObject() const { ensureBuilt(); return !m_shaders.empty(); }
         const vk::raii::Pipeline& getNativePipeline() const { ensureBuilt(); return m_pipeline; }
@@ -50,7 +52,7 @@ namespace NRI
     private:
         void build(const PipelineDesc& desc, ShaderCompiler& compiler);
         void ensureBuilt() const;
-        // The shader compiler, or (building on a worker) a request to build again where the compiler may run.
+        // A stage's SPIR-V: its cached file, else the shader compiler (each source once, compileModuleOnce).
         std::vector<char> compileShader(const ShaderStageDesc& shaderDesc, ShaderCompiler& compiler, bool forceCompile);
 
         struct AsyncBuild
@@ -60,12 +62,11 @@ namespace NRI
             std::mutex Mutex;
             std::condition_variable Finished;
             bool Done = false;
-            bool NeedsSyncBuild = false;
+            bool Compiled = false; // the build compiled a source (BuildStats)
             std::exception_ptr Error;
         };
         std::shared_ptr<AsyncBuild> m_async;
         mutable std::atomic<bool> m_ready{ false };
-        bool m_deferCompile = false;
 
         [[nodiscard]] vk::raii::ShaderModule createShaderModule(const std::vector<char>& code) const;
         vk::ShaderStageFlagBits translateShaderStage(ShaderStage stage);

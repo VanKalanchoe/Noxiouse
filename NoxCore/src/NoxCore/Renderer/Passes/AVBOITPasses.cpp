@@ -81,7 +81,7 @@ namespace Nox
         builder.SetRenderArea({ m_avboitGrid.x, m_avboitGrid.y });
     }
 
-    void Renderer::addAVBOITPasses(bool meshes, bool refraction)
+    void Renderer::addAVBOITPasses(bool meshes)
     {
         if (m_frame.avboitAdded || m_oitMethod != OITMethod::AVBOIT || !isOITActive() || !m_avboitLutPipeline || !m_avboitIntegratePipeline ||
             !m_transparentLitAVBOITOccupancyPipeline || !m_transparentLitAVBOITSplatPipeline || !m_unlitAVBOITOccupancyPipeline ||
@@ -183,10 +183,8 @@ namespace Nox
                 {
                     builder.ColorTarget(placeholder, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
                     declareAVBOITPrepassInputs(builder);
-                    if (meshes && refraction)
-                        builder.Read(resources.RefractionSource);
                 },
-                [this, res = &resources, meshes, refraction, litPipeline, unlitPipeline, particlePipeline, particleBatches, particles, uniforms](RGPassContext& context)
+                [this, res = &resources, meshes, litPipeline, unlitPipeline, particlePipeline, particleBatches, particles, uniforms](RGPassContext& context)
                 {
                     NRI::CommandBuffer& cmd = context.Cmd();
                     cmd.setDepthTestEnable(false);
@@ -197,10 +195,10 @@ namespace Nox
                     {
                         MeshletDrawCursor cursor = beginMeshletDraws(context, res->CameraDraws);
                         cursor.boundPipeline = nullptr;
-                        // As the shading pass: glass over the refraction source lets through only what it does not cover (no rays
-                        // here: the transmittance does not depend on them).
-                        if (refraction)
-                            cursor.references.refractionTextureIndex = context.Slot(res->RefractionSource);
+                        // Never the refraction source here (the cursor's slot stays none): glass refracting the scene covers it fully in
+                        // the shading pass (it shows the opaque scene behind it as its own color), but what it lets through of the
+                        // transparent surfaces behind it is its tinted transmission -- splatted as "covers fully", every glass behind
+                        // the nearest got no weight and vanished.
                         auto drawBuckets = [&](MeshletDrawCursor& drawCursor)
                         {
                             drawMeshletBucket(cmd, drawCursor, RenderBucket::Transparent, *litPipeline, NRI::CullMode::Back, false, false);
@@ -211,7 +209,6 @@ namespace Nox
                         drawBuckets(cursor);
                         MeshletDrawCursor lateCursor = beginMeshletDraws(context, res->CameraDraws, true);
                         lateCursor.boundPipeline = cursor.boundPipeline;
-                        lateCursor.references.refractionTextureIndex = cursor.references.refractionTextureIndex;
                         drawBuckets(lateCursor);
                         cmd.setDepthTestEnable(false);
                         cmd.setDepthWriteEnable(false);

@@ -10,11 +10,13 @@ namespace NRI
     enum class GraphicsAPI : uint8_t;
 
     // Startup progress (the renderer's splash while shaders compile): who is told when a source really compiles (a cached binary is
-    // not a compile) and when a pipeline has been created. Main thread; null outside the renderer's start.
+    // not a compile; any thread: pipelines build on workers), when a pipeline is done (main thread), and that the main thread is
+    // waiting for the workers (OnIdle, every few tens of ms: draw, answer the OS). Null outside the renderer's start.
     struct ShaderProgress
     {
         std::function<void(const std::string& source)> OnCompile;
         std::function<void()> OnPipelineCreated;
+        std::function<void()> OnIdle;
     };
     void SetShaderProgress(ShaderProgress* progress);
     ShaderProgress* GetShaderProgress();

@@ -2,7 +2,9 @@
 
 #include <array>
 #include <fstream>
+#include <algorithm>
 #include <memory>
+#include <thread>
 #include <unordered_set>
 
 
@@ -64,11 +66,15 @@ namespace NRI
         return std::make_unique<SlangCompiler>();
     }
 
-    SlangCompiler::SlangCompiler() = default;
+    SlangCompiler::SlangCompiler()
+    {
+        const unsigned hardware = std::thread::hardware_concurrency();
+        m_maxSessions = std::clamp(hardware / 2u, 1u, 6u);
+    }
 
     bool SlangCompiler::canCompile()
     {
-        if (m_available < 0)
+        std::call_once(m_availableOnce, [this]
         {
 #ifdef _WIN32
             // Delay-loaded: calling into it without the DLL would end the process, so look for it first.
@@ -81,18 +87,37 @@ namespace NRI
 #endif
             if (!m_available)
                 NOX_CORE_INFO("Slang is not shipped: shaders come from the precompiled cache only");
-        }
+        });
         return m_available == 1;
     }
 
-    bool SlangCompiler::ensureSession()
+    Slang::ComPtr<slang::IGlobalSession> SlangCompiler::acquireSession()
     {
-        if (m_globalSession)
-            return true;
         if (!canCompile())
-            return false;
-        slang::createGlobalSession(m_globalSession.writeRef());
-        return static_cast<bool>(m_globalSession);
+            return nullptr;
+        std::unique_lock lock(m_sessionMutex);
+        m_sessionFree.wait(lock, [this] { return !m_freeSessions.empty() || m_sessionCount < m_maxSessions; });
+        if (!m_freeSessions.empty())
+        {
+            Slang::ComPtr<slang::IGlobalSession> session = m_freeSessions.back();
+            m_freeSessions.pop_back();
+            return session;
+        }
+        // A new one (made under the lock: rare, a handful per run).
+        Slang::ComPtr<slang::IGlobalSession> session;
+        slang::createGlobalSession(session.writeRef());
+        if (session)
+            ++m_sessionCount;
+        return session;
+    }
+
+    void SlangCompiler::releaseSession(Slang::ComPtr<slang::IGlobalSession> session)
+    {
+        {
+            std::lock_guard lock(m_sessionMutex);
+            m_freeSessions.push_back(std::move(session));
+        }
+        m_sessionFree.notify_one();
     }
     
     // Mirrors how Slang resolves a quoted include: the including file's own directory first, then the search paths.
@@ -143,9 +168,17 @@ namespace NRI
         if (!std::filesystem::exists(path)) NOX_CORE_ERROR("SlangCompiler::compile file not found: {}", path);
         if (s_ShaderProgress && s_ShaderProgress->OnCompile)
             s_ShaderProgress->OnCompile(path);
-        if (!ensureSession())
+        Slang::ComPtr<slang::IGlobalSession> globalSession = acquireSession();
+        if (!globalSession)
             throw std::runtime_error("No precompiled binary for '" + path + "' and no shader compiler shipped (rebuild the package with "
                                      "the editor having created every pipeline once)");
+        // Back to the pool however this compile ends.
+        struct SessionReturn
+        {
+            SlangCompiler* Compiler;
+            Slang::ComPtr<slang::IGlobalSession> Session; // (a second reference: returned when the compile is over)
+            ~SessionReturn() { Compiler->releaseSession(std::move(Session)); }
+        } sessionReturn{ this, globalSession };
         
         Slang::ComPtr<slang::ISession> session;
         
@@ -153,7 +186,7 @@ namespace NRI
             std::to_array<slang::TargetDesc>({
                 {
                     .format{m_targetAPI == static_cast<GraphicsAPI>(2) ? SLANG_DXIL : SLANG_SPIRV},
-                    .profile{m_globalSession->findProfile(m_targetAPI == static_cast<GraphicsAPI>(2) ? "sm_6_6" : "spirv_1_6")}
+                    .profile{globalSession->findProfile(m_targetAPI == static_cast<GraphicsAPI>(2) ? "sm_6_6" : "spirv_1_6")}
                 }
             })
         };
@@ -173,8 +206,8 @@ namespace NRI
             });
             slangOptions.push_back({ slang::CompilerOptionName::EmitSpirvDirectly, { slang::CompilerOptionValueKind::Int, 1 } });
             slangOptions.push_back({ slang::CompilerOptionName::VulkanUseEntryPointName, { slang::CompilerOptionValueKind::Int, 1 } });
-            slangOptions.push_back({ slang::CompilerOptionName::Capability, { slang::CompilerOptionValueKind::Int, m_globalSession->findCapability("spvDescriptorHeapEXT") } });
-            slangOptions.push_back({ slang::CompilerOptionName::Capability, { slang::CompilerOptionValueKind::Int, m_globalSession->findCapability("spvRayQueryKHR") } });
+            slangOptions.push_back({ slang::CompilerOptionName::Capability, { slang::CompilerOptionValueKind::Int, globalSession->findCapability("spvDescriptorHeapEXT") } });
+            slangOptions.push_back({ slang::CompilerOptionName::Capability, { slang::CompilerOptionValueKind::Int, globalSession->findCapability("spvRayQueryKHR") } });
         }
         else
         {
@@ -228,7 +261,7 @@ namespace NRI
             .compilerOptionEntryCount{uint32_t(slangOptions.size())},
         };
 
-        m_globalSession->createSession(slangSessionDesc, session.writeRef());
+        globalSession->createSession(slangSessionDesc, session.writeRef());
         
         std::string moduleName = std::filesystem::path(path).stem().string();
         

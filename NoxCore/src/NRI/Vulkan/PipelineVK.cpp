@@ -8,7 +8,10 @@
 #include <iostream>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
+#include <chrono>
+#include <atomic>
 #include <SDL3/SDL_filesystem.h>
 
 #include "DeviceVK.h"
@@ -124,6 +127,116 @@ namespace NRI
         return data;
     }
     
+    // A cache file written whole or not at all: pipelines build on several threads, and two of them may write the same stage's file
+    // (Material_PBR_MeshTask's taskMain is in dozens of pipelines) while a third reads it. Written next to it, then renamed over it.
+    static void writeFileAtomic(const std::filesystem::path& path, const void* data, size_t size)
+    {
+        static std::atomic<uint64_t> s_tempCounter{ 0 };
+        std::filesystem::path temporary = path;
+        temporary += ".tmp" + std::to_string(s_tempCounter.fetch_add(1, std::memory_order_relaxed));
+        {
+            std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+            if (!file)
+                return;
+            file.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
+            if (!file)
+            {
+                file.close();
+                std::error_code ignored;
+                std::filesystem::remove(temporary, ignored);
+                return;
+            }
+        }
+        std::error_code error;
+        std::filesystem::rename(temporary, path, error); // replaces the file (MoveFileEx REPLACE_EXISTING on Windows)
+        if (error)
+            std::filesystem::remove(temporary, error);
+    }
+
+    namespace
+    {
+        // compile() builds the whole module, every entry point in it: the other entry points of the same source (SkyAtmosphere.slang
+        // has ten, a mesh pipeline's task, mesh and fragment stages share files, Material_PBR_Mesh is in dozens of pipelines) take
+        // that SPIR-V instead of compiling the module again -- each source compiles once, whichever thread asks first, the others
+        // wait for it. Kept until the start-up's pipelines are done (FinishPendingBuilds), then only the last few.
+        struct ModuleCompile
+        {
+            std::mutex Mutex;
+            std::condition_variable Done;
+            bool Finished = false;
+            std::vector<char> Spirv;
+            std::exception_ptr Error;
+            uint64_t Sequence = 0;
+        };
+        std::mutex s_modulesMutex;
+        std::unordered_map<std::string, std::shared_ptr<ModuleCompile>> s_modules;
+        uint64_t s_moduleSequence = 0;
+
+        std::vector<char> compileModuleOnce(const std::string& sourcePath, ShaderCompiler& compiler)
+        {
+            const std::string key = sourcePath + "|" + std::to_string(compiler.sourceHash(sourcePath));
+            std::shared_ptr<ModuleCompile> entry;
+            bool compileHere = false;
+            {
+                std::lock_guard lock(s_modulesMutex);
+                std::shared_ptr<ModuleCompile>& slot = s_modules[key];
+                if (!slot || (slot->Finished && slot->Error))
+                {
+                    slot = std::make_shared<ModuleCompile>(); // (a failed compile is tried again: the file may have been fixed)
+                    compileHere = true;
+                }
+                slot->Sequence = ++s_moduleSequence;
+                entry = slot;
+            }
+            if (compileHere)
+            {
+                std::vector<char> spirv;
+                std::exception_ptr error;
+                try
+                {
+                    spirv = compiler.compile(sourcePath);
+                }
+                catch (...)
+                {
+                    error = std::current_exception();
+                }
+                {
+                    std::lock_guard lock(entry->Mutex);
+                    entry->Spirv = std::move(spirv);
+                    entry->Error = error;
+                    entry->Finished = true;
+                }
+                entry->Done.notify_all();
+            }
+            std::unique_lock lock(entry->Mutex);
+            entry->Done.wait(lock, [&] { return entry->Finished; });
+            if (entry->Error)
+                std::rethrow_exception(entry->Error);
+            return entry->Spirv;
+        }
+
+        // After the start-up: the most recent few modules stay (a hot reload of one entry point finds its siblings' module).
+        void trimModuleCache(size_t keep)
+        {
+            std::lock_guard lock(s_modulesMutex);
+            std::vector<std::pair<uint64_t, std::string>> finished;
+            for (const auto& [key, entry] : s_modules)
+            {
+                std::lock_guard entryLock(entry->Mutex);
+                if (entry->Finished)
+                    finished.emplace_back(entry->Sequence, key);
+            }
+            if (finished.size() <= keep)
+                return;
+            std::sort(finished.begin(), finished.end());
+            for (size_t i = 0; i + keep < finished.size(); ++i)
+                s_modules.erase(finished[i].second);
+        }
+
+        // Whether the build running on this thread compiled anything (BuildStats).
+        thread_local bool t_compiledInBuild = false;
+    }
+
     // SPIR-V of a stage for a pipeline that is not a shader object (ray tracing, the non-shader-object paths): cached next to the
     // shader-object binaries under the same key (".spv"), so a packaged game without the compiler still has it.
     static std::vector<char> compileSpirvCached(const ShaderStageDesc& shaderDesc, ShaderCompiler& compiler, bool forceCompile)
@@ -136,28 +249,9 @@ namespace NRI
             if (!cached.empty())
                 return std::vector<char>(cached.begin(), cached.end());
         }
-        // compile() builds the whole module, every entry point in it: the next entry point of the same source (SkyAtmosphere.slang
-        // has ten, a mesh pipeline's task, mesh and fragment stages share one file) takes that SPIR-V instead of compiling the module
-        // again. Kept for the last few sources only, by their hash (an edited file is a new key).
-        static std::mutex s_recentModulesMutex;
-        static std::vector<std::pair<std::string, std::vector<char>>> s_recentModules;
-        std::lock_guard lock(s_recentModulesMutex);
-        const std::string moduleKey = shaderDesc.sourcePath + "|" + std::to_string(compiler.sourceHash(shaderDesc.sourcePath));
-        std::vector<char> spirv;
-        for (const auto& [key, module] : s_recentModules)
-            if (key == moduleKey)
-                spirv = module;
-        if (spirv.empty())
-        {
-            spirv = compiler.compile(shaderDesc.sourcePath);
-            if (!spirv.empty())
-            {
-                if (s_recentModules.size() >= 8)
-                    s_recentModules.erase(s_recentModules.begin());
-                s_recentModules.emplace_back(moduleKey, spirv);
-            }
-        }
-        std::ofstream(path, std::ios::binary).write(spirv.data(), static_cast<std::streamsize>(spirv.size()));
+        t_compiledInBuild = true;
+        std::vector<char> spirv = compileModuleOnce(shaderDesc.sourcePath, compiler);
+        writeFileAtomic(path, spirv.data(), spirv.size());
         return spirv;
     }
 
@@ -178,12 +272,9 @@ namespace NRI
 
     namespace
     {
-        // A pipeline being built on a worker found it needs the shader compiler (no binary, or the driver refused the binary): it is
-        // built again on the thread that first needs it -- at start-up the main thread, where the compile-progress window lives.
-        struct DeferredCompile {};
-
-        // The workers that build pipelines from cached binaries (Unreal's parallel PSO creation): creating a shader object is driver
-        // work that takes milliseconds each, ~200 of them at start-up, independent of each other.
+        // The workers that build the start-up's pipelines (Unreal's parallel PSO creation): creating a shader object is driver work that
+        // takes milliseconds each, ~200 of them, independent of each other; a source without a cached binary compiles there too (the
+        // shader compiler gives each thread a session of its own), each source once (compileModuleOnce).
         class PipelineBuildPool
         {
         public:
@@ -244,15 +335,14 @@ namespace NRI
             bool m_stop = false;
         };
 
-        // Pipelines whose build was handed to the pool, for FinishPendingBuilds.
+        // Pipelines whose build was handed to the pool, in the order they were made (FinishPendingBuilds waits in that order: the
+        // progress bar fills as they finish).
         std::mutex s_pendingMutex;
-        std::unordered_set<PipelineVK*> s_pending;
+        std::vector<PipelineVK*> s_pending;
     }
 
     std::vector<char> PipelineVK::compileShader(const ShaderStageDesc& shaderDesc, ShaderCompiler& compiler, bool forceCompile)
     {
-        if (m_deferCompile)
-            throw DeferredCompile{};
         return compileSpirvCached(shaderDesc, compiler, forceCompile);
     }
 
@@ -269,38 +359,37 @@ namespace NRI
                 throw std::runtime_error("PipelineVK graphics pipeline contains a compute shader: " + shader.sourcePath);
         }
 
-        // Shader objects from cached binaries are built on the pool (the usual start-up); a hot reload (forceCompile), a ray tracing
-        // pipeline or the pipeline path build here, as before.
+        // Shader objects are built on the pool (the start-up, compiling what has no cached binary); a hot reload (forceCompile), a
+        // ray tracing pipeline or the pipeline path build here, as before.
         const bool async = m_deviceVK.isShaderObjectExtensionEnabled() && !desc.forceCompile &&
                            (desc.type == PipelineType::Graphics || desc.type == PipelineType::Compute);
         if (!async)
         {
             build(desc, compiler);
             m_ready.store(true, std::memory_order_release);
+            if (desc.forceCompile)
+                trimModuleCache(8); // a hot reload: the cache stays small between them
             return;
         }
         m_async = std::make_shared<AsyncBuild>();
         m_async->Desc = desc;
         m_async->Compiler = &compiler;
-        m_deferCompile = true;
         {
             std::lock_guard lock(s_pendingMutex);
-            s_pending.insert(this);
+            s_pending.push_back(this);
         }
         PipelineBuildPool::Get().Submit([this, state = m_async]
         {
+            t_compiledInBuild = false;
             try
             {
                 build(state->Desc, *state->Compiler);
-            }
-            catch (const DeferredCompile&)
-            {
-                state->NeedsSyncBuild = true;
             }
             catch (...)
             {
                 state->Error = std::current_exception();
             }
+            state->Compiled = t_compiledInBuild;
             {
                 std::lock_guard lock(state->Mutex);
                 state->Done = true;
@@ -319,7 +408,7 @@ namespace NRI
             m_async->Finished.wait(lock, [this] { return m_async->Done; });
         }
         std::lock_guard lock(s_pendingMutex);
-        s_pending.erase(this);
+        std::erase(s_pending, this);
     }
 
     void PipelineVK::ensureBuilt() const
@@ -328,18 +417,6 @@ namespace NRI
             return;
         std::unique_lock lock(m_async->Mutex);
         m_async->Finished.wait(lock, [this] { return m_async->Done; });
-        if (m_async->NeedsSyncBuild)
-        {
-            // Again on this thread, with the compiler allowed (what the pool's build did is thrown away).
-            PipelineVK& self = const_cast<PipelineVK&>(*this);
-            self.m_pipeline = nullptr;
-            self.m_shaders.clear();
-            self.m_stages.clear();
-            self.m_rawShaders.clear();
-            self.m_deferCompile = false;
-            m_async->NeedsSyncBuild = false;
-            self.build(m_async->Desc, *m_async->Compiler);
-        }
         if (m_async->Error)
             std::rethrow_exception(m_async->Error);
         m_ready.store(true, std::memory_order_release);
@@ -351,29 +428,42 @@ namespace NRI
         std::vector<PipelineVK*> pending;
         {
             std::lock_guard lock(s_pendingMutex);
-            pending.assign(s_pending.begin(), s_pending.end());
+            pending.swap(s_pending);
         }
+        ShaderProgress* progress = GetShaderProgress();
         for (PipelineVK* pipeline : pending)
         {
-            if (pipeline->m_ready.load(std::memory_order_acquire))
-                continue;
-            bool rebuilt = false;
             {
-                std::lock_guard lock(pipeline->m_async->Mutex);
-                rebuilt = pipeline->m_async->Done && pipeline->m_async->NeedsSyncBuild;
+                // Waiting with the progress window drawn and the OS answered (it is this thread's).
+                std::unique_lock lock(pipeline->m_async->Mutex);
+                while (!pipeline->m_async->Finished.wait_for(lock, std::chrono::milliseconds(30), [&] { return pipeline->m_async->Done; }))
+                {
+                    lock.unlock();
+                    if (progress && progress->OnIdle)
+                        progress->OnIdle();
+                    lock.lock();
+                }
             }
             try
             {
                 pipeline->ensureBuilt();
-                ++(rebuilt ? stats.Compiled : stats.Parallel);
+                ++(pipeline->m_async->Compiled ? stats.Compiled : stats.Parallel);
             }
             catch (const std::exception& e)
             {
                 ++stats.Failed;
                 NOX_CORE_ERROR("PipelineVK: a pipeline failed to build: {}", e.what());
             }
+            if (progress && progress->OnPipelineCreated)
+                progress->OnPipelineCreated();
         }
+        trimModuleCache(8);
         return stats;
+    }
+
+    bool PipelineVK::isBuiltOnPool() const
+    {
+        return static_cast<bool>(m_async);
     }
 
     void PipelineVK::build(const PipelineDesc& desc, ShaderCompiler& compiler)
@@ -570,19 +660,13 @@ namespace NRI
 
                         auto data = m_shaders[i].getBinaryData();
 
-                        std::ofstream file(path, std::ios::binary);
-
                         // Update in-memory fallback cache with the newly compiled working binary
                         std::string stageKey = desc.shaders[i].sourcePath + "." + desc.shaders[i].entryPoint;
                         {
                             std::lock_guard lock(s_lastWorkingBinariesMutex);
                             s_lastWorkingBinaries[stageKey] = data;
                         }
-                        
-                        file.write(
-                            reinterpret_cast<const char*>(data.data()),
-                            data.size()
-                        );
+                        writeFileAtomic(path, data.data(), data.size());
                     }
                 }
             }
@@ -821,8 +905,7 @@ namespace NRI
                 if (!loadedFromBinary)
                 {
                     auto data = m_shaders[0].getBinaryData();
-                    std::ofstream file(binaryPath, std::ios::binary);
-                    file.write(reinterpret_cast<const char*>(data.data()), data.size());
+                    writeFileAtomic(binaryPath, data.data(), data.size());
                 }
             }
     else
