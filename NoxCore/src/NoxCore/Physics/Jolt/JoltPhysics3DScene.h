@@ -41,6 +41,15 @@ namespace Nox
 
         virtual void CreateCharacter(Entity entity) override;
         virtual void DestroyCharacter(Entity entity) override;
+        bool GetCharacterNetState(Entity entity, CharacterNetState& state) const override;
+        void SetCharacterNetState(Entity entity, const CharacterNetState& state) override;
+        void StepCharacter(Entity entity, float dt) override;
+        void SetTickCallbacks(std::function<void()> beforeTick, std::function<void()> afterTick) override
+        {
+            m_BeforeTick = std::move(beforeTick);
+            m_AfterTick = std::move(afterTick);
+        }
+        float GetFixedDeltaTime() const override { return c_FixedDeltaTime; }
 
         virtual void SetMeshCollider(Entity entity, std::span<const glm::vec3> positions, std::span<const uint32_t> indices,
                                      float friction, float restitution) override;
@@ -92,6 +101,10 @@ namespace Nox
         uint32_t m_NextBodySerial = 1;
 
         void StepCharacters(float dt);
+        struct CharacterState;
+        void StepCharacterState(Entity entity, CharacterState& state, float dt);
+        std::function<void()> m_BeforeTick;
+        std::function<void()> m_AfterTick;
         void SyncCharactersToTransforms();
         void CaptureBodyPoses();
 

@@ -902,8 +902,9 @@ namespace Nox {
     {
         if (!m_PhysicsSystem || !entity || entity.HasComponent<InactiveInHierarchyComponent>()) // switched off: no character
             return;
-        // A network client's copy of a server's character: the server simulates it, the replicated transform places it here.
-        if (m_Scene && m_Scene->IsNetProxy(static_cast<entt::entity>(entity)))
+        // A network client's copy of another's character: the server simulates it, the replicated transform places it here. (The
+        // client's own character is simulated here too: predicted, NET3.)
+        if (m_Scene && m_Scene->IsNetCharacterProxy(static_cast<entt::entity>(entity)))
             return;
 
         const auto& controller = entity.GetComponent<CharacterController3DComponent>();
@@ -950,16 +951,63 @@ namespace Nox {
     {
         if (!m_Scene)
             return;
-
-        const JPH::Vec3 gravity = m_PhysicsSystem->GetGravity();
-        const JPH::Vec3 up = JPH::Vec3::sAxisY();
-
         for (auto& [entityId, state] : m_EntityToCharacterMap)
         {
             Entity entity{ static_cast<entt::entity>(entityId), m_Scene };
             if (!entity.IsValid() || !entity.HasComponent<CharacterController3DComponent>())
                 continue;
+            StepCharacterState(entity, state, dt);
+        }
+    }
 
+    void JoltPhysics3DScene::StepCharacter(Entity entity, float dt)
+    {
+        auto found = m_EntityToCharacterMap.find(static_cast<uint32_t>(entity));
+        if (!m_PhysicsSystem || found == m_EntityToCharacterMap.end() || !entity.HasComponent<CharacterController3DComponent>())
+            return;
+        StepCharacterState(entity, found->second, dt);
+        found->second.Previous = found->second.Current; // (a replay: drawn where it ends, not swept from where it was)
+        found->second.PreviousStepOffset = found->second.StepOffset;
+    }
+
+    bool JoltPhysics3DScene::GetCharacterNetState(Entity entity, CharacterNetState& netState) const
+    {
+        auto found = m_EntityToCharacterMap.find(static_cast<uint32_t>(entity));
+        if (found == m_EntityToCharacterMap.end())
+            return false;
+        const CharacterState& state = found->second;
+        netState.Position = state.Current;
+        netState.Velocity = ToWorld(JoltUtils::ToGLM(state.Character->GetLinearVelocity()));
+        netState.Horizontal = ToWorld(state.Horizontal);
+        netState.Grounded = state.Grounded;
+        netState.WasOnGround = state.WasOnGround;
+        return true;
+    }
+
+    void JoltPhysics3DScene::SetCharacterNetState(Entity entity, const CharacterNetState& netState)
+    {
+        auto found = m_EntityToCharacterMap.find(static_cast<uint32_t>(entity));
+        if (!m_PhysicsSystem || found == m_EntityToCharacterMap.end())
+            return;
+        CharacterState& state = found->second;
+        state.Character->SetPosition(JoltUtils::ToJoltPosition(ToNative(netState.Position)));
+        state.Character->SetLinearVelocity(JoltUtils::ToJolt(ToNative(netState.Velocity)));
+        state.Horizontal = ToNative(netState.Horizontal);
+        state.Grounded = netState.Grounded;
+        state.WasOnGround = netState.WasOnGround;
+        state.GroundRootMotion = glm::vec3(0.0f);
+        state.Previous = state.Current = netState.Position;
+        state.StepOffset = state.PreviousStepOffset = 0.0f;
+        // Its contacts where it now is (what the next step's ground test and collisions start from).
+        state.Character->RefreshContacts(m_PhysicsSystem->GetDefaultBroadPhaseLayerFilter(PhysicsLayers::CHARACTER),
+                                         m_PhysicsSystem->GetDefaultLayerFilter(PhysicsLayers::CHARACTER), {}, {}, *m_TempAllocator);
+    }
+
+    void JoltPhysics3DScene::StepCharacterState(Entity entity, CharacterState& state, float dt)
+    {
+        const JPH::Vec3 gravity = m_PhysicsSystem->GetGravity();
+        const JPH::Vec3 up = JPH::Vec3::sAxisY();
+        {
             auto& controller = entity.GetComponent<CharacterController3DComponent>();
             JPH::CharacterVirtual* character = state.Character.GetPtr();
 
@@ -1182,10 +1230,14 @@ namespace Nox {
         // The scene owns the clock (Scene::AdvanceTicks: one accumulator for scripts and physics, at most 5 ticks a frame).
         for (uint32_t tick = 0; tick < ticks; ++tick)
         {
+            if (m_BeforeTick)
+                m_BeforeTick(); // (networking: a client records its inputs, the server applies its clients' inputs)
             StepCharacters(c_FixedDeltaTime);
             m_PhysicsSystem->Update(c_FixedDeltaTime, 1, m_TempAllocator.get(), m_JobSystem.get());
             m_RollingResistance->Apply(*m_PhysicsSystem, c_FixedDeltaTime);
             CaptureBodyPoses();
+            if (m_AfterTick)
+                m_AfterTick();
         }
         m_Accumulator = glm::clamp(alpha, 0.0f, 1.0f) * c_FixedDeltaTime;
 

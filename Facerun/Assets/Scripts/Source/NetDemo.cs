@@ -2,8 +2,8 @@ using Nox;
 
 namespace Facerun;
 
-// The multiplayer demo (docs/Networking_Plan_2026-11.md, NET2; scene Scenes/NetDemo.nox): a server that spawns boxes and a player for
-// every client, players that walk with WASD and jump with Space. Run NoxRuntime --server --scene=Scenes/NetDemo.nox and one or more
+// The multiplayer demo (docs/Networking_Plan_2026-11.md, NET2 / NET3; scene Scenes/NetDemo.nox): a server that spawns boxes and a
+// player for every client, players that walk with WASD and jump with Space (predicted on their own machine). Run NoxRuntime --server --scene=Scenes/NetDemo.nox and one or more
 // NoxRuntime --windowed --connect=localhost:7777 --scene=Scenes/NetDemo.nox (or --listen to play on the server too).
 
 /// <summary>
@@ -109,9 +109,10 @@ public sealed class NetBox : EntityBehaviour
 }
 
 /// <summary>
-/// A player: the client that owns it reads WASD / Space and sends them to the server (ServerRpcs); the server moves its character and
-/// everyone sees where it is (replicated transform). The camera follows the player this machine owns. Jumps are counted on the server
-/// (a replicated field) and announced to everyone (a MulticastRpc).
+/// A player: the machine that owns it moves its character with WASD / Space at once, exactly as in a single-player game -- the engine
+/// predicts it, sends the inputs to the server, which moves the server's character with them, and corrects the prediction when the two
+/// disagree (NET3). Everyone else sees it drawn smoothly between snapshots. The camera follows the player this machine owns. Jumps are
+/// counted on the server (a replicated field) and announced to everyone (a MulticastRpc).
 /// </summary>
 public sealed class NetPlayer : EntityBehaviour
 {
@@ -127,8 +128,6 @@ public sealed class NetPlayer : EntityBehaviour
     };
 
     Mesh? m_Mesh;
-    Vector3 m_Move;          // on the server: the owner's last input
-    float m_SendTimer;
     bool m_JumpHeld;
     Entity m_Camera;
 
@@ -138,8 +137,6 @@ public sealed class NetPlayer : EntityBehaviour
             Color = s_Palette[Owner % (uint)s_Palette.Length];
         m_Mesh = NetDemoMesh.Box(new Vector3(68.0f, 176.0f, 68.0f), Color);
         Self.SetMesh(m_Mesh);
-        if (IsOwner)
-            m_Camera = Entity.FindByName("Camera");
     }
 
     void OnColorChanged() => m_Mesh?.SetColor(Color.X, Color.Y, Color.Z, new Vector3(0.0f, 0.0f, 0.0f));
@@ -147,27 +144,32 @@ public sealed class NetPlayer : EntityBehaviour
     protected override void OnUpdate(float deltaTime)
     {
         if (!IsOwner)
-            return;
+            return; // someone else's player: the server moves it, the engine draws it
 
-        // Input, 30 times a second (unreliable: the next one replaces a lost one).
+        // Moved here and now, as in a single-player game (the engine sends the same inputs to the server).
         Vector3 move = new(0.0f, 0.0f, 0.0f);
         if (Input.IsKeyDown(KeyCode.W)) move.Z -= 1.0f;
         if (Input.IsKeyDown(KeyCode.S)) move.Z += 1.0f;
         if (Input.IsKeyDown(KeyCode.A)) move.X -= 1.0f;
         if (Input.IsKeyDown(KeyCode.D)) move.X += 1.0f;
-        m_SendTimer += deltaTime;
-        if (m_SendTimer >= 1.0f / 30.0f)
-        {
-            m_SendTimer = 0.0f;
-            CallServerRpc(nameof(ServerMove), move);
-        }
-        // A jump per press, not per frame held (held, it jumped again on landing).
+        float length = MathF.Sqrt(move.X * move.X + move.Z * move.Z);
+        if (length > 1.0f)
+            move = new Vector3(move.X / length, 0.0f, move.Z / length);
+        CharacterControllerComponent character = GetComponent<CharacterControllerComponent>();
+        character.SetMoveVelocity(new Vector3(move.X * Speed, 0.0f, move.Z * Speed));
+
+        // A jump per press, not per frame held.
         bool jump = Input.IsKeyDown(KeyCode.Space);
-        if (jump && !m_JumpHeld)
-            CallServerRpc(nameof(ServerJump));
+        if (jump && !m_JumpHeld && character.IsGrounded)
+        {
+            character.Jump(JumpSpeed);
+            CallServerRpc(nameof(ServerJumped));
+        }
         m_JumpHeld = jump;
 
-        // The camera behind this machine's own player.
+        // The camera behind this machine's own player (found once: the camera is in the scene on every side).
+        if (!m_Camera.IsValid)
+            m_Camera = Entity.FindByName("Camera");
         if (m_Camera.IsValid)
         {
             TransformComponent camera = m_Camera.GetComponent<TransformComponent>();
@@ -177,21 +179,10 @@ public sealed class NetPlayer : EntityBehaviour
         }
     }
 
-    // On the server: the owner's input (checked: a client can send anything).
-    [ServerRpc(Reliable = false)]
-    void ServerMove(Vector3 move)
-    {
-        float length = MathF.Sqrt(move.X * move.X + move.Z * move.Z);
-        m_Move = length > 1.0f ? new Vector3(move.X / length, 0.0f, move.Z / length) : new Vector3(move.X, 0.0f, move.Z);
-    }
-
+    // On the server: the owner says it jumped (the jump itself came with its inputs): counted and announced.
     [ServerRpc]
-    void ServerJump()
+    void ServerJumped()
     {
-        CharacterControllerComponent character = GetComponent<CharacterControllerComponent>();
-        if (!character.IsGrounded)
-            return;
-        character.Jump(JumpSpeed);
         Jumps++;
         CallMulticastRpc(nameof(Jumped), Jumps);
     }
@@ -199,13 +190,6 @@ public sealed class NetPlayer : EntityBehaviour
     // Everyone: the server and every client.
     [MulticastRpc]
     void Jumped(int count) => Log.Info($"[NetDemo] the player of {(Owner == 0 ? "the server" : $"client {Owner}")} jumped ({count} jumps)");
-
-    protected override void OnFixedUpdate(float fixedDeltaTime)
-    {
-        if (!HasAuthority)
-            return; // a client's copy: the server's transform places it
-        GetComponent<CharacterControllerComponent>().SetMoveVelocity(new Vector3(m_Move.X * Speed, 0.0f, m_Move.Z * Speed));
-    }
 
     protected override void OnDestroy()
     {

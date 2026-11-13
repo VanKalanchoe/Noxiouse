@@ -528,6 +528,9 @@ namespace Nox
             m_Server->Update();
         if (m_Client)
             m_Client->Update();
+        // Others drawn between the snapshots just received (before the scene's update: this frame's draw uses it).
+        if (m_Replication)
+            m_Replication->Interpolate();
 
         // The title once a second (the ping changes); a connected client's status line every 10 s.
         m_TitleTimer += ts;
@@ -543,9 +546,11 @@ namespace Nox
             {
                 m_ClientStatusTimer = 0.0f;
                 const Net::ConnectionStats stats = m_Client->GetStats();
-                NOX_CORE_INFO("Client status: client {} on '{}', ping {} ms, quality {} / {}, out {:.1f} KB/s, in {:.1f} KB/s",
+                NOX_CORE_INFO("Client status: client {} on '{}', ping {} ms, quality {} / {}, out {:.1f} KB/s, in {:.1f} KB/s, "
+                              "others drawn {:.0f} ms in the past, {} prediction corrections so far",
                               m_Client->GetWelcome().Client, m_Client->GetWelcome().ServerName, stats.PingMs, Quality(stats.QualityLocal),
-                              Quality(stats.QualityRemote), stats.OutBytesPerSecond / 1024.0f, stats.InBytesPerSecond / 1024.0f);
+                              Quality(stats.QualityRemote), stats.OutBytesPerSecond / 1024.0f, stats.InBytesPerSecond / 1024.0f,
+                              m_Replication ? m_Replication->GetInterpolationDelayMs() : 0.0f, m_Replication ? m_Replication->GetCorrections() : 0);
             }
         }
     }

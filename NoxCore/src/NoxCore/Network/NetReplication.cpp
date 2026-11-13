@@ -28,7 +28,43 @@ namespace Nox::Net
         constexpr size_t PositionProperty = 0;
         constexpr size_t RotationProperty = 1;
         constexpr size_t ScaleProperty = 2;
-        constexpr size_t FirstScriptProperty = 3;
+        constexpr size_t MovementProperty = 3; // a character's movement state and the last input applied (empty without a character)
+        constexpr size_t FirstScriptProperty = 4;
+
+        // The movement property: the character's simulated position (not the drawn one), velocities, ground state, and the newest
+        // client input the server applied to it (0: none; a server-owned character).
+        std::vector<uint8_t> EncodeMovement(uint32_t lastInput, const IPhysics3DScene::CharacterNetState& state, double quantum)
+        {
+            NetWriter writer(48);
+            writer.WriteVarU32(lastInput);
+            const std::vector<uint8_t> position = EncodePosition(state.Position, quantum);
+            writer.WriteU8(static_cast<uint8_t>(position.size()));
+            writer.WriteBytes(position);
+            writer.WriteFloat(state.Velocity.x);
+            writer.WriteFloat(state.Velocity.y);
+            writer.WriteFloat(state.Velocity.z);
+            writer.WriteFloat(state.Horizontal.x);
+            writer.WriteFloat(state.Horizontal.y);
+            writer.WriteFloat(state.Horizontal.z);
+            writer.WriteU8(static_cast<uint8_t>((state.Grounded ? 1 : 0) | (state.WasOnGround ? 2 : 0)));
+            return { writer.GetData().begin(), writer.GetData().end() };
+        }
+
+        bool DecodeMovement(std::span<const uint8_t> bytes, double quantum, uint32_t& lastInput, IPhysics3DScene::CharacterNetState& state)
+        {
+            NetReader reader(bytes);
+            lastInput = reader.ReadVarU32();
+            const uint8_t positionSize = reader.ReadU8();
+            if (reader.IsFailed() || !DecodePosition(reader.ReadBytes(positionSize), quantum, state.Position))
+                return false;
+            state.Velocity = { reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat() };
+            state.Horizontal = { reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat() };
+            const uint8_t flags = reader.ReadU8();
+            state.Grounded = (flags & 1) != 0;
+            state.WasOnGround = (flags & 2) != 0;
+            return reader.IsAtEnd() && std::isfinite(state.Velocity.x + state.Velocity.y + state.Velocity.z) &&
+                   std::isfinite(state.Horizontal.x + state.Horizontal.y + state.Horizontal.z);
+        }
         constexpr double PendingRpcSeconds = 2.0;
 
         // Positions to 0.1 mm whatever the project's world unit.
@@ -69,6 +105,9 @@ namespace Nox::Net
         }
         if (m_Client)
             m_Client->OnMessage = nullptr;
+        if (m_HooksInstalled && m_Scene)
+            if (IPhysics3DScene* physics = m_Scene->GetPhysics3DScene())
+                physics->SetTickCallbacks({}, {});
         if (s_Current == this)
             s_Current = nullptr;
     }
@@ -82,6 +121,14 @@ namespace Nox::Net
         m_ReceivedFirst = false;
         m_ScriptsPending.clear();
         m_PendingRpcs.clear();
+        m_InputQueues.clear();
+        m_Predicted.clear();
+        m_Interpolation.clear();
+        m_Clock.Reset();
+        m_LastSnapshotTick = 0;
+        m_HooksInstalled = false; // (the scene's physics is made when it starts: hooked on the first update)
+        if (m_Scene && m_Mode == Mode::Client)
+            m_Scene->SetNetLocalClient(GetLocalClientId());
     }
 
     ClientId NetReplication::GetLocalClientId() const
@@ -93,6 +140,9 @@ namespace Nox::Net
     {
         if (!m_Scene)
             return;
+        InstallTickHooks();
+        if (m_Mode == Mode::Client)
+            SendInputs();
         if (m_Mode == Mode::Server)
         {
             m_SendAccumulator += deltaTime;
@@ -160,6 +210,9 @@ namespace Nox::Net
         case MessageType::Rpc:
             ReceiveRpc(client.Id, reader);
             break;
+        case MessageType::Input:
+            ReceiveInputs(client.Id, reader);
+            break;
         default:
             break; // (a message of a newer game layer: nothing to do with it)
         }
@@ -187,6 +240,14 @@ namespace Nox::Net
                 state->Properties[PositionProperty] = EncodePosition(transform.Translation, PositionQuantum());
                 state->Properties[RotationProperty] = EncodeRotation(glm::quat(transform.Rotation));
                 state->Properties[ScaleProperty] = EncodeScale(transform.Scale);
+            }
+            IPhysics3DScene::CharacterNetState character;
+            if (IPhysics3DScene* physics = m_Scene->GetPhysics3DScene();
+                physics && entity.HasComponent<CharacterController3DComponent>() && physics->GetCharacterNetState(entity, character))
+            {
+                auto inputs = m_InputQueues.find(id);
+                const uint32_t lastInput = inputs != m_InputQueues.end() ? inputs->second.Queue.GetLastProcessed() : 0;
+                state->Properties[MovementProperty] = EncodeMovement(lastInput, character, PositionQuantum());
             }
             if (backend)
             {
@@ -281,6 +342,11 @@ namespace Nox::Net
             {
             case SnapshotReceiver::Result::Applied:
             {
+                // The clock and the snapshots' spacing (how far in the past others are drawn: two snapshots and a tick).
+                if (m_LastSnapshotTick != 0 && world.Tick > m_LastSnapshotTick)
+                    m_SnapshotSpacingTicks += (std::clamp(static_cast<double>(world.Tick - m_LastSnapshotTick), 1.0, 30.0) - m_SnapshotSpacingTicks) * 0.1;
+                m_LastSnapshotTick = world.Tick;
+                m_Clock.OnSnapshot(world.Tick, NetNow(), static_cast<float>(Scene::TickRate));
                 ApplyWorld(world);
                 NetWriter ack(8);
                 WriteSnapshotAck(ack, sequence);
@@ -334,10 +400,27 @@ namespace Nox::Net
             if (world.Entities.contains(id))
                 continue;
             m_ScriptsPending.erase(id);
+            m_Interpolation.erase(id);
+            m_Predicted.erase(id);
             if (Entity entity = m_Scene->GetEntityByUUID(UUID(id)))
                 m_Scene->QueueDestroy(entity);
         }
         m_World = world;
+
+        // Every replicated transform at this snapshot's tick, also unchanged ones (standing still is a pose too), for interpolation;
+        // the own characters are predicted instead.
+        for (const auto& [id, state] : world.Entities)
+        {
+            if (m_Predicted.contains(id) || state->Properties.size() < FirstScriptProperty || state->Properties[PositionProperty].empty())
+                continue;
+            PoseSample sample;
+            sample.Tick = static_cast<double>(world.Tick);
+            if (!DecodePosition(state->Properties[PositionProperty], PositionQuantum(), sample.Position))
+                continue;
+            DecodeRotation(state->Properties[RotationProperty], sample.Rotation);
+            DecodeScale(state->Properties[ScaleProperty], sample.Scale);
+            m_Interpolation[id].Add(sample);
+        }
     }
 
     void NetReplication::ApplyEntity(NetId id, const EntityState& state, const EntityState* before, bool created)
@@ -383,7 +466,10 @@ namespace Nox::Net
         }
         entity.GetComponent<NetworkIdentityComponent>().Owner = state.Owner;
 
-        if (entity.HasComponent<TransformComponent>())
+        // The transform is set here the first time; afterwards others are drawn between snapshots (Interpolate) and the own
+        // character is predicted (Reconcile).
+        const bool first = created || !before;
+        if (first && entity.HasComponent<TransformComponent>())
         {
             auto& transform = entity.GetComponent<TransformComponent>();
             bool moved = false;
@@ -401,6 +487,9 @@ namespace Nox::Net
             if (moved)
                 entity.MarkTransformDirty();
         }
+        UpdateOwnership(entity, id, state);
+        if (m_Predicted.contains(id))
+            Reconcile(entity, id, state);
 
         if (!ApplyScriptFields(id, state, created ? nullptr : before))
             m_ScriptsPending.insert(id);
@@ -542,5 +631,201 @@ namespace Nox::Net
             return false; // (its scripts have not started yet)
         backend->InvokeRpc((*instances)[rpc.Script], rpc.Kind, rpc.Method, rpc.Arguments);
         return true;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------- prediction
+
+    void NetReplication::InstallTickHooks()
+    {
+        if (m_HooksInstalled || !m_Scene)
+            return;
+        if (IPhysics3DScene* physics = m_Scene->GetPhysics3DScene())
+        {
+            physics->SetTickCallbacks([this]() { BeforeTick(); }, [this]() { AfterTick(); });
+            m_HooksInstalled = true;
+        }
+    }
+
+    void NetReplication::BeforeTick()
+    {
+        if (!m_Scene)
+            return;
+        if (m_Mode == Mode::Server)
+        {
+            // Each client-owned character does what its client asked for this tick (whatever a script on the server set).
+            for (auto it = m_InputQueues.begin(); it != m_InputQueues.end();)
+            {
+                Entity entity = m_Scene->GetEntityByUUID(UUID(it->first));
+                if (!entity || !entity.HasComponent<CharacterController3DComponent>() || GetOwner(UUID(it->first)) != it->second.Client)
+                {
+                    it = m_InputQueues.erase(it); // gone, or handed to someone else
+                    continue;
+                }
+                const InputFrame input = it->second.Queue.Next();
+                auto& controller = entity.GetComponent<CharacterController3DComponent>();
+                controller.MoveVelocity = input.Move;
+                controller.JumpSpeed = input.Jump;
+                entity.GetComponent<TransformComponent>().Rotation = glm::eulerAngles(input.Rotation);
+                entity.MarkTransformDirty();
+                ++it;
+            }
+            return;
+        }
+        // Client: this tick's input of each own character, as its scripts left it (recorded with its result after the step).
+        for (auto& [id, predicted] : m_Predicted)
+        {
+            Entity entity = m_Scene->GetEntityByUUID(UUID(id));
+            if (!entity || !entity.HasComponent<CharacterController3DComponent>())
+                continue;
+            const auto& controller = entity.GetComponent<CharacterController3DComponent>();
+            predicted.PendingInput.Sequence = ++predicted.Sequence;
+            predicted.PendingInput.Move = controller.MoveVelocity;
+            predicted.PendingInput.Jump = controller.JumpSpeed;
+            predicted.PendingInput.Rotation = glm::quat(entity.GetComponent<TransformComponent>().Rotation);
+            predicted.Pending = true;
+        }
+    }
+
+    void NetReplication::AfterTick()
+    {
+        if (m_Mode != Mode::Client || !m_Scene)
+            return;
+        IPhysics3DScene* physics = m_Scene->GetPhysics3DScene();
+        for (auto& [id, predicted] : m_Predicted)
+        {
+            if (!predicted.Pending)
+                continue;
+            predicted.Pending = false;
+            Entity entity = m_Scene->GetEntityByUUID(UUID(id));
+            IPhysics3DScene::CharacterNetState state;
+            if (entity && physics && physics->GetCharacterNetState(entity, state))
+                predicted.History.Record(predicted.PendingInput, state.Position);
+        }
+    }
+
+    void NetReplication::SendInputs()
+    {
+        for (auto& [id, predicted] : m_Predicted)
+        {
+            if (predicted.Sequence == predicted.LastSent || predicted.History.GetSize() == 0)
+                continue;
+            const std::vector<InputFrame> inputs = predicted.History.NewestInputs(InputRedundancy);
+            NetWriter writer(16 + inputs.size() * 36);
+            WriteInputs(writer, id, inputs);
+            m_Client->Send(writer.GetData(), Delivery::Unreliable);
+            predicted.LastSent = predicted.Sequence;
+        }
+    }
+
+    void NetReplication::ReceiveInputs(ClientId sender, NetReader& reader)
+    {
+        NetId id = 0;
+        std::vector<InputFrame> frames;
+        if (!ReadInputs(reader, id, frames))
+        {
+            m_Server->Kick(sender, "malformed inputs");
+            return;
+        }
+        // Only for a character this client owns (never trust the client).
+        Entity entity = m_Scene ? m_Scene->GetEntityByUUID(UUID(id)) : Entity{};
+        if (!entity || !entity.HasComponent<CharacterController3DComponent>() || GetOwner(UUID(id)) != sender)
+            return;
+        ServerInputs& inputs = m_InputQueues[id];
+        if (inputs.Client != sender)
+            inputs = ServerInputs{ sender, InputQueue{} };
+        inputs.Queue.Push(frames);
+    }
+
+    void NetReplication::UpdateOwnership(Entity entity, NetId id, const EntityState& state)
+    {
+        // Client: a character this client owns is simulated here (predicted); one it no longer owns is the server's again.
+        const ClientId local = GetLocalClientId();
+        const bool mine = local != InvalidClientId && state.Owner == local && entity.HasComponent<CharacterController3DComponent>();
+        IPhysics3DScene* physics = m_Scene->GetPhysics3DScene();
+        if (mine && !m_Predicted.contains(id))
+        {
+            m_Predicted.emplace(id, Predicted{});
+            m_Interpolation.erase(id);
+            if (physics)
+            {
+                physics->DestroyCharacter(entity);
+                physics->CreateCharacter(entity); // (Scene::IsNetCharacterProxy is false for it now)
+            }
+        }
+        else if (!mine && m_Predicted.erase(id) && physics)
+            physics->DestroyCharacter(entity);
+    }
+
+    void NetReplication::Reconcile(Entity entity, NetId id, const EntityState& state)
+    {
+        auto found = m_Predicted.find(id);
+        IPhysics3DScene* physics = m_Scene->GetPhysics3DScene();
+        if (found == m_Predicted.end() || !physics || state.Properties[MovementProperty].empty())
+            return;
+        uint32_t lastInput = 0;
+        IPhysics3DScene::CharacterNetState server;
+        if (!DecodeMovement(state.Properties[MovementProperty], PositionQuantum(), lastInput, server))
+            return;
+        Predicted& predicted = found->second;
+        if (lastInput == 0 || lastInput <= predicted.Acknowledged)
+            return; // (no input applied yet, or this snapshot says nothing newer)
+        predicted.Acknowledged = lastInput;
+
+        // Where the server's character was after that input against where this client predicted it: off by more than 2 cm, the
+        // server's state is taken and the inputs since replayed (Unreal's ClientAdjustPosition + replaying the saved moves).
+        const double tolerance = static_cast<double>(WorldUnits::FromMeters(0.02f));
+        std::optional<std::vector<InputFrame>> replay = predicted.History.Reconcile(lastInput, server.Position, tolerance);
+        if (!replay)
+            return;
+        ++m_Corrections;
+        auto& controller = entity.GetComponent<CharacterController3DComponent>();
+        const glm::vec3 move = controller.MoveVelocity;
+        const float jump = controller.JumpSpeed;
+        physics->SetCharacterNetState(entity, server);
+        const float dt = physics->GetFixedDeltaTime();
+        IPhysics3DScene::CharacterNetState replayed;
+        for (const InputFrame& input : *replay)
+        {
+            controller.MoveVelocity = input.Move;
+            controller.JumpSpeed = input.Jump;
+            physics->StepCharacter(entity, dt);
+            if (physics->GetCharacterNetState(entity, replayed))
+                predicted.History.Rewrite(input.Sequence, replayed.Position);
+        }
+        controller.MoveVelocity = move; // (the scripts' current input, for the next tick)
+        controller.JumpSpeed = jump;
+    }
+
+    void NetReplication::Interpolate()
+    {
+        InstallTickHooks();
+        if (m_Mode != Mode::Client || !m_Scene || !m_Clock.IsValid())
+            return;
+        const double renderTick = m_Clock.GetServerTick(NetNow()) - InterpolationDelayTicks();
+        const double teleport = static_cast<double>(WorldUnits::FromMeters(5.0f));
+        for (auto it = m_Interpolation.begin(); it != m_Interpolation.end();)
+        {
+            Entity entity = m_Scene->GetEntityByUUID(UUID(it->first));
+            if (!entity || !entity.HasComponent<TransformComponent>())
+            {
+                it = m_Interpolation.erase(it);
+                continue;
+            }
+            PoseSample pose;
+            if (it->second.Sample(renderTick, 6.0, teleport, pose))
+            {
+                auto& transform = entity.GetComponent<TransformComponent>();
+                transform.Translation = pose.Position;
+                transform.Rotation = glm::eulerAngles(pose.Rotation);
+                transform.Scale = pose.Scale;
+                entity.MarkTransformDirty();
+            }
+            ++it;
+        }
+    }
+
+    float NetReplication::GetInterpolationDelayMs() const
+    {
+        return static_cast<float>(InterpolationDelayTicks() * 1000.0 / Scene::TickRate);
     }
 }

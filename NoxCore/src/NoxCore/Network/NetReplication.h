@@ -1,5 +1,6 @@
 #pragma once
 #include "NetBuffer.h"
+#include "NetPrediction.h"
 #include "NetProtocol.h"
 #include "NetSnapshot.h"
 
@@ -54,8 +55,15 @@ namespace Nox::Net
         // The scene it replicates (a client's scene changes when it joins and leaves; null: none). A client forgets the snapshots of
         // the scene before.
         void SetScene(Scene* scene);
-        // Once a frame after the scene's update: the server sends snapshots when due; the client applies what waited for scripts.
+        // Once a frame after the scene's update: the server sends snapshots when due; the client applies what waited for scripts and
+        // sends its character's inputs.
         void Update(float deltaTime);
+        // Client, once a frame before the scene's update (after the snapshots of this frame were applied): the other entities drawn
+        // between the last snapshots, a little in the past (NET3).
+        void Interpolate();
+        // Client stats: corrections of the own character's prediction so far, and how far in the past others are drawn.
+        size_t GetCorrections() const { return m_Corrections; }
+        float GetInterpolationDelayMs() const;
 
         Mode GetMode() const { return m_Mode; }
         ClientId GetLocalClientId() const;
@@ -102,6 +110,16 @@ namespace Nox::Net
         // Both
         void ReceiveRpc(ClientId sender, NetReader& reader);
         bool DeliverRpc(const PendingRpc& rpc);
+        // Prediction (NET3): every fixed tick the server applies its clients' inputs to their characters; a client records the inputs
+        // of its own character and where they left it, reconciles with the server's state, and replays.
+        void InstallTickHooks();
+        void BeforeTick();
+        void AfterTick();
+        void ReceiveInputs(ClientId sender, NetReader& reader);
+        void SendInputs();
+        void UpdateOwnership(Entity entity, NetId id, const EntityState& state);
+        void Reconcile(Entity entity, NetId id, const EntityState& state);
+        double InterpolationDelayTicks() const { return 2.0 * m_SnapshotSpacingTicks + 1.0; }
 
         static NetReplication* s_Current;
 
@@ -124,5 +142,29 @@ namespace Nox::Net
         std::unordered_set<NetId> m_ScriptsPending; // spawned entities whose scripts did not exist yet when their state came
         std::unordered_set<uint64_t> m_WarnedPrefabs;
         std::vector<PendingRpc> m_PendingRpcs; // for entities that have not arrived yet (the snapshot is behind the RPC)
+
+        // Prediction and interpolation (NET3)
+        struct ServerInputs
+        {
+            ClientId Client = InvalidClientId;
+            InputQueue Queue;
+        };
+        std::unordered_map<NetId, ServerInputs> m_InputQueues; // server: the client-owned characters' inputs
+        struct Predicted
+        {
+            PredictionHistory History;
+            uint32_t Sequence = 0;     // the last input recorded
+            uint32_t Acknowledged = 0; // the newest input the server said it applied
+            uint32_t LastSent = 0;
+            bool Pending = false;      // an input recorded before this tick's step, its result not yet
+            InputFrame PendingInput;
+        };
+        std::unordered_map<NetId, Predicted> m_Predicted;               // client: its own characters
+        std::unordered_map<NetId, InterpolationBuffer> m_Interpolation; // client: the others
+        NetClock m_Clock;
+        double m_SnapshotSpacingTicks = 2.0; // ticks between the server's snapshots (measured)
+        uint64_t m_LastSnapshotTick = 0;
+        bool m_HooksInstalled = false;
+        size_t m_Corrections = 0;
     };
 }

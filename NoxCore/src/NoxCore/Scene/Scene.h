@@ -81,6 +81,12 @@ namespace Nox
         {
             return m_NetMode == NetMode::Client && m_Registry.all_of<NetworkIdentityComponent>(entity);
         }
+        // This client's id (a client's scene): the characters it owns are simulated here (predicted), the others are proxies.
+        void SetNetLocalClient(uint32_t client) { m_NetLocalClient = client; }
+        bool IsNetCharacterProxy(entt::entity entity) const
+        {
+            return IsNetProxy(entity) && (m_NetLocalClient == 0 || m_Registry.get<NetworkIdentityComponent>(entity).Owner != m_NetLocalClient);
+        }
         bool IsPaused() const { return m_IsPaused; }
         void SetPaused(bool paused) { m_IsPaused = paused; }
         void Step(int frames = 1);
@@ -438,6 +444,7 @@ namespace Nox
         std::set<std::string> m_CollapsedFolders;
         bool m_IsRunning = false;
         NetMode m_NetMode = NetMode::Standalone;
+        uint32_t m_NetLocalClient = 0;
         bool m_TimelinesRunning = false; // Play or Simulate
         bool m_AudioRunning = false;     // Play or Simulate
         // One-shots asked for while their clip was loading (UpdateAudio plays them once it is in).

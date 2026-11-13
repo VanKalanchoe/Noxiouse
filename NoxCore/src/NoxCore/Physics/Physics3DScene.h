@@ -3,6 +3,7 @@
 #include "Physics3DTypes.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <span>
 #include <vector>
@@ -47,6 +48,26 @@ namespace Nox {
 
         virtual void CreateCharacter(Entity entity) = 0;
         virtual void DestroyCharacter(Entity entity) = 0;
+
+        // Networking (docs/Networking_Plan_2026-11.md, NET3): a character's movement state, so a client can predict its own character
+        // and correct it to the server's (world units).
+        struct CharacterNetState
+        {
+            glm::dvec3 Position{ 0.0 };
+            glm::vec3 Velocity{ 0.0f };   // the capsule's whole velocity (falling, jumping)
+            glm::vec3 Horizontal{ 0.0f }; // the walking velocity it has accelerated to
+            bool Grounded = false;
+            bool WasOnGround = false;
+        };
+        virtual bool GetCharacterNetState(Entity entity, CharacterNetState& state) const { return false; }
+        virtual void SetCharacterNetState(Entity entity, const CharacterNetState& state) {}
+        // One character stepped by itself by dt with its controller's current inputs (a client replaying its inputs after a correction);
+        // it is drawn where it ends.
+        virtual void StepCharacter(Entity entity, float dt) {}
+        // Called in every fixed tick: before the characters step (inputs are set or recorded there) and after the tick.
+        virtual void SetTickCallbacks(std::function<void()> beforeTick, std::function<void()> afterTick) {}
+        // The fixed tick's length (seconds).
+        virtual float GetFixedDeltaTime() const { return 1.0f / 60.0f; }
 
         // A static triangle-mesh collider at the entity's world transform (terrain, a voxel chunk, level geometry a script
         // built: DynamicMeshes), replacing the one the entity had; empty arrays remove it. Counter-clockwise front faces. It
