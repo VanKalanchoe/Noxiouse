@@ -965,6 +965,42 @@ namespace Nox {
         }
     }
 
+    void JoltPhysics3DScene::SampleCharacterGrounds()
+    {
+        m_GroundSamples.clear();
+        if (!m_PhysicsSystem)
+            return;
+        const JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
+        for (const auto& [_, state] : m_EntityToCharacterMap)
+        {
+            const JPH::BodyID ground = state.Character ? state.Character->GetGroundBodyID() : JPH::BodyID();
+            if (ground.IsInvalid() || m_GroundSamples.contains(ground.GetIndexAndSequenceNumber()) ||
+                !bodyInterface.IsAdded(ground) || bodyInterface.GetMotionType(ground) == JPH::EMotionType::Static)
+                continue;
+            m_GroundSamples[ground.GetIndexAndSequenceNumber()] = { bodyInterface.GetLinearVelocity(ground), bodyInterface.GetAngularVelocity(ground),
+                                                                    bodyInterface.GetCenterOfMassPosition(ground) };
+        }
+    }
+
+    JPH::Vec3 JoltPhysics3DScene::CharacterGroundVelocity(const JPH::CharacterVirtual& character)
+    {
+        const JPH::BodyID ground = character.GetGroundBodyID();
+        if (ground.IsInvalid() || !m_PhysicsSystem)
+            return JPH::Vec3::sZero();
+        auto sample = m_GroundSamples.find(ground.GetIndexAndSequenceNumber());
+        if (sample == m_GroundSamples.end())
+        {
+            // A ground the tick's sampling did not see (stepped onto this tick, or a replay between ticks): sampled now, once.
+            const JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
+            if (!bodyInterface.IsAdded(ground) || bodyInterface.GetMotionType(ground) == JPH::EMotionType::Static)
+                return JPH::Vec3::sZero();
+            sample = m_GroundSamples.emplace(ground.GetIndexAndSequenceNumber(),
+                                             GroundSample{ bodyInterface.GetLinearVelocity(ground), bodyInterface.GetAngularVelocity(ground),
+                                                           bodyInterface.GetCenterOfMassPosition(ground) }).first;
+        }
+        return sample->second.Linear + sample->second.Angular.Cross(JPH::Vec3(character.GetGroundPosition() - sample->second.CenterOfMass));
+    }
+
     void JoltPhysics3DScene::FollowGroundRotation(Entity entity, CharacterState& state, float dt)
     {
         // Standing on a turning body (a spinner, a ship), the character turns with it about the up axis -- Unreal's based movement
@@ -977,10 +1013,11 @@ namespace Nox {
         const JPH::BodyID ground = character->GetGroundBodyID();
         if (ground.IsInvalid())
             return;
-        const JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
-        if (bodyInterface.GetMotionType(ground) == JPH::EMotionType::Static)
+        // (Its motion as the last physics update left it: read after this character's step, the body holds the character's own push.)
+        const auto sample = m_GroundSamples.find(ground.GetIndexAndSequenceNumber());
+        if (sample == m_GroundSamples.end())
             return;
-        const float yawRate = bodyInterface.GetAngularVelocity(ground).GetY(); // radians a second about up
+        const float yawRate = sample->second.Angular.GetY(); // radians a second about up
         if (std::abs(yawRate) < 1e-5f)
             return;
         auto& transform = entity.GetComponent<TransformComponent>();
@@ -1166,8 +1203,10 @@ namespace Nox {
             JPH::CharacterVirtual* character = state.Character.GetPtr();
 
             state.Previous = state.Current;
-            character->UpdateGroundVelocity();
-            const JPH::Vec3 groundVelocity = character->GetGroundVelocity();
+            // Its ground's velocity as the last physics update left it (not Jolt's, which holds this character's own push on a light body
+            // when it was stepped twice before an update -- CharacterGroundVelocity).
+            const JPH::Vec3 groundVelocity = CharacterGroundVelocity(*character);
+            state.GroundVelocity = groundVelocity;
             const JPH::Vec3 currentVelocity = character->GetLinearVelocity();
             const bool onGround = character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
             const bool movingTowardsGround = (currentVelocity.GetY() - groundVelocity.GetY()) <= 0.1f;
@@ -1246,7 +1285,7 @@ namespace Nox {
             // reported "in the air" on most steps (fall and land animations on every other step).
             const float stepHeight = ToNative(std::max(controller.StepHeight, 0.0f));
             state.Grounded = character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
-            if (!state.Grounded && character->GetLinearVelocity().GetY() - character->GetGroundVelocity().GetY() <= 0.5f)
+            if (!state.Grounded && character->GetLinearVelocity().GetY() - CharacterGroundVelocity(*character).GetY() <= 0.5f)
             {
                 const JPH::RRayCast ray(character->GetPosition() + up * 0.05f, -up * (stepHeight + 0.05f));
                 JPH::RayCastResult hit;
@@ -1300,7 +1339,7 @@ namespace Nox {
             // animation's Speed). In the air the whole velocity (a jump off a moving platform keeps the platform's speed).
             JPH::Vec3 ownVelocity = character->GetLinearVelocity();
             if (state.Grounded && character->IsSupported())
-                ownVelocity -= character->GetGroundVelocity();
+                ownVelocity -= state.GroundVelocity;
             controller.Velocity = ToWorld(JoltUtils::ToGLM(ownVelocity));
 
             // Drawn between the last two fixed steps by how far the accumulator is into the next one, minus what is left of a stair's
@@ -1391,6 +1430,7 @@ namespace Nox {
         // The scene owns the clock (Scene::AdvanceTicks: one accumulator for scripts and physics, at most 5 ticks a frame).
         for (uint32_t tick = 0; tick < ticks; ++tick)
         {
+            SampleCharacterGrounds(); // (before any character steps this tick: the server's per-input steps come in m_BeforeTick)
             if (m_BeforeTick)
                 m_BeforeTick(); // (networking: a client records its inputs, the server applies its clients' inputs)
             StepCharacters(c_FixedDeltaTime);

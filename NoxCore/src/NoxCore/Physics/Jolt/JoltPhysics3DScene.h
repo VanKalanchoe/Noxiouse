@@ -168,8 +168,25 @@ namespace Nox
             bool ExternallyStepped = false;       // (networking) stepped by StepCharacter only
             glm::dvec3 VisualOffset{ 0.0 };       // (networking) a correction's offset, drawn and eased away
             float PreviousStepOffset = 0.0f;
+            JPH::Vec3 GroundVelocity = JPH::Vec3::sZero(); // (native) its ground's, as its last step used it (CharacterGroundVelocity)
         };
         std::unordered_map<uint32_t, CharacterState> m_EntityToCharacterMap;
+
+        // The bodies characters stand on, their motion as the last physics update left it -- sampled at the start of each fixed tick,
+        // before any character steps. A character presses its ground with its weight as impulses inside its own step, which the
+        // solver only cancels in the next physics update: Jolt's ground velocity read after one step of a character and before that
+        // update (a server stepping a client's character once per input, two in one tick; a client's replay) holds that push -- a
+        // character standing on a 1 kg box read 5 m/s (Unreal takes its base's velocity from the last physics update the same way).
+        struct GroundSample
+        {
+            JPH::Vec3 Linear = JPH::Vec3::sZero();
+            JPH::Vec3 Angular = JPH::Vec3::sZero();
+            JPH::RVec3 CenterOfMass = JPH::RVec3::sZero();
+        };
+        std::unordered_map<uint32_t, GroundSample> m_GroundSamples; // by body id
+        void SampleCharacterGrounds();
+        // The velocity of the point a character stands on (its ground body's sample; native units). Zero on static ground or none.
+        JPH::Vec3 CharacterGroundVelocity(const JPH::CharacterVirtual& character);
 
         // A moving body and its pose after the last two fixed steps: drawn interpolated between them, like a character, so it
         // moves smoothly at any frame rate instead of in 60 Hz jumps.
