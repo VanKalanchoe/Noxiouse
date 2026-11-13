@@ -97,6 +97,11 @@ namespace Nox
         AudioMixer::Shutdown();
         AudioEngine::Shutdown(); // (what the layers stop on their way out after this finds no voices: a no-op)
 
+        // The layers end while the application still exists: a layer's shutdown stops its scene, whose scripts' OnDestroy may call
+        // into the engine (Input.CursorLocked = false reaches Application::Get() for the window). They used to be destroyed with the
+        // members, after s_Application was cleared -- an assert on exit. Same order as before: before the renderer and the window.
+        m_LayerStack.clear();
+
         s_Application = nullptr;
     }
 
