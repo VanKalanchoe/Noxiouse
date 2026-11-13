@@ -886,6 +886,13 @@ namespace Nox
             const auto& identity = entity.GetComponent<NetworkIdentityComponent>();
             out << YAML::Key << "NetworkIdentityComponent" << YAML::BeginMap;
             out << YAML::Key << "ReplicateTransform" << YAML::Value << identity.ReplicateTransform;
+            out << YAML::Key << "AlwaysRelevant" << YAML::Value << identity.AlwaysRelevant;
+            out << YAML::Key << "OnlyRelevantToOwner" << YAML::Value << identity.OnlyRelevantToOwner;
+            out << YAML::Key << "CullDistance" << YAML::Value << identity.CullDistance;
+            out << YAML::Key << "Priority" << YAML::Value << identity.Priority;
+            out << YAML::Key << "UpdateRate" << YAML::Value << identity.UpdateRate;
+            static const char* dormancyNames[] = { "Awake", "DormantAll", "Initial" };
+            out << YAML::Key << "Dormancy" << YAML::Value << dormancyNames[static_cast<int>(identity.Dormancy) % 3];
             out << YAML::EndMap;
         }
 
@@ -2500,6 +2507,23 @@ namespace Nox
             auto& component = deserializedEntity.AddComponent<NetworkIdentityComponent>();
             if (networkIdentity["ReplicateTransform"])
                 component.ReplicateTransform = networkIdentity["ReplicateTransform"].as<bool>();
+            if (networkIdentity["AlwaysRelevant"])
+                component.AlwaysRelevant = networkIdentity["AlwaysRelevant"].as<bool>();
+            if (networkIdentity["OnlyRelevantToOwner"])
+                component.OnlyRelevantToOwner = networkIdentity["OnlyRelevantToOwner"].as<bool>();
+            if (networkIdentity["CullDistance"])
+                component.CullDistance = std::max(networkIdentity["CullDistance"].as<float>(), 0.0f);
+            if (networkIdentity["Priority"])
+                component.Priority = std::max(networkIdentity["Priority"].as<float>(), 0.0f);
+            if (networkIdentity["UpdateRate"])
+                component.UpdateRate = std::max(networkIdentity["UpdateRate"].as<float>(), 0.0f);
+            if (networkIdentity["Dormancy"])
+            {
+                const std::string dormancy = networkIdentity["Dormancy"].as<std::string>();
+                component.Dormancy = dormancy == "DormantAll" ? NetworkIdentityComponent::DormancyMode::DormantAll
+                                   : dormancy == "Initial"    ? NetworkIdentityComponent::DormancyMode::Initial
+                                                              : NetworkIdentityComponent::DormancyMode::Awake;
+            }
         }
 
         if (auto particleEmitter = entity["ParticleEmitterComponent"])

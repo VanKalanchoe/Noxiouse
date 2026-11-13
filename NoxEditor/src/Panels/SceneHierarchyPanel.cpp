@@ -2898,6 +2898,28 @@ namespace Nox
             ImGui::Checkbox("Replicate Transform", &component.ReplicateTransform);
             ImGui::SetItemTooltip("The server sends where it is (position, rotation, scale); on the clients its physics body follows.\n"
                                   "Off: only its scripts' [Replicated] fields (and its spawn and removal) go to the clients.");
+
+            ImGui::SeparatorText("Relevancy");
+            ImGui::Checkbox("Always Relevant", &component.AlwaysRelevant);
+            ImGui::SetItemTooltip("Every client gets it wherever it is (a game's state, a scoreboard).");
+            ImGui::Checkbox("Only Relevant To Owner", &component.OnlyRelevantToOwner);
+            ImGui::SetItemTooltip("Only the client that owns it gets it (a player's inventory).");
+            ImGui::BeginDisabled(component.AlwaysRelevant || component.OnlyRelevantToOwner);
+            ImGui::DragFloat("Cull Distance (m)", &component.CullDistance, 1.0f, 0.0f, 100000.0f, "%.0f");
+            ImGui::SetItemTooltip("A client gets it while it is within this distance of something that client owns (its character),\n"
+                                  "and for 5 s after it left. Out of range a client switches a level entity off and removes a spawned one.");
+            ImGui::EndDisabled();
+            ImGui::DragFloat("Priority", &component.Priority, 0.05f, 0.0f, 100.0f, "%.2f");
+            ImGui::SetItemTooltip("Its share of a client's bandwidth when there is more to send than the client's rate allows:\n"
+                                  "higher ones are sent first, the others wait (never forever). Unreal's NetPriority (players: 3).");
+            ImGui::DragFloat("Update Rate (/s)", &component.UpdateRate, 0.5f, 0.0f, 240.0f, component.UpdateRate > 0.0f ? "%.1f" : "every snapshot");
+            ImGui::SetItemTooltip("How often the server reads it at most (Unreal's NetUpdateFrequency); 0: every snapshot.");
+            const char* dormancyNames[] = { "Awake", "Dormant All", "Initial" };
+            int dormancy = static_cast<int>(component.Dormancy);
+            if (ImGui::Combo("Dormancy", &dormancy, dormancyNames, 3))
+                component.Dormancy = static_cast<NetworkIdentityComponent::DormancyMode>(dormancy);
+            ImGui::SetItemTooltip("Awake: read every snapshot.\nDormant All: not read again until a script calls FlushNetDormancy (a door).\n"
+                                  "Initial: its level state until flushed (a chest until it is opened). Saves the server's time.");
         });
 
         DrawComponent<CameraComponent>("Camera", entity, [](auto& component)

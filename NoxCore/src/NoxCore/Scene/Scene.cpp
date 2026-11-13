@@ -797,6 +797,17 @@ namespace Nox
         return LevelState::Unloaded;
     }
 
+    void Scene::GetStreamedLevels(std::vector<uint64_t>& outLevels, bool inOnly) const
+    {
+        outLevels.clear();
+        for (const StreamedLevel& streamed : m_Levels)
+        {
+            if (streamed.Failed || (inOnly && (!streamed.Loaded || streamed.UnloadQueued)))
+                continue;
+            outLevels.push_back(static_cast<uint64_t>(streamed.Level));
+        }
+    }
+
     void Scene::DestroyLevelEntities(AssetHandle level)
     {
         std::vector<UUID> entities;

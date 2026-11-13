@@ -21,7 +21,7 @@
 namespace Nox::Net
 {
     constexpr uint32_t ProtocolMagic = 0x4e584f4e;  // "NOXN"
-    constexpr uint32_t ProtocolVersion = 3;         // raised whenever a message's layout changes (2: NET2 replication, 3: NET3 inputs)
+    constexpr uint32_t ProtocolVersion = 4;         // raised whenever a message's layout changes (2: NET2 replication, 3: NET3 inputs, 4: NET4 per-entity acks)
     constexpr uint16_t DefaultPort = 7777;
     constexpr size_t MaxNameLength = 64;            // player and server names
     constexpr size_t MaxProjectNameLength = 128;
@@ -38,6 +38,8 @@ namespace Nox::Net
         Rpc = 34,
         // Prediction (NET3): the owning client's inputs for its character.
         Input = 35,
+        // Interest management (NET4): the streamed levels / world cells a client has in its scene (Unreal's level visibility).
+        LevelVisibility = 36,
     };
 
     // Why a session ended (sent in the transport's close; Unreal's ENetworkFailure / the login failure strings).

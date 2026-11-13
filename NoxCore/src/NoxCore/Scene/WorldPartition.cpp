@@ -624,6 +624,8 @@ namespace Nox
         outSources.clear();
         if (source)
             outSources.push_back({ *source, 1.0f, true }); // the camera activates
+        for (const glm::dvec3& extra : m_ExtraStreamingSources)
+            outSources.push_back({ extra, 1.0f, true }); // (a server's clients' players)
         for (auto handle : m_Registry.view<WorldStreamingSourceComponent, WorldTransformComponent>())
         {
             const auto& component = m_Registry.get<WorldStreamingSourceComponent>(handle);

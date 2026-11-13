@@ -42,13 +42,13 @@ Entities:
     TagComponent:
       Tag: Ground
     TransformComponent:
-      Translation: [0, -10, -500]
+      Translation: [0, -10, -8000]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
     RigidBody3DComponent:
       BodyType: Static
     BoxCollider3DComponent:
-      HalfExtents: [2000, 10, 2000]
+      HalfExtents: [20000, 10, 20000]
       Offset: [0, 0, 0]
     ScriptComponent:
       Classes: [Facerun.LevelStreamingTestBox]
@@ -57,7 +57,7 @@ Entities:
         - Class: Facerun.LevelStreamingTestBox
           Field: Size
           Type: Vector3
-          Value: [4000, 20, 4000]
+          Value: [40000, 20, 40000]
         - Class: Facerun.LevelStreamingTestBox
           Field: Color
           Type: Vector3
@@ -82,6 +82,12 @@ Entities:
       Scale: [1, 1, 1]
     NetworkIdentityComponent:
       ReplicateTransform: true
+      AlwaysRelevant: false
+      OnlyRelevantToOwner: false
+      CullDistance: 150
+      Priority: 1
+      UpdateRate: 0
+      Dormancy: Awake
     RigidBody3DComponent:
       BodyType: Kinematic
     BoxCollider3DComponent:

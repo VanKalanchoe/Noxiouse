@@ -2,8 +2,10 @@ using Nox;
 
 namespace Facerun;
 
-// The multiplayer demo (docs/Networking_Plan_2026-11.md, NET2 / NET3; scene Scenes/NetDemo.nox): a server that spawns boxes and a
-// player for every client, players that walk with WASD and jump with Space (predicted on their own machine). Run NoxRuntime --server --scene=Scenes/NetDemo.nox and one or more
+// The multiplayer demo (docs/Networking_Plan_2026-11.md, NET2 - NET4; scene Scenes/NetDemo.nox): a server that spawns boxes and a
+// player for every client, players that walk with WASD and jump with Space (predicted on their own machine), and north of the start a
+// field of boxes with bots wandering in it -- each client gets only what is near its player (relevancy: boxes within 50 m, bots within
+// 80 m, players within 150 m). Run NoxRuntime --server --scene=Scenes/NetDemo.nox and one or more
 // NoxRuntime --windowed --connect=localhost:7777 --scene=Scenes/NetDemo.nox (or --listen to play on the server too).
 
 /// <summary>
@@ -16,6 +18,12 @@ public sealed class NetGameMode : EntityBehaviour
     [Expose(Tooltip = "The box prefab, under the asset directory")] public string BoxPrefab = "Prefabs/NetBox.nprefab";
     [Expose(Tooltip = "Seconds between two boxes", Min = 0.1f, Max = 30.0f)] public float BoxInterval = 1.5f;
     [Expose(Tooltip = "Boxes at once; the oldest goes when another falls", Min = 1, Max = 500)] public int MaxBoxes = 30;
+    [Expose(Tooltip = "Boxes in the field north of the start (a grid; each client gets the ones within 50 m of its player)", Min = 0, Max = 4000)]
+    public int FieldBoxes = 400;
+    [Expose(Tooltip = "World units between two boxes of the field")] public float FieldSpacing = 800.0f;
+    [Expose(Tooltip = "How far north of the start the field's middle is (world units)")] public float FieldDistance = 12000.0f;
+    [Expose(Tooltip = "The bot prefab, under the asset directory")] public string BotPrefab = "Prefabs/NetBot.nprefab";
+    [Expose(Tooltip = "Server-controlled characters wandering in the field", Min = 0, Max = 256)] public int Bots = 16;
 
     readonly Dictionary<uint, Entity> m_Players = new();
     readonly Queue<Entity> m_Boxes = new();
@@ -30,6 +38,7 @@ public sealed class NetGameMode : EntityBehaviour
         Network.ClientLeft += OnClientLeft;
         if (!Network.IsDedicatedServer)
             SpawnPlayer(0); // the one playing here (a listen server or standalone)
+        SpawnField();
         Log.Info($"[NetDemo] game mode on the {(Network.IsServer ? (Network.IsDedicatedServer ? "dedicated server" : "listen server") : "standalone game")}");
     }
 
@@ -59,6 +68,25 @@ public sealed class NetGameMode : EntityBehaviour
         }
         m_Players[owner] = player;
         Log.Info($"[NetDemo] spawned the player of {(owner == 0 ? "the server" : $"client {owner}")}");
+    }
+
+    // The field: a grid of boxes resting on the ground and bots among them, all on the server; a client is sent the ones near its player.
+    void SpawnField()
+    {
+        int side = (int)MathF.Ceiling(MathF.Sqrt(FieldBoxes));
+        double half = (side - 1) * FieldSpacing * 0.5;
+        for (int index = 0; index < FieldBoxes; ++index)
+        {
+            double x = (index % side) * FieldSpacing - half;
+            double z = -FieldDistance + (index / side) * FieldSpacing - half;
+            Network.Spawn(BoxPrefab, new Vector3d(x, 60.0, z));
+        }
+        for (int index = 0; index < Bots; ++index)
+        {
+            Vector3d position = new(m_Random.NextDouble() * 2.0 * half - half, 200.0, -FieldDistance + m_Random.NextDouble() * 2.0 * half - half);
+            Network.Spawn(BotPrefab, position);
+        }
+        Log.Info($"[NetDemo] a field of {FieldBoxes} boxes and {Bots} bots {FieldDistance / 100.0f:0} m north of the start");
     }
 
     protected override void OnUpdate(float deltaTime)
@@ -226,6 +254,72 @@ public sealed class NetSpinner : EntityBehaviour
         Vector3 rotation = transform.LocalRotation;
         rotation.Y += SpinSpeed * deltaTime;
         transform.LocalRotation = rotation;
+    }
+
+    protected override void OnDestroy()
+    {
+        m_Mesh?.Dispose();
+        m_Mesh = null;
+    }
+}
+
+/// <summary>
+/// A bot: a character the server owns and moves (it wanders around where it was spawned); clients draw it between snapshots -- only
+/// the clients whose player is within 80 m (its Network Identity's Cull Distance).
+/// </summary>
+public sealed class NetBot : EntityBehaviour
+{
+    [Replicated(OnRep = nameof(OnColorChanged))] public Vector3 Color = new(0.6f, 0.6f, 0.6f);
+    [Expose(Tooltip = "Walking speed (world units a second)")] public float Speed = 250.0f;
+    [Expose(Tooltip = "How far it wanders from where it was spawned (world units)")] public float Range = 3000.0f;
+
+    Mesh? m_Mesh;
+    Vector3d m_Home;
+    bool m_HomeSet;
+    Vector3 m_Direction;
+    float m_Timer;
+    readonly Random m_Random = new();
+
+    protected override void OnCreate()
+    {
+        if (HasAuthority)
+        {
+            Color = new Vector3(0.2f + 0.3f * m_Random.NextSingle(), 0.2f + 0.3f * m_Random.NextSingle(), 0.6f + 0.4f * m_Random.NextSingle());
+        }
+        m_Mesh = NetDemoMesh.Box(new Vector3(68.0f, 150.0f, 68.0f), Color);
+        Self.SetMesh(m_Mesh);
+    }
+
+    void OnColorChanged() => m_Mesh?.SetColor(Color.X, Color.Y, Color.Z, new Vector3(0.0f, 0.0f, 0.0f));
+
+    protected override void OnUpdate(float deltaTime)
+    {
+        if (!HasAuthority)
+            return; // a client's copy: the server moves it
+        if (!m_HomeSet)
+        {
+            m_Home = GetComponent<TransformComponent>().WorldPosition; // (where it was spawned, once its transform is in place)
+            m_HomeSet = true;
+        }
+        m_Timer -= deltaTime;
+        if (m_Timer <= 0.0f)
+        {
+            // A new direction every few seconds (sometimes a pause); back home when it wandered too far.
+            m_Timer = 1.5f + 3.0f * m_Random.NextSingle();
+            Vector3d position = GetComponent<TransformComponent>().WorldPosition;
+            double dx = m_Home.X - position.X, dz = m_Home.Z - position.Z;
+            double away = Math.Sqrt(dx * dx + dz * dz);
+            if (away > Range)
+                m_Direction = new Vector3((float)(dx / away), 0.0f, (float)(dz / away));
+            else if (m_Random.NextSingle() < 0.2f)
+                m_Direction = new Vector3(0.0f, 0.0f, 0.0f);
+            else
+            {
+                float angle = m_Random.NextSingle() * MathF.PI * 2.0f;
+                m_Direction = new Vector3(MathF.Cos(angle), 0.0f, MathF.Sin(angle));
+            }
+        }
+        GetComponent<CharacterControllerComponent>().SetMoveVelocity(new Vector3(m_Direction.X * Speed, 0.0f, m_Direction.Z * Speed));
     }
 
     protected override void OnDestroy()

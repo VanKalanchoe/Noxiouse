@@ -160,6 +160,37 @@ namespace Nox
             return replication && replication->SetOwner(UUID(entityID), owner);
         }
 
+        // Dormancy (NET4; Unreal's NetDormancy): -1 for an entity without a Network Identity.
+        int32_t NetworkGetDormancy(uint64_t entityID)
+        {
+            Entity entity = s_Scene ? s_Scene->GetEntityByUUID(UUID(entityID)) : Entity{};
+            if (!entity || !entity.HasComponent<NetworkIdentityComponent>())
+                return -1;
+            return static_cast<int32_t>(entity.GetComponent<NetworkIdentityComponent>().Dormancy);
+        }
+
+        Coral::Bool32 NetworkSetDormancy(uint64_t entityID, int32_t dormancy)
+        {
+            Entity entity = s_Scene ? s_Scene->GetEntityByUUID(UUID(entityID)) : Entity{};
+            if (!entity || !entity.HasComponent<NetworkIdentityComponent>() || dormancy < 0 || dormancy > 2)
+                return false;
+            auto& identity = entity.GetComponent<NetworkIdentityComponent>();
+            // Awake again, or dormant from now: either way its state as it is now is read once more (Unreal: SetNetDormancy flushes).
+            identity.Dormancy = static_cast<NetworkIdentityComponent::DormancyMode>(dormancy);
+            identity.DormancyFlush = true;
+            return true;
+        }
+
+        // Its state is read once more at the next snapshot (Unreal's FlushNetDormancy): after changing a dormant entity.
+        Coral::Bool32 NetworkFlushDormancy(uint64_t entityID)
+        {
+            Entity entity = s_Scene ? s_Scene->GetEntityByUUID(UUID(entityID)) : Entity{};
+            if (!entity || !entity.HasComponent<NetworkIdentityComponent>())
+                return false;
+            entity.GetComponent<NetworkIdentityComponent>().DormancyFlush = true;
+            return true;
+        }
+
         // Network.Spawn("Prefabs/Player.nprefab", position, owner): the server's replicated spawn; standalone a plain Instantiate.
         uint64_t NetworkSpawn(Coral::String path, double x, double y, double z, uint32_t owner)
         {
@@ -1448,6 +1479,9 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Network_SetOwner", reinterpret_cast<void*>(&NetworkSetOwner));
         assembly.AddInternalCall("Nox.InternalCalls", "Network_Spawn", reinterpret_cast<void*>(&NetworkSpawn));
         assembly.AddInternalCall("Nox.InternalCalls", "Network_SendRpc", reinterpret_cast<void*>(&NetworkSendRpc));
+        assembly.AddInternalCall("Nox.InternalCalls", "Network_GetDormancy", reinterpret_cast<void*>(&NetworkGetDormancy));
+        assembly.AddInternalCall("Nox.InternalCalls", "Network_SetDormancy", reinterpret_cast<void*>(&NetworkSetDormancy));
+        assembly.AddInternalCall("Nox.InternalCalls", "Network_FlushDormancy", reinterpret_cast<void*>(&NetworkFlushDormancy));
         assembly.UploadInternalCalls();
     }
 

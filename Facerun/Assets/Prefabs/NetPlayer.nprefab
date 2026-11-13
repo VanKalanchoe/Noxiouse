@@ -10,6 +10,12 @@ Entities:
       Scale: [1, 1, 1]
     NetworkIdentityComponent:
       ReplicateTransform: true
+      AlwaysRelevant: false
+      OnlyRelevantToOwner: false
+      CullDistance: 150
+      Priority: 3
+      UpdateRate: 0
+      Dormancy: Awake
     CharacterController3DComponent: {}
     ScriptComponent:
       Classes: [Facerun.NetPlayer]

@@ -1,0 +1,23 @@
+Prefab: NetBot
+Root: 7021394837112201
+Entities:
+  - Entity: 7021394837112201
+    TagComponent:
+      Tag: NetBot
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    NetworkIdentityComponent:
+      ReplicateTransform: true
+      AlwaysRelevant: false
+      OnlyRelevantToOwner: false
+      CullDistance: 80
+      Priority: 2
+      UpdateRate: 0
+      Dormancy: Awake
+    CharacterController3DComponent: {}
+    ScriptComponent:
+      Classes: [Facerun.NetBot]
+      EntityReferences: []
+      FieldOverrides: []

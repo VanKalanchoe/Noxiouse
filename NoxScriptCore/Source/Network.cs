@@ -45,6 +45,20 @@ public sealed class MulticastRpcAttribute : Attribute
     public bool Reliable = true;
 }
 
+/// <summary>
+/// How often the server reads a replicated entity (Unreal's ENetDormancy; the Network Identity's Dormancy). A dormant entity costs the
+/// server nothing until it changes: flush it after a change (<see cref="Network.FlushDormancy"/>).
+/// </summary>
+public enum NetDormancy
+{
+    /// <summary>Read every snapshot (or at its update rate).</summary>
+    Awake = 0,
+    /// <summary>Not read again until flushed (a door: flush when it opens or closes).</summary>
+    DormantAll = 1,
+    /// <summary>Its level state until flushed (a chest in the level until it is opened).</summary>
+    Initial = 2
+}
+
 /// <summary>This game's part in a multiplayer session (Unreal's ENetMode).</summary>
 public enum NetMode
 {
@@ -92,6 +106,19 @@ public static class Network
 
     /// <summary>The server hands a replicated entity to a client (0: back to the server). False on a client or for an entity that is not replicated.</summary>
     public static bool SetOwner(Entity entity, uint owner) => InternalCalls.NetworkSetOwner(entity.ID, owner);
+
+    /// <summary>A replicated entity's dormancy (null: not replicated).</summary>
+    public static NetDormancy? GetDormancy(Entity entity)
+    {
+        int dormancy = InternalCalls.NetworkGetDormancy(entity.ID);
+        return dormancy < 0 ? null : (NetDormancy)dormancy;
+    }
+
+    /// <summary>On the server: makes an entity dormant or awake again; its state as it is now goes to the clients either way.</summary>
+    public static bool SetDormancy(Entity entity, NetDormancy dormancy) => InternalCalls.NetworkSetDormancy(entity.ID, (int)dormancy);
+
+    /// <summary>On the server: a dormant entity changed -- its state is read once more at the next snapshot (Unreal's FlushNetDormancy).</summary>
+    public static bool FlushDormancy(Entity entity) => InternalCalls.NetworkFlushDormancy(entity.ID);
 
     /// <summary>On the server: a client joined (its id). Subscribe in OnCreate, unsubscribe in OnDestroy.</summary>
     public static event Action<uint>? ClientJoined;

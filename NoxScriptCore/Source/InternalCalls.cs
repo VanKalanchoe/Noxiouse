@@ -14,6 +14,9 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, uint, uint> Network_SetOwner;
     private static delegate*<NativeString, double, double, double, uint, ulong> Network_Spawn;
     private static delegate*<ulong, NativeString, int, int, uint, byte*, int, void> Network_SendRpc;
+    private static delegate*<ulong, int> Network_GetDormancy;
+    private static delegate*<ulong, int, uint> Network_SetDormancy;
+    private static delegate*<ulong, uint> Network_FlushDormancy;
     private static delegate*<int, uint> Input_IsKeyDown;
     private static delegate*<int, uint> Input_IsMouseButtonDown;
     private static delegate*<Vector2*, void> Input_GetMouseDelta;
@@ -139,6 +142,9 @@ internal static unsafe class InternalCalls
     internal static bool NetworkIsDedicatedServer() => Network_IsDedicatedServer() != 0;
     internal static uint NetworkGetOwner(ulong entityID) => Network_GetOwner(entityID);
     internal static bool NetworkSetOwner(ulong entityID, uint owner) => Network_SetOwner(entityID, owner) != 0;
+    internal static int NetworkGetDormancy(ulong entityID) => Network_GetDormancy(entityID);
+    internal static bool NetworkSetDormancy(ulong entityID, int dormancy) => Network_SetDormancy(entityID, dormancy) != 0;
+    internal static bool NetworkFlushDormancy(ulong entityID) => Network_FlushDormancy(entityID) != 0;
 
     internal static ulong NetworkSpawn(string prefabPath, Vector3d position, uint owner)
     {

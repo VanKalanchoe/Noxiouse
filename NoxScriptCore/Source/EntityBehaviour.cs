@@ -44,11 +44,20 @@ public abstract class EntityBehaviour
         }
     }
 
+    /// <summary>This entity's dormancy (Awake when it is not replicated; setting it on a client does nothing for the server).</summary>
+    public NetDormancy NetDormancy
+    {
+        get => Network.GetDormancy(Self) ?? NetDormancy.Awake;
+        set => Network.SetDormancy(Self, value);
+    }
+    /// <summary>On the server: this dormant entity changed -- its fields and transform go to the clients at the next snapshot.</summary>
+    protected void FlushNetDormancy() => Network.FlushDormancy(Self);
+
     /// <summary>Runs a [ServerRpc] method on the server (from the client that owns the entity; on the server it just runs).</summary>
     protected void CallServerRpc(string method, params object?[] arguments) => CallRpc(0, method, arguments);
     /// <summary>Runs a [ClientRpc] method on the client that owns the entity (the server calls it).</summary>
     protected void CallClientRpc(string method, params object?[] arguments) => CallRpc(1, method, arguments);
-    /// <summary>Runs a [MulticastRpc] method here and on every client (the server calls it).</summary>
+    /// <summary>Runs a [MulticastRpc] method here and on every client the entity is relevant to (the server calls it).</summary>
     protected void CallMulticastRpc(string method, params object?[] arguments) => CallRpc(2, method, arguments);
 
     void CallRpc(int kind, string name, object?[] arguments)

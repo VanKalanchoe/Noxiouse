@@ -1166,10 +1166,31 @@ namespace Nox
     // client it is a proxy -- its physics body follows the replicated transform (kinematic) and a character controller is not
     // simulated there. Level entities are matched by their UUID (the same scene on both sides); entities spawned while the game runs
     // reach the clients through the prefab they were made from.
+    //
+    // Interest management (NET4; Unreal's relevancy): a client gets it only while it is relevant to that client -- always relevant, its
+    // own, or within CullDistance of something the client owns (its character); one that leaves the range goes after 5 s. On a client a
+    // level entity that is not relevant is switched off (InactiveComponent) and back on when it is again; a spawned one is removed and
+    // spawned again. Priority shares each client's bandwidth (a busy scene sends the important ones first and the others less often);
+    // UpdateRate reads it less often than every snapshot; a dormant entity is not read at all until a script flushes it (Unreal's
+    // NetDormancy: things that rarely change -- a door, a chest).
     struct NetworkIdentityComponent
     {
+        enum class DormancyMode : uint8_t
+        {
+            Awake = 0,  // read every snapshot (or UpdateRate)
+            DormantAll, // not read again until flushed (Unreal's DORM_DormantAll): a script calls FlushNetDormancy after a change
+            Initial     // its first state (the level's) until flushed (Unreal's DORM_Initial): a level's chest until it is opened
+        };
         bool ReplicateTransform = true;
-        uint32_t Owner = 0; // runtime only (not saved): the client that owns it (Net::ClientId; 0: the server)
+        bool AlwaysRelevant = false;      // every client gets it wherever it is (a game's state, a scoreboard)
+        bool OnlyRelevantToOwner = false; // only its owner gets it (a player's inventory)
+        float CullDistance = 150.0f;      // metres from a client's own entities within which that client gets it (Unreal: 150 m)
+        float Priority = 1.0f;            // its share of a busy client's bandwidth (Unreal's NetPriority; players: 3)
+        float UpdateRate = 0.0f;          // reads a second at most (Unreal's NetUpdateFrequency); 0: every snapshot
+        DormancyMode Dormancy = DormancyMode::Awake;
+
+        uint32_t Owner = 0;               // runtime only (not saved): the client that owns it (Net::ClientId; 0: the server)
+        bool DormancyFlush = false;       // runtime: read once more at the next snapshot (FlushNetDormancy)
     };
 
     // An HLOD (§5.13.2): the merged, simplified, baked stand-in of one world cell, drawn while that cell is not loaded and drawn. Made by

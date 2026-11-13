@@ -10,6 +10,12 @@ Entities:
       Scale: [1, 1, 1]
     NetworkIdentityComponent:
       ReplicateTransform: true
+      AlwaysRelevant: false
+      OnlyRelevantToOwner: false
+      CullDistance: 50
+      Priority: 1
+      UpdateRate: 0
+      Dormancy: Awake
     RigidBody3DComponent:
       BodyType: Dynamic
       Mass: 1

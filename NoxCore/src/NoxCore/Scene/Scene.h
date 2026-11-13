@@ -162,6 +162,12 @@ namespace Nox
         bool LoadLevel(AssetHandle level);
         void UnloadLevel(AssetHandle level);
         LevelState GetLevelState(AssetHandle level) const;
+        // The streamed levels and world cells in this scene (LevelComponent::Level of their entities): every one being loaded or in
+        // (`inOnly` false), or only those completely in the scene (networking: the server's and a client's level visibility).
+        void GetStreamedLevels(std::vector<uint64_t>& outLevels, bool inOnly) const;
+        // More streaming sources (they activate, at the grid's loading range): a server streams the world around its clients' players
+        // (Unreal's world partition server streaming). Replaced each time; empty: none.
+        void SetExtraStreamingSources(std::vector<glm::dvec3> positions) { m_ExtraStreamingSources = std::move(positions); }
 
         // Sub-levels (Unreal's Levels window, Backlog L1): other scenes (scene assets) edited together with this one, the persistent
         // level. While editing, their entities are in this scene, each root marked with LevelComponent (an entity belongs to its
@@ -543,6 +549,7 @@ namespace Nox
             bool Cooked = false;
         };
         std::vector<StreamedLevel> m_Levels;
+        std::vector<glm::dvec3> m_ExtraStreamingSources;
         WorldPartition m_World;
         // Play / Simulate of an edited world: the cells the editor had loaded stay in the world as the session begins, and this is
         // each as it was then (its entities, every component, in a scene of their own): streamed out and back, it is built from

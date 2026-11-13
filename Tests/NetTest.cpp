@@ -10,12 +10,16 @@
 #include "NoxCore/Network/NetSnapshot.h"
 #include "NoxCore/Network/NetQuantize.h"
 #include "NoxCore/Network/NetPrediction.h"
+#include "NoxCore/Network/NetRelevancy.h"
 #include "NoxCore/Core/Log.h"
 
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 #include <functional>
 #include <random>
+#include <set>
+#include <unordered_set>
 #include <thread>
 #include <vector>
 
@@ -687,13 +691,14 @@ static void TestClockAndInterpolation()
 // the client applies must be exactly the server's world at that tick; after the loss stops the client must hold the final world.
 static void TestSnapshots()
 {
-    std::printf("\n== snapshots: deltas against acknowledged baselines, 30 %% loss and reordering both ways\n");
+    std::printf("\n== snapshots: per-entity acknowledged states, 30 %% loss and reordering both ways\n");
     std::mt19937 random(1234);
     auto chance = [&](float p) { return std::uniform_real_distribution<float>(0.0f, 1.0f)(random) < p; };
     auto randomBlob = [&](size_t maxSize) { std::vector<uint8_t> blob(1 + random() % maxSize); for (uint8_t& b : blob) b = static_cast<uint8_t>(random()); return blob; };
 
     WorldState world;
     NetId nextId = 1000;
+    std::unordered_map<NetId, std::vector<EntityStatePtr>> history; // every state each entity had
     auto spawn = [&]()
     {
         auto state = std::make_shared<EntityState>();
@@ -702,6 +707,7 @@ static void TestSnapshots()
         const size_t properties = 1 + random() % 5;
         for (size_t index = 0; index < properties; ++index)
             state->Properties.push_back(randomBlob(index == 0 ? 24 : 8));
+        history[nextId].push_back(state);
         world.Entities[nextId++] = state;
     };
     for (int i = 0; i < 40; ++i)
@@ -709,10 +715,9 @@ static void TestSnapshots()
 
     SnapshotSender sender;
     SnapshotReceiver receiver;
-    std::unordered_map<uint32_t, WorldState> sentWorlds; // what each sequence carried
     struct InFlight { int DeliverAt; std::vector<uint8_t> Bytes; };
     std::vector<InFlight> toClient, toServer;
-    size_t applied = 0, stale = 0, missing = 0, malformed = 0, mismatches = 0, bytes = 0, fullBytes = 0;
+    size_t applied = 0, stale = 0, malformed = 0, invented = 0, bytes = 0, fullBytes = 0;
     WorldState clientWorld;
     const int lossyTicks = 600, totalTicks = 700;
     for (int tick = 1; tick <= totalTicks; ++tick)
@@ -730,6 +735,7 @@ static void TestSnapshots()
                 if (chance(0.05f)) changed->Owner = random() % 4;
                 if (chance(0.02f)) changed->Properties.push_back(randomBlob(8)); // a script added
                 it->second = changed;
+                history[it->first].push_back(changed);
             }
             ++it;
         }
@@ -739,7 +745,6 @@ static void TestSnapshots()
         // The server sends.
         NetWriter out;
         sender.Write(world, out);
-        sentWorlds[sender.GetLastSent()] = world;
         bytes += out.GetSize();
         {
             SnapshotSender full; // the same world from nothing: what no deltas would cost
@@ -763,23 +768,20 @@ static void TestSnapshots()
             case SnapshotReceiver::Result::Applied:
             {
                 ++applied;
-                const WorldState& expected = sentWorlds[sequence];
-                bool same = decoded.Tick == expected.Tick && decoded.Entities.size() == expected.Entities.size();
-                for (const auto& [id, state] : expected.Entities)
+                // Every state the client holds is one the server's entity really had (nothing mixed up or made up).
+                for (const auto& [id, state] : decoded.Entities)
                 {
-                    auto found = decoded.Entities.find(id);
-                    same = same && found != decoded.Entities.end() && *found->second == *state;
+                    const auto& states = history[id];
+                    invented += std::any_of(states.begin(), states.end(), [&](const EntityStatePtr& s) { return *s == *state; }) ? 0 : 1;
                 }
-                mismatches += same ? 0 : 1;
                 clientWorld = decoded;
                 NetWriter ack;
-                WriteSnapshotAck(ack, sequence);
+                receiver.WriteAck(ack);
                 if (!lossy || !chance(0.3f))
                     toServer.push_back({ tick + (lossy ? static_cast<int>(random() % 5) : 0), std::vector<uint8_t>(ack.GetData().begin(), ack.GetData().end()) });
                 break;
             }
             case SnapshotReceiver::Result::Stale: ++stale; break;
-            case SnapshotReceiver::Result::MissingBaseline: ++missing; break;
             case SnapshotReceiver::Result::Malformed: ++malformed; break;
             }
             toClient.erase(toClient.begin());
@@ -789,12 +791,15 @@ static void TestSnapshots()
         {
             NetReader reader(toServer.front().Bytes);
             reader.ReadU8();
-            sender.Acknowledge(reader.ReadU32());
+            uint32_t newest = 0, bits = 0;
+            if (ReadSnapshotAck(reader, newest, bits))
+                sender.Acknowledge(newest, bits);
             toServer.erase(toServer.begin());
         }
     }
-    CHECK(malformed == 0 && mismatches == 0, "{} snapshots applied, each exactly the server's world ({} mismatches, {} malformed); {} late ones skipped, {} without their baseline",
-          applied, mismatches, malformed, stale, missing);
+    CHECK(malformed == 0 && invented == 0 && receiver.GetUnknownChanges() == 0,
+          "{} snapshots applied, every state held one the server had ({} not, {} malformed, {} changes to unknown entities); {} late ones skipped",
+          applied, invented, malformed, receiver.GetUnknownChanges(), stale);
     bool converged = clientWorld.Entities.size() == world.Entities.size();
     for (const auto& [id, state] : world.Entities)
     {
@@ -821,16 +826,377 @@ static void TestSnapshots()
     CHECK(true, "100000 random snapshots read without a crash ({} happened to be well-formed)", accepted);
 }
 
-int main()
+
+// ---------------------------------------------------------------------------------------------------------------- relevancy (NET4)
+
+static void TestRelevancy()
+{
+    std::printf("\n== relevancy: the grid against every entity checked one by one, the relevant time-out, level visibility\n");
+    std::mt19937 random(77);
+    auto uniform = [&](double a, double b) { return std::uniform_real_distribution<double>(a, b)(random); };
+    // 20 000 entities over 4 km x 4 km (a unit is a centimetre here): cull distances 20-300 m, a few always relevant, some only to their
+    // owner, some in streamed levels.
+    std::vector<RelevancyEntity> entities(20000);
+    for (size_t index = 0; index < entities.size(); ++index)
+    {
+        RelevancyEntity& entity = entities[index];
+        entity.Id = 1000 + index;
+        entity.Position = { uniform(-200000.0, 200000.0), uniform(-500.0, 3000.0), uniform(-200000.0, 200000.0) };
+        entity.CullDistance = index % 97 == 0 ? 1000000.0 : uniform(2000.0, 30000.0); // (some far beyond the grid's reach)
+        entity.Owner = index % 13 == 0 ? static_cast<ClientId>(1 + random() % 64) : InvalidClientId;
+        entity.AlwaysRelevant = index % 501 == 0;
+        entity.OnlyRelevantToOwner = index % 211 == 0;
+        entity.Level = index % 5 == 0 ? 11 + random() % 4 : 0; // levels 11-14; 11-13 streamed, 14 not (in every client's world)
+        entity.Priority = 1.0f + static_cast<float>(index % 3);
+    }
+    const std::unordered_set<uint64_t> streamed{ 11, 12, 13 };
+    RelevancyGrid grid;
+    grid.Build(entities, streamed, 5000.0);
+
+    std::vector<std::unordered_set<uint64_t>> levels(64);
+    std::vector<RelevancyViewer> viewers(64);
+    for (size_t client = 0; client < viewers.size(); ++client)
+    {
+        viewers[client].Client = static_cast<ClientId>(client + 1);
+        for (int position = 0; position < 1 + static_cast<int>(client % 3); ++position)
+            viewers[client].Positions.push_back({ uniform(-200000.0, 200000.0), 0.0, uniform(-200000.0, 200000.0) });
+        for (uint64_t level : { 11, 12, 13 })
+            if (random() % 2)
+                levels[client].insert(level);
+        viewers[client].Levels = &levels[client];
+    }
+    size_t mismatched = 0, total = 0, smallest = SIZE_MAX, largest = 0;
+    std::vector<RelevantEntity> relevant;
+    const double start = NetNow();
+    for (const RelevancyViewer& viewer : viewers)
+    {
+        grid.Query(viewer, relevant);
+        std::set<NetId> fromGrid;
+        for (const RelevantEntity& entry : relevant)
+            fromGrid.insert(entities[entry.Index].Id);
+        std::set<NetId> expected;
+        for (const RelevancyEntity& entity : entities)
+            if (grid.IsRelevant(entity, viewer))
+                expected.insert(entity.Id);
+        mismatched += (fromGrid == expected && fromGrid.size() == relevant.size()) ? 0 : 1;
+        total += relevant.size();
+        smallest = std::min(smallest, relevant.size());
+        largest = std::max(largest, relevant.size());
+    }
+    const double elapsed = NetNow() - start;
+    CHECK(mismatched == 0, "64 clients x 20000 entities: the grid finds exactly the relevant ones ({} to {} per client, {} mismatches)",
+          smallest, largest, mismatched);
+    (void)elapsed;
+    double queryStart = NetNow();
+    for (int repeat = 0; repeat < 10; ++repeat)
+        for (const RelevancyViewer& viewer : viewers)
+            grid.Query(viewer, relevant);
+    const double perSnapshot = (NetNow() - queryStart) / 10.0;
+    CHECK(total > 0, "a snapshot's queries for all 64 clients take {:.2f} ms (grid built once per snapshot)", perSnapshot * 1000.0);
+
+    // The relevant time-out: an entity that leaves the range stays for 5 s; one whose level the client unloads leaves at once.
+    std::vector<RelevancyEntity> two(2);
+    two[0] = { 1, { 0.0, 0.0, 1000.0 }, 5000.0, InvalidClientId, 0, 1.0f, false, false };
+    two[1] = { 2, { 0.0, 0.0, 2000.0 }, 5000.0, InvalidClientId, 11, 1.0f, false, false };
+    std::unordered_set<uint64_t> clientLevels{ 11 };
+    RelevancyViewer walker{ 1, { { 0.0, 0.0, 0.0 } }, &clientLevels };
+    ClientRelevancy history;
+    RelevancyGrid small;
+    small.Build(two, streamed, 5000.0);
+    std::vector<RelevantEntity> now;
+    history.Update(small, walker, 0.0, 5.0, now);
+    const bool bothAtFirst = now.size() == 2;
+    walker.Positions[0] = { 0.0, 0.0, 100000.0 }; // walked 1 km away
+    history.Update(small, walker, 1.0, 5.0, now);
+    const bool keptWhileTimingOut = now.size() == 2;
+    clientLevels.clear(); // its level unloaded on the client
+    history.Update(small, walker, 2.0, 5.0, now);
+    const bool levelLeftAtOnce = now.size() == 1 && two[now[0].Index].Id == 1;
+    history.Update(small, walker, 6.5, 5.0, now);
+    const bool goneAfterTimeout = now.empty();
+    CHECK(bothAtFirst && keptWhileTimingOut && levelLeftAtOnce && goneAfterTimeout,
+          "out of range: kept for the 5 s time-out, then gone; its level unloaded on the client: gone at once");
+}
+
+static void DeliverAck(SnapshotSender& sender, const std::vector<uint8_t>& bytes)
+{
+    NetReader reader(bytes);
+    reader.ReadU8();
+    uint32_t newest = 0, bits = 0;
+    if (ReadSnapshotAck(reader, newest, bits))
+        sender.Acknowledge(newest, bits);
+}
+
+// One direction of a lossy link with latency (whole snapshots).
+struct LossyLink
+{
+    struct Packet { int DeliverAt; std::vector<uint8_t> Bytes; };
+    std::vector<Packet> InFlight;
+    void Send(std::mt19937& random, int tick, std::span<const uint8_t> bytes, float loss, int latency, int jitter)
+    {
+        if (std::uniform_real_distribution<float>(0.0f, 1.0f)(random) < loss)
+            return;
+        InFlight.push_back({ tick + latency + (jitter > 0 ? static_cast<int>(random() % (jitter + 1)) : 0), { bytes.begin(), bytes.end() } });
+    }
+    template<typename F> void Deliver(int tick, F&& receive)
+    {
+        std::stable_sort(InFlight.begin(), InFlight.end(), [](const Packet& a, const Packet& b) { return a.DeliverAt < b.DeliverAt; });
+        while (!InFlight.empty() && InFlight.front().DeliverAt <= tick)
+        {
+            receive(InFlight.front().Bytes);
+            InFlight.erase(InFlight.begin());
+        }
+    }
+};
+
+static void TestBudget()
+{
+    std::printf("\n== bandwidth budget: 3000 entities changing faster than 1.5 KB per snapshot can carry, 10 %% loss\n");
+    std::mt19937 random(4242);
+    WorldState world;
+    std::unordered_map<NetId, float> priorities;
+    for (NetId id = 1; id <= 3000; ++id)
+    {
+        auto state = std::make_shared<EntityState>();
+        state->Properties = { std::vector<uint8_t>(8, 0), std::vector<uint8_t>(4, 0) };
+        world.Entities[id] = state;
+        priorities[id] = id <= 300 ? 4.0f : 1.0f; // a tenth are four times as important (the viewer's own, nearby ones)
+    }
+    SnapshotSender sender;
+    SnapshotReceiver receiver;
+    LossyLink toClient, toServer;
+    WorldState clientWorld;
+    const size_t budget = 1500;
+    size_t overBudget = 0, deferredTotal = 0, snapshots = 0;
+    // Starvation: the longest gap between two updates of an entity's client copy while it is out of date, per priority group.
+    std::unordered_map<NetId, int> lastUpdate;
+    std::unordered_map<NetId, EntityStatePtr> lastHeld;
+    int worstGap[2] = { 0, 0 };   // [0] priority 4, [1] priority 1
+    double updates[2] = { 0.0, 0.0 };
+    const int changingTicks = 600, totalTicks = 800;
+    for (int tick = 1; tick <= totalTicks; ++tick)
+    {
+        world.Tick = static_cast<uint64_t>(tick);
+        if (tick <= changingTicks)
+        {
+            // A third of them move every snapshot (a version number in the first property).
+            for (auto& [id, state] : world.Entities)
+            {
+                if (random() % 3 != 0)
+                    continue;
+                auto moved = std::make_shared<EntityState>(*state);
+                moved->Properties[0][0] = static_cast<uint8_t>(moved->Properties[0][0] + 1);
+                moved->Properties[0][1] = static_cast<uint8_t>(random());
+                state = moved;
+            }
+        }
+        NetWriter out;
+        SnapshotLimits limits;
+        limits.MaxBytes = budget;
+        limits.Priorities = &priorities;
+        SnapshotWriteStats stats;
+        sender.Write(world, out, limits, &stats);
+        ++snapshots;
+        deferredTotal += stats.Deferred;
+        overBudget += out.GetSize() > budget ? 1 : 0;
+        toClient.Send(random, tick, out.GetData(), tick <= changingTicks ? 0.1f : 0.0f, 3, 2);
+        toClient.Deliver(tick, [&](const std::vector<uint8_t>& bytes)
+        {
+            NetReader reader(bytes);
+            reader.ReadU8();
+            WorldState decoded;
+            uint32_t sequence = 0;
+            if (receiver.Read(reader, decoded, sequence) == SnapshotReceiver::Result::Applied)
+            {
+                clientWorld = std::move(decoded);
+                NetWriter ack;
+                receiver.WriteAck(ack);
+                toServer.Send(random, tick, ack.GetData(), tick <= changingTicks ? 0.1f : 0.0f, 3, 2);
+            }
+        });
+        toServer.Deliver(tick, [&](const std::vector<uint8_t>& bytes) { DeliverAck(sender, bytes); });
+
+        // Updates each entity's copy got, and the longest wait for one while it was out of date (while the world changes).
+        if (tick > 60 && tick <= changingTicks)
+        {
+            for (const auto& [id, state] : world.Entities)
+            {
+                const int group = priorities[id] > 1.0f ? 0 : 1;
+                auto held = clientWorld.Entities.find(id);
+                const EntityStatePtr now = held != clientWorld.Entities.end() ? held->second : nullptr;
+                auto [last, first] = lastUpdate.try_emplace(id, tick);
+                if (now != lastHeld[id])
+                {
+                    lastHeld[id] = now;
+                    last->second = tick;
+                    updates[group] += first ? 0.0 : 1.0;
+                }
+                else if (!(now && *now == *state))
+                    worstGap[group] = std::max(worstGap[group], tick - last->second);
+            }
+        }
+    }
+    bool converged = clientWorld.Entities.size() == world.Entities.size();
+    for (const auto& [id, state] : world.Entities)
+    {
+        auto found = clientWorld.Entities.find(id);
+        converged = converged && found != clientWorld.Entities.end() && *found->second == *state;
+    }
+    CHECK(overBudget == 0, "{} snapshots, none over {} bytes ({} changes waited for a later one)", snapshots, budget, deferredTotal);
+    // Updates per entity per second (30 snapshots a second): 300 entities of priority 4, 2700 of priority 1.
+    const double seconds = (changingTicks - 60) / 30.0;
+    const double rateImportant = updates[0] / 300.0 / seconds, rateOthers = updates[1] / 2700.0 / seconds;
+    CHECK(worstGap[1] < 150 && rateImportant > 2.0 * rateOthers,
+          "nothing starves: the longest wait for an update {} snapshots (priority 4: {}); updates a second: {:.2f} for priority 4, {:.2f} for the others",
+          worstGap[1], worstGap[0], rateImportant, rateOthers);
+    CHECK(converged, "once the world stops changing the client holds all of it within {} snapshots", totalTicks - changingTicks);
+}
+
+static void TestManyClients()
+{
+    std::printf("\n== 64 clients in a 4 km world: relevancy + budget per client, players walking, 5 %% loss\n");
+    std::mt19937 random(99);
+    auto uniform = [&](double a, double b) { return std::uniform_real_distribution<double>(a, b)(random); };
+    // 64 players (owned characters) and 10 000 other entities (a fifth of them moving), a centimetre a unit; cull distance 150 m.
+    constexpr size_t Clients = 64, Others = 10000;
+    std::vector<RelevancyEntity> entities;
+    WorldState world;
+    std::vector<glm::dvec3> velocity;
+    auto encode = [](const glm::dvec3& position) { std::vector<uint8_t> bytes(24); std::memcpy(bytes.data(), &position, 24); return bytes; };
+    for (size_t index = 0; index < Clients + Others; ++index)
+    {
+        RelevancyEntity entity;
+        entity.Id = 1 + index;
+        entity.Position = { uniform(-200000.0, 200000.0), 0.0, uniform(-200000.0, 200000.0) };
+        entity.CullDistance = 15000.0;
+        entity.Owner = index < Clients ? static_cast<ClientId>(index + 1) : InvalidClientId;
+        entity.AlwaysRelevant = index == Clients; // (a game state)
+        entities.push_back(entity);
+        velocity.push_back(index < Clients || index % 5 == 0 ? glm::dvec3(uniform(-500.0, 500.0), 0.0, uniform(-500.0, 500.0)) : glm::dvec3(0.0));
+    }
+    // The players start in groups of 8 (friends together), so some see each other.
+    for (size_t client = 0; client < Clients; ++client)
+        entities[client].Position = entities[Clients + 1 + (client / 8) * 100].Position + glm::dvec3(uniform(-3000.0, 3000.0), 0.0, uniform(-3000.0, 3000.0));
+
+    struct Client
+    {
+        SnapshotSender Sender;
+        SnapshotReceiver Receiver;
+        ClientRelevancy Relevancy;
+        LossyLink ToClient, ToServer;
+        WorldState Held;
+        WorldState Expected;
+        size_t MaxBytes = 0, TotalBytes = 0, MaxRelevant = 0;
+    };
+    std::vector<Client> clients(Clients);
+    const std::unordered_set<uint64_t> noStreamed;
+    RelevancyGrid grid;
+    const size_t budget = 100000 / 30; // Unreal's default MaxClientRate (100 KB/s) at 30 snapshots a second
+    const int movingTicks = 450, totalTicks = 750; // 15 s walking, then 10 s standing
+    double worstFrame = 0.0;
+    std::vector<RelevantEntity> relevant;
+    std::unordered_map<NetId, float> priorities;
+    for (int tick = 1; tick <= totalTicks; ++tick)
+    {
+        const bool moving = tick <= movingTicks;
+        world.Tick = static_cast<uint64_t>(tick);
+        for (size_t index = 0; index < entities.size(); ++index)
+        {
+            if (moving)
+                entities[index].Position += velocity[index] / 30.0;
+            auto found = world.Entities.find(entities[index].Id);
+            std::vector<uint8_t> bytes = encode(entities[index].Position);
+            if (found == world.Entities.end() || found->second->Properties[0] != bytes)
+            {
+                auto state = std::make_shared<EntityState>();
+                state->Owner = entities[index].Owner;
+                state->Properties = { std::move(bytes) };
+                world.Entities[entities[index].Id] = state;
+            }
+        }
+        const double frameStart = NetNow();
+        grid.Build(entities, noStreamed, 5000.0);
+        for (size_t c = 0; c < Clients; ++c)
+        {
+            Client& client = clients[c];
+            RelevancyViewer viewer{ static_cast<ClientId>(c + 1), { entities[c].Position }, nullptr };
+            client.Relevancy.Update(grid, viewer, tick / 30.0, 5.0, relevant);
+            FilterWorld(world, grid, relevant, client.Expected, priorities);
+            client.MaxRelevant = std::max(client.MaxRelevant, client.Expected.Entities.size());
+            NetWriter out;
+            SnapshotLimits limits;
+            limits.MaxBytes = budget;
+            limits.Priorities = &priorities;
+            client.Sender.Write(client.Expected, out, limits);
+            client.MaxBytes = std::max(client.MaxBytes, out.GetSize());
+            client.TotalBytes += out.GetSize();
+            client.ToClient.Send(random, tick, out.GetData(), moving ? 0.05f : 0.0f, 2, 2);
+        }
+        worstFrame = std::max(worstFrame, NetNow() - frameStart);
+        for (Client& client : clients)
+        {
+            client.ToClient.Deliver(tick, [&](const std::vector<uint8_t>& bytes)
+            {
+                NetReader reader(bytes);
+                reader.ReadU8();
+                WorldState decoded;
+                uint32_t sequence = 0;
+                if (client.Receiver.Read(reader, decoded, sequence) == SnapshotReceiver::Result::Applied)
+                {
+                    client.Held = std::move(decoded);
+                    NetWriter ack;
+                    client.Receiver.WriteAck(ack);
+                    client.ToServer.Send(random, tick, ack.GetData(), moving ? 0.05f : 0.0f, 2, 2);
+                }
+            });
+            client.ToServer.Deliver(tick, [&](const std::vector<uint8_t>& bytes) { DeliverAck(client.Sender, bytes); });
+        }
+    }
+    size_t maxBytes = 0, maxRelevant = 0, converged = 0, seeOthers = 0;
+    double meanRate = 0.0;
+    for (size_t c = 0; c < Clients; ++c)
+    {
+        const Client& client = clients[c];
+        maxBytes = std::max(maxBytes, client.MaxBytes);
+        maxRelevant = std::max(maxRelevant, client.MaxRelevant);
+        meanRate += client.TotalBytes / (totalTicks / 30.0) / Clients;
+        bool same = client.Held.Entities.size() == client.Expected.Entities.size();
+        for (const auto& [id, state] : client.Expected.Entities)
+        {
+            auto found = client.Held.Entities.find(id);
+            same = same && found != client.Held.Entities.end() && *found->second == *state;
+        }
+        converged += same ? 1 : 0;
+        for (size_t other = 0; other < Clients; ++other)
+            if (other != c && client.Held.Entities.contains(entities[other].Id))
+            {
+                ++seeOthers;
+                break;
+            }
+    }
+    CHECK(maxBytes <= budget, "every client's snapshots within {} bytes (largest {}; mean {:.1f} KB/s per client)", budget, maxBytes, meanRate / 1024.0);
+    CHECK(maxRelevant < (Clients + Others) / 10, "a client gets at most {} of the {} entities (relevancy)", maxRelevant, Clients + Others);
+    CHECK(converged == Clients && seeOthers > Clients / 2,
+          "standing still, all {} clients hold exactly their relevant world; {} see another player", converged, seeOthers);
+    CHECK(worstFrame < 0.5, "the server's relevancy + snapshots for 64 clients: worst {:.1f} ms a snapshot (debug + sanitizers)", worstFrame * 1000.0);
+}
+
+int main(int argc, char** argv)
 {
     Nox::Log::Init();
+    const bool offline = argc > 1 && std::strcmp(argv[1], "--offline") == 0; // (only the tests without sockets)
     TestReaderFuzz();
     TestSnapshots();
+    TestRelevancy();
+    TestBudget();
+    TestManyClients();
     TestQuantize();
     TestPrediction();
     TestClockAndInterpolation();
     for (bool loopback : { true, false })
     {
+        if (offline)
+            break;
         const uint16_t base = loopback ? 7100 : 7200;
         TestHandshake(loopback, base + 0);
         TestEmulation(loopback, base + 10);

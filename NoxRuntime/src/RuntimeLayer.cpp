@@ -1,6 +1,7 @@
 #include "RuntimeLayer.h"
 #include "NoxCore/Audio/AudioMixer.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <format>
 #include <iostream>
@@ -313,12 +314,20 @@ namespace Nox
         const auto& clients = m_Server->GetClients();
         NOX_CORE_INFO("Server: {}/{} clients", clients.size(), m_Server->GetConfig().MaxClients);
         const double now = Net::NetNow();
+        const std::vector<Net::NetReplication::ClientNetStats> replication =
+            m_Replication ? m_Replication->GetClientStats() : std::vector<Net::NetReplication::ClientNetStats>{};
         for (const Net::NetClientInfo& client : clients)
         {
             const Net::ConnectionStats stats = m_Server->GetStats(client.Id);
+            auto relevancy = std::find_if(replication.begin(), replication.end(), [&](const auto& r) { return r.Client == client.Id; });
             NOX_CORE_INFO("  {} '{}' {}  ping {} ms, quality {} / {}, out {:.1f} KB/s, in {:.1f} KB/s, joined {:.0f} s ago", client.Id,
                           client.Name, client.Address, stats.PingMs, Quality(stats.QualityLocal), Quality(stats.QualityRemote),
                           stats.OutBytesPerSecond / 1024.0f, stats.InBytesPerSecond / 1024.0f, now - client.JoinedAt);
+            if (relevancy != replication.end() && m_Replication)
+                NOX_CORE_INFO("      relevant: {} of {} replicated entities, snapshots {:.1f} KB/s of {:.0f}, {} changes waited (last second), "
+                              "{} streamed levels loaded", relevancy->Relevant, m_Replication->GetReplicatedCount(),
+                              relevancy->BytesPerSecond / 1024.0f, m_Replication->GetClientRate() / 1024.0f, relevancy->Deferred,
+                              relevancy->Levels);
         }
     }
 
@@ -516,7 +525,10 @@ namespace Nox
         m_Replication = std::make_unique<Net::NetReplication>(*m_Server);
         if (const char* rate = args.Value("--net-rate"))
             m_Replication->SetSnapshotRate(static_cast<float>(std::atof(rate)));
-        NOX_CORE_INFO("Net: replicating at {:.0f} snapshots a second", m_Replication->GetSnapshotRate());
+        if (const char* rate = args.Value("--net-client-rate"))
+            m_Replication->SetClientRate(static_cast<float>(std::atof(rate)));
+        NOX_CORE_INFO("Net: replicating at {:.0f} snapshots a second, up to {:.0f} KB/s per client (--net-rate, --net-client-rate)",
+                      m_Replication->GetSnapshotRate(), m_Replication->GetClientRate() / 1024.0f);
         NOX_CORE_INFO("Net: content checksum {:016x} ('{}', network protocol {})", compatibility.ContentChecksum, compatibility.ProjectName,
                       compatibility.Protocol);
         UpdateWindowTitle();
@@ -547,10 +559,13 @@ namespace Nox
                 m_ClientStatusTimer = 0.0f;
                 const Net::ConnectionStats stats = m_Client->GetStats();
                 NOX_CORE_INFO("Client status: client {} on '{}', ping {} ms, quality {} / {}, out {:.1f} KB/s, in {:.1f} KB/s, "
-                              "others drawn {:.0f} ms in the past, {} prediction corrections so far",
+                              "others drawn {:.0f} ms in the past, {} prediction corrections so far, {} replicated entities relevant here "
+                              "(snapshots {:.1f} KB/s)",
                               m_Client->GetWelcome().Client, m_Client->GetWelcome().ServerName, stats.PingMs, Quality(stats.QualityLocal),
                               Quality(stats.QualityRemote), stats.OutBytesPerSecond / 1024.0f, stats.InBytesPerSecond / 1024.0f,
-                              m_Replication ? m_Replication->GetInterpolationDelayMs() : 0.0f, m_Replication ? m_Replication->GetCorrections() : 0);
+                              m_Replication ? m_Replication->GetInterpolationDelayMs() : 0.0f, m_Replication ? m_Replication->GetCorrections() : 0,
+                              m_Replication ? m_Replication->GetHeldCount() : 0,
+                              m_Replication ? m_Replication->GetReceivedBytesPerSecond() / 1024.0f : 0.0f);
             }
         }
     }
