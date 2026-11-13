@@ -1,5 +1,7 @@
 #pragma once
+#include "NetAnimation.h"
 #include "NetBuffer.h"
+#include "NetLagCompensation.h"
 #include "NetPrediction.h"
 #include "NetProtocol.h"
 #include "NetRelevancy.h"
@@ -31,6 +33,10 @@
 // loaded too, which it reports), within its bandwidth (bytes a second, by priority), and the server streams the world around every
 // client's players. The server reads an entity at its update rate, a dormant one not until it is flushed. On a client a level entity
 // that is not relevant is switched off (InactiveComponent) until it is again; a spawned one is removed.
+//
+// NET5: dynamic rigid bodies are simulated on the clients too and pulled toward the server's state (physics replication); animator
+// graphs' parameters and montages are replicated (the owner drives its own); the server keeps a second of the replicated entities'
+// hitboxes and checks a client's shot against where they were on that client's screen (lag compensation).
 namespace Nox
 {
     class Scene;
@@ -44,6 +50,15 @@ namespace Nox::Net
     struct NetClientInfo;
 
     enum class RpcKind : uint8_t { Server = 0, Client = 1, Multicast = 2 };
+
+    // What RaycastLagCompensated hit.
+    struct RayCastHitResult
+    {
+        uint64_t Entity = 0; // its UUID
+        glm::dvec3 Point{ 0.0 };
+        glm::vec3 Normal{ 0.0f, 1.0f, 0.0f };
+        float Distance = 0.0f;
+    };
 
     class NetReplication
     {
@@ -103,7 +118,20 @@ namespace Nox::Net
         bool SetOwner(UUID entity, ClientId owner);
         ClientId GetOwner(UUID entity) const;
         // An RPC from a script on `entity` (its class `className`); the script ran it locally already when it is for this side.
-        void SendRpc(UUID entity, std::string_view className, RpcKind kind, uint32_t method, bool reliable, std::span<const uint8_t> arguments);
+        // `skipOwner`: a multicast the owning client does not get (it played its effect already: Unreal's predicted cosmetics).
+        void SendRpc(UUID entity, std::string_view className, RpcKind kind, uint32_t method, bool reliable, std::span<const uint8_t> arguments,
+                     bool skipOwner = false);
+
+        // Lag compensation (NET5). Client: the server tick the others are drawn at now (send it with a shot); 0 before the first snapshot.
+        double GetViewTick() const;
+        // Server: a ray from client `shooter`'s shot, against the replicated entities' hitboxes as they stood at `viewTick` on that
+        // client's screen (held to what its latency allows, at most 1 s back) and the static level as it is (walls hide what is behind
+        // them). The shooter's own entities are skipped. `rewoundMs`: how far back it looked.
+        bool RaycastLagCompensated(ClientId shooter, double viewTick, const glm::dvec3& origin, const glm::vec3& direction, float maxDistance,
+                                   RayCastHitResult& hit, double* rewoundMs = nullptr);
+        // Server: off, shots are checked against where the targets are now (the console's `lagcomp off`, to compare).
+        void SetLagCompensation(bool enabled) { m_LagCompensation = enabled; }
+        bool GetLagCompensation() const { return m_LagCompensation; }
 
     private:
         struct ClientReplication
@@ -139,6 +167,10 @@ namespace Nox::Net
         // Client
         void ReportLevelVisibility();
         void UpdateHidden();
+        // NET5
+        void RecordHitboxes();
+        AnimationNetState BuildAnimationState(Entity entity, NetId id);
+        bool ApplyAnimation(Entity entity, NetId id, const std::vector<uint8_t>& property);
         // Client
         void OnClientMessage(uint8_t type, NetReader& reader);
         void ApplyWorld(const WorldState& world);
@@ -179,6 +211,10 @@ namespace Nox::Net
         std::unordered_set<uint64_t> m_StreamedLevels;
         RelevancyGrid m_Grid;
         bool m_WarnedOversized = false;
+        LagCompensationHistory m_Hitboxes;
+        bool m_LagCompensation = true;
+        uint64_t m_LastHitboxTick = 0;
+        std::unordered_map<NetId, std::unordered_map<uint32_t, uint64_t>> m_MontageStarts; // server: montage serial -> the tick it started
         // Client
         SnapshotReceiver m_Receiver;
         WorldState m_World;            // the last applied snapshot's world (minus entities whose level was loaded again since)
@@ -186,6 +222,14 @@ namespace Nox::Net
         std::vector<uint64_t> m_ReportedLevels;        // the streamed levels last reported to the server (sorted)
         size_t m_ReceivedThisSecond = 0;
         float m_ReceivedRate = 0.0f;
+        double m_ExtrapolateSeconds = 0.0;          // the round trip: how far a server body's state is carried forward here
+        std::unordered_set<NetId> m_AnimationPending; // animation states that waited for their graph to load
+        struct AppliedMontage
+        {
+            uint32_t Serial = 0;
+            bool Stopped = false;
+        };
+        std::unordered_map<NetId, std::unordered_map<std::string, AppliedMontage>> m_AppliedMontages;
         std::unordered_set<NetId> m_ScriptsPending; // spawned entities whose scripts did not exist yet when their state came
         std::unordered_set<uint64_t> m_WarnedPrefabs;
         std::vector<PendingRpc> m_PendingRpcs; // for entities that have not arrived yet (the snapshot is behind the RPC)

@@ -1,4 +1,5 @@
 #include "JoltPhysics3DScene.h"
+#include "NoxCore/Network/NetPhysicsReplication.h"
 #include "NoxCore/Math/Math.h"
 #include "JoltUtils.h"
 #include "NoxCore/Physics/PhysicsEngine.h"
@@ -502,14 +503,14 @@ namespace Nox {
         const float rollingResistance = surface.RollingResistance;
         const float rollingRadius = surface.RollingRadius;
 
-        // A network client's copy of a server entity moves where the server says: kinematic, following the replicated transform.
-        const bool netProxy = m_Scene && m_Scene->IsNetProxy(static_cast<entt::entity>(entity));
+        // A network client's copy of a server entity: a kinematic one follows the replicated transform; a dynamic one is simulated here
+        // too and pulled toward the server's state (SetBodyReplicationTarget, NET5).
         if (rb.Type == RigidBody3DComponent::BodyType::Static)
         {
             motionType = JPH::EMotionType::Static;
             objectLayer = PhysicsLayers::NON_MOVING;
         }
-        else if (rb.Type == RigidBody3DComponent::BodyType::Kinematic || netProxy)
+        else if (rb.Type == RigidBody3DComponent::BodyType::Kinematic)
         {
             motionType = JPH::EMotionType::Kinematic;
             if (objectLayer == PhysicsLayers::NON_MOVING)
@@ -600,8 +601,6 @@ namespace Nox {
         // kinematic bodies. (Its transform used to be overwritten by its unmoving body each step.)
         if (motionType == JPH::EMotionType::Kinematic)
             m_FollowTransform.insert(entIdVal);
-        if (netProxy && rb.Type == RigidBody3DComponent::BodyType::Dynamic)
-            m_IgnoredByCharacters.insert(bodyIdVal);
         if (entity.HasComponent<ImpactSoundComponent>())
             m_ContactEvents->SetReporting(body->GetID(), true);
     }
@@ -813,11 +812,11 @@ namespace Nox {
                 m_ContactEvents->SetReporting(bodyId, false);
 
                 m_BodyToEntityMap.erase(bodyId.GetIndexAndSequenceNumber());
-                m_IgnoredByCharacters.erase(bodyId.GetIndexAndSequenceNumber());
             }
             m_EntityToBodyMap.erase(it);
             m_BodyPoses.erase(entIdVal);
             m_FollowTransform.erase(entIdVal);
+            m_ReplicationTargets.erase(entIdVal);
         }
 
         if (entity.HasComponent<RigidBody3DComponent>())
@@ -950,21 +949,6 @@ namespace Nox {
             m_EntityToCharacterMap.erase(static_cast<uint32_t>(entity));
     }
 
-    namespace
-    {
-        // What a character's movement does not collide with (JoltPhysics3DScene::m_IgnoredByCharacters).
-        class IgnoredBodies final : public JPH::BodyFilter
-        {
-        public:
-            explicit IgnoredBodies(const std::unordered_set<uint32_t>& ignored) : m_Ignored(ignored) {}
-            bool ShouldCollide(const JPH::BodyID& body) const override { return !m_Ignored.contains(body.GetIndexAndSequenceNumber()); }
-            bool ShouldCollideLocked(const JPH::Body& body) const override { return ShouldCollide(body.GetID()); }
-
-        private:
-            const std::unordered_set<uint32_t>& m_Ignored;
-        };
-    }
-
     void JoltPhysics3DScene::StepCharacters(float dt)
     {
         if (!m_Scene)
@@ -998,6 +982,100 @@ namespace Nox {
         glm::dvec3 position = glm::mix(state.Previous, state.Current, static_cast<double>(alpha)) + state.VisualOffset;
         position.y += static_cast<double>(glm::mix(state.PreviousStepOffset, state.StepOffset, alpha)); // (as SyncCharactersToTransforms)
         return position;
+    }
+
+    bool JoltPhysics3DScene::GetBodyNetState(Entity entity, BodyNetState& state) const
+    {
+        auto found = m_EntityToBodyMap.find(static_cast<uint32_t>(entity));
+        if (!m_PhysicsSystem || found == m_EntityToBodyMap.end() || found->second.IsInvalid())
+            return false;
+        const JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
+        const JPH::BodyID body = found->second;
+        state.Position = ToWorld(JoltUtils::ToGLMPosition(bodyInterface.GetPosition(body)));
+        state.Rotation = JoltUtils::ToGLM(bodyInterface.GetRotation(body));
+        state.LinearVelocity = ToWorld(JoltUtils::ToGLM(bodyInterface.GetLinearVelocity(body)));
+        state.AngularVelocity = JoltUtils::ToGLM(bodyInterface.GetAngularVelocity(body));
+        state.Sleeping = !bodyInterface.IsActive(body);
+        return true;
+    }
+
+    void JoltPhysics3DScene::SetBodyReplicationTarget(Entity entity, const BodyNetState& target, double extrapolateSeconds, bool snap)
+    {
+        auto found = m_EntityToBodyMap.find(static_cast<uint32_t>(entity));
+        if (found == m_EntityToBodyMap.end() || found->second.IsInvalid())
+            return;
+        ReplicationTarget& replication = m_ReplicationTargets[static_cast<uint32_t>(entity)];
+        replication.State = target;
+        replication.Extrapolate = extrapolateSeconds;
+        replication.TicksSince = 0;
+        replication.Snap = replication.Snap || snap;
+    }
+
+    void JoltPhysics3DScene::ApplyReplicationTargets(float dt)
+    {
+        if (m_ReplicationTargets.empty())
+            return;
+        Net::BodyCorrectionSettings settings;
+        settings.HardSnapDistance = static_cast<double>(WorldUnits::FromMeters(4.0f));
+        settings.RestDistance = static_cast<double>(WorldUnits::FromMeters(0.01f));
+        JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
+        for (auto it = m_ReplicationTargets.begin(); it != m_ReplicationTargets.end();)
+        {
+            auto body = m_EntityToBodyMap.find(it->first);
+            if (body == m_EntityToBodyMap.end() || body->second.IsInvalid())
+            {
+                it = m_ReplicationTargets.erase(it);
+                continue;
+            }
+            ReplicationTarget& replication = it->second;
+            const JPH::BodyID id = body->second;
+            const double age = replication.Extrapolate + static_cast<double>(replication.TicksSince++) * dt;
+            const Net::BodyState serverState{ replication.State.Position, replication.State.Rotation, replication.State.LinearVelocity,
+                                              replication.State.AngularVelocity, replication.State.Sleeping };
+            const Net::BodyState target = Net::ExtrapolateBody(serverState, age, settings.MaxExtrapolation);
+            const bool active = bodyInterface.IsActive(id);
+            if (!replication.Snap && !active && target.Sleeping)
+            {
+                // Both at rest: left asleep while the server's is close (a box lying where it lies on every side).
+                const glm::dvec3 here = ToWorld(JoltUtils::ToGLMPosition(bodyInterface.GetPosition(id)));
+                if (glm::distance(here, target.Position) <= settings.RestDistance)
+                {
+                    ++it;
+                    continue;
+                }
+            }
+            Net::BodyState current;
+            current.Position = ToWorld(JoltUtils::ToGLMPosition(bodyInterface.GetPosition(id)));
+            current.Rotation = JoltUtils::ToGLM(bodyInterface.GetRotation(id));
+            current.LinearVelocity = ToWorld(JoltUtils::ToGLM(bodyInterface.GetLinearVelocity(id)));
+            current.AngularVelocity = JoltUtils::ToGLM(bodyInterface.GetAngularVelocity(id));
+            current.Sleeping = !active;
+            Net::BodyCorrection correction = Net::BodyCorrection::Snapped;
+            if (replication.Snap)
+                current = target;
+            else
+                correction = Net::CorrectBody(current, target, dt, settings);
+            replication.Snap = false;
+            if (correction == Net::BodyCorrection::AtRest)
+            {
+                bodyInterface.SetLinearAndAngularVelocity(id, JPH::Vec3::sZero(), JPH::Vec3::sZero());
+                bodyInterface.DeactivateBody(id);
+            }
+            else
+            {
+                bodyInterface.SetPositionAndRotation(id, JoltUtils::ToJoltPosition(ToNative(current.Position)), JoltUtils::ToJolt(current.Rotation),
+                                                     JPH::EActivation::Activate);
+                bodyInterface.SetLinearAndAngularVelocity(id, JoltUtils::ToJolt(ToNative(current.LinearVelocity)), JoltUtils::ToJolt(current.AngularVelocity));
+                if (correction == Net::BodyCorrection::Snapped)
+                    if (auto pose = m_BodyPoses.find(it->first); pose != m_BodyPoses.end())
+                    {
+                        // (placed: drawn there, not swept from where it was)
+                        pose->second.Previous = pose->second.Current = current.Position;
+                        pose->second.PreviousRotation = pose->second.CurrentRotation = current.Rotation;
+                    }
+            }
+            ++it;
+        }
     }
 
     void JoltPhysics3DScene::SetCharacterExternallyStepped(Entity entity, bool external)
@@ -1047,9 +1125,8 @@ namespace Nox {
         state.Previous = state.Current = netState.Position;
         state.StepOffset = state.PreviousStepOffset = 0.0f;
         // Its contacts where it now is (what the next step's ground test and collisions start from).
-        const IgnoredBodies bodyFilter(m_IgnoredByCharacters);
         state.Character->RefreshContacts(m_PhysicsSystem->GetDefaultBroadPhaseLayerFilter(PhysicsLayers::CHARACTER),
-                                         m_PhysicsSystem->GetDefaultLayerFilter(PhysicsLayers::CHARACTER), bodyFilter, {}, *m_TempAllocator);
+                                         m_PhysicsSystem->GetDefaultLayerFilter(PhysicsLayers::CHARACTER), {}, {}, *m_TempAllocator);
     }
 
     void JoltPhysics3DScene::StepCharacterState(Entity entity, CharacterState& state, float dt)
@@ -1130,11 +1207,10 @@ namespace Nox {
 
             const JPH::RVec3 before = character->GetPosition();
             const JPH::Vec3 groundNormalBefore = character->GetGroundNormal();
-            const IgnoredBodies bodyFilter(m_IgnoredByCharacters);
             character->ExtendedUpdate(dt, -up * gravity.Length(), updateSettings,
                 m_PhysicsSystem->GetDefaultBroadPhaseLayerFilter(PhysicsLayers::CHARACTER),
                 m_PhysicsSystem->GetDefaultLayerFilter(PhysicsLayers::CHARACTER),
-                bodyFilter, {}, *m_TempAllocator);
+                {}, {}, *m_TempAllocator);
             state.Current = ToWorld(JoltUtils::ToGLMPosition(character->GetPosition()));
 
             // Grounded the way Unreal's walking mode decides it: on walkable ground, or a walkable floor within step height under the
@@ -1284,6 +1360,7 @@ namespace Nox {
             if (m_BeforeTick)
                 m_BeforeTick(); // (networking: a client records its inputs, the server applies its clients' inputs)
             StepCharacters(c_FixedDeltaTime);
+            ApplyReplicationTargets(c_FixedDeltaTime);
             m_PhysicsSystem->Update(c_FixedDeltaTime, 1, m_TempAllocator.get(), m_JobSystem.get());
             m_RollingResistance->Apply(*m_PhysicsSystem, c_FixedDeltaTime);
             CaptureBodyPoses();

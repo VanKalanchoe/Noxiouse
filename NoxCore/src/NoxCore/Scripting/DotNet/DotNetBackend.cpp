@@ -216,13 +216,50 @@ namespace Nox
         }
 
         void NetworkSendRpc(uint64_t entityID, Coral::String className, int32_t kind, int32_t method, Coral::Bool32 reliable,
-                            const uint8_t* arguments, int32_t length)
+                            Coral::Bool32 skipOwner, const uint8_t* arguments, int32_t length)
         {
             Net::NetReplication* replication = Net::NetReplication::Get();
             if (!replication || kind < 0 || kind > 2 || method < 0 || length < 0 || (length > 0 && !arguments))
                 return;
             replication->SendRpc(UUID(entityID), std::string(className), static_cast<Net::RpcKind>(kind), static_cast<uint32_t>(method),
-                                 reliable, std::span(arguments, static_cast<size_t>(length)));
+                                 reliable, std::span(arguments, static_cast<size_t>(length)), skipOwner);
+        }
+
+        Coral::Bool32 PhysicsRaycast(double originX, double originY, double originZ, float directionX, float directionY, float directionZ,
+                                     float maxDistance, ManagedRaycastHit* outHit);
+
+        // Network.ViewTick (a client: the server tick others are drawn at) and Network.RaycastLagCompensated (the server: a client's shot).
+        double NetworkGetViewTick()
+        {
+            const Net::NetReplication* replication = Net::NetReplication::Get();
+            return replication ? replication->GetViewTick() : 0.0;
+        }
+
+        Coral::Bool32 NetworkRaycastLagCompensated(uint32_t client, double viewTick, double originX, double originY, double originZ,
+                                                   float directionX, float directionY, float directionZ, float maxDistance, ManagedRaycastHit* outHit,
+                                                   double* outRewoundMs)
+        {
+            *outHit = {};
+            *outRewoundMs = 0.0;
+            Net::NetReplication* replication = Net::NetReplication::Get();
+            if (!replication || replication->GetMode() != Net::NetReplication::Mode::Server)
+                return PhysicsRaycast(originX, originY, originZ, directionX, directionY, directionZ, maxDistance, outHit); // (standalone)
+            if (!OnMainThread("Network.RaycastLagCompensated"))
+                return false;
+            Net::RayCastHitResult hit;
+            double rewound = 0.0;
+            if (!replication->RaycastLagCompensated(client, viewTick, { originX, originY, originZ }, { directionX, directionY, directionZ },
+                                                    maxDistance, hit, &rewound))
+            {
+                *outRewoundMs = rewound;
+                return false;
+            }
+            *outRewoundMs = rewound;
+            outHit->Entity = hit.Entity;
+            outHit->Point = { hit.Point.x, hit.Point.y, hit.Point.z };
+            outHit->Normal = { hit.Normal.x, hit.Normal.y, hit.Normal.z };
+            outHit->Distance = hit.Distance;
+            return true;
         }
 
         // Scene.LoadLevel("Levels/Interior.nox") / UnloadLevel / GetLevelState: a level by its path under the asset directory
@@ -1479,6 +1516,8 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Network_SetOwner", reinterpret_cast<void*>(&NetworkSetOwner));
         assembly.AddInternalCall("Nox.InternalCalls", "Network_Spawn", reinterpret_cast<void*>(&NetworkSpawn));
         assembly.AddInternalCall("Nox.InternalCalls", "Network_SendRpc", reinterpret_cast<void*>(&NetworkSendRpc));
+        assembly.AddInternalCall("Nox.InternalCalls", "Network_GetViewTick", reinterpret_cast<void*>(&NetworkGetViewTick));
+        assembly.AddInternalCall("Nox.InternalCalls", "Network_RaycastLagCompensated", reinterpret_cast<void*>(&NetworkRaycastLagCompensated));
         assembly.AddInternalCall("Nox.InternalCalls", "Network_GetDormancy", reinterpret_cast<void*>(&NetworkGetDormancy));
         assembly.AddInternalCall("Nox.InternalCalls", "Network_SetDormancy", reinterpret_cast<void*>(&NetworkSetDormancy));
         assembly.AddInternalCall("Nox.InternalCalls", "Network_FlushDormancy", reinterpret_cast<void*>(&NetworkFlushDormancy));

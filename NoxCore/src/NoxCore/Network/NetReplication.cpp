@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <limits>
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -29,7 +30,38 @@ namespace Nox::Net
         constexpr size_t RotationProperty = 1;
         constexpr size_t ScaleProperty = 2;
         constexpr size_t MovementProperty = 3; // a character's movement state and the last input applied (empty without a character)
-        constexpr size_t FirstScriptProperty = 4;
+        constexpr size_t PhysicsProperty = 4;  // a dynamic body's velocities and sleep (NET5; empty for anything else)
+        constexpr size_t AnimationProperty = 5; // an animator graph's parameters and montages (NET5)
+        constexpr size_t FirstScriptProperty = 6;
+
+        // The physics property: asleep (1 byte), or awake with the linear and angular velocities.
+        std::vector<uint8_t> EncodeBodyMotion(const IPhysics3DScene::BodyNetState& body)
+        {
+            NetWriter writer(28);
+            writer.WriteU8(body.Sleeping ? 1 : 0);
+            if (!body.Sleeping)
+            {
+                for (float value : { body.LinearVelocity.x, body.LinearVelocity.y, body.LinearVelocity.z, body.AngularVelocity.x,
+                                     body.AngularVelocity.y, body.AngularVelocity.z })
+                    writer.WriteFloat(value);
+            }
+            return { writer.GetData().begin(), writer.GetData().end() };
+        }
+
+        bool DecodeBodyMotion(std::span<const uint8_t> bytes, IPhysics3DScene::BodyNetState& body)
+        {
+            NetReader reader(bytes);
+            body.Sleeping = reader.ReadU8() != 0;
+            body.LinearVelocity = glm::vec3(0.0f);
+            body.AngularVelocity = glm::vec3(0.0f);
+            if (!body.Sleeping)
+            {
+                body.LinearVelocity = { reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat() };
+                body.AngularVelocity = { reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat() };
+            }
+            return reader.IsAtEnd() && std::isfinite(body.LinearVelocity.x + body.LinearVelocity.y + body.LinearVelocity.z +
+                                                     body.AngularVelocity.x + body.AngularVelocity.y + body.AngularVelocity.z);
+        }
 
         // The movement property: the character's simulated position (not the drawn one), velocities, ground state, and the newest
         // client input the server applied to it (0: none; a server-owned character).
@@ -67,6 +99,8 @@ namespace Nox::Net
         }
         constexpr double PendingRpcSeconds = 2.0;
         constexpr double RelevantTimeout = 5.0;     // Unreal's RelevantTimeout: kept this long after it was last relevant
+        constexpr double MaxRewindSeconds = 1.0;    // lag compensation looks back this far at most (Source's sv_maxunlag)
+        constexpr double ViewToleranceSeconds = 0.2; // a claimed view time may be this far from what the shooter's latency suggests
         constexpr float RelevancyCellMeters = 50.0f; // the relevancy grid's cells (a query looks at the cells within the cull distance)
 
         // Positions to 0.1 mm whatever the project's world unit.
@@ -181,6 +215,7 @@ namespace Nox::Net
         }
         if (m_Mode == Mode::Server)
         {
+            RecordHitboxes();
             m_SendAccumulator += deltaTime;
             const float interval = 1.0f / m_SnapshotRate;
             if (m_SendAccumulator < interval)
@@ -191,6 +226,17 @@ namespace Nox::Net
             return;
         }
 
+        // Client: animation states that waited for their graph to load.
+        for (auto it = m_AnimationPending.begin(); it != m_AnimationPending.end();)
+        {
+            auto state = m_World.Entities.find(*it);
+            Entity entity = m_Scene->GetEntityByUUID(UUID(*it));
+            if (state == m_World.Entities.end() || !entity || state->second->Properties.size() <= AnimationProperty ||
+                ApplyAnimation(entity, *it, state->second->Properties[AnimationProperty]))
+                it = m_AnimationPending.erase(it);
+            else
+                ++it;
+        }
         // Client: the spawned entities whose scripts started since their state came, and RPCs that were ahead of their entity.
         for (auto it = m_ScriptsPending.begin(); it != m_ScriptsPending.end();)
         {
@@ -327,16 +373,26 @@ namespace Nox::Net
             state->Owner = identity.Owner;
             state->Prefab = prefab;
             state->Properties.resize(FirstScriptProperty);
+            IPhysics3DScene* physics = m_Scene->GetPhysics3DScene();
+            IPhysics3DScene::BodyNetState body;
+            const bool simulated = identity.ReplicateTransform && physics && entity.HasComponent<RigidBody3DComponent>() &&
+                                   entity.GetComponent<RigidBody3DComponent>().Type == RigidBody3DComponent::BodyType::Dynamic &&
+                                   physics->GetBodyNetState(entity, body);
             if (identity.ReplicateTransform && entity.HasComponent<TransformComponent>())
             {
+                // A dynamic body: where it is simulated (not the drawn pose between two steps), with its velocities -- the target
+                // the clients' copies are pulled to.
                 const auto& transform = entity.GetComponent<TransformComponent>();
-                state->Properties[PositionProperty] = EncodePosition(transform.Translation, PositionQuantum());
-                state->Properties[RotationProperty] = EncodeRotation(glm::quat(transform.Rotation));
+                state->Properties[PositionProperty] = EncodePosition(simulated ? body.Position : transform.Translation, PositionQuantum());
+                state->Properties[RotationProperty] = EncodeRotation(simulated ? body.Rotation : glm::quat(transform.Rotation));
                 state->Properties[ScaleProperty] = EncodeScale(transform.Scale);
+                if (simulated)
+                    state->Properties[PhysicsProperty] = EncodeBodyMotion(body);
             }
+            if (identity.ReplicateAnimation && entity.HasComponent<AnimatorComponent>() && entity.GetComponent<AnimatorComponent>().Graph != 0)
+                state->Properties[AnimationProperty] = EncodeAnimation(BuildAnimationState(entity, id));
             IPhysics3DScene::CharacterNetState character;
-            if (IPhysics3DScene* physics = m_Scene->GetPhysics3DScene();
-                physics && entity.HasComponent<CharacterController3DComponent>() && physics->GetCharacterNetState(entity, character))
+            if (physics && entity.HasComponent<CharacterController3DComponent>() && physics->GetCharacterNetState(entity, character))
             {
                 auto inputs = m_InputQueues.find(id);
                 const uint32_t lastInput = inputs != m_InputQueues.end() ? inputs->second.Queue.GetLastProcessed() : 0;
@@ -526,6 +582,9 @@ namespace Nox::Net
                     m_SnapshotSpacingTicks += (std::clamp(static_cast<double>(world.Tick - m_LastSnapshotTick), 1.0, 30.0) - m_SnapshotSpacingTicks) * 0.1;
                 m_LastSnapshotTick = world.Tick;
                 m_Clock.OnSnapshot(world.Tick, NetNow(), static_cast<float>(Scene::TickRate));
+                // How far the server's bodies are carried forward to this client's present: the round trip (the snapshot is half of it
+                // old, and this client's own character is half of it ahead of the server).
+                m_ExtrapolateSeconds = std::clamp(static_cast<double>(m_Client->GetStats().PingMs) / 1000.0, 0.0, 0.3);
                 ApplyWorld(world);
                 NetWriter ack(16);
                 m_Receiver.WriteAck(ack);
@@ -569,6 +628,8 @@ namespace Nox::Net
             m_ScriptsPending.erase(id);
             m_Interpolation.erase(id);
             m_Predicted.erase(id);
+            m_AnimationPending.erase(id);
+            m_AppliedMontages.erase(id);
             if (before->Prefab != 0)
                 if (Entity entity = m_Scene->GetEntityByUUID(UUID(id)))
                     m_Scene->QueueDestroy(entity);
@@ -580,8 +641,9 @@ namespace Nox::Net
         // the own characters are predicted instead.
         for (const auto& [id, state] : world.Entities)
         {
-            if (m_Predicted.contains(id) || state->Properties.size() < FirstScriptProperty || state->Properties[PositionProperty].empty())
-                continue;
+            if (m_Predicted.contains(id) || state->Properties.size() < FirstScriptProperty || state->Properties[PositionProperty].empty() ||
+                !state->Properties[PhysicsProperty].empty())
+                continue; // (the own characters are predicted, dynamic bodies simulated here)
             PoseSample sample;
             sample.Tick = static_cast<double>(world.Tick);
             if (!DecodePosition(state->Properties[PositionProperty], PositionQuantum(), sample.Position))
@@ -732,6 +794,22 @@ namespace Nox::Net
         if (m_Predicted.contains(id))
             Reconcile(entity, id, state);
 
+        // A dynamic body: simulated here, pulled toward the server's state (placed there the first time).
+        IPhysics3DScene* physics = m_Scene->GetPhysics3DScene();
+        if (physics && !state.Properties[PhysicsProperty].empty() && entity.HasComponent<RigidBody3DComponent>() &&
+            (created || Differs(before, state, PositionProperty) || Differs(before, state, RotationProperty) ||
+             Differs(before, state, PhysicsProperty)))
+        {
+            IPhysics3DScene::BodyNetState target;
+            if (DecodePosition(state.Properties[PositionProperty], PositionQuantum(), target.Position) &&
+                DecodeRotation(state.Properties[RotationProperty], target.Rotation) && DecodeBodyMotion(state.Properties[PhysicsProperty], target))
+                physics->SetBodyReplicationTarget(entity, target, m_ExtrapolateSeconds, first);
+        }
+        // Its animation (not on the owning client: its scripts drive it, as on the server).
+        if (!state.Properties[AnimationProperty].empty() && (created || Differs(before, state, AnimationProperty)) &&
+            (state.Owner == InvalidClientId || state.Owner != GetLocalClientId()) && !ApplyAnimation(entity, id, state.Properties[AnimationProperty]))
+            m_AnimationPending.insert(id);
+
         if (!ApplyScriptFields(id, state, created ? nullptr : before))
             m_ScriptsPending.insert(id);
     }
@@ -778,10 +856,228 @@ namespace Nox::Net
         return true;
     }
 
+    // ------------------------------------------------------------------------------------------------------------- animation
+
+    AnimationNetState NetReplication::BuildAnimationState(Entity entity, NetId id)
+    {
+        AnimationNetState animation;
+        const AnimationGraphInstance& graph = entity.GetComponent<AnimatorComponent>().GraphInstance;
+        for (const auto& [name, value] : graph.Parameters)
+        {
+            AnimParameter parameter;
+            parameter.NameHash = HashParameterName(name);
+            if (const bool* b = std::get_if<bool>(&value)) parameter.Value = *b;
+            else if (const int32_t* i = std::get_if<int32_t>(&value)) parameter.Value = *i;
+            else if (const float* f = std::get_if<float>(&value)) parameter.Value = *f;
+            else if (const glm::vec2* v = std::get_if<glm::vec2>(&value)) parameter.Value = *v;
+            else continue; // (curves, strings, asset handles: not driven per frame)
+            animation.Parameters.push_back(parameter);
+        }
+        std::sort(animation.Parameters.begin(), animation.Parameters.end(),
+                  [](const AnimParameter& a, const AnimParameter& b) { return a.NameHash < b.NameHash; });
+        // Montages, each with the server tick it started at (the first snapshot that saw it).
+        auto& starts = m_MontageStarts[id];
+        std::unordered_map<uint32_t, uint64_t> seen;
+        for (const AnimationGraphInstance::MontageRecord& record : graph.GetMontageRecords())
+        {
+            AnimMontage montage;
+            montage.Slot = record.Slot;
+            montage.Clip = static_cast<uint64_t>(record.Clip);
+            montage.Serial = record.Serial;
+            auto start = starts.find(record.Serial);
+            montage.StartTick = start != starts.end() ? start->second : m_Scene->GetTick();
+            seen[record.Serial] = montage.StartTick;
+            montage.Rate = record.Rate;
+            montage.BlendIn = record.BlendIn;
+            montage.BlendOut = record.BlendOut;
+            montage.Stopped = record.Stopped;
+            montage.StopBlendOut = record.StopBlendOut;
+            animation.Montages.push_back(std::move(montage));
+        }
+        starts = std::move(seen);
+        return animation;
+    }
+
+    bool NetReplication::ApplyAnimation(Entity entity, NetId id, const std::vector<uint8_t>& property)
+    {
+        if (!entity.HasComponent<AnimatorComponent>())
+            return true;
+        AnimationNetState animation;
+        if (!DecodeAnimation(property, animation))
+            return true; // (malformed: nothing to apply)
+        AnimationGraphInstance& graph = entity.GetComponent<AnimatorComponent>().GraphInstance;
+        // The parameters by name (the server sends their names' hashes: both run the same graph). One not declared here yet: the
+        // graph has not loaded -- tried again next frame.
+        std::unordered_map<uint32_t, const std::string*> names;
+        for (const auto& [name, _] : graph.Parameters)
+            names.emplace(HashParameterName(name), &name);
+        bool complete = true;
+        for (const AnimParameter& parameter : animation.Parameters)
+        {
+            auto name = names.find(parameter.NameHash);
+            if (name == names.end())
+            {
+                complete = false;
+                continue;
+            }
+            std::visit([&](const auto& value) { graph.Parameters[*name->second] = value; }, parameter.Value);
+        }
+        // Montages: a new one in a slot is started (that far into it, when it began before this client saw it); a stop, stopped.
+        auto& applied = m_AppliedMontages[id];
+        const double viewTick = GetViewTick();
+        for (const AnimMontage& montage : animation.Montages)
+        {
+            AppliedMontage& slot = applied[montage.Slot];
+            if (montage.Serial != slot.Serial)
+            {
+                slot.Serial = montage.Serial;
+                slot.Stopped = montage.Stopped;
+                if (!montage.Stopped)
+                {
+                    const double elapsed = viewTick > static_cast<double>(montage.StartTick)
+                                               ? (viewTick - static_cast<double>(montage.StartTick)) / static_cast<double>(Scene::TickRate) : 0.0;
+                    graph.PlayMontage(AssetHandle(montage.Clip), montage.Slot, montage.Rate, montage.BlendIn, montage.BlendOut,
+                                      static_cast<float>(elapsed * std::abs(montage.Rate)));
+                }
+            }
+            else if (montage.Stopped && !slot.Stopped)
+            {
+                slot.Stopped = true;
+                graph.StopMontage(montage.Slot, montage.StopBlendOut);
+            }
+        }
+        return complete;
+    }
+
+    // ------------------------------------------------------------------------------------------------------- lag compensation
+
+    void NetReplication::RecordHitboxes()
+    {
+        const uint64_t tick = m_Scene->GetTick();
+        if (tick == m_LastHitboxTick)
+            return;
+        m_LastHitboxTick = tick;
+        std::vector<Hitbox> hitboxes;
+        for (auto handle : m_Scene->GetAllEntitiesWith<NetworkIdentityComponent, WorldTransformComponent>())
+        {
+            Entity entity(handle, m_Scene);
+            if (entity.HasComponent<InactiveInHierarchyComponent>())
+                continue;
+            const glm::dmat4& world = entity.GetComponent<WorldTransformComponent>().WorldMatrix;
+            const glm::dvec3 position(world[3]);
+            const glm::vec3 scale(static_cast<float>(glm::length(glm::dvec3(world[0]))), static_cast<float>(glm::length(glm::dvec3(world[1]))),
+                                  static_cast<float>(glm::length(glm::dvec3(world[2]))));
+            const glm::mat3 axes(glm::vec3(world[0]) / std::max(scale.x, 1e-6f), glm::vec3(world[1]) / std::max(scale.y, 1e-6f),
+                                 glm::vec3(world[2]) / std::max(scale.z, 1e-6f));
+            const glm::quat rotation = glm::normalize(glm::quat_cast(axes));
+            Hitbox hitbox;
+            hitbox.Entity = static_cast<uint64_t>(entity.GetUUID());
+            hitbox.Owner = entity.GetComponent<NetworkIdentityComponent>().Owner;
+            auto add = [&](HitShape::Type kind, const glm::vec3& offset)
+            {
+                hitbox.Shape.Kind = kind;
+                hitbox.Shape.Center = position + glm::dvec3(rotation * (offset * scale));
+                hitbox.Shape.Rotation = rotation;
+                hitboxes.push_back(hitbox);
+            };
+            // The entity's own colliders (a character: its capsule, standing on the entity's origin).
+            if (entity.HasComponent<CharacterController3DComponent>())
+            {
+                const auto& controller = entity.GetComponent<CharacterController3DComponent>();
+                hitbox.Shape.Radius = controller.Radius;
+                hitbox.Shape.HalfHeight = controller.Height * 0.5f;
+                hitbox.Shape.Kind = HitShape::Type::Capsule;
+                hitbox.Shape.Center = position + glm::dvec3(0.0, static_cast<double>(controller.Height * 0.5f + controller.Radius), 0.0);
+                hitbox.Shape.Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f); // (a character stands upright)
+                hitboxes.push_back(hitbox);
+            }
+            if (entity.HasComponent<BoxCollider3DComponent>())
+            {
+                const auto& box = entity.GetComponent<BoxCollider3DComponent>();
+                hitbox.Shape.HalfExtents = box.HalfExtents * scale;
+                add(HitShape::Type::Box, box.Offset);
+            }
+            if (entity.HasComponent<SphereCollider3DComponent>())
+            {
+                const auto& sphere = entity.GetComponent<SphereCollider3DComponent>();
+                hitbox.Shape.Radius = sphere.Radius * std::max({ scale.x, scale.y, scale.z });
+                add(HitShape::Type::Sphere, sphere.Offset);
+            }
+            if (entity.HasComponent<CapsuleCollider3DComponent>())
+            {
+                const auto& capsule = entity.GetComponent<CapsuleCollider3DComponent>();
+                hitbox.Shape.Radius = capsule.Radius * std::max(scale.x, scale.z);
+                hitbox.Shape.HalfHeight = capsule.HalfHeight * scale.y;
+                add(HitShape::Type::Capsule, capsule.Offset);
+            }
+            if (entity.HasComponent<CylinderCollider3DComponent>())
+            {
+                const auto& cylinder = entity.GetComponent<CylinderCollider3DComponent>();
+                const float radius = std::max(cylinder.Radius, cylinder.BottomRadius);
+                hitbox.Shape.HalfExtents = glm::vec3(radius * scale.x, cylinder.HalfHeight * scale.y, radius * scale.z); // (its box)
+                add(HitShape::Type::Box, cylinder.Offset);
+            }
+        }
+        m_Hitboxes.Record(tick, std::move(hitboxes), MaxRewindSeconds * static_cast<double>(Scene::TickRate) + 2.0);
+    }
+
+    double NetReplication::GetViewTick() const
+    {
+        if (m_Mode != Mode::Client || !m_Clock.IsValid())
+            return 0.0;
+        return m_Clock.GetServerTick(NetNow()) - InterpolationDelayTicks();
+    }
+
+    bool NetReplication::RaycastLagCompensated(ClientId shooter, double viewTick, const glm::dvec3& origin, const glm::vec3& direction,
+                                               float maxDistance, RayCastHitResult& hit, double* rewoundMs)
+    {
+        hit = {};
+        if (m_Mode != Mode::Server || !m_Scene || maxDistance <= 0.0f || glm::length(direction) < 1e-6f)
+            return false;
+        const glm::dvec3 dir = glm::normalize(glm::dvec3(direction));
+        const double rate = static_cast<double>(Scene::TickRate);
+        const double now = static_cast<double>(m_Scene->GetTick());
+        // Where that client saw the others: what it claims, held to what its latency allows (half its round trip for the shot to
+        // arrive, plus how far in the past it draws others).
+        double tick = now;
+        if (m_LagCompensation && m_Clients.contains(shooter))
+        {
+            const double oneWay = static_cast<double>(m_Server->GetStats(shooter).PingMs) / 2000.0 * rate;
+            const double spacing = rate / static_cast<double>(m_SnapshotRate);
+            tick = ClampViewTick(viewTick, now, oneWay + 2.0 * spacing + 1.0, ViewToleranceSeconds * rate, MaxRewindSeconds * rate);
+        }
+        if (rewoundMs)
+            *rewoundMs = (now - tick) / rate * 1000.0;
+        RewoundHit rewound;
+        const bool hitEntity = m_Hitboxes.Raycast(tick, origin, dir, static_cast<double>(maxDistance), shooter, rewound);
+        // The static level as it is: a wall between the shooter and the target stops the shot.
+        RayCastHit level;
+        IPhysics3DScene* physics = m_Scene->GetPhysics3DScene();
+        const bool hitLevel = physics && physics->RayCast(origin, glm::vec3(dir), maxDistance, level, PhysicsLayers::MASK_STATIC);
+        const double levelDistance = hitLevel ? glm::distance(origin, level.Position) : std::numeric_limits<double>::infinity();
+        if (hitEntity && rewound.Distance <= levelDistance)
+        {
+            hit.Entity = rewound.Entity;
+            hit.Point = rewound.Point;
+            hit.Normal = rewound.Normal;
+            hit.Distance = static_cast<float>(rewound.Distance);
+            return true;
+        }
+        if (hitLevel)
+        {
+            hit.Entity = level.HitEntity ? static_cast<uint64_t>(level.HitEntity.GetUUID()) : 0;
+            hit.Point = level.Position;
+            hit.Normal = level.Normal;
+            hit.Distance = static_cast<float>(levelDistance);
+            return true;
+        }
+        return false;
+    }
+
     // ---------------------------------------------------------------------------------------------------------------------- RPCs
 
     void NetReplication::SendRpc(UUID id, std::string_view className, RpcKind kind, uint32_t method, bool reliable,
-                                 std::span<const uint8_t> arguments)
+                                 std::span<const uint8_t> arguments, bool skipOwner)
     {
         IScriptBackend* backend = ScriptEngine::GetBackend();
         const auto* instances = ScriptEngine::GetInstances(id);
@@ -824,8 +1120,9 @@ namespace Nox::Net
         else if (kind == RpcKind::Multicast)
         {
             // Every client the entity is relevant to (Unreal: the connections with an open channel for it).
+            const ClientId owner = GetOwner(id);
             for (const auto& [client, replication] : m_Clients)
-                if (IsRelevantTo(static_cast<uint64_t>(id), client, replication))
+                if (!(skipOwner && client == owner) && IsRelevantTo(static_cast<uint64_t>(id), client, replication))
                     m_Server->Send(client, writer.GetData(), delivery);
         }
     }

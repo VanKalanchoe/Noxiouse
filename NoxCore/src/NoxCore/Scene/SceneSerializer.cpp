@@ -886,6 +886,7 @@ namespace Nox
             const auto& identity = entity.GetComponent<NetworkIdentityComponent>();
             out << YAML::Key << "NetworkIdentityComponent" << YAML::BeginMap;
             out << YAML::Key << "ReplicateTransform" << YAML::Value << identity.ReplicateTransform;
+            out << YAML::Key << "ReplicateAnimation" << YAML::Value << identity.ReplicateAnimation;
             out << YAML::Key << "AlwaysRelevant" << YAML::Value << identity.AlwaysRelevant;
             out << YAML::Key << "OnlyRelevantToOwner" << YAML::Value << identity.OnlyRelevantToOwner;
             out << YAML::Key << "CullDistance" << YAML::Value << identity.CullDistance;
@@ -2507,6 +2508,8 @@ namespace Nox
             auto& component = deserializedEntity.AddComponent<NetworkIdentityComponent>();
             if (networkIdentity["ReplicateTransform"])
                 component.ReplicateTransform = networkIdentity["ReplicateTransform"].as<bool>();
+            if (networkIdentity["ReplicateAnimation"])
+                component.ReplicateAnimation = networkIdentity["ReplicateAnimation"].as<bool>();
             if (networkIdentity["AlwaysRelevant"])
                 component.AlwaysRelevant = networkIdentity["AlwaysRelevant"].as<bool>();
             if (networkIdentity["OnlyRelevantToOwner"])

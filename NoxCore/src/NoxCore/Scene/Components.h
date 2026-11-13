@@ -1181,7 +1181,8 @@ namespace Nox
             DormantAll, // not read again until flushed (Unreal's DORM_DormantAll): a script calls FlushNetDormancy after a change
             Initial     // its first state (the level's) until flushed (Unreal's DORM_Initial): a level's chest until it is opened
         };
-        bool ReplicateTransform = true;
+        bool ReplicateTransform = true;   // also a dynamic body's motion (NET5: clients simulate it and follow the server's)
+        bool ReplicateAnimation = true;   // an animator graph's parameters and montages (NET5; the owning client sets its own)
         bool AlwaysRelevant = false;      // every client gets it wherever it is (a game's state, a scoreboard)
         bool OnlyRelevantToOwner = false; // only its owner gets it (a player's inventory)
         float CullDistance = 150.0f;      // metres from a client's own entities within which that client gets it (Unreal: 150 m)

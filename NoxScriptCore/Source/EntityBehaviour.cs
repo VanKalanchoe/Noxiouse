@@ -118,7 +118,7 @@ public abstract class EntityBehaviour
                 NetCodec.Write(writer, parameters[i].ParameterType, arguments[i]);
             writer.Flush();
             MemoryStream written = NetCodec.Written;
-            InternalCalls.NetworkSendRpc(EntityID, GetType().FullName!, kind, index, info.RpcReliable[index],
+            InternalCalls.NetworkSendRpc(EntityID, GetType().FullName!, kind, index, info.RpcReliable[index], info.RpcSkipOwner[index],
                                          new ReadOnlySpan<byte>(written.GetBuffer(), 0, (int)written.Length));
         }
         if (runHere)

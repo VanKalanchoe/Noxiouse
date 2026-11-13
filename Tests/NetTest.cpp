@@ -11,6 +11,9 @@
 #include "NoxCore/Network/NetQuantize.h"
 #include "NoxCore/Network/NetPrediction.h"
 #include "NoxCore/Network/NetRelevancy.h"
+#include "NoxCore/Network/NetLagCompensation.h"
+#include "NoxCore/Network/NetPhysicsReplication.h"
+#include "NoxCore/Network/NetAnimation.h"
 #include "NoxCore/Core/Log.h"
 
 #include <cstdio>
@@ -1181,6 +1184,207 @@ static void TestManyClients()
     CHECK(worstFrame < 0.5, "the server's relevancy + snapshots for 64 clients: worst {:.1f} ms a snapshot (debug + sanitizers)", worstFrame * 1000.0);
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------- NET5
+
+static bool InsideShape(const glm::dvec3& point, const HitShape& shape)
+{
+    const glm::dvec3 local = glm::conjugate(glm::dquat(shape.Rotation)) * (point - shape.Center);
+    switch (shape.Kind)
+    {
+    case HitShape::Type::Sphere: return glm::length(local) <= shape.Radius;
+    case HitShape::Type::Box: return std::abs(local.x) <= shape.HalfExtents.x && std::abs(local.y) <= shape.HalfExtents.y && std::abs(local.z) <= shape.HalfExtents.z;
+    case HitShape::Type::Capsule:
+    {
+        const double y = std::clamp(local.y, -static_cast<double>(shape.HalfHeight), static_cast<double>(shape.HalfHeight));
+        return glm::length(local - glm::dvec3(0.0, y, 0.0)) <= shape.Radius;
+    }
+    }
+    return false;
+}
+
+static void TestLagCompensation()
+{
+    std::printf("\n== lag compensation: ray tests against hitboxes, a shot at a moving target seen 180 ms in the past\n");
+    std::mt19937 random(5);
+    auto uniform = [&](double a, double b) { return std::uniform_real_distribution<double>(a, b)(random); };
+    // Every shape against a ray march (0.25-unit steps): the same hits, at the same distance.
+    size_t disagreements = 0, hits = 0, rays = 0;
+    double worstDistance = 0.0;
+    for (int shapeKind = 0; shapeKind < 3; ++shapeKind)
+    {
+        for (int ray = 0; ray < 1500; ++ray)
+        {
+            HitShape shape;
+            shape.Kind = static_cast<HitShape::Type>(shapeKind);
+            shape.Center = { uniform(-50, 50), uniform(-50, 50), uniform(-50, 50) };
+            shape.Rotation = glm::normalize(glm::quat(static_cast<float>(uniform(-1, 1)), static_cast<float>(uniform(-1, 1)),
+                                                      static_cast<float>(uniform(-1, 1)), static_cast<float>(uniform(-1, 1))));
+            shape.HalfExtents = { static_cast<float>(uniform(5, 40)), static_cast<float>(uniform(5, 40)), static_cast<float>(uniform(5, 40)) };
+            shape.Radius = static_cast<float>(uniform(5, 30));
+            shape.HalfHeight = static_cast<float>(uniform(5, 40));
+            const glm::dvec3 origin(uniform(-300, 300), uniform(-300, 300), uniform(-300, 300));
+            if (InsideShape(origin, shape))
+                continue;
+            const glm::dvec3 toward = shape.Center + glm::dvec3(uniform(-40, 40), uniform(-40, 40), uniform(-40, 40)) - origin;
+            const glm::dvec3 direction = glm::normalize(toward);
+            double analytic = 0.0;
+            glm::vec3 normal;
+            const bool hit = RayHitShape(origin, direction, 1000.0, shape, analytic, normal);
+            double marched = -1.0;
+            for (double t = 0.0; t <= 1000.0; t += 0.25)
+                if (InsideShape(origin + direction * t, shape)) { marched = t; break; }
+            ++rays;
+            if (hit != (marched >= 0.0))
+            {
+                // (a ray grazing an edge may slip between two march steps)
+                ++disagreements;
+                continue;
+            }
+            if (hit)
+            {
+                ++hits;
+                worstDistance = std::max(worstDistance, std::abs(analytic - marched));
+            }
+        }
+    }
+    CHECK(disagreements * 200 < rays && worstDistance <= 0.3, "boxes, spheres, capsules: {} rays ({} hits) agree with a ray march ({} grazing misses), distances within {:.2f}",
+          rays, hits, disagreements, worstDistance);
+
+    // A target running at 5 m/s (a unit is a centimetre), 60 ticks a second; the shooter's link 100 ms each way, others drawn 5 ticks in the past.
+    LagCompensationHistory history;
+    auto targetAt = [](double tick) { return glm::dvec3(-3000.0 + 500.0 * tick / 60.0, 100.0, 2000.0); };
+    for (uint64_t tick = 1; tick <= 300; ++tick)
+    {
+        std::vector<Hitbox> boxes;
+        Hitbox target;
+        target.Entity = 77;
+        target.Shape.Kind = HitShape::Type::Capsule;
+        target.Shape.Center = targetAt(static_cast<double>(tick));
+        target.Shape.Radius = 40.0f;
+        target.Shape.HalfHeight = 50.0f;
+        boxes.push_back(target);
+        Hitbox shooter = target;
+        shooter.Entity = 5;
+        shooter.Owner = 3;
+        shooter.Shape.Center = { 0.0, 100.0, 0.0 };
+        boxes.push_back(shooter);
+        history.Record(tick, std::move(boxes), 60.0);
+    }
+    const double oneWayTicks = 6.0, interpolationTicks = 5.0;
+    const double serverTick = 300.0;                                   // when the shot arrives
+    const double viewTick = serverTick - oneWayTicks - interpolationTicks; // what the shooter saw when it fired
+    const glm::dvec3 origin(0.0, 100.0, 0.0);
+    const glm::dvec3 aim = glm::normalize(targetAt(viewTick) - origin); // dead on the target as drawn
+    RewoundHit hit;
+    const double rewound = ClampViewTick(viewTick, serverTick, oneWayTicks + interpolationTicks, 12.0, 60.0);
+    const bool hitRewound = history.Raycast(rewound, origin, aim, 100000.0, 3, hit) && hit.Entity == 77;
+    RewoundHit now;
+    const bool hitNow = history.Raycast(serverTick, origin, aim, 100000.0, 3, now) && now.Entity == 77;
+    CHECK(hitRewound && !hitNow, "the shot hits the target where the shooter saw it (rewound {:.0f} ticks); without rewinding it misses (the target moved {:.0f} cm)",
+          serverTick - rewound, 500.0 * (serverTick - viewTick) / 60.0);
+    RewoundHit self;
+    const bool skipsOwn = !history.Raycast(rewound, glm::dvec3(0.0, 100.0, -500.0), glm::dvec3(0.0, 0.0, 1.0), 1000.0, 3, self);
+    const double cheat = ClampViewTick(serverTick - 50.0, serverTick, oneWayTicks + interpolationTicks, 12.0, 60.0);
+    const double future = ClampViewTick(serverTick + 30.0, serverTick, oneWayTicks + interpolationTicks, 12.0, 60.0);
+    CHECK(skipsOwn && cheat == serverTick - 23.0 && future == serverTick, "the shooter's own hitbox is skipped; a claimed view 50 ticks back is held to 23, one in the future to now");
+}
+
+static void TestPhysicsCorrection()
+{
+    std::printf("\n== physics replication: a client's body pulled to the server's (100 ms latency, extrapolated)\n");
+    BodyCorrectionSettings settings;
+    const float dt = 1.0f / 60.0f;
+    // The server's body slides at 2 m/s, then turns and slows; the client simulates its own copy, starting 50 cm off.
+    auto serverAt = [](int tick)
+    {
+        BodyState state;
+        const double t = tick / 60.0;
+        if (t < 2.0) { state.Position = { 200.0 * t, 50.0, 0.0 }; state.LinearVelocity = { 200.0f, 0.0f, 0.0f }; }
+        else { state.Position = { 400.0, 50.0, 100.0 * (t - 2.0) }; state.LinearVelocity = { 0.0f, 0.0f, 100.0f }; }
+        state.Rotation = glm::angleAxis(static_cast<float>(t), glm::vec3(0.0f, 1.0f, 0.0f));
+        state.AngularVelocity = { 0.0f, 1.0f, 0.0f };
+        return state;
+    };
+    BodyState client = serverAt(0);
+    client.Position += glm::dvec3(50.0, 0.0, 0.0);
+    const int latency = 6; // ticks: the server's state arrives this old
+    double errorAfterSecond = 0.0, worstAfterTurn = 0.0;
+    for (int tick = 1; tick <= 240; ++tick)
+    {
+        // The client's own step (its physics), then the pull toward the server's state from `latency` ticks ago, carried forward.
+        client.Position += glm::dvec3(client.LinearVelocity) * static_cast<double>(dt);
+        const BodyState target = ExtrapolateBody(serverAt(std::max(tick - latency, 0)), latency / 60.0, settings.MaxExtrapolation);
+        CorrectBody(client, target, dt, settings);
+        const double error = glm::distance(client.Position, serverAt(tick).Position);
+        if (tick == 60)
+            errorAfterSecond = error;
+        if (tick > 120 + latency + 30)
+            worstAfterTurn = std::max(worstAfterTurn, error);
+    }
+    CHECK(errorAfterSecond < 1.0 && worstAfterTurn < 1.0, "a 50 cm error is gone within a second ({:.2f} cm left); after a turn the server made, within {:.2f} cm",
+          errorAfterSecond, worstAfterTurn);
+    BodyState far = client;
+    far.Position += glm::dvec3(1000.0, 0.0, 0.0);
+    BodyState rest;
+    rest.Position = client.Position + glm::dvec3(0.3, 0.0, 0.0);
+    rest.Rotation = client.Rotation;
+    rest.Sleeping = true;
+    BodyState settled = client;
+    const bool snapped = CorrectBody(far, serverAt(240), dt, settings) == BodyCorrection::Snapped && far.Position == serverAt(240).Position;
+    const bool resting = CorrectBody(settled, rest, dt, settings) == BodyCorrection::AtRest && settled.Sleeping;
+    CHECK(snapped && resting, "10 m off: placed at once; the server's body asleep and the client's within 1 cm: left asleep");
+}
+
+static void TestAnimationCodec()
+{
+    std::printf("\n== animation replication: parameters and montages\n");
+    std::mt19937 random(9);
+    size_t roundTrips = 0, failures = 0;
+    for (int i = 0; i < 2000; ++i)
+    {
+        AnimationNetState state;
+        for (int p = 0; p < static_cast<int>(random() % 12); ++p)
+        {
+            AnimParameter parameter;
+            parameter.NameHash = HashParameterName("Param" + std::to_string(p));
+            switch (random() % 4)
+            {
+            case 0: parameter.Value = (random() % 2) == 0; break;
+            case 1: parameter.Value = static_cast<int32_t>(random()) ; break;
+            case 2: parameter.Value = static_cast<float>(random() % 10000) / 7.0f; break;
+            default: parameter.Value = glm::vec2(static_cast<float>(random() % 100), -static_cast<float>(random() % 100)); break;
+            }
+            state.Parameters.push_back(parameter);
+        }
+        for (int m = 0; m < static_cast<int>(random() % 3); ++m)
+        {
+            AnimMontage montage;
+            montage.Slot = m == 0 ? "UpperBody" : "FullBody";
+            montage.Clip = random();
+            montage.Serial = random() % 1000;
+            montage.StartTick = random();
+            montage.Rate = 1.25f;
+            montage.Stopped = (random() % 2) == 0;
+            montage.StopBlendOut = montage.Stopped ? 0.4f : 0.2f;
+            state.Montages.push_back(montage);
+        }
+        AnimationNetState decoded;
+        const bool ok = DecodeAnimation(EncodeAnimation(state), decoded) && decoded == state;
+        roundTrips += ok ? 1 : 0;
+        failures += ok ? 0 : 1;
+    }
+    size_t accepted = 0;
+    for (int i = 0; i < 50000; ++i)
+    {
+        std::vector<uint8_t> junk(random() % 48);
+        for (uint8_t& b : junk) b = static_cast<uint8_t>(random());
+        AnimationNetState decoded;
+        accepted += DecodeAnimation(junk, decoded) ? 1 : 0;
+    }
+    CHECK(failures == 0, "{} random animation states survive the round trip; 50000 random byte strings read without a crash ({} well-formed)", roundTrips, accepted);
+}
+
 int main(int argc, char** argv)
 {
     Nox::Log::Init();
@@ -1190,6 +1394,9 @@ int main(int argc, char** argv)
     TestRelevancy();
     TestBudget();
     TestManyClients();
+    TestLagCompensation();
+    TestPhysicsCorrection();
+    TestAnimationCodec();
     TestQuantize();
     TestPrediction();
     TestClockAndInterpolation();

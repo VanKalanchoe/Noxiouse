@@ -21,7 +21,7 @@
 namespace Nox::Net
 {
     constexpr uint32_t ProtocolMagic = 0x4e584f4e;  // "NOXN"
-    constexpr uint32_t ProtocolVersion = 4;         // raised whenever a message's layout changes (2: NET2 replication, 3: NET3 inputs, 4: NET4 per-entity acks)
+    constexpr uint32_t ProtocolVersion = 5;         // raised whenever a message's layout changes (2: NET2 replication, 3: NET3 inputs, 4: NET4 per-entity acks, 5: NET5 physics / animation properties)
     constexpr uint16_t DefaultPort = 7777;
     constexpr size_t MaxNameLength = 64;            // player and server names
     constexpr size_t MaxProjectNameLength = 128;

@@ -165,7 +165,7 @@ namespace Nox
                     console->Lines.push_back(line);
                 }
             }).detach();
-            NOX_CORE_INFO("Server console: status, clients, kick <id> [reason], netemu off|average|bad|<lag> <jitter> <loss>, quit (or Ctrl+C)");
+            NOX_CORE_INFO("Server console: status, clients, kick <id> [reason], netemu off|average|bad|<lag> <jitter> <loss>, lagcomp on|off, quit (or Ctrl+C)");
         }
     }
 
@@ -286,6 +286,14 @@ namespace Nox
             if (!m_Server->Kick(client, reason.empty() ? "kicked by the server" : reason))
                 NOX_CORE_WARN("Server console: no client {} (see 'clients')", words[1]);
         }
+        else if (command == "lagcomp" && m_Replication)
+        {
+            if (words.size() >= 2)
+                m_Replication->SetLagCompensation(words[1] != "off");
+            NOX_CORE_INFO("Server: lag compensation {} (shots are checked against where the targets were {})",
+                          m_Replication->GetLagCompensation() ? "on" : "off",
+                          m_Replication->GetLagCompensation() ? "on the shooter's screen" : "now, on the server");
+        }
         else if (command == "netemu" && words.size() >= 2 && m_Server)
         {
             Net::NetEmulation emulation;
@@ -304,7 +312,7 @@ namespace Nox
             NOX_CORE_INFO("Server: network emulation {}", Describe(emulation));
         }
         else
-            NOX_CORE_WARN("Server console: unknown command '{}' (status, clients, kick <id> [reason], netemu ..., quit)", line);
+            NOX_CORE_WARN("Server console: unknown command '{}' (status, clients, kick <id> [reason], netemu ..., lagcomp on|off, quit)", line);
     }
 
     void RuntimeLayer::LogClients() const

@@ -169,7 +169,7 @@ namespace Nox
         return &m_LastPose;
     }
 
-    void AnimationGraphInstance::PlayMontage(AssetHandle clip, const std::string& slot, float rate, float blendIn, float blendOut)
+    void AnimationGraphInstance::PlayMontage(AssetHandle clip, const std::string& slot, float rate, float blendIn, float blendOut, float startTime)
     {
         m_Montages.erase(std::remove_if(m_Montages.begin(), m_Montages.end(), [&](const Montage& m) { return m.Slot == slot; }), m_Montages.end());
         if (clip == 0)
@@ -180,6 +180,12 @@ namespace Nox
         montage.Rate = rate;
         montage.BlendIn = std::max(blendIn, 0.0f);
         montage.BlendOut = std::max(blendOut, 0.0f);
+        montage.StartOffset = std::max(startTime, 0.0f);
+        // (the record of the slot, for replication)
+        auto record = std::find_if(m_MontageRecords.begin(), m_MontageRecords.end(), [&](const MontageRecord& r) { return r.Slot == montage.Slot; });
+        if (record == m_MontageRecords.end())
+            record = m_MontageRecords.insert(m_MontageRecords.end(), MontageRecord{ montage.Slot });
+        *record = { montage.Slot, clip, ++m_MontageSerial, rate, montage.BlendIn, montage.BlendOut, false, 0.2f };
         m_Montages.push_back(std::move(montage));
     }
 
@@ -189,6 +195,12 @@ namespace Nox
         {
             if (montage.Slot == slot && !montage.Stopping)
             {
+                for (MontageRecord& record : m_MontageRecords)
+                    if (record.Slot == slot && !record.Stopped)
+                    {
+                        record.Stopped = true;
+                        record.StopBlendOut = std::max(blendOut, 0.0f);
+                    }
                 montage.Stopping = true;
                 montage.StopFrom = montage.Weight;
                 montage.StopElapsed = 0.0f;
@@ -226,7 +238,9 @@ namespace Nox
             if (!montage.Started)
             {
                 montage.Started = true;
-                montage.Time = montage.Rate >= 0.0f ? 0.0f : clip->Duration;
+                const float skipped = std::min(montage.StartOffset, clip->Duration);
+                montage.Time = montage.Rate >= 0.0f ? skipped : clip->Duration - skipped;
+                montage.Elapsed = montage.Rate != 0.0f ? skipped / std::abs(montage.Rate) : 0.0f; // (started late: past its blend in)
             }
 
             const float previous = montage.Time;

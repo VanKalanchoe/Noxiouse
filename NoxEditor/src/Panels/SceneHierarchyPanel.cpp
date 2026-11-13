@@ -2897,7 +2897,11 @@ namespace Nox
                                "(NoxRuntime --server / --listen / --connect).");
             ImGui::Checkbox("Replicate Transform", &component.ReplicateTransform);
             ImGui::SetItemTooltip("The server sends where it is (position, rotation, scale); on the clients its physics body follows.\n"
-                                  "Off: only its scripts' [Replicated] fields (and its spawn and removal) go to the clients.");
+                                  "Off: only its scripts' [Replicated] fields (and its spawn and removal) go to the clients.\n"
+                                  "A dynamic rigid body is simulated on the clients too and pulled toward the server's (physics replication).");
+            ImGui::Checkbox("Replicate Animation", &component.ReplicateAnimation);
+            ImGui::SetItemTooltip("Its animator graph's parameters and montages go to the clients (they animate it themselves);\n"
+                                  "the client that owns it sets its own.");
 
             ImGui::SeparatorText("Relevancy");
             ImGui::Checkbox("Always Relevant", &component.AlwaysRelevant);

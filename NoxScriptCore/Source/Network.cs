@@ -43,6 +43,11 @@ public sealed class ClientRpcAttribute : Attribute
 public sealed class MulticastRpcAttribute : Attribute
 {
     public bool Reliable = true;
+    /// <summary>
+    /// Not sent to the client that owns the entity (Unreal's predicted cosmetics): the owner played the effect itself when it acted
+    /// (a shot's sound and flash at once, not a round trip later); everyone else gets it from the server.
+    /// </summary>
+    public bool SkipOwner = false;
 }
 
 /// <summary>
@@ -107,6 +112,27 @@ public static class Network
     /// <summary>The server hands a replicated entity to a client (0: back to the server). False on a client or for an entity that is not replicated.</summary>
     public static bool SetOwner(Entity entity, uint owner) => InternalCalls.NetworkSetOwner(entity.ID, owner);
 
+    /// <summary>
+    /// On a client: the server tick the other entities are drawn at right now (they are shown a little in the past). Send it with a shot
+    /// (a [ServerRpc] argument) so the server checks it against where the targets were on this screen: <see cref="RaycastLagCompensated"/>.
+    /// 0 elsewhere.
+    /// </summary>
+    public static double ViewTick => InternalCalls.NetworkGetViewTick();
+
+    /// <summary>
+    /// On the server: a client's shot (lag compensation, Unreal / Source's "favor the shooter") -- the ray against the replicated
+    /// entities as they stood at <paramref name="viewTick"/> on that client's screen (its <see cref="ViewTick"/>, held to what its latency
+    /// allows, at most a second back) and the static level as it is now; the client's own entities are skipped. Standalone (or with
+    /// <c>lagcomp off</c> on the server's console) a plain <see cref="Physics.Raycast"/> against the world as it is.
+    /// </summary>
+    public static bool RaycastLagCompensated(uint client, double viewTick, Vector3d origin, Vector3 direction, float maxDistance, out RaycastHit hit) =>
+        InternalCalls.NetworkRaycastLagCompensated(client, viewTick, origin, direction, maxDistance, out hit, out _);
+
+    /// <summary>The same, and how far back (milliseconds) the server looked for that client's shot.</summary>
+    public static bool RaycastLagCompensated(uint client, double viewTick, Vector3d origin, Vector3 direction, float maxDistance, out RaycastHit hit,
+                                             out double rewoundMs) =>
+        InternalCalls.NetworkRaycastLagCompensated(client, viewTick, origin, direction, maxDistance, out hit, out rewoundMs);
+
     /// <summary>A replicated entity's dormancy (null: not replicated).</summary>
     public static NetDormancy? GetDormancy(Entity entity)
     {
@@ -148,6 +174,7 @@ internal sealed class NetTypeInfo
     internal readonly MethodInfo[] Rpcs;
     internal readonly int[] RpcKinds;     // 0 server, 1 client, 2 multicast
     internal readonly bool[] RpcReliable;
+    internal readonly bool[] RpcSkipOwner;
     internal readonly Dictionary<string, int> RpcIndex = new(StringComparer.Ordinal);
 
     static readonly ConcurrentDictionary<Type, NetTypeInfo> s_Cache = new();
@@ -157,7 +184,7 @@ internal sealed class NetTypeInfo
     {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
         var fields = new List<FieldInfo>();
-        var methods = new List<(MethodInfo Method, int Kind, bool Reliable)>();
+        var methods = new List<(MethodInfo Method, int Kind, bool Reliable, bool SkipOwner)>();
         for (Type? t = type; t != null && t != typeof(EntityBehaviour); t = t.BaseType)
         {
             foreach (FieldInfo field in t.GetFields(flags))
@@ -174,10 +201,10 @@ internal sealed class NetTypeInfo
             foreach (MethodInfo method in t.GetMethods(flags))
             {
                 int kind = -1;
-                bool reliable = true;
+                bool reliable = true, skipOwner = false;
                 if (method.GetCustomAttribute<ServerRpcAttribute>() is { } server) { kind = 0; reliable = server.Reliable; }
                 else if (method.GetCustomAttribute<ClientRpcAttribute>() is { } client) { kind = 1; reliable = client.Reliable; }
-                else if (method.GetCustomAttribute<MulticastRpcAttribute>() is { } multicast) { kind = 2; reliable = multicast.Reliable; }
+                else if (method.GetCustomAttribute<MulticastRpcAttribute>() is { } multicast) { kind = 2; reliable = multicast.Reliable; skipOwner = multicast.SkipOwner; }
                 if (kind < 0)
                     continue;
                 if (method.GetParameters().Any(p => !NetCodec.Supports(p.ParameterType)) || method.ReturnType != typeof(void))
@@ -185,7 +212,7 @@ internal sealed class NetTypeInfo
                     Log.Info($"[Network] {type.FullName}.{method.Name}: an RPC returns void and takes the types [Replicated] supports (skipped)");
                     continue;
                 }
-                methods.Add((method, kind, reliable));
+                methods.Add((method, kind, reliable, skipOwner));
             }
         }
         fields.Sort((a, b) => string.CompareOrdinal(a.DeclaringType!.FullName + "." + a.Name, b.DeclaringType!.FullName + "." + b.Name));
@@ -206,7 +233,8 @@ internal sealed class NetTypeInfo
         var rpcs = new List<MethodInfo>();
         var kinds = new List<int>();
         var reliables = new List<bool>();
-        foreach (var (method, kind, reliable) in methods)
+        var skipOwners = new List<bool>();
+        foreach (var (method, kind, reliable, skipOwner) in methods)
         {
             if (RpcIndex.ContainsKey(method.Name))
             {
@@ -217,10 +245,12 @@ internal sealed class NetTypeInfo
             rpcs.Add(method);
             kinds.Add(kind);
             reliables.Add(reliable);
+            skipOwners.Add(skipOwner);
         }
         Rpcs = rpcs.ToArray();
         RpcKinds = kinds.ToArray();
         RpcReliable = reliables.ToArray();
+        RpcSkipOwner = skipOwners.ToArray();
     }
 }
 

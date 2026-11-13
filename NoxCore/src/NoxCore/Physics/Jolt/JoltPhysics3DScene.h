@@ -44,6 +44,8 @@ namespace Nox
         bool GetCharacterNetState(Entity entity, CharacterNetState& state) const override;
         void SetCharacterNetState(Entity entity, const CharacterNetState& state) override;
         void StepCharacter(Entity entity, float dt) override;
+        bool GetBodyNetState(Entity entity, BodyNetState& state) const override;
+        void SetBodyReplicationTarget(Entity entity, const BodyNetState& target, double extrapolateSeconds, bool snap) override;
         glm::dvec3 GetCharacterDrawnPosition(Entity entity) const override;
         void SetCharacterExternallyStepped(Entity entity, bool external) override;
         void AddCharacterVisualOffset(Entity entity, const glm::dvec3& offset) override;
@@ -129,9 +131,17 @@ namespace Nox
         // entity -- a network client's proxies of the server's entities are made kinematic, Scene::IsNetProxy), swept to it before
         // each step so they push dynamic bodies.
         std::unordered_set<uint32_t> m_FollowTransform;
-        // A network client's copies of bodies the server simulates (dynamic there): its predicted character passes through them -- they
-        // are drawn in the past and cannot be pushed here; the server decides what the character does with them.
-        std::unordered_set<uint32_t> m_IgnoredByCharacters; // body ids
+        // A network client's copies of dynamic bodies the server simulates: simulated here and pulled toward the server's state each
+        // tick (NET5, Unreal's physics replication: SetBodyReplicationTarget, ApplyReplicationTargets).
+        struct ReplicationTarget
+        {
+            BodyNetState State;
+            double Extrapolate = 0.0; // seconds the server's state is carried forward (the latency)
+            uint32_t TicksSince = 0;  // ticks since it arrived (carried forward by these too)
+            bool Snap = false;
+        };
+        std::unordered_map<uint32_t, ReplicationTarget> m_ReplicationTargets; // by entity
+        void ApplyReplicationTargets(float dt);
         void MoveFollowers(uint32_t ticks);
         std::unordered_map<uint32_t, Entity> m_BodyToEntityMap;
         std::unordered_map<uint32_t, JPH::BodyID> m_MeshColliders; // SetMeshCollider: static bodies, apart from the rigid bodies

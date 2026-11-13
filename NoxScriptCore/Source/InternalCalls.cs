@@ -13,7 +13,9 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, uint> Network_GetOwner;
     private static delegate*<ulong, uint, uint> Network_SetOwner;
     private static delegate*<NativeString, double, double, double, uint, ulong> Network_Spawn;
-    private static delegate*<ulong, NativeString, int, int, uint, byte*, int, void> Network_SendRpc;
+    private static delegate*<ulong, NativeString, int, int, uint, uint, byte*, int, void> Network_SendRpc;
+    private static delegate*<double> Network_GetViewTick;
+    private static delegate*<uint, double, double, double, double, float, float, float, float, RaycastHit*, double*, uint> Network_RaycastLagCompensated;
     private static delegate*<ulong, int> Network_GetDormancy;
     private static delegate*<ulong, int, uint> Network_SetDormancy;
     private static delegate*<ulong, uint> Network_FlushDormancy;
@@ -152,11 +154,25 @@ internal static unsafe class InternalCalls
         return Network_Spawn(nativePath, position.X, position.Y, position.Z, owner);
     }
 
-    internal static void NetworkSendRpc(ulong entityID, string className, int kind, int method, bool reliable, ReadOnlySpan<byte> arguments)
+    internal static void NetworkSendRpc(ulong entityID, string className, int kind, int method, bool reliable, bool skipOwner, ReadOnlySpan<byte> arguments)
     {
         using NativeString nativeClass = new(className);
         fixed (byte* data = arguments)
-            Network_SendRpc(entityID, nativeClass, kind, method, reliable ? 1u : 0u, data, arguments.Length);
+            Network_SendRpc(entityID, nativeClass, kind, method, reliable ? 1u : 0u, skipOwner ? 1u : 0u, data, arguments.Length);
+    }
+
+    internal static double NetworkGetViewTick() => Network_GetViewTick();
+
+    internal static bool NetworkRaycastLagCompensated(uint client, double viewTick, Vector3d origin, Vector3 direction, float maxDistance,
+                                                      out RaycastHit hit, out double rewoundMs)
+    {
+        RaycastHit result = default;
+        double rewound = 0.0;
+        bool found = Network_RaycastLagCompensated(client, viewTick, origin.X, origin.Y, origin.Z, direction.X, direction.Y, direction.Z, maxDistance,
+                                                   &result, &rewound) != 0;
+        hit = result;
+        rewoundMs = rewound;
+        return found;
     }
 
     internal static bool GetEntityActive(ulong entityID) => Entity_GetActive(entityID) != 0;

@@ -61,9 +61,21 @@ namespace Nox
         // Montages (UE's anim montages): a clip played once over the graph in the Slot node of that name, started by scripts
         // (attack, interact, reload). It blends in over blendIn seconds and out over the last blendOut seconds; a new one in
         // an occupied slot replaces the old. A clip not loaded yet starts once it is (Sync requests it).
-        void PlayMontage(AssetHandle clip, const std::string& slot, float rate, float blendIn, float blendOut);
+        // `startTime`: seconds of the clip already played (a network client starting a montage the server began earlier).
+        void PlayMontage(AssetHandle clip, const std::string& slot, float rate, float blendIn, float blendOut, float startTime = 0.0f);
         void StopMontage(const std::string& slot, float blendOut);
         bool IsMontagePlaying(const std::string& slot) const;
+        // The last montage started in each slot, and whether it was stopped (networking replicates this: Unreal's RepAnimMontageInfo).
+        struct MontageRecord
+        {
+            std::string Slot;
+            AssetHandle Clip = 0;
+            uint32_t Serial = 0; // counts the montages played on this instance (a new one: a higher number)
+            float Rate = 1.0f, BlendIn = 0.2f, BlendOut = 0.2f;
+            bool Stopped = false;
+            float StopBlendOut = 0.2f;
+        };
+        const std::vector<MontageRecord>& GetMontageRecords() const { return m_MontageRecords; }
 
         // The notifies the playheads crossed in the last Evaluate (clips, blend spaces' leading clips, montages).
         const std::vector<AnimationNotify>& GetFiredNotifies() const { return m_FiredNotifies; }
@@ -96,6 +108,7 @@ namespace Nox
             float BlendOut = 0.2f;
             float Elapsed = 0.0f;
             float Weight = 0.0f;
+            float StartOffset = 0.0f; // seconds of the clip skipped (started late)
             bool Started = false;   // its clip has loaded and it began
             bool Stopping = false;
             float StopFrom = 1.0f;  // the weight when StopMontage was called
@@ -103,6 +116,8 @@ namespace Nox
             float StopDuration = 0.2f;
         };
         std::vector<Montage> m_Montages;
+        std::vector<MontageRecord> m_MontageRecords;
+        uint32_t m_MontageSerial = 0;
         std::unordered_map<std::string, MontageSlotState> m_MontageSlots; // what the Slot nodes read, rebuilt each Evaluate
         std::vector<AnimationNotify> m_FiredNotifies;
 

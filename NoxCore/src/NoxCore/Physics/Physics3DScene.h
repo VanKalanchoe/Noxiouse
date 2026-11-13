@@ -8,6 +8,7 @@
 #include <span>
 #include <vector>
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace Nox {
 
@@ -70,6 +71,20 @@ namespace Nox {
         virtual glm::dvec3 GetCharacterDrawnPosition(Entity entity) const { return glm::dvec3(0.0); }
         // Drawn this much away from where it is, eased away over about 0.1 s (a prediction correction is not a visible snap).
         virtual void AddCharacterVisualOffset(Entity entity, const glm::dvec3& offset) {}
+        // Networking (NET5, Unreal's physics replication): a rigid body's state (world units; Sleeping: not moving, Jolt's deactivated).
+        struct BodyNetState
+        {
+            glm::dvec3 Position{ 0.0 };
+            glm::quat Rotation{ 1.0f, 0.0f, 0.0f, 0.0f };
+            glm::vec3 LinearVelocity{ 0.0f };
+            glm::vec3 AngularVelocity{ 0.0f };
+            bool Sleeping = false;
+        };
+        virtual bool GetBodyNetState(Entity entity, BodyNetState& state) const { return false; }
+        // A network client's copy of a dynamic body the server simulates: simulated here too (what this client's character pushes moves
+        // at once), and pulled every tick toward `target` -- the server's state, carried forward by `extrapolateSeconds` (the latency)
+        // plus the time since (Net::CorrectBody). `snap`: placed there at once (it just appeared, or came back into relevancy).
+        virtual void SetBodyReplicationTarget(Entity entity, const BodyNetState& target, double extrapolateSeconds, bool snap) {}
         // Called in every fixed tick: before the characters step (inputs are set or recorded there) and after the tick.
         virtual void SetTickCallbacks(std::function<void()> beforeTick, std::function<void()> afterTick) {}
         // The fixed tick's length (seconds).

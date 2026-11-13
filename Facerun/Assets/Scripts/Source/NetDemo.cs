@@ -2,8 +2,9 @@ using Nox;
 
 namespace Facerun;
 
-// The multiplayer demo (docs/Networking_Plan_2026-11.md, NET2 - NET4; scene Scenes/NetDemo.nox): a server that spawns boxes and a
-// player for every client, players that walk with WASD and jump with Space (predicted on their own machine), and north of the start a
+// The multiplayer demo (docs/Networking_Plan_2026-11.md, NET2 - NET5; scene Scenes/NetDemo.nox): a server that spawns boxes and a
+// player for every client, players that look with the mouse, walk with WASD, jump with Space (predicted on their own machine) and shoot
+// with the left button (lag compensated on the server), and north of the start a
 // field of boxes with bots wandering in it -- each client gets only what is near its player (relevancy: boxes within 50 m, bots within
 // 80 m, players within 150 m). Run NoxRuntime --server --scene=Scenes/NetDemo.nox and one or more
 // NoxRuntime --windowed --connect=localhost:7777 --scene=Scenes/NetDemo.nox (or --listen to play on the server too).
@@ -107,13 +108,17 @@ public sealed class NetGameMode : EntityBehaviour
     }
 }
 
-/// <summary>A falling box: the server picks its color; physics runs on the server, the clients show where it is.</summary>
-public sealed class NetBox : EntityBehaviour
+/// <summary>
+/// A box: the server picks its color; physics runs on the server and on every client (each client simulates its copy and follows the
+/// server's -- what a player pushes moves at once on that player's screen). A shot knocks it away.
+/// </summary>
+public sealed class NetBox : EntityBehaviour, INetShootable
 {
     [Replicated(OnRep = nameof(OnColorChanged))] public Vector3 Color = new(0.8f, 0.8f, 0.8f);
     [Expose(Tooltip = "Edge length in world units")] public float Size = 100.0f;
 
     Mesh? m_Mesh;
+    NetFlash m_Flash;
 
     protected override void OnCreate()
     {
@@ -124,30 +129,46 @@ public sealed class NetBox : EntityBehaviour
         }
         m_Mesh = NetDemoMesh.Box(new Vector3(Size, Size, Size), Color);
         Self.SetMesh(m_Mesh);
+        NetDemoTargets.Register(Self, this);
     }
 
     // On a client, when the server's color arrives (right after the box appears).
     void OnColorChanged() => m_Mesh?.SetColor(Color.X, Color.Y, Color.Z, new Vector3(0.0f, 0.0f, 0.0f));
 
+    // On the server: a shot hit it -- pushed along the shot (physics replication carries it to every client) and flashed everywhere.
+    public void OnShot(Vector3 direction, uint shooter)
+    {
+        GetComponent<RigidBody3DComponent>().AddImpulse(new Vector3(direction.X * 700.0f, direction.Y * 700.0f + 300.0f, direction.Z * 700.0f));
+        CallMulticastRpc(nameof(Hit));
+    }
+
+    [MulticastRpc(Reliable = false)]
+    void Hit() => m_Flash.Start(0.25f);
+
+    protected override void OnUpdate(float deltaTime) => m_Flash.Update(deltaTime, m_Mesh, Color);
+
     protected override void OnDestroy()
     {
+        NetDemoTargets.Unregister(Self);
         m_Mesh?.Dispose();
         m_Mesh = null;
     }
 }
 
 /// <summary>
-/// A player: the machine that owns it moves its character with WASD / Space at once, exactly as in a single-player game -- the engine
-/// predicts it, sends the inputs to the server, which moves the server's character with them, and corrects the prediction when the two
-/// disagree (NET3). Everyone else sees it drawn smoothly between snapshots. The camera follows the player this machine owns. Jumps are
-/// counted on the server (a replicated field) and announced to everyone (a MulticastRpc).
+/// A player, third person: the mouse turns the view (click into the window to capture it, Tab to let it go), WASD walks relative to
+/// it, Space jumps, the left button shoots. The machine that owns it moves it at once (NET3 prediction); a shot is checked on the
+/// server against where the targets were on the shooter's screen (NET5 lag compensation) -- the shooter's own flash plays at once, the
+/// others get it from the server (a multicast that skips the owner). Jumps are counted on the server and announced to everyone.
 /// </summary>
-public sealed class NetPlayer : EntityBehaviour
+public sealed class NetPlayer : EntityBehaviour, INetShootable
 {
     [Replicated(OnRep = nameof(OnColorChanged))] public Vector3 Color = new(1.0f, 1.0f, 1.0f);
     [Replicated] public int Jumps;
     [Expose(Unit = "m/s", Tooltip = "Walking speed")] public float Speed = 500.0f;
     [Expose(Unit = "m/s", Tooltip = "Jump speed")] public float JumpSpeed = 600.0f;
+    [Expose(Tooltip = "Radians the view turns per pixel the mouse moves")] public float LookSpeed = 0.0025f;
+    [Expose(Tooltip = "How far a shot reaches (world units)")] public float Range = 30000.0f;
 
     static readonly Vector3[] s_Palette =
     {
@@ -156,7 +177,9 @@ public sealed class NetPlayer : EntityBehaviour
     };
 
     Mesh? m_Mesh;
-    bool m_JumpHeld;
+    NetFlash m_Flash;
+    bool m_JumpHeld, m_FireHeld;
+    float m_Yaw, m_Pitch = -0.2f;
     Entity m_Camera;
 
     protected override void OnCreate()
@@ -165,21 +188,43 @@ public sealed class NetPlayer : EntityBehaviour
             Color = s_Palette[Owner % (uint)s_Palette.Length];
         m_Mesh = NetDemoMesh.Box(new Vector3(68.0f, 176.0f, 68.0f), Color);
         Self.SetMesh(m_Mesh);
+        NetDemoTargets.Register(Self, this);
     }
 
     void OnColorChanged() => m_Mesh?.SetColor(Color.X, Color.Y, Color.Z, new Vector3(0.0f, 0.0f, 0.0f));
 
+    // Where the camera looks (yaw around up, pitch up/down; -Z is ahead at yaw 0).
+    Vector3 ViewDirection() =>
+        new(-MathF.Cos(m_Pitch) * MathF.Sin(m_Yaw), MathF.Sin(m_Pitch), -MathF.Cos(m_Pitch) * MathF.Cos(m_Yaw));
+
     protected override void OnUpdate(float deltaTime)
     {
+        m_Flash.Update(deltaTime, m_Mesh, Color);
         if (!IsOwner)
             return; // someone else's player: the server moves it, the engine draws it
 
-        // Moved here and now, as in a single-player game (the engine sends the same inputs to the server).
-        Vector3 move = new(0.0f, 0.0f, 0.0f);
-        if (Input.IsKeyDown(KeyCode.W)) move.Z -= 1.0f;
-        if (Input.IsKeyDown(KeyCode.S)) move.Z += 1.0f;
-        if (Input.IsKeyDown(KeyCode.A)) move.X -= 1.0f;
-        if (Input.IsKeyDown(KeyCode.D)) move.X += 1.0f;
+        // The view: captured mouse (a click captures it, Tab lets it go).
+        if (!Input.CursorLocked && Input.IsMouseButtonDown(MouseButton.Left))
+        {
+            Input.CursorLocked = true;
+            m_FireHeld = true; // (that click only captures)
+        }
+        if (Input.IsKeyDown(KeyCode.Tab))
+            Input.CursorLocked = false;
+        if (Input.CursorLocked)
+        {
+            Vector2 look = Input.MouseDelta;
+            m_Yaw -= look.X * LookSpeed;
+            m_Pitch = Math.Clamp(m_Pitch - look.Y * LookSpeed, -1.2f, 0.3f); // (higher: the camera behind would go under the ground)
+        }
+        GetComponent<TransformComponent>().LocalRotation = new Vector3(0.0f, m_Yaw, 0.0f); // (sent with the inputs: the server turns it too)
+
+        // Walking relative to the view, here and now as in a single-player game (the engine sends the same inputs to the server).
+        Vector3 forward = new(-MathF.Sin(m_Yaw), 0.0f, -MathF.Cos(m_Yaw));
+        Vector3 right = new(MathF.Cos(m_Yaw), 0.0f, -MathF.Sin(m_Yaw));
+        float ahead = (Input.IsKeyDown(KeyCode.W) ? 1.0f : 0.0f) - (Input.IsKeyDown(KeyCode.S) ? 1.0f : 0.0f);
+        float side = (Input.IsKeyDown(KeyCode.D) ? 1.0f : 0.0f) - (Input.IsKeyDown(KeyCode.A) ? 1.0f : 0.0f);
+        Vector3 move = new(forward.X * ahead + right.X * side, 0.0f, forward.Z * ahead + right.Z * side);
         float length = MathF.Sqrt(move.X * move.X + move.Z * move.Z);
         if (length > 1.0f)
             move = new Vector3(move.X / length, 0.0f, move.Z / length);
@@ -194,24 +239,62 @@ public sealed class NetPlayer : EntityBehaviour
             CallServerRpc(nameof(ServerJumped));
         }
         m_JumpHeld = jump;
+
+        // A shot per click: the flash here at once, the hit decided by the server with the tick this screen shows the others at.
+        bool fire = Input.CursorLocked && Input.IsMouseButtonDown(MouseButton.Left);
+        if (fire && !m_FireHeld && m_Camera.IsValid)
+        {
+            m_Flash.Start(0.08f);
+            CallServerRpc(nameof(ServerFire), m_Camera.GetComponent<TransformComponent>().WorldPosition, ViewDirection(), Network.ViewTick);
+        }
+        m_FireHeld = fire;
     }
 
-    // The camera behind this machine's own player -- after physics moved it this frame (OnUpdate runs before: the camera would show
-    // where the player was a frame ago and trail it).
+    // The camera behind this machine's own player, after physics moved it this frame (OnUpdate runs before: it would trail a frame).
     protected override void OnLateUpdate(float deltaTime)
     {
         if (!IsOwner)
             return;
         if (!m_Camera.IsValid) // (found once: the camera is in the scene on every side)
             m_Camera = Entity.FindByName("Camera");
-        if (m_Camera.IsValid)
-        {
-            TransformComponent camera = m_Camera.GetComponent<TransformComponent>();
-            Vector3d position = GetComponent<TransformComponent>().WorldPosition;
-            camera.WorldPosition = new Vector3d(position.X, position.Y + 350.0, position.Z + 700.0);
-            camera.LocalRotation = new Vector3(-0.4f, 0.0f, 0.0f);
-        }
+        if (!m_Camera.IsValid)
+            return;
+        Vector3 view = ViewDirection();
+        Vector3d position = GetComponent<TransformComponent>().WorldPosition;
+        TransformComponent camera = m_Camera.GetComponent<TransformComponent>();
+        camera.WorldPosition = new Vector3d(position.X - view.X * 600.0, position.Y + 220.0 - view.Y * 600.0, position.Z - view.Z * 600.0);
+        camera.LocalRotation = new Vector3(m_Pitch, m_Yaw, 0.0f);
     }
+
+    // On the server: the shot, against where the targets were on the shooter's screen. The origin it claims must be near its player
+    // (never trust the client).
+    [ServerRpc]
+    void ServerFire(Vector3d origin, Vector3 direction, double viewTick)
+    {
+        Vector3d me = GetComponent<TransformComponent>().WorldPosition;
+        double dx = origin.X - me.X, dy = origin.Y - me.Y, dz = origin.Z - me.Z;
+        if (dx * dx + dy * dy + dz * dz > 1000.0 * 1000.0)
+            origin = new Vector3d(me.X, me.Y + 150.0, me.Z);
+        string who = Owner == 0 ? "the server's player" : $"client {Owner}";
+        if (Network.RaycastLagCompensated(Owner, viewTick, origin, direction, Range, out RaycastHit hit, out double rewoundMs))
+        {
+            bool target = NetDemoTargets.Shoot(hit.Entity, direction, Owner, out string what);
+            Log.Info($"[NetDemo] {who} hit {(target ? what : "the level")} {hit.Distance / 100.0f:0.0} m away (looked {rewoundMs:0} ms back)");
+        }
+        else
+            Log.Info($"[NetDemo] {who} missed (looked {rewoundMs:0} ms back)");
+        CallMulticastRpc(nameof(Fired));
+    }
+
+    // Everyone but the shooter (it flashed already): the shooter's flash.
+    [MulticastRpc(Reliable = false, SkipOwner = true)]
+    void Fired() => m_Flash.Start(0.08f);
+
+    // On the server: shot by someone.
+    public void OnShot(Vector3 direction, uint shooter) => CallMulticastRpc(nameof(Hit));
+
+    [MulticastRpc(Reliable = false)]
+    void Hit() => m_Flash.Start(0.25f, red: true);
 
     // On the server: the owner says it jumped (the jump itself came with its inputs): counted and announced.
     [ServerRpc]
@@ -227,6 +310,9 @@ public sealed class NetPlayer : EntityBehaviour
 
     protected override void OnDestroy()
     {
+        NetDemoTargets.Unregister(Self);
+        if (IsOwner)
+            Input.CursorLocked = false;
         m_Mesh?.Dispose();
         m_Mesh = null;
     }
@@ -267,13 +353,14 @@ public sealed class NetSpinner : EntityBehaviour
 /// A bot: a character the server owns and moves (it wanders around where it was spawned); clients draw it between snapshots -- only
 /// the clients whose player is within 80 m (its Network Identity's Cull Distance).
 /// </summary>
-public sealed class NetBot : EntityBehaviour
+public sealed class NetBot : EntityBehaviour, INetShootable
 {
     [Replicated(OnRep = nameof(OnColorChanged))] public Vector3 Color = new(0.6f, 0.6f, 0.6f);
     [Expose(Tooltip = "Walking speed (world units a second)")] public float Speed = 250.0f;
     [Expose(Tooltip = "How far it wanders from where it was spawned (world units)")] public float Range = 3000.0f;
 
     Mesh? m_Mesh;
+    NetFlash m_Flash;
     Vector3d m_Home;
     bool m_HomeSet;
     Vector3 m_Direction;
@@ -288,12 +375,26 @@ public sealed class NetBot : EntityBehaviour
         }
         m_Mesh = NetDemoMesh.Box(new Vector3(68.0f, 150.0f, 68.0f), Color);
         Self.SetMesh(m_Mesh);
+        NetDemoTargets.Register(Self, this);
     }
+
+    // On the server: shot -- it hops, and flashes red everywhere.
+    public void OnShot(Vector3 direction, uint shooter)
+    {
+        CharacterControllerComponent character = GetComponent<CharacterControllerComponent>();
+        if (character.IsGrounded)
+            character.Jump(450.0f);
+        CallMulticastRpc(nameof(Hit));
+    }
+
+    [MulticastRpc(Reliable = false)]
+    void Hit() => m_Flash.Start(0.3f, red: true);
 
     void OnColorChanged() => m_Mesh?.SetColor(Color.X, Color.Y, Color.Z, new Vector3(0.0f, 0.0f, 0.0f));
 
     protected override void OnUpdate(float deltaTime)
     {
+        m_Flash.Update(deltaTime, m_Mesh, Color);
         if (!HasAuthority)
             return; // a client's copy: the server moves it
         if (!m_HomeSet)
@@ -324,8 +425,65 @@ public sealed class NetBot : EntityBehaviour
 
     protected override void OnDestroy()
     {
+        NetDemoTargets.Unregister(Self);
         m_Mesh?.Dispose();
         m_Mesh = null;
+    }
+}
+
+/// <summary>Something a shot can hit (the demo's targets; the server calls it).</summary>
+interface INetShootable
+{
+    void OnShot(Vector3 direction, uint shooter);
+}
+
+// The demo's targets by entity, so the server finds the script a shot hit.
+static class NetDemoTargets
+{
+    static readonly Dictionary<ulong, INetShootable> s_Targets = new();
+
+    internal static void Register(Entity entity, INetShootable target) => s_Targets[entity.ID] = target;
+    internal static void Unregister(Entity entity) => s_Targets.Remove(entity.ID);
+
+    internal static bool Shoot(Entity entity, Vector3 direction, uint shooter, out string what)
+    {
+        if (!s_Targets.TryGetValue(entity.ID, out INetShootable? target))
+        {
+            what = "";
+            return false;
+        }
+        what = target.GetType().Name;
+        target.OnShot(direction, shooter);
+        return true;
+    }
+}
+
+// A short flash of a mesh's color (a shot: bright; a hit: red), back to its own color after.
+struct NetFlash
+{
+    float m_Time, m_Duration;
+    bool m_Red;
+
+    public void Start(float seconds, bool red = false)
+    {
+        m_Time = m_Duration = seconds;
+        m_Red = red;
+    }
+
+    public void Update(float deltaTime, Mesh? mesh, Vector3 color)
+    {
+        if (m_Time <= 0.0f || mesh == null)
+            return;
+        m_Time -= deltaTime;
+        if (m_Time <= 0.0f)
+        {
+            mesh.SetColor(color.X, color.Y, color.Z, new Vector3(0.0f, 0.0f, 0.0f));
+            return;
+        }
+        float k = m_Time / m_Duration;
+        Vector3 flash = m_Red ? new Vector3(1.0f, 0.1f, 0.1f) : new Vector3(1.0f, 1.0f, 0.8f);
+        mesh.SetColor(color.X + (flash.X - color.X) * k, color.Y + (flash.Y - color.Y) * k, color.Z + (flash.Z - color.Z) * k,
+                      new Vector3(flash.X * k * 2.0f, flash.Y * k * 2.0f, flash.Z * k * 2.0f));
     }
 }
 
