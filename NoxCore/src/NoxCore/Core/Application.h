@@ -38,6 +38,18 @@ namespace Nox
                     return true;
             return false;
         }
+        // The value of a "--name=value" switch ("--connect=192.168.1.5:7777"), or null. Values are always given with '=' (a separate
+        // argument would be taken for the project file).
+        const char* Value(std::string_view name) const
+        {
+            for (int index = 1; index < Count; ++index)
+            {
+                const std::string_view argument(Args[index]);
+                if (argument.size() > name.size() && argument.substr(0, name.size()) == name && argument[name.size()] == '=')
+                    return Args[index] + name.size() + 1;
+            }
+            return nullptr;
+        }
         // The first argument that is not a switch (the project file), or null.
         const char* FirstPositional() const
         {

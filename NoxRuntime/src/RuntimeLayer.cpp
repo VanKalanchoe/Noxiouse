@@ -1,19 +1,26 @@
 #include "RuntimeLayer.h"
 #include "NoxCore/Audio/AudioMixer.h"
 
+#include <cstdlib>
+#include <format>
 #include <iostream>
+#include <sstream>
 #include <thread>
 #include <unordered_set>
 
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_video.h>
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/Window.h"
 #include "NoxCore/Events/InputEvents.h"
+#include "NoxCore/Network/NetClient.h"
+#include "NoxCore/Network/NetProject.h"
+#include "NoxCore/Network/NetServer.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
@@ -43,6 +50,39 @@ namespace Nox
             event.type = SDL_EVENT_QUIT;
             SDL_PushEvent(&event);
         }
+
+        // The network emulation from the command line: a preset (--net-emulation=average), then single values over it
+        // (--net-lag=50 --net-jitter=10 --net-loss=2: milliseconds, milliseconds, percent; each direction).
+        Net::NetEmulation ParseEmulation(const ApplicationCommandLineArgs& args)
+        {
+            Net::NetEmulation emulation;
+            if (const char* preset = args.Value("--net-emulation"); preset && !Net::NetEmulation::FromPreset(preset, emulation))
+                NOX_CORE_WARN("NoxRuntime: unknown --net-emulation '{}' (off, average, bad)", preset);
+            if (const char* lag = args.Value("--net-lag"))
+                emulation.LagMs = static_cast<float>(std::atof(lag));
+            if (const char* jitter = args.Value("--net-jitter"))
+                emulation.JitterMs = static_cast<float>(std::atof(jitter));
+            if (const char* loss = args.Value("--net-loss"))
+                emulation.LossPercent = static_cast<float>(std::atof(loss));
+            return emulation;
+        }
+
+        std::string Describe(const Net::NetEmulation& emulation)
+        {
+            if (!emulation.IsActive())
+                return "off";
+            return std::format("{:.0f} ms lag, {:.0f} ms jitter, {:.1f} % loss (each direction)", emulation.LagMs, emulation.JitterMs,
+                               emulation.LossPercent);
+        }
+
+        std::vector<std::string> SplitWords(const std::string& line)
+        {
+            std::vector<std::string> words;
+            std::istringstream stream(line);
+            for (std::string word; stream >> word;)
+                words.push_back(word);
+            return words;
+        }
     }
 
     RuntimeLayer::RuntimeLayer()
@@ -54,12 +94,13 @@ namespace Nox
         const std::filesystem::path projectFile = FindProjectFile();
         if (projectFile.empty() || !Project::Load(projectFile, true))
         {
-            NOX_CORE_ERROR("NoxRuntime: no project to play ({}). Usage: NoxRuntime [--server] [--project=]<project.nproj>",
+            NOX_CORE_ERROR("NoxRuntime: no project to play ({}). Usage: NoxRuntime [--server | --listen | --connect=<address>] [--project=]<project.nproj>",
                            projectFile.empty() ? std::string("none found") : projectFile.generic_string());
             Quit();
             return;
         }
         NOX_CORE_INFO("NoxRuntime: {} '{}'", m_Headless ? "serving" : "playing", projectFile.generic_string());
+        m_ProjectName = Project::GetActive()->GetConfig().Name;
         if (m_Renderer)
         {
             // The project's quality preset ("Auto": the one this GPU should run, the fallback on smaller RT cards).
@@ -88,6 +129,7 @@ namespace Nox
             Quit();
             return;
         }
+        m_StartSceneHandle = startScene;
         StartScene(startScene);
 
         if (m_Headless)
@@ -104,13 +146,19 @@ namespace Nox
                     console->Lines.push_back(line);
                 }
             }).detach();
-            NOX_CORE_INFO("Server console: 'status', 'quit' (or Ctrl+C)");
+            NOX_CORE_INFO("Server console: status, clients, kick <id> [reason], netemu off|average|bad|<lag> <jitter> <loss>, quit (or Ctrl+C)");
         }
+
+        StartNetworking();
     }
 
     RuntimeLayer::~RuntimeLayer()
     {
         NOX_CORE_INFO("RuntimeLayer Shutdown");
+
+        // The sessions first: the clients hear "server shut down" / the server hears "left", while the game still exists.
+        m_Client.reset();
+        m_Server.reset();
 
         if (m_Scene)
             m_Scene->OnRuntimeStop();
@@ -125,6 +173,9 @@ namespace Nox
 
     void RuntimeLayer::OnUpdate(Timestep ts)
     {
+        // Receive first (Unreal's TickDispatch): joins, leaves and the game's messages land before the simulation; a client that
+        // joined switches to the server's scene here.
+        UpdateNetworking(static_cast<float>(ts));
         if (!m_Scene || !Project::GetActive())
             return;
 
@@ -165,6 +216,8 @@ namespace Nox
 
         if (m_Headless)
             UpdateServerConsole(static_cast<float>(ts));
+        // Send last (TickFlush): what this frame queued leaves now, not a few ms later.
+        FlushNetworking();
     }
 
     void RuntimeLayer::UpdateServerConsole(float ts)
@@ -185,16 +238,67 @@ namespace Nox
             lines.swap(m_Console->Lines);
         }
         for (const std::string& line : lines)
+            RunConsoleCommand(line);
+    }
+
+    void RuntimeLayer::RunConsoleCommand(const std::string& line)
+    {
+        const std::vector<std::string> words = SplitWords(line);
+        if (words.empty())
+            return;
+        const std::string& command = words[0];
+        if (command == "quit" || command == "exit")
         {
-            if (line == "quit" || line == "exit")
+            NOX_CORE_INFO("Server: quitting");
+            Quit();
+        }
+        else if (command == "status")
+            LogServerStatus();
+        else if (command == "clients")
+            LogClients();
+        else if (command == "kick" && words.size() >= 2 && m_Server)
+        {
+            const Net::ClientId client = static_cast<Net::ClientId>(std::strtoul(words[1].c_str(), nullptr, 10));
+            std::string reason;
+            for (size_t index = 2; index < words.size(); ++index)
+                reason += (index > 2 ? " " : "") + words[index];
+            if (!m_Server->Kick(client, reason.empty() ? "kicked by the server" : reason))
+                NOX_CORE_WARN("Server console: no client {} (see 'clients')", words[1]);
+        }
+        else if (command == "netemu" && words.size() >= 2 && m_Server)
+        {
+            Net::NetEmulation emulation;
+            if (words.size() >= 4)
             {
-                NOX_CORE_INFO("Server: quitting");
-                Quit();
+                emulation.LagMs = static_cast<float>(std::atof(words[1].c_str()));
+                emulation.JitterMs = static_cast<float>(std::atof(words[2].c_str()));
+                emulation.LossPercent = static_cast<float>(std::atof(words[3].c_str()));
             }
-            else if (line == "status")
-                LogServerStatus();
-            else if (!line.empty())
-                NOX_CORE_WARN("Server console: unknown command '{}' (status, quit)", line);
+            else if (!Net::NetEmulation::FromPreset(words[1], emulation))
+            {
+                NOX_CORE_WARN("Server console: netemu off | average | bad | <lag ms> <jitter ms> <loss %>");
+                return;
+            }
+            m_Server->SetEmulation(emulation);
+            NOX_CORE_INFO("Server: network emulation {}", Describe(emulation));
+        }
+        else
+            NOX_CORE_WARN("Server console: unknown command '{}' (status, clients, kick <id> [reason], netemu ..., quit)", line);
+    }
+
+    void RuntimeLayer::LogClients() const
+    {
+        if (!m_Server)
+            return;
+        const auto& clients = m_Server->GetClients();
+        NOX_CORE_INFO("Server: {}/{} clients", clients.size(), m_Server->GetConfig().MaxClients);
+        const double now = Net::NetNow();
+        for (const Net::NetClientInfo& client : clients)
+        {
+            const Net::ConnectionStats stats = m_Server->GetStats(client.Id);
+            NOX_CORE_INFO("  {} '{}' {}  ping {} ms, quality {:.0f} % / {:.0f} %, out {:.1f} KB/s, in {:.1f} KB/s, joined {:.0f} s ago", client.Id,
+                          client.Name, client.Address, stats.PingMs, stats.QualityLocal * 100.0f, stats.QualityRemote * 100.0f,
+                          stats.OutBytesPerSecond / 1024.0f, stats.InBytesPerSecond / 1024.0f, now - client.JoinedAt);
         }
     }
 
@@ -212,9 +316,10 @@ namespace Nox
         const double budget = 1.0 / static_cast<double>(Application::Get().GetTickRate());
         const double averageWork = m_FramesSinceStatus > 0 ? m_WorkSinceStatus / m_FramesSinceStatus : 0.0;
         NOX_CORE_INFO("Server status: tick {} ({:.1f} ticks/s), {:.1f} updates/s, work {:.2f} ms average ({:.0f} % of the {:.1f} ms tick), "
-                      "{:.2f} ms worst, {} entities",
+                      "{:.2f} ms worst, {} entities, {}/{} clients",
                       tick, static_cast<double>(tick - m_TickAtStatus) / seconds, static_cast<double>(m_FramesSinceStatus) / seconds,
-                      averageWork * 1000.0, averageWork / budget * 100.0, budget * 1000.0, m_WorstWorkSinceStatus * 1000.0, entities);
+                      averageWork * 1000.0, averageWork / budget * 100.0, budget * 1000.0, m_WorstWorkSinceStatus * 1000.0, entities,
+                      m_Server ? m_Server->GetClients().size() : 0, m_Server ? m_Server->GetConfig().MaxClients : 0);
         m_TickAtStatus = tick;
         m_StatusTimer = 0.0f;
         m_FramesSinceStatus = 0;
@@ -271,7 +376,10 @@ namespace Nox
             return;
         }
 
+        if (m_Scene)
+            m_Scene->OnRuntimeStop(); // (a client changing scenes: the one it played ends first)
         m_Scene = Scene::Copy(sceneAsset);
+        m_SceneHandle = sceneHandle;
         if (m_Renderer)
         {
             m_Scene->SetRenderer(m_Renderer);
@@ -291,5 +399,175 @@ namespace Nox
         std::unordered_set<AssetHandle> referencedAssets;
         m_Scene->CollectAssetReferences(referencedAssets);
         Project::GetActive()->GetEditorAssetManager()->UnloadUnusedAssets(referencedAssets);
+    }
+
+    void RuntimeLayer::StartNetworking()
+    {
+        const ApplicationCommandLineArgs& args = Application::Get().GetSpecification().CommandLineArgs;
+        const char* connect = args.Value("--connect");
+        const bool listen = args.HasSwitch("--listen");
+        if (m_Headless)
+            m_NetRole = NetRole::DedicatedServer;
+        else if (connect)
+            m_NetRole = NetRole::Client;
+        else if (listen)
+            m_NetRole = NetRole::ListenServer;
+        if (connect && m_NetRole != NetRole::Client)
+            NOX_CORE_WARN("NoxRuntime: --connect is ignored by a server");
+        if (m_NetRole == NetRole::Standalone)
+            return;
+
+        const Net::NetEmulation emulation = ParseEmulation(args);
+        const Net::NetCompatibility compatibility = Net::MakeProjectCompatibility();
+        uint16_t port = Net::DefaultPort;
+        if (const char* value = args.Value("--port"))
+        {
+            const long number = std::strtol(value, nullptr, 10);
+            if (number > 0 && number <= 65535)
+                port = static_cast<uint16_t>(number);
+            else
+                NOX_CORE_WARN("NoxRuntime: --port={} is not a port; using {}", value, port);
+        }
+
+        if (m_NetRole == NetRole::Client)
+        {
+            Net::NetClientConfig config;
+            config.Compatibility = compatibility;
+            const char* name = args.Value("--name");
+            config.PlayerName = name ? name : "Player";
+            m_Client = std::make_unique<Net::NetClient>(std::move(config));
+            m_Client->SetEmulation(emulation);
+            m_Client->OnConnected = [this](const Net::NetWelcome& welcome) { OnJoinedServer(welcome); };
+            m_Client->OnDisconnected = [this](Net::DisconnectReason reason, const std::string& text) { OnLeftServer(reason, text); };
+            if (emulation.IsActive())
+                NOX_CORE_INFO("Net: network emulation {}", Describe(emulation));
+            // A connection attempt that can't even start (a bad address) keeps the client on its start scene, saying why.
+            m_Client->Connect(connect);
+            UpdateWindowTitle();
+            return;
+        }
+
+        Net::NetServerConfig config;
+        config.Port = port;
+        config.Compatibility = compatibility;
+        const char* serverName = args.Value("--server-name");
+        config.ServerName = serverName ? serverName : m_ProjectName + " server";
+        if (const char* maxClients = args.Value("--max-clients"))
+            config.MaxClients = static_cast<uint32_t>((std::max)(1l, std::strtol(maxClients, nullptr, 10)));
+        m_Server = std::make_unique<Net::NetServer>(std::move(config));
+        m_Server->FillWelcome = [this](Net::NetWelcome& welcome)
+        {
+            welcome.ServerTick = m_Scene ? m_Scene->GetTick() : 0;
+            welcome.TickRate = static_cast<uint16_t>(Scene::TickRate);
+            welcome.SceneHandle = static_cast<uint64_t>(m_SceneHandle);
+        };
+        if (!m_Server->AddTransport(Net::CreateTransport(false)))
+        {
+            NOX_CORE_ERROR("NoxRuntime: the server cannot accept clients (port {}); choose another one with --port=<number>", port);
+            m_Server.reset();
+            if (m_NetRole == NetRole::DedicatedServer)
+                Quit(); // a dedicated server without its port has nothing to do
+            return;
+        }
+        if (emulation.IsActive())
+        {
+            m_Server->SetEmulation(emulation);
+            NOX_CORE_INFO("Net: network emulation {}", Describe(emulation));
+        }
+        NOX_CORE_INFO("Net: content checksum {:016x} ('{}', network protocol {})", compatibility.ContentChecksum, compatibility.ProjectName,
+                      compatibility.Protocol);
+        UpdateWindowTitle();
+    }
+
+    void RuntimeLayer::UpdateNetworking(float ts)
+    {
+        if (m_Server)
+            m_Server->Update();
+        if (m_Client)
+            m_Client->Update();
+
+        // The title once a second (the ping changes); a connected client's status line every 10 s.
+        m_TitleTimer += ts;
+        if (m_TitleTimer >= 1.0f)
+        {
+            m_TitleTimer = 0.0f;
+            UpdateWindowTitle();
+        }
+        if (m_Client && m_Client->IsConnected())
+        {
+            m_ClientStatusTimer += ts;
+            if (m_ClientStatusTimer >= 10.0f)
+            {
+                m_ClientStatusTimer = 0.0f;
+                const Net::ConnectionStats stats = m_Client->GetStats();
+                NOX_CORE_INFO("Client status: client {} on '{}', ping {} ms, quality {:.0f} % / {:.0f} %, out {:.1f} KB/s, in {:.1f} KB/s",
+                              m_Client->GetWelcome().Client, m_Client->GetWelcome().ServerName, stats.PingMs, stats.QualityLocal * 100.0f,
+                              stats.QualityRemote * 100.0f, stats.OutBytesPerSecond / 1024.0f, stats.InBytesPerSecond / 1024.0f);
+            }
+        }
+    }
+
+    void RuntimeLayer::FlushNetworking()
+    {
+        if (m_Server)
+            m_Server->Flush();
+        if (m_Client)
+            m_Client->Flush();
+    }
+
+    void RuntimeLayer::OnJoinedServer(const Net::NetWelcome& welcome)
+    {
+        // The server's scene (Unreal's travel to the server's map on join): a fresh copy, even when it is the one already playing,
+        // so the client starts from the level as it was saved, like the server did.
+        const AssetHandle scene(welcome.SceneHandle);
+        if (welcome.SceneHandle == 0 || !AssetManager::IsAssetHandleValid(scene))
+        {
+            m_Client->Disconnect(Net::DisconnectReason::ContentMismatch,
+                                 std::format("the client does not have the server's scene {}", welcome.SceneHandle));
+            UpdateWindowTitle();
+            return;
+        }
+        StartScene(scene);
+        m_ClientStatusTimer = 0.0f;
+        UpdateWindowTitle();
+    }
+
+    void RuntimeLayer::OnLeftServer(Net::DisconnectReason reason, const std::string& text)
+    {
+        // Back to the start scene (Unreal returns to the default map); nothing changes when the client never left it.
+        if (m_SceneHandle != m_StartSceneHandle && m_StartSceneHandle != 0)
+            StartScene(m_StartSceneHandle);
+        UpdateWindowTitle();
+    }
+
+    void RuntimeLayer::UpdateWindowTitle()
+    {
+        if (m_Headless || m_NetRole == NetRole::Standalone)
+            return;
+        std::string state;
+        if (m_Server)
+            state = std::format("listen server on port {}, {}/{} clients", m_Server->GetConfig().Port, m_Server->GetClients().size(),
+                                m_Server->GetConfig().MaxClients);
+        else if (m_Client)
+        {
+            switch (m_Client->GetState())
+            {
+            case Net::NetClientState::Connecting:
+            case Net::NetClientState::Handshaking:
+                state = std::format("connecting to {}...", m_Client->GetServerAddress());
+                break;
+            case Net::NetClientState::Connected:
+                state = std::format("client {} on '{}' ({}), ping {} ms", m_Client->GetWelcome().Client, m_Client->GetWelcome().ServerName,
+                                    m_Client->GetServerAddress(), m_Client->GetStats().PingMs);
+                break;
+            case Net::NetClientState::Disconnected:
+                state = std::format("disconnected: {} ({})", Net::ToString(m_Client->GetLastDisconnectReason()), m_Client->GetLastDisconnectText());
+                break;
+            }
+        }
+        else
+            state = "server not running (see the log)";
+        if (const auto window = Application::Get().getWindow())
+            SDL_SetWindowTitle(window->getHandle(), std::format("{} - {}", m_ProjectName, state).c_str());
     }
 }

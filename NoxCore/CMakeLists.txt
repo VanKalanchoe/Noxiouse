@@ -22,6 +22,15 @@ find_package (xxhash REQUIRED)
 find_package (yaml-cpp REQUIRED)
 find_package (spdlog CONFIG REQUIRED)
 find_package (box2d REQUIRED)
+# Networking (docs/Networking_Plan_2026-11.md, NET1): Valve's open-source GameNetworkingSockets, vcpkg "gamenetworkingsockets"
+# (scripts/install_windows_dependencies.bat). The x64-windows triplet builds the DLL (GameNetworkingSockets.dll, with its
+# libprotobuf / libcrypto DLLs: vcpkg copies them next to the executables); a static triplet links it in.
+find_package (GameNetworkingSockets CONFIG REQUIRED)
+if(TARGET GameNetworkingSockets::shared)
+    set(NOX_GNS_TARGET GameNetworkingSockets::shared)
+else()
+    set(NOX_GNS_TARGET GameNetworkingSockets::static) # (its interface defines STEAMNETWORKINGSOCKETS_STATIC_LINK)
+endif()
 
 # Define Slang as an imported library
 add_library(Slang::slang IMPORTED UNKNOWN)
@@ -213,7 +222,9 @@ if(MSVC)
 endif()
 
 target_link_libraries (${PROJECT_NAME} PUBLIC Coral.Native Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen tinyobjloader::tinyobjloader "${STREAMLINE_LIB}" ${NRD_LIBS} "${STEAMAUDIO_LIB}" Jolt)
+target_link_libraries (${PROJECT_NAME} PRIVATE ${NOX_GNS_TARGET}) # (only Network/GnsTransport.cpp includes its headers)
 if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32) # getaddrinfo: host names in network addresses (GnsTransport)
     target_link_libraries(${PROJECT_NAME} PUBLIC d3d12 dxgi dxguid)
     if(TARGET D3D12MemoryAllocator)
         target_link_libraries(${PROJECT_NAME} PUBLIC D3D12MemoryAllocator)

@@ -1,0 +1,457 @@
+// NoxNetTest (docs/Networking_Plan_2026-11.md, NET1): the sessions and transports end to end, without a window or GPU --
+// NetServer / NetClient over LoopbackTransport and GnsTransport (real UDP on 127.0.0.1, ports 7100-7260): the handshake and its
+// refusals (protocol, project, content checksum, server full), game messages both ways, network emulation (round trip, loss,
+// reliable order under 20 % loss), kick, handshake time-out, garbage, dead links (with and without traffic), server shutdown,
+// and the message reader against random bytes. Build with -DNOX_BUILD_TESTS=ON; run NoxNetTest (exit code 0: all passed).
+#include "NoxCore/Network/GnsTransport.h"
+#include "NoxCore/Network/LoopbackTransport.h"
+#include "NoxCore/Network/NetClient.h"
+#include "NoxCore/Network/NetServer.h"
+#include "NoxCore/Core/Log.h"
+
+#include <cstdio>
+#include <cstring>
+#include <functional>
+#include <random>
+#include <thread>
+#include <vector>
+
+using namespace Nox::Net;
+
+static int s_Failures = 0;
+static int s_Checks = 0;
+#define CHECK(condition, ...)                                                                                                          \
+    do {                                                                                                                               \
+        ++s_Checks;                                                                                                                    \
+        if (!(condition)) { ++s_Failures; std::printf("FAIL %s:%d: %s -- %s\n", __FILE__, __LINE__, #condition, std::format(__VA_ARGS__).c_str()); } \
+        else std::printf("ok   %s\n", std::format(__VA_ARGS__).c_str());                                                               \
+    } while (0)
+
+static NetCompatibility Game(uint64_t checksum = 0x1234, uint32_t protocol = ProtocolVersion, std::string name = "Facerun")
+{
+    NetCompatibility c;
+    c.Protocol = protocol;
+    c.ProjectName = name;
+    c.ContentChecksum = checksum;
+    return c;
+}
+
+// Runs server / clients for up to `seconds` or until `done` (~1 ms steps, like a frame loop).
+static bool Pump(NetServer* server, std::vector<NetClient*> clients, double seconds, const std::function<bool()>& done)
+{
+    const double until = NetNow() + seconds;
+    while (NetNow() < until)
+    {
+        if (server) { server->Update(); server->Flush(); }
+        for (NetClient* client : clients) { client->Update(); client->Flush(); }
+        if (done && done())
+            return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return done ? done() : true;
+}
+
+static std::unique_ptr<NetTransport> MakeTransport(bool loopback, TransportConfig config = {})
+{
+    return CreateTransport(loopback, config);
+}
+
+static std::string Address(bool loopback, uint16_t port)
+{
+    return loopback ? std::format("loopback:{}", port) : std::format("127.0.0.1:{}", port);
+}
+
+static constexpr uint8_t GameMessage = static_cast<uint8_t>(MessageType::FirstGameMessage);
+
+static void TestHandshake(bool loopback, uint16_t port)
+{
+    std::printf("\n== handshake (%s)\n", loopback ? "loopback" : "GNS");
+    NetServerConfig sc;
+    sc.Port = port;
+    sc.ServerName = "Test Server";
+    sc.Compatibility = Game();
+    NetServer server(sc);
+    server.FillWelcome = [](NetWelcome& w) { w.ServerTick = 4242; w.SceneHandle = 0xABCDEF; };
+    int joined = 0;
+    server.OnClientJoined = [&](const NetClientInfo&) { ++joined; };
+    CHECK(server.AddTransport(MakeTransport(loopback)), "server listens on {}", port);
+
+    NetClientConfig cc;
+    cc.Compatibility = Game();
+    cc.PlayerName = "Alice";
+    NetClient client(cc);
+    NetWelcome got;
+    client.OnConnected = [&](const NetWelcome& w) { got = w; };
+    CHECK(client.Connect(Address(loopback, port)), "client starts connecting");
+    const double start = NetNow();
+    Pump(&server, { &client }, 5.0, [&] { return client.IsConnected() && joined == 1; });
+    CHECK(client.IsConnected(), "client connected in {:.1f} ms", (NetNow() - start) * 1000.0);
+    CHECK(got.Client == 1 && got.ServerTick == 4242 && got.SceneHandle == 0xABCDEF && got.ServerName == "Test Server" && got.TickRate == 60,
+          "welcome: client {}, tick {}, scene {:x}, '{}'", got.Client, got.ServerTick, got.SceneHandle, got.ServerName);
+    CHECK(server.GetClients().size() == 1 && server.GetClients()[0].Name == "Alice", "server lists 'Alice'");
+
+    // Game messages both ways.
+    std::vector<uint32_t> atServer, atClient;
+    server.OnMessage = [&](const NetClientInfo& from, uint8_t type, NetReader& reader)
+    {
+        if (type != GameMessage) return;
+        const uint32_t value = reader.ReadU32();
+        atServer.push_back(value);
+        NetWriter echo;
+        echo.WriteU8(GameMessage);
+        echo.WriteU32(value * 2);
+        server.Send(from.Id, echo.GetData(), Delivery::Reliable);
+    };
+    client.OnMessage = [&](uint8_t type, NetReader& reader) { if (type == GameMessage) atClient.push_back(reader.ReadU32()); };
+    for (uint32_t i = 0; i < 100; ++i)
+    {
+        NetWriter w;
+        w.WriteU8(GameMessage);
+        w.WriteU32(i);
+        client.Send(w.GetData(), Delivery::Reliable);
+    }
+    Pump(&server, { &client }, 5.0, [&] { return atClient.size() == 100; });
+    bool ordered = atServer.size() == 100 && atClient.size() == 100;
+    for (uint32_t i = 0; ordered && i < 100; ++i)
+        ordered = atServer[i] == i && atClient[i] == 2 * i;
+    CHECK(ordered, "100 reliable messages there and back, in order ({} / {})", atServer.size(), atClient.size());
+    CHECK(!client.Send(std::vector<uint8_t>{ 5 }, Delivery::Reliable), "a session-type message is refused by Send");
+
+    // The client leaves: the server hears Quit.
+    DisconnectReason leftReason = DisconnectReason::None;
+    server.OnClientLeft = [&](const NetClientInfo&, DisconnectReason r, const std::string&) { leftReason = r; };
+    client.Disconnect();
+    Pump(&server, { &client }, 5.0, [&] { return leftReason != DisconnectReason::None; });
+    CHECK(leftReason == DisconnectReason::Quit, "server: client left with '{}'", ToString(leftReason));
+    CHECK(server.GetClients().empty(), "server has no clients");
+}
+
+static void TestEmulation(bool loopback, uint16_t port)
+{
+    std::printf("\n== emulation: 40 ms lag each way, 10 ms jitter, 20 %% loss (%s)\n", loopback ? "loopback" : "GNS");
+    NetServerConfig sc;
+    sc.Port = port;
+    sc.Compatibility = Game();
+    NetServer server(sc);
+    CHECK(server.AddTransport(MakeTransport(loopback)), "listening");
+    NetClientConfig cc;
+    cc.Compatibility = Game();
+    NetClient client(cc);
+    client.Connect(Address(loopback, port));
+    Pump(&server, { &client }, 5.0, [&] { return client.IsConnected(); });
+    CHECK(client.IsConnected(), "connected without emulation");
+
+    const NetEmulation emulation{ 40.0f, 10.0f, 20.0f };
+    server.SetEmulation(emulation);
+    client.SetEmulation(emulation);
+
+    // Round trip: a reliable ping-pong of 20 messages, one at a time (what the session layer sees, resends included).
+    uint32_t received = 0;
+    std::vector<double> roundTrips;
+    double sentAt = 0.0;
+    server.OnMessage = [&](const NetClientInfo& from, uint8_t, NetReader& reader)
+    {
+        NetWriter w;
+        w.WriteU8(GameMessage);
+        w.WriteU32(reader.ReadU32());
+        server.Send(from.Id, w.GetData(), Delivery::Unreliable);
+    };
+    client.OnMessage = [&](uint8_t, NetReader& reader) { reader.ReadU32(); ++received; roundTrips.push_back(NetNow() - sentAt); };
+    int lost = 0;
+    for (uint32_t i = 0; i < 40; ++i)
+    {
+        const uint32_t before = received;
+        NetWriter w;
+        w.WriteU8(GameMessage);
+        w.WriteU32(i);
+        sentAt = NetNow();
+        client.Send(w.GetData(), Delivery::Unreliable);
+        if (!Pump(&server, { &client }, 0.6, [&] { return received > before; }))
+            ++lost;
+    }
+    std::sort(roundTrips.begin(), roundTrips.end());
+    const double median = roundTrips.empty() ? 0.0 : roundTrips[roundTrips.size() / 2] * 1000.0;
+    // 2 x 40 ms lag + jitter (mean 10 each way, capped 30)
+    CHECK(median >= 80.0 && median <= 160.0, "unreliable round trip median {:.0f} ms (expected 80-160: 2 x 40 lag + jitter)", median);
+    // P(both directions survive) = 0.8^2 = 0.64 -> ~14 of 40 lost
+    CHECK(lost >= 4 && lost <= 26, "{} of 40 unreliable round trips lost (expected ~14: 1 - 0.8^2)", lost);
+    const ConnectionStats stats = client.GetStats();
+    std::printf("     transport ping %d ms, quality local %.2f remote %.2f, out %.0f B/s in %.0f B/s\n", stats.PingMs, stats.QualityLocal,
+                stats.QualityRemote, stats.OutBytesPerSecond, stats.InBytesPerSecond);
+    CHECK(stats.PingMs >= 60 && stats.PingMs <= 250, "transport reports ping {} ms", stats.PingMs);
+
+    // 500 reliable messages under 20 % loss: all, in order.
+    std::vector<uint32_t> order;
+    server.OnMessage = [&](const NetClientInfo&, uint8_t, NetReader& reader) { order.push_back(reader.ReadU32()); };
+    const double start = NetNow();
+    for (uint32_t i = 0; i < 500; ++i)
+    {
+        NetWriter w;
+        w.WriteU8(GameMessage);
+        w.WriteU32(i);
+        w.WriteBytes(std::vector<uint8_t>(200, static_cast<uint8_t>(i)));
+        client.Send(w.GetData(), Delivery::Reliable);
+    }
+    Pump(&server, { &client }, 20.0, [&] { return order.size() == 500; });
+    bool inOrder = order.size() == 500;
+    for (uint32_t i = 0; inOrder && i < 500; ++i)
+        inOrder = order[i] == i;
+    CHECK(inOrder, "500 reliable messages under 20 % loss arrive complete and in order ({} in {:.2f} s)", order.size(), NetNow() - start);
+    server.SetEmulation({});
+    client.SetEmulation({});
+}
+
+static void TestRefusals(bool loopback, uint16_t port)
+{
+    std::printf("\n== refusals (%s)\n", loopback ? "loopback" : "GNS");
+    NetServerConfig sc;
+    sc.Port = port;
+    sc.MaxClients = 1;
+    sc.Compatibility = Game();
+    NetServer server(sc);
+    CHECK(server.AddTransport(MakeTransport(loopback)), "listening");
+
+    auto attempt = [&](NetCompatibility compatibility, DisconnectReason expected, const char* what)
+    {
+        NetClientConfig cc;
+        cc.Compatibility = compatibility;
+        NetClient client(cc);
+        DisconnectReason reason = DisconnectReason::None;
+        std::string text;
+        client.OnDisconnected = [&](DisconnectReason r, const std::string& t) { reason = r; text = t; };
+        client.Connect(Address(loopback, port));
+        Pump(&server, { &client }, 5.0, [&] { return reason != DisconnectReason::None; });
+        CHECK(reason == expected && !client.IsConnected(), "{}: '{}' ({})", what, ToString(reason), text);
+    };
+    attempt(Game(0x1234, 99), DisconnectReason::VersionMismatch, "other protocol");
+    attempt(Game(0x9999), DisconnectReason::ContentMismatch, "other content checksum");
+    attempt(Game(0x1234, ProtocolVersion, "OtherGame"), DisconnectReason::ContentMismatch, "other project");
+    CHECK(server.GetClients().empty(), "nobody joined");
+
+    // Full: one joins, the second is refused.
+    NetClientConfig cc;
+    cc.Compatibility = Game();
+    NetClient first(cc);
+    first.Connect(Address(loopback, port));
+    Pump(&server, { &first }, 5.0, [&] { return first.IsConnected(); });
+    CHECK(first.IsConnected(), "first client joined");
+    NetClient second(cc);
+    DisconnectReason reason = DisconnectReason::None;
+    second.OnDisconnected = [&](DisconnectReason r, const std::string&) { reason = r; };
+    second.Connect(Address(loopback, port));
+    Pump(&server, { &first, &second }, 5.0, [&] { return reason != DisconnectReason::None; });
+    CHECK(reason == DisconnectReason::ServerFull, "second client: '{}' ({})", ToString(reason), second.GetLastDisconnectText());
+    CHECK(first.IsConnected(), "first client still connected");
+
+    // Kick.
+    DisconnectReason kicked = DisconnectReason::None;
+    std::string kickText;
+    first.OnDisconnected = [&](DisconnectReason r, const std::string& t) { kicked = r; kickText = t; };
+    CHECK(server.Kick(server.GetClients()[0].Id, "too much lag"), "kick");
+    Pump(&server, { &first }, 5.0, [&] { return kicked != DisconnectReason::None; });
+    CHECK(kicked == DisconnectReason::Kicked && kickText == "too much lag", "kicked client: '{}' ({})", ToString(kicked), kickText);
+}
+
+// A raw transport connection that never sends a Hello / sends garbage.
+struct RawPeer final : TransportListener
+{
+    std::unique_ptr<NetTransport> Transport;
+    ConnectionHandle Connection = InvalidConnection;
+    bool Connected = false;
+    bool Ended = false;
+    CloseInfo Close;
+    void OnTransportConnected(ConnectionHandle, bool) override { Connected = true; }
+    void OnTransportDisconnected(ConnectionHandle, const CloseInfo& info) override { Ended = true; Close = info; }
+    void OnTransportMessage(ConnectionHandle, std::span<const uint8_t>) override {}
+};
+
+static void TestBadClients(bool loopback, uint16_t port)
+{
+    std::printf("\n== handshake time-out and garbage (%s)\n", loopback ? "loopback" : "GNS");
+    NetServerConfig sc;
+    sc.Port = port;
+    sc.HandshakeTimeoutSeconds = 1.0f;
+    sc.Compatibility = Game();
+    NetServer server(sc);
+    CHECK(server.AddTransport(MakeTransport(loopback)), "listening");
+
+    auto run = [&](RawPeer& raw, double seconds, const std::function<void()>& onConnected)
+    {
+        bool sent = false;
+        const double until = NetNow() + seconds;
+        while (NetNow() < until && !raw.Ended)
+        {
+            server.Update();
+            raw.Transport->Poll(raw);
+            if (raw.Connected && !sent) { sent = true; if (onConnected) onConnected(); raw.Transport->Flush(); }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+
+    RawPeer silent;
+    silent.Transport = MakeTransport(loopback);
+    silent.Connection = silent.Transport->Connect(Address(loopback, port));
+    const double start = NetNow();
+    run(silent, 5.0, nullptr);
+    CHECK(silent.Ended && silent.Close.AppReason == static_cast<uint32_t>(DisconnectReason::HandshakeTimeout),
+          "a silent connection is dropped after {:.2f} s: reason {} ({})", NetNow() - start, silent.Close.AppReason, silent.Close.Text);
+
+    RawPeer garbage;
+    garbage.Transport = MakeTransport(loopback);
+    garbage.Connection = garbage.Transport->Connect(Address(loopback, port));
+    run(garbage, 5.0, [&] { std::vector<uint8_t> junk = { 1, 0xde, 0xad }; garbage.Transport->Send(garbage.Connection, junk, Delivery::Reliable); });
+    CHECK(garbage.Ended && garbage.Close.AppReason == static_cast<uint32_t>(DisconnectReason::ProtocolError),
+          "a garbage Hello is refused: reason {} ({})", garbage.Close.AppReason, garbage.Close.Text);
+}
+
+static void TestTimeouts(bool loopback, uint16_t port)
+{
+    std::printf("\n== time-outs (%s)\n", loopback ? "loopback" : "GNS");
+    TransportConfig fast;
+    fast.ConnectTimeoutSeconds = 2.0f;
+    fast.TimeoutSeconds = 2.0f;
+
+    // Nobody there.
+    {
+        NetClientConfig cc;
+        cc.Compatibility = Game();
+        cc.Transport = fast;
+        NetClient client(cc);
+        DisconnectReason reason = DisconnectReason::None;
+        client.OnDisconnected = [&](DisconnectReason r, const std::string&) { reason = r; };
+        client.Connect(Address(loopback, static_cast<uint16_t>(port + 1)));
+        const double start = NetNow();
+        Pump(nullptr, { &client }, 6.0, [&] { return reason != DisconnectReason::None; });
+        CHECK(reason == DisconnectReason::ConnectionFailed, "no server: '{}' after {:.1f} s ({})", ToString(reason), NetNow() - start,
+              client.GetLastDisconnectText());
+    }
+
+    // The link dies (100 % loss both ways) after joining: both sides time out.
+    NetServerConfig sc;
+    sc.Port = port;
+    sc.Compatibility = Game();
+    sc.Transport = fast;
+    NetServer server(sc);
+    CHECK(server.AddTransport(MakeTransport(loopback, fast)), "listening");
+    NetClientConfig cc;
+    cc.Compatibility = Game();
+    cc.Transport = fast;
+    NetClient client(cc);
+    client.Connect(Address(loopback, port));
+    Pump(&server, { &client }, 5.0, [&] { return client.IsConnected(); });
+    CHECK(client.IsConnected(), "joined");
+    DisconnectReason clientReason = DisconnectReason::None, serverReason = DisconnectReason::None;
+    client.OnDisconnected = [&](DisconnectReason r, const std::string&) { clientReason = r; };
+    server.OnClientLeft = [&](const NetClientInfo&, DisconnectReason r, const std::string&) { serverReason = r; };
+    server.SetEmulation({ 0.0f, 0.0f, 100.0f });
+    client.SetEmulation({ 0.0f, 0.0f, 100.0f });
+    // Game traffic every frame both ways (as a game sends input and snapshots each tick): the transport notices the silence.
+    const double start = NetNow();
+    std::vector<uint8_t> tick = { GameMessage, 0, 0, 0, 0 };
+    Pump(&server, { &client }, 8.0, [&]
+    {
+        server.Broadcast(tick, Delivery::Unreliable);
+        client.Send(tick, Delivery::Unreliable);
+        return clientReason != DisconnectReason::None && serverReason != DisconnectReason::None;
+    });
+    CHECK(clientReason == DisconnectReason::TimedOut && serverReason == DisconnectReason::TimedOut,
+          "dead link: client '{}', server '{}' after {:.1f} s", ToString(clientReason), ToString(serverReason), NetNow() - start);
+    server.SetEmulation({});
+    client.SetEmulation({});
+
+    // The same with no game traffic at all (an idle lobby): the transport's own probes find the dead link.
+    NetClient idle(cc);
+    idle.Connect(Address(loopback, port));
+    Pump(&server, { &idle }, 5.0, [&] { return idle.IsConnected(); });
+    CHECK(idle.IsConnected(), "idle client joined");
+    Pump(&server, { &idle }, 1.5, nullptr); // quiet for a while first
+    DisconnectReason idleReason = DisconnectReason::None;
+    serverReason = DisconnectReason::None;
+    idle.OnDisconnected = [&](DisconnectReason r, const std::string&) { idleReason = r; };
+    server.SetEmulation({ 0.0f, 0.0f, 100.0f });
+    idle.SetEmulation({ 0.0f, 0.0f, 100.0f });
+    const double idleStart = NetNow();
+    Pump(&server, { &idle }, 8.0, [&] { return idleReason != DisconnectReason::None && serverReason != DisconnectReason::None; });
+    CHECK(idleReason == DisconnectReason::TimedOut && serverReason == DisconnectReason::TimedOut,
+          "dead idle link: client '{}', server '{}' after {:.1f} s", ToString(idleReason), ToString(serverReason), NetNow() - idleStart);
+    server.SetEmulation({});
+    idle.SetEmulation({});
+}
+
+static void TestShutdown(bool loopback, uint16_t port)
+{
+    std::printf("\n== server shutdown (%s)\n", loopback ? "loopback" : "GNS");
+    NetClientConfig cc;
+    cc.Compatibility = Game();
+    NetClient client(cc);
+    DisconnectReason reason = DisconnectReason::None;
+    client.OnDisconnected = [&](DisconnectReason r, const std::string&) { reason = r; };
+    {
+        NetServerConfig sc;
+        sc.Port = port;
+        sc.Compatibility = Game();
+        auto server = std::make_unique<NetServer>(sc);
+        server->AddTransport(MakeTransport(loopback));
+        client.Connect(Address(loopback, port));
+        Pump(server.get(), { &client }, 5.0, [&] { return client.IsConnected(); });
+        CHECK(client.IsConnected(), "joined");
+        server.reset();
+    }
+    Pump(nullptr, { &client }, 5.0, [&] { return reason != DisconnectReason::None; });
+    CHECK(reason == DisconnectReason::ServerShutdown, "client: '{}' ({})", ToString(reason), client.GetLastDisconnectText());
+}
+
+static void TestReaderFuzz()
+{
+    std::printf("\n== reader fuzz\n");
+    std::mt19937 random(7);
+    int accepted = 0;
+    for (int i = 0; i < 200000; ++i)
+    {
+        std::vector<uint8_t> bytes(random() % 48);
+        for (uint8_t& b : bytes) b = static_cast<uint8_t>(random());
+        if (i % 3 == 0 && bytes.size() >= 8) // a valid magic and protocol sometimes, to reach the strings
+        {
+            const uint32_t magic = ProtocolMagic, protocol = ProtocolVersion;
+            std::memcpy(bytes.data(), &magic, 4);
+            std::memcpy(bytes.data() + 4, &protocol, 4);
+        }
+        NetReader reader(bytes);
+        NetHello hello;
+        accepted += ReadHello(reader, hello) ? 1 : 0;
+        NetReader reader2(bytes);
+        NetWelcome welcome;
+        ReadWelcome(reader2, welcome);
+    }
+    CHECK(true, "200000 random Hello/Welcome parses without a crash ({} random ones were well-formed)", accepted);
+
+    NetWriter writer;
+    writer.WriteVarU64(0); writer.WriteVarU64(127); writer.WriteVarU64(128); writer.WriteVarU64(UINT64_MAX);
+    writer.WriteString("héllo"); writer.WriteFloat(-1.5f); writer.WriteU16(0xBEEF);
+    NetReader reader(writer.GetData());
+    const bool roundTrip = reader.ReadVarU64() == 0 && reader.ReadVarU64() == 127 && reader.ReadVarU64() == 128 &&
+                           reader.ReadVarU64() == UINT64_MAX && reader.ReadString(16) == "héllo" && reader.ReadFloat() == -1.5f &&
+                           reader.ReadU16() == 0xBEEF && reader.IsAtEnd();
+    CHECK(roundTrip, "writer/reader round trip");
+    NetReader shortReader(std::span(writer.GetData().data(), 3));
+    shortReader.ReadVarU64(); shortReader.ReadVarU64(); shortReader.ReadVarU64(); shortReader.ReadVarU64();
+    CHECK(shortReader.IsFailed() && shortReader.ReadU32() == 0, "a cut message fails the reader and reads zeros");
+}
+
+int main()
+{
+    Nox::Log::Init();
+    TestReaderFuzz();
+    for (bool loopback : { true, false })
+    {
+        const uint16_t base = loopback ? 7100 : 7200;
+        TestHandshake(loopback, base + 0);
+        TestEmulation(loopback, base + 10);
+        TestRefusals(loopback, base + 20);
+        TestBadClients(loopback, base + 30);
+        TestTimeouts(loopback, base + 40);
+        TestShutdown(loopback, base + 50);
+    }
+    std::printf("\n%d checks, %d failed\n", s_Checks, s_Failures);
+    return s_Failures == 0 ? 0 : 1;
+}

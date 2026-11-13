@@ -52,3 +52,9 @@ option(NOX_BUILD_RUNTIME "Build NoxRuntime, the standalone player (no editor)" O
 if(NOX_BUILD_RUNTIME)
     add_subdirectory(NoxRuntime)
 endif()
+
+# Engine tests that run without a window or GPU (Tests/): NoxNetTest (servers and clients over loopback and UDP, NET1).
+option(NOX_BUILD_TESTS "Build the engine's command-line tests (NoxNetTest)" OFF)
+if(NOX_BUILD_TESTS)
+    add_subdirectory(Tests)
+endif()
