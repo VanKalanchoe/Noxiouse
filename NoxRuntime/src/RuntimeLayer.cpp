@@ -174,7 +174,7 @@ namespace Nox
                     console->Lines.push_back(line);
                 }
             }).detach();
-            NOX_CORE_INFO("Server console: status, clients, kick <id> [reason], netemu off|average|bad|<lag> <jitter> <loss>, lagcomp on|off, quit (or Ctrl+C)");
+            NOX_CORE_INFO("Server console: status, clients, kick <id> [reason], netemu off|average|bad|<lag> <jitter> <loss>, lagcomp on|off, netdebug on|off, quit (or Ctrl+C)");
         }
     }
 
@@ -301,6 +301,8 @@ namespace Nox
                           Replication()->GetLagCompensation() ? "on" : "off",
                           Replication()->GetLagCompensation() ? "on the shooter's screen" : "now, on the server");
         }
+        else if (command == "netdebug" && Replication())
+            Replication()->SetDebugTrace(words.size() >= 2 ? words[1] != "off" : !Replication()->GetDebugTrace());
         else if (command == "netemu" && words.size() >= 2 && Server())
         {
             Net::NetEmulation emulation;
@@ -319,7 +321,7 @@ namespace Nox
             NOX_CORE_INFO("Server: network emulation {}", Describe(emulation));
         }
         else
-            NOX_CORE_WARN("Server console: unknown command '{}' (status, clients, kick <id> [reason], netemu ..., lagcomp on|off, quit)", line);
+            NOX_CORE_WARN("Server console: unknown command '{}' (status, clients, kick <id> [reason], netemu ..., lagcomp on|off, netdebug on|off, quit)", line);
     }
 
     void RuntimeLayer::LogClients() const
@@ -507,6 +509,8 @@ namespace Nox
         // --connect-retry=<seconds>: keep trying while the server is still starting (the editor's multiplayer Play launches both).
         if (const char* retry = args.Value("--connect-retry"))
             config.ConnectRetrySeconds = std::max(std::atof(retry), 0.0);
+        // --net-debug: the network debug trace in the log (NetReplication::SetDebugTrace; the server console's `netdebug on|off`).
+        config.DebugTrace = args.HasSwitch("--net-debug");
 
         m_Session = std::make_unique<Net::NetSession>(std::move(config));
         m_Session->FillWelcome = [this](Net::NetWelcome& welcome)

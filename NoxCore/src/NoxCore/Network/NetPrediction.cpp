@@ -172,13 +172,17 @@ namespace Nox::Net
             m_Entries.pop_front();
     }
 
-    std::optional<std::vector<InputFrame>> PredictionHistory::Reconcile(uint32_t sequence, const glm::dvec3& serverPosition, double tolerance)
+    std::optional<std::vector<InputFrame>> PredictionHistory::Reconcile(uint32_t sequence, const glm::dvec3& serverPosition, double tolerance,
+                                                                       double* error)
     {
         while (!m_Entries.empty() && m_Entries.front().Input.Sequence < sequence)
             m_Entries.pop_front();
         if (m_Entries.empty() || m_Entries.front().Input.Sequence != sequence)
             return std::nullopt;
-        const bool right = glm::distance(m_Entries.front().Position, serverPosition) <= tolerance;
+        const double off = glm::distance(m_Entries.front().Position, serverPosition);
+        if (error)
+            *error = off;
+        const bool right = off <= tolerance;
         m_Entries.front().Position = serverPosition;
         if (right)
             return std::nullopt;

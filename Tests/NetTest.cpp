@@ -583,10 +583,12 @@ static PredictionRun RunPrediction(int latencyTicks, int jitterTicks, float loss
                 continue;
             newestSnapshot = acknowledged;
             ++run.Acknowledged;
-            std::optional<std::vector<InputFrame>> replay = history.Reconcile(acknowledged, position, 0.02);
+            double error = 0.0;
+            std::optional<std::vector<InputFrame>> replay = history.Reconcile(acknowledged, position, 0.02, &error);
             if (!replay)
                 continue;
             ++run.Corrections;
+            run.WorstError = std::max(run.WorstError, error); // (what the debug trace reports for a correction)
             client = position;
             for (const InputFrame& frame : *replay)
             {
@@ -617,6 +619,7 @@ static void TestPrediction()
         PredictionRun run = RunPrediction(6, 0, 0.0f, 600, 3); // the server pushes the character once
         CHECK(run.Corrections >= 1 && run.Corrections <= 2 && run.FinalGap < 0.02,
               "a push only the server saw: {} correction(s), then the client matches the server (final gap {:.3f})", run.Corrections, run.FinalGap);
+        CHECK(std::abs(run.WorstError - 100.0) < 0.05, "the correction reports how far the prediction was off: {:.2f} (the push: 100)", run.WorstError);
     }
 
     // Input messages: garbage and NaN are refused.

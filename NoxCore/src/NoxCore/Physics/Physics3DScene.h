@@ -71,6 +71,19 @@ namespace Nox {
         virtual glm::dvec3 GetCharacterDrawnPosition(Entity entity) const { return glm::dvec3(0.0); }
         // Drawn this much away from where it is, eased away over about 0.1 s (a prediction correction is not a visible snap).
         virtual void AddCharacterVisualOffset(Entity entity, const glm::dvec3& offset) {}
+        // A character's movement as its last step left it, for the network debug trace (world units): its own velocity (relative to
+        // its ground: what CharacterController3DComponent::Velocity reports after the frame), its whole velocity and its ground's.
+        struct CharacterDebugState
+        {
+            glm::vec3 OwnVelocity{ 0.0f };
+            glm::vec3 Velocity{ 0.0f };
+            glm::vec3 GroundVelocity{ 0.0f };
+            uint32_t GroundEntity = UINT32_MAX; // the entity of the body it stands on (its entt id); UINT32_MAX: none
+            bool GroundDynamic = false;
+            bool Supported = false;
+            bool Grounded = false;
+        };
+        virtual bool GetCharacterDebugState(Entity entity, CharacterDebugState& state) const { return false; }
         // Networking (NET5, Unreal's physics replication): a rigid body's state (world units; Sleeping: not moving, Jolt's deactivated).
         struct BodyNetState
         {

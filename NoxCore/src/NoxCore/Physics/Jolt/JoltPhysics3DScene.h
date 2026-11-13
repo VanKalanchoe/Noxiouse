@@ -49,6 +49,7 @@ namespace Nox
         glm::dvec3 GetCharacterDrawnPosition(Entity entity) const override;
         void SetCharacterExternallyStepped(Entity entity, bool external) override;
         void AddCharacterVisualOffset(Entity entity, const glm::dvec3& offset) override;
+        bool GetCharacterDebugState(Entity entity, CharacterDebugState& state) const override;
         void SetTickCallbacks(std::function<void()> beforeTick, std::function<void()> afterTick) override
         {
             m_BeforeTick = std::move(beforeTick);
@@ -109,6 +110,8 @@ namespace Nox
         struct CharacterState;
         void StepCharacterState(Entity entity, CharacterState& state, float dt);
         void FollowGroundRotation(Entity entity, CharacterState& state, float dt);
+        // Its velocity relative to the ground it stands on (native units): Unreal's CharacterMovement Velocity.
+        static JPH::Vec3 OwnVelocity(const CharacterState& state);
         std::function<void()> m_BeforeTick;
         std::function<void()> m_AfterTick;
         void SyncCharactersToTransforms();

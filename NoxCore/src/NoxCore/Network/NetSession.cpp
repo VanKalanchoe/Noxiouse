@@ -86,6 +86,8 @@ namespace Nox::Net
             NOX_CORE_INFO("Net: network emulation {}", DescribeEmulation(m_Config.Emulation));
         }
         m_Replication = std::make_unique<NetReplication>(*m_Server);
+        if (m_Config.DebugTrace)
+            m_Replication->SetDebugTrace(true);
         if (m_Config.SnapshotRate > 0.0f)
             m_Replication->SetSnapshotRate(m_Config.SnapshotRate);
         if (m_Config.ClientRate > 0.0f)
@@ -101,6 +103,8 @@ namespace Nox::Net
     {
         // Replication first: the server's scene starts as this client's copy of it (proxies), its scripts see Network.IsClient.
         m_Replication = std::make_unique<NetReplication>(*m_Client);
+        if (m_Config.DebugTrace)
+            m_Replication->SetDebugTrace(true);
         const AssetHandle scene(welcome.SceneHandle);
         if (welcome.SceneHandle == 0 || !OnJoined || !OnJoined(scene))
         {
@@ -143,7 +147,10 @@ namespace Nox::Net
         }
         // Others drawn between the snapshots just received (before the scene's update: this frame's draw uses it).
         if (m_Replication)
+        {
+            m_Replication->TraceFrame(deltaTime);
             m_Replication->Interpolate();
+        }
 
         // A joined client's status line every 10 s.
         if (m_Client && m_Client->IsConnected())

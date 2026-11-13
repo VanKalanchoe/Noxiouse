@@ -2721,6 +2721,10 @@ namespace Nox
             ImGui::InputInt("Port", &m_PlayNet.Port);
             m_PlayNet.Port = std::clamp(m_PlayNet.Port, 1, 65535);
             ImGui::Checkbox("Save the scene without asking", &m_PlayNet.SaveWithoutAsking);
+            ImGui::Checkbox("Network debug log", &m_PlayNet.DebugTrace);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Every player's log and the server's get the network debug trace (--net-debug): inputs that come unevenly,\n"
+                                  "a standing character that moves, the animation parameters sent and applied, prediction corrections, long frames.");
             ImGui::SetItemTooltip("The other players load the scene from disk: Play saves it first.");
             ImGui::EndDisabled();
             ImGui::EndPopup();
@@ -6718,11 +6722,18 @@ namespace Nox
                                              std::format("--window-size={},{}", windowWidth, windowHeight),
                                              std::format("--window-pos={},{}", usable.x + (slot % 2) * windowWidth, usable.y + (slot / 2) * windowHeight) };
         };
+        auto withDebug = [this](std::vector<std::string> arguments)
+        {
+            if (m_PlayNet.DebugTrace)
+                arguments.push_back("--net-debug");
+            return arguments;
+        };
 
         Net::NetSessionConfig config;
         config.Port = port;
         config.Emulation = emulationValues;
         config.PlayerName = "Player1";
+        config.DebugTrace = m_PlayNet.DebugTrace;
         m_PlaySessionEnded = false;
         if (m_PlayNet.Mode == PlayNetMode::ListenServer)
         {
@@ -6748,7 +6759,7 @@ namespace Nox
         {
             // The editor is a client of a dedicated server it starts (its console takes the server's commands); its Play scene starts
             // when the server lets it in.
-            if (!LaunchPlayer({ projectFile.string(), "--server", "--port=" + std::to_string(port), "--scene=" + scene, "--net-emulation=" + emulation },
+            if (!LaunchPlayer(withDebug({ projectFile.string(), "--server", "--port=" + std::to_string(port), "--scene=" + scene, "--net-emulation=" + emulation }),
                               true, "the dedicated server"))
                 return;
             config.Role = Net::SessionRole::Client;
@@ -6774,7 +6785,7 @@ namespace Nox
                 m_PlaySessionEnded = true;
         }
         for (int player = 2; player <= std::clamp(m_PlayNet.Players, 1, 8); ++player)
-            LaunchPlayer(playerArguments(player), false, std::format("player {}", player).c_str());
+            LaunchPlayer(withDebug(playerArguments(player)), false, std::format("player {}", player).c_str());
     }
 
     void EditorLayer::EndMultiplayerPlay()

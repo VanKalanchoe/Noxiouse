@@ -10,6 +10,7 @@
 #include <glm/glm.hpp>
 
 #include <span>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -133,6 +134,16 @@ namespace Nox::Net
         void SetLagCompensation(bool enabled) { m_LagCompensation = enabled; }
         bool GetLagCompensation() const { return m_LagCompensation; }
 
+        // The network debug trace (--net-debug; the server console's `netdebug on|off`), in the log: what explains a character's
+        // movement and animation on each machine. Server: a client's inputs coming unevenly (ticks that applied 0 or several, a
+        // stall stepped without inputs, the burst after it), and a character standing still by its inputs that has a speed of its
+        // own (with its ground). Both: the animation parameters starting and stopping (a float leaving or coming back to about 0, a
+        // bool changing) as the server sends them and as a client applies them. Client: each correction of its own character. Both: a
+        // frame that took more than 0.1 s (a frozen or dragged window).
+        void SetDebugTrace(bool enabled);
+        bool GetDebugTrace() const { return m_DebugTrace; }
+        void TraceFrame(float deltaTime);
+
     private:
         struct ClientReplication
         {
@@ -189,6 +200,11 @@ namespace Nox::Net
         void UpdateOwnership(Entity entity, NetId id, const EntityState& state);
         void Reconcile(Entity entity, NetId id, const EntityState& state);
         double InterpolationDelayTicks() const { return 2.0 * m_SnapshotSpacingTicks + 1.0; }
+        // The debug trace (SetDebugTrace)
+        std::string DebugName(Entity entity) const;
+        void TraceCharacterTick(Entity entity, NetId id, size_t inputs, bool stallStep, bool standing, double now);
+        void TraceAnimationParameter(Entity entity, NetId id, const std::string& name, float value, bool isBool);
+        void FlushDebugTrace(double now);
 
         static NetReplication* s_Current;
 
@@ -258,5 +274,19 @@ namespace Nox::Net
         uint64_t m_LastSnapshotTick = 0;
         bool m_HooksInstalled = false;
         size_t m_Corrections = 0;
+
+        // The debug trace
+        struct DebugCharacter
+        {
+            uint32_t TicksByInputs[MaxInputsPerTick + 1] = {}; // the last second's ticks by how many inputs each applied
+            uint32_t StallSteps = 0;                           // the last second's steps without an input
+            bool Stalled = false;
+            double LastInputAt = 0.0;
+            uint32_t Lines = 0; // "moving while standing" lines the last second (at most a few)
+        };
+        bool m_DebugTrace = false;
+        double m_DebugSecondStart = 0.0;
+        std::unordered_map<NetId, DebugCharacter> m_DebugCharacters;
+        std::unordered_map<NetId, std::unordered_map<std::string, float>> m_DebugAnimation; // the last value logged, per parameter
     };
 }

@@ -1319,6 +1319,37 @@ namespace Nox {
         }
     }
 
+    JPH::Vec3 JoltPhysics3DScene::OwnVelocity(const CharacterState& state)
+    {
+        JPH::Vec3 velocity = state.Character->GetLinearVelocity();
+        if (state.Grounded && state.Character->IsSupported())
+            velocity -= state.GroundVelocity;
+        return velocity;
+    }
+
+    bool JoltPhysics3DScene::GetCharacterDebugState(Entity entity, CharacterDebugState& debug) const
+    {
+        auto found = m_EntityToCharacterMap.find(static_cast<uint32_t>(entity));
+        if (!m_PhysicsSystem || found == m_EntityToCharacterMap.end() || !found->second.Character)
+            return false;
+        const CharacterState& state = found->second;
+        debug.OwnVelocity = ToWorld(JoltUtils::ToGLM(OwnVelocity(state)));
+        debug.Velocity = ToWorld(JoltUtils::ToGLM(state.Character->GetLinearVelocity()));
+        debug.GroundVelocity = ToWorld(JoltUtils::ToGLM(state.GroundVelocity));
+        debug.Supported = state.Character->IsSupported();
+        debug.Grounded = state.Grounded;
+        debug.GroundEntity = UINT32_MAX;
+        debug.GroundDynamic = false;
+        const JPH::BodyID ground = state.Character->GetGroundBodyID();
+        const JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
+        if (!ground.IsInvalid() && bodyInterface.IsAdded(ground))
+        {
+            debug.GroundEntity = static_cast<uint32_t>(bodyInterface.GetUserData(ground));
+            debug.GroundDynamic = bodyInterface.GetMotionType(ground) == JPH::EMotionType::Dynamic;
+        }
+        return true;
+    }
+
     // The controller owns the entity's translation (like a dynamic body does); rotation stays with scripts.
     void JoltPhysics3DScene::SyncCharactersToTransforms()
     {
@@ -1332,15 +1363,11 @@ namespace Nox {
                 continue;
 
             auto& controller = entity.GetComponent<CharacterController3DComponent>();
-            JPH::CharacterVirtual* character = state.Character.GetPtr();
             controller.IsGrounded = state.Grounded; // Unreal's floor test (StepCharacters)
             // Script-facing (world units): its own movement, relative to the ground it stands on -- Unreal's CharacterMovement Velocity,
             // which a moving or turning platform's motion is not part of (standing on the spinner is standing, not walking: the
             // animation's Speed). In the air the whole velocity (a jump off a moving platform keeps the platform's speed).
-            JPH::Vec3 ownVelocity = character->GetLinearVelocity();
-            if (state.Grounded && character->IsSupported())
-                ownVelocity -= state.GroundVelocity;
-            controller.Velocity = ToWorld(JoltUtils::ToGLM(ownVelocity));
+            controller.Velocity = ToWorld(JoltUtils::ToGLM(OwnVelocity(state)));
 
             // Drawn between the last two fixed steps by how far the accumulator is into the next one, minus what is left of a stair's
             // step (StepOffset, eased out).

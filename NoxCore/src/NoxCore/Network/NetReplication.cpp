@@ -193,6 +193,8 @@ namespace Nox::Net
         if (!m_Scene)
             return;
         InstallTickHooks();
+        if (m_DebugTrace)
+            FlushDebugTrace(NetNow());
         // Stats over the last second.
         if (const double now = NetNow(); now - m_StatsSecondStart >= 1.0)
         {
@@ -872,6 +874,11 @@ namespace Nox::Net
             else if (const glm::vec2* v = std::get_if<glm::vec2>(&value)) parameter.Value = *v;
             else continue; // (curves, strings, asset handles: not driven per frame)
             animation.Parameters.push_back(parameter);
+            if (m_DebugTrace)
+            {
+                if (const bool* b = std::get_if<bool>(&value)) TraceAnimationParameter(entity, id, name, *b ? 1.0f : 0.0f, true);
+                else if (const float* f = std::get_if<float>(&value)) TraceAnimationParameter(entity, id, name, *f, false);
+            }
         }
         std::sort(animation.Parameters.begin(), animation.Parameters.end(),
                   [](const AnimParameter& a, const AnimParameter& b) { return a.NameHash < b.NameHash; });
@@ -921,6 +928,11 @@ namespace Nox::Net
                 continue;
             }
             std::visit([&](const auto& value) { graph.Parameters[*name->second] = value; }, parameter.Value);
+            if (m_DebugTrace)
+            {
+                if (const bool* b = std::get_if<bool>(&parameter.Value)) TraceAnimationParameter(entity, id, *name->second, *b ? 1.0f : 0.0f, true);
+                else if (const float* f = std::get_if<float>(&parameter.Value)) TraceAnimationParameter(entity, id, *name->second, *f, false);
+            }
         }
         // Montages: a new one in a slot is started (that far into it, when it began before this client saw it); a stop, stopped.
         auto& applied = m_AppliedMontages[id];
@@ -947,6 +959,137 @@ namespace Nox::Net
             }
         }
         return complete;
+    }
+
+    // ------------------------------------------------------------------------------------------------------------- debug trace
+
+    void NetReplication::SetDebugTrace(bool enabled)
+    {
+        m_DebugTrace = enabled;
+        m_DebugCharacters.clear();
+        m_DebugAnimation.clear();
+        m_DebugSecondStart = NetNow();
+        NOX_CORE_INFO("Net debug: trace {} ({})", enabled ? "on" : "off",
+                      m_Mode == Mode::Server ? "inputs, stalls, standing characters that move, animation sent"
+                                             : "corrections, animation applied, long frames");
+    }
+
+    void NetReplication::TraceFrame(float deltaTime)
+    {
+        if (m_DebugTrace && deltaTime > 0.1f)
+            NOX_CORE_INFO("Net debug: a frame took {:.0f} ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time "
+                          "is skipped", deltaTime * 1000.0f);
+    }
+
+    std::string NetReplication::DebugName(Entity entity) const
+    {
+        const NetId id = static_cast<uint64_t>(entity.GetUUID());
+        std::string name = entity.HasComponent<TagComponent>() ? entity.GetComponent<TagComponent>().Tag : std::string();
+        if (name.empty())
+            name = std::format("entity {}", id);
+        const ClientId owner = entity.HasComponent<NetworkIdentityComponent>() ? entity.GetComponent<NetworkIdentityComponent>().Owner : InvalidClientId;
+        if (owner != InvalidClientId)
+            name += std::format(" (client {}'s)", owner);
+        return name;
+    }
+
+    void NetReplication::TraceCharacterTick(Entity entity, NetId id, size_t inputs, bool stallStep, bool standing, double now)
+    {
+        DebugCharacter& debug = m_DebugCharacters[id];
+        debug.TicksByInputs[std::min(inputs, MaxInputsPerTick)]++;
+        if (inputs > 0)
+        {
+            if (debug.Stalled)
+                NOX_CORE_INFO("Net debug: {}: inputs again after {:.2f} s without ({} this tick)", DebugName(entity), now - debug.LastInputAt, inputs);
+            debug.Stalled = false;
+            debug.LastInputAt = now;
+        }
+        else if (stallStep)
+        {
+            ++debug.StallSteps;
+            if (!debug.Stalled)
+                NOX_CORE_INFO("Net debug: {}: no inputs for {:.2f} s -- stepped without input until they come", DebugName(entity),
+                              debug.LastInputAt > 0.0 ? now - debug.LastInputAt : 0.0);
+            debug.Stalled = true;
+        }
+        if (!standing || (inputs == 0 && !stallStep))
+            return; // (moved by its inputs, or not stepped this tick)
+
+        // Standing still by its inputs: any speed of its own is what the animation's Speed would show as walking.
+        IPhysics3DScene* physics = m_Scene->GetPhysics3DScene();
+        IPhysics3DScene::CharacterDebugState state;
+        if (!physics || !physics->GetCharacterDebugState(entity, state))
+            return;
+        const float own = WorldUnits::ToMeters(glm::length(glm::vec2(state.OwnVelocity.x, state.OwnVelocity.z)));
+        if (own < 0.3f || debug.Lines >= 5)
+            return;
+        ++debug.Lines;
+        std::string ground = "nothing";
+        if (state.GroundEntity != UINT32_MAX)
+        {
+            Entity groundEntity(static_cast<entt::entity>(state.GroundEntity), m_Scene);
+            ground = std::format("{} ({})", groundEntity.IsValid() && groundEntity.HasComponent<TagComponent>() ? groundEntity.GetComponent<TagComponent>().Tag
+                                                                                                                : std::string("an entity"),
+                                 state.GroundDynamic ? "dynamic" : "not dynamic");
+        }
+        const auto meters = [](const glm::vec3& v) { return glm::vec3(WorldUnits::ToMeters(v.x), WorldUnits::ToMeters(v.y), WorldUnits::ToMeters(v.z)); };
+        const glm::vec3 velocity = meters(state.Velocity), groundVelocity = meters(state.GroundVelocity);
+        NOX_CORE_WARN("Net debug: {} stands still by its inputs but moves {:.2f} m/s of its own (tick {}, {} input(s){}): velocity ({:.2f} {:.2f} {:.2f}), "
+                      "ground velocity ({:.2f} {:.2f} {:.2f}) on {}, {}, {}",
+                      DebugName(entity), own, m_Scene->GetTick(), inputs, stallStep ? ", a step without input" : "", velocity.x, velocity.y, velocity.z,
+                      groundVelocity.x, groundVelocity.y, groundVelocity.z, ground, state.Grounded ? "grounded" : "not grounded",
+                      state.Supported ? "supported" : "not supported");
+    }
+
+    void NetReplication::TraceAnimationParameter(Entity entity, NetId id, const std::string& name, float value, bool isBool)
+    {
+        // Logged when it starts or stops: a bool that changes, a float that leaves about 0 or comes back to it (not every value of a
+        // moving character).
+        auto& values = m_DebugAnimation[id];
+        auto [last, isNew] = values.try_emplace(name, value);
+        const bool changed = isBool ? last->second != value : (std::abs(last->second) < 0.1f) != (std::abs(value) < 0.1f);
+        if (!isNew && !changed)
+            return;
+        const float before = last->second;
+        last->second = value;
+        if (isNew && (isBool || std::abs(value) < 0.1f))
+            return; // (its first value: logged only when it is not the resting one)
+        const char* what = m_Mode == Mode::Server ? "sends" : "applies";
+        if (isBool)
+            NOX_CORE_INFO("Net debug: {} animation {} {} = {} (tick {})", DebugName(entity), what, name, value != 0.0f ? "true" : "false", m_Scene->GetTick());
+        else
+            NOX_CORE_INFO("Net debug: {} animation {} {} {:.2f} -> {:.2f} (tick {})", DebugName(entity), what, name, isNew ? 0.0f : before, value,
+                          m_Scene->GetTick());
+    }
+
+    void NetReplication::FlushDebugTrace(double now)
+    {
+        if (now - m_DebugSecondStart < 1.0)
+            return;
+        m_DebugSecondStart = now;
+        for (auto it = m_DebugCharacters.begin(); it != m_DebugCharacters.end();)
+        {
+            DebugCharacter& debug = it->second;
+            Entity entity = m_Scene ? m_Scene->GetEntityByUUID(UUID(it->first)) : Entity();
+            if (!entity)
+            {
+                it = m_DebugCharacters.erase(it);
+                continue;
+            }
+            // Only an uneven second: one input every tick is the normal case.
+            uint32_t ticks = 0;
+            for (uint32_t count : debug.TicksByInputs)
+                ticks += count;
+            if (ticks != debug.TicksByInputs[1])
+                NOX_CORE_INFO("Net debug: {} the last second: {} ticks applied 1 input, {} none, {} two, {} three, {} four; {} steps without input",
+                              DebugName(entity), debug.TicksByInputs[1], debug.TicksByInputs[0], debug.TicksByInputs[2], debug.TicksByInputs[3],
+                              debug.TicksByInputs[4], debug.StallSteps);
+            for (uint32_t& count : debug.TicksByInputs)
+                count = 0;
+            debug.StallSteps = 0;
+            debug.Lines = 0;
+            ++it;
+        }
     }
 
     // ------------------------------------------------------------------------------------------------------- lag compensation
@@ -1222,6 +1365,7 @@ namespace Nox::Net
                     entity.GetComponent<TransformComponent>().Rotation = glm::eulerAngles(input.Rotation);
                     physics->StepCharacter(entity, physics->GetFixedDeltaTime());
                 }
+                bool stallStep = false;
                 if (!inputs.empty())
                     entity.MarkTransformDirty();
                 else if (now - it->second.LastInputAt > 0.5)
@@ -1229,6 +1373,13 @@ namespace Nox::Net
                     controller.MoveVelocity = glm::vec3(0.0f);
                     controller.JumpSpeed = 0.0f;
                     physics->StepCharacter(entity, physics->GetFixedDeltaTime());
+                    stallStep = true;
+                }
+                if (m_DebugTrace)
+                {
+                    // Standing by its inputs: the last step's input moves and jumps not at all.
+                    const bool standing = stallStep || (!inputs.empty() && glm::length(inputs.back().Move) < 1e-3f && inputs.back().Jump <= 0.0f);
+                    TraceCharacterTick(entity, it->first, inputs.size(), stallStep, standing, now);
                 }
                 ++it;
             }
@@ -1337,10 +1488,16 @@ namespace Nox::Net
         // Where the server's character was after that input against where this client predicted it: off by more than 2 cm, the
         // server's state is taken and the inputs since replayed (Unreal's ClientAdjustPosition + replaying the saved moves).
         const double tolerance = static_cast<double>(WorldUnits::FromMeters(0.02f));
-        std::optional<std::vector<InputFrame>> replay = predicted.History.Reconcile(lastInput, server.Position, tolerance);
+        double error = 0.0;
+        std::optional<std::vector<InputFrame>> replay = predicted.History.Reconcile(lastInput, server.Position, tolerance, &error);
         if (!replay)
             return;
         ++m_Corrections;
+        if (m_DebugTrace)
+            NOX_CORE_INFO("Net debug: {} corrected by the server: off by {:.1f} cm at input {}, {} inputs replayed (server: speed {:.2f} m/s, {})",
+                          DebugName(entity), WorldUnits::ToMeters(static_cast<float>(error)) * 100.0f, lastInput, replay->size(),
+                          WorldUnits::ToMeters(glm::length(glm::vec2(server.Horizontal.x, server.Horizontal.z))),
+                          server.Grounded ? "grounded" : "in the air");
         auto& controller = entity.GetComponent<CharacterController3DComponent>();
         const glm::vec3 move = controller.MoveVelocity;
         const float jump = controller.JumpSpeed;

@@ -34,6 +34,8 @@ namespace Nox::Net
         // Clients: a connection that fails before ever joining is tried again for this long (a server started with it is still
         // loading: the editor's multiplayer Play). 0: once.
         double ConnectRetrySeconds = 0.0;
+        // The network debug trace in the log (NetReplication::SetDebugTrace; --net-debug).
+        bool DebugTrace = false;
     };
 
     class NetSession

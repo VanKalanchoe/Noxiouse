@@ -146,6 +146,7 @@ namespace Nox
             int Emulation = 0;         // 0 off, 1 average, 2 bad (Net::NetEmulation presets), for every player
             int Port = Net::DefaultPort;
             bool SaveWithoutAsking = false;
+            bool DebugTrace = false;   // the network debug trace in every player's log and the server's (--net-debug)
         };
         // The edited scene's path under the asset directory and its handle (m_EditorScenePath is absolute after Save As / the file dialog,
         // relative when opened from the Content Browser: the registry knows relative paths only). Empty / 0: not saved as an asset.
