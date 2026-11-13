@@ -161,7 +161,7 @@ public sealed class NetBox : EntityBehaviour, INetShootable
 
 /// <summary>
 /// A player, third person (Unreal's template): the mouse turns the view (click into the window to capture it, Tab to let it go), WASD
-/// walks relative to it and the character turns toward where it walks, Space jumps, the left button shoots. With an animator (the
+/// walks relative to it (Shift runs) and the character turns toward where it walks, Space jumps, the left button shoots. With an animator (the
 /// NetPlayerAnimated prefab: the UAL1 character and its locomotion graph) it feeds the graph Speed / VerticalSpeed / IsGrounded -- on the
 /// machine that owns it (predicted) and on the server, which replicates them to everyone else (NET5 animation replication). The machine that owns it moves it at once (NET3 prediction); a shot is checked on the
 /// server against where the targets were on the shooter's screen (NET5 lag compensation) -- the shooter's own flash plays at once, the
@@ -171,7 +171,8 @@ public sealed class NetPlayer : EntityBehaviour, INetShootable
 {
     [Replicated(OnRep = nameof(OnColorChanged))] public Vector3 Color = new(1.0f, 1.0f, 1.0f);
     [Replicated] public int Jumps;
-    [Expose(Unit = "m/s", Tooltip = "Walking speed")] public float Speed = 500.0f;
+    [Expose(Unit = "m/s", Tooltip = "Walking speed")] public float WalkSpeed = 200.0f;     // 2 m/s: the locomotion graph's walk
+    [Expose(Unit = "m/s", Tooltip = "Running speed (Shift held)")] public float RunSpeed = 500.0f; // 5 m/s (Unreal's template): its jog
     [Expose(Unit = "m/s", Tooltip = "Jump speed")] public float JumpSpeed = 600.0f;
     [Expose(Tooltip = "Radians the view turns per pixel the mouse moves")] public float LookSpeed = 0.0025f;
     [Expose(Tooltip = "How far a shot reaches (world units)")] public float Range = 30000.0f;
@@ -252,8 +253,11 @@ public sealed class NetPlayer : EntityBehaviour, INetShootable
         float length = MathF.Sqrt(move.X * move.X + move.Z * move.Z);
         if (length > 1.0f)
             move = new Vector3(move.X / length, 0.0f, move.Z / length);
+        // Walks, runs with Shift held (CharacterMovement's rule); the speed is part of the move velocity the engine sends the server, so
+        // the server moves it as fast and everyone's animation shows walking or running from its Speed.
+        float speed = Input.IsKeyDown(KeyCode.LeftShift) || Input.IsKeyDown(KeyCode.RightShift) ? RunSpeed : WalkSpeed;
         CharacterControllerComponent character = GetComponent<CharacterControllerComponent>();
-        character.SetMoveVelocity(new Vector3(move.X * Speed, 0.0f, move.Z * Speed));
+        character.SetMoveVelocity(new Vector3(move.X * speed, 0.0f, move.Z * speed));
 
         // Turned toward where it walks, at TurnRate (Unreal's Orient Rotation To Movement); sent with the inputs -- the server turns it too.
         // From where it faces now: a platform it stands on turns it (the engine adds the ground's yaw).
