@@ -10,7 +10,7 @@ namespace Nox
 {
     // The standalone player (docs/Runtime_And_Packaging_Plan_2026-10.md, R1): the engine without the editor -- no ImGui, no
     // panels, the scene rendered straight to the window. Usage: NoxRuntime [switches] [--project=]<project.nproj>
-    // Networking (docs/Networking_Plan_2026-11.md, NET1; RuntimeLayer::ParseNetworkOptions):
+    // Networking (docs/Networking_Plan_2026-11.md, NET1; RuntimeLayer::StartNetworking):
     //   --server                 a dedicated server: no window, GPU or sound, listening for clients (--port=7777)
     //   --listen                 a listen server: plays in a window and accepts clients too
     //   --connect=<address>      a client: joins the server at 192.168.1.5:7777 / myserver.lan / loopback
