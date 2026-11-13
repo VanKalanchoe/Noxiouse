@@ -8,6 +8,15 @@ file(GLOB_RECURSE NOXEDITOR_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
+# The MCP server (src/Mcp, docs/MCP_Plan_2026-11.md): left out entirely with NOX_WITH_MCP=OFF.
+if(NOX_WITH_MCP)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE NOX_WITH_MCP=1)
+    target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/NoxCore/vendors/cpp-httplib")
+else()
+    list(FILTER NOXEDITOR_FILES EXCLUDE REGEX ".*/src/Mcp/.*")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE NOX_WITH_MCP=0)
+endif()
+
 target_sources(${PROJECT_NAME} PRIVATE ${NOXEDITOR_FILES})
 
 target_link_libraries(${PROJECT_NAME} PRIVATE NoxCore)

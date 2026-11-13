@@ -67,6 +67,7 @@ namespace Nox
         case ConsoleAccess::Read: return "read";
         case ConsoleAccess::Write: return "write";
         case ConsoleAccess::Execute: return "execute";
+        case ConsoleAccess::User: return "user";
         }
         return "?";
     }
@@ -402,9 +403,10 @@ namespace Nox
                                         cvar.GetHelp()));
                 return;
             }
-            if (maxAccess == ConsoleAccess::Read)
+            if (static_cast<uint8_t>(maxAccess) < static_cast<uint8_t>(cvar.GetRequiredAccess()))
             {
-                output.Error(std::format("{}: setting a variable needs write access", cvar.GetName()));
+                output.Error(std::format("{}: setting it needs {} access (granted: {})", cvar.GetName(), ToString(cvar.GetRequiredAccess()),
+                                         ToString(maxAccess)));
                 return;
             }
             // (a string variable takes the rest of the line)
@@ -461,7 +463,7 @@ namespace Nox
             if (!lower.empty() && key.find(lower) == std::string::npos && Lower(variable->GetHelp()).find(lower) == std::string::npos)
                 continue;
             entries.push_back({ variable->GetName(), variable->GetName() + " [value]", variable->GetHelp(), true, variable->GetString(),
-                                ConsoleAccess::Write });
+                                variable->GetRequiredAccess() });
         }
         std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) { return Lower(a.Name) < Lower(b.Name); });
         return entries;

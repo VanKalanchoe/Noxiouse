@@ -1,7 +1,16 @@
 # MCP for NoxEditor -- plan (2026-11-13, revised the same day after a review)
 
-Status: **planned, nothing built** except the pieces it builds on: the in-memory log (`LogBuffer`) and the editor's Output Log tab
-(2026-11-13). Backlog items: C1 Console (built first, §4) and N7 MCP.
+Status (2026-11-13): **C1 console built; MCP0 and MCP1 built** (read tools, screenshot, list_commands / run_command), waiting for the
+user's test; MCP2-MCP5 open. Backlog items C1 and N7.
+
+Built: `NoxCore/Console` (registry, variables, access levels read / write / execute / user), the Output Log's Cmd line, the server
+terminal and `--exec` on it; `NoxEditor/src/Mcp/` -- `McpProtocol` (JSON-RPC, 2025-06-18 + 2025-03-26, token / Host / Origin /
+version checks, schema validation, access filtering), `McpServer` (cpp-httplib on 127.0.0.1, exclusive port, calls run on the main
+thread between frames, 60 s time-out, Stop answers waiting calls), `McpEditorTools` (get_editor_status, read_log, get_hierarchy,
+find_entities, get_entity, get_selection, list_assets, screenshot, list_commands, run_command), `McpEditor` (Tools > MCP Server, the
+mcp.* variables -- user-only --, `.nox/mcp.ini`, `.nox/mcp-token` with its own `.gitignore`, copy-connect-command). Removable: CMake
+`NOX_WITH_MCP=OFF` drops the folder; EditorLayer has four guarded spots. Tested: NoxToolsTest 59 checks (console 22, protocol 28, HTTP
+end to end 9) under AddressSanitizer / UBSan; the editor tools compile, not yet run in the editor.
 
 Revision note: a review (2026-11-13) kept the architecture and asked for a shared command layer, schema-aware component edits,
 operation ids for long work, an explicit protocol revision, a stricter local-server security model, more read tools and early

@@ -38,7 +38,9 @@ namespace Nox
     {
         Read,    // only looks (status, help, printing a variable)
         Write,   // changes settings or the scene
-        Execute  // runs something with consequences outside the editor's state (quit, kick, build, package)
+        Execute, // runs something with consequences outside the editor's state (quit, kick, build, package)
+        User     // only the person at this machine (the Output Log's Cmd line, the server's terminal): never granted to a tool --
+                 // e.g. the MCP server's own settings, so a client cannot raise its own access
     };
 
     using ConsoleHandler = std::function<void(const std::vector<std::string>& arguments, ConsoleOutput& output)>;
@@ -61,6 +63,9 @@ namespace Nox
         virtual bool SetString(std::string_view text, std::string& error) = 0;
         // Called after every change (a setting applied to the running engine).
         void OnChanged(std::function<void(ConsoleVariable&)> callback) { m_Callbacks.push_back(std::move(callback)); }
+        // The access setting it needs from the console (Write by default; User: only the person at this machine).
+        void SetRequiredAccess(ConsoleAccess access) { m_SetAccess = access; }
+        ConsoleAccess GetRequiredAccess() const { return m_SetAccess; }
 
     protected:
         void NotifyChanged();
@@ -68,6 +73,7 @@ namespace Nox
     private:
         std::string m_Name, m_Help;
         Type m_Type;
+        ConsoleAccess m_SetAccess = ConsoleAccess::Write;
         std::vector<std::function<void(ConsoleVariable&)>> m_Callbacks;
     };
 
@@ -144,8 +150,8 @@ namespace Nox
         const CommandInfo* FindCommand(std::string_view name) const;
 
         // Runs a line (';' separates commands). Each command's output is logged and returned; `maxAccess` refuses commands that need
-        // more (MCP's permissions; the editor's own input line passes Execute).
-        ConsoleOutput Execute(std::string_view line, ConsoleAccess maxAccess = ConsoleAccess::Execute);
+        // more (a tool passes what it was granted; the person at this machine -- the Cmd line, the server terminal -- has User).
+        ConsoleOutput Execute(std::string_view line, ConsoleAccess maxAccess = ConsoleAccess::User);
 
         // Names starting with `prefix` (case ignored), sorted: Tab completion.
         std::vector<std::string> Complete(std::string_view prefix) const;

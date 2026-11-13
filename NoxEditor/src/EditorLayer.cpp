@@ -27,6 +27,9 @@
 #include "NoxCore/Network/NetReplication.h"
 #include "NoxCore/Network/NetSession.h"
 #include "NoxCore/Console/Console.h"
+#if NOX_WITH_MCP
+#include "Mcp/McpEditor.h"
+#endif
 #include "NoxCore/Asset/MeshSerializer.h"
 #include "NoxCore/Asset/SceneImporter.h"
 #include "NoxCore/Core/Application.h"
@@ -281,6 +284,33 @@ namespace Nox
 
         // The engine console: its variables exist before anything uses them; --exec="cmd; cmd" runs commands at start-up.
         Net::RegisterConsoleVariables();
+#if NOX_WITH_MCP
+        {
+            // What MCP's tools may ask of the editor (the only way they reach it).
+            Mcp::EditorContext context;
+            context.ActiveScene = [this]() { return m_ActiveScene; };
+            context.Mode = [this]() { return std::string(m_SceneState == SceneState::Play ? "play" : m_SceneState == SceneState::Simulate ? "simulate" : "edit"); };
+            context.ScenePath = [this]() { return EditorSceneAssetPath().generic_string(); };
+            context.Selection = [this]() { return m_SceneHierarchyPanel.GetSelectedEntities(); };
+            context.NetStatus = [this]() { return m_PlaySession ? m_PlaySession->Describe() : std::string(); };
+            context.FramesPerSecond = []() { return ImGui::GetIO().Framerate; };
+            context.CaptureViewport = [this](std::function<void(std::vector<uint8_t>, uint32_t, uint32_t, bool)> done)
+            {
+                Ref<Texture2D> image = m_Renderer ? m_Renderer->GetSceneResourceRef() : nullptr;
+                if (!image)
+                {
+                    done({}, 0, 0, false);
+                    return;
+                }
+                const bool bgra = m_Renderer->IsSurfaceFormatBGRA();
+                m_Renderer->ReadbackTexture(std::move(image), [done, bgra](std::vector<uint8_t> pixels, uint32_t width, uint32_t height)
+                {
+                    done(std::move(pixels), width, height, bgra);
+                });
+            };
+            m_Mcp = std::make_unique<Mcp::McpEditor>(std::move(context));
+        }
+#endif
         if (const char* exec = app.GetSpecification().CommandLineArgs.Value("--exec"))
             Console::Get().Execute(exec);
     }
@@ -356,6 +386,10 @@ namespace Nox
     {
         if (!Project::GetActive())
             return; // closing: no project was opened
+#if NOX_WITH_MCP
+        if (m_Mcp)
+            m_Mcp->Update(); // (MCP tool calls that came in run here, between frames)
+#endif
         // A project without a picture for the Project Manager: the view a few seconds after it opened (the scene has drawn by then).
         if (m_ThumbnailPending && m_SceneState == SceneState::Edit && !m_SceneLoad)
         {
@@ -723,6 +757,14 @@ namespace Nox
                 ImGui::EndMenu();
             }
 
+#if NOX_WITH_MCP
+            if (ImGui::BeginMenu("Tools"))
+            {
+                if (m_Mcp)
+                    m_Mcp->DrawMenu();
+                ImGui::EndMenu();
+            }
+#endif
             if (ImGui::BeginMenu("Window"))
             {
                 bool renderGraphOpen = m_RenderGraphPanel->IsOpen();

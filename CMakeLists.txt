@@ -44,6 +44,10 @@ if(NOX_DIST)
     set(NOX_BUILD_RUNTIME ON CACHE BOOL "" FORCE)
 endif()
 
+# The editor's MCP server (docs/MCP_Plan_2026-11.md): AI tools read and use the running editor over the Model Context Protocol. All
+# of it is NoxEditor/src/Mcp; OFF leaves that folder out of the build (and the editor's few NOX_WITH_MCP lines).
+option(NOX_WITH_MCP "Build the editor's MCP server (Tools > MCP Server; off at run time until enabled)" ON)
+
 add_subdirectory(NoxCore)
 add_subdirectory(NoxEditor)
 
@@ -54,7 +58,7 @@ if(NOX_BUILD_RUNTIME)
 endif()
 
 # Engine tests that run without a window or GPU (Tests/): NoxNetTest (servers and clients over loopback and UDP, NET1).
-option(NOX_BUILD_TESTS "Build the engine's command-line tests (NoxNetTest)" OFF)
+option(NOX_BUILD_TESTS "Build the engine's command-line tests (NoxNetTest, NoxToolsTest)" OFF)
 if(NOX_BUILD_TESTS)
     add_subdirectory(Tests)
 endif()

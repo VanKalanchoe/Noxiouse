@@ -7,10 +7,6 @@
 #include <format>
 #include <string>
 
-#ifdef NOX_TOOLS_TEST_MCP
-#include "McpTests.inl"
-#endif
-
 namespace
 {
     int s_Checks = 0, s_Failed = 0;
@@ -25,6 +21,10 @@ namespace
     }
 }
 #define CHECK(condition, ...) Check((condition), __VA_ARGS__)
+
+#ifdef NOX_TOOLS_TEST_MCP
+#include "McpTests.inl"
+#endif
 
 using namespace Nox;
 
@@ -119,6 +119,15 @@ static void TestConsole()
     out = console.Execute("test.Once");
     CHECK(out.Text() == "ran once" && console.FindCommand("test.Once") == nullptr, "a command may remove itself while running");
 
+    // A variable only the person at the machine may set: refused even with execute access (a tool's highest).
+    auto* guarded = console.RegisterVariable<int32_t>("test.Guarded", "Only the user", 0, 0, 2);
+    guarded->SetRequiredAccess(ConsoleAccess::User);
+    out = console.Execute("test.Guarded 2", ConsoleAccess::Execute);
+    const bool refusedForTool = out.HasErrors() && guarded->Get() == 0;
+    out = console.Execute("test.Guarded 2");
+    CHECK(refusedForTool && !out.HasErrors() && guarded->Get() == 2, "a user-only variable: refused with execute access, set by the user");
+    console.Unregister("test.Guarded");
+
     console.Unregister("test.Quality");
     CHECK(console.FindVariable("test.Quality") == nullptr, "a variable is unregistered");
 }
@@ -129,6 +138,9 @@ int main()
     TestConsole();
 #ifdef NOX_TOOLS_TEST_MCP
     TestMcp();
+#endif
+#ifdef NOX_TOOLS_TEST_MCP_SERVER
+    TestMcpServer();
 #endif
     std::printf("\n%d checks, %d failed\n", s_Checks, s_Failed);
     return s_Failed == 0 ? 0 : 1;

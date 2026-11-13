@@ -32,6 +32,11 @@
 #include "NoxCore/Network/NetSession.h"
 #include "ProjectManager/ProcessLauncher.h"
 
+namespace Nox::Mcp
+{
+    class McpEditor;
+}
+
 namespace Nox
 {
     class EditorLayer : public Layer
@@ -274,6 +279,11 @@ namespace Nox
 
         PlayNetSettings m_PlayNet;
         std::unique_ptr<Net::NetSession> m_PlaySession;
+#if NOX_WITH_MCP
+        // The MCP server (docs/MCP_Plan_2026-11.md; off unless Tools > MCP Server is on). All of it lives in src/Mcp: CMake's
+        // NOX_WITH_MCP=OFF leaves that folder and these lines out.
+        std::unique_ptr<Mcp::McpEditor> m_Mcp;
+#endif
         std::vector<std::unique_ptr<ChildProcess>> m_PlayProcesses;
         bool m_PlayWaitingForServer = false; // client: Play has begun, the scene starts when the server lets it in
         bool m_PlaySessionEnded = false;     // the session ended by itself (the server stopped, the connection failed): Play stops
