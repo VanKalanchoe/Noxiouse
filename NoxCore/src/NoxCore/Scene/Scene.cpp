@@ -616,6 +616,11 @@ namespace Nox
             outHandles.insert(animator.Animation);
             outHandles.insert(animator.Skeleton);
             outHandles.insert(animator.Graph);
+            // The clips its graph plays (blend spaces, states) and its montages': kept with it. They were left out -- the sweep after
+            // any spawn or removal unloaded a running character's walk cycle and it showed its rest pose until they reloaded.
+            if (const NodeGraphAsset* graph = animator.Graph != 0 ? AssetManager::FindLoadedAsset<NodeGraphAsset>(animator.Graph) : nullptr)
+                AnimationGraphInstance::CollectGraphAssets(graph->Graph, outHandles);
+            animator.GraphInstance.CollectMontageClips(outHandles);
         }
 
         for (auto entity : m_Registry.view<TimelinePlayerComponent>())

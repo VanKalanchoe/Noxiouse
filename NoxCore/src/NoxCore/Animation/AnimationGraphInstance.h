@@ -2,6 +2,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -36,6 +37,13 @@ namespace Nox
         // system); a handle that isn't resident yet is appended to missingAssets, same convention as
         // Scene::UpdateAnimators, for Scene::ApplySyncPoint to request.
         void Sync(AssetHandle graphHandle, std::vector<AssetHandle>& missingAssets);
+
+        // The assets a graph's nodes use (clips of Clip nodes and blend spaces, also inside a state machine's states): what an
+        // entity playing it keeps loaded (Scene::CollectAssetReferences -- the unused-asset sweep must not unload a walk cycle
+        // from under a running character).
+        static void CollectGraphAssets(const NodeGraph& graph, std::unordered_set<AssetHandle>& outAssets);
+        // The clips of the montages playing or waiting to start.
+        void CollectMontageClips(std::unordered_set<AssetHandle>& outAssets) const;
 
         // Runs the compiled graph once against skeleton and returns the resulting pose, or nullptr if not
         // playing, no graph assigned, or the graph failed to compile. The returned pointer is valid until the

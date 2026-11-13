@@ -8,6 +8,46 @@
 
 namespace Nox
 {
+    namespace
+    {
+        // Every asset handle a graph's nodes name in a property the node type marks as an asset (its PropertyAssetTypeHints of the
+        // "AssetType::..." kind; a "Bone" hint is a name, not an asset), the state machines' states included.
+        template<typename Visit>
+        void ForEachGraphAsset(const NodeGraph& graph, const Visit& visit)
+        {
+            for (const GraphNode& node : graph.Nodes)
+            {
+                if (const NodeTypeDesc* type = NodeTypeRegistry::Find(graph.Domain, node.TypeName))
+                {
+                    for (const auto& [propertyName, typeHint] : type->PropertyAssetTypeHints)
+                    {
+                        if (std::string_view(typeHint).rfind("AssetType::", 0) != 0)
+                            continue;
+                        auto property = node.Properties.find(propertyName);
+                        if (property == node.Properties.end())
+                            continue;
+                        if (const auto* handle = std::get_if<uint64_t>(&property->second); handle && *handle != 0)
+                            visit(AssetHandle(*handle));
+                    }
+                }
+                for (const NodeSubGraph& subGraph : node.SubGraphs)
+                    ForEachGraphAsset(subGraph.Graph, visit);
+            }
+        }
+    }
+
+    void AnimationGraphInstance::CollectGraphAssets(const NodeGraph& graph, std::unordered_set<AssetHandle>& outAssets)
+    {
+        ForEachGraphAsset(graph, [&](AssetHandle handle) { outAssets.insert(handle); });
+    }
+
+    void AnimationGraphInstance::CollectMontageClips(std::unordered_set<AssetHandle>& outAssets) const
+    {
+        for (const Montage& montage : m_Montages)
+            if (montage.Clip != 0)
+                outAssets.insert(montage.Clip);
+    }
+
     void AnimationGraphInstance::Sync(AssetHandle graphHandle, std::vector<AssetHandle>& missingAssets)
     {
         // Re-resolve when the graph handle changed, or it was set but never successfully resolved yet (asset
@@ -29,28 +69,11 @@ namespace Nox
 
         // Assets the graph's nodes reference (a Clip node's clip, also inside a state machine's states) aren't loaded by
         // anything else, e.g. after a scene reload: report the ones not resident yet so Scene::ApplySyncPoint requests them.
-        std::function<void(const NodeGraph&)> collectMissing = [&](const NodeGraph& graph)
+        ForEachGraphAsset(m_Graph->Graph, [&](AssetHandle handle)
         {
-            for (const GraphNode& node : graph.Nodes)
-            {
-                if (const NodeTypeDesc* type = NodeTypeRegistry::Find(graph.Domain, node.TypeName))
-                {
-                    for (const auto& [propertyName, typeHint] : type->PropertyAssetTypeHints)
-                    {
-                        auto property = node.Properties.find(propertyName);
-                        if (property == node.Properties.end())
-                            continue;
-                        const auto* handle = std::get_if<uint64_t>(&property->second);
-                        if (handle && *handle != 0 && AssetManager::IsAssetHandleValid(AssetHandle(*handle)) &&
-                            !AssetManager::IsAssetLoaded(AssetHandle(*handle)))
-                            missingAssets.push_back(AssetHandle(*handle));
-                    }
-                }
-                for (const NodeSubGraph& subGraph : node.SubGraphs)
-                    collectMissing(subGraph.Graph);
-            }
-        };
-        collectMissing(m_Graph->Graph);
+            if (AssetManager::IsAssetHandleValid(handle) && !AssetManager::IsAssetLoaded(handle))
+                missingAssets.push_back(handle);
+        });
         for (const Montage& montage : m_Montages)
         {
             if (AssetManager::IsAssetHandleValid(montage.Clip) && !AssetManager::IsAssetLoaded(montage.Clip))
