@@ -1,106 +1,188 @@
-# MCP for NoxEditor -- plan (2026-11-13)
+# MCP for NoxEditor -- plan (2026-11-13, revised the same day after a review)
 
-Status: **planned, nothing built** except the two pieces it builds on, made the same day: the in-memory log (`LogBuffer`) and the
-editor's Output Log tab. Backlog item N7.
+Status: **planned, nothing built** except the pieces it builds on: the in-memory log (`LogBuffer`) and the editor's Output Log tab
+(2026-11-13). Backlog items: C1 Console (built first, §4) and N7 MCP.
+
+Revision note: a review (2026-11-13) kept the architecture and asked for a shared command layer, schema-aware component edits,
+operation ids for long work, an explicit protocol revision, a stricter local-server security model, more read tools and early
+screenshots. Accepted, with the changes argued in §12; the shared command layer is the engine console (§4), which the editor
+needs on its own anyway.
 
 ## 1. What MCP is
 
 The Model Context Protocol is an open protocol (JSON-RPC 2.0) through which an AI client -- Claude Code, Claude Desktop, other
 editors' assistants -- calls **tools** ("create an entity", "press Play"), reads **resources** ("the open scene", "the log") and
-uses **prompts** that a **server** offers. The server is a program you own: here, a small part of NoxEditor. Two transports:
+uses **prompts** that a **server** offers. The server is a program you own: here, a small part of NoxEditor. Transports:
 
-- **Streamable HTTP**: the server listens on a URL (`http://127.0.0.1:8765/mcp`); the client posts JSON-RPC requests and can receive a
-  stream of messages back. Claude Code: `claude mcp add --transport http nox http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"`.
-- **stdio**: the client starts the server as a child process and talks over stdin / stdout (for clients that only do that, a tiny
-  `NoxMcpBridge` executable forwards stdio to the editor's HTTP endpoint).
+- **Streamable HTTP**: the server listens on a URL (`http://127.0.0.1:8765/mcp`); the client posts JSON-RPC requests. Claude Code:
+  `claude mcp add --transport http nox http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"`.
+- **stdio**: the client starts the server as a child process (later: a tiny `NoxMcpBridge` forwarding stdio to the editor).
 
-The model never touches the engine directly: it can only do what a tool offers, with the arguments the tool's JSON schema allows, and
-sees only what the tool returns (text, JSON, images).
+MCP is only the interface. The planning -- "look, decide, call a tool, check the result, go on" -- is done by the AI client. A Nox
+agent of its own (a chat panel in the editor with its own model calls) would be a separate project on top of the same tools (§12).
 
 ## 2. What works today without MCP, and what MCP adds
 
-**Today** (Claude Code in the repository, as in this project's sessions): reading and editing every text file -- C# scripts, scenes
-(`.nox` YAML), prefabs, materials, animation / audio graphs, the engine's C++ -- building, running the offline tests (NoxNetTest),
-reading the logs you upload, writing test guides. What it cannot do: see or touch the **running** editor -- its live scene, the
-selection, the viewport, Play -- so every check of behaviour goes through you ("press Play, send the log").
+**Today** (Claude Code in the repository): reading and editing every text file -- C# scripts, scenes (`.nox` YAML), prefabs,
+materials, graphs, the engine's C++ -- building, running the offline tests, reading the logs you upload, writing test guides. It
+cannot see or touch the **running** editor, so every behaviour check goes through you ("press Play, send the log").
 
-**With MCP** the assistant drives the running NoxEditor itself: looks at the scene as it is, makes and changes entities and components
-(each change an undo step), imports assets, saves, presses Play / Stop (also multiplayer Play), waits for something to happen,
-reads the Output Log, takes screenshots of the viewport, injects input for scripted gameplay checks, builds scripts and reads the
-compiler's errors. The loop "change -> run -> look -> fix" no longer needs you in the middle for every step.
+**With MCP** the assistant drives the running NoxEditor: looks at the scene as it is, changes it (each change an undo step), imports
+assets, saves, presses Play (also multiplayer), waits for something to happen, reads the Output Log, takes viewport screenshots,
+injects input, runs console commands, builds scripts and reads the compiler's errors.
 
 ## 3. Architecture
 
 ```
-Claude Code / Desktop --HTTP (JSON-RPC)--> McpServer thread (NoxEditor) --queue--> main thread: EditorLayer runs the tool between frames
-                                                   <---------------- result (JSON / text / PNG) ----------------
+MCP client --HTTP JSON-RPC--> McpServer thread --> tool registry + validation --> command queue --> main thread, between frames:
+(Claude Code)                 (NoxEditor/src/Mcp)  (schemas, permissions)          (operations)      EditorLayer -> scene / assets / console
+          <---------------------------------- result (JSON / text / PNG), or an operation id for long work ----------------------
 ```
 
-- **McpServer** (`NoxEditor/src/Mcp/`): an HTTP listener on 127.0.0.1 on its own thread (cpp-httplib, MIT, one header, vendored),
-  JSON with nlohmann/json (already vendored in tinygltf). It implements `initialize`, `ping`, `tools/list`, `tools/call`,
-  `resources/list`, `resources/read`, notifications, and the protocol's version negotiation.
-- **Main thread only**: the editor, ImGui, the scene and the asset manager are not thread-safe. A tool call is queued and run at the
-  start of `EditorLayer::OnUpdate` (between frames); the HTTP thread waits for its result (with a time-out). Tools that wait for the
-  game ("Play for 5 s", "wait until the log says X") hold their reply while frames keep running.
-- **Tool registry**: each tool = name, description, JSON schema of its arguments, a handler. `tools/list` is generated from it.
-- **Undo**: an MCP edit happens outside any ImGui interaction, so EditorHistory takes it as one step at the end of the frame; the
-  step is named "MCP: <tool>" (a name hook in `EditorHistory::FrameInfo`). Ctrl+Z undoes what the assistant did, like your own edits.
-- **Components without hand-written tools**: `SceneSerializer::EntityToNode` / `DeserializeEntityComponents` already turn any
-  entity's components to and from YAML. A YAML <-> JSON bridge gives `get_entity` / `set_component` every component the scene file
-  knows, current and future; script fields through their `[Expose]` metadata.
-- **Security**: off by default (Edit > Preferences > MCP server, with the port); listens on 127.0.0.1 only; a random token written
-  to `<Project>/.nox/mcp-token` must be sent as `Authorization: Bearer`; the `Origin` header is checked (the spec's DNS-rebinding
-  rule); every tool call is written to the Output Log ("MCP: set_component Player.Transform"); destructive tools (delete assets or
-  files, overwrite scenes) ask in the editor unless allowed in the preferences. Text inside scenes, logs or assets is data for the
-  model, never instructions.
+- **McpServer** (`NoxEditor/src/Mcp/`): HTTP on 127.0.0.1 on its own thread (cpp-httplib, MIT, one header), JSON with nlohmann/json
+  (already vendored in tinygltf). It parses, authenticates and validates; it never touches the scene.
+- **Main thread only**: tool handlers run at the start of `EditorLayer::OnUpdate`, between frames. The HTTP thread waits for short
+  results; the main thread never waits for anything (long work becomes an operation, §6).
+- **One command layer for everything**: the engine console's registry (§4) holds the editor's and the engine's commands with typed
+  arguments. An MCP tool is either a thin adapter over a registered command or a read query; the console input line, the dedicated
+  server's terminal, C# scripts, tests and MCP all run the same commands. Nothing scene-changing lives in an HTTP handler.
+- **Undo**: EditorHistory snapshots the scene each frame, so every mutation made between frames is one undo step; MCP names it
+  ("MCP: create_entity Cube"). Commands therefore need no hand-written Undo() each -- that is the snapshot design's advantage.
+- **Public ids**: entities by their UUID (`IDComponent`), assets by their AssetHandle; never `entt::entity` (internal, reused).
 
-## 4. Phases and tools
+## 4. The console (built before MCP: backlog C1)
+
+Unreal's console: the `Cmd` line at the bottom of the Output Log and the `~` console in the game. Not an operating-system shell (Unreal
+has none either; Claude Code or your own terminal does that, outside the engine's permissions).
+
+- **Registry in NoxCore** (so NoxRuntime and the dedicated server have it too): commands (`name`, help text, typed arguments,
+  handler, where it may run: editor / game / server) and console variables (CVars: `r.ShadowQuality 2`, `net.DebugTrace 1`) with a
+  type, default, range, help and change callbacks; `help`, `find <text>`, values printed when typed without an argument; values set
+  from the command line (`-ExecCmds="net.DebugTrace 1"`) and an optional `Console.ini` per project.
+- **Front ends**: an input line under the Output Log (history with Up / Down, Tab completion of names and values, the command and its
+  output in the log); the `~` console in NoxRuntime development builds; the dedicated server's terminal (its commands -- status,
+  clients, kick, netemu, lagcomp, netdebug, quit -- move onto the registry: one implementation).
+- **C#**: `[ConsoleCommand("demo.spawnbots", Help = "...")]` on a static method and `ConsoleVariable<T>` fields, so game code adds
+  commands like Unreal's `Exec` functions.
+- **MCP**: `list_commands` and `run_command` expose every registered command at once -- the console is how MCP scales without a tool
+  per feature, and each command is also usable by you by hand.
+
+## 5. Component editing: validated, partial, by schema
+
+`SceneSerializer::EntityToNode` / `DeserializeEntityComponents` give every component as YAML, which becomes JSON. Writes are not
+deserialized blindly into live components:
+
+- **Partial updates**: a JSON-Patch subset (`replace`, `add`, `remove` on paths such as `/Transform/Translation`) applied to the
+  component's current data; omitted fields keep their values.
+- **Schema**: `get_component_schema` describes each component's fields (type, default, range, read-only / runtime-only, asset
+  type for references). Generated from a small field table per component (the Properties panel's ranges and asset kinds), with
+  the serializer's output as the check that every serialized field is described (a test fails when a field has no schema).
+- **Validation before writing**: unknown fields and wrong types refused, ranges clamped or refused, asset references checked to
+  exist and be of the right type, read-only and runtime-only fields refused; the patched component goes through a scratch entity
+  first and only replaces the live one when it deserializes and re-serializes to what was asked.
+- **Batches are atomic**: `apply_edits` takes several edits; if one fails, the scene goes back to the snapshot taken before the
+  batch (EditorHistory's), and the error names the failed edit and why.
+
+## 6. Operations: short calls answer at once, long work gets an id
+
+- Most tools (reads, single edits) answer in the same request within a frame or two.
+- Long work -- Play for N seconds, `wait_for`, building scripts, importing, packaging, screenshots that need a GPU read-back --
+  returns an **operation id** at once (`Queued -> Executing -> Completed / Failed`, `Queued -> Cancelled`), with
+  `get_operation_status` / `cancel_operation`; results are kept for a while after they finish.
+- A client may pass its own id; resending the same id returns the same operation instead of running it twice (idempotent retry).
+- Limits: a bounded queue (refusal when full), a time-out per operation, operations of a client that disconnected cancelled.
+- Progress notifications over a stream come later, once plain request / response is solid.
+
+## 7. Protocol
+
+- **Revision**: MCP 2025-06-18 (Streamable HTTP, `MCP-Protocol-Version` header, no JSON-RPC batching). `initialize` negotiates:
+  the client's requested revision when supported, else the server's; newer revisions are added deliberately, one at a time.
+- Lifecycle: `initialize` -> `notifications/initialized` -> requests; `ping`; `notifications/cancelled`; JSON-RPC errors with the
+  standard codes plus tool errors as `isError` results (the model reads them and corrects itself).
+- Responses as plain `application/json` first; SSE streams and the stdio bridge after that works.
+
+## 8. Security
+
+- Off by default (Preferences > MCP server: on / off, port, permissions); bound to 127.0.0.1 only.
+- **Token**: 32 random bytes from the operating system's cryptographic generator, in `<Project>/.nox/mcp-token` (file readable by
+  the user only where the OS allows; `.nox/` is in `.gitignore`); never written to a log or an error; a **Rotate token** button.
+- **Headers**: `Host` must be `127.0.0.1:<port>` or `localhost:<port>`; an `Origin` header, when present, must be one allowed
+  (non-browser clients send none -- accepted); both against DNS rebinding.
+- **Permissions**: Read, Write (scene and asset edits), Execute (Play, builds, packaging, console commands that run things); each
+  tool and command declares which it needs; the preferences grant them. Deleting assets or files, overwriting scenes and packaging
+  ask in the editor unless allowed.
+- Every call is written to the Output Log ("MCP: set_component Player /Transform/Translation"), so you see what was done.
+- Content from the project -- entity names, logs, asset metadata, scene text -- is data, never instructions, for the agent.
+
+## 9. Tools by phase
 
 | Phase | What | Tools / resources |
 |---|---|---|
-| MCP0 | Server, handshake, preferences toggle, token, status in the status bar | `editor_status` (project, scene, mode, selection, fps) |
-| MCP1 | Read the editor | `get_hierarchy` (paged, filtered: 400 boxes must not flood the model), `get_entity` (components as JSON), `find_entities` (name / component / script / level), `list_assets` / `search_assets`, `get_asset` (type, path, dependencies), `read_log` (since a sequence, by level / text: the `LogBuffer`), `get_selection`, `get_stats` (frame time, draw / memory stats, net status); resources: the open scene's YAML, Nox.log, the docs |
-| MCP2 | Edit (undoable) | `create_entity`, `delete_entities`, `duplicate`, `set_parent`, `set_component` (merge a JSON patch), `add_component` / `remove_component`, `set_script_field`, `instantiate_prefab`, `select`, `open_scene`, `save_scene`, `undo` / `redo`, `create_material` / `set_material`, `import_asset` (glTF, textures, sounds with their import settings), node graphs as JSON (`get_graph` / `set_graph`: animation and audio graphs' nodes, pins, links) |
-| MCP3 | Play and look | `play` / `stop` / `simulate` (standalone, listen server, client with N players, network debug log), `wait_for` (seconds, a log line matching text, an entity condition), `screenshot` (the viewport read back to a PNG image result; a camera to shoot from, or focus an entity), `inject_input` (keys / mouse held for a time in Play: scripted gameplay checks), `set_camera` |
-| MCP4 | Code and build | `build_scripts` (the ScriptBuilder's errors as structured file / line / message), `reload_scripts`, `run_net_tests`, `package_game` / `package_server` |
-| MCP5 | NoxRuntime | the same server in NoxRuntime (`--mcp`): status, the server console's commands, screenshots and input in a client -- automated multiplayer tests without the editor |
+| MCP0 | Server, `initialize` / version negotiation, token, Host / Origin checks, preferences, status bar indicator; offline protocol tests with a fake registry | `get_editor_status` |
+| MCP1 | Read, and see | `get_hierarchy` (paged, filtered), `get_entity` (components as JSON), `find_entities`, `get_entity_bounds`, `get_selection`, `list_assets` / `search_assets` (paged), `get_asset`, `get_asset_dependencies`, `read_log` (since a sequence, by level / text: the LogBuffer), `get_stats`, `get_viewport_camera`, `get_component_schema` / `get_scene_schema`, `get_project_documentation`, **`screenshot`** (moved up: it is read-only and the read-back exists), `list_commands`; resources: the open scene's YAML, Nox.log, the docs |
+| MCP2 | Edit (validated, undoable) | `create_entity`, `delete_entities`, `rename`, `duplicate`, `set_parent`, `patch_component`, `add_component` / `remove_component`, `set_script_field`, `instantiate_prefab`, `apply_edits` (atomic batch), `select`, `open_scene`, `save_scene`, `undo` / `redo`, `run_command`, `get_operation_status` / `cancel_operation` |
+| MCP3 | Play and verify | `play` / `stop` / `simulate` (standalone, listen server, client with N players, network debug log), `wait_for` (seconds, a log line, an entity condition), `inject_input`, `set_camera` / `focus_entity` |
+| MCP4 | Wider workflows | `build_scripts` (errors as file / line / message), `reload_scripts`, `run_tests`, materials, prefabs, graphs as JSON (`get_graph` / `set_graph`), `import_asset`, `package_game` / `package_server` |
+| MCP5 | NoxRuntime | the same server in NoxRuntime (`--mcp`), its own permissions and lifecycle: automated multiplayer tests without the editor |
 
-## 5. What has to change in the engine
+**Acceptance test (end of MCP3)**: Claude Code, connected to a running NoxEditor, makes a scene with a camera, a cube with a new
+material and a directional light; reads the hierarchy and the values back; presses Play; takes a screenshot; reads the screenshot
+and the log; fixes something wrong it saw or that was reported. Reliable -> the architecture works.
 
-1. **Main-thread command queue** in EditorLayer (tool calls run between frames; replies through futures).
-2. **Dependencies**: cpp-httplib (new, one header); nlohmann/json (reuse tinygltf's copy).
-3. **YAML <-> JSON** for components (on top of SceneSerializer).
-4. **Viewport screenshots as tool results**: the pieces exist -- `Renderer::ReadbackTexture` and the project screenshot
-   (`EditorLayer.cpp`, viewport -> PNG with stb_image_write); the tool needs the PNG in memory (base64 image content) instead of a
-   file, and a callback that completes the waiting tool call a frame or two later.
-5. **Input injection**: `Input::IsKeyDown` / mouse state consult an injected state too (Play only), so scripts see injected keys.
-6. **EditorHistory step names** for edits from outside the UI.
-7. **ScriptBuilder diagnostics** as data (file, line, column, message), not only log lines.
-8. **LogBuffer** -- done (2026-11-13): the recent log lines in memory with sequence numbers, readable from any thread.
+## 10. What has to change in the engine
 
-## 6. What it cannot do (or not well)
+1. The **console registry** and its front ends (§4) -- first, useful without MCP.
+2. **Command queue and operations** in EditorLayer (§6).
+3. **Dependencies**: cpp-httplib; nlohmann/json (tinygltf's copy).
+4. **Component schemas** (field tables) and the YAML <-> JSON bridge with patching and validation (§5).
+5. **Screenshots in memory**: `Renderer::ReadbackTexture` and the project screenshot code exist; the PNG goes into the tool result
+   (base64 image) instead of a file, completing the operation a frame or two later.
+6. **Input injection** in `Input` (Play only).
+7. **EditorHistory step names** for edits from outside the UI, and its snapshot for batch rollback.
+8. **ScriptBuilder diagnostics** as data.
+9. **LogBuffer** -- done (2026-11-13).
 
-- **Not real time**: every call is a round trip (a tenth of a second to seconds). It can run scripted input sequences and check the
-  result; it cannot play reactively like a person (aiming, dodging).
-- **Vision is snapshots**: screenshots, not video. It can tell "the character is missing / the lighting is black / the UI overlaps",
-  not subtle motion problems (flicker, ghosting, a T-pose pop lasting one frame) -- those still need you, or frame sequences and
-  numbers (the profiler, the network debug log).
-- **Engine C++ changes** are file edits + a rebuild + an editor restart: done the way it is today, not through MCP (the MCP
-  connection drops while the editor restarts).
-- **Only what a tool exposes**: ImGui-only interactions (dragging the gizmo, laying out a node graph canvas by hand) are out of
-  reach until a tool covers their data; the generic component JSON covers most of the scene.
-- **No binary authoring**: it cannot paint textures, model meshes or record sounds; it can import files it is given and make
-  procedural content through scripts.
-- **GPU debugging / deep profiling** only through exported data (profiler captures, stats), not RenderDoc-style inspection.
-- **Big scenes**: answers must be paged and filtered to fit the model's context.
-- **Where the assistant runs**: a Claude Code session on your machine (or one attached to it) reaches `127.0.0.1`; a cloud session
-  like this repository's cannot see your editor unless connected to your computer.
-- **Trust**: whatever a tool allows, the model can do -- the toggle, the token, the confirmations and the Output Log trail are there
-  for that.
+## 11. Does it scale?
 
-## 7. Testing
+- **Features**: yes, if it grows through the console registry and the generic component access: a new engine feature adds a command
+  or a component field, not a new MCP tool. The tool list stays around 30-40 entries, which keeps `tools/list` small in the model's
+  context (each tool's description costs tokens in every conversation).
+- **Scene and project size**: yes, with pagination, filters, stable ids and summaries by default (400 boxes are "400 x NetBox",
+  not 400 JSON objects, unless asked).
+- **Throughput**: one main-thread queue, a few commands per frame. Fine for one agent and for you working beside it; two agents
+  at once serialize (by design: the scene has one writer). `apply_edits` batches avoid a round trip per edit.
+- **Several editors**: one server per editor instance, each on its own port, written to `<Project>/.nox/mcp-port` for discovery.
+- **Limits that do not scale by design**: vision (one screenshot per call), real-time play, and anything without a command or a
+  component field.
 
-- **Offline, in this container**: the protocol layer (McpServer with a fake tool registry) against JSON-RPC requests -- initialize,
-  version negotiation, tools/list schemas, errors, token / Origin refusal, time-outs -- like NoxNetTest.
-- **On your machine**: NoxEditor with the MCP server on, Claude Code connected with `claude mcp add ...`; each phase ships a test
-  guide naming the program for every step (NoxEditor, Claude Code).
+## 12. On the review's points
+
+Accepted: shared command layer (as the console), schema-aware partial edits, UUIDs, operation ids with idempotent retry, atomic
+batches, explicit protocol revision and lifecycle, Host / Origin / token / permission rules, the extra read tools, screenshots early,
+the acceptance test, the agent kept separate from the tools.
+
+Changed:
+- **Folders**: `NoxEditor/src/Mcp/` (transport, tools) and the registry in `NoxCore/src/NoxCore/Console/` instead of new top-level
+  `NoxAI/` / `NoxAgent/` trees: the commands belong to the engine, the MCP adapter to the editor; an agent project gets its own
+  folder if it is ever started.
+- **Undo**: no per-command Undo() -- EditorHistory's snapshots already make every between-frames mutation undoable and give the
+  rollback for batches.
+- **Operation ids only for long work**: reads and single edits answer directly (an id for every call doubles the round trips).
+
+## 13. What it cannot do (or not well)
+
+- **Not real time**: a call takes a tenth of a second to seconds; scripted input sequences yes, reactive play no.
+- **Vision is snapshots**, not video: it can tell "missing / black / overlapping", not flicker, ghosting or a one-frame pop.
+- **Engine C++ changes** are file edits, a rebuild and an editor restart (the connection drops while the editor restarts).
+- **Only what a command, tool or component field exposes**; ImGui-only interactions (gizmo dragging, canvas layout) are out of reach.
+- **No binary authoring** (textures, meshes, sounds); it imports files it is given and makes procedural content through scripts.
+- **GPU debugging / deep profiling** only through exported data.
+- **Where the assistant runs**: a Claude Code session on your machine (or attached to it) reaches `127.0.0.1`; a cloud session does
+  not unless connected to your computer.
+
+## 14. Testing
+
+- **Offline, in this container**: the console registry (parsing, CVars, completion), the protocol layer (initialize, negotiation,
+  tools/list schemas, errors, token / Host / Origin refusals, operations, idempotent retry, time-outs) and the component patch /
+  validation against scenes, like NoxNetTest.
+- **On your machine**: each phase ships a test guide naming the program for every step (NoxEditor, NoxRuntime, Claude Code).
