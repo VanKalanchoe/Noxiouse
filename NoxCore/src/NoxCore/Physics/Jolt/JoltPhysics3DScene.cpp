@@ -968,17 +968,25 @@ namespace Nox {
     void JoltPhysics3DScene::SampleCharacterGrounds()
     {
         m_GroundSamples.clear();
+        m_CharacterStepsSinceSample = 0;
         if (!m_PhysicsSystem)
             return;
         const JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
+        auto sample = [&](JPH::BodyID body)
+        {
+            if (body.IsInvalid() || m_GroundSamples.contains(body.GetIndexAndSequenceNumber()) || !bodyInterface.IsAdded(body) ||
+                bodyInterface.GetMotionType(body) == JPH::EMotionType::Static)
+                return;
+            m_GroundSamples[body.GetIndexAndSequenceNumber()] = { bodyInterface.GetLinearVelocity(body), bodyInterface.GetAngularVelocity(body),
+                                                                  bodyInterface.GetCenterOfMassPosition(body) };
+        };
         for (const auto& [_, state] : m_EntityToCharacterMap)
         {
-            const JPH::BodyID ground = state.Character ? state.Character->GetGroundBodyID() : JPH::BodyID();
-            if (ground.IsInvalid() || m_GroundSamples.contains(ground.GetIndexAndSequenceNumber()) ||
-                !bodyInterface.IsAdded(ground) || bodyInterface.GetMotionType(ground) == JPH::EMotionType::Static)
+            if (!state.Character)
                 continue;
-            m_GroundSamples[ground.GetIndexAndSequenceNumber()] = { bodyInterface.GetLinearVelocity(ground), bodyInterface.GetAngularVelocity(ground),
-                                                                    bodyInterface.GetCenterOfMassPosition(ground) };
+            sample(state.Character->GetGroundBodyID());
+            for (const JPH::CharacterContact& contact : state.Character->GetActiveContacts())
+                sample(contact.mBodyB);
         }
     }
 
@@ -990,7 +998,10 @@ namespace Nox {
         auto sample = m_GroundSamples.find(ground.GetIndexAndSequenceNumber());
         if (sample == m_GroundSamples.end())
         {
-            // A ground the tick's sampling did not see (stepped onto this tick, or a replay between ticks): sampled now, once.
+            // A ground the tick's sampling did not see: read now only while no character has stepped since -- after a step it may hold
+            // that step's push (zero instead: the platform's motion is picked up by the next tick's sampling).
+            if (m_CharacterStepsSinceSample > 0)
+                return JPH::Vec3::sZero();
             const JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
             if (!bodyInterface.IsAdded(ground) || bodyInterface.GetMotionType(ground) == JPH::EMotionType::Static)
                 return JPH::Vec3::sZero();
@@ -1206,7 +1217,7 @@ namespace Nox {
             // Its ground's velocity as the last physics update left it (not Jolt's, which holds this character's own push on a light body
             // when it was stepped twice before an update -- CharacterGroundVelocity).
             const JPH::Vec3 groundVelocity = CharacterGroundVelocity(*character);
-            state.GroundVelocity = groundVelocity;
+            state.GroundVelocity = JPH::Vec3::sZero(); // (set below when this step carries it)
             const JPH::Vec3 currentVelocity = character->GetLinearVelocity();
             const bool onGround = character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
             const bool movingTowardsGround = (currentVelocity.GetY() - groundVelocity.GetY()) <= 0.1f;
@@ -1229,6 +1240,7 @@ namespace Nox {
             {
                 velocity = groundVelocity;
                 walking = true;
+                state.GroundVelocity = groundVelocity; // (carried: its own velocity is what it moves besides)
             }
             else
             {
@@ -1279,6 +1291,7 @@ namespace Nox {
                 m_PhysicsSystem->GetDefaultLayerFilter(PhysicsLayers::CHARACTER),
                 {}, {}, *m_TempAllocator);
             state.Current = ToWorld(JoltUtils::ToGLMPosition(character->GetPosition()));
+            ++m_CharacterStepsSinceSample;
 
             // Grounded the way Unreal's walking mode decides it: on walkable ground, or a walkable floor within step height under the
             // capsule while not rising. A capsule resting on a stair's edge counts as steep ground: taken alone, going down a stair
@@ -1336,6 +1349,9 @@ namespace Nox {
         debug.OwnVelocity = ToWorld(JoltUtils::ToGLM(OwnVelocity(state)));
         debug.Velocity = ToWorld(JoltUtils::ToGLM(state.Character->GetLinearVelocity()));
         debug.GroundVelocity = ToWorld(JoltUtils::ToGLM(state.GroundVelocity));
+        debug.WalkVelocity = ToWorld(state.Horizontal);
+        if (entity.HasComponent<CharacterController3DComponent>())
+            debug.WalkVelocity += entity.GetComponent<CharacterController3DComponent>().RootMotionVelocity * glm::vec3(1.0f, 0.0f, 1.0f);
         debug.Supported = state.Character->IsSupported();
         debug.Grounded = state.Grounded;
         debug.GroundEntity = UINT32_MAX;

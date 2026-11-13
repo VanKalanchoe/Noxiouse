@@ -171,7 +171,9 @@ namespace Nox
             bool ExternallyStepped = false;       // (networking) stepped by StepCharacter only
             glm::dvec3 VisualOffset{ 0.0 };       // (networking) a correction's offset, drawn and eased away
             float PreviousStepOffset = 0.0f;
-            JPH::Vec3 GroundVelocity = JPH::Vec3::sZero(); // (native) its ground's, as its last step used it (CharacterGroundVelocity)
+            // (native) the ground's velocity its last step carried it with (walking on it); zero when that step did not (in the air,
+            // landing, moving away from it) -- what Velocity takes off to be its own
+            JPH::Vec3 GroundVelocity = JPH::Vec3::sZero();
         };
         std::unordered_map<uint32_t, CharacterState> m_EntityToCharacterMap;
 
@@ -186,9 +188,14 @@ namespace Nox
             JPH::Vec3 Angular = JPH::Vec3::sZero();
             JPH::RVec3 CenterOfMass = JPH::RVec3::sZero();
         };
+        // Each character's ground and every body it touches (its active contacts: the box under it while it is a hair above it, a
+        // step it walks onto), so a body it lands on within the tick is known as it was before it pushed it.
         std::unordered_map<uint32_t, GroundSample> m_GroundSamples; // by body id
+        uint32_t m_CharacterStepsSinceSample = 0;
         void SampleCharacterGrounds();
-        // The velocity of the point a character stands on (its ground body's sample; native units). Zero on static ground or none.
+        // The velocity of the point a character stands on (its ground body's sample; native units). Zero on static ground or none, and
+        // for a body the tick's sampling did not see once a character has stepped this tick (it may hold that step's push: a
+        // character landing on a 1 kg box read 12 m/s down and 3 m/s sideways, its walk animation played standing still).
         JPH::Vec3 CharacterGroundVelocity(const JPH::CharacterVirtual& character);
 
         // A moving body and its pose after the last two fixed steps: drawn interpolated between them, like a character, so it

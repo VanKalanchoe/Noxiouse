@@ -120,9 +120,10 @@ namespace Nox::Net
         void Record(const InputFrame& input, const glm::dvec3& positionAfter);
         // The server applied input `sequence` and the character ended at `serverPosition`: forgets what is older, and returns the
         // inputs after it to replay when the prediction for it was off by more than `tolerance` (nullopt: it was right, or that input
-        // is no longer known). `error`: how far the prediction was off (when that input is known).
+        // is no longer known). `error`: how far the prediction was off, the server's position minus the predicted one (when that
+        // input is known).
         std::optional<std::vector<InputFrame>> Reconcile(uint32_t sequence, const glm::dvec3& serverPosition, double tolerance,
-                                                         double* error = nullptr);
+                                                         glm::dvec3* error = nullptr);
         // The replay's result for an input (the corrected prediction the next comparison is made with).
         void Rewrite(uint32_t sequence, const glm::dvec3& positionAfter);
         // The inputs not yet acknowledged, newest last (what the next Input message repeats).

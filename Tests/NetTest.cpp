@@ -509,6 +509,7 @@ struct PredictionRun
     size_t Acknowledged = 0;
     double WorstError = 0.0;  // between the client's predicted and the server's position for the same input, before correcting
     double FinalGap = 0.0;    // client vs server once both are at rest
+    glm::dvec3 PushError{ 0.0 }; // the correction of the push (server minus predicted)
 };
 
 static PredictionRun RunPrediction(int latencyTicks, int jitterTicks, float loss, int pushAtTick, uint32_t seed)
@@ -583,12 +584,14 @@ static PredictionRun RunPrediction(int latencyTicks, int jitterTicks, float loss
                 continue;
             newestSnapshot = acknowledged;
             ++run.Acknowledged;
-            double error = 0.0;
+            glm::dvec3 error(0.0);
             std::optional<std::vector<InputFrame>> replay = history.Reconcile(acknowledged, position, 0.02, &error);
             if (!replay)
                 continue;
             ++run.Corrections;
-            run.WorstError = std::max(run.WorstError, error); // (what the debug trace reports for a correction)
+            run.WorstError = std::max(run.WorstError, glm::length(error)); // (what the debug trace reports for a correction)
+            if (glm::length(error) > 50.0)
+                run.PushError = error;
             client = position;
             for (const InputFrame& frame : *replay)
             {
@@ -619,7 +622,9 @@ static void TestPrediction()
         PredictionRun run = RunPrediction(6, 0, 0.0f, 600, 3); // the server pushes the character once
         CHECK(run.Corrections >= 1 && run.Corrections <= 2 && run.FinalGap < 0.02,
               "a push only the server saw: {} correction(s), then the client matches the server (final gap {:.3f})", run.Corrections, run.FinalGap);
-        CHECK(std::abs(run.WorstError - 100.0) < 0.05, "the correction reports how far the prediction was off: {:.2f} (the push: 100)", run.WorstError);
+        CHECK(std::abs(run.WorstError - 100.0) < 0.05 && std::abs(run.PushError.x - 100.0) < 0.05 && std::abs(run.PushError.y) < 0.05,
+              "the correction reports how far and which way the prediction was off: ({:.2f} {:.2f} {:.2f}) (the push: +100 x)", run.PushError.x,
+              run.PushError.y, run.PushError.z);
     }
 
     // Input messages: garbage and NaN are refused.

@@ -136,8 +136,8 @@ namespace Nox::Net
 
         // The network debug trace (--net-debug; the server console's `netdebug on|off`), in the log: what explains a character's
         // movement and animation on each machine. Server: a client's inputs coming unevenly (ticks that applied 0 or several, a
-        // stall stepped without inputs, the burst after it), and a character standing still by its inputs that has a speed of its
-        // own (with its ground). Both: the animation parameters starting and stopping (a float leaving or coming back to about 0, a
+        // stall stepped without inputs, the burst after it), and a character moving faster than it walks (a speed of its own its
+        // inputs do not explain: with its ground). Both: the animation parameters starting and stopping (a float leaving or coming back to about 0, a
         // bool changing) as the server sends them and as a client applies them. Client: each correction of its own character. Both: a
         // frame that took more than 0.1 s (a frozen or dragged window).
         void SetDebugTrace(bool enabled);
@@ -202,7 +202,7 @@ namespace Nox::Net
         double InterpolationDelayTicks() const { return 2.0 * m_SnapshotSpacingTicks + 1.0; }
         // The debug trace (SetDebugTrace)
         std::string DebugName(Entity entity) const;
-        void TraceCharacterTick(Entity entity, NetId id, size_t inputs, bool stallStep, bool standing, double now);
+        void TraceCharacterTick(Entity entity, NetId id, size_t inputs, bool stallStep, double now);
         void TraceAnimationParameter(Entity entity, NetId id, const std::string& name, float value, bool isBool);
         void FlushDebugTrace(double now);
 
@@ -282,7 +282,7 @@ namespace Nox::Net
             uint32_t StallSteps = 0;                           // the last second's steps without an input
             bool Stalled = false;
             double LastInputAt = 0.0;
-            uint32_t Lines = 0; // "moving while standing" lines the last second (at most a few)
+            uint32_t Lines = 0; // "faster than it walks" lines the last second (at most a few)
         };
         bool m_DebugTrace = false;
         double m_DebugSecondStart = 0.0;

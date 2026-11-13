@@ -970,7 +970,7 @@ namespace Nox::Net
         m_DebugAnimation.clear();
         m_DebugSecondStart = NetNow();
         NOX_CORE_INFO("Net debug: trace {} ({})", enabled ? "on" : "off",
-                      m_Mode == Mode::Server ? "inputs, stalls, standing characters that move, animation sent"
+                      m_Mode == Mode::Server ? "inputs, stalls, characters moving faster than they walk, animation sent"
                                              : "corrections, animation applied, long frames");
     }
 
@@ -993,7 +993,7 @@ namespace Nox::Net
         return name;
     }
 
-    void NetReplication::TraceCharacterTick(Entity entity, NetId id, size_t inputs, bool stallStep, bool standing, double now)
+    void NetReplication::TraceCharacterTick(Entity entity, NetId id, size_t inputs, bool stallStep, double now)
     {
         DebugCharacter& debug = m_DebugCharacters[id];
         debug.TicksByInputs[std::min(inputs, MaxInputsPerTick)]++;
@@ -1012,16 +1012,18 @@ namespace Nox::Net
                               debug.LastInputAt > 0.0 ? now - debug.LastInputAt : 0.0);
             debug.Stalled = true;
         }
-        if (!standing || (inputs == 0 && !stallStep))
-            return; // (moved by its inputs, or not stepped this tick)
+        if (inputs == 0 && !stallStep)
+            return; // (not stepped this tick)
 
-        // Standing still by its inputs: any speed of its own is what the animation's Speed would show as walking.
+        // Faster than it walks: a horizontal speed of its own its inputs do not explain (they explain braking, and less than its walk
+        // against a wall) -- what the animation's Speed shows as walking or running. Not in the air (a jump keeps its momentum).
         IPhysics3DScene* physics = m_Scene->GetPhysics3DScene();
         IPhysics3DScene::CharacterDebugState state;
-        if (!physics || !physics->GetCharacterDebugState(entity, state))
+        if (!physics || !physics->GetCharacterDebugState(entity, state) || !state.Grounded)
             return;
         const float own = WorldUnits::ToMeters(glm::length(glm::vec2(state.OwnVelocity.x, state.OwnVelocity.z)));
-        if (own < 0.3f || debug.Lines >= 5)
+        const float walk = WorldUnits::ToMeters(glm::length(glm::vec2(state.WalkVelocity.x, state.WalkVelocity.z)));
+        if (own < walk + 0.3f || debug.Lines >= 5)
             return;
         ++debug.Lines;
         std::string ground = "nothing";
@@ -1034,9 +1036,9 @@ namespace Nox::Net
         }
         const auto meters = [](const glm::vec3& v) { return glm::vec3(WorldUnits::ToMeters(v.x), WorldUnits::ToMeters(v.y), WorldUnits::ToMeters(v.z)); };
         const glm::vec3 velocity = meters(state.Velocity), groundVelocity = meters(state.GroundVelocity);
-        NOX_CORE_WARN("Net debug: {} stands still by its inputs but moves {:.2f} m/s of its own (tick {}, {} input(s){}): velocity ({:.2f} {:.2f} {:.2f}), "
-                      "ground velocity ({:.2f} {:.2f} {:.2f}) on {}, {}, {}",
-                      DebugName(entity), own, m_Scene->GetTick(), inputs, stallStep ? ", a step without input" : "", velocity.x, velocity.y, velocity.z,
+        NOX_CORE_WARN("Net debug: {} moves {:.2f} m/s of its own but walks {:.2f} m/s (tick {}, {} input(s){}): velocity ({:.2f} {:.2f} {:.2f}), "
+                      "ground velocity carried ({:.2f} {:.2f} {:.2f}) on {}, {}, {}",
+                      DebugName(entity), own, walk, m_Scene->GetTick(), inputs, stallStep ? ", a step without input" : "", velocity.x, velocity.y, velocity.z,
                       groundVelocity.x, groundVelocity.y, groundVelocity.z, ground, state.Grounded ? "grounded" : "not grounded",
                       state.Supported ? "supported" : "not supported");
     }
@@ -1376,11 +1378,7 @@ namespace Nox::Net
                     stallStep = true;
                 }
                 if (m_DebugTrace)
-                {
-                    // Standing by its inputs: the last step's input moves and jumps not at all.
-                    const bool standing = stallStep || (!inputs.empty() && glm::length(inputs.back().Move) < 1e-3f && inputs.back().Jump <= 0.0f);
-                    TraceCharacterTick(entity, it->first, inputs.size(), stallStep, standing, now);
-                }
+                    TraceCharacterTick(entity, it->first, inputs.size(), stallStep, now);
                 ++it;
             }
             return;
@@ -1488,16 +1486,36 @@ namespace Nox::Net
         // Where the server's character was after that input against where this client predicted it: off by more than 2 cm, the
         // server's state is taken and the inputs since replayed (Unreal's ClientAdjustPosition + replaying the saved moves).
         const double tolerance = static_cast<double>(WorldUnits::FromMeters(0.02f));
-        double error = 0.0;
+        glm::dvec3 error(0.0);
         std::optional<std::vector<InputFrame>> replay = predicted.History.Reconcile(lastInput, server.Position, tolerance, &error);
         if (!replay)
             return;
         ++m_Corrections;
         if (m_DebugTrace)
-            NOX_CORE_INFO("Net debug: {} corrected by the server: off by {:.1f} cm at input {}, {} inputs replayed (server: speed {:.2f} m/s, {})",
-                          DebugName(entity), WorldUnits::ToMeters(static_cast<float>(error)) * 100.0f, lastInput, replay->size(),
+        {
+            // Which way it was off (cm, server minus here: +y means the server's is higher), and what this client's character stood
+            // on before the correction -- the server's ground is in its own log.
+            std::string here = "unknown";
+            IPhysics3DScene::CharacterDebugState local;
+            if (physics->GetCharacterDebugState(entity, local))
+            {
+                std::string ground = "nothing";
+                if (local.GroundEntity != UINT32_MAX)
+                {
+                    Entity groundEntity(static_cast<entt::entity>(local.GroundEntity), m_Scene);
+                    ground = groundEntity.IsValid() && groundEntity.HasComponent<TagComponent>() ? groundEntity.GetComponent<TagComponent>().Tag
+                                                                                               : std::string("an entity");
+                }
+                here = std::format("on {}, {}, {}, vertical speed {:.2f} m/s", ground, local.Grounded ? "grounded" : "not grounded",
+                                   local.Supported ? "supported" : "not supported", WorldUnits::ToMeters(local.Velocity.y));
+            }
+            const glm::vec3 cm = glm::vec3(error) * (WorldUnits::ToMeters(1.0f) * 100.0f); // (world units to cm)
+            NOX_CORE_INFO("Net debug: {} corrected by the server: off by {:.1f} cm ({:.1f} {:.1f} {:.1f}) at input {}, {} inputs replayed (server: speed "
+                          "{:.2f} m/s, {}; here: {})",
+                          DebugName(entity), glm::length(cm), cm.x, cm.y, cm.z, lastInput, replay->size(),
                           WorldUnits::ToMeters(glm::length(glm::vec2(server.Horizontal.x, server.Horizontal.z))),
-                          server.Grounded ? "grounded" : "in the air");
+                          server.Grounded ? "grounded" : "in the air", here);
+        }
         auto& controller = entity.GetComponent<CharacterController3DComponent>();
         const glm::vec3 move = controller.MoveVelocity;
         const float jump = controller.JumpSpeed;
