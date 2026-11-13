@@ -652,21 +652,41 @@ namespace Nox::Net
             return;
         if (m_Mode == Mode::Server)
         {
-            // Each client-owned character does what its client asked for this tick (whatever a script on the server set).
+            // Each client-owned character is moved by its client's inputs as they arrive: one step per input, each applied once (Unreal's
+            // server moves), whatever a script on the server set. Without inputs for half a second (a stalled client) it is stepped with
+            // none, so it does not hang in the air.
+            IPhysics3DScene* physics = m_Scene->GetPhysics3DScene();
+            const double now = NetNow();
             for (auto it = m_InputQueues.begin(); it != m_InputQueues.end();)
             {
                 Entity entity = m_Scene->GetEntityByUUID(UUID(it->first));
-                if (!entity || !entity.HasComponent<CharacterController3DComponent>() || GetOwner(UUID(it->first)) != it->second.Client)
+                if (!entity || !entity.HasComponent<CharacterController3DComponent>() || GetOwner(UUID(it->first)) != it->second.Client || !physics)
                 {
+                    if (entity && physics)
+                        physics->SetCharacterExternallyStepped(entity, false);
                     it = m_InputQueues.erase(it); // gone, or handed to someone else
                     continue;
                 }
-                const InputFrame input = it->second.Queue.Next();
+                physics->SetCharacterExternallyStepped(entity, true);
                 auto& controller = entity.GetComponent<CharacterController3DComponent>();
-                controller.MoveVelocity = input.Move;
-                controller.JumpSpeed = input.Jump;
-                entity.GetComponent<TransformComponent>().Rotation = glm::eulerAngles(input.Rotation);
-                entity.MarkTransformDirty();
+                const std::vector<InputFrame> inputs = it->second.Queue.Take(MaxInputsPerTick);
+                if (!inputs.empty())
+                    it->second.LastInputAt = now;
+                for (const InputFrame& input : inputs)
+                {
+                    controller.MoveVelocity = input.Move;
+                    controller.JumpSpeed = input.Jump;
+                    entity.GetComponent<TransformComponent>().Rotation = glm::eulerAngles(input.Rotation);
+                    physics->StepCharacter(entity, physics->GetFixedDeltaTime());
+                }
+                if (!inputs.empty())
+                    entity.MarkTransformDirty();
+                else if (now - it->second.LastInputAt > 0.5)
+                {
+                    controller.MoveVelocity = glm::vec3(0.0f);
+                    controller.JumpSpeed = 0.0f;
+                    physics->StepCharacter(entity, physics->GetFixedDeltaTime());
+                }
                 ++it;
             }
             return;
@@ -732,7 +752,7 @@ namespace Nox::Net
             return;
         ServerInputs& inputs = m_InputQueues[id];
         if (inputs.Client != sender)
-            inputs = ServerInputs{ sender, InputQueue{} };
+            inputs = ServerInputs{ sender, InputQueue{}, NetNow() };
         inputs.Queue.Push(frames);
     }
 
@@ -781,6 +801,7 @@ namespace Nox::Net
         auto& controller = entity.GetComponent<CharacterController3DComponent>();
         const glm::vec3 move = controller.MoveVelocity;
         const float jump = controller.JumpSpeed;
+        const glm::dvec3 drawnBefore = physics->GetCharacterDrawnPosition(entity);
         physics->SetCharacterNetState(entity, server);
         const float dt = physics->GetFixedDeltaTime();
         IPhysics3DScene::CharacterNetState replayed;
@@ -794,6 +815,9 @@ namespace Nox::Net
         }
         controller.MoveVelocity = move; // (the scripts' current input, for the next tick)
         controller.JumpSpeed = jump;
+        // Drawn exactly where it was this frame and glided to the corrected path over about 0.1 s (Unreal's network smoothing): a
+        // correction is not seen as a snap.
+        physics->AddCharacterVisualOffset(entity, drawnBefore - physics->GetCharacterDrawnPosition(entity));
     }
 
     void NetReplication::Interpolate()

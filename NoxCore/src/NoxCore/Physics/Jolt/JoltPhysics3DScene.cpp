@@ -600,6 +600,8 @@ namespace Nox {
         // kinematic bodies. (Its transform used to be overwritten by its unmoving body each step.)
         if (motionType == JPH::EMotionType::Kinematic)
             m_FollowTransform.insert(entIdVal);
+        if (netProxy && rb.Type == RigidBody3DComponent::BodyType::Dynamic)
+            m_IgnoredByCharacters.insert(bodyIdVal);
         if (entity.HasComponent<ImpactSoundComponent>())
             m_ContactEvents->SetReporting(body->GetID(), true);
     }
@@ -811,6 +813,7 @@ namespace Nox {
                 m_ContactEvents->SetReporting(bodyId, false);
 
                 m_BodyToEntityMap.erase(bodyId.GetIndexAndSequenceNumber());
+                m_IgnoredByCharacters.erase(bodyId.GetIndexAndSequenceNumber());
             }
             m_EntityToBodyMap.erase(it);
             m_BodyPoses.erase(entIdVal);
@@ -947,14 +950,31 @@ namespace Nox {
             m_EntityToCharacterMap.erase(static_cast<uint32_t>(entity));
     }
 
+    namespace
+    {
+        // What a character's movement does not collide with (JoltPhysics3DScene::m_IgnoredByCharacters).
+        class IgnoredBodies final : public JPH::BodyFilter
+        {
+        public:
+            explicit IgnoredBodies(const std::unordered_set<uint32_t>& ignored) : m_Ignored(ignored) {}
+            bool ShouldCollide(const JPH::BodyID& body) const override { return !m_Ignored.contains(body.GetIndexAndSequenceNumber()); }
+            bool ShouldCollideLocked(const JPH::Body& body) const override { return ShouldCollide(body.GetID()); }
+
+        private:
+            const std::unordered_set<uint32_t>& m_Ignored;
+        };
+    }
+
     void JoltPhysics3DScene::StepCharacters(float dt)
     {
         if (!m_Scene)
             return;
+        const double ease = std::exp(-static_cast<double>(dt) / 0.1);
         for (auto& [entityId, state] : m_EntityToCharacterMap)
         {
+            state.VisualOffset *= ease;
             Entity entity{ static_cast<entt::entity>(entityId), m_Scene };
-            if (!entity.IsValid() || !entity.HasComponent<CharacterController3DComponent>())
+            if (state.ExternallyStepped || !entity.IsValid() || !entity.HasComponent<CharacterController3DComponent>())
                 continue;
             StepCharacterState(entity, state, dt);
         }
@@ -965,9 +985,37 @@ namespace Nox {
         auto found = m_EntityToCharacterMap.find(static_cast<uint32_t>(entity));
         if (!m_PhysicsSystem || found == m_EntityToCharacterMap.end() || !entity.HasComponent<CharacterController3DComponent>())
             return;
-        StepCharacterState(entity, found->second, dt);
-        found->second.Previous = found->second.Current; // (a replay: drawn where it ends, not swept from where it was)
-        found->second.PreviousStepOffset = found->second.StepOffset;
+        StepCharacterState(entity, found->second, dt); // (after a replay it is drawn between the last two replayed steps)
+    }
+
+    glm::dvec3 JoltPhysics3DScene::GetCharacterDrawnPosition(Entity entity) const
+    {
+        auto found = m_EntityToCharacterMap.find(static_cast<uint32_t>(entity));
+        if (found == m_EntityToCharacterMap.end())
+            return glm::dvec3(0.0);
+        const CharacterState& state = found->second;
+        const float alpha = glm::clamp(m_Accumulator / c_FixedDeltaTime, 0.0f, 1.0f);
+        glm::dvec3 position = glm::mix(state.Previous, state.Current, static_cast<double>(alpha)) + state.VisualOffset;
+        position.y += static_cast<double>(glm::mix(state.PreviousStepOffset, state.StepOffset, alpha)); // (as SyncCharactersToTransforms)
+        return position;
+    }
+
+    void JoltPhysics3DScene::SetCharacterExternallyStepped(Entity entity, bool external)
+    {
+        auto found = m_EntityToCharacterMap.find(static_cast<uint32_t>(entity));
+        if (found != m_EntityToCharacterMap.end())
+            found->second.ExternallyStepped = external;
+    }
+
+    void JoltPhysics3DScene::AddCharacterVisualOffset(Entity entity, const glm::dvec3& offset)
+    {
+        auto found = m_EntityToCharacterMap.find(static_cast<uint32_t>(entity));
+        if (found == m_EntityToCharacterMap.end())
+            return;
+        glm::dvec3& visual = found->second.VisualOffset;
+        visual += offset;
+        if (glm::length(visual) > static_cast<double>(WorldUnits::FromMeters(2.0f)))
+            visual = glm::dvec3(0.0); // (too far to glide: shown where it is)
     }
 
     bool JoltPhysics3DScene::GetCharacterNetState(Entity entity, CharacterNetState& netState) const
@@ -999,8 +1047,9 @@ namespace Nox {
         state.Previous = state.Current = netState.Position;
         state.StepOffset = state.PreviousStepOffset = 0.0f;
         // Its contacts where it now is (what the next step's ground test and collisions start from).
+        const IgnoredBodies bodyFilter(m_IgnoredByCharacters);
         state.Character->RefreshContacts(m_PhysicsSystem->GetDefaultBroadPhaseLayerFilter(PhysicsLayers::CHARACTER),
-                                         m_PhysicsSystem->GetDefaultLayerFilter(PhysicsLayers::CHARACTER), {}, {}, *m_TempAllocator);
+                                         m_PhysicsSystem->GetDefaultLayerFilter(PhysicsLayers::CHARACTER), bodyFilter, {}, *m_TempAllocator);
     }
 
     void JoltPhysics3DScene::StepCharacterState(Entity entity, CharacterState& state, float dt)
@@ -1081,10 +1130,11 @@ namespace Nox {
 
             const JPH::RVec3 before = character->GetPosition();
             const JPH::Vec3 groundNormalBefore = character->GetGroundNormal();
+            const IgnoredBodies bodyFilter(m_IgnoredByCharacters);
             character->ExtendedUpdate(dt, -up * gravity.Length(), updateSettings,
                 m_PhysicsSystem->GetDefaultBroadPhaseLayerFilter(PhysicsLayers::CHARACTER),
                 m_PhysicsSystem->GetDefaultLayerFilter(PhysicsLayers::CHARACTER),
-                {}, {}, *m_TempAllocator);
+                bodyFilter, {}, *m_TempAllocator);
             state.Current = ToWorld(JoltUtils::ToGLMPosition(character->GetPosition()));
 
             // Grounded the way Unreal's walking mode decides it: on walkable ground, or a walkable floor within step height under the
@@ -1148,6 +1198,7 @@ namespace Nox {
             const float alpha = glm::clamp(m_Accumulator / c_FixedDeltaTime, 0.0f, 1.0f);
             glm::dvec3 position = glm::mix(state.Previous, state.Current, static_cast<double>(alpha));
             position.y += static_cast<double>(glm::mix(state.PreviousStepOffset, state.StepOffset, alpha));
+            position += state.VisualOffset; // (a network correction gliding out)
             if (entity.HasComponent<RelationshipComponent>())
             {
                 UUID parentUUID = entity.GetComponent<RelationshipComponent>().Parent;

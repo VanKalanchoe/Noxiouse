@@ -148,6 +148,7 @@ namespace Nox::Net
         {
             ClientId Client = InvalidClientId;
             InputQueue Queue;
+            double LastInputAt = 0.0;
         };
         std::unordered_map<NetId, ServerInputs> m_InputQueues; // server: the client-owned characters' inputs
         struct Predicted

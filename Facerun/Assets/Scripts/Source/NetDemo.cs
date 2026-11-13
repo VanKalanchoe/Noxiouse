@@ -166,9 +166,15 @@ public sealed class NetPlayer : EntityBehaviour
             CallServerRpc(nameof(ServerJumped));
         }
         m_JumpHeld = jump;
+    }
 
-        // The camera behind this machine's own player (found once: the camera is in the scene on every side).
-        if (!m_Camera.IsValid)
+    // The camera behind this machine's own player -- after physics moved it this frame (OnUpdate runs before: the camera would show
+    // where the player was a frame ago and trail it).
+    protected override void OnLateUpdate(float deltaTime)
+    {
+        if (!IsOwner)
+            return;
+        if (!m_Camera.IsValid) // (found once: the camera is in the scene on every side)
             m_Camera = Entity.FindByName("Camera");
         if (m_Camera.IsValid)
         {

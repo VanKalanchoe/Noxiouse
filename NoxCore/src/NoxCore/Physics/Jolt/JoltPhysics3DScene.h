@@ -44,6 +44,9 @@ namespace Nox
         bool GetCharacterNetState(Entity entity, CharacterNetState& state) const override;
         void SetCharacterNetState(Entity entity, const CharacterNetState& state) override;
         void StepCharacter(Entity entity, float dt) override;
+        glm::dvec3 GetCharacterDrawnPosition(Entity entity) const override;
+        void SetCharacterExternallyStepped(Entity entity, bool external) override;
+        void AddCharacterVisualOffset(Entity entity, const glm::dvec3& offset) override;
         void SetTickCallbacks(std::function<void()> beforeTick, std::function<void()> afterTick) override
         {
             m_BeforeTick = std::move(beforeTick);
@@ -126,6 +129,9 @@ namespace Nox
         // entity -- a network client's proxies of the server's entities are made kinematic, Scene::IsNetProxy), swept to it before
         // each step so they push dynamic bodies.
         std::unordered_set<uint32_t> m_FollowTransform;
+        // A network client's copies of bodies the server simulates (dynamic there): its predicted character passes through them -- they
+        // are drawn in the past and cannot be pushed here; the server decides what the character does with them.
+        std::unordered_set<uint32_t> m_IgnoredByCharacters; // body ids
         void MoveFollowers(uint32_t ticks);
         std::unordered_map<uint32_t, Entity> m_BodyToEntityMap;
         std::unordered_map<uint32_t, JPH::BodyID> m_MeshColliders; // SetMeshCollider: static bodies, apart from the rigid bodies
@@ -148,6 +154,8 @@ namespace Nox
             // slope, taken off the drawn position and eased back to 0, so the mesh glides up a stair instead of popping. Drawn
             // interpolated between the last two fixed steps like the position.
             float StepOffset = 0.0f;
+            bool ExternallyStepped = false;       // (networking) stepped by StepCharacter only
+            glm::dvec3 VisualOffset{ 0.0 };       // (networking) a correction's offset, drawn and eased away
             float PreviousStepOffset = 0.0f;
         };
         std::unordered_map<uint32_t, CharacterState> m_EntityToCharacterMap;

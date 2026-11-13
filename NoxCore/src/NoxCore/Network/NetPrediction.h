@@ -15,7 +15,8 @@
 // the scene, so they can be tested alone. Unreal's model:
 //   - the client's own character (autonomous proxy) moves at once with its inputs; each fixed tick's input is numbered, kept with
 //     where it left the character, and sent to the server (the last few each time, for loss);
-//   - the server applies them to its character one per tick (InputQueue) and says in its snapshots which one it applied last and
+//   - the server applies each to its character once, when it arrives (InputQueue: Unreal's server moves -- not one per server tick, which
+//     the two clocks' drift turned into repeated and dropped inputs) and says in its snapshots which one it applied last and
 //     where that left the character; the client compares with what it predicted for that input and, when they differ, takes the
 //     server's state and re-applies the inputs that came after it (PredictionHistory);
 //   - everyone else's entities (simulated proxies) are drawn a little in the past, between the last snapshots (InterpolationBuffer),
@@ -80,22 +81,22 @@ namespace Nox::Net
     };
 
     constexpr size_t InputRedundancy = 8;  // inputs in each Input message: the newest and the 7 before it (a lost message is covered)
-    constexpr size_t MaxQueuedInputs = 8;  // the server catches up past this many waiting (a client that sent a burst)
+    constexpr size_t MaxQueuedInputs = 16; // the server catches up past this many waiting (a client that sent a burst)
+    constexpr size_t MaxInputsPerTick = 4; // applied in one server tick at most (a client sending faster than real time is held back)
 
     // Input message (type MessageType::Input, client -> server, unreliable): varint entity, u8 count, then the frames oldest first:
     // u32 sequence, 3 floats move, float jump, 4 floats rotation (x y z w).
     void WriteInputs(NetWriter& out, NetId entity, std::span<const InputFrame> frames);
     bool ReadInputs(NetReader& in, NetId& entity, std::vector<InputFrame>& frames);
 
-    // The server's inputs of one client's character, applied one per tick.
+    // The server's inputs of one client's character, each applied once, in order, when it has arrived.
     class InputQueue
     {
     public:
         // Frames from a message: those not applied or queued yet join, in order.
         void Push(std::span<const InputFrame> frames);
-        // The input for this tick: the next one in order. When none has arrived the last one is applied again (the character keeps
-        // doing what it did; the client's prediction is corrected if that was wrong) and the processed sequence does not move.
-        InputFrame Next();
+        // The inputs to apply now (in order; at most `max`): the character is stepped once per input.
+        std::vector<InputFrame> Take(size_t max);
         // The newest input applied (what the client compares its prediction with); 0 before the first.
         uint32_t GetLastProcessed() const { return m_LastProcessed; }
         size_t GetQueued() const { return m_Queue.size(); }

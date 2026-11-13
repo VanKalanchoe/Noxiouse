@@ -538,7 +538,7 @@ static PredictionRun RunPrediction(int latencyTicks, int jitterTicks, float loss
             toServer.push_back({ tick + latencyTicks + (jitterTicks ? static_cast<int>(random() % (jitterTicks + 1)) : 0),
                                  std::vector<uint8_t>(inputs.GetData().begin(), inputs.GetData().end()) });
 
-        // Server: the inputs that arrived, one applied per tick; a snapshot every other tick.
+        // Server: the inputs that arrived, each applied once (Unreal's server moves); a snapshot every other tick.
         std::stable_sort(toServer.begin(), toServer.end(), [](const Message& a, const Message& b) { return a.DeliverAt < b.DeliverAt; });
         while (!toServer.empty() && toServer.front().DeliverAt <= tick)
         {
@@ -550,7 +550,8 @@ static PredictionRun RunPrediction(int latencyTicks, int jitterTicks, float loss
                 queue.Push(frames);
             toServer.erase(toServer.begin());
         }
-        server = step(server, queue.Next());
+        for (const InputFrame& frame : queue.Take(MaxInputsPerTick))
+            server = step(server, frame);
         if (tick == pushAtTick)
             server.x += 100.0; // something only the server knows about pushed the character (a collision, a knock-back)
         if (tick % 2 == 0 && !chance(loss))
@@ -601,8 +602,8 @@ static void TestPrediction()
     }
     {
         PredictionRun run = RunPrediction(5, 4, 0.05f, 0, 2); // 83-150 ms each way, 5 % loss both ways
-        CHECK(run.FinalGap < 0.02 && run.Corrections * 10 < run.Acknowledged,
-              "83-150 ms each way, 5 % loss: {} corrections in {} snapshots (inputs that arrived too late are repeated by the server), final gap {:.3f}",
+        CHECK(run.FinalGap < 0.02 && run.Corrections == 0,
+              "83-150 ms each way, 5 % loss: {} corrections in {} snapshots (every input applied once, lost ones covered by the repeats), final gap {:.3f}",
               run.Corrections, run.Acknowledged, run.FinalGap);
     }
     {

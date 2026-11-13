@@ -150,18 +150,17 @@ namespace Nox::Net
         }
     }
 
-    InputFrame InputQueue::Next()
+    std::vector<InputFrame> InputQueue::Take(size_t max)
     {
-        if (m_Queue.empty())
+        std::vector<InputFrame> taken;
+        while (!m_Queue.empty() && taken.size() < max)
         {
-            InputFrame repeat = m_Last;
-            repeat.Jump = 0.0f; // (a jump is pressed once, not repeated)
-            return repeat;
+            m_Last = m_Queue.front();
+            m_Queue.pop_front();
+            m_LastProcessed = m_Last.Sequence;
+            taken.push_back(m_Last);
         }
-        m_Last = m_Queue.front();
-        m_Queue.pop_front();
-        m_LastProcessed = m_Last.Sequence;
-        return m_Last;
+        return taken;
     }
 
     // --------------------------------------------------------------------------------------------------------------- prediction

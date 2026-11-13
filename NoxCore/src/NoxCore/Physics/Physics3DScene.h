@@ -61,9 +61,15 @@ namespace Nox {
         };
         virtual bool GetCharacterNetState(Entity entity, CharacterNetState& state) const { return false; }
         virtual void SetCharacterNetState(Entity entity, const CharacterNetState& state) {}
-        // One character stepped by itself by dt with its controller's current inputs (a client replaying its inputs after a correction);
-        // it is drawn where it ends.
+        // One character stepped by itself by dt with its controller's current inputs: a client replaying its inputs after a correction,
+        // or the server applying a client's input when it arrives.
         virtual void StepCharacter(Entity entity, float dt) {}
+        // Stepped only by StepCharacter, not by the fixed tick (the server moves a client's character when that client's inputs come).
+        virtual void SetCharacterExternallyStepped(Entity entity, bool external) {}
+        // Where it is drawn this frame: between its last two steps, plus a correction still gliding out (world units).
+        virtual glm::dvec3 GetCharacterDrawnPosition(Entity entity) const { return glm::dvec3(0.0); }
+        // Drawn this much away from where it is, eased away over about 0.1 s (a prediction correction is not a visible snap).
+        virtual void AddCharacterVisualOffset(Entity entity, const glm::dvec3& offset) {}
         // Called in every fixed tick: before the characters step (inputs are set or recorded there) and after the tick.
         virtual void SetTickCallbacks(std::function<void()> beforeTick, std::function<void()> afterTick) {}
         // The fixed tick's length (seconds).
