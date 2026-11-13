@@ -55,7 +55,8 @@ namespace Nox
         std::shared_ptr<ConsoleInput> m_Console;
         float m_StatusTimer = 0.0f;
         uint32_t m_FramesSinceStatus = 0;
-        float m_WorstFrameSinceStatus = 0.0f;
+        double m_WorkSinceStatus = 0.0;      // seconds worked by the updates since the last status line
+        double m_WorstWorkSinceStatus = 0.0;
         uint64_t m_TickAtStatus = 0;
     };
 }

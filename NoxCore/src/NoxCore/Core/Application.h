@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <functional>
 #include <vector>
 #include <string>
@@ -162,6 +163,9 @@ namespace Nox
         // A headless (dedicated server) application runs: no renderer exists, GPU-only assets (textures, fonts) and sound are not
         // loaded. False without an application (tools, tests).
         static bool IsHeadless();
+        // Seconds the last frame worked: from its start to its end, without the headless loop's sleep until the next tick.
+        double GetLastFrameWorkTime() const { return m_LastFrameWorkTime; }
+        uint32_t GetTickRate() const { return (std::max)(m_Specification.TickRate, 1u); }
         const ApplicationSpecification& GetSpecification() const { return m_Specification; }
         std::shared_ptr<Window> getWindow() { return m_Window; }
         ImGuiLayer* GetImGuiLayer() { return m_ImGuiLayer; }
@@ -184,6 +188,7 @@ namespace Nox
         std::vector<std::unique_ptr<Layer>> m_LayerStack;
         std::vector<std::function<void()>> m_AfterFrame;
         double m_LastFrameTime = 0.0;
+        double m_LastFrameWorkTime = 0.0;
     };
 
     extern Application* CreateApplication(ApplicationCommandLineArgs args);

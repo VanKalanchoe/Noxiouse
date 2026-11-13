@@ -160,12 +160,15 @@ namespace Nox
 
         NOX_PROFILE_FRAME();
 
+        // The frame's work: from its start to here, before any sleep (a server's load against its tick budget).
+        const double now = GetTime();
+        m_LastFrameWorkTime = now - m_LastFrameTime;
+
         // Headless: nothing waits for a display, so the loop sleeps until the next tick (the frame's own time included).
         if (m_Specification.Headless)
         {
             const double tickSeconds = 1.0 / static_cast<double>(std::max(m_Specification.TickRate, 1u));
             const double next = m_LastFrameTime + tickSeconds;
-            const double now = GetTime();
             if (next > now)
                 SDL_DelayPrecise(static_cast<Uint64>((next - now) * 1'000'000'000.0));
         }

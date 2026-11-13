@@ -169,8 +169,11 @@ namespace Nox
 
     void RuntimeLayer::UpdateServerConsole(float ts)
     {
+        // The previous frame's work (this one is still running): the server's load, not the tick interval it sleeps out.
+        const double work = Application::Get().GetLastFrameWorkTime();
         ++m_FramesSinceStatus;
-        m_WorstFrameSinceStatus = std::max(m_WorstFrameSinceStatus, ts);
+        m_WorkSinceStatus += work;
+        m_WorstWorkSinceStatus = std::max(m_WorstWorkSinceStatus, work);
         m_StatusTimer += ts;
         if (m_StatusTimer >= 10.0f)
             LogServerStatus();
@@ -204,13 +207,19 @@ namespace Nox
         size_t entities = 0;
         for ([[maybe_unused]] auto entity : m_Scene->GetAllEntitiesWith<IDComponent>())
             ++entities;
-        NOX_CORE_INFO("Server status: tick {} ({:.1f} ticks/s), {:.1f} updates/s, worst update {:.1f} ms, {} entities", tick,
-                      static_cast<double>(tick - m_TickAtStatus) / seconds, static_cast<double>(m_FramesSinceStatus) / seconds,
-                      m_WorstFrameSinceStatus * 1000.0f, entities);
+        // Work per update against the tick's budget (16.7 ms at 60 Hz): the average is the server's load, the worst its spikes
+        // (an update longer than the budget makes the next ones catch up with several ticks).
+        const double budget = 1.0 / static_cast<double>(Application::Get().GetTickRate());
+        const double averageWork = m_FramesSinceStatus > 0 ? m_WorkSinceStatus / m_FramesSinceStatus : 0.0;
+        NOX_CORE_INFO("Server status: tick {} ({:.1f} ticks/s), {:.1f} updates/s, work {:.2f} ms average ({:.0f} % of the {:.1f} ms tick), "
+                      "{:.2f} ms worst, {} entities",
+                      tick, static_cast<double>(tick - m_TickAtStatus) / seconds, static_cast<double>(m_FramesSinceStatus) / seconds,
+                      averageWork * 1000.0, averageWork / budget * 100.0, budget * 1000.0, m_WorstWorkSinceStatus * 1000.0, entities);
         m_TickAtStatus = tick;
         m_StatusTimer = 0.0f;
         m_FramesSinceStatus = 0;
-        m_WorstFrameSinceStatus = 0.0f;
+        m_WorkSinceStatus = 0.0;
+        m_WorstWorkSinceStatus = 0.0;
     }
 
     void RuntimeLayer::OnEvent(Event& event)

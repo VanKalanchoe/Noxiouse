@@ -273,8 +273,18 @@ namespace Nox
         AssetPreviewRenderer::SetRenderer(m_Renderer);
         AssetPreviewRenderer::Get().SetSphereProvider([this]() { return GetShapeAsset(PrimitiveShape::Sphere); });
 
-        if (!ScriptEngine::Initialize(SDL_GetBasePath(), true))
+        if (!ScriptEngine::Initialize(SDL_GetBasePath(), true) && !ScriptEngine::IsInitialized())
             NOX_CORE_ERROR("Failed to initialize the .NET scripting backend");
+        BuildScriptsIfNeverBuilt();
+    }
+
+    void EditorLayer::BuildScriptsIfNeverBuilt()
+    {
+        if (!ScriptEngine::IsInitialized() || !Project::GetActive() || ScriptEngine::GetProjectScriptsProject().empty())
+            return;
+        std::filesystem::path core, game;
+        if (!ScriptEngine::FindAssemblies(core, game))
+            m_ScriptBuilder.RequestBuild();
     }
 
     EditorLayer::~EditorLayer()
@@ -3475,12 +3485,12 @@ namespace Nox
             Project::GetActive()->GetEditorAssetManager()->Init();
             AudioMixer::LoadProjectMixer(true); // its buses and effects (made with the default ones if the project has none yet)
             // The project's scripts (at startup ScriptEngine::Initialize loads them, after this).
-            if (ScriptEngine::IsInitialized())
-                ScriptEngine::LoadProjectAssembly();
             m_ScriptBuilder.SetProject(ScriptEngine::GetProjectScriptsProject());
-            // Scripts never built (a project just made, or cloned without its build output): built now, loaded when done.
-            if (std::filesystem::path core, game; !ScriptEngine::GetProjectScriptsProject().empty() && !ScriptEngine::FindAssemblies(core, game))
-                m_ScriptBuilder.RequestBuild();
+            if (ScriptEngine::IsInitialized())
+            {
+                ScriptEngine::LoadProjectAssembly();
+                BuildScriptsIfNeverBuilt();
+            }
 
             AssetHandle startScene = Project::GetActive()->GetConfig().StartScene;
             if (startScene)

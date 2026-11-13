@@ -60,6 +60,9 @@ namespace Nox
         // A .nproj picked in a dialog. False when cancelled or it did not load.
         bool OpenProject();
         bool OpenProject(const std::filesystem::path& path);
+        // Scripts never built (a project just made, or cloned without its build output): built now, loaded when done. Only once
+        // the script engine is up -- before that it does not know where the executable's Scripts/Core is.
+        void BuildScriptsIfNeverBuilt();
         // No project given, or `failed` did not open: a choice of opening one, making one or quitting (asked again until one
         // opens). False: the user chose to quit.
         bool OpenStartupProject(const std::filesystem::path& failed = {});
