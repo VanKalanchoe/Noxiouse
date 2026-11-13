@@ -31,6 +31,12 @@ namespace Nox
         // The .NET runtime the editor uses, copied into <Output>/dotnet (host/fxr and shared/Microsoft.NETCore.App, about
         // 70 MB): the game runs on machines without .NET installed. Off: they need the .NET 9 runtime.
         bool SelfContainedDotNet = false;
+        // File > Package Server (docs/Networking_Plan_2026-11.md, NET6; Unreal's server target): a dedicated server -- the same
+        // runtime named <Project>Server (a server whatever its arguments: no window, GPU or sound; ApplicationCommandLineArgs::
+        // IsDedicatedServer) and the same cooked content without what only drawing and sound use (textures, fonts, sound clips, baked
+        // acoustics, the shader cache and the engine's shaders). Run it on a machine without a GPU; its console takes the server's
+        // commands.
+        bool Server = false;
     };
 
     struct PackageReport

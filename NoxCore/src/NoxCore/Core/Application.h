@@ -38,13 +38,38 @@ namespace Nox
                     return true;
             return false;
         }
+        // A dedicated server: --server, or an executable named <Name>Server (a packaged server, File > Package Server -- Unreal's
+        // <Project>Server target is a server whatever its arguments).
+        bool IsDedicatedServer() const
+        {
+            if (HasSwitch("--server"))
+                return true;
+            if (Count < 1 || !Args || !Args[0])
+                return false;
+            std::string_view path(Args[0]);
+            const size_t slash = path.find_last_of("/\\");
+            std::string_view stem = slash == std::string_view::npos ? path : path.substr(slash + 1);
+            if (const size_t dot = stem.rfind('.'); dot != std::string_view::npos)
+                stem = stem.substr(0, dot);
+            constexpr std::string_view suffix = "server";
+            if (stem.size() <= suffix.size())
+                return false;
+            for (size_t index = 0; index < suffix.size(); ++index)
+            {
+                const char c = stem[stem.size() - suffix.size() + index];
+                if ((c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c) != suffix[index])
+                    return false;
+            }
+            return true;
+        }
         // The switches that take a value. Both "--name=value" and "--name value" work: an IDE's argument presets (Rider) pass the
         // value as an argument of its own, which then is not mistaken for the project file.
         static bool TakesValue(std::string_view name)
         {
             constexpr std::string_view names[] = { "--project", "--connect", "--port", "--name", "--server-name", "--max-clients",
                                                    "--tickrate", "--net-emulation", "--net-lag", "--net-jitter", "--net-loss",
-                                                   "--net-rate", "--scene" };
+                                                   "--net-rate", "--scene", "--net-client-rate", "--connect-retry", "--window-pos",
+                                                   "--window-size" };
             for (std::string_view known : names)
                 if (name == known)
                     return true;

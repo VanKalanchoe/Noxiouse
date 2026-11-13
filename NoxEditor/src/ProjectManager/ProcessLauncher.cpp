@@ -8,6 +8,40 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+    bool ChildProcess::Launch(const std::filesystem::path& executable, const std::vector<std::string>& arguments, bool console, std::string& error)
+    {
+        Kill();
+        std::wstring commandLine = QuoteArgument(executable.wstring());
+        for (const std::string& argument : arguments)
+            commandLine += L" " + QuoteArgument(Widen(argument));
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process{};
+        const DWORD flags = (console ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW) | CREATE_NEW_PROCESS_GROUP;
+        if (!CreateProcessW(executable.wstring().c_str(), commandLine.data(), nullptr, nullptr, FALSE, flags, nullptr, nullptr, &startup, &process))
+        {
+            error = "CreateProcess failed (error " + std::to_string(GetLastError()) + ")";
+            return false;
+        }
+        CloseHandle(process.hThread);
+        m_Handle = process.hProcess;
+        return true;
+    }
+
+    bool ChildProcess::IsRunning() const
+    {
+        return m_Handle && WaitForSingleObject(static_cast<HANDLE>(m_Handle), 0) == WAIT_TIMEOUT;
+    }
+
+    void ChildProcess::Kill()
+    {
+        if (!m_Handle)
+            return;
+        if (WaitForSingleObject(static_cast<HANDLE>(m_Handle), 0) == WAIT_TIMEOUT)
+            TerminateProcess(static_cast<HANDLE>(m_Handle), 0);
+        CloseHandle(static_cast<HANDLE>(m_Handle));
+        m_Handle = nullptr;
+    }
 #else
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_process.h>
@@ -101,6 +135,48 @@ namespace Nox
         }
         SDL_DestroyProcess(process); // (only the handle: the process keeps running)
         return true;
+    }
+    bool ChildProcess::Launch(const std::filesystem::path& executable, const std::vector<std::string>& arguments, bool console, std::string& error)
+    {
+        (void)console; // (a terminal program's output goes where this process's goes)
+        Kill();
+        std::vector<std::string> all{ executable.string() };
+        all.insert(all.end(), arguments.begin(), arguments.end());
+        std::vector<const char*> argv;
+        for (const std::string& argument : all)
+            argv.push_back(argument.c_str());
+        argv.push_back(nullptr);
+        const SDL_PropertiesID properties = SDL_CreateProperties();
+        SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());
+        SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_INHERITED);
+        SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_INHERITED);
+        SDL_Process* process = SDL_CreateProcessWithProperties(properties);
+        SDL_DestroyProperties(properties);
+        if (!process)
+        {
+            error = SDL_GetError();
+            return false;
+        }
+        m_Handle = process;
+        return true;
+    }
+
+    bool ChildProcess::IsRunning() const
+    {
+        int exitCode = 0;
+        return m_Handle && !SDL_WaitProcess(static_cast<SDL_Process*>(m_Handle), false, &exitCode);
+    }
+
+    void ChildProcess::Kill()
+    {
+        if (!m_Handle)
+            return;
+        SDL_Process* process = static_cast<SDL_Process*>(m_Handle);
+        int exitCode = 0;
+        if (!SDL_WaitProcess(process, false, &exitCode))
+            SDL_KillProcess(process, true);
+        SDL_DestroyProcess(process);
+        m_Handle = nullptr;
     }
 #endif
 }

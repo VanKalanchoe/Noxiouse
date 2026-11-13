@@ -25,5 +25,5 @@ with them; reference them by handle or path, and say that the files live only on
 
 ## Engine facts worth keeping
 - World unit: centimetres in Facerun (WorldUnits); positions are double precision.
-- Networking plan: `docs/Networking_Plan_2026-11.md` (NET0-NET5 built; NET6 next). Offline network tests: `Tests/NetTest.cpp`
+- Networking plan: `docs/Networking_Plan_2026-11.md` (NET0-NET5 built; NET6 part 1 built: editor multiplayer Play, NetSession, Package Server; Steam backend and NoxServer target open). Offline network tests: `Tests/NetTest.cpp`
   (NoxNetTest; `--offline` skips the socket tests).

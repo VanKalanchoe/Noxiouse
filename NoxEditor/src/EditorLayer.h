@@ -28,6 +28,8 @@
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Scene/SceneLoader.h"
+#include "NoxCore/Network/NetSession.h"
+#include "ProjectManager/ProcessLauncher.h"
 
 namespace Nox
 {
@@ -114,6 +116,7 @@ namespace Nox
         // The project's C# scripts: built (dotnet) and hot-reloaded on request or after a source changed.
         ScriptBuilder m_ScriptBuilder;
         bool m_ShowPackageGame = false;
+        bool m_PackageServer = false; // File > Package Server (the same dialog)
         char m_PackageOutput[512] = {};
         bool m_PackageAllScenes = false;
         bool m_PackagePackFiles = true;
@@ -131,6 +134,24 @@ namespace Nox
         void OnScenePlay();
         void OnSceneSimulate();
         void OnSceneStop();
+
+        // Multiplayer Play (docs/Networking_Plan_2026-11.md, NET6; Unreal's Play settings -- Net Mode, Number of Players, separate
+        // processes): the editor plays as a listen server or as a client of a dedicated server it starts, and the other players are
+        // NoxRuntime windows it starts on the saved scene and closes with Stop.
+        enum class PlayNetMode : uint8_t { Standalone = 0, ListenServer, Client };
+        struct PlayNetSettings
+        {
+            PlayNetMode Mode = PlayNetMode::Standalone;
+            int Players = 2;           // the editor's player included
+            int Emulation = 0;         // 0 off, 1 average, 2 bad (Net::NetEmulation presets), for every player
+            int Port = Net::DefaultPort;
+            bool SaveWithoutAsking = false;
+        };
+        void DrawPlaySettings();
+        void BeginMultiplayerPlay();
+        void StartPlayScene(Scene::NetMode netMode); // the Play copy of the edited scene, started (its replication set first)
+        void EndMultiplayerPlay();
+        bool LaunchPlayer(const std::vector<std::string>& arguments, bool console, const char* what);
 
         // Unloads assets no live scene references anymore (GPU memory freed after in-flight frames).
         void UnloadUnusedAssets();
@@ -244,6 +265,13 @@ namespace Nox
         AssetHandle m_SceneLoadHandle = 0;
         Ref<Scene> m_EditorScene;
         std::filesystem::path m_EditorScenePath;
+
+        PlayNetSettings m_PlayNet;
+        std::unique_ptr<Net::NetSession> m_PlaySession;
+        std::vector<std::unique_ptr<ChildProcess>> m_PlayProcesses;
+        bool m_PlayWaitingForServer = false; // client: Play has begun, the scene starts when the server lets it in
+        bool m_PlaySessionEnded = false;     // the session ended by itself (the server stopped, the connection failed): Play stops
+        bool m_OpenSaveAndPlay = false;
 
         struct PrefabModeState
         {

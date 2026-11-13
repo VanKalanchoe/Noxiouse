@@ -110,13 +110,18 @@ namespace Nox
         const std::filesystem::path engineAssets = std::filesystem::current_path() / "assets";
         const std::filesystem::path output = settings.OutputDirectory;
 
+        // A server is named <Project>Server: that name alone makes the runtime a dedicated server (and a game's must not end so).
+        const std::string baseName = settings.Server ? config.Name + "Server" : config.Name;
 #ifdef _WIN32
         const std::filesystem::path runtime = binaryDirectory / "NoxRuntime.exe";
-        const std::string executableName = config.Name + ".exe";
+        const std::string executableName = baseName + ".exe";
 #else
         const std::filesystem::path runtime = binaryDirectory / "NoxRuntime";
-        const std::string executableName = config.Name;
+        const std::string executableName = baseName;
 #endif
+        if (!settings.Server && Lower(config.Name).ends_with("server"))
+            report.Warnings.push_back("The project's name ends with \"Server\": its game executable starts as a dedicated server (rename the "
+                                      "project, or start the game with --connect / --listen)");
         if (!std::filesystem::exists(runtime))
         {
             report.Error = "NoxRuntime is not built next to the editor (" + runtime.generic_string() +
@@ -154,7 +159,8 @@ namespace Nox
             if (directory && relative.parent_path() == "Scripts" && relative.filename() != "Core" && relative.filename() != assemblyName)
                 return true;
             if (directory)
-                return IsWithin(binaryDirectory / relative, output) || (relative.parent_path().empty() && Lower(relative.filename().string()) == "assets");
+                return IsWithin(binaryDirectory / relative, output) || (relative.parent_path().empty() && Lower(relative.filename().string()) == "assets") ||
+                       (settings.Server && relative.parent_path().empty() && Lower(relative.filename().string()) == "shaders"); // (a server draws nothing)
             const std::string name = Lower(relative.filename().string());
             const std::string extension = Lower(relative.extension().string());
             if (settings.PrecompiledShadersOnly && name.rfind("slang", 0) == 0 && (extension == ".dll" || extension == ".so" || extension == ".dylib"))
@@ -223,9 +229,12 @@ namespace Nox
                 report.Warnings.push_back("Self-contained .NET: no .NET 9 runtime found (DOTNET_ROOT, Program Files/dotnet): the game needs one installed");
         }
 
-        // 2. The engine's assets the runtime reads (shaders are compiled at start, fonts for text, textures for defaults).
+        // 2. The engine's assets the runtime reads (shaders are compiled at start, fonts for text, textures for defaults) -- none for a
+        //    server, which draws nothing.
         for (const char* folder : { "shaders", "fonts", "textures" })
         {
+            if (settings.Server)
+                break;
             if (std::filesystem::exists(engineAssets / folder))
                 copier.Tree(engineAssets / folder, output / "assets" / folder, [](const std::filesystem::path&, bool) { return false; });
             else
@@ -290,6 +299,15 @@ namespace Nox
             std::vector<std::filesystem::path> tokenFiles = scripts;
             tokenFiles.insert(tokenFiles.end(), cellFiles.begin(), cellFiles.end());
             assets = assetManager->CollectDependencies(roots, tokenFiles);
+        }
+        // A server leaves out what only drawing and sound use: it never loads them (NET0: textures, fonts, sound clips, acoustics).
+        if (settings.Server)
+        {
+            std::erase_if(assets, [&](AssetHandle handle)
+            {
+                const AssetType type = assetManager->GetMetadata(handle).Type;
+                return type == AssetType::Texture2D || type == AssetType::Font || type == AssetType::AudioClip || type == AssetType::AcousticData;
+            });
         }
         report.Assets = assets.size();
 
@@ -387,7 +405,7 @@ namespace Nox
         report.Success = true;
         if (report.Cooked > 0)
             NOX_CORE_INFO("Package Game: cooked {} textures that were not cooked yet", report.Cooked);
-        NOX_CORE_INFO("Packaged {}: {} assets, {} files, {:.1f} MB -> {}", config.Name, report.Assets, report.Files,
+        NOX_CORE_INFO("Packaged {}: {} assets, {} files, {:.1f} MB -> {}", baseName, report.Assets, report.Files,
                       static_cast<double>(report.Bytes) / (1024.0 * 1024.0), output.generic_string());
         return report;
     }

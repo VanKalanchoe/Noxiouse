@@ -25,7 +25,7 @@ namespace Nox
         specification.WindowSpec.Height = 1080;
         specification.CommandLineArgs = args;
         specification.isEditor = false;
-        if (args.HasSwitch("--server"))
+        if (args.IsDedicatedServer())
         {
             specification.Name = "NoxServer";
             specification.Headless = true;

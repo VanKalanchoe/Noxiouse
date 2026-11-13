@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cmath>
 #include <cstdio>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <unordered_set>
@@ -23,6 +24,7 @@
 #include <glm/gtc/type_ptr.hpp>  // for pointer to matrix or vector
 
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Network/NetReplication.h"
 #include "NoxCore/Asset/MeshSerializer.h"
 #include "NoxCore/Asset/SceneImporter.h"
 #include "NoxCore/Core/Application.h"
@@ -291,6 +293,7 @@ namespace Nox
     {
         NOX_CORE_INFO("EditorLayer Shutdown");
 
+        EndMultiplayerPlay(); // (the players' windows and the dedicated server close with the editor)
         SaveEditorCameras();
         ScriptEngine::Shutdown();
         AssetPreviewRenderer::Get().Clear();
@@ -472,7 +475,21 @@ namespace Nox
                 }
             case SceneState::Play:
                 {
-                    m_ActiveScene->OnUpdateRuntime(ts);
+                    // Multiplayer Play: receive (a client's join starts the scene here), the scene, then the snapshots and send.
+                    if (m_PlaySession)
+                        m_PlaySession->Receive(static_cast<float>(ts));
+                    if (m_PlaySessionEnded)
+                    {
+                        OnSceneStop(); // (the server stopped, or it could not be reached: back to editing)
+                        break;
+                    }
+                    if (!m_PlayWaitingForServer)
+                        m_ActiveScene->OnUpdateRuntime(ts);
+                    if (m_PlaySession)
+                    {
+                        m_PlaySession->AfterScene(static_cast<float>(ts));
+                        m_PlaySession->Send();
+                    }
                     break;
                 }
             }
@@ -640,13 +657,18 @@ namespace Nox
 
                 ImGui::Separator();
 
-                if (ImGui::MenuItem("Package Game..."))
+                for (const bool server : { false, true })
                 {
-                    if (m_PackageOutput[0] == '\0' && Project::GetActive())
+                    if (!ImGui::MenuItem(server ? "Package Server..." : "Package Game..."))
+                        continue;
+                    // Each its own folder by default (Build/<Project>, Build/<Project>Server).
+                    if (Project::GetActive() && (m_PackageOutput[0] == '\0' || server != m_PackageServer))
                     {
-                        const std::filesystem::path defaultOutput = Project::GetProjectDirectory() / "Build" / Project::GetActive()->GetConfig().Name;
+                        const std::string name = Project::GetActive()->GetConfig().Name + (server ? "Server" : "");
+                        const std::filesystem::path defaultOutput = Project::GetProjectDirectory() / "Build" / name;
                         snprintf(m_PackageOutput, sizeof(m_PackageOutput), "%s", defaultOutput.generic_string().c_str());
                     }
+                    m_PackageServer = server;
                     m_PackageResult.clear();
                     m_ShowPackageGame = true;
                 }
@@ -2620,6 +2642,7 @@ namespace Nox
                     }
                 }
             }
+            DrawPlaySettings();
         }
         if (hasSimulateButton)
         {
@@ -2671,6 +2694,71 @@ namespace Nox
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(3);
         ImGui::End();
+    }
+
+    void EditorLayer::DrawPlaySettings()
+    {
+        // The arrow beside Play: Unreal's Play settings (Net Mode, Number of Players).
+        ImGui::SameLine(0.0f, 1.0f);
+        ImGui::BeginDisabled(m_SceneState != SceneState::Edit);
+        if (ImGui::ArrowButton("##PlaySettings", ImGuiDir_Down))
+            ImGui::OpenPopup("PlaySettings");
+        ImGui::EndDisabled();
+        ImGui::SetItemTooltip("Play settings: multiplayer (net mode, number of players)");
+        if (ImGui::BeginPopup("PlaySettings"))
+        {
+            ImGui::SeparatorText("Multiplayer");
+            const char* modes[] = { "Standalone", "Play As Listen Server", "Play As Client" };
+            int mode = static_cast<int>(m_PlayNet.Mode);
+            if (ImGui::Combo("Net Mode", &mode, modes, 3))
+                m_PlayNet.Mode = static_cast<PlayNetMode>(mode);
+            ImGui::SetItemTooltip("Standalone: no networking.\nListen Server: this viewport is the server and plays; the others join it.\n"
+                                  "Client: a dedicated server is started (a console window: its commands) and this viewport joins it.");
+            ImGui::BeginDisabled(m_PlayNet.Mode == PlayNetMode::Standalone);
+            ImGui::SliderInt("Number of Players", &m_PlayNet.Players, 1, 8);
+            ImGui::SetItemTooltip("This viewport is player 1; each other player is a NoxRuntime window, closed with Stop.");
+            const char* emulations[] = { "Off", "Average", "Bad" };
+            ImGui::Combo("Network Emulation", &m_PlayNet.Emulation, emulations, 3);
+            ImGui::SetItemTooltip("Lag, jitter and loss on every connection (NoxRuntime --net-emulation): average ~30 ms, bad ~100 ms with loss.");
+            ImGui::InputInt("Port", &m_PlayNet.Port);
+            m_PlayNet.Port = std::clamp(m_PlayNet.Port, 1, 65535);
+            ImGui::Checkbox("Save the scene without asking", &m_PlayNet.SaveWithoutAsking);
+            ImGui::SetItemTooltip("The other players load the scene from disk: Play saves it first.");
+            ImGui::EndDisabled();
+            ImGui::EndPopup();
+        }
+        if (m_PlaySession)
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", m_PlayWaitingForServer ? ("waiting for the dedicated server -- " + m_PlaySession->Describe()).c_str()
+                                                             : m_PlaySession->Describe().c_str());
+        }
+
+        // Multiplayer Play saves the scene first (the other players load it from disk).
+        if (m_OpenSaveAndPlay)
+        {
+            ImGui::OpenPopup("Save and Play");
+            m_OpenSaveAndPlay = false;
+        }
+        if (ImGui::BeginPopupModal("Save and Play", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::TextUnformatted("Multiplayer Play starts the other players (NoxRuntime) on the saved scene:");
+            ImGui::TextUnformatted("the scene is saved first.");
+            ImGui::Checkbox("Don't ask again (this session)", &m_PlayNet.SaveWithoutAsking);
+            if (ImGui::Button("Save and Play"))
+            {
+                ImGui::CloseCurrentPopup();
+                SaveScene();
+                BeginMultiplayerPlay();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel"))
+            {
+                m_PlayNet.SaveWithoutAsking = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
     }
 
     bool EditorLayer::AnyNodeGraphEditorWantsInput() const
@@ -5868,14 +5956,21 @@ namespace Nox
         if (!ImGui::BeginPopupModal("Package Game", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
             return;
 
-        ImGui::TextWrapped("A folder that runs the game on its own: the runtime (NoxRuntime, renamed after the project), the engine's "
-                           "libraries, scripts and shaders, and only the assets the scenes need, cooked, without their sources.");
+        if (m_PackageServer)
+            ImGui::TextWrapped("A dedicated server (Unreal's server target): the runtime named <Project>Server -- it starts as a dedicated "
+                               "server, no window, GPU or sound, its console takes the server's commands -- with the scenes' cooked assets "
+                               "but no textures, fonts, sound clips, baked acoustics or shaders. Clients join it with --connect=<its address>.");
+        else
+            ImGui::TextWrapped("A folder that runs the game on its own: the runtime (NoxRuntime, renamed after the project), the engine's "
+                               "libraries, scripts and shaders, and only the assets the scenes need, cooked, without their sources.");
         ImGui::Spacing();
         ImGui::SetNextItemWidth(480.0f);
         ImGui::InputText("Output folder", m_PackageOutput, sizeof(m_PackageOutput));
         ImGui::Checkbox("Every scene (not only the start scene)", &m_PackageAllScenes);
         ImGui::Checkbox("Pack files (Content.npak)", &m_PackagePackFiles);
+        ImGui::BeginDisabled(m_PackageServer);
         ImGui::Checkbox("Precompiled shaders only (no Slang)", &m_PackagePrecompiledShaders);
+        ImGui::EndDisabled();
         ImGui::Checkbox("Self-contained .NET", &m_PackageSelfContainedDotNet);
         ImGui::SetItemTooltip("Copies the .NET 9 runtime into the game (about 70 MB): it runs where .NET is not installed.");
         ImGui::SetItemTooltip("The game uses the shader cache the editor wrote (every pipeline it created) and ships without the\n"
@@ -5895,6 +5990,7 @@ namespace Nox
             settings.PackFiles = m_PackagePackFiles;
             settings.PrecompiledShadersOnly = m_PackagePrecompiledShaders;
             settings.SelfContainedDotNet = m_PackageSelfContainedDotNet;
+            settings.Server = m_PackageServer;
             const PackageReport report = PackageGame(settings);
             if (!report.Success)
                 m_PackageResult = "Failed: " + report.Error;
@@ -6496,13 +6592,169 @@ namespace Nox
         if (m_SceneState == SceneState::Simulate)
             OnSceneStop();
 
-        m_SceneState = SceneState::Play;
+        if (m_PlayNet.Mode != PlayNetMode::Standalone)
+        {
+            // The other players load the scene from disk: saved first (asked, unless the Play settings say not to).
+            if (!m_PlayNet.SaveWithoutAsking)
+            {
+                m_OpenSaveAndPlay = true;
+                return;
+            }
+            SaveScene();
+            BeginMultiplayerPlay();
+            return;
+        }
 
+        m_SceneState = SceneState::Play;
+        StartPlayScene(Scene::NetMode::Standalone);
+    }
+
+    void EditorLayer::StartPlayScene(Scene::NetMode netMode)
+    {
         m_HoveredEntity = Entity(); // points into the scene being replaced
         m_ActiveScene = Scene::Copy(m_EditorScene);
+        // Its part in the game before it starts (a client's replicated entities become proxies; its scripts see their role in OnCreate).
+        m_ActiveScene->SetNetMode(netMode);
+        if (m_PlaySession && m_PlaySession->GetReplication())
+            m_PlaySession->GetReplication()->SetScene(m_ActiveScene.get());
+        m_ActiveScene->SetRenderer(m_Renderer);
+        m_ActiveScene->SetRenderer2D(m_Renderer->getRenderer2D());
+        m_ActiveScene->OnViewportResize(static_cast<uint32_t>(m_ViewportSize.x), static_cast<uint32_t>(m_ViewportSize.y));
         m_ActiveScene->OnRuntimeStart();
-
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+    }
+
+    bool EditorLayer::LaunchPlayer(const std::vector<std::string>& arguments, bool console, const char* what)
+    {
+#ifdef _WIN32
+        const std::filesystem::path runtime = std::filesystem::path(Application::GetExecutableRootPath()) / "NoxRuntime.exe";
+#else
+        const std::filesystem::path runtime = std::filesystem::path(Application::GetExecutableRootPath()) / "NoxRuntime";
+#endif
+        std::error_code exists;
+        if (!std::filesystem::exists(runtime, exists))
+        {
+            NOX_CORE_ERROR("Multiplayer Play: NoxRuntime is not next to the editor ({}); build the NoxRuntime target", runtime.generic_string());
+            return false;
+        }
+        auto process = std::make_unique<ChildProcess>();
+        std::string error;
+        if (!process->Launch(runtime, arguments, console, error))
+        {
+            NOX_CORE_ERROR("Multiplayer Play: could not start {} ({})", what, error);
+            return false;
+        }
+        NOX_CORE_INFO("Multiplayer Play: started {}", what);
+        m_PlayProcesses.push_back(std::move(process));
+        return true;
+    }
+
+    void EditorLayer::BeginMultiplayerPlay()
+    {
+        if (m_EditorScenePath.empty() || !Project::GetActive())
+        {
+            NOX_CORE_WARN("Multiplayer Play: save the scene first (the other players load it from disk)");
+            return;
+        }
+        // What the other players run: NoxRuntime on this project and this scene.
+        std::filesystem::path projectFile;
+        std::error_code error;
+        for (const auto& entry : std::filesystem::directory_iterator(Project::GetProjectDirectory(), error))
+            if (entry.is_regular_file(error) && entry.path().extension() == ".nproj")
+            {
+                projectFile = entry.path();
+                break;
+            }
+        const std::string scene = std::filesystem::relative(m_EditorScenePath, Project::GetActiveAssetDirectory(), error).generic_string();
+        const AssetHandle sceneHandle = Project::GetActive()->GetEditorAssetManager()->FindHandleByPath(m_EditorScenePath, AssetType::Scene);
+        if (projectFile.empty() || scene.empty() || sceneHandle == 0)
+        {
+            NOX_CORE_ERROR("Multiplayer Play: the project file or the scene's asset was not found");
+            return;
+        }
+        static const char* emulationNames[] = { "off", "average", "bad" };
+        const std::string emulation = emulationNames[std::clamp(m_PlayNet.Emulation, 0, 2)];
+        Net::NetEmulation emulationValues;
+        Net::NetEmulation::FromPreset(emulation, emulationValues);
+        const uint16_t port = static_cast<uint16_t>(std::clamp(m_PlayNet.Port, 1, 65535));
+
+        // The other players' windows tiled over the primary display (two by two), like Unreal's new-window players.
+        SDL_Rect usable{ 0, 0, 1920, 1080 };
+        SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable);
+        const int windowWidth = std::min(usable.w / 2, 1280), windowHeight = std::min(usable.h / 2, 720);
+        auto playerArguments = [&](int player)
+        {
+            const int slot = (player - 2) % 4;
+            return std::vector<std::string>{ projectFile.string(), "--connect=127.0.0.1:" + std::to_string(port), "--connect-retry=30", "--windowed",
+                                             "--name=Player" + std::to_string(player), "--scene=" + scene, "--net-emulation=" + emulation,
+                                             std::format("--window-size={},{}", windowWidth, windowHeight),
+                                             std::format("--window-pos={},{}", usable.x + (slot % 2) * windowWidth, usable.y + (slot / 2) * windowHeight) };
+        };
+
+        Net::NetSessionConfig config;
+        config.Port = port;
+        config.Emulation = emulationValues;
+        config.PlayerName = "Player1";
+        m_PlaySessionEnded = false;
+        if (m_PlayNet.Mode == PlayNetMode::ListenServer)
+        {
+            // The editor is the listen server: its Play scene is the authority, the others join it.
+            config.Role = Net::SessionRole::ListenServer;
+            m_PlaySession = std::make_unique<Net::NetSession>(config);
+            m_PlaySession->FillWelcome = [this, sceneHandle](Net::NetWelcome& welcome)
+            {
+                welcome.ServerTick = m_ActiveScene ? m_ActiveScene->GetTick() : 0;
+                welcome.TickRate = static_cast<uint16_t>(Scene::TickRate);
+                welcome.SceneHandle = static_cast<uint64_t>(sceneHandle);
+            };
+            if (!m_PlaySession->Start())
+            {
+                NOX_CORE_ERROR("Multiplayer Play: port {} cannot be opened (another server running? change it in the Play settings)", port);
+                m_PlaySession.reset();
+                return;
+            }
+            m_SceneState = SceneState::Play;
+            StartPlayScene(Scene::NetMode::Server);
+        }
+        else
+        {
+            // The editor is a client of a dedicated server it starts (its console takes the server's commands); its Play scene starts
+            // when the server lets it in.
+            if (!LaunchPlayer({ projectFile.string(), "--server", "--port=" + std::to_string(port), "--scene=" + scene, "--net-emulation=" + emulation },
+                              true, "the dedicated server"))
+                return;
+            config.Role = Net::SessionRole::Client;
+            config.Address = "127.0.0.1:" + std::to_string(port);
+            config.ConnectRetrySeconds = 30.0;
+            m_PlaySession = std::make_unique<Net::NetSession>(config);
+            m_PlaySession->OnJoined = [this, sceneHandle](AssetHandle serverScene)
+            {
+                if (serverScene != sceneHandle)
+                    return false;
+                m_PlayWaitingForServer = false;
+                StartPlayScene(Scene::NetMode::Client);
+                return true;
+            };
+            m_PlaySession->OnLeft = [this](Net::DisconnectReason reason, const std::string& text, bool)
+            {
+                NOX_CORE_WARN("Multiplayer Play: the session ended -- {} ({})", Net::ToString(reason), text);
+                m_PlaySessionEnded = true;
+            };
+            m_SceneState = SceneState::Play;
+            m_PlayWaitingForServer = true;
+            if (!m_PlaySession->Start())
+                m_PlaySessionEnded = true;
+        }
+        for (int player = 2; player <= std::clamp(m_PlayNet.Players, 1, 8); ++player)
+            LaunchPlayer(playerArguments(player), false, std::format("player {}", player).c_str());
+    }
+
+    void EditorLayer::EndMultiplayerPlay()
+    {
+        // The other players' windows and the dedicated server close (not left to return to their start scene), then the session.
+        m_PlayProcesses.clear();
+        m_PlaySession.reset();
+        m_PlaySessionEnded = false;
     }
 
     void EditorLayer::OnSceneSimulate()
@@ -6528,7 +6780,11 @@ namespace Nox
     {
         NOX_CORE_ASSERT(m_SceneState == SceneState::Play || m_SceneState == SceneState::Simulate, "OnSceneStop failed no sceneState match");
 
-        if (m_SceneState == SceneState::Play)
+        // Multiplayer Play: the other players and the session end first (the replication refers to the Play scene).
+        const bool started = !(m_SceneState == SceneState::Play && m_PlayWaitingForServer); // (a client still waiting has no Play scene)
+        EndMultiplayerPlay();
+        m_PlayWaitingForServer = false;
+        if (m_SceneState == SceneState::Play && started)
             m_ActiveScene->OnRuntimeStop();
         else if (m_SceneState == SceneState::Simulate)
             m_ActiveScene->OnSimulationStop();

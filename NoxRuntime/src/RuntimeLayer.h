@@ -11,6 +11,7 @@
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Network/NetProtocol.h"
+#include "NoxCore/Network/NetSession.h"
 
 namespace Nox
 {
@@ -62,8 +63,10 @@ namespace Nox
         void StartNetworking();
         void UpdateNetworking(float ts);
         void FlushNetworking();
-        void OnJoinedServer(const Net::NetWelcome& welcome);
-        void OnLeftServer(Net::DisconnectReason reason, const std::string& text);
+        bool OnJoinedServer(AssetHandle scene);
+        void OnLeftServer(Net::DisconnectReason reason, const std::string& text, bool wasJoined);
+        Net::NetServer* Server() const { return m_Session ? m_Session->GetServer() : nullptr; }
+        Net::NetReplication* Replication() const { return m_Session ? m_Session->GetReplication() : nullptr; }
         // The window title shows the session (the project's name, then the state).
         void UpdateWindowTitle();
 
@@ -91,12 +94,10 @@ namespace Nox
 
         // Networking.
         NetRole m_NetRole = NetRole::Standalone;
-        std::unique_ptr<Net::NetServer> m_Server; // dedicated / listen server
-        std::unique_ptr<Net::NetClient> m_Client; // client
-        // The scene's replication (NET2): a server's from the start, a client's while it is joined (its scene is the server's).
-        std::unique_ptr<Net::NetReplication> m_Replication;
+        // The session (Net::NetSession, NET6): its server or client and the scene's replication -- a server's from the start, a
+        // client's while it is joined (its scene is the server's).
+        std::unique_ptr<Net::NetSession> m_Session;
         std::string m_ProjectName;
         float m_TitleTimer = 0.0f;
-        float m_ClientStatusTimer = 0.0f;
     };
 }

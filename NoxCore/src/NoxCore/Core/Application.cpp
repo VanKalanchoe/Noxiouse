@@ -249,7 +249,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
     // Each program of a multiplayer test its own log (several NoxRuntimes in one folder wrote into one Nox.log, mixed):
     // NoxServer.log, NoxListen.log, NoxClient-<name>.log (--name; else the process id); Nox.log otherwise (the editor, a game).
     std::string logFile = "Nox.log";
-    if (args.HasSwitch("--server"))
+    if (args.IsDedicatedServer())
         logFile = "NoxServer.log";
     else if (args.HasSwitch("--listen"))
         logFile = "NoxListen.log";
