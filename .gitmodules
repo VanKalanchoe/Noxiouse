@@ -41,3 +41,6 @@
 [submodule "NoxCore/vendors/miniaudio"]
 	path = NoxCore/vendors/miniaudio
 	url = https://github.com/mackron/miniaudio
+[submodule "NoxCore/vendors/cpp-httplib"]
+	path = NoxCore/vendors/cpp-httplib
+	url = https://github.com/yhirose/cpp-httplib

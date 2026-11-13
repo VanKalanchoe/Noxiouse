@@ -274,6 +274,8 @@ NoxCore/vendors/*
 !NoxCore/vendors/xatlas/
 !NoxCore/vendors/bcdec/
 !NoxCore/vendors/miniaudio/
+!NoxCore/vendors/cpp-httplib/
+!NoxCore/vendors/miniaudio/
 *.ntex
 *.nmesh
 *.hash
