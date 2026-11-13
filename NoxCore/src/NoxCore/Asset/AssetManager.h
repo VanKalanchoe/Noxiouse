@@ -55,6 +55,12 @@ namespace Nox
             return Project::GetActiveAssetManager().FindHandleByPath(path, type);
         }
 
+        // FindHandleByPath that registers an unregistered file of that type at the path (AssetManagerBase::ResolvePath).
+        static AssetHandle ResolvePath(const std::filesystem::path& path, AssetType type)
+        {
+            return Project::GetActiveAssetManager().ResolvePath(path, type);
+        }
+
         static size_t GetAssetCount()
         {
             return Project::GetActiveAssetManager().GetAssetCount();

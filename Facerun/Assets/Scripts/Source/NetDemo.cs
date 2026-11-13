@@ -54,7 +54,7 @@ public sealed class NetGameMode : EntityBehaviour
         Entity player = Network.Spawn(PlayerPrefab, position, owner);
         if (!player.IsValid)
         {
-            Log.Info($"[NetDemo] could not spawn '{PlayerPrefab}' (open Facerun in NoxEditor once so it registers the demo files)");
+            Log.Info($"[NetDemo] could not spawn '{PlayerPrefab}' (is the prefab under Facerun/Assets?)");
             return;
         }
         m_Players[owner] = player;

@@ -133,12 +133,11 @@ namespace Nox
         AssetHandle startScene = Project::GetActive()->GetConfig().StartScene;
         if (const char* scenePath = Application::Get().GetSpecification().CommandLineArgs.Value("--scene"))
         {
-            const AssetHandle chosen = AssetManager::FindHandleByPath(std::filesystem::path(scenePath), AssetType::Scene);
+            const AssetHandle chosen = AssetManager::ResolvePath(std::filesystem::path(scenePath), AssetType::Scene);
             if (chosen != 0)
                 startScene = chosen;
             else
-                NOX_CORE_ERROR("NoxRuntime: --scene '{}' is not a scene in the asset registry (open the project in the editor once so it "
-                               "registers new files); playing the start scene", scenePath);
+                NOX_CORE_ERROR("NoxRuntime: --scene '{}' is not a scene under the asset directory; playing the start scene", scenePath);
         }
         if (startScene == 0)
         {

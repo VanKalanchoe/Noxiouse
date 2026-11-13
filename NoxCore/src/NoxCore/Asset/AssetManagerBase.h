@@ -33,6 +33,10 @@ namespace Nox
         virtual AssetMetadata GetMetadata(AssetHandle handle) const = 0;
         // The registered asset of this type at a path relative to the asset directory (its file or its source), 0 if none.
         virtual AssetHandle FindHandleByPath(const std::filesystem::path& path, AssetType type) const = 0;
+        // FindHandleByPath, and a file of that type at the path that is not registered yet (added outside the editor: a pull, the
+        // file manager) is registered on this first use -- a script's Scene.Instantiate("Prefabs/Ball.nprefab") works without the
+        // editor having seen the file. 0 when there is no such file.
+        virtual AssetHandle ResolvePath(const std::filesystem::path& path, AssetType type) { return FindHandleByPath(path, type); }
         // How many assets are registered (grows with every registration: callers use it to notice new assets).
         virtual size_t GetAssetCount() const = 0;
 

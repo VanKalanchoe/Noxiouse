@@ -26,6 +26,7 @@
 #include <charconv>
 #include <yaml-cpp/yaml.h>
 
+#include "NoxCore/Core/Hash.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Profiling/Profiler.h"
 
@@ -207,6 +208,9 @@ namespace Nox
     {
         if (m_ReadOnly)
             return;
+        // Files added while the editor was closed (a pull, the file manager): registered now, as Unreal's asset registry scans at
+        // startup -- not only when the Content Browser opens their folder.
+        ScanAndRegisterNewAssets({});
         m_AssetWatcher.watch(Project::GetActiveAssetDirectory(), [this](const std::filesystem::path& path) 
         {
             OnAssetModifiedOnDisk(path);
@@ -997,6 +1001,39 @@ namespace Nox
             return 0;
         const auto entry = m_AssetRegistry.find(found->second);
         return entry != m_AssetRegistry.end() && entry->second.Type == type ? found->second : AssetHandle(0);
+    }
+
+    AssetHandle EditorAssetManager::HandleForPath(const std::filesystem::path& relativePath)
+    {
+        const std::string key = relativePath.lexically_normal().generic_string();
+        const uint64_t hash = Hash::compute(key, 0x4e6f78417373ull); // ("NoxAss")
+        return AssetHandle(hash != 0 ? hash : 1);
+    }
+
+    AssetHandle EditorAssetManager::ResolvePath(const std::filesystem::path& path, AssetType type)
+    {
+        if (const AssetHandle found = FindHandleByPath(path, type))
+            return found;
+        const std::filesystem::path relativePath = path.lexically_normal();
+        if (relativePath.empty() || relativePath.is_absolute() || GetAssetTypeFromExtension(relativePath.extension()) != type)
+            return 0;
+        if (m_HandleByPath.contains(relativePath.generic_string()))
+            return 0; // (registered as another type)
+        if (!VFS::Exists(Project::GetActiveAssetDirectory() / relativePath))
+            return 0;
+        AssetHandle handle = HandleForPath(relativePath);
+        if (m_AssetRegistry.contains(handle))
+            handle = AssetHandle(); // (another path with the same hash: a random handle)
+        AssetMetadata metadata;
+        metadata.Type = type;
+        metadata.FilePath = relativePath;
+        metadata.SourceFilePath = relativePath;
+        m_AssetRegistry[handle] = metadata;
+        IndexPath(handle, metadata);
+        if (!m_ReadOnly)
+            m_RegistryDirty = true; // the editor keeps it (written by Update); a runtime only knows it while it runs
+        NOX_CORE_INFO("[AssetManager] '{}' was not registered: registered on first use", relativePath.generic_string());
+        return handle;
     }
 
     AssetHandle EditorAssetManager::RegisterExistingFile(const std::filesystem::path& relativePath, AssetType type)
@@ -2220,7 +2257,10 @@ namespace Nox
                         registryChanged = true;
                         continue;
                     }
-                    AssetHandle newHandle; // generates new random handle
+                    // The same handle a runtime gives it when a script names the file first (HandleForPath).
+                    AssetHandle newHandle = HandleForPath(relativePath);
+                    if (m_AssetRegistry.contains(newHandle))
+                        newHandle = AssetHandle(); // (a hash collision: random)
                     AssetMetadata metadata;
                     metadata.FilePath = relativePath;
                     metadata.SourceFilePath = relativePath;

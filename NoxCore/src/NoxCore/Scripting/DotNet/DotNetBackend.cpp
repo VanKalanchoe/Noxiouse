@@ -108,7 +108,7 @@ namespace Nox
         uint64_t SceneInstantiate(Coral::String path, double x, double y, double z)
         {
             if (!s_Scene) return 0;
-            const AssetHandle prefab = AssetManager::FindHandleByPath(std::filesystem::path(std::string(path)), AssetType::Prefab);
+            const AssetHandle prefab = AssetManager::ResolvePath(std::filesystem::path(std::string(path)), AssetType::Prefab);
             if (prefab == 0)
             {
                 NOX_CORE_ERROR("[C#] Scene.Instantiate: no prefab '{}' in the asset registry", std::string(path));
@@ -164,7 +164,7 @@ namespace Nox
         uint64_t NetworkSpawn(Coral::String path, double x, double y, double z, uint32_t owner)
         {
             if (!s_Scene) return 0;
-            const AssetHandle prefab = AssetManager::FindHandleByPath(std::filesystem::path(std::string(path)), AssetType::Prefab);
+            const AssetHandle prefab = AssetManager::ResolvePath(std::filesystem::path(std::string(path)), AssetType::Prefab);
             if (prefab == 0)
             {
                 NOX_CORE_ERROR("[C#] Network.Spawn: no prefab '{}' in the asset registry", std::string(path));
@@ -198,7 +198,7 @@ namespace Nox
         // (Scene::LoadLevel; carried out at the start of the next frame).
         AssetHandle FindLevel(Coral::String path, const char* call)
         {
-            const AssetHandle level = AssetManager::FindHandleByPath(std::filesystem::path(std::string(path)), AssetType::Scene);
+            const AssetHandle level = AssetManager::ResolvePath(std::filesystem::path(std::string(path)), AssetType::Scene);
             if (level == 0)
                 NOX_CORE_ERROR("[C#] {}: no scene '{}' in the asset registry", call, std::string(path));
             return level;
@@ -221,7 +221,7 @@ namespace Nox
         int32_t SceneGetLevelState(Coral::String path)
         {
             if (!s_Scene) return 0;
-            const AssetHandle level = AssetManager::FindHandleByPath(std::filesystem::path(std::string(path)), AssetType::Scene);
+            const AssetHandle level = AssetManager::ResolvePath(std::filesystem::path(std::string(path)), AssetType::Scene);
             return level != 0 ? static_cast<int32_t>(s_Scene->GetLevelState(level)) : 0;
         }
 
@@ -368,7 +368,7 @@ namespace Nox
             AssetHandle material = 0;
             if (!path.empty())
             {
-                material = AssetManager::FindHandleByPath(std::filesystem::path(path), AssetType::Material);
+                material = AssetManager::ResolvePath(std::filesystem::path(path), AssetType::Material);
                 if (material == 0)
                 {
                     NOX_CORE_ERROR("[C#] Mesh.SetMaterial: no material '{}' in the asset registry", path);
@@ -654,7 +654,7 @@ namespace Nox
             if (!animator)
                 return false;
             const std::string path = std::string(clipPath);
-            const AssetHandle clip = AssetManager::FindHandleByPath(path, AssetType::AnimationSequence);
+            const AssetHandle clip = AssetManager::ResolvePath(path, AssetType::AnimationSequence);
             if (clip == 0)
             {
                 NOX_CORE_WARN("PlayMontage: no animation clip at '{}'", path);
@@ -863,15 +863,15 @@ namespace Nox
         AssetHandle FindSound(const std::string& path, const char* call)
         {
             const std::filesystem::path soundPath(path);
-            AssetHandle sound = AssetManager::FindHandleByPath(soundPath, AssetType::AudioClip);
+            AssetHandle sound = AssetManager::ResolvePath(soundPath, AssetType::AudioClip);
             if (sound == 0)
-                sound = AssetManager::FindHandleByPath(soundPath, AssetType::AudioGraph);
+                sound = AssetManager::ResolvePath(soundPath, AssetType::AudioGraph);
             for (const char* extension : { ".wav", ".ogg", ".flac", ".mp3", ".naudiograph" })
             {
                 if (sound != 0 || soundPath.has_extension())
                     break;
                 const std::filesystem::path candidate(path + extension);
-                sound = AssetManager::FindHandleByPath(candidate, std::string_view(extension) == ".naudiograph" ? AssetType::AudioGraph : AssetType::AudioClip);
+                sound = AssetManager::ResolvePath(candidate, std::string_view(extension) == ".naudiograph" ? AssetType::AudioGraph : AssetType::AudioClip);
             }
             if (sound != 0 || !Project::GetActive())
             {

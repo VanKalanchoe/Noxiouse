@@ -90,6 +90,11 @@ namespace Nox
         void SerializeAssetRegistry(const std::filesystem::path& path, const std::unordered_set<AssetHandle>& handles) const;
         // The registered asset of this type at a path under the asset directory (or as its source), 0 when there is none.
         AssetHandle FindHandleByPath(const std::filesystem::path& path, AssetType type) const override;
+        AssetHandle ResolvePath(const std::filesystem::path& path, AssetType type) override;
+        // The handle a file found outside the editor is registered under: derived from its path, so every program that registers it
+        // (the editor's scan, a runtime resolving a script's path) gives it the same one -- a server and its clients agree on a
+        // prefab they never saw in the editor.
+        static AssetHandle HandleForPath(const std::filesystem::path& relativePath);
         // Imports a glTF like Unreal: the file's content decides the assets -- skinned meshes become a skeletal mesh
         // (destPath with .nmesh, plus skeleton and clips), the rest a static mesh (.nsmesh); a file with both gets both.
         // False when the settings leave nothing to import. Cooking and loading happen in the background.
