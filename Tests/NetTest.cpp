@@ -7,6 +7,7 @@
 #include "NoxCore/Network/LoopbackTransport.h"
 #include "NoxCore/Network/NetClient.h"
 #include "NoxCore/Network/NetServer.h"
+#include "NoxCore/Network/NetSnapshot.h"
 #include "NoxCore/Core/Log.h"
 
 #include <cstdio>
@@ -438,10 +439,150 @@ static void TestReaderFuzz()
     CHECK(shortReader.IsFailed() && shortReader.ReadU32() == 0, "a cut message fails the reader and reads zeros");
 }
 
+// The snapshot codec alone: a world that keeps changing (spawns, removals, property and owner changes, scripts added), snapshots
+// over a channel that loses 30 % and delivers the rest up to 4 ticks late, acknowledgements lost and late the same way. Every snapshot
+// the client applies must be exactly the server's world at that tick; after the loss stops the client must hold the final world.
+static void TestSnapshots()
+{
+    std::printf("\n== snapshots: deltas against acknowledged baselines, 30 %% loss and reordering both ways\n");
+    std::mt19937 random(1234);
+    auto chance = [&](float p) { return std::uniform_real_distribution<float>(0.0f, 1.0f)(random) < p; };
+    auto randomBlob = [&](size_t maxSize) { std::vector<uint8_t> blob(1 + random() % maxSize); for (uint8_t& b : blob) b = static_cast<uint8_t>(random()); return blob; };
+
+    WorldState world;
+    NetId nextId = 1000;
+    auto spawn = [&]()
+    {
+        auto state = std::make_shared<EntityState>();
+        state->Prefab = random() % 3 == 0 ? 0 : 0xAB00 + random() % 4;
+        state->Owner = random() % 4;
+        const size_t properties = 1 + random() % 5;
+        for (size_t index = 0; index < properties; ++index)
+            state->Properties.push_back(randomBlob(index == 0 ? 24 : 8));
+        world.Entities[nextId++] = state;
+    };
+    for (int i = 0; i < 40; ++i)
+        spawn();
+
+    SnapshotSender sender;
+    SnapshotReceiver receiver;
+    std::unordered_map<uint32_t, WorldState> sentWorlds; // what each sequence carried
+    struct InFlight { int DeliverAt; std::vector<uint8_t> Bytes; };
+    std::vector<InFlight> toClient, toServer;
+    size_t applied = 0, stale = 0, missing = 0, malformed = 0, mismatches = 0, bytes = 0, fullBytes = 0;
+    WorldState clientWorld;
+    const int lossyTicks = 600, totalTicks = 700;
+    for (int tick = 1; tick <= totalTicks; ++tick)
+    {
+        const bool lossy = tick <= lossyTicks;
+        // The world changes.
+        world.Tick = static_cast<uint64_t>(tick);
+        for (auto it = world.Entities.begin(); it != world.Entities.end();)
+        {
+            if (lossy && chance(0.01f)) { it = world.Entities.erase(it); continue; }
+            if (lossy && chance(0.2f))
+            {
+                auto changed = std::make_shared<EntityState>(*it->second);
+                changed->Properties[random() % changed->Properties.size()] = randomBlob(16);
+                if (chance(0.05f)) changed->Owner = random() % 4;
+                if (chance(0.02f)) changed->Properties.push_back(randomBlob(8)); // a script added
+                it->second = changed;
+            }
+            ++it;
+        }
+        if (lossy && chance(0.3f))
+            spawn();
+
+        // The server sends.
+        NetWriter out;
+        sender.Write(world, out);
+        sentWorlds[sender.GetLastSent()] = world;
+        bytes += out.GetSize();
+        {
+            SnapshotSender full; // the same world from nothing: what no deltas would cost
+            NetWriter fullOut;
+            full.Write(world, fullOut);
+            fullBytes += fullOut.GetSize();
+        }
+        if (!lossy || !chance(0.3f))
+            toClient.push_back({ tick + (lossy ? static_cast<int>(random() % 5) : 0), std::vector<uint8_t>(out.GetData().begin(), out.GetData().end()) });
+
+        // The client receives what arrived by now (in arrival order) and acknowledges.
+        std::stable_sort(toClient.begin(), toClient.end(), [](const InFlight& a, const InFlight& b) { return a.DeliverAt < b.DeliverAt; });
+        while (!toClient.empty() && toClient.front().DeliverAt <= tick)
+        {
+            NetReader reader(toClient.front().Bytes);
+            reader.ReadU8(); // the type
+            WorldState decoded;
+            uint32_t sequence = 0;
+            switch (receiver.Read(reader, decoded, sequence))
+            {
+            case SnapshotReceiver::Result::Applied:
+            {
+                ++applied;
+                const WorldState& expected = sentWorlds[sequence];
+                bool same = decoded.Tick == expected.Tick && decoded.Entities.size() == expected.Entities.size();
+                for (const auto& [id, state] : expected.Entities)
+                {
+                    auto found = decoded.Entities.find(id);
+                    same = same && found != decoded.Entities.end() && *found->second == *state;
+                }
+                mismatches += same ? 0 : 1;
+                clientWorld = decoded;
+                NetWriter ack;
+                WriteSnapshotAck(ack, sequence);
+                if (!lossy || !chance(0.3f))
+                    toServer.push_back({ tick + (lossy ? static_cast<int>(random() % 5) : 0), std::vector<uint8_t>(ack.GetData().begin(), ack.GetData().end()) });
+                break;
+            }
+            case SnapshotReceiver::Result::Stale: ++stale; break;
+            case SnapshotReceiver::Result::MissingBaseline: ++missing; break;
+            case SnapshotReceiver::Result::Malformed: ++malformed; break;
+            }
+            toClient.erase(toClient.begin());
+        }
+        std::stable_sort(toServer.begin(), toServer.end(), [](const InFlight& a, const InFlight& b) { return a.DeliverAt < b.DeliverAt; });
+        while (!toServer.empty() && toServer.front().DeliverAt <= tick)
+        {
+            NetReader reader(toServer.front().Bytes);
+            reader.ReadU8();
+            sender.Acknowledge(reader.ReadU32());
+            toServer.erase(toServer.begin());
+        }
+    }
+    CHECK(malformed == 0 && mismatches == 0, "{} snapshots applied, each exactly the server's world ({} mismatches, {} malformed); {} late ones skipped, {} without their baseline",
+          applied, mismatches, malformed, stale, missing);
+    bool converged = clientWorld.Entities.size() == world.Entities.size();
+    for (const auto& [id, state] : world.Entities)
+    {
+        auto found = clientWorld.Entities.find(id);
+        converged = converged && found != clientWorld.Entities.end() && *found->second == *state;
+    }
+    CHECK(converged, "after the loss stops the client holds the server's world ({} entities)", world.Entities.size());
+    // (A churny world -- a fifth of the entities change every tick, baselines several ticks old under the loss: a level where most
+    // things stand still sends far less.)
+    CHECK(bytes * 2 < fullBytes, "deltas: {} KB sent, {} KB without them ({:.0f} %)", bytes / 1024, fullBytes / 1024, 100.0 * bytes / fullBytes);
+
+    // Random bytes never crash the reader or apply anything.
+    SnapshotReceiver fuzzed;
+    size_t accepted = 0;
+    for (int i = 0; i < 100000; ++i)
+    {
+        std::vector<uint8_t> junk(random() % 64);
+        for (uint8_t& b : junk) b = static_cast<uint8_t>(random());
+        NetReader reader(junk);
+        WorldState decoded;
+        uint32_t sequence = 0;
+        accepted += fuzzed.Read(reader, decoded, sequence) == SnapshotReceiver::Result::Applied ? 1 : 0;
+    }
+    CHECK(true, "100000 random snapshots read without a crash ({} happened to be well-formed)", accepted);
+}
+
 int main()
 {
     Nox::Log::Init();
     TestReaderFuzz();
+    TestSnapshots();
     for (bool loopback : { true, false })
     {
         const uint16_t base = loopback ? 7100 : 7200;

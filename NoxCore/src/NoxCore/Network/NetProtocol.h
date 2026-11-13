@@ -21,7 +21,7 @@
 namespace Nox::Net
 {
     constexpr uint32_t ProtocolMagic = 0x4e584f4e;  // "NOXN"
-    constexpr uint32_t ProtocolVersion = 1;         // raised whenever a message's layout changes
+    constexpr uint32_t ProtocolVersion = 2;         // raised whenever a message's layout changes (2: NET2 replication)
     constexpr uint16_t DefaultPort = 7777;
     constexpr size_t MaxNameLength = 64;            // player and server names
     constexpr size_t MaxProjectNameLength = 128;
@@ -30,8 +30,12 @@ namespace Nox::Net
     {
         Hello = 1,
         Welcome = 2,
-        // The game's messages (replication, RPCs: NET2) start here; types below are the session's own.
+        // The game's messages start here (NetServer / NetClient hand them up); types below are the session's own.
         FirstGameMessage = 32,
+        // Replication (NET2, NetReplication): the server's snapshots, the client's acknowledgements, RPCs both ways.
+        Snapshot = 32,
+        SnapshotAck = 33,
+        Rpc = 34,
     };
 
     // Why a session ended (sent in the transport's close; Unreal's ENetworkFailure / the login failure strings).
