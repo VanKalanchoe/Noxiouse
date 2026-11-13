@@ -8,6 +8,8 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include "NoxCore/Console/Console.h"
+
 namespace Nox
 {
     namespace
@@ -156,6 +158,7 @@ namespace Nox
         DrawToolbar();
         ImGui::Separator();
         DrawLines();
+        DrawCommandLine();
         ImGui::End();
     }
 
@@ -198,7 +201,8 @@ namespace Nox
 
     void OutputLogPanel::DrawLines()
     {
-        ImGui::BeginChild("##Lines", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
+        // (the command line keeps its row under the lines)
+        ImGui::BeginChild("##Lines", ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing()), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
         const bool atBottom = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f;
         const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
         const float clockWidth = ImGui::CalcTextSize("[00:00:00] ").x;
@@ -284,9 +288,121 @@ namespace Nox
             ImGui::EndPopup();
         }
 
-        if (m_AutoScroll && atBottom)
+        if ((m_AutoScroll && atBottom) || m_ScrollToBottom)
             ImGui::SetScrollHereY(1.0f);
+        m_ScrollToBottom = false;
         ImGui::EndChild();
+    }
+
+    int OutputLogPanel::CommandCallback(ImGuiInputTextCallbackData* data)
+    {
+        auto* panel = static_cast<OutputLogPanel*>(data->UserData);
+        if (data->EventFlag == ImGuiInputTextFlags_CallbackHistory && !panel->m_History.empty())
+        {
+            const int count = static_cast<int>(panel->m_History.size());
+            int& index = panel->m_HistoryIndex;
+            if (data->EventKey == ImGuiKey_UpArrow)
+                index = index < 0 ? count - 1 : std::max(0, index - 1);
+            else if (data->EventKey == ImGuiKey_DownArrow)
+                index = index < 0 ? -1 : (index + 1 < count ? index + 1 : -1);
+            data->DeleteChars(0, data->BufTextLen);
+            if (index >= 0)
+                data->InsertChars(0, panel->m_History[static_cast<size_t>(index)].c_str());
+        }
+        else if (data->EventFlag == ImGuiInputTextFlags_CallbackCompletion)
+        {
+            // The first word: completed to the longest prefix the names share (one name: completed with a space after it).
+            const std::string_view text(data->Buf, static_cast<size_t>(data->BufTextLen));
+            if (text.find(' ') != std::string_view::npos)
+                return 0;
+            const std::vector<std::string> names = Console::Get().Complete(text);
+            if (names.empty())
+                return 0;
+            std::string common = names.front();
+            for (const std::string& name : names)
+            {
+                size_t length = 0;
+                while (length < common.size() && length < name.size() &&
+                       std::tolower(static_cast<unsigned char>(common[length])) == std::tolower(static_cast<unsigned char>(name[length])))
+                    ++length;
+                common.resize(length);
+            }
+            if (names.size() == 1)
+                common += ' ';
+            if (common.size() >= text.size())
+            {
+                data->DeleteChars(0, data->BufTextLen);
+                data->InsertChars(0, common.c_str());
+            }
+        }
+        return 0;
+    }
+
+    void OutputLogPanel::DrawCommandLine()
+    {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Cmd");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(-1.0f);
+        if (m_RefocusCommand)
+        {
+            ImGui::SetKeyboardFocusHere();
+            m_RefocusCommand = false;
+        }
+        const ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory | ImGuiInputTextFlags_CallbackCompletion;
+        const bool entered = ImGui::InputTextWithHint("##Cmd", "Console command (Tab completes, Up / Down history, 'help' lists them)", m_Command,
+                                                      sizeof(m_Command), flags, &OutputLogPanel::CommandCallback, this);
+        const bool editing = ImGui::IsItemActive();
+        const ImVec2 inputMin = ImGui::GetItemRectMin();
+        if (entered)
+        {
+            std::string line(m_Command);
+            const size_t first = line.find_first_not_of(" \t");
+            line = first == std::string::npos ? std::string() : line.substr(first);
+            if (!line.empty())
+            {
+                if (m_History.empty() || m_History.back() != line)
+                    m_History.push_back(line);
+                if (m_History.size() > 100)
+                    m_History.erase(m_History.begin());
+                Console::Get().Execute(line); // (its lines arrive in the log next frame)
+                m_ScrollToBottom = true;
+            }
+            m_Command[0] = '\0';
+            m_HistoryIndex = -1;
+            m_RefocusCommand = true; // (Enter leaves the field: back into it for the next command)
+        }
+
+        // The names that fit the first word, above the line while typing it (Unreal's suggestion list).
+        const std::string_view typed(m_Command);
+        if (editing && !typed.empty() && typed.find(' ') == std::string_view::npos)
+        {
+            const std::vector<std::string> names = Console::Get().Complete(typed);
+            if (!names.empty())
+            {
+                const size_t shown = std::min<size_t>(names.size(), 12);
+                const float height = static_cast<float>(shown) * ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().WindowPadding.y * 2.0f;
+                ImGui::SetNextWindowPos(ImVec2(inputMin.x, inputMin.y - height - 2.0f));
+                ImGui::SetNextWindowBgAlpha(0.95f);
+                const ImGuiWindowFlags popupFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                                    ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_AlwaysAutoResize |
+                                                    ImGuiWindowFlags_NoInputs;
+                if (ImGui::Begin("##CmdSuggestions", nullptr, popupFlags))
+                {
+                    for (size_t index = 0; index < shown; ++index)
+                    {
+                        const std::string& name = names[index];
+                        if (const ConsoleVariable* variable = Console::Get().FindVariable(name))
+                            ImGui::Text("%s = %s", name.c_str(), variable->GetString().c_str());
+                        else if (const Console::CommandInfo* command = Console::Get().FindCommand(name))
+                            ImGui::TextUnformatted((command->Usage.empty() ? name : command->Usage).c_str());
+                    }
+                    if (names.size() > shown)
+                        ImGui::TextDisabled("... %zu more (Tab narrows)", names.size() - shown);
+                }
+                ImGui::End();
+            }
+        }
     }
 
     void OutputLogPanel::CopyLines(bool selectedOnly) const

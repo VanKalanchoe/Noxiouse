@@ -1,4 +1,5 @@
 #pragma once
+#include "NoxCore/Console/Console.h"
 #include "NetProtocol.h"
 #include "NetTransport.h"
 
@@ -38,6 +39,10 @@ namespace Nox::Net
         bool DebugTrace = false;
     };
 
+    // The networking console variables (net.DebugTrace, net.LagCompensation), registered once at start-up so they can be set
+    // before any session exists (--exec, Console.ini); every session follows them.
+    void RegisterConsoleVariables();
+
     class NetSession
     {
     public:
@@ -75,6 +80,8 @@ namespace Nox::Net
         void Connect();
         void OnConnected(const NetWelcome& welcome);
         void OnDisconnected(DisconnectReason reason, const std::string& text);
+        void ApplyConsoleVariables();
+        void RegisterConsoleCommands();
 
         NetSessionConfig m_Config;
         std::unique_ptr<NetServer> m_Server;
@@ -84,5 +91,6 @@ namespace Nox::Net
         double m_RetryAt = 0.0;   // a failed first connection tried again then (0: no retry pending)
         bool m_EverJoined = false;
         float m_StatusTimer = 0.0f;
+        std::vector<Console::Registration> m_ConsoleCommands; // net.Status, net.Emulation: while this session lives
     };
 }

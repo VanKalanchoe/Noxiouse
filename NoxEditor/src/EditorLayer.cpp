@@ -25,6 +25,8 @@
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Network/NetReplication.h"
+#include "NoxCore/Network/NetSession.h"
+#include "NoxCore/Console/Console.h"
 #include "NoxCore/Asset/MeshSerializer.h"
 #include "NoxCore/Asset/SceneImporter.h"
 #include "NoxCore/Core/Application.h"
@@ -276,6 +278,11 @@ namespace Nox
         if (!ScriptEngine::Initialize(SDL_GetBasePath(), true) && !ScriptEngine::IsInitialized())
             NOX_CORE_ERROR("Failed to initialize the .NET scripting backend");
         BuildScriptsIfNeverBuilt();
+
+        // The engine console: its variables exist before anything uses them; --exec="cmd; cmd" runs commands at start-up.
+        Net::RegisterConsoleVariables();
+        if (const char* exec = app.GetSpecification().CommandLineArgs.Value("--exec"))
+            Console::Get().Execute(exec);
     }
 
     void EditorLayer::BuildScriptsIfNeverBuilt()

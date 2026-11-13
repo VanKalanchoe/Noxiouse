@@ -70,28 +70,12 @@ namespace Nox
             return emulation;
         }
 
-        std::string Describe(const Net::NetEmulation& emulation)
-        {
-            if (!emulation.IsActive())
-                return "off";
-            return std::format("{:.0f} ms lag, {:.0f} ms jitter, {:.1f} % loss (each direction)", emulation.LagMs, emulation.JitterMs,
-                               emulation.LossPercent);
-        }
-
         // A connection quality (0..1) as a percentage; the transport reports -1 until it has measured it.
         std::string Quality(float quality)
         {
             return quality < 0.0f ? std::string("unknown") : std::format("{:.0f} %", quality * 100.0f);
         }
 
-        std::vector<std::string> SplitWords(const std::string& line)
-        {
-            std::vector<std::string> words;
-            std::istringstream stream(line);
-            for (std::string word; stream >> word;)
-                words.push_back(word);
-            return words;
-        }
     }
 
     RuntimeLayer::RuntimeLayer()
@@ -174,8 +158,52 @@ namespace Nox
                     console->Lines.push_back(line);
                 }
             }).detach();
-            NOX_CORE_INFO("Server console: status, clients, kick <id> [reason], netemu off|average|bad|<lag> <jitter> <loss>, lagcomp on|off, netdebug on|off, quit (or Ctrl+C)");
+            NOX_CORE_INFO("Server console: the engine console's commands -- status, clients, kick <id> [reason], net.Emulation (netemu), "
+                          "net.LagCompensation (lagcomp), net.DebugTrace (netdebug), quit (or Ctrl+C); 'help' lists every command");
         }
+        Net::RegisterConsoleVariables(); // (also without a session: set before one starts)
+        RegisterConsoleCommands();
+        // --exec="cmd; cmd": console commands once the game is up (Unreal's -ExecCmds), e.g. --exec="net.DebugTrace 1".
+        if (const char* exec = Application::Get().GetSpecification().CommandLineArgs.Value("--exec"))
+            Console::Get().Execute(exec);
+    }
+
+    void RuntimeLayer::RegisterConsoleCommands()
+    {
+        Console& console = Console::Get();
+        m_ConsoleCommands.push_back(console.RegisterCommand({ "quit", "quit", "Ends the game (a server tells its clients)", ConsoleAccess::Execute,
+            [](const std::vector<std::string>&, ConsoleOutput& output)
+            {
+                output.Info("Quitting");
+                Quit();
+            } }));
+        m_ConsoleCommands.push_back(console.RegisterCommand({ "exit", "exit", "Same as quit", ConsoleAccess::Execute,
+            [](const std::vector<std::string>&, ConsoleOutput&) { Quit(); } }));
+        if (m_NetRole != NetRole::DedicatedServer && m_NetRole != NetRole::ListenServer)
+            return;
+        m_ConsoleCommands.push_back(console.RegisterCommand({ "status", "status", "The server's tick rate, load, entities, clients and bandwidth",
+            ConsoleAccess::Read, [this](const std::vector<std::string>&, ConsoleOutput&) { LogServerStatus(); } }));
+        m_ConsoleCommands.push_back(console.RegisterCommand({ "clients", "clients", "The joined clients: id, name, address, ping",
+            ConsoleAccess::Read, [this](const std::vector<std::string>&, ConsoleOutput&) { LogClients(); } }));
+        m_ConsoleCommands.push_back(console.RegisterCommand({ "kick", "kick <client id> [reason]", "Disconnects a client", ConsoleAccess::Execute,
+            [this](const std::vector<std::string>& arguments, ConsoleOutput& output)
+            {
+                if (arguments.empty() || !Server())
+                {
+                    output.Error("kick <client id> [reason]");
+                    return;
+                }
+                const Net::ClientId client = static_cast<Net::ClientId>(std::strtoul(arguments[0].c_str(), nullptr, 10));
+                std::string reason;
+                for (size_t index = 1; index < arguments.size(); ++index)
+                    reason += (index > 1 ? " " : "") + arguments[index];
+                if (!Server()->Kick(client, reason.empty() ? "kicked by the server" : reason))
+                    output.Error(std::format("No client {} (see 'clients')", arguments[0]));
+            } }));
+        // The server console's old names, kept: they run the engine's commands.
+        m_ConsoleCommands.push_back(console.RegisterAlias("netemu", "net.Emulation", "netemu off|average|bad|<lag> <jitter> <loss>"));
+        m_ConsoleCommands.push_back(console.RegisterAlias("lagcomp", "net.LagCompensation", "lagcomp on|off"));
+        m_ConsoleCommands.push_back(console.RegisterAlias("netdebug", "net.DebugTrace", "netdebug on|off"));
     }
 
     RuntimeLayer::~RuntimeLayer()
@@ -271,57 +299,8 @@ namespace Nox
 
     void RuntimeLayer::RunConsoleCommand(const std::string& line)
     {
-        const std::vector<std::string> words = SplitWords(line);
-        if (words.empty())
-            return;
-        const std::string& command = words[0];
-        if (command == "quit" || command == "exit")
-        {
-            NOX_CORE_INFO("Server: quitting");
-            Quit();
-        }
-        else if (command == "status")
-            LogServerStatus();
-        else if (command == "clients")
-            LogClients();
-        else if (command == "kick" && words.size() >= 2 && Server())
-        {
-            const Net::ClientId client = static_cast<Net::ClientId>(std::strtoul(words[1].c_str(), nullptr, 10));
-            std::string reason;
-            for (size_t index = 2; index < words.size(); ++index)
-                reason += (index > 2 ? " " : "") + words[index];
-            if (!Server()->Kick(client, reason.empty() ? "kicked by the server" : reason))
-                NOX_CORE_WARN("Server console: no client {} (see 'clients')", words[1]);
-        }
-        else if (command == "lagcomp" && Replication())
-        {
-            if (words.size() >= 2)
-                Replication()->SetLagCompensation(words[1] != "off");
-            NOX_CORE_INFO("Server: lag compensation {} (shots are checked against where the targets were {})",
-                          Replication()->GetLagCompensation() ? "on" : "off",
-                          Replication()->GetLagCompensation() ? "on the shooter's screen" : "now, on the server");
-        }
-        else if (command == "netdebug" && Replication())
-            Replication()->SetDebugTrace(words.size() >= 2 ? words[1] != "off" : !Replication()->GetDebugTrace());
-        else if (command == "netemu" && words.size() >= 2 && Server())
-        {
-            Net::NetEmulation emulation;
-            if (words.size() >= 4)
-            {
-                emulation.LagMs = static_cast<float>(std::atof(words[1].c_str()));
-                emulation.JitterMs = static_cast<float>(std::atof(words[2].c_str()));
-                emulation.LossPercent = static_cast<float>(std::atof(words[3].c_str()));
-            }
-            else if (!Net::NetEmulation::FromPreset(words[1], emulation))
-            {
-                NOX_CORE_WARN("Server console: netemu off | average | bad | <lag ms> <jitter ms> <loss %>");
-                return;
-            }
-            Server()->SetEmulation(emulation);
-            NOX_CORE_INFO("Server: network emulation {}", Describe(emulation));
-        }
-        else
-            NOX_CORE_WARN("Server console: unknown command '{}' (status, clients, kick <id> [reason], netemu ..., lagcomp on|off, netdebug on|off, quit)", line);
+        // The engine console (its commands log what they print).
+        Console::Get().Execute(line);
     }
 
     void RuntimeLayer::LogClients() const

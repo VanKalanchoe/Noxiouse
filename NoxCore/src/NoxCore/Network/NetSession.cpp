@@ -27,11 +27,86 @@ namespace Nox::Net
         }
 
         constexpr double RetryIntervalSeconds = 0.5;
+
+        TConsoleVariable<bool>* s_DebugTrace = nullptr;
+        TConsoleVariable<bool>* s_LagCompensation = nullptr;
+    }
+
+    void RegisterConsoleVariables()
+    {
+        if (s_DebugTrace)
+            return;
+        Console& console = Console::Get();
+        s_DebugTrace = console.RegisterVariable<bool>("net.DebugTrace",
+            "The network debug trace in the log: uneven inputs, characters faster than they walk, animation sent / applied, corrections, "
+            "long frames (--net-debug)", false);
+        s_DebugTrace->OnChanged([](ConsoleVariable&)
+        {
+            if (NetReplication* replication = NetReplication::Get())
+                replication->SetDebugTrace(s_DebugTrace->Get());
+        });
+        s_LagCompensation = console.RegisterVariable<bool>("net.LagCompensation",
+            "Server: shots are checked against where the targets were on the shooter's screen (0: where they are now, to compare)", true);
+        s_LagCompensation->OnChanged([](ConsoleVariable&)
+        {
+            if (NetReplication* replication = NetReplication::Get(); replication && replication->GetMode() == NetReplication::Mode::Server)
+                replication->SetLagCompensation(s_LagCompensation->Get());
+        });
     }
 
     NetSession::NetSession(NetSessionConfig config)
         : m_Config(std::move(config))
     {
+        RegisterConsoleVariables();
+        if (m_Config.DebugTrace)
+            s_DebugTrace->Set(true); // (--net-debug: the variable shows it, and turning it off works)
+        RegisterConsoleCommands();
+    }
+
+    void NetSession::ApplyConsoleVariables()
+    {
+        if (!m_Replication)
+            return;
+        if (s_DebugTrace->Get())
+            m_Replication->SetDebugTrace(true);
+        if (m_Replication->GetMode() == NetReplication::Mode::Server)
+            m_Replication->SetLagCompensation(s_LagCompensation->Get());
+    }
+
+    void NetSession::RegisterConsoleCommands()
+    {
+        Console& console = Console::Get();
+        m_ConsoleCommands.push_back(console.RegisterCommand({ "net.Status", "net.Status", "The network session: role, port or server, clients, ping",
+            ConsoleAccess::Read,
+            [this](const std::vector<std::string>&, ConsoleOutput& output)
+            {
+                output.Info(Describe());
+                if (m_Server)
+                    for (const NetClientInfo& client : m_Server->GetClients())
+                        output.Info(std::format("  client {} '{}' from {}", client.Id, client.Name, client.Address));
+            } }));
+        m_ConsoleCommands.push_back(console.RegisterCommand({ "net.Emulation", "net.Emulation off|average|bad|<lag ms> <jitter ms> <loss %>",
+            "Simulated lag, jitter and packet loss on this machine's connections (each direction)", ConsoleAccess::Write,
+            [this](const std::vector<std::string>& arguments, ConsoleOutput& output)
+            {
+                NetEmulation emulation;
+                if (arguments.size() >= 3)
+                {
+                    emulation.LagMs = std::max(0.0f, static_cast<float>(std::atof(arguments[0].c_str())));
+                    emulation.JitterMs = std::max(0.0f, static_cast<float>(std::atof(arguments[1].c_str())));
+                    emulation.LossPercent = std::clamp(static_cast<float>(std::atof(arguments[2].c_str())), 0.0f, 100.0f);
+                }
+                else if (arguments.size() != 1 || !NetEmulation::FromPreset(arguments[0], emulation))
+                {
+                    output.Error("net.Emulation off|average|bad|<lag ms> <jitter ms> <loss %>");
+                    return;
+                }
+                if (m_Server)
+                    m_Server->SetEmulation(emulation);
+                if (m_Client)
+                    m_Client->SetEmulation(emulation);
+                output.Info(std::format("Network emulation: {}", emulation.IsActive() ? DescribeEmulation(emulation) : std::string("off")));
+            } }));
     }
 
     NetSession::~NetSession()
@@ -86,8 +161,7 @@ namespace Nox::Net
             NOX_CORE_INFO("Net: network emulation {}", DescribeEmulation(m_Config.Emulation));
         }
         m_Replication = std::make_unique<NetReplication>(*m_Server);
-        if (m_Config.DebugTrace)
-            m_Replication->SetDebugTrace(true);
+        ApplyConsoleVariables();
         if (m_Config.SnapshotRate > 0.0f)
             m_Replication->SetSnapshotRate(m_Config.SnapshotRate);
         if (m_Config.ClientRate > 0.0f)
@@ -103,8 +177,7 @@ namespace Nox::Net
     {
         // Replication first: the server's scene starts as this client's copy of it (proxies), its scripts see Network.IsClient.
         m_Replication = std::make_unique<NetReplication>(*m_Client);
-        if (m_Config.DebugTrace)
-            m_Replication->SetDebugTrace(true);
+        ApplyConsoleVariables();
         const AssetHandle scene(welcome.SceneHandle);
         if (welcome.SceneHandle == 0 || !OnJoined || !OnJoined(scene))
         {

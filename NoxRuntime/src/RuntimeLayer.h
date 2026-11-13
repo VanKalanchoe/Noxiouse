@@ -12,6 +12,7 @@
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Network/NetProtocol.h"
 #include "NoxCore/Network/NetSession.h"
+#include "NoxCore/Console/Console.h"
 
 namespace Nox
 {
@@ -86,6 +87,9 @@ namespace Nox
         };
         bool m_Headless = false;
         std::shared_ptr<ConsoleInput> m_Console;
+        // The runtime's console commands (quit; a server's status, clients, kick and the old short names): while this layer lives.
+        std::vector<Console::Registration> m_ConsoleCommands;
+        void RegisterConsoleCommands();
         float m_StatusTimer = 0.0f;
         uint32_t m_FramesSinceStatus = 0;
         double m_WorkSinceStatus = 0.0;      // seconds worked by the updates since the last status line

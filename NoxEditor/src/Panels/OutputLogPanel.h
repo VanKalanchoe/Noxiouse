@@ -5,13 +5,16 @@
 
 #include "NoxCore/Core/LogBuffer.h"
 
+struct ImGuiInputTextCallbackData;
+
 namespace Nox
 {
     // Unreal's Output Log: everything the engine, the editor and the scripts log (the LogBuffer), as it happens -- a tab beside the
     // Content Browser the first time it opens. Filters by verbosity (errors, warnings, info, verbose) and by text (every word must
     // appear, case ignored: "net debug" or "[C#]"); Clear hides what is there (Nox.log keeps it all); the view follows new lines while
     // it is scrolled to the bottom. Click a line to select it (Shift / Ctrl for more), Ctrl+C or the right-click menu copies; Window >
-    // Output Log.
+    // Output Log. Under the lines, Unreal's Cmd line: engine console commands (Tab completes, Up / Down walk the history, the names that
+    // fit what is typed are listed above it).
     class OutputLogPanel
     {
     public:
@@ -28,6 +31,8 @@ namespace Nox
         void DrawToolbar();
         void DrawLines();
         void CopyLines(bool selectedOnly) const;
+        void DrawCommandLine();
+        static int CommandCallback(::ImGuiInputTextCallbackData* data);
 
     private:
         bool m_Open = true;
@@ -50,5 +55,10 @@ namespace Nox
         uint64_t m_SelectionAnchor = 0;      // sequences: what Shift-click extends from
         std::vector<uint64_t> m_Selected;    // sorted
         size_t m_ErrorCount = 0, m_WarningCount = 0; // since Clear
+        char m_Command[512] = {};
+        std::vector<std::string> m_History; // commands run, oldest first
+        int m_HistoryIndex = -1;            // -1: not walking the history
+        bool m_RefocusCommand = false;
+        bool m_ScrollToBottom = false;
     };
 }
