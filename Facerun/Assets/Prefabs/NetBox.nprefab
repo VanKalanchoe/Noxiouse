@@ -1,0 +1,22 @@
+Prefab: NetBox
+Root: 7021394837112001
+Entities:
+  - Entity: 7021394837112001
+    TagComponent:
+      Tag: NetBox
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    NetworkIdentityComponent:
+      ReplicateTransform: true
+    RigidBody3DComponent:
+      BodyType: Dynamic
+      Mass: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+    ScriptComponent:
+      Classes: [Facerun.NetBox]
+      EntityReferences: []
+      FieldOverrides: []

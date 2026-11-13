@@ -1,0 +1,17 @@
+Prefab: NetPlayer
+Root: 7021394837112101
+Entities:
+  - Entity: 7021394837112101
+    TagComponent:
+      Tag: NetPlayer
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    NetworkIdentityComponent:
+      ReplicateTransform: true
+    CharacterController3DComponent: {}
+    ScriptComponent:
+      Classes: [Facerun.NetPlayer]
+      EntityReferences: []
+      FieldOverrides: []

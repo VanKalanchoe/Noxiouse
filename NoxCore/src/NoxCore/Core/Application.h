@@ -44,7 +44,7 @@ namespace Nox
         {
             constexpr std::string_view names[] = { "--project", "--connect", "--port", "--name", "--server-name", "--max-clients",
                                                    "--tickrate", "--net-emulation", "--net-lag", "--net-jitter", "--net-loss",
-                                                   "--net-rate" };
+                                                   "--net-rate", "--scene" };
             for (std::string_view known : names)
                 if (name == known)
                     return true;

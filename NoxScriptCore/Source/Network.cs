@@ -69,6 +69,8 @@ public static class Network
     public static bool IsServer => Mode == NetMode.Server;
     public static bool IsClient => Mode == NetMode.Client;
     public static bool IsStandalone => Mode == NetMode.Standalone;
+    /// <summary>A dedicated server (NoxRuntime --server): no window, nobody plays on it -- spawn players only for the clients that join.</summary>
+    public static bool IsDedicatedServer => InternalCalls.NetworkIsDedicatedServer();
     /// <summary>The game decides here: the server, or a standalone game (Unreal's HasAuthority). Spawn and score on it, not on clients.</summary>
     public static bool HasAuthority => Mode != NetMode.Client;
     /// <summary>This client's id (from 1); 0 on a server or standalone.</summary>

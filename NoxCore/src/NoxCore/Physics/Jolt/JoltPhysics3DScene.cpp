@@ -596,7 +596,9 @@ namespace Nox {
         uint32_t entIdVal = static_cast<uint32_t>(entity);
         m_EntityToBodyMap[entIdVal] = body->GetID();
         m_BodyToEntityMap[bodyIdVal] = entity;
-        if (netProxy && motionType == JPH::EMotionType::Kinematic)
+        // Kinematic: moved by its transform (a script, an animation, the network), pushing what is in its way -- Unreal's movable
+        // kinematic bodies. (Its transform used to be overwritten by its unmoving body each step.)
+        if (motionType == JPH::EMotionType::Kinematic)
             m_FollowTransform.insert(entIdVal);
         if (entity.HasComponent<ImpactSoundComponent>())
             m_ContactEvents->SetReporting(body->GetID(), true);

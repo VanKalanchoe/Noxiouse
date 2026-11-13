@@ -9,6 +9,7 @@ internal static unsafe class InternalCalls
     private static delegate*<NativeString, void> Log_Info;
     private static delegate*<int> Network_GetMode;
     private static delegate*<uint> Network_GetLocalClientId;
+    private static delegate*<uint> Network_IsDedicatedServer;
     private static delegate*<ulong, uint> Network_GetOwner;
     private static delegate*<ulong, uint, uint> Network_SetOwner;
     private static delegate*<NativeString, double, double, double, uint, ulong> Network_Spawn;
@@ -135,6 +136,7 @@ internal static unsafe class InternalCalls
 
     internal static int NetworkGetMode() => Network_GetMode();
     internal static uint NetworkGetLocalClientId() => Network_GetLocalClientId();
+    internal static bool NetworkIsDedicatedServer() => Network_IsDedicatedServer() != 0;
     internal static uint NetworkGetOwner(ulong entityID) => Network_GetOwner(entityID);
     internal static bool NetworkSetOwner(ulong entityID, uint owner) => Network_SetOwner(entityID, owner) != 0;
 

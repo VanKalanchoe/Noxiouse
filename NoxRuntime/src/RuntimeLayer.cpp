@@ -76,6 +76,12 @@ namespace Nox
                                emulation.LossPercent);
         }
 
+        // A connection quality (0..1) as a percentage; the transport reports -1 until it has measured it.
+        std::string Quality(float quality)
+        {
+            return quality < 0.0f ? std::string("unknown") : std::format("{:.0f} %", quality * 100.0f);
+        }
+
         std::vector<std::string> SplitWords(const std::string& line)
         {
             std::vector<std::string> words;
@@ -123,7 +129,17 @@ namespace Nox
         if (!ScriptEngine::Initialize(SDL_GetBasePath()))
             NOX_CORE_ERROR("NoxRuntime: failed to initialize the .NET scripting backend (scripts will not run)");
 
-        const AssetHandle startScene = Project::GetActive()->GetConfig().StartScene;
+        // --scene=Scenes/NetDemo.nox: another scene than the project's start scene (by its path under the asset directory).
+        AssetHandle startScene = Project::GetActive()->GetConfig().StartScene;
+        if (const char* scenePath = Application::Get().GetSpecification().CommandLineArgs.Value("--scene"))
+        {
+            const AssetHandle chosen = AssetManager::FindHandleByPath(std::filesystem::path(scenePath), AssetType::Scene);
+            if (chosen != 0)
+                startScene = chosen;
+            else
+                NOX_CORE_ERROR("NoxRuntime: --scene '{}' is not a scene in the asset registry (open the project in the editor once so it "
+                               "registers new files); playing the start scene", scenePath);
+        }
         if (startScene == 0)
         {
             NOX_CORE_ERROR("NoxRuntime: the project has no start scene (ProjectConfig StartScene)");
@@ -301,8 +317,8 @@ namespace Nox
         for (const Net::NetClientInfo& client : clients)
         {
             const Net::ConnectionStats stats = m_Server->GetStats(client.Id);
-            NOX_CORE_INFO("  {} '{}' {}  ping {} ms, quality {:.0f} % / {:.0f} %, out {:.1f} KB/s, in {:.1f} KB/s, joined {:.0f} s ago", client.Id,
-                          client.Name, client.Address, stats.PingMs, stats.QualityLocal * 100.0f, stats.QualityRemote * 100.0f,
+            NOX_CORE_INFO("  {} '{}' {}  ping {} ms, quality {} / {}, out {:.1f} KB/s, in {:.1f} KB/s, joined {:.0f} s ago", client.Id,
+                          client.Name, client.Address, stats.PingMs, Quality(stats.QualityLocal), Quality(stats.QualityRemote),
                           stats.OutBytesPerSecond / 1024.0f, stats.InBytesPerSecond / 1024.0f, now - client.JoinedAt);
         }
     }
@@ -321,10 +337,11 @@ namespace Nox
         const double budget = 1.0 / static_cast<double>(Application::Get().GetTickRate());
         const double averageWork = m_FramesSinceStatus > 0 ? m_WorkSinceStatus / m_FramesSinceStatus : 0.0;
         NOX_CORE_INFO("Server status: tick {} ({:.1f} ticks/s), {:.1f} updates/s, work {:.2f} ms average ({:.0f} % of the {:.1f} ms tick), "
-                      "{:.2f} ms worst, {} entities, {}/{} clients",
+                      "{:.2f} ms worst, {} entities, {}/{} clients, snapshots {:.1f} KB/s",
                       tick, static_cast<double>(tick - m_TickAtStatus) / seconds, static_cast<double>(m_FramesSinceStatus) / seconds,
                       averageWork * 1000.0, averageWork / budget * 100.0, budget * 1000.0, m_WorstWorkSinceStatus * 1000.0, entities,
-                      m_Server ? m_Server->GetClients().size() : 0, m_Server ? m_Server->GetConfig().MaxClients : 0);
+                      m_Server ? m_Server->GetClients().size() : 0, m_Server ? m_Server->GetConfig().MaxClients : 0,
+                      m_Replication ? static_cast<double>(m_Replication->GetLastSnapshotBytes()) * m_Replication->GetSnapshotRate() / 1024.0 : 0.0);
         m_TickAtStatus = tick;
         m_StatusTimer = 0.0f;
         m_FramesSinceStatus = 0;
@@ -527,9 +544,9 @@ namespace Nox
             {
                 m_ClientStatusTimer = 0.0f;
                 const Net::ConnectionStats stats = m_Client->GetStats();
-                NOX_CORE_INFO("Client status: client {} on '{}', ping {} ms, quality {:.0f} % / {:.0f} %, out {:.1f} KB/s, in {:.1f} KB/s",
-                              m_Client->GetWelcome().Client, m_Client->GetWelcome().ServerName, stats.PingMs, stats.QualityLocal * 100.0f,
-                              stats.QualityRemote * 100.0f, stats.OutBytesPerSecond / 1024.0f, stats.InBytesPerSecond / 1024.0f);
+                NOX_CORE_INFO("Client status: client {} on '{}', ping {} ms, quality {} / {}, out {:.1f} KB/s, in {:.1f} KB/s",
+                              m_Client->GetWelcome().Client, m_Client->GetWelcome().ServerName, stats.PingMs, Quality(stats.QualityLocal),
+                              Quality(stats.QualityRemote), stats.OutBytesPerSecond / 1024.0f, stats.InBytesPerSecond / 1024.0f);
             }
         }
     }

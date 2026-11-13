@@ -1,0 +1,93 @@
+Scene: NetDemo
+Entities:
+  - Entity: 7021394837113001
+    TagComponent:
+      Tag: Camera
+    TransformComponent:
+      Translation: [0, 600, 1400]
+      Rotation: [-0.4, 0, 0]
+      Scale: [1, 1, 1]
+    CameraComponent:
+      Camera:
+        ProjectionType: 0
+        PerspectiveFOV: 0.785398
+        PerspectiveNear: 10
+        PerspectiveFar: 100000
+        OrthographicSize: 10
+        OrthographicNear: -1
+        OrthographicFar: 1
+      Primary: true
+      FixedAspectRatio: false
+  - Entity: 7021394837113002
+    TagComponent:
+      Tag: Sky
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    EnvironmentLightComponent:
+      Source: ProceduralSky
+      Enabled: true
+  - Entity: 7021394837113003
+    TagComponent:
+      Tag: Sun
+    TransformComponent:
+      Translation: [0, 500, 0]
+      Rotation: [-0.9, 0.5, 0]
+      Scale: [1, 1, 1]
+    DirectionalLightComponent:
+      Color: [1, 1, 1]
+      Intensity: 10
+  - Entity: 7021394837113004
+    TagComponent:
+      Tag: Ground
+    TransformComponent:
+      Translation: [0, -10, -500]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    RigidBody3DComponent:
+      BodyType: Static
+    BoxCollider3DComponent:
+      HalfExtents: [2000, 10, 2000]
+      Offset: [0, 0, 0]
+    ScriptComponent:
+      Classes: [Facerun.LevelStreamingTestBox]
+      EntityReferences: []
+      FieldOverrides:
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Size
+          Type: Vector3
+          Value: [4000, 20, 4000]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Color
+          Type: Vector3
+          Value: [0.45, 0.45, 0.45]
+  - Entity: 7021394837113005
+    TagComponent:
+      Tag: Game Mode
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    ScriptComponent:
+      Classes: [Facerun.NetGameMode]
+      EntityReferences: []
+      FieldOverrides: []
+  - Entity: 7021394837113006
+    TagComponent:
+      Tag: Spinner
+    TransformComponent:
+      Translation: [0, 20, -900]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    NetworkIdentityComponent:
+      ReplicateTransform: true
+    RigidBody3DComponent:
+      BodyType: Kinematic
+    BoxCollider3DComponent:
+      HalfExtents: [300, 20, 300]
+      Offset: [0, 0, 0]
+    ScriptComponent:
+      Classes: [Facerun.NetSpinner]
+      EntityReferences: []
+      FieldOverrides: []

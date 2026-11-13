@@ -7,6 +7,7 @@
 #include <SDL3/SDL_scancode.h>
 
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Core/Application.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Core/Input.h"
 #include "NoxCore/Physics/Physics3DScene.h"
@@ -125,6 +126,12 @@ namespace Nox
             if (!replication)
                 return 0;
             return replication->GetMode() == Net::NetReplication::Mode::Server ? 1 : 2;
+        }
+
+        // A dedicated server (NoxRuntime --server): no window and no local player.
+        Coral::Bool32 NetworkIsDedicatedServer()
+        {
+            return Application::IsHeadless();
         }
 
         uint32_t NetworkGetLocalClientId()
@@ -1436,6 +1443,7 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "WorldUnits_PerMeter", reinterpret_cast<void*>(&WorldUnitsPerMeter));
         assembly.AddInternalCall("Nox.InternalCalls", "Network_GetMode", reinterpret_cast<void*>(&NetworkGetMode));
         assembly.AddInternalCall("Nox.InternalCalls", "Network_GetLocalClientId", reinterpret_cast<void*>(&NetworkGetLocalClientId));
+        assembly.AddInternalCall("Nox.InternalCalls", "Network_IsDedicatedServer", reinterpret_cast<void*>(&NetworkIsDedicatedServer));
         assembly.AddInternalCall("Nox.InternalCalls", "Network_GetOwner", reinterpret_cast<void*>(&NetworkGetOwner));
         assembly.AddInternalCall("Nox.InternalCalls", "Network_SetOwner", reinterpret_cast<void*>(&NetworkSetOwner));
         assembly.AddInternalCall("Nox.InternalCalls", "Network_Spawn", reinterpret_cast<void*>(&NetworkSpawn));

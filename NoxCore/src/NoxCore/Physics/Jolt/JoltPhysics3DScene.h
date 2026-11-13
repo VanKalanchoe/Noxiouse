@@ -109,8 +109,9 @@ namespace Nox
         std::unique_ptr<JoltFilterData> m_FilterData;
 
         std::unordered_map<uint32_t, JPH::BodyID> m_EntityToBodyMap;
-        // Bodies that follow their entity's transform instead of moving it: a network client's proxies of the server's entities
-        // (Scene::IsNetProxy), kinematic, moved to the replicated transform before each step.
+        // Bodies that follow their entity's transform instead of moving it: the kinematic ones (a script or the network moves the
+        // entity -- a network client's proxies of the server's entities are made kinematic, Scene::IsNetProxy), swept to it before
+        // each step so they push dynamic bodies.
         std::unordered_set<uint32_t> m_FollowTransform;
         void MoveFollowers(uint32_t ticks);
         std::unordered_map<uint32_t, Entity> m_BodyToEntityMap;
