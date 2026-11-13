@@ -1161,6 +1161,7 @@ namespace Nox
         }
         LoadAlwaysLoadedSubLevels(); // before anything starts: they start with the scene's own entities
         ApplyActiveChanges();        // switched-off entities make no bodies
+        UpdateWorldTransformsNow();  // the bodies and characters are made where the entities are
         m_IsRunning = true;
         OnPhysics2DStart();
         OnPhysics3DStart();
@@ -1201,6 +1202,7 @@ namespace Nox
         BeginWorldStreaming(streamingSource);
         LoadAlwaysLoadedSubLevels();
         ApplyActiveChanges();
+        UpdateWorldTransformsNow();
         OnPhysics2DStart();
         OnPhysics3DStart();
         StartTimelines();
@@ -1733,6 +1735,17 @@ namespace Nox
             if (mesh && material)
                 m_renderer->RefreshEntityMaterials(*mesh, *material, static_cast<int32_t>(entity));
         }
+    }
+
+    void Scene::UpdateWorldTransformsNow()
+    {
+        // Every entity's world transform as its transform and parents say, now (the frame's Transform Propagation does it otherwise).
+        // A scene just loaded has none yet -- each WorldTransformComponent is the identity until the first frame -- and the physics
+        // makes its bodies and characters at their world transforms when it starts: NoxRuntime made every body of the scene file at
+        // the origin (NetDemo's ground 10 cm higher than drawn, so a NoxRuntime server and the editor's Play disagreed by 10 cm and the
+        // editor's player was corrected several times a second). The editor's Play copies a scene the editor has updated already.
+        SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap, m_CommandBuffers, m_MovedEntities);
+        ApplySyncPoint();
     }
 
     void Scene::ApplySyncPoint()

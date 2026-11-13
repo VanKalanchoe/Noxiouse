@@ -329,6 +329,7 @@ namespace Nox
         void RunSubmitSystems();
         // Main thread after each graph: deferred structural changes, then loads of assets the systems found unloaded.
         void ApplySyncPoint();
+        void UpdateWorldTransformsNow(); // world transforms computed at once (before the physics makes its bodies)
         // Main thread after the update systems (§5.5): brings the renderer's GPU scene up to date with what changed.
         void SyncGpuScene();
         // EnTT signals of the components that decide a mesh entity's GPU instances.
