@@ -12,7 +12,7 @@ file(GLOB_RECURSE NOXEDITOR_FILES
 if(NOX_WITH_MCP)
     if(NOT EXISTS "${CMAKE_SOURCE_DIR}/NoxCore/vendors/cpp-httplib/httplib.h")
         message(FATAL_ERROR "NoxCore/vendors/cpp-httplib is missing (a git submodule, the MCP server's HTTP library): run "
-                            "'git submodule update --init NoxCore/vendors/cpp-httplib' (scripts/setup_windows_build.bat does), "
+                            "'git submodule update --init NoxCore/vendors/cpp-httplib', "
                             "or configure with -DNOX_WITH_MCP=OFF")
     endif()
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOX_WITH_MCP=1)
