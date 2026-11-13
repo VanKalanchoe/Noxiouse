@@ -45,6 +45,21 @@ namespace Nox
                     return Args[index];
             return nullptr;
         }
+        // The project file: "--project=<path>" or "--project <path>" (one IDE argument preset), else the first positional argument
+        // (NoxEditor C:/Games/MyGame/MyGame.nproj). Null when none is given.
+        const char* ProjectFile() const
+        {
+            constexpr std::string_view prefix = "--project=";
+            for (int index = 1; index < Count; ++index)
+            {
+                const std::string_view argument(Args[index]);
+                if (argument.size() > prefix.size() && argument.substr(0, prefix.size()) == prefix)
+                    return Args[index] + prefix.size();
+                if (argument == "--project" && index + 1 < Count)
+                    return Args[index + 1];
+            }
+            return FirstPositional();
+        }
         // The graphics API asked for: --dx12 / --d3d12 (Windows) or --vk / --vulkan; the last one given wins; Vulkan by default.
         bool WantsD3D12() const
         {

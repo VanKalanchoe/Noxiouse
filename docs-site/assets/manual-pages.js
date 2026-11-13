@@ -1813,7 +1813,7 @@ window.NOX_MANUAL_PAGES = [
             "",
             "## Dedicated Server (headless)",
             "",
-            "`NoxRuntime --server` (optionally `--tickrate=30`, default 60) runs the same game as a dedicated server: no window, no GPU, no sound device. The start scene plays as in the game -- scripts, physics, animation, level streaming -- but nothing is drawn, textures, fonts and sounds are not loaded (meshes load without their GPU geometry: hierarchy, colliders, skeletons). The log prints a status line every 10 seconds (tick, ticks per second, worst update, entities); type `status` or `quit` in its console, or press Ctrl+C. The networking that clients will connect through comes next (NET1, `docs/Networking_Plan_2026-11.md`)."
+            "`NoxRuntime --server --project=C:/Games/MyGame/MyGame.nproj` (the project can also be given as a plain path; optionally `--tickrate=30`, default 60) runs the same game as a dedicated server: no window, no GPU, no sound device. The start scene plays as in the game -- scripts, physics, animation, level streaming -- but nothing is drawn, textures, fonts and sounds are not loaded (meshes load without their GPU geometry: hierarchy, colliders, skeletons). The log prints a status line every 10 seconds (tick, ticks per second, worst update, entities); type `status` or `quit` in its console, or press Ctrl+C. The networking that clients will connect through comes next (NET1, `docs/Networking_Plan_2026-11.md`)."
         ]
     },
 

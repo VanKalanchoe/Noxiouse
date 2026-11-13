@@ -54,7 +54,7 @@ namespace Nox
         const std::filesystem::path projectFile = FindProjectFile();
         if (projectFile.empty() || !Project::Load(projectFile, true))
         {
-            NOX_CORE_ERROR("NoxRuntime: no project to play ({}). Usage: NoxRuntime <project.nproj>",
+            NOX_CORE_ERROR("NoxRuntime: no project to play ({}). Usage: NoxRuntime [--server] [--project=]<project.nproj>",
                            projectFile.empty() ? std::string("none found") : projectFile.generic_string());
             Quit();
             return;
@@ -236,7 +236,7 @@ namespace Nox
     std::filesystem::path RuntimeLayer::FindProjectFile() const
     {
         const ApplicationCommandLineArgs& args = Application::Get().GetSpecification().CommandLineArgs;
-        if (const char* project = args.FirstPositional())
+        if (const char* project = args.ProjectFile())
             return std::filesystem::path(project);
 
         // A packaged game keeps its project in Game/ next to the executable (File > Package Game in the editor).

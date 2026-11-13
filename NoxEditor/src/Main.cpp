@@ -23,7 +23,7 @@ namespace Nox
         // most recent one when the Project Manager's "Always open the last project" is on (--project-manager, from File > Project
         // Manager..., skips that); else the Project Manager, which hands over to the editor once a project is picked.
         std::filesystem::path project;
-        if (const char* projectFile = args.FirstPositional())
+        if (const char* projectFile = args.ProjectFile())
             project = projectFile;
         else if (!args.HasSwitch("--project-manager") && ProjectLibrary::GetOpenLastProjectAtStartup())
         {
