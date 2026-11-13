@@ -15,6 +15,8 @@ namespace Nox
     //   --listen                 a listen server: plays in a window and accepts clients too
     //   --connect=<address>      a client: joins the server at 192.168.1.5:7777 / myserver.lan / loopback
     //   --tickrate=N             (server) main loop updates a second (60; the simulation's tick stays Scene::TickRate)
+    // A value follows its switch with '=' or as the next argument ("--connect localhost:7777": Rider's argument presets);
+    // ApplicationCommandLineArgs::TakesValue lists the switches that take one.
     Application* CreateApplication(ApplicationCommandLineArgs args)
     {
         ApplicationSpecification specification;

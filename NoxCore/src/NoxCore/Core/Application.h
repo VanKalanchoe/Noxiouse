@@ -38,8 +38,18 @@ namespace Nox
                     return true;
             return false;
         }
-        // The value of a "--name=value" switch ("--connect=192.168.1.5:7777"), or null. Values are always given with '=' (a separate
-        // argument would be taken for the project file).
+        // The switches that take a value. Both "--name=value" and "--name value" work: an IDE's argument presets (Rider) pass the
+        // value as an argument of its own, which then is not mistaken for the project file.
+        static bool TakesValue(std::string_view name)
+        {
+            constexpr std::string_view names[] = { "--project", "--connect", "--port", "--name", "--server-name", "--max-clients",
+                                                   "--tickrate", "--net-emulation", "--net-lag", "--net-jitter", "--net-loss" };
+            for (std::string_view known : names)
+                if (name == known)
+                    return true;
+            return false;
+        }
+        // The value of a switch ("--connect=192.168.1.5:7777" or "--connect 192.168.1.5:7777"), or null.
         const char* Value(std::string_view name) const
         {
             for (int index = 1; index < Count; ++index)
@@ -47,30 +57,30 @@ namespace Nox
                 const std::string_view argument(Args[index]);
                 if (argument.size() > name.size() && argument.substr(0, name.size()) == name && argument[name.size()] == '=')
                     return Args[index] + name.size() + 1;
+                if (argument == name && index + 1 < Count && !IsSwitch(Args[index + 1]))
+                    return Args[index + 1];
             }
             return nullptr;
         }
-        // The first argument that is not a switch (the project file), or null.
+        // The first argument that is neither a switch nor a switch's value (the project file), or null.
         const char* FirstPositional() const
         {
             for (int index = 1; index < Count; ++index)
-                if (!IsSwitch(Args[index]))
-                    return Args[index];
+            {
+                if (IsSwitch(Args[index]))
+                    continue;
+                if (index > 1 && TakesValue(Args[index - 1]))
+                    continue; // ("--connect localhost:7777": the address, not a project)
+                return Args[index];
+            }
             return nullptr;
         }
-        // The project file: "--project=<path>" or "--project <path>" (one IDE argument preset), else the first positional argument
+        // The project file: "--project=<path>" or "--project <path>", else the first positional argument
         // (NoxEditor C:/Games/MyGame/MyGame.nproj). Null when none is given.
         const char* ProjectFile() const
         {
-            constexpr std::string_view prefix = "--project=";
-            for (int index = 1; index < Count; ++index)
-            {
-                const std::string_view argument(Args[index]);
-                if (argument.size() > prefix.size() && argument.substr(0, prefix.size()) == prefix)
-                    return Args[index] + prefix.size();
-                if (argument == "--project" && index + 1 < Count)
-                    return Args[index + 1];
-            }
+            if (const char* project = Value("--project"))
+                return project;
             return FirstPositional();
         }
         // The graphics API asked for: --dx12 / --d3d12 (Windows) or --vk / --vulkan; the last one given wins; Vulkan by default.

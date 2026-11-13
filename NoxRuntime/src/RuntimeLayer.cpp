@@ -415,7 +415,13 @@ namespace Nox
         if (connect && m_NetRole != NetRole::Client)
             NOX_CORE_WARN("NoxRuntime: --connect is ignored by a server");
         if (m_NetRole == NetRole::Standalone)
+        {
+            NOX_CORE_INFO("NoxRuntime: standalone (no networking: --server, --listen or --connect <address> make a server or a client)");
             return;
+        }
+        NOX_CORE_INFO("NoxRuntime: {}", m_NetRole == NetRole::DedicatedServer ? "dedicated server"
+                                        : m_NetRole == NetRole::ListenServer  ? "listen server"
+                                                                              : "client");
 
         const Net::NetEmulation emulation = ParseEmulation(args);
         const Net::NetCompatibility compatibility = Net::MakeProjectCompatibility();
