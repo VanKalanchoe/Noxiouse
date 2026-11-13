@@ -16,6 +16,9 @@ namespace Facerun;
 public sealed class NetGameMode : EntityBehaviour
 {
     [Expose(Tooltip = "The player prefab, under the asset directory")] public string PlayerPrefab = "Prefabs/NetPlayer.nprefab";
+    [Expose(Tooltip = "Players are the animated UAL1 character (Prefabs/NetPlayerAnimated.nprefab; its model and graph must be in the project)")]
+    public bool AnimatedPlayers = false;
+    [Expose(Tooltip = "The animated player prefab, under the asset directory")] public string AnimatedPlayerPrefab = "Prefabs/NetPlayerAnimated.nprefab";
     [Expose(Tooltip = "The box prefab, under the asset directory")] public string BoxPrefab = "Prefabs/NetBox.nprefab";
     [Expose(Tooltip = "Seconds between two boxes", Min = 0.1f, Max = 30.0f)] public float BoxInterval = 1.5f;
     [Expose(Tooltip = "Boxes at once; the oldest goes when another falls", Min = 1, Max = 500)] public int MaxBoxes = 30;
@@ -61,10 +64,11 @@ public sealed class NetGameMode : EntityBehaviour
     void SpawnPlayer(uint owner)
     {
         Vector3d position = new(-600.0 + 200.0 * (owner % 7), 200.0, 400.0);
-        Entity player = Network.Spawn(PlayerPrefab, position, owner);
+        string prefab = AnimatedPlayers ? AnimatedPlayerPrefab : PlayerPrefab;
+        Entity player = Network.Spawn(prefab, position, owner);
         if (!player.IsValid)
         {
-            Log.Info($"[NetDemo] could not spawn '{PlayerPrefab}' (is the prefab under Facerun/Assets?)");
+            Log.Info($"[NetDemo] could not spawn '{prefab}' (is the prefab under Facerun/Assets?)");
             return;
         }
         m_Players[owner] = player;
@@ -156,8 +160,10 @@ public sealed class NetBox : EntityBehaviour, INetShootable
 }
 
 /// <summary>
-/// A player, third person: the mouse turns the view (click into the window to capture it, Tab to let it go), WASD walks relative to
-/// it, Space jumps, the left button shoots. The machine that owns it moves it at once (NET3 prediction); a shot is checked on the
+/// A player, third person (Unreal's template): the mouse turns the view (click into the window to capture it, Tab to let it go), WASD
+/// walks relative to it and the character turns toward where it walks, Space jumps, the left button shoots. With an animator (the
+/// NetPlayerAnimated prefab: the UAL1 character and its locomotion graph) it feeds the graph Speed / VerticalSpeed / IsGrounded -- on the
+/// machine that owns it (predicted) and on the server, which replicates them to everyone else (NET5 animation replication). The machine that owns it moves it at once (NET3 prediction); a shot is checked on the
 /// server against where the targets were on the shooter's screen (NET5 lag compensation) -- the shooter's own flash plays at once, the
 /// others get it from the server (a multicast that skips the owner). Jumps are counted on the server and announced to everyone.
 /// </summary>
@@ -169,6 +175,8 @@ public sealed class NetPlayer : EntityBehaviour, INetShootable
     [Expose(Unit = "m/s", Tooltip = "Jump speed")] public float JumpSpeed = 600.0f;
     [Expose(Tooltip = "Radians the view turns per pixel the mouse moves")] public float LookSpeed = 0.0025f;
     [Expose(Tooltip = "How far a shot reaches (world units)")] public float Range = 30000.0f;
+    [Expose(Tooltip = "Degrees a second it turns toward where it walks (Unreal's Rotation Rate)")] public float TurnRate = 540.0f;
+    [Expose(Tooltip = "Radians: the model's forward axis relative to +Z")] public float ModelYawOffset = 0.0f;
 
     static readonly Vector3[] s_Palette =
     {
@@ -179,16 +187,32 @@ public sealed class NetPlayer : EntityBehaviour, INetShootable
     Mesh? m_Mesh;
     NetFlash m_Flash;
     bool m_JumpHeld, m_FireHeld;
-    float m_Yaw, m_Pitch = -0.2f;
+    float m_Yaw, m_Pitch = -0.2f; // the view
+    float m_BodyYaw;              // where the character faces
     Entity m_Camera;
 
     protected override void OnCreate()
     {
         if (HasAuthority)
             Color = s_Palette[Owner % (uint)s_Palette.Length];
-        m_Mesh = NetDemoMesh.Box(new Vector3(68.0f, 176.0f, 68.0f), Color);
-        Self.SetMesh(m_Mesh);
+        // A model of its own (the animated prefab): kept; else a colored box.
+        if (!HasComponent<MeshComponent>())
+        {
+            m_Mesh = NetDemoMesh.Box(new Vector3(68.0f, 176.0f, 68.0f), Color);
+            Self.SetMesh(m_Mesh);
+        }
         NetDemoTargets.Register(Self, this);
+    }
+
+    // The animation graph's inputs from the character's movement (the server and the owning machine; the others get them replicated).
+    void UpdateAnimation(CharacterControllerComponent character)
+    {
+        if (!TryGetComponent(out AnimatorComponent? animator) || animator == null)
+            return;
+        Vector3 velocity = character.Velocity;
+        animator.SetFloat("Speed", WorldUnits.ToMeters(MathF.Sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z)));
+        animator.SetFloat("VerticalSpeed", WorldUnits.ToMeters(velocity.Y));
+        animator.SetBool("IsGrounded", character.IsGrounded);
     }
 
     void OnColorChanged() => m_Mesh?.SetColor(Color.X, Color.Y, Color.Z, new Vector3(0.0f, 0.0f, 0.0f));
@@ -200,6 +224,8 @@ public sealed class NetPlayer : EntityBehaviour, INetShootable
     protected override void OnUpdate(float deltaTime)
     {
         m_Flash.Update(deltaTime, m_Mesh, Color);
+        if (HasAuthority && !IsOwner)
+            UpdateAnimation(GetComponent<CharacterControllerComponent>()); // (the server: a client's player, moved by that client's inputs)
         if (!IsOwner)
             return; // someone else's player: the server moves it, the engine draws it
 
@@ -217,8 +243,6 @@ public sealed class NetPlayer : EntityBehaviour, INetShootable
             m_Yaw -= look.X * LookSpeed;
             m_Pitch = Math.Clamp(m_Pitch - look.Y * LookSpeed, -1.2f, 0.3f); // (higher: the camera behind would go under the ground)
         }
-        GetComponent<TransformComponent>().LocalRotation = new Vector3(0.0f, m_Yaw, 0.0f); // (sent with the inputs: the server turns it too)
-
         // Walking relative to the view, here and now as in a single-player game (the engine sends the same inputs to the server).
         Vector3 forward = new(-MathF.Sin(m_Yaw), 0.0f, -MathF.Cos(m_Yaw));
         Vector3 right = new(MathF.Cos(m_Yaw), 0.0f, -MathF.Sin(m_Yaw));
@@ -230,6 +254,17 @@ public sealed class NetPlayer : EntityBehaviour, INetShootable
             move = new Vector3(move.X / length, 0.0f, move.Z / length);
         CharacterControllerComponent character = GetComponent<CharacterControllerComponent>();
         character.SetMoveVelocity(new Vector3(move.X * Speed, 0.0f, move.Z * Speed));
+
+        // Turned toward where it walks, at TurnRate (Unreal's Orient Rotation To Movement); sent with the inputs -- the server turns it too.
+        if (length > 0.01f)
+        {
+            float target = MathF.Atan2(move.X, move.Z) + ModelYawOffset;
+            float delta = MathF.IEEERemainder(target - m_BodyYaw, 2.0f * MathF.PI);
+            float step = TurnRate * (MathF.PI / 180.0f) * deltaTime;
+            m_BodyYaw += Math.Clamp(delta, -step, step);
+        }
+        GetComponent<TransformComponent>().LocalRotation = new Vector3(0.0f, m_BodyYaw, 0.0f);
+        UpdateAnimation(character);
 
         // A jump per press, not per frame held.
         bool jump = Input.IsKeyDown(KeyCode.Space);

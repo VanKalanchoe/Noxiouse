@@ -1,0 +1,51 @@
+Prefab: NetPlayerAnimated
+Root: 7021394837112301
+Entities:
+  - Entity: 7021394837112301
+    TagComponent:
+      Tag: NetPlayerAnimated
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 16531713622870338582
+      SubmeshIndex: 0
+      SubmeshCount: 4294967295
+    MaterialComponent:
+      {}
+    AnimatorComponent:
+      Animation: 17644891489966042489
+      Skeleton: 6087766411216149246
+      Playing: true
+      Looping: true
+      PlaybackSpeed: 1
+      NodeEntities:
+        []
+      Graph: 8121772498988545577
+      RootMotion: false
+      RootBone: ""
+      GraphParameterOverrides:
+        []
+    NetworkIdentityComponent:
+      ReplicateTransform: true
+      ReplicateAnimation: true
+      AlwaysRelevant: false
+      OnlyRelevantToOwner: false
+      CullDistance: 150
+      Priority: 3
+      UpdateRate: 0
+      Dormancy: Awake
+    CharacterController3DComponent:
+      Radius: 34
+      Height: 108.00001
+      StepHeight: 45
+      MaxSlopeDegrees: 44.8
+      GravityScale: 1.75
+      AirControl: 0.35
+      MaxAcceleration: 2048
+      BrakingDeceleration: 2000
+    ScriptComponent:
+      Classes: [Facerun.NetPlayer]
+      EntityReferences: []
+      FieldOverrides: []
