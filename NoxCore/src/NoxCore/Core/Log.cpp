@@ -1,4 +1,5 @@
 #include "Log.h"
+#include "LogBuffer.h"
 #include "core.h"
 
 #include <cstdlib>
@@ -32,6 +33,8 @@ namespace Nox
 #endif
         for (const spdlog::sink_ptr& sink : logSinks)
             sink->set_pattern("%^[%T] %n: %v%$");
+        // The recent lines in memory: the editor's Output Log (and tools) read them from there (LogBuffer).
+        logSinks.push_back(LogBuffer::CreateSink());
         
         s_CoreLogger = std::make_shared<spdlog::logger>("NOX", logSinks.begin(), logSinks.end());
         spdlog::register_logger(s_CoreLogger);

@@ -721,6 +721,9 @@ namespace Nox
                 bool renderGraphOpen = m_RenderGraphPanel->IsOpen();
                 if (ImGui::MenuItem("Render Graph", nullptr, &renderGraphOpen))
                     m_RenderGraphPanel->SetOpen(renderGraphOpen);
+                bool outputLogOpen = m_OutputLogPanel.IsOpen();
+                if (ImGui::MenuItem("Output Log", nullptr, &outputLogOpen))
+                    m_OutputLogPanel.SetOpen(outputLogOpen);
                 bool profilerOpen = m_ProfilerPanel.IsOpen();
                 if (ImGui::MenuItem("Profiler", nullptr, &profilerOpen))
                     m_ProfilerPanel.SetOpen(profilerOpen);
@@ -832,6 +835,7 @@ namespace Nox
 
         m_SceneHierarchyPanel.OnImGuiRender();
         m_ContentBrowserPanel->OnImGuiRender();
+        m_OutputLogPanel.OnImGuiRender(); // (after the Content Browser: its first appearance docks beside it)
         m_RenderGraphPanel->OnImGuiRender();
         m_ProfilerPanel.OnImGuiRender();
         m_MixerPanel.OnImGuiRender();

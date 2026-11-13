@@ -14,6 +14,7 @@
 #include "Panels/SceneHierarchyPanel.h"
 #include "Panels/ContentBrowserPanel.h"
 #include "Panels/ProfilerPanel.h"
+#include "Panels/OutputLogPanel.h"
 #include "Panels/WorldPartitionPanel.h"
 #include "Panels/LevelsPanel.h"
 #include "Panels/MixerPanel.h"
@@ -398,6 +399,7 @@ namespace Nox
         Scope<ContentBrowserPanel> m_ContentBrowserPanel;
         Scope<RenderGraphPanel> m_RenderGraphPanel;
         ProfilerPanel m_ProfilerPanel;
+        OutputLogPanel m_OutputLogPanel;
         WorldPartitionPanel m_WorldPartitionPanel;
         LevelsPanel m_LevelsPanel;
         MixerPanel m_MixerPanel;
