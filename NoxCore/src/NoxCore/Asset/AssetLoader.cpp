@@ -27,8 +27,9 @@ namespace Nox
         }
         virtual ~Load() = default;
 
-        // Goes as far as it can this frame, taking staging bytes from the budget; true once the result is final.
-        virtual bool Advance(Renderer& renderer, uint64_t& uploadBudget) = 0;
+        // Goes as far as it can this frame, taking staging bytes from the budget; true once the result is final. `renderer` is null
+        // on a headless server: a mesh then loads without its GPU geometry (textures and fonts are not loaded there at all).
+        virtual bool Advance(Renderer* renderer, uint64_t& uploadBudget) = 0;
         // Blocks until no job of this load runs (they write memory the load owns).
         virtual void WaitForJobs() = 0;
         // After WaitForJobs, while the renderer exists: returns the GPU objects and geometry the load still holds.
@@ -120,8 +121,10 @@ namespace Nox
                 });
             }
 
-            bool Advance(Renderer& renderer, uint64_t& uploadBudget) override
+            bool Advance(Renderer* rendererPointer, uint64_t& uploadBudget) override
             {
+                NOX_CORE_ASSERT(rendererPointer, "AssetLoader: a texture load without a renderer (headless servers load no textures)");
+                Renderer& renderer = *rendererPointer;
                 switch (m_Stage)
                 {
                 case Stage::Header:
@@ -290,7 +293,7 @@ namespace Nox
                 });
             }
 
-            bool Advance(Renderer& renderer, uint64_t& uploadBudget) override
+            bool Advance(Renderer* rendererPointer, uint64_t& uploadBudget) override
             {
                 if (!m_Mesh)
                 {
@@ -327,6 +330,14 @@ namespace Nox
                     m_Mesh = MeshImporter::CreateMeshAsset(m_Metadata.Type, m_Cooked);
                 }
 
+                // Headless: the asset as the CPU has it (hierarchy, materials, skeleton, bounds), no geometry on a GPU.
+                if (!rendererPointer)
+                {
+                    m_PendingBytes = 0;
+                    m_Result.Loaded = std::move(m_Mesh);
+                    return true;
+                }
+                Renderer& renderer = *rendererPointer;
                 admit(renderer, uploadBudget);
 
                 for (const std::unique_ptr<Batch>& batch : m_Batches)
@@ -466,7 +477,7 @@ namespace Nox
                 });
             }
 
-            bool Advance(Renderer&, uint64_t&) override
+            bool Advance(Renderer*, uint64_t&) override
             {
                 if (!m_Import.IsReady())
                     return false;
@@ -557,7 +568,7 @@ namespace Nox
             return;
 
         NOX_PROFILE_SCOPE("Asset Loads");
-        Renderer& renderer = *Application::Get().GetRenderer();
+        Renderer* renderer = Application::Get().GetRenderer(); // (null on a headless server)
         std::erase_if(m_Loads, [&](const std::unique_ptr<Load>& load)
         {
             if (!load->Advance(renderer, uploadBudget))

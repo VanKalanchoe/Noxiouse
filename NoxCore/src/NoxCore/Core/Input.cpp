@@ -52,7 +52,8 @@ namespace Nox
         // Not SDL_GetMouseFocus(): that returns null unless the OS considers this window "mouse-focused" right
         // now, which is not guaranteed true on the very frame a fly session starts (the frame of the RMB press
         // itself) -- silently no-opping the whole call. The app's own window handle is always valid.
-        SDL_Window* window = Application::Get().getWindow()->getHandle();
+        const std::shared_ptr<Window> appWindow = Application::Get().getWindow(); // (none on a headless server)
+        SDL_Window* window = appWindow ? appWindow->getHandle() : nullptr;
         if (!window || SDL_GetWindowRelativeMouseMode(window) == enabled)
             return;
         if (enabled)
@@ -64,7 +65,8 @@ namespace Nox
 
     bool Input::IsRelativeMouseMode()
     {
-        SDL_Window* window = Application::Get().getWindow()->getHandle();
+        const std::shared_ptr<Window> appWindow = Application::Get().getWindow();
+        SDL_Window* window = appWindow ? appWindow->getHandle() : nullptr;
         return window && SDL_GetWindowRelativeMouseMode(window);
     }
 

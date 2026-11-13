@@ -1037,10 +1037,12 @@ namespace Nox
 
         MeshHandle UploadMeshGeometry(const MeshData& data, bool isOpaque = true);
 
+        // Without a renderer (a headless server) no geometry is uploaded: the mesh asset keeps its CPU data (hierarchy, materials,
+        // skeleton) with empty submesh handles.
         static MeshHandle UploadMesh(const MeshData& data, bool isOpaque = true)
         {
-            NOX_CORE_ASSERT(s_Instance, "Renderer instance does not exist!");
-
+            if (!s_Instance)
+                return {};
             return s_Instance->UploadMeshGeometry(data, isOpaque);
         }
 
@@ -1067,8 +1069,8 @@ namespace Nox
 
         static void UnloadMesh(const MeshHandle& handle)
         {
-            NOX_CORE_ASSERT(s_Instance, "Renderer instance does not exist!");
-            s_Instance->UnloadMeshGeometry(handle);
+            if (s_Instance)
+                s_Instance->UnloadMeshGeometry(handle);
         }
         
         void setDLSSEnabled(bool enabled);

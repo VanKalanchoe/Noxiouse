@@ -31,6 +31,14 @@
 
 namespace Nox
 {
+    // What a headless server never loads (docs/Networking_Plan_2026-11.md, NET0): what only a GPU draws (textures, fonts' atlases) or
+    // a speaker plays (sounds, baked acoustics). The server's world has every entity and component as the client's; only these assets
+    // stay unloaded (a material keeps its texture handles, a font component its font handle).
+    static bool SkippedWhileHeadless(AssetType type)
+    {
+        return type == AssetType::Texture2D || type == AssetType::Font || type == AssetType::AudioClip || type == AssetType::AcousticData;
+    }
+
     static std::string_view ImageFormatToString(NRI::ImageFormat format)
     {
         switch (format)
@@ -299,7 +307,8 @@ namespace Nox
                 m_Streamer.Register(loaded.Handle, *loaded.Streamed, loaded.StreamedFirstMip,
                                     static_cast<Texture2D*>(loaded.Loaded.get())->GetDescriptorIndexSlot());
             if (loaded.Virtual)
-                Application::Get().GetRenderer()->RegisterVirtualTexture(*static_cast<Texture2D*>(loaded.Loaded.get()), *loaded.Virtual);
+                if (Renderer* renderer = Application::Get().GetRenderer())
+                    renderer->RegisterVirtualTexture(*static_cast<Texture2D*>(loaded.Loaded.get()), *loaded.Virtual);
 
             if (metadata.Type == AssetType::Mesh || metadata.Type == AssetType::StaticMesh || metadata.Type == AssetType::MeshSource)
             {
@@ -321,11 +330,14 @@ namespace Nox
 
         // Textures that moved to a new image (more or fewer mips): swapped in like a reload -- materials resolve to the
         // new image's slot, the old image leaves once frames in flight are done with it.
+        Renderer* renderer = Application::Get().GetRenderer();
+        if (!renderer)
+            return; // headless: nothing streams to a GPU
         std::vector<std::pair<AssetHandle, Ref<Texture2D>>> streamed;
-        m_Streamer.Update(*Application::Get().GetRenderer(), uploadBudget, streamed);
+        m_Streamer.Update(*renderer, uploadBudget, streamed);
         // Geometry pages (§5.7.2) and virtual texture tiles (§5.12.2) within what the loads and textures left of the upload budget.
-        Application::Get().GetRenderer()->UpdateGeometryStreaming(uploadBudget);
-        Application::Get().GetRenderer()->UpdateVirtualTextures(uploadBudget);
+        renderer->UpdateGeometryStreaming(uploadBudget);
+        renderer->UpdateVirtualTextures(uploadBudget);
         std::vector<uint32_t> replacedSlots;
         for (auto& [handle, texture] : streamed)
         {
@@ -365,7 +377,7 @@ namespace Nox
 
         m_Streamer.Unregister(handle);
         if (auto* texture = dynamic_cast<Texture2D*>(m_LoadedAssets.at(handle).get()))
-            Application::Get().GetRenderer()->UnregisterVirtualTexture(texture->GetDescriptorIndexSlot());
+            if (Renderer* renderer = Application::Get().GetRenderer()) renderer->UnregisterVirtualTexture(texture->GetDescriptorIndexSlot());
 
         // The file watcher can fire on this source file even though its content never actually
         // changed -- e.g. our own cooker rewrites extracted embedded textures unconditionally on
@@ -1180,7 +1192,7 @@ namespace Nox
         if (auto loadedAsset = m_LoadedAssets.find(handle); loadedAsset != m_LoadedAssets.end())
         {
             if (auto* texture = dynamic_cast<Texture2D*>(loadedAsset->second.get()))
-                Application::Get().GetRenderer()->UnregisterVirtualTexture(texture->GetDescriptorIndexSlot());
+                if (Renderer* renderer = Application::Get().GetRenderer()) renderer->UnregisterVirtualTexture(texture->GetDescriptorIndexSlot());
         }
         m_LoadedAssets.erase(handle);
         m_FailedAssets.erase(handle);
@@ -1663,6 +1675,8 @@ namespace Nox
         // 1. check if handle is valid
         if (!IsAssetHandleValid(handle))
             return {};
+        if (Application::IsHeadless() && SkippedWhileHeadless(GetAssetType(handle)))
+            return {}; // (quietly: not a failure)
         
         // 2. check if asset needs load (and if so, load)
         Ref<Asset> asset;
@@ -1746,6 +1760,8 @@ namespace Nox
     AssetState EditorAssetManager::RequestAsset(AssetHandle handle)
     {
         if (!IsAssetHandleValid(handle))
+            return AssetState::Failed;
+        if (Application::IsHeadless() && SkippedWhileHeadless(GetAssetType(handle)))
             return AssetState::Failed;
         if (IsAssetLoaded(handle))
             return AssetState::Ready;
@@ -1946,7 +1962,7 @@ namespace Nox
                 if (auto* texture = dynamic_cast<Texture2D*>(asset.get()))
                 {
                     unloadedTextureSlots.push_back(texture->GetDescriptorIndexSlot());
-                    Application::Get().GetRenderer()->UnregisterVirtualTexture(texture->GetDescriptorIndexSlot());
+                    if (Renderer* renderer = Application::Get().GetRenderer()) renderer->UnregisterVirtualTexture(texture->GetDescriptorIndexSlot());
                 }
             }
             m_Streamer.Unregister(it->first);

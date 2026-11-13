@@ -1224,17 +1224,15 @@ namespace Nox
                 auto scripts = m_Registry.view<ScriptComponent>(entt::exclude<InactiveInHierarchyComponent>);
                 scriptEntities.assign(scripts.begin(), scripts.end());
             }
-            // OnFixedUpdate at 60 Hz (as many steps as the frame's time holds, at most 5: a long hitch does not snowball), then
-            // OnUpdate once.
-            constexpr float fixedStep = 1.0f / 60.0f;
-            m_FixedTimeAccumulator = std::min(m_FixedTimeAccumulator + static_cast<float>(ts), 5.0f * fixedStep);
-            while (m_FixedTimeAccumulator >= fixedStep)
+            // The frame's fixed ticks (AdvanceTicks): OnFixedUpdate for each, the 3D physics steps as many in RunUpdateSystems;
+            // then OnUpdate once.
+            const uint32_t ticks = AdvanceTicks(static_cast<float>(ts));
+            for (uint32_t tick = 0; tick < ticks; ++tick)
             {
-                m_FixedTimeAccumulator -= fixedStep;
                 for (entt::entity handle : scriptEntities)
                 {
                     if (m_Registry.valid(handle) && IsActiveInHierarchy(handle))
-                        ScriptEngine::OnFixedUpdateEntity(Entity(handle, this), fixedStep);
+                        ScriptEngine::OnFixedUpdateEntity(Entity(handle, this), TickSeconds);
                 }
             }
             for (entt::entity handle : scriptEntities)
@@ -1302,7 +1300,8 @@ namespace Nox
 
         UpdateAudio(cameraTransform);
 
-        if (mainCamera)
+        // (Headless: nothing is drawn.)
+        if (mainCamera && m_renderer)
         {
             m_renderer->BeginScene(*mainCamera, cameraTransform);
             RunSubmitSystems();
@@ -1318,6 +1317,7 @@ namespace Nox
             // Simulate streams levels around the editor camera (Unreal's Simulate does the same with its viewport).
             const glm::dvec3 source = camera.GetPosition();
             UpdateLevelStreaming(&source, static_cast<float>(ts));
+            AdvanceTicks(static_cast<float>(ts)); // the physics' ticks (no scripts run in Simulate)
         }
         RunUpdateSystems(ts, step, step);
         SyncGpuScene();
@@ -1386,10 +1386,27 @@ namespace Nox
     void Scene::RunUpdateSystems(Timestep ts, bool stepPhysics, bool stepAnimation)
     {
         NOX_PROFILE_SCOPE("Scene Update Systems");
-        m_FrameInput = { static_cast<float>(ts), stepPhysics, stepAnimation };
+        m_FrameInput = { static_cast<float>(ts), stepPhysics, stepAnimation, stepPhysics ? m_PendingTicks : 0u,
+                         std::clamp(m_FixedTimeAccumulator / TickSeconds, 0.0f, 1.0f) };
+        m_PendingTicks = 0;
         m_UpdateSystems.Run();
         ApplySyncPoint();
         SyncPendingPhysics3D();
+    }
+
+    uint32_t Scene::AdvanceTicks(float ts)
+    {
+        // At most 5 ticks a frame: a long hitch does not snowball (the simulation runs slower than real time then).
+        m_FixedTimeAccumulator = std::min(m_FixedTimeAccumulator + std::max(ts, 0.0f), 5.0f * TickSeconds);
+        uint32_t ticks = 0;
+        while (m_FixedTimeAccumulator >= TickSeconds)
+        {
+            m_FixedTimeAccumulator -= TickSeconds;
+            ++ticks;
+        }
+        m_PendingTicks += ticks;
+        m_Tick += ticks;
+        return ticks;
     }
 
     void Scene::RunSubmitSystems()
@@ -1487,6 +1504,10 @@ namespace Nox
             ModelInstance::SpawnPending(*this);
             PrefabInstance::SpawnPending(*this);
         }
+
+        // Headless (a dedicated server): the entities exist as above; nothing is registered with a GPU.
+        if (!m_renderer)
+            return;
 
         // 1. Another scene rendered last (e.g. edit <-> play): register every mesh entity again.
         if (m_renderer->BindGpuScene(m_SceneID))
@@ -1722,7 +1743,7 @@ namespace Nox
         if (!m_FrameInput.StepPhysics || !m_Physics3DScene)
             return;
 
-        m_Physics3DScene->Step(m_FrameInput.Timestep);
+        m_Physics3DScene->StepTicks(m_FrameInput.FixedTicks, m_FrameInput.TickAlpha);
     }
 
     void Scene::StartParticles()

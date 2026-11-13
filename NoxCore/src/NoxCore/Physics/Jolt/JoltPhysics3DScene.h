@@ -31,7 +31,7 @@ namespace Nox
         virtual float NativeUnitsPerMeter() const override { return 1.0f; } // Jolt works in meters
 
         virtual void Init() override;
-        virtual void Step(float dt) override;
+        virtual void StepTicks(uint32_t ticks, float alpha) override;
         virtual void OptimizeBroadPhase() override;
 
         virtual void CreateBody(Entity entity) override;
@@ -146,7 +146,7 @@ namespace Nox
         std::unordered_map<uint32_t, BodyPose> m_BodyPoses;
 
 
-        float m_Accumulator = 0.0f;
+        float m_Accumulator = 0.0f; // how far into the next tick (alpha x c_FixedDeltaTime): the draw interpolation
         static constexpr float c_FixedDeltaTime = 1.0f / 60.0f;
     };
 

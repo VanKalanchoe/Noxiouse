@@ -1809,7 +1809,11 @@ window.NOX_MANUAL_PAGES = [
             "In your output folder, simply double-click `NoxRuntime.exe` (or rename it to `MyGame.exe`):",
             "- Mounts `Game.npak` via lock-free Virtual File System (`VirtualFileSystem`).",
             "- Boots straight into your startup scene in fullscreen with zero editor overhead.",
-            "- Uses `RuntimeAssetManager` read-only mode for maximum streaming performance."
+            "- Uses `RuntimeAssetManager` read-only mode for maximum streaming performance.",
+            "",
+            "## Dedicated Server (headless)",
+            "",
+            "`NoxRuntime --server` (optionally `--tickrate=30`, default 60) runs the same game as a dedicated server: no window, no GPU, no sound device. The start scene plays as in the game -- scripts, physics, animation, level streaming -- but nothing is drawn, textures, fonts and sounds are not loaded (meshes load without their GPU geometry: hierarchy, colliders, skeletons). The log prints a status line every 10 seconds (tick, ticks per second, worst update, entities); type `status` or `quit` in its console, or press Ctrl+C. The networking that clients will connect through comes next (NET1, `docs/Networking_Plan_2026-11.md`)."
         ]
     },
 

@@ -2306,7 +2306,7 @@ namespace Nox
         }
     }
 
-    void AudioEngine::Init()
+    void AudioEngine::Init(bool openDevice)
     {
         if (s_State)
             return;
@@ -2319,6 +2319,12 @@ namespace Nox
         state.FreeSlots.reserve(MaxVoices);
         for (uint32_t slot = MaxVoices; slot-- > 0;)
             state.FreeSlots.push_back(slot);
+
+        if (!openDevice)
+        {
+            NOX_CORE_INFO("Audio: no output device (headless) -- sound is off");
+            return;
+        }
 
         ma_device_config config = ma_device_config_init(ma_device_type_playback);
         config.playback.format = ma_format_f32;

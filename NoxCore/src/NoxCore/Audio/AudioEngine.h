@@ -170,7 +170,9 @@ namespace Nox
         static constexpr uint32_t MaxVoices = 128;
         static constexpr uint32_t BlockFrames = 256;
 
-        static void Init();
+        // `openDevice` false (a headless server): the engine exists without an output device, as on a machine with none -- sound
+        // off, every call a no-op.
+        static void Init(bool openDevice = true);
         static void Shutdown();
         // False when no output device could be opened: every call is then a no-op and Play returns 0.
         static bool IsAvailable();

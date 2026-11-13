@@ -42,6 +42,9 @@
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/quaternion.hpp>
 
+// One clock for scripts and physics (Scene::AdvanceTicks drives StepTicks): the step must be the scene's tick.
+static_assert(1.0f / 60.0f == Nox::Scene::TickSeconds, "JoltPhysics3DScene::c_FixedDeltaTime must equal Scene::TickSeconds");
+
 namespace Nox {
 
     // Factory method implementation
@@ -1134,30 +1137,23 @@ namespace Nox {
         }
     }
 
-    void JoltPhysics3DScene::Step(float dt)
+    void JoltPhysics3DScene::StepTicks(uint32_t ticks, float alpha)
     {
         if (!m_PhysicsSystem)
             return;
 
-        m_Accumulator += dt;
-        constexpr int maxSubSteps = 8; // below ~8 fps the simulation runs slower than real time instead of spiralling
-        int steps = 0;
-
         if (m_ConstraintsDirty)
             RebuildConstraints();
 
-        while (m_Accumulator >= c_FixedDeltaTime && steps < maxSubSteps)
+        // The scene owns the clock (Scene::AdvanceTicks: one accumulator for scripts and physics, at most 5 ticks a frame).
+        for (uint32_t tick = 0; tick < ticks; ++tick)
         {
             StepCharacters(c_FixedDeltaTime);
             m_PhysicsSystem->Update(c_FixedDeltaTime, 1, m_TempAllocator.get(), m_JobSystem.get());
             m_RollingResistance->Apply(*m_PhysicsSystem, c_FixedDeltaTime);
             CaptureBodyPoses();
-            m_Accumulator -= c_FixedDeltaTime;
-            steps++;
         }
-
-        // Time the step cap could not simulate is dropped, not carried: a backlog would keep the simulation behind forever.
-        m_Accumulator = std::min(m_Accumulator, c_FixedDeltaTime);
+        m_Accumulator = glm::clamp(alpha, 0.0f, 1.0f) * c_FixedDeltaTime;
 
         SyncCharactersToTransforms();
 

@@ -31,7 +31,9 @@ namespace Nox {
 
         // Lifecycle & Simulation
         virtual void Init() = 0;
-        virtual void Step(float dt) = 0;
+        // The scene's fixed ticks this frame (Scene::TickSeconds each: scripts' OnFixedUpdate and physics in step, the network tick),
+        // and how far time is into the next one (0..1): bodies are drawn between their last two poses by it.
+        virtual void StepTicks(uint32_t ticks, float alpha) = 0;
         virtual void OptimizeBroadPhase() = 0;
 
         // Body Management

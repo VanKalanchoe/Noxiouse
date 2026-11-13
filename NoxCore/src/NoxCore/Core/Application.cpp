@@ -5,7 +5,10 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <cstdio>
 #include <ranges>
+#include <string_view>
+
 
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Profiling/StatsOverlayLayer.h"
@@ -20,6 +23,17 @@
 #include "NoxCore/Audio/AudioGraph.h"
 #include "NoxCore/Audio/AudioMixer.h"
 
+#ifdef _WIN32
+// Last: its macros (near, far, min, max...) must not reach the engine's headers.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 namespace Nox
 {
     static Application* s_Application = nullptr;
@@ -31,7 +45,9 @@ namespace Nox
         s_Application = this;
 
         m_JobSystem = std::make_unique<JobSystem>();
-        AudioEngine::Init(); // its own mixer and stream threads, apart from the JobSystem (docs/Audio_Architecture_Plan_2026.md §8)
+        // Its own mixer and stream threads, apart from the JobSystem (docs/Audio_Architecture_Plan_2026.md §8). A headless server opens
+        // no output device: the engine runs as on a machine without one (sound off, every call a no-op).
+        AudioEngine::Init(!m_Specification.Headless);
         AudioMixer::Init();  // the default buses, until a project's mixer is loaded
 
         if (!m_Specification.WorkingDirectory.empty())
@@ -39,6 +55,15 @@ namespace Nox
 
         if (m_Specification.WindowSpec.Ttile.empty())
             m_Specification.WindowSpec.Ttile = m_Specification.Name;
+
+        if (m_Specification.Headless)
+        {
+            // No window and no GPU: only SDL's events (the quit event on Ctrl+C / a console closed) and timers.
+            if (!SDL_Init(SDL_INIT_EVENTS))
+                NOX_CORE_ERROR("SDL_Init(SDL_INIT_EVENTS) failed: {}", SDL_GetError());
+            NOX_CORE_INFO("Headless: no window, renderer or audio device; {} ticks a second", std::max(m_Specification.TickRate, 1u));
+            return;
+        }
 
 #ifdef _WIN32
         if (m_Specification.CommandLineArgs.WantsD3D12())
@@ -109,7 +134,7 @@ namespace Nox
                     layer->OnRender();
             }
 
-            if (applicationState.app->GetSpecification().isEditor)
+            if (applicationState.app->GetSpecification().isEditor && m_ImGuiLayer)
             {
                 NOX_PROFILE_SCOPE("ImGui Build");
                 m_ImGuiLayer->Begin();
@@ -118,7 +143,8 @@ namespace Nox
                 m_ImGuiLayer->End();
             }
 
-            renderer->drawFrame();
+            if (renderer)
+                renderer->drawFrame();
 
             // Frame sync point (§5.3): no frame graph task runs past this.
             m_JobSystem->ResetFrameArenas();
@@ -133,6 +159,21 @@ namespace Nox
         }
 
         NOX_PROFILE_FRAME();
+
+        // Headless: nothing waits for a display, so the loop sleeps until the next tick (the frame's own time included).
+        if (m_Specification.Headless)
+        {
+            const double tickSeconds = 1.0 / static_cast<double>(std::max(m_Specification.TickRate, 1u));
+            const double next = m_LastFrameTime + tickSeconds;
+            const double now = GetTime();
+            if (next > now)
+                SDL_DelayPrecise(static_cast<Uint64>((next - now) * 1'000'000'000.0));
+        }
+    }
+
+    bool Application::IsHeadless()
+    {
+        return s_Application && s_Application->m_Specification.Headless;
     }
 
     Application& Application::Get()
@@ -170,6 +211,24 @@ static bool minimized = false;
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
 {
     SDL_SetAppMetadata("Nox Engine", "1.0", "com.example.renderer-clear");
+
+#ifdef _WIN32
+    // A dedicated server (--server) of a distribution build, which is a windowed (no console) program: its log and console go to the
+    // console it was started from, else a new one -- before the log opens its console output.
+    for (int index = 1; index < argc; ++index)
+    {
+        if (std::string_view(argv[index]) == "--server" && !GetConsoleWindow())
+        {
+            if (!AttachConsole(ATTACH_PARENT_PROCESS))
+                AllocConsole();
+            FILE* stream = nullptr;
+            freopen_s(&stream, "CONOUT$", "w", stdout);
+            freopen_s(&stream, "CONOUT$", "w", stderr);
+            freopen_s(&stream, "CONIN$", "r", stdin);
+            break;
+        }
+    }
+#endif
 
     Nox::Log::Init(); // todo: make it disalable when shipping
 
@@ -223,6 +282,8 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
     case SDL_EVENT_QUIT: return SDL_APP_SUCCESS; /* end the program, reporting success to the OS. */
     case SDL_EVENT_WINDOW_RESIZED:
         {
+            if (!applicationState->app->GetRenderer())
+                return SDL_APP_CONTINUE;
             applicationState->app->GetRenderer()->resizeWindow();
 
             int width, height;
@@ -235,6 +296,8 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
         }
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: /* framebuffer resize swapchain */
         {
+            if (!applicationState->app->GetRenderer())
+                return SDL_APP_CONTINUE;
             applicationState->app->GetRenderer()->resizeWindow();
 
             int width, height;

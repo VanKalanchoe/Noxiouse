@@ -74,6 +74,13 @@ namespace Nox
         void SetPaused(bool paused) { m_IsPaused = paused; }
         void Step(int frames = 1);
 
+        // The fixed simulation tick (docs/Networking_Plan_2026-11.md): scripts' OnFixedUpdate and the 3D physics step together, as
+        // many a frame as its time holds (AdvanceTicks) -- the tick the network numbers its snapshots and inputs by.
+        static constexpr uint32_t TickRate = 60;
+        static constexpr float TickSeconds = 1.0f / static_cast<float>(TickRate);
+        // Fixed ticks simulated since the scene was made (Play, Simulate).
+        uint64_t GetTick() const { return m_Tick; }
+
         template<typename... Components>
         auto GetAllEntitiesWith()
         {
@@ -401,7 +408,12 @@ namespace Nox
             float Timestep = 0.0f;
             bool StepPhysics = false;
             bool StepAnimation = false;
+            uint32_t FixedTicks = 0; // the 3D physics' steps this frame (AdvanceTicks)
+            float TickAlpha = 0.0f;  // how far into the next tick: bodies drawn between their last two poses
         };
+        // Adds the frame's time to the tick accumulator: the ticks it holds now (scripts' OnFixedUpdate), counted for the physics
+        // (RunUpdateSystems) and the tick number.
+        uint32_t AdvanceTicks(float ts);
 
     private:
         entt::registry m_Registry;
@@ -469,7 +481,9 @@ namespace Nox
         std::vector<entt::entity> m_PendingActiveChanges;
         bool m_IsPaused = false;
         int m_StepFrames = 0;
-        float m_FixedTimeAccumulator = 0.0f; // seconds owed to OnFixedUpdate
+        float m_FixedTimeAccumulator = 0.0f; // seconds into the next fixed tick (AdvanceTicks)
+        uint32_t m_PendingTicks = 0;         // ticks the physics owes (AdvanceTicks -> RunUpdateSystems)
+        uint64_t m_Tick = 0;
         bool m_AssetReferencesChanged = false;
 
         std::unordered_map<UUID, entt::entity> m_EntityMap;

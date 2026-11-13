@@ -69,6 +69,10 @@ namespace Nox
         ApplicationCommandLineArgs CommandLineArgs;
         WindowSpecification WindowSpec;
         bool isEditor = false;
+        // A dedicated server (docs/Networking_Plan_2026-11.md, NET0): no window, no renderer, no ImGui, no audio device; the main loop
+        // runs at TickRate and sleeps in between (nothing paces it otherwise). Assets load without the GPU (Application::IsHeadless).
+        bool Headless = false;
+        uint32_t TickRate = 60; // updates a second while headless
 
         using EventCallbackFn = std::function<void(Event&)>;
         EventCallbackFn EventCallback;
@@ -140,6 +144,9 @@ namespace Nox
         }
 
         static Application& Get();
+        // A headless (dedicated server) application runs: no renderer exists, GPU-only assets (textures, fonts) and sound are not
+        // loaded. False without an application (tools, tests).
+        static bool IsHeadless();
         const ApplicationSpecification& GetSpecification() const { return m_Specification; }
         std::shared_ptr<Window> getWindow() { return m_Window; }
         ImGuiLayer* GetImGuiLayer() { return m_ImGuiLayer; }
