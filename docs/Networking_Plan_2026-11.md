@@ -1,4 +1,4 @@
-# Networking plan (2026-11-12; NET0 built and tested 2026-11-13: Bistro served at 60 ticks/s headless; NET1 built and tested 2026-11-13; NET2 built 2026-11-13, waiting for the user's test)
+# Networking plan (2026-11-12; NET0 built and tested 2026-11-13: Bistro served at 60 ticks/s headless; NET1 built and tested 2026-11-13; NET2 built and tested 2026-11-13: players and boxes replicate between a server and two clients)
 
 How Nox gets multiplayer: the architecture, what has to change in the engine, the phases. Written from the code as it is
 (Application, Scene, Jolt, the C# scripting, world partition). Backlog item N5.

@@ -32,7 +32,11 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include <unistd.h>
 #endif
+#include <cctype>
+#include <string>
 
 namespace Nox
 {
@@ -233,16 +237,39 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
     }
 #endif
 
-    Nox::Log::Init(); // todo: make it disalable when shipping
+    Nox::ApplicationCommandLineArgs args;
+    args.Count = argc;
+    args.Args = argv;
+
+    // Each program of a multiplayer test its own log (several NoxRuntimes in one folder wrote into one Nox.log, mixed):
+    // NoxServer.log, NoxListen.log, NoxClient-<name>.log (--name; else the process id); Nox.log otherwise (the editor, a game).
+    std::string logFile = "Nox.log";
+    if (args.HasSwitch("--server"))
+        logFile = "NoxServer.log";
+    else if (args.HasSwitch("--listen"))
+        logFile = "NoxListen.log";
+    else if (args.Value("--connect"))
+    {
+        std::string name;
+        if (const char* playerName = args.Value("--name"))
+            for (const char* c = playerName; *c && name.size() < 32; ++c)
+                if (std::isalnum(static_cast<unsigned char>(*c)) || *c == '-' || *c == '_')
+                    name += *c;
+#ifdef _WIN32
+        if (name.empty())
+            name = std::to_string(GetCurrentProcessId());
+#else
+        if (name.empty())
+            name = std::to_string(getpid());
+#endif
+        logFile = "NoxClient-" + name + ".log";
+    }
+    Nox::Log::Init(logFile); // todo: make it disalable when shipping
 
     // Node-graph domains register their node types once, here, regardless of editor vs. future standalone
     // runtime (NodeTypeRegistry has no de-duplication, so this must run exactly once).
     Nox::RegisterAnimationGraphNodeTypes();
     Nox::RegisterAudioGraphNodeTypes();
-
-    Nox::ApplicationCommandLineArgs args;
-    args.Count = argc;
-    args.Args = argv;
 
     auto applicationState = new Nox::AppState();
     applicationState->app = Nox::CreateApplication(args);

@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <string>
 
 #include <spdlog/spdlog.h>
 
@@ -18,7 +19,8 @@ namespace Nox
     class Log
     {
     public:
-        static void Init();
+        // fileName: the log file in the working directory (development builds; a shipped game logs into the user's folder).
+        static void Init(const std::string& fileName = "Nox.log");
         
         static std::shared_ptr<spdlog::logger>& GetCoreLogger() { return s_CoreLogger; }
         static std::shared_ptr<spdlog::logger>& GetClientLogger() { return s_ClientLogger; }

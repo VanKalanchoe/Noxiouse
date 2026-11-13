@@ -129,6 +129,7 @@ public sealed class NetPlayer : EntityBehaviour
     Mesh? m_Mesh;
     Vector3 m_Move;          // on the server: the owner's last input
     float m_SendTimer;
+    bool m_JumpHeld;
     Entity m_Camera;
 
     protected override void OnCreate()
@@ -160,8 +161,11 @@ public sealed class NetPlayer : EntityBehaviour
             m_SendTimer = 0.0f;
             CallServerRpc(nameof(ServerMove), move);
         }
-        if (Input.IsKeyDown(KeyCode.Space))
+        // A jump per press, not per frame held (held, it jumped again on landing).
+        bool jump = Input.IsKeyDown(KeyCode.Space);
+        if (jump && !m_JumpHeld)
             CallServerRpc(nameof(ServerJump));
+        m_JumpHeld = jump;
 
         // The camera behind this machine's own player.
         if (m_Camera.IsValid)
