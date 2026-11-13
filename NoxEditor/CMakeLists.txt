@@ -36,10 +36,12 @@ add_custom_target(NoxManagedScripts ALL
         "${NOX_CORAL_RUNTIME_DIR}/Coral.Managed.deps.json"
         "${NOX_CORAL_RUNTIME_DIR}/Coral.Managed.runtimeconfig.json"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    # copy_directory_if_different (here and below): a NoxRuntime still running from this folder (a server while a client is
+    # started from the IDE, which builds first) holds its DLLs open; unchanged files are left alone instead of failing the build.
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
         "${NOX_SCRIPT_CORE_OUTPUT}"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Scripts/Core"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
         "${NOX_FACERUN_SCRIPT_OUTPUT}"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Scripts/Facerun"
     DEPENDS CoralManaged
@@ -94,7 +96,7 @@ if(WIN32)
     # Copy Streamline runtime binaries next to the editor executable
     # (In Debug, copies development binaries; in Release, copies production binaries)
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
             "${CMAKE_SOURCE_DIR}/NoxCore/vendors/Streamline/bin/x64/$<IF:$<CONFIG:Debug>,development,>"
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
         COMMAND ${CMAKE_COMMAND} -E rm -rf
