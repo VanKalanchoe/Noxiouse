@@ -20,7 +20,7 @@ namespace Nox
         bool WaitForJobs(uint32_t timeoutMilliseconds) override;
         bool WaitForDebugger(uint32_t timeoutMilliseconds) override;
         // Nox.ScriptApi.Version (ScriptApi.cs) this engine's internal calls match.
-        static constexpr int32_t kScriptApiVersion = 19;
+        static constexpr int32_t kScriptApiVersion = 20;
         bool HasType(std::string_view fullName) const override;
         std::vector<ScriptFieldInfo> GetExposedFields(std::string_view fullName) const override;
         ScriptInstanceHandle CreateInstance(std::string_view fullName, UUID entity) override;
@@ -33,9 +33,15 @@ namespace Nox
         bool Implements(ScriptInstanceHandle instance, ScriptCallback callback) const override;
         void InvokeWithString(ScriptInstanceHandle instance, std::string_view method, std::string_view argument) override;
         void SetSceneContext(Scene* scene) override;
+        uint32_t GetReplicatedFieldCount(ScriptInstanceHandle instance) override;
+        void WriteReplicated(ScriptInstanceHandle instance, std::vector<std::vector<uint8_t>>& fields) override;
+        void ReadReplicated(ScriptInstanceHandle instance, std::span<const uint8_t> records) override;
+        void InvokeRpc(ScriptInstanceHandle instance, uint8_t kind, uint32_t method, std::span<const uint8_t> arguments) override;
+        void RaiseNetworkEvent(int32_t event, uint32_t client) override;
 
     private:
         struct Instance { uint32_t Generation; Coral::ManagedObject Object; std::string ClassName; int32_t CallbackMask = 0; };
+        Instance* FindInstance(ScriptInstanceHandle handle);
         void ClearModule();
         // Loads the assemblies into a new load context (no module may be loaded); false (nothing loaded) when they do not load.
         bool LoadModuleFrom(const std::filesystem::path& coreAssembly, const std::filesystem::path& gameAssembly);
@@ -48,6 +54,8 @@ namespace Nox
         std::unordered_map<std::string, const Coral::Type*> m_Types;
         std::unordered_map<std::string, std::vector<ScriptFieldInfo>> m_ExposedFields;
         std::unordered_map<std::string, int32_t> m_CallbackMasks; // per class (EntityBehaviour.GetCallbackMask)
+        std::unordered_map<std::string, uint32_t> m_ReplicatedFieldCounts; // per class (EntityBehaviour.NetReplicatedFieldCount)
+        std::vector<uint8_t> m_NetBuffer = std::vector<uint8_t>(4096); // the scripts write their replicated fields into it
         std::unordered_map<uint64_t, std::unique_ptr<Instance>> m_Instances;
         std::filesystem::path m_CorePath, m_GamePath;
         uint32_t m_LoadContextCount = 0; // names each load context apart: the old one is still loaded while the new one loads

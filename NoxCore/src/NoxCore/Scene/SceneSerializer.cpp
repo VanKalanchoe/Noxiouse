@@ -880,6 +880,15 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (entity.HasComponent<NetworkIdentityComponent>())
+        {
+            // (Owner is runtime only: who owns it is decided by the server while the game runs.)
+            const auto& identity = entity.GetComponent<NetworkIdentityComponent>();
+            out << YAML::Key << "NetworkIdentityComponent" << YAML::BeginMap;
+            out << YAML::Key << "ReplicateTransform" << YAML::Value << identity.ReplicateTransform;
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<ParticleEmitterComponent>())
         {
             const auto& emitter = entity.GetComponent<ParticleEmitterComponent>();
@@ -2484,6 +2493,13 @@ namespace Nox
                                                                                               : WorldStreamingSourceComponent::TargetState::Activated;
             if (streamingSource["LoadingRangeScale"])
                 component.LoadingRangeScale = std::max(streamingSource["LoadingRangeScale"].as<float>(), 0.0f);
+        }
+
+        if (auto networkIdentity = entity["NetworkIdentityComponent"])
+        {
+            auto& component = deserializedEntity.AddComponent<NetworkIdentityComponent>();
+            if (networkIdentity["ReplicateTransform"])
+                component.ReplicateTransform = networkIdentity["ReplicateTransform"].as<bool>();
         }
 
         if (auto particleEmitter = entity["ParticleEmitterComponent"])

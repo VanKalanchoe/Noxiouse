@@ -750,7 +750,7 @@ namespace Nox
         }
     }
 
-    Entity PrefabInstance::Instantiate(Scene& scene, AssetHandle prefabHandle, const glm::dvec3& position, std::vector<Entity>& outSpawned)
+    Entity PrefabInstance::Instantiate(Scene& scene, AssetHandle prefabHandle, const glm::dvec3& position, std::vector<Entity>& outSpawned, UUID rootId)
     {
         outSpawned.clear();
         Ref<Prefab> prefab = AssetManager::GetAsset<Prefab>(prefabHandle);
@@ -760,7 +760,7 @@ namespace Nox
             return {};
         }
 
-        Entity root = scene.CreateEntity(prefab->Name);
+        Entity root = static_cast<uint64_t>(rootId) != 0 ? scene.CreateEntityWithUUID(rootId, prefab->Name) : scene.CreateEntity(prefab->Name);
         root.GetComponent<TransformComponent>().Translation = position;
         auto& instance = root.AddComponent<PrefabInstanceComponent>();
         instance.Prefab = prefabHandle;

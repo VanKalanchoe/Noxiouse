@@ -1331,6 +1331,7 @@ namespace Nox
             DisplayAddComponentEntry<LevelStreamingVolumeComponent>("Level Streaming Volume");
             DisplayAddComponentEntry<WorldPartitionComponent>("World Partition");
             DisplayAddComponentEntry<WorldStreamingSourceComponent>("World Streaming Source");
+            DisplayAddComponentEntry<NetworkIdentityComponent>("Network Identity");
             DisplayAddComponentEntry<BoneSocketComponent>("Bone Socket");
             DisplayAddComponentEntry<ParticleEmitterComponent>("Particle Emitter");
 
@@ -2888,6 +2889,15 @@ namespace Nox
                                   "reaches them. A Loaded source with a larger range scale preloads ahead of the player.");
             ImGui::DragFloat("Loading Range Scale", &component.LoadingRangeScale, 0.01f, 0.0f, 16.0f, "%.2f");
             ImGui::SetItemTooltip("Times the grid's loading range (1: the world's Loading Range).");
+        });
+
+        DrawComponent<NetworkIdentityComponent>("Network Identity", entity, [](auto& component)
+        {
+            ImGui::TextWrapped("Replicated: in a multiplayer game the server's entity is the authority and its clients show a copy "
+                               "(NoxRuntime --server / --listen / --connect).");
+            ImGui::Checkbox("Replicate Transform", &component.ReplicateTransform);
+            ImGui::SetItemTooltip("The server sends where it is (position, rotation, scale); on the clients its physics body follows.\n"
+                                  "Off: only its scripts' [Replicated] fields (and its spawn and removal) go to the clients.");
         });
 
         DrawComponent<CameraComponent>("Camera", entity, [](auto& component)

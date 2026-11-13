@@ -39,7 +39,9 @@ namespace Nox
         // call). The prefab asset is read synchronously (a small text file); the assets its entities use load in the
         // background as usual. `outSpawned` gets the root first, then the spawned entities. Returns the root, an invalid entity
         // when the prefab cannot be loaded.
-        Entity Instantiate(Scene& scene, AssetHandle prefab, const glm::dvec3& position, std::vector<Entity>& outSpawned);
+        // rootId: the root's UUID (0: a new one); the other entities' ids follow from it (NodeUUID), so the same root id gives the
+        // same ids everywhere (a client's copy of a prefab the server spawned).
+        Entity Instantiate(Scene& scene, AssetHandle prefab, const glm::dvec3& position, std::vector<Entity>& outSpawned, UUID rootId = UUID(0));
 
         // The entity of an instance with this id in the prefab file (the root for the prefab's root id); invalid when it is not
         // spawned.

@@ -20,6 +20,7 @@
 #include "NoxCore/Utils/PlatformUtils.h"
 #include "NoxCore/Audio/AudioMixer.h"
 #include "NoxCore/Scene/Entity.h"
+#include "NoxCore/Network/NetReplication.h"
 #include "NoxCore/Scene/MaterialVariants.h"
 #include "NoxCore/Scene/ParticleSystem.h"
 
@@ -114,6 +115,76 @@ namespace Nox
             }
             Entity root = s_Scene->Instantiate(prefab, { x, y, z });
             return root ? static_cast<uint64_t>(root.GetUUID()) : 0;
+        }
+
+        // Nox.Network (docs/Networking_Plan_2026-11.md, NET2): the role in a multiplayer game, ownership, spawning and RPCs; all of it
+        // goes to the running Net::NetReplication (none outside a multiplayer game: standalone).
+        int32_t NetworkGetMode()
+        {
+            const Net::NetReplication* replication = Net::NetReplication::Get();
+            if (!replication)
+                return 0;
+            return replication->GetMode() == Net::NetReplication::Mode::Server ? 1 : 2;
+        }
+
+        uint32_t NetworkGetLocalClientId()
+        {
+            const Net::NetReplication* replication = Net::NetReplication::Get();
+            return replication ? replication->GetLocalClientId() : 0;
+        }
+
+        // The client that owns a replicated entity; 0xFFFFFFFF (Network.NotReplicated) for one that belongs to this machine alone (no
+        // Network Identity, or no multiplayer game).
+        uint32_t NetworkGetOwner(uint64_t entityID)
+        {
+            constexpr uint32_t notReplicated = 0xFFFFFFFFu;
+            const Net::NetReplication* replication = Net::NetReplication::Get();
+            if (!replication || !s_Scene)
+                return notReplicated;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!entity || !entity.HasComponent<NetworkIdentityComponent>())
+                return notReplicated;
+            return entity.GetComponent<NetworkIdentityComponent>().Owner;
+        }
+
+        Coral::Bool32 NetworkSetOwner(uint64_t entityID, uint32_t owner)
+        {
+            Net::NetReplication* replication = Net::NetReplication::Get();
+            return replication && replication->SetOwner(UUID(entityID), owner);
+        }
+
+        // Network.Spawn("Prefabs/Player.nprefab", position, owner): the server's replicated spawn; standalone a plain Instantiate.
+        uint64_t NetworkSpawn(Coral::String path, double x, double y, double z, uint32_t owner)
+        {
+            if (!s_Scene) return 0;
+            const AssetHandle prefab = AssetManager::FindHandleByPath(std::filesystem::path(std::string(path)), AssetType::Prefab);
+            if (prefab == 0)
+            {
+                NOX_CORE_ERROR("[C#] Network.Spawn: no prefab '{}' in the asset registry", std::string(path));
+                return 0;
+            }
+            Net::NetReplication* replication = Net::NetReplication::Get();
+            if (!replication)
+            {
+                Entity root = s_Scene->Instantiate(prefab, { x, y, z });
+                return root ? static_cast<uint64_t>(root.GetUUID()) : 0;
+            }
+            if (replication->GetMode() != Net::NetReplication::Mode::Server)
+            {
+                NOX_CORE_ERROR("[C#] Network.Spawn: only the server spawns replicated entities (on a client this does nothing)");
+                return 0;
+            }
+            return replication->Spawn(prefab, { x, y, z }, owner);
+        }
+
+        void NetworkSendRpc(uint64_t entityID, Coral::String className, int32_t kind, int32_t method, Coral::Bool32 reliable,
+                            const uint8_t* arguments, int32_t length)
+        {
+            Net::NetReplication* replication = Net::NetReplication::Get();
+            if (!replication || kind < 0 || kind > 2 || method < 0 || length < 0 || (length > 0 && !arguments))
+                return;
+            replication->SendRpc(UUID(entityID), std::string(className), static_cast<Net::RpcKind>(kind), static_cast<uint32_t>(method),
+                                 reliable, std::span(arguments, static_cast<size_t>(length)));
         }
 
         // Scene.LoadLevel("Levels/Interior.nox") / UnloadLevel / GetLevelState: a level by its path under the asset directory
@@ -1261,6 +1332,7 @@ namespace Nox
         m_Types.clear();
         m_ExposedFields.clear();
         m_CallbackMasks.clear();
+        m_ReplicatedFieldCounts.clear();
         // Handles of the module going stop working (a new one is a new generation, also when the old one is loaded back).
         ++m_Generation;
         m_CoreAssembly = nullptr;
@@ -1362,6 +1434,12 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Transform_GetWorld", reinterpret_cast<void*>(&GetWorldTransform));
         assembly.AddInternalCall("Nox.InternalCalls", "Transform_SetWorld", reinterpret_cast<void*>(&SetWorldTransform));
         assembly.AddInternalCall("Nox.InternalCalls", "WorldUnits_PerMeter", reinterpret_cast<void*>(&WorldUnitsPerMeter));
+        assembly.AddInternalCall("Nox.InternalCalls", "Network_GetMode", reinterpret_cast<void*>(&NetworkGetMode));
+        assembly.AddInternalCall("Nox.InternalCalls", "Network_GetLocalClientId", reinterpret_cast<void*>(&NetworkGetLocalClientId));
+        assembly.AddInternalCall("Nox.InternalCalls", "Network_GetOwner", reinterpret_cast<void*>(&NetworkGetOwner));
+        assembly.AddInternalCall("Nox.InternalCalls", "Network_SetOwner", reinterpret_cast<void*>(&NetworkSetOwner));
+        assembly.AddInternalCall("Nox.InternalCalls", "Network_Spawn", reinterpret_cast<void*>(&NetworkSpawn));
+        assembly.AddInternalCall("Nox.InternalCalls", "Network_SendRpc", reinterpret_cast<void*>(&NetworkSendRpc));
         assembly.UploadInternalCalls();
     }
 
@@ -1510,5 +1588,93 @@ namespace Nox
         m_Scene = scene;
         s_Scene = scene;
         s_MainThread = std::this_thread::get_id();
+    }
+
+    DotNetBackend::Instance* DotNetBackend::FindInstance(ScriptInstanceHandle handle)
+    {
+        auto it = m_Instances.find(handle.ID);
+        if (it == m_Instances.end() || handle.Generation != m_Generation || !it->second->Object.IsValid())
+            return nullptr;
+        return it->second.get();
+    }
+
+    uint32_t DotNetBackend::GetReplicatedFieldCount(ScriptInstanceHandle handle)
+    {
+        Instance* instance = FindInstance(handle);
+        if (!instance)
+            return 0;
+        auto cached = m_ReplicatedFieldCounts.find(instance->ClassName);
+        if (cached == m_ReplicatedFieldCounts.end())
+        {
+            const int32_t count = instance->Object.InvokeMethod<int32_t>("NetReplicatedFieldCount");
+            cached = m_ReplicatedFieldCounts.emplace(instance->ClassName, static_cast<uint32_t>(std::max(count, 0))).first;
+        }
+        return cached->second;
+    }
+
+    void DotNetBackend::WriteReplicated(ScriptInstanceHandle handle, std::vector<std::vector<uint8_t>>& fields)
+    {
+        fields.clear();
+        const uint32_t count = GetReplicatedFieldCount(handle);
+        Instance* instance = FindInstance(handle);
+        if (!instance || count == 0)
+            return;
+        // The script writes each field as u16 length + bytes; when the buffer is too small it returns the size it needs, negated.
+        int32_t written = instance->Object.InvokeMethod<int32_t>("NetWriteReplicated", static_cast<void*>(m_NetBuffer.data()),
+                                                                static_cast<int32_t>(m_NetBuffer.size()));
+        if (written < 0)
+        {
+            m_NetBuffer.resize(static_cast<size_t>(-written));
+            written = instance->Object.InvokeMethod<int32_t>("NetWriteReplicated", static_cast<void*>(m_NetBuffer.data()),
+                                                            static_cast<int32_t>(m_NetBuffer.size()));
+        }
+        if (written <= 0)
+            return;
+        size_t offset = 0;
+        fields.resize(count);
+        for (uint32_t field = 0; field < count; ++field)
+        {
+            if (offset + 2 > static_cast<size_t>(written))
+            {
+                fields.clear(); // (a script that wrote less than it said: nothing of it is sent)
+                return;
+            }
+            const size_t length = m_NetBuffer[offset] | (static_cast<size_t>(m_NetBuffer[offset + 1]) << 8);
+            offset += 2;
+            if (offset + length > static_cast<size_t>(written))
+            {
+                fields.clear();
+                return;
+            }
+            fields[field].assign(m_NetBuffer.begin() + static_cast<std::ptrdiff_t>(offset), m_NetBuffer.begin() + static_cast<std::ptrdiff_t>(offset + length));
+            offset += length;
+        }
+    }
+
+    void DotNetBackend::ReadReplicated(ScriptInstanceHandle handle, std::span<const uint8_t> records)
+    {
+        Instance* instance = FindInstance(handle);
+        if (!instance || records.empty())
+            return;
+        instance->Object.InvokeMethod("NetReadReplicated", static_cast<void*>(const_cast<uint8_t*>(records.data())),
+                                      static_cast<int32_t>(records.size()));
+    }
+
+    void DotNetBackend::InvokeRpc(ScriptInstanceHandle handle, uint8_t kind, uint32_t method, std::span<const uint8_t> arguments)
+    {
+        Instance* instance = FindInstance(handle);
+        if (!instance)
+            return;
+        instance->Object.InvokeMethod("NetInvokeRpc", static_cast<int32_t>(kind), static_cast<int32_t>(method),
+                                      static_cast<void*>(const_cast<uint8_t*>(arguments.data())), static_cast<int32_t>(arguments.size()));
+    }
+
+    void DotNetBackend::RaiseNetworkEvent(int32_t event, uint32_t client)
+    {
+        if (!m_CoreAssembly)
+            return;
+        Coral::Type& network = m_CoreAssembly->GetLocalType("Nox.Network");
+        if (network)
+            network.InvokeStaticMethod("RaiseClientEvent", event, client);
     }
 }

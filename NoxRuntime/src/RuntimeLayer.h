@@ -20,6 +20,7 @@ namespace Nox
     {
         class NetServer;
         class NetClient;
+        class NetReplication;
     }
 
     // Plays a project's start scene the way the editor's Play button does (a copy of the scene asset, OnRuntimeStart,
@@ -55,7 +56,9 @@ namespace Nox
         void LogServerStatus();
         void LogClients() const;
 
-        // Networking: the role and sessions from the command line; receive / send around the frame; the client's session events.
+        // Networking: the role and sessions from the command line (before the scene starts: its scripts see their role in OnCreate);
+        // receive / send around the frame; the client's session events.
+        void DetermineNetRole();
         void StartNetworking();
         void UpdateNetworking(float ts);
         void FlushNetworking();
@@ -90,6 +93,8 @@ namespace Nox
         NetRole m_NetRole = NetRole::Standalone;
         std::unique_ptr<Net::NetServer> m_Server; // dedicated / listen server
         std::unique_ptr<Net::NetClient> m_Client; // client
+        // The scene's replication (NET2): a server's from the start, a client's while it is joined (its scene is the server's).
+        std::unique_ptr<Net::NetReplication> m_Replication;
         std::string m_ProjectName;
         float m_TitleTimer = 0.0f;
         float m_ClientStatusTimer = 0.0f;

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -44,5 +46,18 @@ namespace Nox
         // A method of the script taking one string (e.g. OnAnimationEvent(string name)).
         virtual void InvokeWithString(ScriptInstanceHandle instance, std::string_view method, std::string_view argument) = 0;
         virtual void SetSceneContext(Scene* scene) = 0;
+
+        // Networking (docs/Networking_Plan_2026-11.md, NET2): the scripts encode and decode their own values (Nox.NetCodec); the
+        // engine moves the bytes. [Replicated] fields in the class's order (by name).
+        virtual uint32_t GetReplicatedFieldCount(ScriptInstanceHandle instance) = 0;
+        // Each replicated field's encoded value (cleared first; nothing for a class without any).
+        virtual void WriteReplicated(ScriptInstanceHandle instance, std::vector<std::vector<uint8_t>>& fields) = 0;
+        // Sets fields from records (u16 field index, u16 length, the bytes; little-endian), then calls their OnRep methods.
+        virtual void ReadReplicated(ScriptInstanceHandle instance, std::span<const uint8_t> records) = 0;
+        // Calls the RPC method (its index among the class's RPCs, by name) with its encoded arguments; the script checks that the
+        // method is of this kind (0 ServerRpc, 1 ClientRpc, 2 MulticastRpc).
+        virtual void InvokeRpc(ScriptInstanceHandle instance, uint8_t kind, uint32_t method, std::span<const uint8_t> arguments) = 0;
+        // Nox.Network's events: 0 a client joined, 1 a client left (on the server).
+        virtual void RaiseNetworkEvent(int32_t event, uint32_t client) = 0;
     };
 }

@@ -660,10 +660,10 @@ namespace Nox
         outHandles.erase(AssetHandle(0));
     }
 
-    Entity Scene::Instantiate(AssetHandle prefab, const glm::dvec3& position)
+    Entity Scene::Instantiate(AssetHandle prefab, const glm::dvec3& position, UUID rootId)
     {
         std::vector<Entity> spawned;
-        Entity root = PrefabInstance::Instantiate(*this, prefab, position, spawned);
+        Entity root = PrefabInstance::Instantiate(*this, prefab, position, spawned, rootId);
         if (!root)
             return {};
 
@@ -3419,7 +3419,8 @@ namespace Nox
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
             CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent, PhysicsJoint3DComponent, CollisionFilter3DComponent,
-            CharacterController3DComponent, TextComponent, LevelStreamingVolumeComponent, WorldPartitionComponent, WorldStreamingSourceComponent>;
+            CharacterController3DComponent, TextComponent, LevelStreamingVolumeComponent, WorldPartitionComponent, WorldStreamingSourceComponent,
+            NetworkIdentityComponent>;
 
         // Source UUID -> duplicate UUID, so a duplicated animator drives the duplicated nodes
         // instead of still pointing at the original hierarchy.
@@ -4161,6 +4162,11 @@ namespace Nox
     }
 
     template <>
+    void Scene::OnComponentAdded<NetworkIdentityComponent>(Entity entity, NetworkIdentityComponent& component)
+    {
+    }
+
+    template<>
     void Scene::OnComponentAdded<WorldStreamingSourceComponent>(Entity entity, WorldStreamingSourceComponent& component)
     {
     }

@@ -45,6 +45,14 @@ namespace Nox
         // An animation notify (AnimationSequence::Notifies) the entity's animator crossed: OnAnimationEvent(name) on its scripts.
         static void OnAnimationEvent(Entity entity, const std::string& name);
         static bool EntityClassExists(std::string_view fullName);
+        // Networking (NET2): an entity's script instances (in the order of its ScriptComponent's scripts; null: none), and the
+        // backend that reads and writes their replicated fields and calls their RPCs.
+        static const std::vector<ScriptInstanceHandle>* GetInstances(UUID entity)
+        {
+            auto found = s_Instances.find(entity);
+            return found != s_Instances.end() ? &found->second : nullptr;
+        }
+        static IScriptBackend* GetBackend() { return s_Backend.get(); }
         static std::vector<ScriptFieldInfo> GetExposedFields(std::string_view fullName);
     private:
         // Exposed field values of an entity's script instances: class -> field -> value (kept across a hot reload).

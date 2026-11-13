@@ -70,6 +70,17 @@ namespace Nox
         bool IsActiveInHierarchy(entt::entity entity) const { return !m_Registry.all_of<InactiveInHierarchyComponent>(entity); }
 
         bool IsRunning() const { return m_IsRunning; }
+        // The scene's part in a multiplayer game (docs/Networking_Plan_2026-11.md, NET2; Unreal's ENetMode): on a client the entities
+        // with a NetworkIdentityComponent are the server's, shown here -- their physics bodies follow the replicated transform and
+        // their character controllers are not simulated. Set before OnRuntimeStart.
+        enum class NetMode : uint8_t { Standalone, Server, Client };
+        void SetNetMode(NetMode mode) { m_NetMode = mode; }
+        NetMode GetNetMode() const { return m_NetMode; }
+        // A replicated entity of the server's on this client (a proxy).
+        bool IsNetProxy(entt::entity entity) const
+        {
+            return m_NetMode == NetMode::Client && m_Registry.all_of<NetworkIdentityComponent>(entity);
+        }
         bool IsPaused() const { return m_IsPaused; }
         void SetPaused(bool paused) { m_IsPaused = paused; }
         void Step(int frames = 1);
@@ -124,7 +135,8 @@ namespace Nox
 
         // Runtime: places a prefab in the scene and spawns it at once (see PrefabInstance::Instantiate); physics bodies and scripts
         // of its entities start as if the scene had begun with them. Returns the instance root (invalid when it fails).
-        Entity Instantiate(AssetHandle prefab, const glm::dvec3& position);
+        // rootId: the root's UUID (a client's copy of an entity the server spawned has the server's ids); 0: a new one.
+        Entity Instantiate(AssetHandle prefab, const glm::dvec3& position, UUID rootId = UUID(0));
         // Destroys the entity at the end of the script update (a script may destroy itself: nothing in the middle of a frame's
         // script loop is removed).
         void QueueDestroy(Entity entity);
@@ -425,6 +437,7 @@ namespace Nox
         std::vector<std::string> m_Folders;
         std::set<std::string> m_CollapsedFolders;
         bool m_IsRunning = false;
+        NetMode m_NetMode = NetMode::Standalone;
         bool m_TimelinesRunning = false; // Play or Simulate
         bool m_AudioRunning = false;     // Play or Simulate
         // One-shots asked for while their clip was loading (UpdateAudio plays them once it is in).

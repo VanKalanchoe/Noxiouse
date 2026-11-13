@@ -16,6 +16,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace Nox 
 {
@@ -108,6 +109,10 @@ namespace Nox
         std::unique_ptr<JoltFilterData> m_FilterData;
 
         std::unordered_map<uint32_t, JPH::BodyID> m_EntityToBodyMap;
+        // Bodies that follow their entity's transform instead of moving it: a network client's proxies of the server's entities
+        // (Scene::IsNetProxy), kinematic, moved to the replicated transform before each step.
+        std::unordered_set<uint32_t> m_FollowTransform;
+        void MoveFollowers(uint32_t ticks);
         std::unordered_map<uint32_t, Entity> m_BodyToEntityMap;
         std::unordered_map<uint32_t, JPH::BodyID> m_MeshColliders; // SetMeshCollider: static bodies, apart from the rigid bodies
         // A character and its positions at the last two fixed steps: the entity is drawn interpolated between them, so

@@ -7,6 +7,12 @@ internal static unsafe class InternalCalls
 {
 #pragma warning disable CS0649 // Assigned by Coral when the assembly is loaded.
     private static delegate*<NativeString, void> Log_Info;
+    private static delegate*<int> Network_GetMode;
+    private static delegate*<uint> Network_GetLocalClientId;
+    private static delegate*<ulong, uint> Network_GetOwner;
+    private static delegate*<ulong, uint, uint> Network_SetOwner;
+    private static delegate*<NativeString, double, double, double, uint, ulong> Network_Spawn;
+    private static delegate*<ulong, NativeString, int, int, uint, byte*, int, void> Network_SendRpc;
     private static delegate*<int, uint> Input_IsKeyDown;
     private static delegate*<int, uint> Input_IsMouseButtonDown;
     private static delegate*<Vector2*, void> Input_GetMouseDelta;
@@ -126,6 +132,24 @@ internal static unsafe class InternalCalls
     }
 
     internal static void DestroyEntity(ulong entityID) => Scene_Destroy(entityID);
+
+    internal static int NetworkGetMode() => Network_GetMode();
+    internal static uint NetworkGetLocalClientId() => Network_GetLocalClientId();
+    internal static uint NetworkGetOwner(ulong entityID) => Network_GetOwner(entityID);
+    internal static bool NetworkSetOwner(ulong entityID, uint owner) => Network_SetOwner(entityID, owner) != 0;
+
+    internal static ulong NetworkSpawn(string prefabPath, Vector3d position, uint owner)
+    {
+        using NativeString nativePath = new(prefabPath);
+        return Network_Spawn(nativePath, position.X, position.Y, position.Z, owner);
+    }
+
+    internal static void NetworkSendRpc(ulong entityID, string className, int kind, int method, bool reliable, ReadOnlySpan<byte> arguments)
+    {
+        using NativeString nativeClass = new(className);
+        fixed (byte* data = arguments)
+            Network_SendRpc(entityID, nativeClass, kind, method, reliable ? 1u : 0u, data, arguments.Length);
+    }
 
     internal static bool GetEntityActive(ulong entityID) => Entity_GetActive(entityID) != 0;
     internal static bool GetEntityActiveInHierarchy(ulong entityID) => Entity_GetActiveInHierarchy(entityID) != 0;

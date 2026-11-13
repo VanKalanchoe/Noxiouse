@@ -20,6 +20,7 @@
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Network/NetClient.h"
 #include "NoxCore/Network/NetProject.h"
+#include "NoxCore/Network/NetReplication.h"
 #include "NoxCore/Network/NetServer.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
@@ -130,6 +131,8 @@ namespace Nox
             return;
         }
         m_StartSceneHandle = startScene;
+        DetermineNetRole();
+        StartNetworking(); // (a server's replication exists before its scene's scripts start)
         StartScene(startScene);
 
         if (m_Headless)
@@ -148,8 +151,6 @@ namespace Nox
             }).detach();
             NOX_CORE_INFO("Server console: status, clients, kick <id> [reason], netemu off|average|bad|<lag> <jitter> <loss>, quit (or Ctrl+C)");
         }
-
-        StartNetworking();
     }
 
     RuntimeLayer::~RuntimeLayer()
@@ -157,6 +158,7 @@ namespace Nox
         NOX_CORE_INFO("RuntimeLayer Shutdown");
 
         // The sessions first: the clients hear "server shut down" / the server hears "left", while the game still exists.
+        m_Replication.reset();
         m_Client.reset();
         m_Server.reset();
 
@@ -214,6 +216,9 @@ namespace Nox
             assetManager->Update(); // publishes the background loads that finished
         }
 
+        // The server's snapshots of this frame's results; the client's state that waited for scripts.
+        if (m_Replication)
+            m_Replication->Update(static_cast<float>(ts));
         if (m_Headless)
             UpdateServerConsole(static_cast<float>(ts));
         // Send last (TickFlush): what this frame queued leaves now, not a few ms later.
@@ -380,6 +385,11 @@ namespace Nox
             m_Scene->OnRuntimeStop(); // (a client changing scenes: the one it played ends first)
         m_Scene = Scene::Copy(sceneAsset);
         m_SceneHandle = sceneHandle;
+        // Its part in the game, before it starts (physics makes a client's replicated entities proxies).
+        if (m_NetRole == NetRole::DedicatedServer || m_NetRole == NetRole::ListenServer)
+            m_Scene->SetNetMode(Scene::NetMode::Server);
+        else if (m_NetRole == NetRole::Client && m_Replication)
+            m_Scene->SetNetMode(Scene::NetMode::Client);
         if (m_Renderer)
         {
             m_Scene->SetRenderer(m_Renderer);
@@ -387,6 +397,8 @@ namespace Nox
             const NRI::Extent2D outputSize = m_Renderer->getOutputSize();
             m_Scene->OnViewportResize(outputSize.width, outputSize.height);
         }
+        if (m_Replication)
+            m_Replication->SetScene(m_Scene.get());
         m_Scene->OnRuntimeStart();
         m_UnloadUnusedAssetsRequested = true;
 #if NOX_PROFILE_STATS
@@ -401,19 +413,24 @@ namespace Nox
         Project::GetActive()->GetEditorAssetManager()->UnloadUnusedAssets(referencedAssets);
     }
 
-    void RuntimeLayer::StartNetworking()
+    void RuntimeLayer::DetermineNetRole()
     {
         const ApplicationCommandLineArgs& args = Application::Get().GetSpecification().CommandLineArgs;
         const char* connect = args.Value("--connect");
-        const bool listen = args.HasSwitch("--listen");
         if (m_Headless)
             m_NetRole = NetRole::DedicatedServer;
         else if (connect)
             m_NetRole = NetRole::Client;
-        else if (listen)
+        else if (args.HasSwitch("--listen"))
             m_NetRole = NetRole::ListenServer;
         if (connect && m_NetRole != NetRole::Client)
             NOX_CORE_WARN("NoxRuntime: --connect is ignored by a server");
+    }
+
+    void RuntimeLayer::StartNetworking()
+    {
+        const ApplicationCommandLineArgs& args = Application::Get().GetSpecification().CommandLineArgs;
+        const char* connect = args.Value("--connect");
         if (m_NetRole == NetRole::Standalone)
         {
             NOX_CORE_INFO("NoxRuntime: standalone (no networking: --server, --listen or --connect <address> make a server or a client)");
@@ -480,6 +497,10 @@ namespace Nox
             m_Server->SetEmulation(emulation);
             NOX_CORE_INFO("Net: network emulation {}", Describe(emulation));
         }
+        m_Replication = std::make_unique<Net::NetReplication>(*m_Server);
+        if (const char* rate = args.Value("--net-rate"))
+            m_Replication->SetSnapshotRate(static_cast<float>(std::atof(rate)));
+        NOX_CORE_INFO("Net: replicating at {:.0f} snapshots a second", m_Replication->GetSnapshotRate());
         NOX_CORE_INFO("Net: content checksum {:016x} ('{}', network protocol {})", compatibility.ContentChecksum, compatibility.ProjectName,
                       compatibility.Protocol);
         UpdateWindowTitle();
@@ -533,6 +554,8 @@ namespace Nox
             UpdateWindowTitle();
             return;
         }
+        // Replication first: the server's scene starts as the client's copy of it (proxies), its scripts see Network.IsClient.
+        m_Replication = std::make_unique<Net::NetReplication>(*m_Client);
         StartScene(scene);
         m_ClientStatusTimer = 0.0f;
         UpdateWindowTitle();
@@ -540,8 +563,10 @@ namespace Nox
 
     void RuntimeLayer::OnLeftServer(Net::DisconnectReason reason, const std::string& text)
     {
-        // Back to the start scene (Unreal returns to the default map); nothing changes when the client never left it.
-        if (m_SceneHandle != m_StartSceneHandle && m_StartSceneHandle != 0)
+        // Back to the start scene (Unreal returns to the default map), standalone; nothing changes when the client never joined.
+        const bool wasJoined = m_Replication != nullptr;
+        m_Replication.reset();
+        if (wasJoined && m_StartSceneHandle != 0)
             StartScene(m_StartSceneHandle);
         UpdateWindowTitle();
     }

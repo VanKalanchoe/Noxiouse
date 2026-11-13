@@ -1161,6 +1161,17 @@ namespace Nox
         float LoadingRangeScale = 1.0f; // times the grid's loading range (Unreal's FStreamingSourceShape::LoadingRangeScale)
     };
 
+    // Replication (docs/Networking_Plan_2026-11.md, NET2; Unreal's bReplicates): the entity exists on the server and on its clients,
+    // and the server's copy is the authority. The server sends its transform and its scripts' [Replicated] fields in snapshots; on a
+    // client it is a proxy -- its physics body follows the replicated transform (kinematic) and a character controller is not
+    // simulated there. Level entities are matched by their UUID (the same scene on both sides); entities spawned while the game runs
+    // reach the clients through the prefab they were made from.
+    struct NetworkIdentityComponent
+    {
+        bool ReplicateTransform = true;
+        uint32_t Owner = 0; // runtime only (not saved): the client that owns it (Net::ClientId; 0: the server)
+    };
+
     // An HLOD (§5.13.2): the merged, simplified, baked stand-in of one world cell, drawn while that cell is not loaded and drawn. Made by
     // Build HLODs and kept in the HLOD grid's cells; never saved into the scene or a world cell, never edited.
     struct HLODComponent
@@ -1198,5 +1209,5 @@ namespace Nox
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,
             SphereCollider3DComponent, CapsuleCollider3DComponent, CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent,
             PhysicsJoint3DComponent, CollisionFilter3DComponent, CharacterController3DComponent, TextComponent, BoneSocketComponent, LevelStreamingVolumeComponent,
-            WorldPartitionComponent, WorldStreamingSourceComponent, HLODComponent, InactiveComponent>;
+            WorldPartitionComponent, WorldStreamingSourceComponent, HLODComponent, NetworkIdentityComponent, InactiveComponent>;
 }

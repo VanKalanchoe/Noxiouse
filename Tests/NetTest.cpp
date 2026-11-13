@@ -8,6 +8,7 @@
 #include "NoxCore/Network/NetClient.h"
 #include "NoxCore/Network/NetServer.h"
 #include "NoxCore/Network/NetSnapshot.h"
+#include "NoxCore/Network/NetQuantize.h"
 #include "NoxCore/Core/Log.h"
 
 #include <cstdio>
@@ -439,6 +440,59 @@ static void TestReaderFuzz()
     CHECK(shortReader.IsFailed() && shortReader.ReadU32() == 0, "a cut message fails the reader and reads zeros");
 }
 
+// Transform quantization: positions exact to the step anywhere (large worlds), rotations to ~0.003 degrees, malformed input refused.
+static void TestQuantize()
+{
+    std::printf("\n== transform quantization\n");
+    std::mt19937 random(99);
+    std::uniform_real_distribution<double> near(-1.0e4, 1.0e4), far(-1.0e9, 1.0e9);
+    const double quantum = 0.01; // 0.1 mm in a centimeter project
+    double worstPosition = 0.0;
+    size_t worstBytes = 0, nearBytes = 0;
+    for (int i = 0; i < 100000; ++i)
+    {
+        const glm::dvec3 position = i % 2 ? glm::dvec3(near(random), near(random), near(random)) : glm::dvec3(far(random), far(random), far(random));
+        const std::vector<uint8_t> bytes = EncodePosition(position, quantum);
+        glm::dvec3 decoded(0.0);
+        if (!DecodePosition(bytes, quantum, decoded)) { worstPosition = 1e30; break; }
+        const glm::dvec3 error = glm::abs(decoded - position);
+        worstPosition = std::max({ worstPosition, error.x, error.y, error.z });
+        worstBytes = std::max(worstBytes, bytes.size());
+        if (i % 2) nearBytes = std::max(nearBytes, bytes.size());
+    }
+    CHECK(worstPosition <= quantum * 0.5 + 1e-6, "positions up to 10^9 units: worst error {:.4f} (half a step: {:.4f}); at most {} bytes, {} within 100 m",
+          worstPosition, quantum * 0.5, worstBytes, nearBytes);
+
+    std::normal_distribution<float> gauss;
+    float worstDegrees = 0.0f;
+    for (int i = 0; i < 100000; ++i)
+    {
+        const glm::quat rotation = glm::normalize(glm::quat(gauss(random), gauss(random), gauss(random), gauss(random)));
+        glm::quat decoded;
+        const std::vector<uint8_t> bytes = EncodeRotation(rotation);
+        if (bytes.size() != 7 || !DecodeRotation(bytes, decoded)) { worstDegrees = 1e9f; break; }
+        // The angle between them in double, both normalized in double first: a float-normalized quaternion is only unit to ~3e-7,
+        // which acos turns into ~0.09 degrees by itself -- more than the encoding loses.
+        const glm::dvec4 a = glm::normalize(glm::dvec4(rotation.x, rotation.y, rotation.z, rotation.w));
+        const glm::dvec4 b = glm::normalize(glm::dvec4(decoded.x, decoded.y, decoded.z, decoded.w));
+        const double dot = std::min(1.0, std::abs(glm::dot(a, b)));
+        worstDegrees = std::max(worstDegrees, static_cast<float>(2.0 * std::acos(dot) * 57.29577951308232));
+    }
+    CHECK(worstDegrees < 0.01f, "rotations in 7 bytes: worst error {:.4f} degrees", worstDegrees);
+
+    glm::dvec3 untouched(1.0, 2.0, 3.0);
+    const std::vector<uint8_t> cut = { 0x80 };
+    glm::quat rotationUntouched(1, 0, 0, 0);
+    const std::vector<uint8_t> badRotation = { 7, 0, 0, 0, 0, 0, 0 };
+    glm::vec3 scale(1.0f);
+    const std::vector<uint8_t> nanScale = EncodeScale(glm::vec3(std::nanf(""), 1.0f, 1.0f));
+    const bool refused = !DecodePosition(cut, quantum, untouched) && untouched == glm::dvec3(1.0, 2.0, 3.0) &&
+                         !DecodeRotation(badRotation, rotationUntouched) && !DecodeScale(nanScale, scale) && scale == glm::vec3(1.0f);
+    glm::dvec3 nanPosition(0.0);
+    const bool nanSafe = DecodePosition(EncodePosition(glm::dvec3(std::nan(""), 5.0, 0.0), quantum), quantum, nanPosition) && nanPosition.y == 5.0;
+    CHECK(refused && nanSafe, "malformed bytes leave the transform as it was; a NaN position is sent as 0");
+}
+
 // The snapshot codec alone: a world that keeps changing (spawns, removals, property and owner changes, scripts added), snapshots
 // over a channel that loses 30 % and delivers the rest up to 4 ticks late, acknowledgements lost and late the same way. Every snapshot
 // the client applies must be exactly the server's world at that tick; after the loss stops the client must hold the final world.
@@ -583,6 +637,7 @@ int main()
     Nox::Log::Init();
     TestReaderFuzz();
     TestSnapshots();
+    TestQuantize();
     for (bool loopback : { true, false })
     {
         const uint16_t base = loopback ? 7100 : 7200;

@@ -43,7 +43,8 @@ namespace Nox
         static bool TakesValue(std::string_view name)
         {
             constexpr std::string_view names[] = { "--project", "--connect", "--port", "--name", "--server-name", "--max-clients",
-                                                   "--tickrate", "--net-emulation", "--net-lag", "--net-jitter", "--net-loss" };
+                                                   "--tickrate", "--net-emulation", "--net-lag", "--net-jitter", "--net-loss",
+                                                   "--net-rate" };
             for (std::string_view known : names)
                 if (name == known)
                     return true;

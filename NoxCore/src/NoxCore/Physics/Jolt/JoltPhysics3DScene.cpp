@@ -502,12 +502,14 @@ namespace Nox {
         const float rollingResistance = surface.RollingResistance;
         const float rollingRadius = surface.RollingRadius;
 
+        // A network client's copy of a server entity moves where the server says: kinematic, following the replicated transform.
+        const bool netProxy = m_Scene && m_Scene->IsNetProxy(static_cast<entt::entity>(entity));
         if (rb.Type == RigidBody3DComponent::BodyType::Static)
         {
             motionType = JPH::EMotionType::Static;
             objectLayer = PhysicsLayers::NON_MOVING;
         }
-        else if (rb.Type == RigidBody3DComponent::BodyType::Kinematic)
+        else if (rb.Type == RigidBody3DComponent::BodyType::Kinematic || netProxy)
         {
             motionType = JPH::EMotionType::Kinematic;
             if (objectLayer == PhysicsLayers::NON_MOVING)
@@ -594,6 +596,8 @@ namespace Nox {
         uint32_t entIdVal = static_cast<uint32_t>(entity);
         m_EntityToBodyMap[entIdVal] = body->GetID();
         m_BodyToEntityMap[bodyIdVal] = entity;
+        if (netProxy && motionType == JPH::EMotionType::Kinematic)
+            m_FollowTransform.insert(entIdVal);
         if (entity.HasComponent<ImpactSoundComponent>())
             m_ContactEvents->SetReporting(body->GetID(), true);
     }
@@ -808,6 +812,7 @@ namespace Nox {
             }
             m_EntityToBodyMap.erase(it);
             m_BodyPoses.erase(entIdVal);
+            m_FollowTransform.erase(entIdVal);
         }
 
         if (entity.HasComponent<RigidBody3DComponent>())
@@ -894,6 +899,9 @@ namespace Nox {
     void JoltPhysics3DScene::CreateCharacter(Entity entity)
     {
         if (!m_PhysicsSystem || !entity || entity.HasComponent<InactiveInHierarchyComponent>()) // switched off: no character
+            return;
+        // A network client's copy of a server's character: the server simulates it, the replicated transform places it here.
+        if (m_Scene && m_Scene->IsNetProxy(static_cast<entt::entity>(entity)))
             return;
 
         const auto& controller = entity.GetComponent<CharacterController3DComponent>();
@@ -1137,6 +1145,28 @@ namespace Nox {
         }
     }
 
+    void JoltPhysics3DScene::MoveFollowers(uint32_t ticks)
+    {
+        if (m_FollowTransform.empty() || !m_Scene || ticks == 0)
+            return;
+        JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
+        const float teleportDistance = NativeUnitsPerMeter() * 5.0f; // a jump this long (a respawn) is placed, not swept
+        for (uint32_t entityId : m_FollowTransform)
+        {
+            auto body = m_EntityToBodyMap.find(entityId);
+            Entity entity{ static_cast<entt::entity>(entityId), m_Scene };
+            if (body == m_EntityToBodyMap.end() || body->second.IsInvalid() || !entity.IsValid())
+                continue;
+            const WorldPose pose = WorldPoseOf(entity);
+            const JPH::RVec3 target = JoltUtils::ToJoltPosition(ToNative(pose.Position));
+            const JPH::Quat rotation = JoltUtils::ToJolt(pose.Rotation);
+            if ((bodyInterface.GetPosition(body->second) - target).Length() > teleportDistance)
+                bodyInterface.SetPositionAndRotation(body->second, target, rotation, JPH::EActivation::Activate);
+            else // swept over this frame's steps: what it pushes on its way is pushed (a door, a lift)
+                bodyInterface.MoveKinematic(body->second, target, rotation, static_cast<float>(ticks) * c_FixedDeltaTime);
+        }
+    }
+
     void JoltPhysics3DScene::StepTicks(uint32_t ticks, float alpha)
     {
         if (!m_PhysicsSystem)
@@ -1144,6 +1174,8 @@ namespace Nox {
 
         if (m_ConstraintsDirty)
             RebuildConstraints();
+
+        MoveFollowers(ticks);
 
         // The scene owns the clock (Scene::AdvanceTicks: one accumulator for scripts and physics, at most 5 ticks a frame).
         for (uint32_t tick = 0; tick < ticks; ++tick)
@@ -1174,6 +1206,8 @@ namespace Nox {
                 const auto& rb = entity.GetComponent<RigidBody3DComponent>();
                 if (rb.Type == RigidBody3DComponent::BodyType::Static)
                     continue; // Static bodies do not move
+                if (m_FollowTransform.contains(entityId))
+                    continue; // (moved by its transform: MoveFollowers)
 
                 // A body that fell asleep is synced once more after its last step, so it ends on its final pose.
                 auto poseIt = m_BodyPoses.find(entityId);
