@@ -42,6 +42,8 @@ public sealed class CharacterMovement : EntityBehaviour
 
         Vector3 velocity = character.Velocity;
         bool rootMotionOnGround = UseRootMotion && character.IsGrounded;
+        // Where it faces now (a platform it stands on may have turned it: the engine turns a character with the ground's yaw).
+        _yaw = GetComponent<TransformComponent>().LocalRotation.Y;
         if (length > 0.0f)
         {
             direction = direction * (1.0f / length);

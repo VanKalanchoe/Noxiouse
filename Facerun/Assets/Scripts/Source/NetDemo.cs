@@ -256,6 +256,8 @@ public sealed class NetPlayer : EntityBehaviour, INetShootable
         character.SetMoveVelocity(new Vector3(move.X * Speed, 0.0f, move.Z * Speed));
 
         // Turned toward where it walks, at TurnRate (Unreal's Orient Rotation To Movement); sent with the inputs -- the server turns it too.
+        // From where it faces now: a platform it stands on turns it (the engine adds the ground's yaw).
+        m_BodyYaw = GetComponent<TransformComponent>().LocalRotation.Y;
         if (length > 0.01f)
         {
             float target = MathF.Atan2(move.X, move.Z) + ModelYawOffset;

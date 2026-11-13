@@ -961,7 +961,35 @@ namespace Nox {
             if (state.ExternallyStepped || !entity.IsValid() || !entity.HasComponent<CharacterController3DComponent>())
                 continue;
             StepCharacterState(entity, state, dt);
+            FollowGroundRotation(entity, state, dt);
         }
+    }
+
+    void JoltPhysics3DScene::FollowGroundRotation(Entity entity, CharacterState& state, float dt)
+    {
+        // Standing on a turning body (a spinner, a ship), the character turns with it about the up axis -- Unreal's based movement
+        // with bIgnoreBaseRotation off: the platform's yaw is added to the character's (its position already moves with the
+        // ground's velocity). Only in the fixed tick: not in a network replay, nor on the server for a client's character (its
+        // rotation comes with that client's inputs, which carry the turn already).
+        JPH::CharacterVirtual* character = state.Character.GetPtr();
+        if (!state.Grounded || !character->IsSupported())
+            return;
+        const JPH::BodyID ground = character->GetGroundBodyID();
+        if (ground.IsInvalid())
+            return;
+        const JPH::BodyInterface& bodyInterface = m_PhysicsSystem->GetBodyInterface();
+        if (bodyInterface.GetMotionType(ground) == JPH::EMotionType::Static)
+            return;
+        const float yawRate = bodyInterface.GetAngularVelocity(ground).GetY(); // radians a second about up
+        if (std::abs(yawRate) < 1e-5f)
+            return;
+        auto& transform = entity.GetComponent<TransformComponent>();
+        const float delta = yawRate * dt;
+        if (std::abs(transform.Rotation.x) < 1e-4f && std::abs(transform.Rotation.z) < 1e-4f)
+            transform.Rotation.y = std::remainder(transform.Rotation.y + delta, glm::two_pi<float>()); // (an upright character: the yaw as it is)
+        else
+            transform.Rotation = glm::eulerAngles(glm::angleAxis(delta, glm::vec3(0.0f, 1.0f, 0.0f)) * glm::quat(transform.Rotation));
+        entity.MarkTransformDirty();
     }
 
     void JoltPhysics3DScene::StepCharacter(Entity entity, float dt)

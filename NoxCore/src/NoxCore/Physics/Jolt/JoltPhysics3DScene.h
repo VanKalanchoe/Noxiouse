@@ -108,6 +108,7 @@ namespace Nox
         void StepCharacters(float dt);
         struct CharacterState;
         void StepCharacterState(Entity entity, CharacterState& state, float dt);
+        void FollowGroundRotation(Entity entity, CharacterState& state, float dt);
         std::function<void()> m_BeforeTick;
         std::function<void()> m_AfterTick;
         void SyncCharactersToTransforms();
