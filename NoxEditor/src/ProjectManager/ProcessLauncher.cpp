@@ -8,40 +8,6 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-    bool ChildProcess::Launch(const std::filesystem::path& executable, const std::vector<std::string>& arguments, bool console, std::string& error)
-    {
-        Kill();
-        std::wstring commandLine = QuoteArgument(executable.wstring());
-        for (const std::string& argument : arguments)
-            commandLine += L" " + QuoteArgument(Widen(argument));
-        STARTUPINFOW startup{};
-        startup.cb = sizeof(startup);
-        PROCESS_INFORMATION process{};
-        const DWORD flags = (console ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW) | CREATE_NEW_PROCESS_GROUP;
-        if (!CreateProcessW(executable.wstring().c_str(), commandLine.data(), nullptr, nullptr, FALSE, flags, nullptr, nullptr, &startup, &process))
-        {
-            error = "CreateProcess failed (error " + std::to_string(GetLastError()) + ")";
-            return false;
-        }
-        CloseHandle(process.hThread);
-        m_Handle = process.hProcess;
-        return true;
-    }
-
-    bool ChildProcess::IsRunning() const
-    {
-        return m_Handle && WaitForSingleObject(static_cast<HANDLE>(m_Handle), 0) == WAIT_TIMEOUT;
-    }
-
-    void ChildProcess::Kill()
-    {
-        if (!m_Handle)
-            return;
-        if (WaitForSingleObject(static_cast<HANDLE>(m_Handle), 0) == WAIT_TIMEOUT)
-            TerminateProcess(static_cast<HANDLE>(m_Handle), 0);
-        CloseHandle(static_cast<HANDLE>(m_Handle));
-        m_Handle = nullptr;
-    }
 #else
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_process.h>
@@ -109,6 +75,40 @@ namespace Nox
         CloseHandle(process.hThread);
         CloseHandle(process.hProcess);
         return true;
+    }
+    bool ChildProcess::Launch(const std::filesystem::path& executable, const std::vector<std::string>& arguments, bool console, std::string& error)
+    {
+        Kill();
+        std::wstring commandLine = QuoteArgument(executable.wstring());
+        for (const std::string& argument : arguments)
+            commandLine += L" " + QuoteArgument(Widen(argument));
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process{};
+        const DWORD flags = (console ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW) | CREATE_NEW_PROCESS_GROUP;
+        if (!CreateProcessW(executable.wstring().c_str(), commandLine.data(), nullptr, nullptr, FALSE, flags, nullptr, nullptr, &startup, &process))
+        {
+            error = "CreateProcess failed (error " + std::to_string(GetLastError()) + ")";
+            return false;
+        }
+        CloseHandle(process.hThread);
+        m_Handle = process.hProcess;
+        return true;
+    }
+
+    bool ChildProcess::IsRunning() const
+    {
+        return m_Handle && WaitForSingleObject(static_cast<HANDLE>(m_Handle), 0) == WAIT_TIMEOUT;
+    }
+
+    void ChildProcess::Kill()
+    {
+        if (!m_Handle)
+            return;
+        if (WaitForSingleObject(static_cast<HANDLE>(m_Handle), 0) == WAIT_TIMEOUT)
+            TerminateProcess(static_cast<HANDLE>(m_Handle), 0);
+        CloseHandle(static_cast<HANDLE>(m_Handle));
+        m_Handle = nullptr;
     }
 #else
     bool LaunchDetachedProcess(const std::filesystem::path& executable, const std::vector<std::string>& arguments, std::string& error)

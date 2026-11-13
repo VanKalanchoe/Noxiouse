@@ -120,8 +120,8 @@ namespace Nox
         const std::string executableName = baseName;
 #endif
         if (!settings.Server && Lower(config.Name).ends_with("server"))
-            report.Warnings.push_back("The project's name ends with \"Server\": its game executable starts as a dedicated server (rename the "
-                                      "project, or start the game with --connect / --listen)");
+            report.Warnings.push_back("The project's name ends with \"Server\": its game executable would start as a dedicated server "
+                                      "(an executable named <Name>Server always does) -- rename the project");
         if (!std::filesystem::exists(runtime))
         {
             report.Error = "NoxRuntime is not built next to the editor (" + runtime.generic_string() +
