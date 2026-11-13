@@ -69,11 +69,16 @@ namespace Nox
 
         // Assets the graph's nodes reference (a Clip node's clip, also inside a state machine's states) aren't loaded by
         // anything else, e.g. after a scene reload: report the ones not resident yet so Scene::ApplySyncPoint requests them.
+        bool resident = true;
         ForEachGraphAsset(m_Graph->Graph, [&](AssetHandle handle)
         {
             if (AssetManager::IsAssetHandleValid(handle) && !AssetManager::IsAssetLoaded(handle))
+            {
                 missingAssets.push_back(handle);
+                resident = false;
+            }
         });
+        m_AssetsResident = resident;
         for (const Montage& montage : m_Montages)
         {
             if (AssetManager::IsAssetHandleValid(montage.Clip) && !AssetManager::IsAssetLoaded(montage.Clip))
@@ -189,6 +194,7 @@ namespace Nox
         m_LastPose = m_EvalContext.GetInput<AnimPose>(m_Graph->Compiled.OutputNodeIndex, 0);
         if (RootMotion)
             ExtractRootMotion(skeleton);
+        m_PoseReady = m_PoseReady || (m_AssetsResident && !m_LastPose.LocalTransforms.empty());
         return &m_LastPose;
     }
 

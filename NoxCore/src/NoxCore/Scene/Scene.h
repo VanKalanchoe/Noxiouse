@@ -628,6 +628,8 @@ namespace Nox
         std::vector<AnimatorTask> m_AnimatorOrder;
         std::vector<uint32_t> m_AnimatorGroups;
         std::vector<entt::entity> m_PendingMeshEntities; // (re)registered at the next sync
+        // Animated characters held back until their animation can pose them (AnimationGraphInstance::IsPoseReady): since when.
+        std::unordered_map<entt::entity, std::chrono::steady_clock::time_point> m_AnimationWaits;
         WorkerLocal<std::vector<entt::entity>> m_MovedEntities; // world transform changed (transform propagation)
 
         // Allow the Entity class to access m_Registry to add/get components

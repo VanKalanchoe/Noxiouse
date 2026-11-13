@@ -18,6 +18,9 @@ public sealed class CharacterControllerComponent : Component
     public void Jump(float speed) => InternalCalls.CharacterJump(EntityID, speed);
 
     public bool IsGrounded => InternalCalls.IsCharacterGrounded(EntityID);
-    /// <summary>The velocity the last physics step moved it with, in world units per second.</summary>
+    /// <summary>
+    /// Its own velocity, in world units per second, relative to the ground it stands on (Unreal's): a moving or turning platform's
+    /// motion is not part of it, so standing on one reads as standing. In the air the whole velocity.
+    /// </summary>
     public Vector3 Velocity => InternalCalls.GetCharacterVelocity(EntityID);
 }

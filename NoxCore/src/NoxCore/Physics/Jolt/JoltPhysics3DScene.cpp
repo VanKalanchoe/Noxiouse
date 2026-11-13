@@ -1267,7 +1267,13 @@ namespace Nox {
             auto& controller = entity.GetComponent<CharacterController3DComponent>();
             JPH::CharacterVirtual* character = state.Character.GetPtr();
             controller.IsGrounded = state.Grounded; // Unreal's floor test (StepCharacters)
-            controller.Velocity = ToWorld(JoltUtils::ToGLM(character->GetLinearVelocity())); // script-facing: world units
+            // Script-facing (world units): its own movement, relative to the ground it stands on -- Unreal's CharacterMovement Velocity,
+            // which a moving or turning platform's motion is not part of (standing on the spinner is standing, not walking: the
+            // animation's Speed). In the air the whole velocity (a jump off a moving platform keeps the platform's speed).
+            JPH::Vec3 ownVelocity = character->GetLinearVelocity();
+            if (state.Grounded && character->IsSupported())
+                ownVelocity -= character->GetGroundVelocity();
+            controller.Velocity = ToWorld(JoltUtils::ToGLM(ownVelocity));
 
             // Drawn between the last two fixed steps by how far the accumulator is into the next one, minus what is left of a stair's
             // step (StepOffset, eased out).

@@ -1095,7 +1095,7 @@ namespace Nox
 
         // Runtime state, written by the physics step
         bool IsGrounded = false;
-        glm::vec3 Velocity = { 0.0f, 0.0f, 0.0f };
+        glm::vec3 Velocity = { 0.0f, 0.0f, 0.0f }; // its own movement relative to the ground it stands on (a platform's not in it); world units/s
 
         CharacterController3DComponent() = default;
         CharacterController3DComponent(const CharacterController3DComponent&) = default;

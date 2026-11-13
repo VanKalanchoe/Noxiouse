@@ -1599,7 +1599,10 @@ namespace Nox
                 }
 
                 if (!m_Registry.valid(entity))
+                {
+                    m_AnimationWaits.erase(entity);
                     continue;
+                }
                 const MeshComponent* mesh = m_Registry.try_get<MeshComponent>(entity);
                 if (!mesh)
                     continue;
@@ -1614,6 +1617,22 @@ namespace Nox
                     m_PendingMeshEntities.push_back(entity);
                     continue;
                 }
+                // An animated character is not drawn before its animation graph has posed it with all its clips loaded -- not in
+                // its rest pose (a T-pose) while they load (Unreal never shows a skeletal mesh before its animation runs). At most
+                // MaxAnimationWaitSeconds: a clip that never loads (a missing file) does not hide it for good.
+                if (const AnimatorComponent* animator = m_Registry.try_get<AnimatorComponent>(entity);
+                    animator && animator->Graph != 0 && animator->Playing && !animator->GraphInstance.IsPoseReady())
+                {
+                    constexpr auto MaxAnimationWaitSeconds = std::chrono::seconds(5);
+                    const auto now = std::chrono::steady_clock::now();
+                    const auto since = m_AnimationWaits.try_emplace(entity, now).first->second;
+                    if (now - since < MaxAnimationWaitSeconds)
+                    {
+                        m_PendingMeshEntities.push_back(entity);
+                        continue;
+                    }
+                }
+                m_AnimationWaits.erase(entity);
                 if (registrationBudget == 0)
                 {
                     m_PendingMeshEntities.push_back(entity);

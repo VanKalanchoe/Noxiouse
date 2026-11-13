@@ -49,6 +49,9 @@ namespace Nox
         // playing, no graph assigned, or the graph failed to compile. The returned pointer is valid until the
         // next Evaluate() call on this instance.
         const AnimPose* Evaluate(float deltaTime, bool playing, const Skeleton& skeleton);
+        // It has made a pose with every asset its graph uses loaded (the scene draws an animated character from then on, not in its
+        // rest pose while its clips load -- Unreal never shows a skeletal mesh before its animation can pose it). Stays true.
+        bool IsPoseReady() const { return m_PoseReady; }
 
         // Script access (Nox.AnimatorComponent). Set* stores whatever is given, even for a name the graph doesn't
         // declare (yet) -- a script may run before the graph has loaded; Sync() drops undeclared ones. Bool and
@@ -133,6 +136,8 @@ namespace Nox
 
         AssetHandle m_GraphHandle = 0;
         Ref<NodeGraphAsset> m_Graph;
+        bool m_AssetsResident = false; // the last Sync found every asset of the graph loaded
+        bool m_PoseReady = false;
         uint32_t m_CompiledVersion = 0; // NodeGraphAsset::CompileVersion that m_EvalContext was last Init()'d against
         GraphEvalContext m_EvalContext;
         AnimPose m_LastPose;
