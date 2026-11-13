@@ -9,6 +9,7 @@
 #include "NoxCore/Network/NetServer.h"
 #include "NoxCore/Network/NetSnapshot.h"
 #include "NoxCore/Network/NetQuantize.h"
+#include "NoxCore/Network/NetPrediction.h"
 #include "NoxCore/Core/Log.h"
 
 #include <cstdio>
@@ -493,6 +494,193 @@ static void TestQuantize()
     CHECK(refused && nanSafe, "malformed bytes leave the transform as it was; a NaN position is sent as 0");
 }
 
+// Prediction and reconciliation between a toy client and server (a character that moves by its input each tick; deterministic, like
+// the real one on both sides): inputs and snapshots over a channel with latency, jitter and loss.
+struct PredictionRun
+{
+    size_t Corrections = 0;
+    size_t Acknowledged = 0;
+    double WorstError = 0.0;  // between the client's predicted and the server's position for the same input, before correcting
+    double FinalGap = 0.0;    // client vs server once both are at rest
+};
+
+static PredictionRun RunPrediction(int latencyTicks, int jitterTicks, float loss, int pushAtTick, uint32_t seed)
+{
+    std::mt19937 random(seed);
+    auto chance = [&](float p) { return std::uniform_real_distribution<float>(0.0f, 1.0f)(random) < p; };
+    const float dt = 1.0f / 60.0f;
+    auto step = [&](glm::dvec3 position, const InputFrame& input) { return position + glm::dvec3(input.Move) * static_cast<double>(dt); };
+
+    struct Message { int DeliverAt; std::vector<uint8_t> Bytes; };
+    std::vector<Message> toServer, toClient;
+    PredictionHistory history;
+    InputQueue queue;
+    glm::dvec3 client(0.0), server(0.0);
+    uint32_t sequence = 0;
+    uint32_t newestSnapshot = 0;
+    PredictionRun run;
+    const int moveTicks = 1200, totalTicks = 1500;
+    for (int tick = 1; tick <= totalTicks; ++tick)
+    {
+        // Client: this tick's input (a direction that changes every 50 ticks; at rest at the end), applied at once.
+        InputFrame input;
+        input.Sequence = ++sequence;
+        if (tick <= moveTicks)
+        {
+            const float angle = static_cast<float>((tick / 50) % 8) * 0.785f;
+            input.Move = glm::vec3(std::cos(angle), 0.0f, std::sin(angle)) * 500.0f;
+        }
+        client = step(client, input);
+        history.Record(input, client);
+        NetWriter inputs;
+        WriteInputs(inputs, 42, history.NewestInputs(InputRedundancy));
+        if (!chance(loss))
+            toServer.push_back({ tick + latencyTicks + (jitterTicks ? static_cast<int>(random() % (jitterTicks + 1)) : 0),
+                                 std::vector<uint8_t>(inputs.GetData().begin(), inputs.GetData().end()) });
+
+        // Server: the inputs that arrived, one applied per tick; a snapshot every other tick.
+        std::stable_sort(toServer.begin(), toServer.end(), [](const Message& a, const Message& b) { return a.DeliverAt < b.DeliverAt; });
+        while (!toServer.empty() && toServer.front().DeliverAt <= tick)
+        {
+            NetReader reader(toServer.front().Bytes);
+            reader.ReadU8();
+            NetId entity = 0;
+            std::vector<InputFrame> frames;
+            if (ReadInputs(reader, entity, frames))
+                queue.Push(frames);
+            toServer.erase(toServer.begin());
+        }
+        server = step(server, queue.Next());
+        if (tick == pushAtTick)
+            server.x += 100.0; // something only the server knows about pushed the character (a collision, a knock-back)
+        if (tick % 2 == 0 && !chance(loss))
+        {
+            NetWriter snapshot;
+            snapshot.WriteU32(queue.GetLastProcessed());
+            snapshot.WriteBytes(EncodePosition(server, 0.01));
+            toClient.push_back({ tick + latencyTicks + (jitterTicks ? static_cast<int>(random() % (jitterTicks + 1)) : 0),
+                                 std::vector<uint8_t>(snapshot.GetData().begin(), snapshot.GetData().end()) });
+        }
+
+        // Client: snapshots that arrived (late ones skipped), each compared with the prediction for its input.
+        std::stable_sort(toClient.begin(), toClient.end(), [](const Message& a, const Message& b) { return a.DeliverAt < b.DeliverAt; });
+        while (!toClient.empty() && toClient.front().DeliverAt <= tick)
+        {
+            NetReader reader(toClient.front().Bytes);
+            const uint32_t acknowledged = reader.ReadU32();
+            glm::dvec3 position;
+            DecodePosition(reader.ReadBytes(reader.GetRemaining()), 0.01, position);
+            toClient.erase(toClient.begin());
+            if (acknowledged <= newestSnapshot || acknowledged == 0)
+                continue;
+            newestSnapshot = acknowledged;
+            ++run.Acknowledged;
+            std::optional<std::vector<InputFrame>> replay = history.Reconcile(acknowledged, position, 0.02);
+            if (!replay)
+                continue;
+            ++run.Corrections;
+            client = position;
+            for (const InputFrame& frame : *replay)
+            {
+                client = step(client, frame);
+                history.Rewrite(frame.Sequence, client);
+            }
+        }
+    }
+    run.FinalGap = glm::distance(client, server);
+    return run;
+}
+
+static void TestPrediction()
+{
+    std::printf("\n== prediction and reconciliation\n");
+    {
+        PredictionRun run = RunPrediction(6, 0, 0.0f, 0, 1); // 100 ms each way, steady
+        CHECK(run.Corrections == 0 && run.FinalGap < 0.02, "100 ms each way, no jitter or loss: {} snapshots checked, {} corrections, final gap {:.3f}",
+              run.Acknowledged, run.Corrections, run.FinalGap);
+    }
+    {
+        PredictionRun run = RunPrediction(5, 4, 0.05f, 0, 2); // 83-150 ms each way, 5 % loss both ways
+        CHECK(run.FinalGap < 0.02 && run.Corrections * 10 < run.Acknowledged,
+              "83-150 ms each way, 5 % loss: {} corrections in {} snapshots (inputs that arrived too late are repeated by the server), final gap {:.3f}",
+              run.Corrections, run.Acknowledged, run.FinalGap);
+    }
+    {
+        PredictionRun run = RunPrediction(6, 0, 0.0f, 600, 3); // the server pushes the character once
+        CHECK(run.Corrections >= 1 && run.Corrections <= 2 && run.FinalGap < 0.02,
+              "a push only the server saw: {} correction(s), then the client matches the server (final gap {:.3f})", run.Corrections, run.FinalGap);
+    }
+
+    // Input messages: garbage and NaN are refused.
+    NetWriter writer;
+    InputFrame bad;
+    bad.Sequence = 1;
+    bad.Move.x = std::nanf("");
+    WriteInputs(writer, 7, std::span(&bad, 1));
+    NetReader reader(writer.GetData());
+    reader.ReadU8();
+    NetId entity = 0;
+    std::vector<InputFrame> frames;
+    CHECK(!ReadInputs(reader, entity, frames), "an input with a NaN is refused");
+}
+
+// The clock: snapshots every 2 ticks arriving 50-80 ms late (uniform jitter); the estimate should follow the earliest arrivals.
+static void TestClockAndInterpolation()
+{
+    std::printf("\n== clock and interpolation\n");
+    std::mt19937 random(5);
+    NetClock clock;
+    InterpolationBuffer buffer;
+    const double speed = 300.0; // world units a second along x
+    struct Arrival { double At; uint64_t Tick; };
+    std::vector<Arrival> arrivals;
+    for (uint64_t tick = 0; tick < 60 * 20; tick += 2)
+        arrivals.push_back({ tick / 60.0 + 0.050 + std::uniform_real_distribution<double>(0.0, 0.030)(random), tick });
+    std::sort(arrivals.begin(), arrivals.end(), [](const Arrival& a, const Arrival& b) { return a.At < b.At; });
+
+    // Render at 144 frames a second, 4 ticks behind the clock (2 snapshot intervals: the jitter must not empty the buffer).
+    size_t next = 0;
+    double worstClockError = 0.0, worstStepError = 0.0, previousX = -1e30;
+    size_t backwards = 0, frames = 0;
+    const double frame = 1.0 / 144.0;
+    for (double now = 0.0; now < 20.0; now += frame)
+    {
+        while (next < arrivals.size() && arrivals[next].At <= now)
+        {
+            const Arrival& arrival = arrivals[next++];
+            clock.OnSnapshot(arrival.Tick, arrival.At, 60.0f);
+            PoseSample sample;
+            sample.Tick = static_cast<double>(arrival.Tick);
+            sample.Position = glm::dvec3(speed * arrival.Tick / 60.0, 0.0, 0.0);
+            buffer.Add(sample);
+        }
+        if (!clock.IsValid() || now < 3.0)
+            continue; // (settled)
+        // The fastest arrivals are 50 ms late: the clock should sit there (within about a tick).
+        worstClockError = std::max(worstClockError, std::abs(clock.GetServerTick(now) - (now - 0.050) * 60.0));
+        PoseSample pose;
+        if (!buffer.Sample(clock.GetServerTick(now) - 4.0, 6.0, 500.0, pose))
+            continue;
+        if (pose.Position.x < previousX - 1e-9)
+            ++backwards;
+        if (previousX > -1e29)
+            worstStepError = std::max(worstStepError, std::abs((pose.Position.x - previousX) - speed * frame));
+        previousX = pose.Position.x;
+        ++frames;
+    }
+    CHECK(worstClockError < 1.5, "the clock follows the earliest arrivals (50-80 ms jitter): worst error {:.2f} ticks", worstClockError);
+    CHECK(backwards == 0 && worstStepError < speed * frame * 0.5, "{} frames drawn between snapshots: never backwards, worst step error {:.2f} units (a step is {:.2f})",
+          frames, worstStepError, speed * frame);
+
+    // A teleport is taken at once, not swept.
+    InterpolationBuffer jump;
+    jump.Add({ 0.0, glm::dvec3(0.0) });
+    jump.Add({ 2.0, glm::dvec3(10000.0, 0.0, 0.0) });
+    PoseSample pose;
+    jump.Sample(1.0, 6.0, 500.0, pose);
+    CHECK(pose.Position.x == 10000.0, "a 100 m jump between two snapshots is a teleport (no sweep across the level)");
+}
+
 // The snapshot codec alone: a world that keeps changing (spawns, removals, property and owner changes, scripts added), snapshots
 // over a channel that loses 30 % and delivers the rest up to 4 ticks late, acknowledgements lost and late the same way. Every snapshot
 // the client applies must be exactly the server's world at that tick; after the loss stops the client must hold the final world.
@@ -638,6 +826,8 @@ int main()
     TestReaderFuzz();
     TestSnapshots();
     TestQuantize();
+    TestPrediction();
+    TestClockAndInterpolation();
     for (bool loopback : { true, false })
     {
         const uint16_t base = loopback ? 7100 : 7200;
