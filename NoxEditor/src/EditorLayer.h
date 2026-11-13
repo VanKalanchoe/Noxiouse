@@ -147,6 +147,10 @@ namespace Nox
             int Port = Net::DefaultPort;
             bool SaveWithoutAsking = false;
         };
+        // The edited scene's path under the asset directory and its handle (m_EditorScenePath is absolute after Save As / the file dialog,
+        // relative when opened from the Content Browser: the registry knows relative paths only). Empty / 0: not saved as an asset.
+        std::filesystem::path EditorSceneAssetPath() const;
+        AssetHandle EditorSceneHandle() const;
         void DrawPlaySettings();
         void BeginMultiplayerPlay();
         void StartPlayScene(Scene::NetMode netMode); // the Play copy of the edited scene, started (its replication set first)

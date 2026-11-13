@@ -133,9 +133,7 @@ namespace Nox
         m_LevelsPanel.SetSaveCallback([this]() { SaveScene(); });
         m_LevelsPanel.SetOpenSceneCallback([this]() -> AssetHandle
         {
-            if (m_EditorScenePath.empty() || !Project::GetActive())
-                return 0;
-            return Project::GetActive()->GetEditorAssetManager()->FindHandleByPath(m_EditorScenePath, AssetType::Scene);
+            return EditorSceneHandle();
         });
         m_WorldPartitionPanel.SetBuildHLODsCallback([this]() { StartHLODBuild(); }, [this]() { return m_HLODBuild.get(); });
         m_Renderer2D = m_Renderer->getRenderer2D();
@@ -6649,6 +6647,30 @@ namespace Nox
         return true;
     }
 
+    std::filesystem::path EditorLayer::EditorSceneAssetPath() const
+    {
+        if (m_EditorScenePath.empty() || !Project::GetActive())
+            return {};
+        if (!m_EditorScenePath.is_absolute())
+            return m_EditorScenePath.lexically_normal();
+        // Absolute: under the asset directory, compared as the file system sees both (on Windows the case and the separators of the
+        // two may differ: "Facerun\\assets\\Scenes/NetDemo.nox" against ".../Facerun/Assets").
+        std::error_code error;
+        const std::filesystem::path relative = std::filesystem::relative(m_EditorScenePath, Project::GetActiveAssetDirectory(), error);
+        if (error || relative.empty() || *relative.begin() == "..")
+            return {};
+        return relative.lexically_normal();
+    }
+
+    AssetHandle EditorLayer::EditorSceneHandle() const
+    {
+        const std::filesystem::path relative = EditorSceneAssetPath();
+        if (relative.empty())
+            return 0;
+        // (Registered on first use when the editor has not seen the file yet: a scene saved as a new file.)
+        return Project::GetActive()->GetEditorAssetManager()->ResolvePath(relative, AssetType::Scene);
+    }
+
     void EditorLayer::BeginMultiplayerPlay()
     {
         if (m_EditorScenePath.empty() || !Project::GetActive())
@@ -6665,11 +6687,17 @@ namespace Nox
                 projectFile = entry.path();
                 break;
             }
-        const std::string scene = std::filesystem::relative(m_EditorScenePath, Project::GetActiveAssetDirectory(), error).generic_string();
-        const AssetHandle sceneHandle = Project::GetActive()->GetEditorAssetManager()->FindHandleByPath(m_EditorScenePath, AssetType::Scene);
-        if (projectFile.empty() || scene.empty() || sceneHandle == 0)
+        const std::string scene = EditorSceneAssetPath().generic_string();
+        const AssetHandle sceneHandle = EditorSceneHandle();
+        if (projectFile.empty())
         {
-            NOX_CORE_ERROR("Multiplayer Play: the project file or the scene's asset was not found");
+            NOX_CORE_ERROR("Multiplayer Play: no .nproj file in {}", Project::GetProjectDirectory().generic_string());
+            return;
+        }
+        if (scene.empty() || sceneHandle == 0)
+        {
+            NOX_CORE_ERROR("Multiplayer Play: the scene '{}' is not an asset of the project (save it under {})", m_EditorScenePath.generic_string(),
+                           Project::GetActiveAssetDirectory().generic_string());
             return;
         }
         static const char* emulationNames[] = { "off", "average", "bad" };
