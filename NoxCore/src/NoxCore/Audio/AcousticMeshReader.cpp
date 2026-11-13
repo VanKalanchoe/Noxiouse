@@ -91,6 +91,9 @@ namespace Nox
             return {};
         // (the metadata and the folder taken here, on the game thread: the worker reads files only)
         const AssetMetadata metadata = AssetManager::GetMetadata(meshHandle);
+        // A mesh made at run time (a script's Mesh: a memory asset) has no cooked file to read: not part of the acoustic scene.
+        if (metadata.FilePath.empty())
+            return {};
         const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
         auto job = std::make_shared<TaskFuture<std::shared_ptr<AcousticMesh>>>(
             JobSystem::Get().Async("Acoustic Mesh", JobPriority::Normal,
