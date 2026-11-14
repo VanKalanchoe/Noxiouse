@@ -142,7 +142,8 @@ namespace Nox
         { ".ogg", AssetType::AudioClip },
         { ".flac", AssetType::AudioClip },
         { ".mp3", AssetType::AudioClip },
-        { ".slang", AssetType::MaterialShader }
+        { ".slang", AssetType::MaterialShader },
+        { ".nmatgraph", AssetType::MaterialGraph }
     };
 
     AssetType EditorAssetManager::GetAssetTypeFromExtension(const std::filesystem::path& extension)
@@ -1112,6 +1113,7 @@ namespace Nox
         {
         case AssetType::Prefab:
         case AssetType::MaterialShader: // (materials name it by path: the old one stays an alias, Renderer::GetCustomLitSlot)
+        case AssetType::MaterialGraph:
         case AssetType::AnimationGraph:
         case AssetType::AudioGraph:
         case AssetType::AudioClip:
@@ -1374,6 +1376,7 @@ namespace Nox
         bool IsReferencingType(AssetType type)
         {
             return type == AssetType::Scene || type == AssetType::Prefab || type == AssetType::AnimationGraph || type == AssetType::AudioGraph ||
+                   type == AssetType::MaterialGraph ||
                    type == AssetType::AudioMixer || type == AssetType::Material ||
                    type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::SkeletalMesh;
         }
@@ -1481,7 +1484,8 @@ namespace Nox
         for (const auto& [handle, metadata] : m_AssetRegistry)
         {
             if ((metadata.Type == AssetType::Scene || metadata.Type == AssetType::Prefab || metadata.Type == AssetType::AnimationGraph ||
-                 metadata.Type == AssetType::AudioGraph || metadata.Type == AssetType::AudioMixer || metadata.Type == AssetType::Timeline) && !metadata.FilePath.empty())
+                 metadata.Type == AssetType::AudioGraph || metadata.Type == AssetType::AudioMixer || metadata.Type == AssetType::Timeline ||
+                 metadata.Type == AssetType::MaterialGraph) && !metadata.FilePath.empty())
                 files.push_back(Project::GetActiveAssetDirectory() / metadata.FilePath);
         }
         // World cells: a world's entities that are not in its scene file.
@@ -2286,7 +2290,7 @@ namespace Nox
             std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (ext == ".nox" || ext == ".nanim" || ext == ".nskel" || ext == ".nmat" ||
                 ext == ".ntex" || ext == ".nanimgraph" || ext == ".naudiograph" || ext == ".nprefab" || ext == ".ntimeline" ||
-                ext == ".ttf" || ext == ".otf" || ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".slang")
+                ext == ".ttf" || ext == ".otf" || ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".slang" || ext == ".nmatgraph")
             {
                 std::filesystem::path relativePath = entry.path().lexically_relative(assetDir).lexically_normal();
 

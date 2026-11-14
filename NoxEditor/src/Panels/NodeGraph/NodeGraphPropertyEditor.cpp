@@ -32,6 +32,11 @@ namespace Nox
         }
         if (glm::vec2* v = std::get_if<glm::vec2>(&value))
             return ImGui::DragFloat2(name.c_str(), &v->x, 0.01f);
+        if (glm::vec4* v = std::get_if<glm::vec4>(&value))
+        {
+            // A colour (a material graph's Color / Vector Parameter "Value" / "Default"): drag fields with a swatch, HDR allowed.
+            return ImGui::ColorEdit4(name.c_str(), &v->x, ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+        }
         if (uint64_t* u = std::get_if<uint64_t>(&value))
         {
             // AssetHandle-shaped values (e.g. a Clip node's "Clip" property): shown read-only here. A plain

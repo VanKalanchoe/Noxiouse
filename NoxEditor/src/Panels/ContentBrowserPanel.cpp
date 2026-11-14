@@ -21,6 +21,7 @@
 #include "NoxCore/Asset/TextureImporter.h"
 #include "NoxCore/Asset/TimelineImporter.h"
 #include "NoxCore/Renderer/CustomLitShaders.h"
+#include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/Audio/AudioClip.h"
 #include "NoxCore/Audio/AudioGraph.h"
 #include "NoxCore/Audio/AudioEngine.h"
@@ -486,10 +487,13 @@ namespace Nox
         }
         if (ImGui::BeginPopupModal("Create Graph", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
-            ImGui::TextUnformatted(m_CreateAudioGraph ? "Audio Graph (.naudiograph)" : "Animation Graph (.nanimgraph)");
+            const char* kinds[] = { "Animation Graph (.nanimgraph)", "Audio Graph (.naudiograph)", "Material Graph (.nmatgraph)" };
+            const char* extensions[] = { ".nanimgraph", ".naudiograph", ".nmatgraph" };
+            const int kind = std::clamp(m_CreateGraphKind, 0, 2);
+            ImGui::TextUnformatted(kinds[kind]);
             ImGui::InputText("Name", m_NewGraphName, sizeof(m_NewGraphName));
             const std::string graphName = m_NewGraphName;
-            const std::filesystem::path graphPath = m_CurrentDirectory / (graphName + (m_CreateAudioGraph ? ".naudiograph" : ".nanimgraph"));
+            const std::filesystem::path graphPath = m_CurrentDirectory / (graphName + extensions[kind]);
             const bool validName = !graphName.empty() && graphName.find_first_of("\\/:*?\"<>|") == std::string::npos;
             const bool graphAlreadyExists = std::filesystem::exists(graphPath);
             if (!validName)
@@ -501,7 +505,7 @@ namespace Nox
             if (disableCreate) ImGui::BeginDisabled();
             if (ImGui::Button("Create"))
             {
-                if (NodeGraphSerializer::Serialize(graphPath, m_CreateAudioGraph ? CreateEmptyAudioGraph() : CreateEmptyAnimationGraph()))
+                if (NodeGraphSerializer::Serialize(graphPath, kind == 1 ? CreateEmptyAudioGraph() : kind == 2 ? CreateEmptyMaterialGraph() : CreateEmptyAnimationGraph()))
                 {
                     // Writing the file isn't enough: the registry (and so the Content Browser, the Animator's
                     // Graph combo and everything else keyed by AssetHandle) only knows registered assets.
@@ -1026,17 +1030,26 @@ namespace Nox
             if (ImGui::MenuItem("Animation Graph"))
             {
                 m_ShowCreateGraphModal = true;
-                m_CreateAudioGraph = false;
+                m_CreateGraphKind = 0;
                 std::snprintf(m_NewGraphName, sizeof(m_NewGraphName), "NewAnimationGraph");
             }
             if (ImGui::MenuItem("Audio Graph"))
             {
                 m_ShowCreateGraphModal = true;
-                m_CreateAudioGraph = true;
+                m_CreateGraphKind = 1;
                 std::snprintf(m_NewGraphName, sizeof(m_NewGraphName), "NewAudioGraph");
             }
             ImGui::SetItemTooltip("A procedural sound (MetaSounds' Source): clips, oscillators, noise, triggers, envelopes, filters\n"
                                   "and parameters wired in a graph, played by an Audio Source like a clip.");
+            if (ImGui::MenuItem("Material Graph"))
+            {
+                m_ShowCreateGraphModal = true;
+                m_CreateGraphKind = 2;
+                std::snprintf(m_NewGraphName, sizeof(m_NewGraphName), "NewMaterialGraph");
+            }
+            ImGui::SetItemTooltip("A surface built from nodes (Unreal's Material Editor): textures, math, panners, Fresnel ... into a Material Output\n"
+                                  "(Base Color, Metallic, Roughness, Normal, Emissive, Ambient Occlusion, Opacity). Materials use it with\n"
+                                  "Material Editor > Surface Graph and override its parameters.");
             if (ImGui::MenuItem("Material Shader"))
                 CreateMaterialShader();
             ImGui::SetItemTooltip("A Custom Lit material's lighting, written in Slang (Godot's light()): a .slang file with a light() function\n"
@@ -1235,7 +1248,7 @@ namespace Nox
         switch (m_TypeFilter)
         {
         case 1: return type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::MeshSource || type == AssetType::SkeletalMesh;
-        case 2: return type == AssetType::Material || type == AssetType::MaterialShader;
+        case 2: return type == AssetType::Material || type == AssetType::MaterialShader || type == AssetType::MaterialGraph;
         case 3: return type == AssetType::Texture2D;
         case 4: return type == AssetType::Prefab;
         case 5: return type == AssetType::Scene;
@@ -1316,7 +1329,8 @@ namespace Nox
         for (const auto& entry : std::filesystem::directory_iterator(m_CurrentDirectory, error))
         {
             static const std::unordered_set<std::string> kSelfContained = { ".nox", ".nmat", ".nanimgraph", ".naudiograph", ".nprefab", ".ntimeline",
-                                                                            ".ttf", ".otf", ".wav", ".ogg", ".flac", ".mp3", ".slang" };
+                                                                            ".ttf", ".otf", ".wav", ".ogg", ".flac", ".mp3", ".slang",
+                                                                            ".nmatgraph" };
             const auto relativePath = entry.path().lexically_relative(m_BaseDirectory).lexically_normal().generic_string();
             if (entry.is_regular_file() && kSelfContained.contains(entry.path().extension().string()) && !handleOfPath.contains(relativePath))
             {
@@ -1452,7 +1466,8 @@ namespace Nox
             BeginRename(handle);
         // Unreal's Duplicate: a copy next to it ("<name> Copy"), registered as its own asset and up for renaming. For assets that are
         // one self-contained file (an animation graph -- e.g. the same graph with the root-motion clips --, a material).
-        const bool duplicable = metadata.Type == AssetType::AnimationGraph || metadata.Type == AssetType::AudioGraph || metadata.Type == AssetType::Material;
+        const bool duplicable = metadata.Type == AssetType::AnimationGraph || metadata.Type == AssetType::AudioGraph || metadata.Type == AssetType::Material ||
+                                metadata.Type == AssetType::MaterialGraph;
         if (ImGui::MenuItem("Duplicate", nullptr, false, m_Selected.size() == 1 && duplicable))
             DuplicateAsset(handle);
         if (metadata.Type == AssetType::AudioGraph && ImGui::MenuItem(IsPreviewing(handle) ? "Stop" : "Play"))

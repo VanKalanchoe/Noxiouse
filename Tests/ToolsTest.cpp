@@ -3,6 +3,8 @@
 #include "NoxCore/Console/Console.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Renderer/CustomLitShaders.h"
+#include "NoxCore/Renderer/MaterialGraph.h"
+#include <fstream>
 
 #include <cstdio>
 #include <format>
@@ -182,11 +184,100 @@ static void TestCustomLitShaders()
           "the new Material Shader template has both functions");
 }
 
+// The material graph (step 4): example graphs generated to Slang -- the parameter layout, the outputs connected, the type rules and the
+// derivatives a Texture Sample gets. (NOX_MATERIAL_GRAPH_DUMP=<folder>: the generated code is written there, to compile it with Slang.)
+static void TestMaterialGraph()
+{
+    using namespace Nox;
+    std::printf("\n== Material graph: nodes to Slang\n");
+    RegisterMaterialGraphNodeTypes();
+    auto node = [](NodeGraph& graph, const char* type, std::vector<std::pair<std::string, NodeGraphValue>> properties = {})
+    {
+        GraphNode n;
+        n.Id = graph.NextNodeId++;
+        n.TypeName = type;
+        for (auto& [name, value] : properties)
+            n.Properties[name] = value;
+        graph.Nodes.push_back(n);
+        return n.Id;
+    };
+    auto link = [](NodeGraph& graph, uint32_t from, uint32_t fromPin, uint32_t to, uint32_t toPin) { graph.Links.push_back({ from, fromPin, to, toPin }); };
+
+    // A dissolve-style graph: a tinted, panned texture times a colour parameter into Base Color, a scalar parameter into Roughness,
+    // Fresnel into Emissive.
+    NodeGraph graph = CreateEmptyMaterialGraph();
+    const uint32_t output = graph.OutputNode;
+    const uint32_t uv = node(graph, "Texture Coordinate", { { "Index", int32_t(0) }, { "Tiling", glm::vec2(4.0f, 4.0f) } });
+    const uint32_t panner = node(graph, "Panner", { { "Speed", glm::vec2(0.1f, 0.0f) } });
+    const uint32_t texture = node(graph, "Texture Sample", { { "Texture", uint64_t(1234) }, { "Parameter", std::string("Albedo") }, { "Normal Map", false } });
+    const uint32_t tint = node(graph, "Vector Parameter", { { "Name", std::string("Tint") }, { "Default", glm::vec4(1.0f, 0.5f, 0.25f, 1.0f) } });
+    const uint32_t multiply = node(graph, "Multiply");
+    const uint32_t rough = node(graph, "Scalar Parameter", { { "Name", std::string("Roughness") }, { "Default", 0.6f } });
+    const uint32_t fresnel = node(graph, "Fresnel", { { "Exponent", 3.0f }, { "Base Reflect Fraction", 0.04f } });
+    link(graph, uv, 0, panner, 0);
+    link(graph, panner, 0, texture, 0);
+    link(graph, texture, 0, multiply, 0); // RGB
+    link(graph, tint, 0, multiply, 1);    // RGB
+    link(graph, multiply, 0, output, 0);  // Base Color
+    link(graph, rough, 0, output, 2);     // Roughness
+    link(graph, fresnel, 0, output, 4);   // Emissive (a float spread to rgb)
+    const MaterialGraphProgram program = CompileMaterialGraph(graph);
+    CHECK(program.Valid, "a graph with a panned texture, a colour and a scalar parameter and Fresnel compiles: '{}'", program.Error);
+    CHECK(program.Outputs == (MaterialGraphOutputBaseColor | MaterialGraphOutputRoughness | MaterialGraphOutputEmissive),
+          "only the connected Material Output pins are written (Base Color, Roughness, Emissive): {}", program.Outputs);
+    CHECK(program.Parameters.size() == 3 && program.ParameterSlots == 2 && program.TextureSlots == 1, "two number slots and one texture slot: {} / {} / {}",
+          program.Parameters.size(), program.ParameterSlots, program.TextureSlots);
+    const auto albedo = std::find_if(program.Parameters.begin(), program.Parameters.end(), [](const MaterialGraphParameter& p) { return p.Name == "Albedo"; });
+    CHECK(albedo != program.Parameters.end() && albedo->Type == MaterialGraphParameter::Kind::Texture && albedo->DefaultTexture == 1234,
+          "the Texture Sample with a Parameter name is an overridable texture with its default");
+    CHECK(program.Code.find("i.uv0Dx * float2(4.0, 4.0)") != std::string::npos && program.Code.find("material_graph_texture(i, 0,") != std::string::npos,
+          "the texture's UV derivatives follow the tiling (its mip from the derivatives)");
+    CHECK(program.Code.find("o.metallic") == std::string::npos && program.Code.find("o.baseColor = max(") != std::string::npos,
+          "an unconnected pin keeps the material's value");
+
+    // Type rules: a float2 and a float3 do not combine; an Append makes a float3 of a float2 and a float.
+    NodeGraph bad = CreateEmptyMaterialGraph();
+    const uint32_t badAdd = node(bad, "Add");
+    link(bad, node(bad, "Texture Coordinate"), 0, badAdd, 0);
+    link(bad, node(bad, "World Position"), 0, badAdd, 1);
+    link(bad, badAdd, 0, bad.OutputNode, 0);
+    const MaterialGraphProgram badProgram = CompileMaterialGraph(bad);
+    CHECK(!badProgram.Valid && badProgram.Error.find("float2 and a float3") != std::string::npos, "a float2 + float3 is refused with which node: '{}'", badProgram.Error);
+    NodeGraph append = CreateEmptyMaterialGraph();
+    const uint32_t appendNode = node(append, "Append");
+    link(append, node(append, "Texture Coordinate"), 0, appendNode, 0);
+    link(append, node(append, "Time"), 0, appendNode, 1);
+    link(append, appendNode, 0, append.OutputNode, 4);
+    const MaterialGraphProgram appendProgram = CompileMaterialGraph(append);
+    CHECK(appendProgram.Valid && appendProgram.Code.find("float3(") != std::string::npos, "Append: a float2 and a float make a float3: '{}'", appendProgram.Error);
+
+    // The same parameter name twice: one slot; a name as both texture and number: refused.
+    NodeGraph shared = CreateEmptyMaterialGraph();
+    const uint32_t sharedAdd = node(shared, "Add");
+    link(shared, node(shared, "Scalar Parameter", { { "Name", std::string("K") }, { "Default", 1.0f } }), 0, sharedAdd, 0);
+    link(shared, node(shared, "Scalar Parameter", { { "Name", std::string("K") }, { "Default", 2.0f } }), 0, sharedAdd, 1);
+    link(shared, sharedAdd, 0, shared.OutputNode, 1);
+    const MaterialGraphProgram sharedProgram = CompileMaterialGraph(shared);
+    CHECK(sharedProgram.Valid && sharedProgram.ParameterSlots == 1 && sharedProgram.Parameters[0].Default.x == 1.0f,
+          "two Scalar Parameters named K share one slot (the first's default)");
+    CHECK(CompileMaterialGraph(CreateEmptyMaterialGraph()).Valid && CompileMaterialGraph(CreateEmptyMaterialGraph()).Outputs == 0,
+          "an empty graph compiles and writes nothing (the material as it is)");
+
+    if (const char* dump = std::getenv("NOX_MATERIAL_GRAPH_DUMP"))
+    {
+        std::ofstream file(std::string(dump) + "/graph0.slang");
+        file << program.Code;
+        std::ofstream file2(std::string(dump) + "/graph1.slang");
+        file2 << appendProgram.Code;
+    }
+}
+
 int main()
 {
     Log::Init("NoxToolsTest.log");
     TestConsole();
     TestCustomLitShaders();
+    TestMaterialGraph();
 #ifdef NOX_TOOLS_TEST_MCP
     TestMcp();
     TestMcpValidation();

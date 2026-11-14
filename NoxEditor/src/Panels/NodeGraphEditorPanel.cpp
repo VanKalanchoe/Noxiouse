@@ -18,6 +18,7 @@
 #include "NoxCore/Asset/NodeGraphSerializer.h"
 #include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Audio/AudioGraph.h"
+#include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 
@@ -49,7 +50,8 @@ namespace Nox
         : m_GraphHandle(graphAsset)
     {
         m_Asset = AssetManager::GetAsset<NodeGraphAsset>(graphAsset);
-        m_Title = m_Asset && m_Asset->Graph.Domain == kAudioGraphDomain ? "Audio Graph" : "Animation Graph";
+        m_Title = m_Asset && m_Asset->Graph.Domain == kAudioGraphDomain ? "Audio Graph"
+                : m_Asset && m_Asset->Graph.Domain == kMaterialGraphDomain ? "Material Graph" : "Animation Graph";
         if (auto assetManager = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr)
         {
             const auto& registry = assetManager->GetAssetRegistry();

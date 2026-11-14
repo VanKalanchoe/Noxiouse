@@ -113,6 +113,7 @@ file-reference
 
 ## What's New (November 2026)
 
+- **Material graph (in progress):** a `.nmatgraph` asset (Content Browser > + Add > Material Graph) with 45 nodes -- textures, maths, parameters into a Material Output, Unreal's Material Editor graph -- and its Slang code generation with analytic derivatives. Materials do not use graphs yet; that is the next part (see the Renderer page).
 - **Custom Lit materials:** write a material's lighting yourself -- a Material Shader (Content Browser > + Add > Material Shader) is a small Slang file with `light()` per light and `ambient()`, like Godot's `light()`; materials use it with Shading Model > Custom Lit, four parameters and two textures. Shadows, GI, reflections, outlines and TAA / DLSS keep working; saving the file rebuilds it live (see Material Authoring in the user manual and the Renderer page).
 - **Post Process Volume and outlines:** post effects and outlines saved with the scene (Unreal's Post Process Volume: unbound or a box, priority), and outlines -- silhouettes and creases drawn before TAA / DLSS, optionally on toon surfaces only (see the Renderer page).
 - **Shading models:** each material picks **Default Lit**, **Unlit** or **Toon** (bands or a ramp texture, a sharp highlight, a rim light) in the Material Editor, whose labels now use Unreal's names (Blend Mode, Opacity Mask Clip Value, Two Sided); plan for outlines and a material graph in `docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md` (see the Renderer page).

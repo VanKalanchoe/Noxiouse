@@ -151,6 +151,7 @@ namespace Nox
 
         m_AssetOpeners[AssetType::AnimationGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
         m_AssetOpeners[AssetType::AudioGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
+        m_AssetOpeners[AssetType::MaterialGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
         m_AssetOpeners[AssetType::AudioMixer] = [this](AssetHandle handle)
         {
             // The panel edits the project's mixer (Project > Audio Mixer path); another .nmixer is not what plays.

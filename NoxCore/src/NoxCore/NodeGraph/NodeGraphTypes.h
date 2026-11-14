@@ -52,7 +52,8 @@ namespace Nox
         }
     };
 
-    using NodeGraphValue = std::variant<bool, int32_t, float, glm::vec2, uint64_t, std::string, NodeGraphCurve>;
+    // (glm::vec4 last: a colour or a 4-vector -- a material graph's Color and Vector Parameter nodes.)
+    using NodeGraphValue = std::variant<bool, int32_t, float, glm::vec2, uint64_t, std::string, NodeGraphCurve, glm::vec4>;
 
     // Numeric view of a value, for consumers that only deal in floats (a node's output pin, a script getter):
     // bool -> 0/1, int -> float, float as is, anything else the fallback.

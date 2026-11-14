@@ -143,7 +143,7 @@ namespace Nox
         char m_NewScriptName[128] = "NewBehaviour";
         bool m_ShowCreateGraphModal = false;
         char m_NewGraphName[128] = "NewAnimationGraph";
-        bool m_CreateAudioGraph = false; // the Create Graph dialog makes an audio graph (.naudiograph), else an animation graph
+        int m_CreateGraphKind = 0; // what the Create Graph dialog makes: 0 animation graph (.nanimgraph), 1 audio graph (.naudiograph), 2 material graph (.nmatgraph)
         std::function<void(AssetHandle)> m_OpenAsset;
         std::function<AssetHandle(UUID, const std::filesystem::path&)> m_CreatePrefab;
         std::function<AssetHandle(AssetHandle, const std::filesystem::path&)> m_CreateVariant;

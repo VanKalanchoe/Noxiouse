@@ -80,6 +80,8 @@ namespace Nox
                 if (v.Smooth)
                     out << YAML::Key << "Smooth" << YAML::Value << true;
             }
+            else if constexpr (std::is_same_v<T, glm::vec4>)
+                out << YAML::Key << "Vec4" << YAML::Value << YAML::Flow << YAML::BeginSeq << v.x << v.y << v.z << v.w << YAML::EndSeq;
         }, value);
         out << YAML::EndMap;
     }
@@ -91,6 +93,11 @@ namespace Nox
         if (node["Float"]) { value = node["Float"].as<float>(); return true; }
         if (node["Vec2"]) { value = node["Vec2"].as<glm::vec2>(); return true; }
         if (node["U64"]) { value = node["U64"].as<uint64_t>(); return true; }
+        if (const YAML::Node v = node["Vec4"]; v && v.IsSequence() && v.size() == 4)
+        {
+            value = glm::vec4(v[0].as<float>(), v[1].as<float>(), v[2].as<float>(), v[3].as<float>());
+            return true;
+        }
         if (node["Str"]) { value = node["Str"].as<std::string>(); return true; }
         if (const YAML::Node keys = node["Curve"])
         {

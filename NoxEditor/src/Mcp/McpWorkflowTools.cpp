@@ -18,6 +18,7 @@
 #include "NoxCore/Animation/AnimationGraphNodes.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Audio/AudioGraph.h"
+#include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/LogBuffer.h"
@@ -40,7 +41,10 @@ namespace Nox::Mcp
                 return handle;
             if (AssetHandle handle = ResolveAsset(value, AssetType::AudioGraph, audioError))
                 return handle;
-            error = animationError.find("not a") != std::string::npos ? animationError + " (graphs are AnimationGraph or AudioGraph assets)" : animationError;
+            std::string materialError;
+            if (AssetHandle handle = ResolveAsset(value, AssetType::MaterialGraph, materialError))
+                return handle;
+            error = animationError.find("not a") != std::string::npos ? animationError + " (graphs are AnimationGraph, AudioGraph or MaterialGraph assets)" : animationError;
             return 0;
         }
 
@@ -162,7 +166,7 @@ namespace Nox::Mcp
                                "properties with their defaults, enum names, value ranges and asset kinds. Read it before writing a graph with "
                                "set_graph.";
             tool.InputSchema = Schema()
-                                   .Enum("domain", "AnimationGraph or AudioGraph (or give 'graph')", { kAnimationGraphDomain, kAudioGraphDomain })
+                                   .Enum("domain", "AnimationGraph, AudioGraph or MaterialGraph (or give 'graph')", { kAnimationGraphDomain, kAudioGraphDomain, kMaterialGraphDomain })
                                    .String("graph", "A graph asset (uuid or path): its domain")
                                    .String("filter", "Only types whose name or category contains this (case ignored)");
             tool.Handler = [](const Json& arguments, ToolDone done)
@@ -182,7 +186,7 @@ namespace Nox::Mcp
                 }
                 if (domain.empty())
                 {
-                    done(ToolResult::Error("give 'domain' (AnimationGraph or AudioGraph) or 'graph'"));
+                    done(ToolResult::Error("give 'domain' (AnimationGraph, AudioGraph or MaterialGraph) or 'graph'"));
                     return;
                 }
                 Json types = NodeTypesJson(domain);

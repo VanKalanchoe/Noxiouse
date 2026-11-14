@@ -396,6 +396,8 @@ namespace Nox::Mcp
                 return Json::array({ v.x, v.y });
             else if constexpr (std::is_same_v<T, uint64_t>)
                 return std::to_string(v); // (an asset id: digits, as every MCP tool writes ids)
+            else if constexpr (std::is_same_v<T, glm::vec4>)
+                return Json::array({ v.x, v.y, v.z, v.w });
             else
             {
                 Json keys = Json::array();
@@ -475,6 +477,12 @@ namespace Nox::Mcp
                         return "must be a string";
                     value = json.get<std::string>();
                 }
+                else if constexpr (std::is_same_v<T, glm::vec4>)
+                {
+                    if (!json.is_array() || json.size() != 4 || !json[0].is_number() || !json[1].is_number() || !json[2].is_number() || !json[3].is_number())
+                        return "must be [x, y, z, w] (a colour: [r, g, b, a])";
+                    value = glm::vec4(json[0].get<float>(), json[1].get<float>(), json[2].get<float>(), json[3].get<float>());
+                }
                 else
                     return curve();
                 return {};
@@ -493,6 +501,8 @@ namespace Nox::Mcp
             value = json.get<float>();
         else if (json.is_array() && json.size() == 2 && json[0].is_number() && json[1].is_number())
             value = glm::vec2(json[0].get<float>(), json[1].get<float>());
+        else if (json.is_array() && json.size() == 4 && json[0].is_number() && json[1].is_number() && json[2].is_number() && json[3].is_number())
+            value = glm::vec4(json[0].get<float>(), json[1].get<float>(), json[2].get<float>(), json[3].get<float>());
         else if (IsIdText(json))
             value = static_cast<uint64_t>(std::stoull(json.get<std::string>()));
         else if (json.is_string())
@@ -500,7 +510,7 @@ namespace Nox::Mcp
         else if (json.is_object() && json.contains("Curve"))
             return curve();
         else
-            return "must be a bool, number, [x, y], string or curve";
+            return "must be a bool, number, [x, y], [x, y, z, w], string or curve";
         return {};
     }
 

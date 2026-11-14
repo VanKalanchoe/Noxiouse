@@ -21,6 +21,7 @@
 #include "NoxCore/Animation/AnimationGraphNodes.h"
 #include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Audio/AudioGraph.h"
+#include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/Audio/AudioMixer.h"
 
 #ifdef _WIN32
@@ -275,6 +276,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
     // runtime (NodeTypeRegistry has no de-duplication, so this must run exactly once).
     Nox::RegisterAnimationGraphNodeTypes();
     Nox::RegisterAudioGraphNodeTypes();
+    Nox::RegisterMaterialGraphNodeTypes();
 
     auto applicationState = new Nox::AppState();
     applicationState->app = Nox::CreateApplication(args);
