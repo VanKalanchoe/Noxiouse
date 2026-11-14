@@ -5,6 +5,11 @@
 - Test guides: very explicit, step by step, and **every step names the program it runs in** -- NoxRuntime, NoxEditor or NoxNetTest
   (server and client are both NoxRuntime; scripts are rebuilt by opening the project in NoxEditor once).
 - The user writes English (sometimes German); answer in English.
+- **Every new feature also goes into the docs site** in the same commit (the user asked for this always): the user manual
+  `docs-site/assets/manual-pages.js` (how to use it, step by step, naming the program), the technical pages
+  `docs-site/assets/docs-pages.js` with their Sphinx mirrors `docs-site/*.md` + `docs-site/index.md` (toctree, What's New), and new
+  source files in `docs-site/assets/file-db.js`. Only what is built and say what is not yet. Check it renders (open the page in
+  Chromium; table cells cannot contain `|`, even escaped).
 - Branch: develop on `claude/read-future-md-6zyo6c`, push with `git push -u origin claude/read-future-md-6zyo6c`. No pull requests
   unless asked. No model ids in commits, code or docs.
 

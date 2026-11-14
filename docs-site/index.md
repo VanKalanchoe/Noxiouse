@@ -95,6 +95,14 @@ scripting
 
 ```{toctree}
 :maxdepth: 2
+:caption: Networking & Automation
+
+networking
+console-mcp
+```
+
+```{toctree}
+:maxdepth: 2
 :caption: Authoring & Tools
 
 editor-runtime-sample
@@ -105,6 +113,9 @@ file-reference
 
 ## What's New (November 2026)
 
+- **Multiplayer:** server-authoritative sessions, replication with RPCs, client prediction and interpolation, relevancy and bandwidth budgets, physics and animation replication, lag compensation, multiplayer Play in the editor and Package Server (see Networking).
+- **Engine console and Output Log:** commands and variables with access levels, the Output Log tab with a Cmd line, the dedicated server's terminal, `--exec` (see Console, Output Log & MCP Server).
+- **MCP server:** AI assistants (Claude Code and other MCP clients) read, edit (undoable) and play the open scene, take screenshots and drive the game with input (see Console, Output Log & MCP Server).
 - **Raster versions of the ray-traced effects** -- cascaded shadow maps (cached), a local-light shadow atlas, contact shadows,
   GTAO, SSR + reflection probes, relightable irradiance probe volumes + SSGI, froxel volumetric fog -- and the **Raster (All)**
   preset (see the Renderer page).
