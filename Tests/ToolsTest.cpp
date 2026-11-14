@@ -138,6 +138,7 @@ int main()
     TestConsole();
 #ifdef NOX_TOOLS_TEST_MCP
     TestMcp();
+    TestMcpValidation();
 #endif
 #ifdef NOX_TOOLS_TEST_MCP_SERVER
     TestMcpServer();

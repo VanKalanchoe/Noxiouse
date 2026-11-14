@@ -308,6 +308,72 @@ namespace Nox
                     done(std::move(pixels), width, height, bgra);
                 });
             };
+            // MCP2, editing: each change becomes one undo step (several in a frame: one step together).
+            context.RecordEdit = [this](const std::string& step)
+            {
+                m_HistoryExternalStep = m_HistoryExternalStep.empty() ? step : std::string("MCP: several edits");
+            };
+            context.Select = [this](const std::vector<Entity>& entities)
+            {
+                m_SceneHierarchyPanel.ClearSelection();
+                for (Entity entity : entities)
+                    m_SceneHierarchyPanel.ToggleSelectedEntity(entity);
+            };
+            context.ShapeMesh = [this](const std::string& shapeName) -> AssetHandle
+            {
+                for (uint8_t index = 0; index < static_cast<uint8_t>(PrimitiveShape::Count); ++index)
+                {
+                    std::string name = PrimitiveShapes::GetName(static_cast<PrimitiveShape>(index));
+                    if (name.size() == shapeName.size() &&
+                        std::equal(name.begin(), name.end(), shapeName.begin(), [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); }))
+                        return GetShapeAsset(static_cast<PrimitiveShape>(index));
+                }
+                return 0;
+            };
+            context.ShapeNames = []()
+            {
+                std::vector<std::string> names;
+                for (uint8_t index = 0; index < static_cast<uint8_t>(PrimitiveShape::Count); ++index)
+                    names.push_back(PrimitiveShapes::GetName(static_cast<PrimitiveShape>(index)));
+                return names;
+            };
+            context.SaveScene = [this](std::string& error)
+            {
+                if (m_PrefabMode.Active)
+                {
+                    error = "the editor is in Prefab Mode (Ctrl+S there saves the prefab): leave it first";
+                    return false;
+                }
+                if (m_EditorScenePath.empty())
+                {
+                    error = "the scene was never saved: the user names it once (File > Save Scene As)";
+                    return false;
+                }
+                SaveScene();
+                return true;
+            };
+            context.Undo = [this]()
+            {
+                const size_t before = m_History.GetPosition();
+                const std::string name = m_History.CanUndo() ? m_History.GetUndoName() : std::string();
+                Undo();
+                return m_History.GetPosition() != before ? name : std::string();
+            };
+            context.Redo = [this]()
+            {
+                const size_t before = m_History.GetPosition();
+                const std::string name = m_History.CanRedo() ? m_History.GetRedoName() : std::string();
+                Redo();
+                return m_History.GetPosition() != before ? name : std::string();
+            };
+            context.SnapshotScene = [this]()
+            {
+                if (!m_EditorScene)
+                    return std::string();
+                SceneSerializer serializer(m_EditorScene);
+                return serializer.SerializeToText();
+            };
+            context.RestoreScene = [this](const std::string& text) { RestoreHistoryState(text); };
             m_Mcp = std::make_unique<Mcp::McpEditor>(std::move(context));
         }
 #endif
@@ -6121,6 +6187,12 @@ namespace Nox
         frame.AssetsLoading = Project::GetActive()->GetEditorAssetManager()->GetLoadingCount() > 0;
         if (Entity selected = m_SceneHierarchyPanel.GetSelectedEntity())
             frame.Watched = selected.GetUUID();
+        // An edit from outside the UI (an MCP tool) this frame: its own named step (not during a drag: it waits for the drag to end).
+        if (!frame.InteractionActive && !m_HistoryExternalStep.empty())
+        {
+            frame.ExternalStep = std::move(m_HistoryExternalStep);
+            m_HistoryExternalStep.clear();
+        }
         m_History.Update(m_ActiveScene, frame);
     }
 

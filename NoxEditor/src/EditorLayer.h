@@ -279,6 +279,7 @@ namespace Nox
 
         PlayNetSettings m_PlayNet;
         std::unique_ptr<Net::NetSession> m_PlaySession;
+        std::string m_HistoryExternalStep; // an edit from outside the UI (MCP) waiting to become an undo step with this name
 #if NOX_WITH_MCP
         // The MCP server (docs/MCP_Plan_2026-11.md; off unless Tools > MCP Server is on). All of it lives in src/Mcp: CMake's
         // NOX_WITH_MCP=OFF leaves that folder and these lines out.

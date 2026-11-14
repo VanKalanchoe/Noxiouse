@@ -102,6 +102,23 @@ namespace Nox
             return;
         }
 
+        if (!frame.ExternalStep.empty())
+        {
+            // (the fingerprint covers ids, names, parents and transforms; an outside edit may change any value: the text decides)
+            std::string text = SceneText(scene);
+            if (text != m_States[m_Index].Text)
+            {
+                Commit(std::move(text), frame.ExternalStep);
+                m_Settling = true;
+                m_StableFrames = 0;
+            }
+            m_Fingerprint = Fingerprint(*scene, m_EntityCount);
+            m_Watched = 0; // re-read below
+            if (frame.Watched != m_Watched)
+                Watch(frame.Watched);
+            return;
+        }
+
         if (frame.InteractionEnded || m_Settling)
         {
             size_t entityCount = 0;

@@ -296,3 +296,89 @@ static void TestMcpServer()
     editor.join();
 }
 #endif
+
+#ifdef NOX_TOOLS_TEST_MCP
+// Component edits' JSON side (McpValidation): patches, checks against a component's example, what the engine stored differently.
+#include "McpValidation.h"
+
+static void TestMcpValidation()
+{
+    using namespace Nox::Mcp;
+    std::printf("\n== MCP component edits (JSON)\n");
+    const Json light = Json::parse(R"({ "Color": [1, 1, 1], "Intensity": 10.0, "CastShadows": true, "Samples": 4, "Mode": "Realtime",
+                                        "Mesh": "16531713622870338582", "Texture": "0", "Curve": [{ "Time": 0.0, "Value": 1.0 }],
+                                        "Inner": { "Radius": 5.0 } })");
+
+    CHECK(CheckAgainstExample(light, Json::parse(R"({ "Intensity": 3, "Color": [0.5, 0.2, 0.1] })")).empty(), "a whole number for a number, a vector of 3: fits");
+    std::string problem = CheckAgainstExample(light, Json::parse(R"({ "Intensty": 3 })"));
+    CHECK(problem.find("unknown field 'Intensty'") != std::string::npos && problem.find("Intensity") != std::string::npos,
+          "a misspelled field: refused, the valid ones listed ({})", problem);
+    CHECK(!CheckAgainstExample(light, Json::parse(R"({ "Color": [1, 1] })")).empty(), "a vector of another length: refused");
+    CHECK(!CheckAgainstExample(light, Json::parse(R"({ "Color": [1, "a", 1] })")).empty(), "a vector with a word in it: refused");
+    CHECK(!CheckAgainstExample(light, Json::parse(R"({ "CastShadows": 1 })")).empty(), "1 for a bool: refused");
+    CHECK(!CheckAgainstExample(light, Json::parse(R"({ "Samples": 2.5 })")).empty() && CheckAgainstExample(light, Json::parse(R"({ "Samples": 2.0 })")).empty(),
+          "2.5 for a whole number refused, 2.0 fits");
+    problem = CheckAgainstExample(light, Json::parse(R"({ "Mesh": 16531713622870338582 })"));
+    CHECK(problem.find("write it as a string") != std::string::npos, "an id as a JSON number: refused with how to write it ({})", problem);
+    CHECK(CheckAgainstExample(light, Json::parse(R"({ "Mesh": "10922256994577822127", "Texture": "6087766411216149246" })")).empty(),
+          "ids as digit strings, also into a field that was 0: fit");
+    CHECK(CheckAgainstExample(light, Json::parse(R"({ "Mesh": "0" })")).empty(), "\"0\" clears an id");
+    CHECK(CheckAgainstExample(Json::parse(R"({ "MeshHandle": 0, "Count": 3 })"), Json::parse(R"({ "MeshHandle": "16531713622870338582" })")).empty() &&
+          !CheckAgainstExample(Json::parse(R"({ "MeshHandle": 0, "Count": 3 })"), Json::parse(R"({ "Count": "16531713622870338582" })")).empty(),
+          "an unset reference (0) takes an id string; a field holding another number does not");
+    CHECK(!CheckAgainstExample(light, Json::parse(R"({ "Inner": { "Radius": "big" } })")).empty(), "nested objects are checked");
+    CHECK(!CheckAgainstExample(light, Json::parse(R"({ "Curve": [{ "Time": "x", "Value": 1 }] })")).empty() &&
+          CheckAgainstExample(light, Json::parse(R"({ "Curve": [{ "Time": 0.5, "Value": 1 }, { "Time": 1, "Value": 0 }] })")).empty(),
+          "list items are checked against the list's first item; a longer list fits");
+
+    Json patched;
+    problem = ApplyPatch(light, Json::parse(R"([{ "op": "replace", "path": "/Intensity", "value": 2.5 }, { "op": "replace", "path": "/Color/0", "value": 0.25 }])"), patched);
+    CHECK(problem.empty() && patched["Intensity"] == 2.5 && patched["Color"][0] == 0.25 && patched["Samples"] == 4,
+          "a patch: two fields changed, the rest as they were");
+    CHECK(!ApplyPatch(light, Json::parse(R"([{ "op": "move", "from": "/A", "path": "/B" }])"), patched).empty(), "'move' is not allowed");
+    CHECK(!ApplyPatch(light, Json::parse(R"([{ "op": "replace", "path": "/Missing", "value": 1 }])"), patched).empty(), "replacing a field that is not there fails");
+    CHECK(!ApplyPatch(light, Json::parse(R"([{ "op": "test", "path": "/Samples", "value": 5 }])"), patched).empty(), "a failed 'test' stops the patch");
+    CHECK(!ApplyPatch(light, Json::parse(R"([])"), patched).empty() && !ApplyPatch(light, Json::parse(R"([{ "op": "replace", "path": "Intensity", "value": 1 }])"), patched).empty(),
+          "an empty patch and a path without '/' are refused");
+
+    const Json stored = Json::parse(R"({ "Intensity": 100.0, "Color": [0.25, 1.0000001, 1], "Mode": "Realtime" })");
+    const Json differences = Differences(Json::parse(R"({ "Intensity": 500, "Color": [0.25, 1, 1], "Mode": "Realtime" })"), stored);
+    CHECK(differences.size() == 1 && differences[0]["path"] == "/Intensity" && differences[0]["stored"] == 100.0,
+          "what the engine stored differently: only the clamped field ({})", differences.dump());
+
+    const Json merged = Merge(Json::parse(R"({ "A": 1, "B": { "C": 2, "D": 3 } })"), Json::parse(R"({ "B": { "C": 9 }, "E": 4 })"));
+    CHECK(merged == Json::parse(R"({ "A": 1, "B": { "C": 9, "D": 3 }, "E": 4 })"), "defaults merged under current values");
+    // The serializer's YAML and back: kinds kept, ids as text, doubles with every digit.
+    const char* yamlText = R"(TransformComponent:
+  Translation: [123456.789012345, -10, 0.1]
+  Rotation: [0, 1.5707964, 0]
+  Scale: [1, 1, 1]
+MeshComponent:
+  MeshHandle: 16531713622870338582
+  SubmeshIndex: 0
+  CastShadows: true
+ScriptComponent:
+  Classes: [Facerun.NetPlayer]
+  FieldOverrides:
+    - Class: Facerun.NetPlayer
+      Field: Speed
+      Value: 200
+)";
+    const Json fromYaml = NodeToJson(YAML::Load(yamlText));
+    CHECK(fromYaml["MeshComponent"]["MeshHandle"] == "16531713622870338582" && fromYaml["MeshComponent"]["CastShadows"] == true &&
+          fromYaml["MeshComponent"]["SubmeshIndex"] == 0 && fromYaml["ScriptComponent"]["Classes"][0] == "Facerun.NetPlayer" &&
+          fromYaml["ScriptComponent"]["FieldOverrides"][0]["Value"] == 200, "YAML to JSON: an id as text, a bool, numbers, lists of maps");
+    YAML::Emitter emitter;
+    emitter << JsonToYaml(fromYaml);
+    const Json roundTrip = NodeToJson(YAML::Load(emitter.c_str()));
+    CHECK(roundTrip == fromYaml, "JSON back to YAML and again: the same values");
+    CHECK(YAML::Load(emitter.c_str())["TransformComponent"]["Translation"][0].as<double>() == 123456.789012345,
+          "a double world position keeps every digit through the round trip");
+    CHECK(ScalarToJson("Dynamic") == "Dynamic" && ScalarToJson("2.5") == 2.5 && ScalarToJson("false") == false && ScalarToJson("0") == 0,
+          "scalars: an enum name stays text, numbers and booleans read as such");
+
+    const Json schema = SchemaFromExample(light);
+    CHECK(schema["Color"]["kind"] == "vector3" && schema["Mesh"]["kind"] == "id" && schema["Samples"]["kind"] == "integer" &&
+          schema["Intensity"]["kind"] == "number" && schema["Inner"]["kind"] == "object", "a schema from an example: kinds ({})", schema["Color"].dump());
+}
+#endif

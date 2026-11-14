@@ -16,7 +16,8 @@ set_target_properties(NoxToolsTest PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$<TARGET
 add_dependencies(NoxToolsTest NoxEditor)
 # (with the editor's MCP protocol layer when it is built: NOX_WITH_MCP)
 if(NOX_WITH_MCP)
-    target_sources(NoxToolsTest PRIVATE "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/McpProtocol.cpp" "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/McpServer.cpp")
+    target_sources(NoxToolsTest PRIVATE "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/McpProtocol.cpp" "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/McpServer.cpp"
+                                        "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/McpValidation.cpp")
     target_include_directories(NoxToolsTest PRIVATE "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp" "${CMAKE_SOURCE_DIR}/Tests"
                                "${CMAKE_SOURCE_DIR}/NoxCore/vendors/cpp-httplib")
     target_compile_definitions(NoxToolsTest PRIVATE NOX_TOOLS_TEST_MCP=1 NOX_TOOLS_TEST_MCP_SERVER=1)

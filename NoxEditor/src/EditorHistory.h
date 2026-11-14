@@ -36,6 +36,9 @@ namespace Nox
             bool GizmoEnded = false;       // the gizmo was released this frame (names the step)
             bool AssetsLoading = false;    // background loads still running: what they spawn may still change the scene
             UUID Watched = 0;              // the entity the Properties panel shows (0 = none)
+            // An edit made from outside the UI this frame (an MCP tool): compared on the whole scene text -- any component of any
+            // entity, not only what the per-frame fingerprint covers -- and committed as one step with this name.
+            std::string ExternalStep;
         };
 
         // Once per frame in Edit mode, after the UI has applied its changes. A different scene than the bound one (another scene

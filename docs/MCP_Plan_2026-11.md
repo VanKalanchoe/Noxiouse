@@ -1,7 +1,18 @@
 # MCP for NoxEditor -- plan (2026-11-13, revised the same day after a review)
 
-Status (2026-11-13): **C1 console built; MCP0 and MCP1 built** (read tools, screenshot, list_commands / run_command), waiting for the
-user's test; MCP2-MCP5 open. Backlog items C1 and N7.
+Status (2026-11-14): **C1 console, MCP0 and MCP1 built and tested by the user; MCP2 built** (editing the scene), waiting for the
+user's test; MCP3-MCP5 open. Backlog items C1 and N7.
+
+MCP2 (2026-11-14): `McpEditTools` -- create_entity (name, parent, position, a basic shape mesh), delete_entities, rename_entity,
+duplicate_entity, set_parent (no cycles, keeps the world place), add_component / remove_component / patch_component (`values` or a
+JSON Patch), get_component_schema, apply_edits (a batch, all or nothing: the scene snapshot is restored when an edit fails; "$N"
+stands for the uuid edit N answered), select, save_scene, undo, redo. Every write: the component's example (its C++ defaults,
+serialized from a scratch scene, under its current values) checks field names and kinds; new ids must name an existing asset or
+entity; the values go in through the scene serializer (what loading does), are read back (`adjusted` lists values the engine
+changed), and the component is put back as it was when the write fails. Edit mode only. Each change is one undo step named
+"MCP: ...": `EditorHistory::FrameInfo::ExternalStep` compares the whole scene text (the per-frame fingerprint only covers ids,
+names, parents and transforms). `McpValidation` holds the JSON side (patching, checks, differences, YAML <-> JSON) -- NoxToolsTest
+83 checks. The editor-side edits compile; they have not run in the editor yet.
 
 Built: `NoxCore/Console` (registry, variables, access levels read / write / execute / user), the Output Log's Cmd line, the server
 terminal and `--exec` on it; `NoxEditor/src/Mcp/` -- `McpProtocol` (JSON-RPC, 2025-06-18 + 2025-03-26, token / Host / Origin /
