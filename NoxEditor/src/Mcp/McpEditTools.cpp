@@ -3,6 +3,7 @@
 #include "McpValidation.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <format>
 #include <map>
 
@@ -321,6 +322,58 @@ namespace Nox::Mcp
                         }
                         outcome.Result = EntitySummary(scene, entity);
                         outcome.Step = std::format("MCP: Create {}", name);
+                        return {};
+                    });
+            }
+
+            // -------------------------------------------------------------------------------------------- instantiate_prefab
+            {
+                Json schema = Schema()
+                                  .String("prefab", "The prefab: its uuid, or its path under the asset folder (e.g. \"Prefabs/Door.nprefab\")", true)
+                                  .String("parent", "The parent's uuid (left out: a root entity)")
+                                  .String("name", "The instance's name (default: the prefab's file name)")
+                                  .Build();
+                schema["properties"]["position"] = Json{ { "type", "array" }, { "description", "Position [x, y, z] in centimetres, relative to the parent" },
+                                                         { "items", Json{ { "type", "number" } } }, { "minItems", 3 }, { "maxItems", 3 } };
+                add("instantiate_prefab", "Place a prefab",
+                    "Places an instance of a prefab at 'position' (as dragging it from the Content Browser does): its root entity now, the "
+                    "prefab's entities under it once the prefab has loaded (a frame or two; get_entity / get_hierarchy then). One undo step.",
+                    schema,
+                    [](Scene& scene, const Json& arguments, Outcome& outcome) -> std::string
+                    {
+                        std::string error;
+                        const AssetHandle prefab = ResolveAsset(arguments["prefab"], AssetType::Prefab, error);
+                        if (prefab == 0)
+                            return error;
+                        Entity parent;
+                        if (arguments.contains("parent") && !arguments["parent"].get<std::string>().empty())
+                            if (!(parent = FindEntity(scene, arguments["parent"], error)))
+                                return error;
+                        glm::dvec3 position(0.0);
+                        if (arguments.contains("position"))
+                        {
+                            const Json& p = arguments["position"];
+                            if (p.size() != 3 || !p[0].is_number() || !p[1].is_number() || !p[2].is_number())
+                                return "'position' must be three numbers [x, y, z]";
+                            position = glm::dvec3(p[0].get<double>(), p[1].get<double>(), p[2].get<double>());
+                        }
+                        std::string name = arguments.value("name", std::string());
+                        if (name.empty())
+                            name = std::filesystem::path(AssetPath(prefab)).stem().string();
+                        if (name.empty())
+                            name = "Prefab";
+                        Entity root = scene.CreateEntity(name);
+                        if (parent)
+                            root.SetParent(parent);
+                        auto& instance = root.AddComponent<PrefabInstanceComponent>();
+                        instance.Prefab = prefab;
+                        instance.InitTransform = true; // (takes the prefab root's rotation and scale when it spawns)
+                        root.GetComponent<TransformComponent>().Translation = position;
+                        root.MarkTransformDirty();
+                        AssetManager::RequestAsset(prefab);
+                        outcome.Result = EntitySummary(scene, root);
+                        outcome.Result["prefab"] = AssetPath(prefab);
+                        outcome.Step = std::format("MCP: Place {}", name);
                         return {};
                     });
             }

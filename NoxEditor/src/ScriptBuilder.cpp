@@ -1,7 +1,9 @@
 #include "ScriptBuilder.h"
 
 #include <cstdlib>
+#include <format>
 #include <fstream>
+#include <iterator>
 
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
@@ -75,6 +77,7 @@ namespace Nox
 #endif
         m_Status = "Building " + m_Project.filename().string() + "...";
         NOX_CORE_INFO("Scripts: building {}", m_Project.generic_string());
+        m_BuildStarted = std::chrono::steady_clock::now();
         m_Build = std::async(std::launch::async, [command]() { return std::system(command.c_str()); });
     }
 
@@ -85,28 +88,44 @@ namespace Nox
             if (m_Build.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
                 return;
             const int result = m_Build.get();
-            if (result == 0)
+            // The compiler's messages as data (MSBuild prints each twice: in place and in its summary; kept once).
+            std::string output;
             {
-                m_Status = ScriptEngine::ReloadAssembly() ? "Scripts built and reloaded" : "Scripts built; the reload failed (see the log)";
-                NOX_CORE_INFO("Scripts: {}", m_Status);
+                std::ifstream log(m_Log, std::ios::binary);
+                output.assign(std::istreambuf_iterator<char>(log), std::istreambuf_iterator<char>());
+            }
+            BuildResult built;
+            built.Number = m_LastResult.Number + 1;
+            built.Succeeded = result == 0;
+            built.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - m_BuildStarted).count();
+            built.Diagnostics = ParseScriptBuildOutput(output);
+            built.Log = m_Log;
+            size_t errors = 0, warnings = 0;
+            for (const ScriptDiagnostic& diagnostic : built.Diagnostics)
+                (diagnostic.Severity == "error" ? errors : warnings)++;
+            if (built.Succeeded)
+            {
+                built.Reloaded = ScriptEngine::ReloadAssembly();
+                m_Status = built.Reloaded ? "Scripts built and reloaded" : "Scripts built; the reload failed (see the log)";
+                NOX_CORE_INFO("Scripts: {} ({:.1f} s{})", m_Status, built.Seconds, warnings ? std::format(", {} warnings", warnings) : std::string());
             }
             else
             {
-                // The compiler's errors, into the editor's log.
-                std::ifstream log(m_Log);
-                std::string line;
-                int shown = 0;
-                while (std::getline(log, line) && shown < 20)
+                // The compiler's errors, into the editor's log: file(line,col) code message.
+                for (const ScriptDiagnostic& diagnostic : built.Diagnostics)
                 {
-                    if (line.find("error") != std::string::npos)
-                    {
-                        NOX_CORE_ERROR("[C# build] {}", line);
-                        ++shown;
-                    }
+                    if (diagnostic.Severity != "error")
+                        continue;
+                    const std::string place = diagnostic.File.empty() ? std::string()
+                                            : std::format("{}({},{}): ", diagnostic.File, diagnostic.Line, diagnostic.Column);
+                    NOX_CORE_ERROR("[C# build] {}{} {}", place, diagnostic.Code, diagnostic.Message);
                 }
-                m_Status = "Script build failed (" + std::to_string(shown) + " errors in the log)";
+                if (errors == 0) // (failed without a message we can read: the output's last lines)
+                    NOX_CORE_ERROR("[C# build] the build failed without a compiler error; see {}", m_Log.generic_string());
+                m_Status = "Script build failed (" + std::to_string(errors) + " errors)";
                 NOX_CORE_ERROR("Scripts: build failed, the scripts that were running stay; full output in {}", m_Log.generic_string());
             }
+            m_LastResult = std::move(built);
         }
 
         bool due = m_BuildRequested;

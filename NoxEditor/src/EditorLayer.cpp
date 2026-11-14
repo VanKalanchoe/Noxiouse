@@ -474,6 +474,34 @@ namespace Nox
                 m_EditorCamera.SetDistance(static_cast<float>(distance));
                 m_EditorCamera.SetOrientation(pitch, yaw); // (places the camera)
             };
+            // MCP4, scripts and assets.
+            context.ScriptBuild = [this]()
+            {
+                Mcp::ScriptBuildInfo info;
+                info.HasProject = !ScriptEngine::GetProjectScriptsProject().empty();
+                info.Building = m_ScriptBuilder.IsBuilding();
+                info.Pending = m_ScriptBuilder.IsBuildPending();
+                info.Status = m_ScriptBuilder.GetStatus();
+                const ScriptBuilder::BuildResult& last = m_ScriptBuilder.GetLastResult();
+                info.Number = last.Number;
+                info.Succeeded = last.Succeeded;
+                info.Reloaded = last.Reloaded;
+                info.Seconds = last.Seconds;
+                info.Diagnostics = last.Diagnostics;
+                info.Log = last.Log.generic_string();
+                return info;
+            };
+            context.RequestScriptBuild = [this]() { m_ScriptBuilder.RequestBuild(); };
+            context.MaterialChanged = [](AssetHandle material)
+            {
+                Renderer::MarkMaterialChanged(material); // (as the Material Editor does)
+                AssetPreviewRenderer::Get().Invalidate(material);
+            };
+            context.AssetsChanged = [this]()
+            {
+                if (m_ContentBrowserPanel)
+                    m_ContentBrowserPanel->Refresh();
+            };
             m_Mcp = std::make_unique<Mcp::McpEditor>(std::move(context));
         }
 #endif

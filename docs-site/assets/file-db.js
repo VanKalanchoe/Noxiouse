@@ -460,7 +460,7 @@ window.NOX_FILE_DATABASE = [
     { path: "NoxCore/src/NoxCore/Network/NetAnimation.h", category: "Networking", type: "C++ Header", desc: "Animator parameters and montages replicated (never poses); the clients animate themselves." },
     { path: "NoxCore/src/NoxCore/Network/NetAnimation.cpp", category: "Networking", type: "C++ Source", desc: "Animator parameters and montages replicated (never poses); the clients animate themselves." },
 
-    // --- Console & MCP (22 files) ---
+    // --- Console & MCP (27 files) ---
     { path: "NoxCore/src/NoxCore/Console/Console.h", category: "Console & MCP", type: "C++ Header", desc: "The engine console: commands, typed variables, aliases, access levels." },
     { path: "NoxCore/src/NoxCore/Console/Console.cpp", category: "Console & MCP", type: "C++ Source", desc: "Console parsing, execution, completion, help and find." },
     { path: "NoxCore/src/NoxCore/Core/LogBuffer.h", category: "Console & MCP", type: "C++ Header", desc: "The last 20 000 log lines in memory (Output Log, MCP read_log)." },
@@ -481,6 +481,11 @@ window.NOX_FILE_DATABASE = [
     { path: "NoxEditor/src/Mcp/McpValidation.cpp", category: "Console & MCP", type: "C++ Source", desc: "Component value validation and conversion." },
     { path: "NoxEditor/src/Mcp/McpInputPlayer.h", category: "Console & MCP", type: "C++ Header", desc: "inject_input's per-frame timing." },
     { path: "NoxEditor/src/Mcp/McpInputPlayer.cpp", category: "Console & MCP", type: "C++ Source", desc: "Holds, shared keys, motion spread over time." },
+    { path: "NoxEditor/src/Mcp/McpAssetTools.cpp", category: "Console & MCP", type: "C++ Source", desc: "Scripts and assets tools: build_scripts, materials, prefabs, import_asset." },
+    { path: "NoxEditor/src/Mcp/McpMaterial.h", category: "Console & MCP", type: "C++ Header", desc: "A material as JSON and back (one field table)." },
+    { path: "NoxEditor/src/Mcp/McpMaterial.cpp", category: "Console & MCP", type: "C++ Source", desc: "Material JSON codec and its texture paths." },
+    { path: "NoxEditor/src/ScriptDiagnostics.h", category: "Console & MCP", type: "C++ Header", desc: "Script build errors and warnings as data." },
+    { path: "NoxEditor/src/ScriptDiagnostics.cpp", category: "Console & MCP", type: "C++ Source", desc: "Parses dotnet build output into file / line / column / code / message." },
     { path: "NoxEditor/src/Mcp/McpToolHelpers.h", category: "Console & MCP", type: "C++ Header", desc: "Shared MCP helpers: ids, summaries, paging." },
     { path: "NoxEditor/src/Mcp/McpToolHelpers.cpp", category: "Console & MCP", type: "C++ Source", desc: "Shared MCP helper implementations." },
 

@@ -925,7 +925,7 @@ window.NOX_DOCS_PAGES = [
         markdown: [
             "# Console, Output Log & MCP Server (`NoxCore/Console`, `NoxEditor/src/Mcp`)",
             "",
-            "The engine console is one registry of commands and variables in NoxCore that every front end uses: the editor's Output Log Cmd line, the dedicated server's terminal, `--exec`, and the editor's MCP server, which lets AI assistants read, edit and play the scene. Plan and status: `docs/MCP_Plan_2026-11.md` (C1 console, MCP0-MCP3 built; MCP4-MCP5 open). How to use them: the manual's **The Engine Console** and **AI Assistants (MCP Server)** pages.",
+            "The engine console is one registry of commands and variables in NoxCore that every front end uses: the editor's Output Log Cmd line, the dedicated server's terminal, `--exec`, and the editor's MCP server, which lets AI assistants read, edit and play the scene, build its scripts and work with its assets. Plan and status: `docs/MCP_Plan_2026-11.md` (C1 console, MCP0-MCP3 and MCP4 part 1 built; MCP4 part 2 and MCP5 open). How to use them: the manual's **The Engine Console** and **AI Assistants (MCP Server)** pages.",
             "",
             "---",
             "",
@@ -947,6 +947,9 @@ window.NOX_DOCS_PAGES = [
             "| `McpEditorTools.h/.cpp` | `EditorContext` (the only way tools reach the editor; EditorLayer fills it) and the reading tools: status, log, hierarchy, entities, selection, assets, screenshot, console. |",
             "| `McpEditTools.cpp` | Editing tools: entities, components (about 40 editable types), `apply_edits` (atomic via a scene snapshot), select, save, undo, redo. |",
             "| `McpPlayTools.cpp` | play / simulate / stop / pause, `wait_for`, `inject_input`, the editor camera tools. |",
+            "| `McpAssetTools.cpp` | MCP4: `build_scripts` / `get_build_status`, `get_material` / `create_material` / `set_material`, `create_prefab`, `import_asset` (`instantiate_prefab` is an edit tool). |",
+            "| `McpMaterial.h/.cpp` | A material (`MaterialData`, `.nmat`) as JSON and back from one field table; the texture paths it names. |",
+            "| `NoxEditor/src/ScriptDiagnostics.h/.cpp` | The script build's output as data: each error and warning once with file, line, column, code and message (used by the Output Log and `build_scripts`). |",
             "| `McpValidation.h/.cpp` | Component values as JSON: the example (C++ defaults under current values) as schema, checks, JSON Patch, differences, YAML <-> JSON (ids as strings, 17-digit doubles). |",
             "| `McpInputPlayer.h/.cpp` | `inject_input`'s timing: holds per frame, shared keys, motion spread over the time. |",
             "| `McpToolHelpers.h/.cpp` | Shared helpers: ids, entity summaries, paths, paging. |",

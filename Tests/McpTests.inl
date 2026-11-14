@@ -473,3 +473,71 @@ static void TestMcpInputPlayer()
     }
 }
 #endif
+
+#ifdef NOX_TOOLS_TEST_MCP
+// build_scripts' errors as data (ScriptDiagnostics) and materials as JSON (McpMaterial).
+#include "McpMaterial.h"
+#include "ScriptDiagnostics.h"
+
+static void TestMcpAssets()
+{
+    using namespace Nox;
+    using namespace Nox::Mcp;
+    std::printf("\n== MCP scripts and materials\n");
+
+    // dotnet build output (quiet): errors in place and again in the summary, a warning, a project-wide error, noise.
+    const char* output =
+        "  Determining projects to restore...\r\n"
+        "C:\\Game\\Assets\\Scripts\\Source\\Player.cs(12,5): error CS1002: ; expected [C:\\Game\\Assets\\Scripts\\Game.csproj]\r\n"
+        "C:\\Game\\Assets\\Scripts\\Source\\Door.cs(40,13,40,20): warning CS0168: The variable 'e' is declared but never used [C:\\Game\\Assets\\Scripts\\Game.csproj]\r\n"
+        "C:\\Game\\Assets\\Scripts\\Game.csproj : error NU1101: Unable to find package Foo. [C:\\Game\\Assets\\Scripts\\Game.csproj]\r\n"
+        "MSBUILD : error MSB1009: Project file does not exist.\r\n"
+        "\r\n"
+        "Build FAILED.\r\n"
+        "C:\\Game\\Assets\\Scripts\\Source\\Player.cs(12,5): error CS1002: ; expected [C:\\Game\\Assets\\Scripts\\Game.csproj]\r\n"
+        "    1 Warning(s)\r\n"
+        "    3 Error(s)\r\n";
+    const std::vector<ScriptDiagnostic> diagnostics = ParseScriptBuildOutput(output);
+    CHECK(diagnostics.size() == 4, "4 messages, the repeated one once ({})", diagnostics.size());
+    if (diagnostics.size() == 4)
+    {
+        CHECK(diagnostics[0].Severity == "error" && diagnostics[0].Code == "CS1002" && diagnostics[0].Line == 12 && diagnostics[0].Column == 5 &&
+              diagnostics[0].File == "C:\\Game\\Assets\\Scripts\\Source\\Player.cs" && diagnostics[0].Message == "; expected",
+              "an error: file, line, column, code, message without the project ('{}')", diagnostics[0].Message);
+        CHECK(diagnostics[1].Severity == "warning" && diagnostics[1].Code == "CS0168" && diagnostics[1].Line == 40 && diagnostics[1].Column == 13,
+              "a warning with an end position: line and column kept");
+        CHECK(diagnostics[2].Code == "NU1101" && diagnostics[2].Line == 0 && diagnostics[2].File == "C:\\Game\\Assets\\Scripts\\Game.csproj",
+              "a project-wide error: the project file, no line");
+        CHECK(diagnostics[3].Code == "MSB1009" && diagnostics[3].File.empty(), "an MSBuild error: no file");
+    }
+    CHECK(ParseScriptBuildOutput("Build succeeded.\n    0 Warning(s)\n    0 Error(s)\n").empty(), "a clean build: no messages");
+
+    // Materials: every field to JSON and back.
+    MaterialData material;
+    material.Name = "Brick";
+    material.BaseColorFactor = glm::vec4(0.8f, 0.2f, 0.1f, 1.0f);
+    material.RoughnessFactor = 0.35f;
+    material.BaseColorTexturePath = "Textures/brick.png";
+    material.Mode = AlphaMode::Mask;
+    material.ClearcoatFactor = 0.5f;
+    material.ClearcoatTexture = { "Textures/coat.png", 1 };
+    material.UVChannels[1].Scale = glm::vec2(4.0f, 2.0f);
+    const Json json = MaterialToJson(material);
+    CHECK(json["BaseColorFactor"].size() == 4 && json["Mode"] == "Mask" && json["ClearcoatTexture"]["Set"] == 1 && json["UVChannels"].size() == 4 &&
+          json["UVChannels"][1]["Scale"][0] == 4.0f, "a material as JSON: vectors, the alpha mode by name, a lobe texture, the UV channels");
+    MaterialData back;
+    CHECK(MaterialFromJson(json, back).empty() && MaterialToJson(back) == json, "JSON back to the material: the same values");
+    CHECK(CheckAgainstExample(MaterialToJson(MaterialData{}), Json::parse(R"({ "RoughnessFactor": 0.2, "EmissiveFactor": [1, 0.5, 0] })")).empty(),
+          "values checked against a default material: fit");
+    CHECK(!CheckAgainstExample(MaterialToJson(MaterialData{}), Json::parse(R"({ "Roughness": 0.2 })")).empty() &&
+          !CheckAgainstExample(MaterialToJson(MaterialData{}), Json::parse(R"({ "BaseColorFactor": [1, 0, 0] })")).empty(),
+          "refused: a misspelled field, a color with 3 numbers for 4");
+    MaterialData kept = material;
+    CHECK(!MaterialFromJson(Json::parse(R"({ "RoughnessFactor": 0.9, "Mode": "Glass" })"), kept).empty() && kept.RoughnessFactor == 0.35f,
+          "an unknown alpha mode: refused, and nothing of the call applied");
+    CHECK(!MaterialFromJson(Json::parse(R"({ "UVChannels": [{}, { "Source": 3 }] })"), kept).empty(), "a UV channel reading UV set 3: refused");
+    const auto textures = MaterialTexturePaths(material);
+    CHECK(textures.size() == 2 && std::any_of(textures.begin(), textures.end(), [](const auto& t) { return t.first == "ClearcoatTexture/Path" && t.second == "Textures/coat.png"; }),
+          "the texture paths a material names, with their fields ({})", textures.size());
+}
+#endif

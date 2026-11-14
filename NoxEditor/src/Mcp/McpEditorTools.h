@@ -9,6 +9,7 @@
 #include "McpProtocol.h"
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Scene/Entity.h"
+#include "ScriptDiagnostics.h"
 
 namespace Nox
 {
@@ -24,6 +25,21 @@ namespace Nox::Mcp
         int Players = 2;                    // multiplayer: the editor's player included
         std::string Emulation = "off";      // "off", "average", "bad"
         bool DebugLog = false;              // the network debug trace (--net-debug)
+    };
+
+    // MCP4: the script build as the tools see it (ScriptBuilder).
+    struct ScriptBuildInfo
+    {
+        bool HasProject = false; // the project has a C# project to build
+        bool Building = false;
+        bool Pending = false;    // asked for or due, not started yet
+        std::string Status;      // the editor's status line ("Scripts built and reloaded" ...)
+        uint64_t Number = 0;     // the last finished build (0: none since the editor started)
+        bool Succeeded = false;
+        bool Reloaded = false;
+        double Seconds = 0.0;
+        std::vector<ScriptDiagnostic> Diagnostics;
+        std::string Log;         // the full output's file
     };
 
     // The editor camera of the active viewport (an orbit camera: it looks at FocalPoint from Distance away).
@@ -76,6 +92,12 @@ namespace Nox::Mcp
         // Runs `poll` at the start of every frame (main thread) until it returns true -- tools that answer later (wait_for,
         // inject_input). McpEditor fills it in; polls still going when the server stops are dropped (their calls were answered).
         std::function<void(std::function<bool()> poll)> EveryFrame;
+
+        // MCP4, scripts and assets:
+        std::function<ScriptBuildInfo()> ScriptBuild;
+        std::function<void()> RequestScriptBuild;        // as Scripts > Build and Reload
+        std::function<void(AssetHandle material)> MaterialChanged; // drawn with its new values from this frame (and its thumbnail)
+        std::function<void()> AssetsChanged;              // the Content Browser lists the asset folder again
     };
 
     // MCP1, reading the editor: get_editor_status, read_log, get_hierarchy, find_entities, get_entity, get_selection, list_assets,
@@ -88,6 +110,9 @@ namespace Nox::Mcp
     // MCP3, play and verify: play, simulate, stop, pause, wait_for, inject_input, focus_entity, get_viewport_camera,
     // set_viewport_camera.
     std::vector<Tool> CreatePlayTools(const EditorContext& context);
+    // MCP4, scripts and assets: build_scripts, get_build_status, get_material, create_material, set_material, create_prefab,
+    // import_asset (instantiate_prefab is an edit tool: CreateEditTools).
+    std::vector<Tool> CreateAssetTools(const EditorContext& context);
 
     // inject_input's key names: the C# KeyCode names (W, LeftShift, Space, Alpha1, F5 ...) and SDL's ("Left Shift"), case ignored.
     // 0 when unknown.

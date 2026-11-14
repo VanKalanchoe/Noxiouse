@@ -19,6 +19,8 @@ namespace Nox
         
         void OnImGuiRender();
         void OnExternalFileDrop(const std::filesystem::path& path);
+        // Lists the asset folder again (files added from outside the panel: an MCP import, a new material).
+        void Refresh() { RefreshAssetTree(); }
         // Called with an asset's handle when it's double-clicked (or just created); EditorLayer decides what
         // opening means per AssetType, so this panel doesn't need to know about any editor window.
         void SetOpenAssetCallback(std::function<void(AssetHandle)> callback) { m_OpenAsset = std::move(callback); }

@@ -2,10 +2,14 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <future>
 #include <memory>
 #include <string>
+#include <vector>
+
+#include "ScriptDiagnostics.h"
 
 namespace Utils { class NOXWatcher; }
 
@@ -27,8 +31,22 @@ namespace Nox
         void RequestBuild();
 
         bool IsBuilding() const { return m_Build.valid(); }
+        // A build asked for (RequestBuild) or due (a change) that has not started yet.
+        bool IsBuildPending() const { return m_BuildRequested || (AutoBuild && m_Changed); }
         const std::string& GetStatus() const { return m_Status; }
         bool AutoBuild = true;
+
+        // The last finished build: whether it compiled, whether the scripts were reloaded, its errors and warnings, the full output.
+        struct BuildResult
+        {
+            uint64_t Number = 0;  // 1, 2, 3 ... per finished build (0: none yet)
+            bool Succeeded = false;
+            bool Reloaded = false;
+            double Seconds = 0.0;
+            std::vector<ScriptDiagnostic> Diagnostics;
+            std::filesystem::path Log;
+        };
+        const BuildResult& GetLastResult() const { return m_LastResult; }
 
     private:
         void StartBuild();
@@ -39,6 +57,8 @@ namespace Nox
         std::atomic<int64_t> m_ChangedAt{ 0 }; // steady_clock ticks of the last change
         bool m_BuildRequested = false;
         std::future<int> m_Build;
+        std::chrono::steady_clock::time_point m_BuildStarted;
+        BuildResult m_LastResult;
         std::filesystem::path m_Log;
         std::string m_Status;
     };

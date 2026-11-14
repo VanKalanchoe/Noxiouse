@@ -1,7 +1,20 @@
 # MCP for NoxEditor -- plan (2026-11-13, revised the same day after a review)
 
-Status (2026-11-14): **C1 console, MCP0, MCP1 and MCP2 built and tested by the user; MCP3 built** (play and verify), waiting for
-the user's test; MCP4-MCP5 open. Backlog items C1 and N7.
+Status (2026-11-14): **C1 console and MCP0-MCP3 built and tested by the user; MCP4 part 1 built** (scripts and assets),
+waiting for the user's test; MCP4 part 2 (graphs as JSON, run_tests, packaging) and MCP5 open. Backlog items C1 and N7.
+
+MCP4 part 1 (2026-11-14): `McpAssetTools` -- build_scripts (asks ScriptBuilder for a build, or waits for the running one, and
+answers when it finished: succeeded, reloaded, the errors and warnings; Execute access: MSBuild runs the project's build; a build
+longer than the time-out answers building and get_build_status reads it later), get_build_status, get_material / create_material /
+set_material (MaterialData as JSON from one field table, `McpMaterial`, checked against the material's own fields; a texture by uuid
+or path must be a texture asset and is stored as the Material Editor stores it; written to the .nmat, Renderer::MarkMaterialChanged;
+not an undo step, as in the Material Editor -- the answer carries the previous values), create_prefab (SceneSerializer::
+SerializePrefab, as dragging into the Content Browser), instantiate_prefab (an edit tool: undo step, apply_edits), import_asset (a
+.gltf with its referenced buffers and images, or a .glb, copied into a folder of its own and cooked with ImportModel; textures,
+sounds and fonts copied and registered; files already in the asset folder registered in place; answers the new registry entries).
+`ScriptDiagnostics` parses dotnet build output into file / line / column / code / message, each once (MSBuild repeats them in its
+summary); ScriptBuilder keeps the last build's result and logs one line per error. NoxToolsTest: 108 checks (ASan / UBSan). The
+editor side compiles; it has not run in the editor yet.
 
 MCP3 (2026-11-14): `McpPlayTools` -- play (standalone, listen server or client with N players, network emulation, debug log; the
 call's choices are for that Play only, the user's Play settings stay; multiplayer saves the scene without the dialog, and is refused

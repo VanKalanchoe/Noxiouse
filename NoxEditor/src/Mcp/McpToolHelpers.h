@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -8,6 +9,7 @@
 
 #include "McpEditorTools.h"
 #include "McpValidation.h"
+#include "NoxCore/Asset/Asset.h"
 
 namespace Nox
 {
@@ -33,4 +35,12 @@ namespace Nox::Mcp
 
     // The scene the editor shows, or an error answered when there is none.
     Ref<Scene> RequireScene(const EditorContext& context, ToolDone& done);
+
+    // An asset of `type` named by its uuid (a digit string) or by its path under the asset directory ("Materials/Red.nmat"); 0 and
+    // `error` when there is none (or it is another kind of asset).
+    AssetHandle ResolveAsset(const Json& value, AssetType type, std::string& error);
+    // Its path under the asset directory, as the registry has it.
+    std::string AssetPath(AssetHandle handle);
+    // A path under the asset directory from what a caller wrote: relative, inside it (no "..", not absolute); empty and `error` when not.
+    std::filesystem::path AssetRelativePath(const std::string& text, std::string& error);
 }

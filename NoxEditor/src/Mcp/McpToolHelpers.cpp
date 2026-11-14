@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <format>
 
+#include "NoxCore/Asset/EditorAssetManager.h"
+#include "NoxCore/Project/Project.h"
 #include "NoxCore/Scene/Components.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneSerializer.h"
@@ -105,4 +107,73 @@ namespace Nox::Mcp
         return scene;
     }
 
+
+    AssetHandle ResolveAsset(const Json& value, AssetType type, std::string& error)
+    {
+        const std::string typeName(AssetTypeToString(type));
+        Ref<Project> project = Project::GetActive();
+        if (!project || !project->GetEditorAssetManager())
+        {
+            error = "no project is open";
+            return 0;
+        }
+        auto manager = project->GetEditorAssetManager();
+        uint64_t id = 0;
+        if (ParseId(value, id))
+        {
+            const AssetHandle handle(id);
+            if (!manager->IsAssetHandleValid(handle))
+            {
+                error = std::format("no asset with uuid {} (list_assets lists them)", id);
+                return 0;
+            }
+            if (manager->GetAssetType(handle) != type)
+            {
+                error = std::format("asset {} is a {}, not a {}", id, AssetTypeToString(manager->GetAssetType(handle)), typeName);
+                return 0;
+            }
+            return handle;
+        }
+        if (!value.is_string() || value.get<std::string>().empty())
+        {
+            error = std::format("name the {} by its uuid (a digit string) or its path under the asset folder", typeName);
+            return 0;
+        }
+        std::string problem;
+        const std::filesystem::path path = AssetRelativePath(value.get<std::string>(), problem);
+        if (path.empty())
+        {
+            error = problem;
+            return 0;
+        }
+        const AssetHandle handle = manager->ResolvePath(path, type);
+        if (handle == 0)
+            error = std::format("no {} at '{}' (list_assets lists them)", typeName, path.generic_string());
+        return handle;
+    }
+
+    std::string AssetPath(AssetHandle handle)
+    {
+        Ref<Project> project = Project::GetActive();
+        if (!project || !project->GetEditorAssetManager() || !project->GetEditorAssetManager()->IsAssetHandleValid(handle))
+            return {};
+        return project->GetEditorAssetManager()->GetMetadata(handle).FilePath.generic_string();
+    }
+
+    std::filesystem::path AssetRelativePath(const std::string& text, std::string& error)
+    {
+        std::filesystem::path path = std::filesystem::path(text).lexically_normal();
+        if (path.empty() || path.is_absolute() || path.has_root_name() || path.has_root_directory())
+        {
+            error = std::format("'{}' must be a path under the asset folder (e.g. \"Materials/Red.nmat\")", text);
+            return {};
+        }
+        for (const auto& part : path)
+            if (part == "..")
+            {
+                error = std::format("'{}' leaves the asset folder", text);
+                return {};
+            }
+        return path;
+    }
 }
