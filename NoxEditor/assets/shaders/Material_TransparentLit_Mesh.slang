@@ -414,7 +414,16 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     const float iorF0 = (max(instance.ior, 1.0) - 1.0) / (max(instance.ior, 1.0) + 1.0);
     float3 f0 = float3(iorF0 * iorF0);
 
+#ifdef NOX_MATERIAL_GRAPH
+    // A Masked material whose graph connects Opacity Mask: that is its alpha test (as in the visibility buffer).
+    const bool graphMask = instance.alphaMode == 1 && graphIn.material.graphSlot != 0xFFFFFFFFu &&
+                           (graphIn.material.graphOutputs & MaterialGraphOutputOpacityMask) != 0u;
+    if (graphMask && material_graph_opacity_mask(graphIn.material.graphSlot, graphIn) < instance.alphaMaskCutoff)
+        discard;
+    if (instance.alphaMode == 1 && !graphMask) // Mask
+#else
     if (instance.alphaMode == 1) // Mask
+#endif
     {
         float4 maskBaseColor = instance.baseColorFactor;
         if (instance.baseColorTextureIndex != 0xFFFFFFFF)

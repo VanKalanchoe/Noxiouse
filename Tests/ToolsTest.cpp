@@ -193,7 +193,8 @@ static void TestCustomLitShaders()
           "material graphs: a file of their own (no Material Shader in it), each in its slot's namespace (one without code left out)");
     CHECK(withGraphs.find("case 0u: MaterialGraph0::surface(i, o); break;") != std::string::npos &&
           withGraphs.find("case 2u: MaterialGraph2::surface(i, o); break;") != std::string::npos && withGraphs.find("case 1u: MaterialGraph") == std::string::npos &&
-          withGraphs.find("default: break;") != std::string::npos,
+          withGraphs.find("default: break;") != std::string::npos && withGraphs.find("case 2u: return MaterialGraph2::opacity_mask(i);") != std::string::npos &&
+          withGraphs.find("default: return 1.0;") != std::string::npos,
           "material_graph_surface calls the graph by slot (an unknown one: the material's own values)");
     CHECK(withGraphs.find("o.baseColor = 1; }\n}") != std::string::npos && withGraphs.find("#line 1 \"G/A.nmatgraph (generated)\"") != std::string::npos,
           "a graph's code without a final newline still closes its namespace; #line names the graph");
@@ -285,6 +286,32 @@ static void TestMaterialGraph()
     const MaterialGraphProgram sharedProgram = CompileMaterialGraph(shared);
     CHECK(sharedProgram.Valid && sharedProgram.ParameterSlots == 1 && sharedProgram.Parameters[0].Default.x == 1.0f,
           "two Scalar Parameters named K share one slot (the first's default)");
+    // Opacity Mask (stylized step 4b): its own function from only the nodes feeding that pin; a parameter it alone reads gets a slot after
+    // the surface's; a graph connecting only the mask still counts as connecting something (it is built).
+    NodeGraph masked = CreateEmptyMaterialGraph();
+    const uint32_t maskTexture = node(masked, "Texture Sample", { { "Parameter Name", std::string("Leaves") } });
+    const uint32_t maskMultiply = node(masked, "Multiply");
+    link(masked, maskTexture, 4, maskMultiply, 0); // A
+    link(masked, node(masked, "Scalar Parameter", { { "Name", std::string("Density") }, { "Default", 1.5f } }), 0, maskMultiply, 1);
+    link(masked, maskMultiply, 0, masked.OutputNode, 7);
+    link(masked, node(masked, "Color", { { "Value", glm::vec4(0.2f, 0.6f, 0.1f, 1.0f) } }), 0, masked.OutputNode, 0);
+    const MaterialGraphProgram maskProgram = CompileMaterialGraph(masked);
+    const size_t maskFunction = maskProgram.Code.find("float opacity_mask(MaterialGraphInputs i)");
+    CHECK(maskProgram.Valid && maskProgram.Outputs == (MaterialGraphOutputBaseColor | MaterialGraphOutputOpacityMask) && maskFunction != std::string::npos &&
+          maskProgram.Code.find("return saturate(", maskFunction) != std::string::npos,
+          "Opacity Mask: its own function returning the mask, the output bit set: '{}'", maskProgram.Error);
+    CHECK(maskProgram.Code.substr(0, maskFunction).find("material_graph_texture") == std::string::npos &&
+          maskProgram.Code.find("material_graph_texture", maskFunction) != std::string::npos,
+          "the mask's nodes are only in opacity_mask() (the surface computes none of them)");
+    const auto density = std::find_if(maskProgram.Parameters.begin(), maskProgram.Parameters.end(), [](const MaterialGraphParameter& p) { return p.Name == "Density"; });
+    CHECK(density != maskProgram.Parameters.end() && density->Default.x == 1.5f && maskProgram.TextureSlots == 1,
+          "a parameter only the mask reads has a slot (and the texture its slot)");
+    NodeGraph maskOnly = CreateEmptyMaterialGraph();
+    link(maskOnly, node(maskOnly, "Constant", { { "Value", 0.25f } }), 0, maskOnly.OutputNode, 7);
+    const MaterialGraphProgram maskOnlyProgram = CompileMaterialGraph(maskOnly);
+    CHECK(maskOnlyProgram.Valid && maskOnlyProgram.Outputs == MaterialGraphOutputOpacityMask && program.Code.find("    return 1.0;") != std::string::npos,
+          "a graph connecting only Opacity Mask has an output (it is built); one without the mask returns 1 from opacity_mask()");
+
     // Every node is offered in the node graph editor's Add menu: a "Parameter" property marks a node reading a graph variable, which the
     // menu lists only as "Get <variable>" -- Texture Sample had one and was missing from the menu (the user's test).
     size_t offered = 0, hidden = 0;
@@ -314,6 +341,8 @@ static void TestMaterialGraph()
         std::ofstream graphsFile(std::string(dump) + "/MaterialGraphs.slang");
         graphsFile << CustomLitShaders::GenerateGraphDispatcher({ "Graphs/Panned.nmatgraph", "Graphs/Append.nmatgraph" },
                                                                 { { "Graphs/Panned.nmatgraph", program.Code }, { "Graphs/Append.nmatgraph", appendProgram.Code } });
+        std::ofstream maskFile(std::string(dump) + "/MaterialGraphsMask.slang");
+        maskFile << CustomLitShaders::GenerateGraphDispatcher({ "Graphs/Leaves.nmatgraph" }, { { "Graphs/Leaves.nmatgraph", maskProgram.Code } });
     }
 }
 

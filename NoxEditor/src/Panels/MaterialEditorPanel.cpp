@@ -525,6 +525,9 @@ namespace Nox
                     ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.3f, 1.0f), "%s", renderer->GetCustomLitStatus().Message.c_str());
                 else if (built)
                     ImGui::TextDisabled("Built: %s computes the surface.", graphLabel.c_str());
+                // Opacity Mask works as in Unreal: only on a Masked material (its pixels below Opacity Mask Clip Value are not drawn).
+                if (program.Valid && (program.Outputs & MaterialGraphOutputOpacityMask) != 0 && data.Mode != AlphaMode::Mask)
+                    ImGui::TextColored(warning, "The graph connects Opacity Mask: set Blend Mode to Masked (above) for it to cut the surface.");
                 else
                     ImGui::TextColored(warning, "Not built yet (the material keeps its own values): save the graph.");
                 ImGui::PopTextWrapPos();

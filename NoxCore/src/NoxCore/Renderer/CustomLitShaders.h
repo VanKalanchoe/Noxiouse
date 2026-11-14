@@ -54,6 +54,9 @@ namespace Nox
         std::filesystem::path CheckSourcePath();    // CustomLitCheck.slang
         // The G-buffer resolve compiled with the material graphs (GBufferMaterial.slang with NOX_MATERIAL_GRAPH).
         std::filesystem::path GBufferSourcePath();  // GBufferMaterialGraph.slang
+        // The visibility buffer and the shadow maps' depth with the material graphs (VisibilityBuffer.slang with NOX_MATERIAL_GRAPH):
+        // a Masked material's Opacity Mask.
+        std::filesystem::path VisibilitySourcePath(); // VisibilityBufferMaterialGraph.slang
 
         // The generated file's text for these Material Shaders, `paths[slot]` naming each one's slot (a path with no source here: its
         // case left out, it lights nothing): CustomLitShaders.slang.

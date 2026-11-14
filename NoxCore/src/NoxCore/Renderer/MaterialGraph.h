@@ -35,6 +35,9 @@ namespace Nox
         MaterialGraphOutputEmissive = 1u << 4,
         MaterialGraphOutputOcclusion = 1u << 5,
         MaterialGraphOutputOpacity = 1u << 6,
+        // Opacity Mask (Unreal's: a Masked material's pixels below its Opacity Mask Clip Value are not drawn): its own function,
+        // opacity_mask(), evaluated by the passes that test the mask (the visibility buffer, the shadow maps, the forward shader).
+        MaterialGraphOutputOpacityMask = 1u << 7,
     };
 
     // A value a material (.nmat) may override: a Scalar / Vector Parameter node's, or a Texture Sample's with a parameter name. Texture
@@ -53,7 +56,9 @@ namespace Nox
     {
         bool Valid = false;
         std::string Error;  // why not (which node and what), for the editor and the log
-        std::string Code;   // `static const uint Outputs = ...;` and `void surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)`
+        // `static const uint Outputs = ...;`, `void surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)` and
+        // `float opacity_mask(MaterialGraphInputs i)` (only the nodes feeding the Opacity Mask pin; 1 when it is not connected).
+        std::string Code;
         std::vector<MaterialGraphParameter> Parameters;
         uint32_t ParameterSlots = 0;
         uint32_t TextureSlots = 0;

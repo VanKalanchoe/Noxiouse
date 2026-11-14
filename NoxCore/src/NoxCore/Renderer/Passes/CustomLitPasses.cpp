@@ -52,6 +52,21 @@ namespace Nox
         return m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
+    std::unique_ptr<NRI::Pipeline> Renderer::buildMaterialGraphVisibilityPipeline(bool forceCompile, bool shadowDepth)
+    {
+        // As createVisibilityPipeline / createShadowMapPipelines' mask pipeline, from the generated source with the graphs.
+        const std::string source = CustomLitShaders::VisibilitySourcePath().generic_string();
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.buildNow = true;
+        if (!shadowDepth)
+            desc.colorFormats = { NRI::ImageFormat::R32G32_UINT };
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = source });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = shadowDepth ? "depthMaskFragMain" : "fragMain", .sourcePath = source });
+        return m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
     bool Renderer::createCustomLitPipelines(bool forceCompile)
     {
         // All here and now (a packaged game's start from the shipped binaries, an engine shader's hot reload), those the project needs:
@@ -65,10 +80,14 @@ namespace Nox
             std::unique_ptr<NRI::Pipeline> deferred = shaders ? buildCustomLitDeferredPipeline(forceCompile) : nullptr;
             std::unique_ptr<NRI::Pipeline> gbuffer = graphs ? buildMaterialGraphGBufferPipeline(forceCompile, true) : nullptr;
             std::unique_ptr<NRI::Pipeline> gbufferNoVelocity = graphs ? buildMaterialGraphGBufferPipeline(forceCompile, false) : nullptr;
+            std::unique_ptr<NRI::Pipeline> visibility = graphs ? buildMaterialGraphVisibilityPipeline(forceCompile, false) : nullptr;
+            std::unique_ptr<NRI::Pipeline> shadowDepthMask = graphs ? buildMaterialGraphVisibilityPipeline(forceCompile, true) : nullptr;
             std::unique_ptr<NRI::Pipeline> forward = shaders || graphs ? buildCustomLitForwardPipeline(forceCompile) : nullptr;
             m_customLitPipeline = std::move(deferred);
             m_gbufferGraphPipeline = std::move(gbuffer);
             m_gbufferGraphPipelineNoVelocity = std::move(gbufferNoVelocity);
+            m_visibilityGraphPipeline = std::move(visibility);
+            m_shadowDepthMaskGraphPipeline = std::move(shadowDepthMask);
             m_transparentLitCustomPipeline = std::move(forward);
         }
         catch (const std::exception& error)
@@ -80,6 +99,8 @@ namespace Nox
             m_customLitPipeline.reset();
             m_gbufferGraphPipeline.reset();
             m_gbufferGraphPipelineNoVelocity.reset();
+            m_visibilityGraphPipeline.reset();
+            m_shadowDepthMaskGraphPipeline.reset();
             m_transparentLitCustomPipeline.reset();
             m_customLitStatus.Ready = false;
             m_customLitStatus.GraphsReady = false;
@@ -145,6 +166,8 @@ namespace Nox
                 m_transparentLitCustomPipeline.reset();
                 m_gbufferGraphPipeline.reset();
                 m_gbufferGraphPipelineNoVelocity.reset();
+                m_visibilityGraphPipeline.reset();
+                m_shadowDepthMaskGraphPipeline.reset();
             }
             m_customLitPaths = paths;
             m_materialGraphPaths = graphPaths;
@@ -206,9 +229,14 @@ namespace Nox
                         return;
                     std::unique_ptr<NRI::Pipeline> gbuffer = buildMaterialGraphGBufferPipeline(false, true);
                     std::unique_ptr<NRI::Pipeline> gbufferNoVelocity = buildMaterialGraphGBufferPipeline(false, false);
+                    // The Masked pipelines with the graphs' Opacity Mask, swapped in with the G-buffer resolve's (one set of slots).
+                    std::unique_ptr<NRI::Pipeline> visibility = buildMaterialGraphVisibilityPipeline(false, false);
+                    std::unique_ptr<NRI::Pipeline> shadowDepthMask = buildMaterialGraphVisibilityPipeline(false, true);
                     std::lock_guard lock(build->Mutex);
                     build->GBuffer = std::move(gbuffer);
                     build->GBufferNoVelocity = std::move(gbufferNoVelocity);
+                    build->Visibility = std::move(visibility);
+                    build->ShadowDepthMask = std::move(shadowDepthMask);
                     build->GBufferDone = true;
                 }
                 if (shaderCount > 0)
@@ -244,7 +272,7 @@ namespace Nox
         if (!m_customLitBuild)
             return;
         CustomLitBuild& build = *m_customLitBuild;
-        std::unique_ptr<NRI::Pipeline> deferred, forward, gbuffer, gbufferNoVelocity;
+        std::unique_ptr<NRI::Pipeline> deferred, forward, gbuffer, gbufferNoVelocity, visibility, shadowDepthMask;
         bool failed, finished;
         std::string error;
         {
@@ -253,6 +281,8 @@ namespace Nox
             forward = std::move(build.Forward);
             gbuffer = std::move(build.GBuffer);
             gbufferNoVelocity = std::move(build.GBufferNoVelocity);
+            visibility = std::move(build.Visibility);
+            shadowDepthMask = std::move(build.ShadowDepthMask);
             failed = build.Failed;
             finished = build.Failed || build.ForwardDone;
             error = build.Error;
@@ -266,6 +296,8 @@ namespace Nox
                 // leaves an unknown slot's material with its own values until its own build is done).
                 m_gbufferGraphPipeline = std::move(gbuffer);
                 m_gbufferGraphPipelineNoVelocity = std::move(gbufferNoVelocity);
+                m_visibilityGraphPipeline = std::move(visibility);
+                m_shadowDepthMaskGraphPipeline = std::move(shadowDepthMask);
                 m_materialGraphPaths = build.GraphPaths;
                 m_materialGraphPrograms = build.GraphPrograms;
                 m_customLitStatus.GraphCount = build.GraphCount;
@@ -312,6 +344,8 @@ namespace Nox
                 m_device->waitIdle();
                 m_gbufferGraphPipeline.reset();
                 m_gbufferGraphPipelineNoVelocity.reset();
+                m_visibilityGraphPipeline.reset();
+                m_shadowDepthMaskGraphPipeline.reset();
                 m_materialGraphPaths = build.GraphPaths;
                 m_materialGraphPrograms.clear();
                 m_customLitStatus.GraphCount = 0;
@@ -380,7 +414,8 @@ namespace Nox
         m_customLitStatus.GraphCount = m_materialGraphPrograms.size();
         const bool sourcesShipped = std::filesystem::exists(CustomLitShaders::ForwardSourcePath()) &&
                                     (shaderCount == 0 || std::filesystem::exists(CustomLitShaders::DeferredSourcePath())) &&
-                                    (m_customLitStatus.GraphCount == 0 || std::filesystem::exists(CustomLitShaders::GBufferSourcePath()));
+                                    (m_customLitStatus.GraphCount == 0 || (std::filesystem::exists(CustomLitShaders::GBufferSourcePath()) &&
+                                                                           std::filesystem::exists(CustomLitShaders::VisibilitySourcePath())));
         if ((shaderCount > 0 || m_customLitStatus.GraphCount > 0) && sourcesShipped)
         {
             m_device->waitIdle();

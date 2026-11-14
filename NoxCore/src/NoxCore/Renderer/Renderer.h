@@ -1308,11 +1308,24 @@ namespace Nox
         // The G-buffer resolve compiled with the material graphs (CustomLitShaders::GBufferSourcePath; any thread; throws when it does
         // not compile).
         std::unique_ptr<NRI::Pipeline> buildMaterialGraphGBufferPipeline(bool forceCompile, bool writeVelocity);
+        // The visibility buffer's and the shadow maps' Masked pipelines with the graphs' Opacity Mask (CustomLitShaders::VisibilitySourcePath).
+        std::unique_ptr<NRI::Pipeline> buildMaterialGraphVisibilityPipeline(bool forceCompile, bool shadowDepth);
         void pollCustomLitBuild();    // main thread, each frame: a finished build's pipelines swapped in
         void waitForCustomLitBuild();
         // The forward shader for lit surfaces: its Custom Lit variant while the project has Material Shaders (it shades every other
         // material as the plain one does), else the plain one.
         NRI::Pipeline* forwardLitPipeline() const { return m_transparentLitCustomPipeline ? m_transparentLitCustomPipeline.get() : m_transparentLitPipeline.get(); }
+        // The Masked buckets' visibility / shadow depth pipeline: the material graph variant (a graph's Opacity Mask) while a material has
+        // a graph and it is built, else the plain one.
+        NRI::Pipeline* visibilityMaskPipeline() const
+        {
+            return m_visibilityGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0 ? m_visibilityGraphPipeline.get() : m_visibilityPipeline.get();
+        }
+        NRI::Pipeline* shadowDepthMaskPipeline() const
+        {
+            return m_shadowDepthMaskGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0 ? m_shadowDepthMaskGraphPipeline.get()
+                                                                                              : m_shadowDepthMaskPipeline.get();
+        }
         void addSceneOutlinePass();
         // Reflection probes: the probe table of this frame and at most one probe's capture (six faces, assembled, prefiltered); after
         // Compile the capture faces' uniforms.
@@ -1716,6 +1729,8 @@ namespace Nox
             // The material graphs' variant of the G-buffer resolve (both pipelines: with and without motion vectors).
             std::unique_ptr<NRI::Pipeline> GBuffer;
             std::unique_ptr<NRI::Pipeline> GBufferNoVelocity;
+            std::unique_ptr<NRI::Pipeline> Visibility;
+            std::unique_ptr<NRI::Pipeline> ShadowDepthMask;
             bool GBufferDone = false;
             std::vector<std::string> GraphPaths;
             std::unordered_map<std::string, MaterialGraphProgram> GraphPrograms;
@@ -1733,6 +1748,8 @@ namespace Nox
         // materials are packed with -- all three as the variant in use has them.
         std::unique_ptr<NRI::Pipeline> m_gbufferGraphPipeline;
         std::unique_ptr<NRI::Pipeline> m_gbufferGraphPipelineNoVelocity;
+        std::unique_ptr<NRI::Pipeline> m_visibilityGraphPipeline;        // (Masked buckets of the visibility pass)
+        std::unique_ptr<NRI::Pipeline> m_shadowDepthMaskGraphPipeline;   // (Masked / unlit buckets of the shadow maps)
         std::vector<std::string> m_materialGraphPaths;          // slot -> graph path ("": none)
         std::vector<std::string> m_materialGraphRequestedPaths; // as the latest build request gave them (the next one keeps these slots)
         std::unordered_map<std::string, MaterialGraphProgram> m_materialGraphPrograms;

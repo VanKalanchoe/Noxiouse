@@ -574,8 +574,8 @@ namespace Nox
                     cursor.taskFlags |= shaderio::MESHLET_COUNT_TRIANGLES;
                     drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
                     drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_visibilityPipeline, NRI::CullMode::None, true, false);
-                    drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
-                    drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_visibilityPipeline, NRI::CullMode::None, true, false);
+                    drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *visibilityMaskPipeline(), NRI::CullMode::Back, true, false);
+                    drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *visibilityMaskPipeline(), NRI::CullMode::None, true, false);
                 }
             });
     }
@@ -690,8 +690,8 @@ namespace Nox
                 cursor.taskFlags |= shaderio::MESHLET_COUNT_TRIANGLES;
                 drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
                 drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_visibilityPipeline, NRI::CullMode::None, true, false);
-                drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_visibilityPipeline, NRI::CullMode::Back, true, false);
-                drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_visibilityPipeline, NRI::CullMode::None, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *visibilityMaskPipeline(), NRI::CullMode::Back, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *visibilityMaskPipeline(), NRI::CullMode::None, true, false);
             });
     }
 

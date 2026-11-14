@@ -252,6 +252,7 @@ STATIC_CONST uint32_t MaterialGraphOutputNormal = 1u << 3;
 STATIC_CONST uint32_t MaterialGraphOutputEmissive = 1u << 4;
 STATIC_CONST uint32_t MaterialGraphOutputOcclusion = 1u << 5;
 STATIC_CONST uint32_t MaterialGraphOutputOpacity = 1u << 6;
+STATIC_CONST uint32_t MaterialGraphOutputOpacityMask = 1u << 7; // its own function (material_graph_opacity_mask): a Masked material's alpha test
 
 // GpuMaterial::shadingModel (MaterialShadingModel, DataTypes.h).
 STATIC_CONST uint32_t ShadingModelDefaultLit = 0u;

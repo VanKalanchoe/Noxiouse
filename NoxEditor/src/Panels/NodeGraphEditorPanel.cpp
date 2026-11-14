@@ -352,9 +352,10 @@ namespace Nox
             ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "Does not compile: %s", program.Error.c_str());
             return;
         }
-        static constexpr const char* outputNames[] = { "Base Color", "Metallic", "Roughness", "Normal", "Emissive", "Ambient Occlusion", "Opacity" };
+        static constexpr const char* outputNames[] = { "Base Color", "Metallic", "Roughness", "Normal", "Emissive", "Ambient Occlusion", "Opacity",
+                                                       "Opacity Mask" };
         std::string outputs;
-        for (uint32_t bit = 0; bit < 7; ++bit)
+        for (uint32_t bit = 0; bit < 8; ++bit)
         {
             if ((program.Outputs & (1u << bit)) != 0)
                 outputs += std::string(outputs.empty() ? "" : ", ") + outputNames[bit];

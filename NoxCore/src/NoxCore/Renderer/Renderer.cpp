@@ -426,7 +426,8 @@ namespace Nox
         watchShader("assets/shaders/Material_TransparentLit_Mesh.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); createAVBOITPipelines(true); });
         // The Custom Lit and material graph pipelines include the deferred lighting, the forward shader and the G-buffer resolve
         // (CustomLitShaders.h): built again with them.
-        for (const char* shader : { "CustomLit", "Material_TransparentLit_Mesh", "DeferredLighting", "PBRLighting", "GBufferMaterial", "MaterialGraph" })
+        for (const char* shader : { "CustomLit", "Material_TransparentLit_Mesh", "DeferredLighting", "PBRLighting", "GBufferMaterial", "MaterialGraph",
+                                    "VisibilityBuffer" })
             watchShader(std::string("assets/shaders/") + shader + ".slang", "CustomLit", [this]()
             {
                 if ((m_customLitStatus.ShaderCount > 0 || m_customLitStatus.GraphCount > 0) && m_shaderCompiler->canCompile() &&

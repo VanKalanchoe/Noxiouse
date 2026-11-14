@@ -579,7 +579,7 @@ window.NOX_FILE_DATABASE = [
         ["ClusterIndices.slang", "Expands triangles from the finest resident Cluster DAG cut into 32-bit indices for BLAS builds."],
         ["Material_PBR_MeshTask.slang", "Shared task shader for all meshlet pipelines: Cluster LOD cut selection and meshlet culling."],
         ["Material_PBR_Mesh.slang", "Shared mesh stage for all forward pipelines (its fragMain is unused)."],
-        ["VisibilityBuffer.slang", "Primary deferred rasterizer: writes 64-bit visibility pair, entityID, and 2D velocity."],
+        ["VisibilityBuffer.slang", "Primary deferred rasterizer: writes the visibility pair (instance, meshlet + primitive) with the Masked alpha test; the shadow maps' depth; with NOX_MATERIAL_GRAPH (generated VisibilityBufferMaterialGraph.slang) a material graph's Opacity Mask."],
         ["GBufferMaterial.slang", "Fullscreen Visibility Buffer resolve pass: ray-diff barycentrics, mip/VT feedback, 8 MRTs."],
         ["Material_Unlit_Mesh.slang", "Forward fragment shader for KHR_materials_unlit meshes (opaque/blend and WBOIT)."],
         ["Material_TransparentLit_Mesh.slang", "Forward PBR glass shader: inline RT shadows, multi-bounce volume refraction, dispersion."],

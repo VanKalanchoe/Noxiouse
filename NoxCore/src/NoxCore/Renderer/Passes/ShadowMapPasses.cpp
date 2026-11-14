@@ -393,10 +393,10 @@ namespace Nox
                 // Both faces of everything the RT shadow rays hit (ShadowMask.slang): opaque, masked (alpha tested), unlit.
                 drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_shadowDepthPipeline, NRI::CullMode::None, true, false);
                 drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_shadowDepthPipeline, NRI::CullMode::None, true, false);
-                drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
-                drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
-                drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
-                drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
 
                 cmd.setDepthBiasEnable(false);
                 cmd.setDepthClampEnable(false);
@@ -795,10 +795,10 @@ namespace Nox
                         cursor.references.matrixReference = m_localShadowViewUniforms[frameIndex][view]->getDeviceAddress();
                         drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_shadowDepthPipeline, NRI::CullMode::None, true, false);
                         drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_shadowDepthPipeline, NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *m_shadowDepthMaskPipeline, NRI::CullMode::None, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
                     }
                 }
                 cmd.setDepthBiasEnable(false);

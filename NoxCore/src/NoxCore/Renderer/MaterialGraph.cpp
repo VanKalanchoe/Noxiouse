@@ -80,6 +80,9 @@ namespace Nox
             uint32_t TextureSlots = 0;
             uint32_t Outputs = 0;
             std::string Error;
+            // Which function is being generated: surface() (every Material Output pin but Opacity Mask) or opacity_mask() (that pin
+            // alone; the Material Output then writes `return`).
+            bool MaskPass = false;
 
             // A value into named locals (its derivatives too), so what reads it twice computes it once.
             Value Store(const Value& value)
@@ -661,9 +664,22 @@ namespace Nox
         void RegisterOutput()
         {
             Register("Material Output", "Output",
-                     { V("Base Color"), V("Metallic"), V("Roughness"), V("Normal"), V("Emissive"), V("Ambient Occlusion"), V("Opacity") }, {}, {},
+                     { V("Base Color"), V("Metallic"), V("Roughness"), V("Normal"), V("Emissive"), V("Ambient Occlusion"), V("Opacity"),
+                       V("Opacity Mask") }, {}, {},
                      [](EmitArgs& args)
                      {
+                         constexpr size_t maskPin = 7;
+                         if (args.Ctx.MaskPass)
+                         {
+                             if (args.Connected.size() > maskPin && args.Connected[maskPin])
+                             {
+                                 args.Ctx.Body += "    return saturate(" + Convert(args.In[maskPin], 1).Code + ");\n";
+                                 args.Ctx.Outputs |= MaterialGraphOutputOpacityMask;
+                             }
+                             else
+                                 args.Ctx.Body += "    return 1.0;\n";
+                             return true;
+                         }
                          struct Pin { const char* Field; int Components; uint32_t Bit; const char* Before; const char* After; };
                          const Pin pins[] = {
                              { "baseColor", 3, MaterialGraphOutputBaseColor, "max(", ", float3(0.0))" },
@@ -736,23 +752,40 @@ namespace Nox
             return program;
         }
 
-        // What the output needs (an unconnected node computes nothing, and its errors do not count).
-        std::vector<bool> needed(compiled.Nodes.size(), false);
-        std::vector<uint32_t> stack{ compiled.OutputNodeIndex };
-        while (!stack.empty())
+        // Two functions: surface() from what every Material Output pin but Opacity Mask needs, opacity_mask() from what that pin needs
+        // (the visibility and shadow passes run it alone). An unconnected node computes nothing, and its errors do not count. The
+        // second pass starts from the first's parameters, so a parameter both read has one slot.
+        constexpr uint32_t kMaskPin = 7;
+        auto neededFor = [&](bool mask)
         {
-            const uint32_t index = stack.back();
-            stack.pop_back();
-            if (needed[index])
-                continue;
-            needed[index] = true;
-            for (const CompiledPin& pin : compiled.Nodes[index].Inputs)
-                if (pin.Node != kInvalidGraphIndex)
-                    stack.push_back(pin.Node);
-        }
+            std::vector<bool> needed(compiled.Nodes.size(), false);
+            std::vector<uint32_t> stack;
+            needed[compiled.OutputNodeIndex] = true;
+            const std::vector<CompiledPin>& outputPins = outputNode.Inputs;
+            for (uint32_t pin = 0; pin < outputPins.size(); ++pin)
+                if ((pin == kMaskPin) == mask && outputPins[pin].Node != kInvalidGraphIndex)
+                    stack.push_back(outputPins[pin].Node);
+            while (!stack.empty())
+            {
+                const uint32_t index = stack.back();
+                stack.pop_back();
+                if (needed[index])
+                    continue;
+                needed[index] = true;
+                for (const CompiledPin& pin : compiled.Nodes[index].Inputs)
+                    if (pin.Node != kInvalidGraphIndex)
+                        stack.push_back(pin.Node);
+            }
+            return needed;
+        };
 
         Context context;
+        Context maskContext;
+        maskContext.MaskPass = true;
+        auto generate = [&](Context& ctx, const std::vector<bool>& needed) -> bool
+        {
         std::vector<std::vector<Value>> outputs(compiled.Nodes.size());
+        Context& context = ctx;
         for (uint32_t index = 0; index < compiled.Nodes.size(); ++index)
         {
             if (!needed[index])
@@ -762,7 +795,7 @@ namespace Nox
             if (emitter == Emitters().end())
             {
                 program.Error = std::format("node {} ({}) is not a material node", node.SourceNodeId, node.Type->TypeName);
-                return program;
+                return false;
             }
             const std::vector<NodePinDesc> inputPins = ResolveNodePins(*node.Type, node.Properties).Inputs;
             std::vector<Value> in(inputPins.size());
@@ -770,7 +803,8 @@ namespace Nox
             for (size_t pin = 0; pin < inputPins.size(); ++pin)
             {
                 const CompiledPin source = pin < node.Inputs.size() ? node.Inputs[pin] : CompiledPin{};
-                if (source.Node != kInvalidGraphIndex)
+                // (a source this pass does not generate -- the Material Output's pins of the other function -- reads as unconnected)
+                if (source.Node != kInvalidGraphIndex && needed[source.Node])
                 {
                     const uint32_t slot = source.OutputSlot; // (the source node's output pin)
                     in[pin] = outputs[source.Node].at(slot);
@@ -785,21 +819,32 @@ namespace Nox
             {
                 program.Error = std::format("node {} ({}): {}", node.SourceNodeId, node.Type->TypeName,
                                             context.Error.empty() ? std::string("could not be generated") : context.Error);
-                return program;
+                return false;
             }
             // Every output a node gives into a local: a value read by several nodes is computed once.
             for (Value& value : outputs[index])
                 if (!value.Code.empty() && value.Code.find_first_of("(+-*/") != std::string::npos)
                     value = context.Store(value);
         }
+        return true;
+        };
+
+        if (!generate(context, neededFor(false)))
+            return program;
+        maskContext.Parameters = context.Parameters;
+        maskContext.ParameterSlots = context.ParameterSlots;
+        maskContext.TextureSlots = context.TextureSlots;
+        if (!generate(maskContext, neededFor(true)))
+            return program;
 
         program.Valid = true;
-        program.Parameters = std::move(context.Parameters);
-        program.ParameterSlots = context.ParameterSlots;
-        program.TextureSlots = context.TextureSlots;
-        program.Outputs = context.Outputs;
-        program.Code = std::format("static const uint Outputs = {}u;\n\nvoid surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)\n{{\n{}}}\n",
-                                   context.Outputs, context.Body);
+        program.Parameters = std::move(maskContext.Parameters);
+        program.ParameterSlots = maskContext.ParameterSlots;
+        program.TextureSlots = maskContext.TextureSlots;
+        program.Outputs = context.Outputs | maskContext.Outputs;
+        program.Code = std::format("static const uint Outputs = {}u;\n\nvoid surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)\n{{\n{}}}\n\n"
+                                   "float opacity_mask(MaterialGraphInputs i)\n{{\n{}}}\n",
+                                   program.Outputs, context.Body, maskContext.Body);
         return program;
     }
 }
