@@ -587,12 +587,17 @@ namespace Nox
             // Texture Sample (Unreal's TextureSample / TextureSampleParameter2D): its texture, or a parameter a material overrides when
             // it has a Name; UV unconnected: the mesh's first UV set. The mip from the UV's derivatives (SampleGrad).
             Register("Texture Sample", "Textures", { V("UV") }, { V("RGB"), V("R"), V("G"), V("B"), V("A"), V("RGBA") },
-                     { { "Texture", uint64_t(0) }, { "Parameter", std::string() }, { "Normal Map", false } },
+                     // "Parameter Name" (Unreal's label), not "Parameter": that property name marks a node reading a graph variable
+                     // (kParameterReferenceProperty), and the node graph editor's Add menu offered the node only as "Get <variable>"
+                     // -- material graphs have none, so Texture Sample was missing from the menu (the user's test).
+                     { { "Texture", uint64_t(0) }, { "Parameter Name", std::string() }, { "Normal Map", false } },
                      [](EmitArgs& args)
                      {
                          const NodeGraphValue* textureValue = Property(args.Node, "Texture");
                          const uint64_t* texture = textureValue ? std::get_if<uint64_t>(textureValue) : nullptr;
-                         std::string name = StringProperty(args.Node, "Parameter");
+                         std::string name = StringProperty(args.Node, "Parameter Name");
+                         if (name.empty())
+                             name = StringProperty(args.Node, kParameterReferenceProperty); // (a graph saved before the rename)
                          if (name.empty())
                              name = "#" + std::to_string(args.NodeId); // (its own slot, not overridable)
                          const MaterialGraphParameter* parameter = args.Ctx.Parameter(name, MaterialGraphParameter::Kind::Texture, glm::vec4(0.0f), texture ? *texture : 0);

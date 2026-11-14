@@ -4,6 +4,8 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Renderer/CustomLitShaders.h"
 #include "NoxCore/Renderer/MaterialGraph.h"
+#include "NoxCore/NodeGraph/NodeType.h"
+#include <algorithm>
 #include <fstream>
 
 #include <cstdio>
@@ -232,7 +234,7 @@ static void TestMaterialGraph()
     const uint32_t output = graph.OutputNode;
     const uint32_t uv = node(graph, "Texture Coordinate", { { "Index", int32_t(0) }, { "Tiling", glm::vec2(4.0f, 4.0f) } });
     const uint32_t panner = node(graph, "Panner", { { "Speed", glm::vec2(0.1f, 0.0f) } });
-    const uint32_t texture = node(graph, "Texture Sample", { { "Texture", uint64_t(1234) }, { "Parameter", std::string("Albedo") }, { "Normal Map", false } });
+    const uint32_t texture = node(graph, "Texture Sample", { { "Texture", uint64_t(1234) }, { "Parameter Name", std::string("Albedo") }, { "Normal Map", false } });
     const uint32_t tint = node(graph, "Vector Parameter", { { "Name", std::string("Tint") }, { "Default", glm::vec4(1.0f, 0.5f, 0.25f, 1.0f) } });
     const uint32_t multiply = node(graph, "Multiply");
     const uint32_t rough = node(graph, "Scalar Parameter", { { "Name", std::string("Roughness") }, { "Default", 0.6f } });
@@ -283,6 +285,19 @@ static void TestMaterialGraph()
     const MaterialGraphProgram sharedProgram = CompileMaterialGraph(shared);
     CHECK(sharedProgram.Valid && sharedProgram.ParameterSlots == 1 && sharedProgram.Parameters[0].Default.x == 1.0f,
           "two Scalar Parameters named K share one slot (the first's default)");
+    // Every node is offered in the node graph editor's Add menu: a "Parameter" property marks a node reading a graph variable, which the
+    // menu lists only as "Get <variable>" -- Texture Sample had one and was missing from the menu (the user's test).
+    size_t offered = 0, hidden = 0;
+    for (const NodeTypeDesc& type : NodeTypeRegistry::All())
+    {
+        if (type.Domain != kMaterialGraphDomain)
+            continue;
+        const bool readsVariable = std::any_of(type.DefaultProperties.begin(), type.DefaultProperties.end(),
+                                               [](const auto& property) { return property.first == kParameterReferenceProperty; });
+        (readsVariable ? hidden : offered) += 1;
+    }
+    CHECK(hidden == 0 && offered >= 45, "every material graph node is in the Add menu (none marked as a variable reader): {} offered, {} hidden",
+          offered, hidden);
     CHECK(CompileMaterialGraph(CreateEmptyMaterialGraph()).Valid && CompileMaterialGraph(CreateEmptyMaterialGraph()).Outputs == 0,
           "an empty graph compiles and writes nothing (the material as it is)");
 

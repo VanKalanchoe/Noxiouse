@@ -4,6 +4,12 @@
 - Build it the Unreal Engine 5 way: data-verified, no hacks, never half-baked. Say plainly what is tested and what is not.
 - Test guides: very explicit, step by step, and **every step names the program it runs in** -- NoxRuntime, NoxEditor or NoxNetTest
   (server and client are both NoxRuntime; scripts are rebuilt by opening the project in NoxEditor once).
+- **Never shorthand in a guide** (the user got lost at "Texture Coordinate -> Panner -> Texture Sample"): one action per line, the
+  exact menu path / button label, how to do it (e.g. graph editor: right-click the empty canvas > type in *Search nodes...* > click
+  the node; inputs are pins on a node's left, outputs on its right; drag from an output pin to an input pin to connect), the exact
+  field and pin names as the UI shows them, the values to type, and what the user should see after. **Check every name in the code
+  before writing it** (node type names, pin names, property labels, menu items) -- and that the thing is really reachable in the UI.
+  Say what each node / setting does in a few words.
 - The user writes English (sometimes German); answer in English.
 - **Every new feature also goes into the docs site** in the same commit (the user asked for this always): the user manual
   `docs-site/assets/manual-pages.js` (how to use it, step by step, naming the program), the technical pages
@@ -41,7 +47,7 @@ with them; reference them by handle or path, and say that the files live only on
   `--mcp-port` 8770, `--mcp-access` write by default -- `quit` needs execute). Editor MCP port 8765; multiplayer Play's games with
   "Players' MCP servers" use editor port + 1 (dedicated server) / + n (player n). One token per project in `<Project>/.nox/mcp-token`.
   When the user tests runtime features, remind them to **build NoxRuntime too** (building NoxEditor does not). Offline tests:
-  `Tests/McpTests.inl` + `Tests/ToolsTest.cpp` in NoxToolsTest (203 checks).
+  `Tests/McpTests.inl` + `Tests/ToolsTest.cpp` in NoxToolsTest (204 checks).
 - Stylized rendering / material graph plan: `docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md` (step 1 Toon and step 2
   outlines + Post Process Volume built and tested; step 3 Custom Lit with hand-written Material Shaders built; step 4a material graph built (`.nmatgraph`, `Renderer/MaterialGraph.h`, `MaterialGraph.slang`; graphs in the generated `MaterialGraphs.slang`
   (Material Shaders in `CustomLitShaders.slang`; pipelines cached by source hash, not force-compiled), the G-buffer resolve's variant `GBufferMaterialGraph.slang` + the forward variant; `GpuMaterial::graphSlot` /
