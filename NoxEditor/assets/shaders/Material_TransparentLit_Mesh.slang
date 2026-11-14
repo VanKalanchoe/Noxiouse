@@ -23,6 +23,7 @@
 #include "DDGICommon.slang"
 #include "PBRLighting.slang"
 #include "MaterialLobes.slang"
+#include "ToonShading.slang"
 #include "MipFeedback.slang"
 #include "RayHitShading.slang"
 #include "HeightFog.slang"
@@ -473,7 +474,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     GBufferLobes lobes = gbuffer_default_lobes();
     float3 anisotropicT = float3(0.0);
     GpuMaterial* gpuMaterial = instances.material(vertIn.drawID);
-    if (gpuMaterial.lobes != 0u && instance.unlit == 0 && instance.workflow == PBR_WORKFLOW_METALLIC_ROUGHNESS)
+    if (gpuMaterial.lobes != 0u && instance.shadingModel == ShadingModelDefaultLit && instance.workflow == PBR_WORKFLOW_METALLIC_ROUGHNESS)
     {
         const float lodScale = exp2(ubo->textureLodBias); // as SampleMaterialTextureBias reads the base textures
         MaterialSampleCoords coords;
@@ -641,8 +642,14 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             );
 
             float3 lightRadiance = light.color.rgb * light.color.w * attenuation;
-            contribution = hasLobes ? evaluateDirectLightLobes(ubo, pbrInputs, lobeShading, n, v, l, lightRadiance)
-                                    : evaluateDirectLight(pbrInputs, lightRadiance);
+            // A toon surface (ToonShading.slang). Here the light's shadow map is in its attenuation and its shadow ray comes after the
+            // sum (below), so on a transparent toon surface a soft shadow-map edge dims the light instead of being banded with it.
+            if (instance.shadingModel == ShadingModelToon)
+                contribution = toon_direct_light(ubo, toon_settings(gpuMaterial), diffuseColor, baseColor.rgb, metallic, n, v, l, NdotL, 1.0,
+                                                 lightRadiance);
+            else
+                contribution = hasLobes ? evaluateDirectLightLobes(ubo, pbrInputs, lobeShading, n, v, l, lightRadiance)
+                                        : evaluateDirectLight(pbrInputs, lightRadiance);
         }
         directLighting += contribution;
 
@@ -1061,7 +1068,7 @@ FSOutputProbeCapture captureFragMain(VSOutput vertIn, bool isFrontFace : SV_IsFr
     if (instance.emissiveTextureIndex != 0xFFFFFFFF)
         emission *= SampleMaterialTextureBias(ubo, instance.emissiveTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).rgb;
     float3 albedo = baseColor.rgb * (1.0 - metallic);
-    if (instance.unlit != 0)
+    if (instance.shadingModel == ShadingModelUnlit)
     {
         emission = baseColor.rgb;
         albedo = float3(0.0);

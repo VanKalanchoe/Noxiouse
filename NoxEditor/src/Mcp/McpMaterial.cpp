@@ -22,6 +22,10 @@ namespace Nox::Mcp
         {
             return value == AlphaMode::Mask ? "Mask" : value == AlphaMode::Blend ? "Blend" : "Opaque";
         }
+        Json ToJson(MaterialShadingModel value)
+        {
+            return value == MaterialShadingModel::Unlit ? "Unlit" : value == MaterialShadingModel::Toon ? "Toon" : "DefaultLit";
+        }
 
         std::string FromJson(const Json& value, float& out)
         {
@@ -103,6 +107,19 @@ namespace Nox::Mcp
                 return "must be \"Opaque\", \"Mask\" or \"Blend\"";
             return {};
         }
+        std::string FromJson(const Json& value, MaterialShadingModel& out)
+        {
+            const std::string name = value.is_string() ? value.get<std::string>() : std::string();
+            if (name == "DefaultLit" || name == "Default Lit" || name == "Lit")
+                out = MaterialShadingModel::DefaultLit;
+            else if (name == "Unlit")
+                out = MaterialShadingModel::Unlit;
+            else if (name == "Toon")
+                out = MaterialShadingModel::Toon;
+            else
+                return "must be \"DefaultLit\", \"Unlit\" or \"Toon\"";
+            return {};
+        }
 
         struct Field
         {
@@ -151,7 +168,7 @@ namespace Nox::Mcp
                 NOX_MATERIAL_FIELD(Mode),
                 NOX_MATERIAL_FIELD(AlphaMaskCutoff),
                 NOX_MATERIAL_FIELD(DoubleSided),
-                NOX_MATERIAL_FIELD(Unlit),
+                NOX_MATERIAL_FIELD(ShadingModel),
                 NOX_MATERIAL_FIELD(ClearcoatFactor),
                 NOX_MATERIAL_FIELD(ClearcoatTexture),
                 NOX_MATERIAL_FIELD(ClearcoatRoughnessFactor),
@@ -176,6 +193,15 @@ namespace Nox::Mcp
                 NOX_MATERIAL_FIELD(AnisotropyRotation),
                 NOX_MATERIAL_FIELD(AnisotropyTexture),
                 NOX_MATERIAL_FIELD(Dispersion),
+                NOX_MATERIAL_FIELD(ToonBands),
+                NOX_MATERIAL_FIELD(ToonBandSoftness),
+                NOX_MATERIAL_FIELD(ToonRampTexture),
+                NOX_MATERIAL_FIELD(ToonSpecularSize),
+                NOX_MATERIAL_FIELD(ToonSpecularSoftness),
+                NOX_MATERIAL_FIELD(ToonSpecularIntensity),
+                NOX_MATERIAL_FIELD(ToonRimColor),
+                NOX_MATERIAL_FIELD(ToonRimWidth),
+                NOX_MATERIAL_FIELD(ToonRimIntensity),
             };
             return fields;
         }
@@ -242,6 +268,14 @@ namespace Nox::Mcp
                 for (size_t index = 0; index < it.value().size(); ++index)
                     if (std::string problem = ChannelFromJson(it.value()[index], result.UVChannels[index]); !problem.empty())
                         return std::format("'UVChannels/{}' {}", index, problem);
+                continue;
+            }
+            if (it.key() == "Unlit") // (the field before ShadingModel: still accepted)
+            {
+                bool unlit = false;
+                if (std::string problem = FromJson(it.value(), unlit); !problem.empty())
+                    return std::format("'Unlit' {}", problem);
+                result.ShadingModel = unlit ? MaterialShadingModel::Unlit : MaterialShadingModel::DefaultLit;
                 continue;
             }
             const auto& fields = Fields();

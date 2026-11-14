@@ -1,6 +1,7 @@
 #include "shaderIO.h"
 #include "MipFeedback.slang"
 #include "MaterialLobes.slang"
+#include "ToonShading.slang"
 
     struct GBufferPayload
     {
@@ -598,7 +599,7 @@
         GpuMaterial* gpuMaterial = instances.material(instanceSlot);
         GBufferLobes lobes = gbuffer_default_lobes();
         float3 anisotropicT = float3(0.0);
-        if (gpuMaterial.lobes != 0u && instance.unlit == 0)
+        if (gpuMaterial.lobes != 0u && instance.shadingModel == ShadingModelDefaultLit) // (the lobes are Default Lit's)
         {
             MaterialSampleCoords coords;
             coords.material = gpuMaterial;
@@ -687,8 +688,8 @@
         }
         output.normal   = (pushConstant.debugMode == 2) ? float4(rawNormalTex, roughness) : float4(finalNormal, roughness);
 
-        // The lobe bits and unlit (gbuffer_unlit): which lobe targets hold data for this pixel.
-        output.material = float4(roughness, metallic, gbuffer_encode_flags(lobes.flags, instance.unlit != 0),
+        // The lobe bits and the shading model (gbuffer_unlit / gbuffer_toon): which lobe targets hold data for this pixel.
+        output.material = float4(roughness, metallic, gbuffer_encode_flags(lobes.flags, instance.shadingModel),
                                  gbuffer_encode_back_light(instance.doubleSided != 0, instance.diffuseTransmission));
 
         // The coat is over the emission too: what it reflects of the view does not come from below (the spec's coated_emission).
@@ -706,7 +707,8 @@
             const float3 t = anisotropicT - storedNormal * dot(storedNormal, anisotropicT);
             lobes.anisotropyAngle = atan2(dot(t, b0), dot(t, t0));
         }
-        output.lobes = gbuffer_encode_lobes(lobes);
+        // A toon pixel's lobe target carries its toon settings instead (it has no lobes; DeferredLighting reads them by the toon bit).
+        output.lobes = instance.shadingModel == ShadingModelToon ? gbuffer_encode_toon(toon_settings(gpuMaterial)) : gbuffer_encode_lobes(lobes);
         output.specular = gbuffer_encode_specular(lobes);
 
         output.velocity = float2(0.0, 0.0);

@@ -21,7 +21,7 @@ namespace Nox
         RenderBucket SelectRenderBucket(const shaderio::GpuMaterial& material)
         {
             const bool doubleSided = material.doubleSided != 0;
-            const bool unlit = material.unlit != 0;
+            const bool unlit = material.shadingModel == shaderio::ShadingModelUnlit; // (toon: drawn as Default Lit, lit differently)
 
             // A closed, single-sided translucent shape needs its backface culled like the opaque buckets do; otherwise
             // both hemispheres blend on top of each other (meshlets are not depth-sorted), so transparent buckets respect
@@ -105,7 +105,7 @@ namespace Nox
 
         bool SameBucketInputs(const shaderio::GpuMaterial& a, const shaderio::GpuMaterial& b)
         {
-            return a.alphaMode == b.alphaMode && a.unlit == b.unlit && a.doubleSided == b.doubleSided &&
+            return a.alphaMode == b.alphaMode && a.shadingModel == b.shadingModel && a.doubleSided == b.doubleSided &&
                    SelectRenderBucket(a) == SelectRenderBucket(b) && (a.transmissionFactor > 0.0f) == (b.transmissionFactor > 0.0f);
         }
     }

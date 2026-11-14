@@ -542,6 +542,7 @@ window.NOX_FILE_DATABASE = [
     { path: "docs/OpenPBR_Material_Plan_2026.md", category: "Scripts & Docs", type: "Architecture Doc", desc: "Specification for glTF 2.0 / OpenPBR multi-lobe materials." },
     { path: "docs/Virtual_Geometry_Streaming_Plan_2026.md", category: "Scripts & Docs", type: "Architecture Doc", desc: "Design for Nanite Cluster LOD DAG cooker, 128 KB pages, and 64 KB sparse buffers." },
     { path: "docs/Sky_Atmosphere_Cloud_Plan_2026.md", category: "Scripts & Docs", type: "Architecture Doc", desc: "Design for Hillaire sky atmosphere, volumetric clouds, and 3D froxels." },
+    { path: "docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md", category: "Scripts & Docs", type: "Architecture Doc", desc: "Shading models (Toon), outlines, forward custom-lit pass, material graph, Custom Lit, hand-written material shaders." },
     { path: "docs/World_Units_Convention_Plan_2026.md", category: "Scripts & Docs", type: "Architecture Doc", desc: "Specification for 1 unit = 1 cm world units and physics meter conversions." },
     { path: "docs/Perf_Audit_Scene_Rendering_2026-04.md", category: "Scripts & Docs", type: "Architecture Doc", desc: "CPU/GPU scene synchronization and rendering performance audit." }
 ];
@@ -553,6 +554,7 @@ window.NOX_FILE_DATABASE = [
         ["Math.slang", "Slang module common; providing SRGBtoLINEAR."],
         ["MipFeedback.slang", "WaveReadLaneFirst atomic mip and virtual-texture feedback helpers."],
         ["MaterialLobes.slang", "Evaluates glTF 2.0 extension textures for Clearcoat, Sheen, Specular, Iridescence, Anisotropy."],
+        ["ToonShading.slang", "The Toon shading model: banded or ramp diffuse, sharp highlight, rim (deferred and transparent forward)."],
         ["MaterialLobeMath.slang", "Pure BRDF math: anisotropic GGX, Charlie sheen, and Belcour-Barla thin-film iridescence."],
         ["LightSelection.slang", "select_lights: top-4 deterministic lights + 1 weighted RIS sample for O(1) shadow rays."],
         ["SceneGI.slang", "Unified indirect diffuse lookup: Screen-Probe GI -> Cascaded DDGI -> IBL irradiance."],

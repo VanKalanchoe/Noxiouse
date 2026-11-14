@@ -65,6 +65,16 @@ namespace Nox
         Blend  = 2
     };
 
+    // How a material is lit (Unreal's Shading Model; docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md): physically
+    // (Default Lit), not at all (Unlit: its base colour and emissive as they are), or with toon lighting (bands or a ramp, a sharp
+    // highlight, a rim). One byte in the .nmat / cooked layouts, where 0 / 1 were the old Unlit flag.
+    enum class MaterialShadingModel : uint8_t
+    {
+        DefaultLit = 0,
+        Unlit = 1,
+        Toon = 2
+    };
+
     // A texture a material reads: its file (empty: none) and the UV channel it is sampled with (MaterialData::UVChannels).
     struct MaterialTexture
     {
@@ -169,7 +179,8 @@ namespace Nox
         AlphaMode Mode = AlphaMode::Opaque;
         float AlphaMaskCutoff = 0.5f;
         bool DoubleSided = false;
-        bool Unlit = false;
+        MaterialShadingModel ShadingModel = MaterialShadingModel::DefaultLit;
+        bool IsUnlit() const { return ShadingModel == MaterialShadingModel::Unlit; }
 
         // The UV channels the textures read (their Set): by default channels 0 and 1 are UV sets 0 and 1 untransformed.
         MaterialUVChannel UVChannels[MaxMaterialUVChannels] = { MaterialUVChannel{ 0 }, MaterialUVChannel{ 1 }, MaterialUVChannel{ 0 }, MaterialUVChannel{ 0 } };
@@ -206,6 +217,21 @@ namespace Nox
         MaterialTexture AnisotropyTexture;         // RG: direction in tangent space, B: strength
         // Dispersion (KHR_materials_dispersion): 20 / Abbe number, how far refraction splits the colors apart (0: none).
         float Dispersion = 0.0f;
+
+        // The Toon shading model's settings (ShadingModel Toon; ToonShading.slang). Diffuse: the light (times its shadow) in Bands
+        // steps -- 1: lit / unlit, two tones -- with edges ToonBandSoftness wide; a Ramp texture, when set, replaces the bands (read
+        // left to right by the light amount: dark to lit). Highlight: a sharp spot ToonSpecularSize big (0: none). Rim: a band at
+        // grazing angles on the lit side, ToonRimWidth wide, in its colour (ToonRimIntensity 0: none). Stored in .nmat files only
+        // (a cooked mesh's glTF materials are never toon).
+        int32_t ToonBands = 2;
+        float ToonBandSoftness = 0.05f;
+        MaterialTexture ToonRampTexture;           // RGB, sRGB: left = unlit, right = fully lit
+        float ToonSpecularSize = 0.1f;
+        float ToonSpecularSoftness = 0.02f;
+        float ToonSpecularIntensity = 1.0f;
+        glm::vec3 ToonRimColor = glm::vec3(1.0f);
+        float ToonRimWidth = 0.3f;
+        float ToonRimIntensity = 0.0f;
     };
 
     // The lobe textures of a material, with how each is read: sRGB color, or a tangent-space normal map.
@@ -226,6 +252,7 @@ namespace Nox
         { &MaterialData::IridescenceTexture, false, false },
         { &MaterialData::IridescenceThicknessTexture, false, false },
         { &MaterialData::AnisotropyTexture, false, false },
+        { &MaterialData::ToonRampTexture, true, false },
     };
     
     enum class GltfLightType : uint32_t

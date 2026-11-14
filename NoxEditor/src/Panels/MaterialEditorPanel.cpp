@@ -170,6 +170,17 @@ namespace Nox
             ImGui::Text("%s", labelName);
             ImGui::SameLine();
             ImGui::Button((label + "##" + id).c_str(), ImVec2(150.0f, 0.0f));
+            if (!texturePath.empty() && ImGui::BeginPopupContextItem())
+            {
+                if (ImGui::MenuItem("Clear"))
+                {
+                    texturePath.clear();
+                    changed = true;
+                }
+                ImGui::EndPopup();
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Drag a texture here from the Content Browser; right-click to clear it.");
 
             if (ImGui::BeginDragDropTarget())
             {
@@ -200,8 +211,8 @@ namespace Nox
         changed |= ImGui::DragFloat("Normal Strength", &data.NormalScale, 0.01f, 0.0f, 4.0f);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("How strongly the normal map bends the surface (glTF's normal texture scale): 1 as authored, 0 flat.");
-        drawTextureReference("Occlusion Texture", "Occlusion", data.OcclusionTexturePath);
-        changed |= ImGui::SliderFloat("Occlusion Strength", &data.OcclusionStrength, 0.0f, 1.0f);
+        drawTextureReference("Ambient Occlusion Texture", "Occlusion", data.OcclusionTexturePath);
+        changed |= ImGui::SliderFloat("Ambient Occlusion Strength", &data.OcclusionStrength, 0.0f, 1.0f);
         drawTextureReference("Emissive Texture", "Emissive", data.EmissiveTexturePath);
         drawTextureReference("Transmission Texture", "Transmission", data.TransmissionTexturePath);
 
@@ -286,17 +297,57 @@ namespace Nox
             ImGui::TextDisabled("A texture reads the channel its set names (imported from glTF; 0 by default).");
         }
 
-        int alphaMode = static_cast<int>(data.Mode);
-        const char* alphaModes[] = {"Opaque", "Mask", "Blend"};
-        if (ImGui::Combo("Alpha Mode", &alphaMode, alphaModes, 3))
+        // Unreal's names for what the file calls Mode / AlphaMaskCutoff / DoubleSided (glTF's alphaMode / alphaCutoff / doubleSided).
+        int blendMode = static_cast<int>(data.Mode);
+        const char* blendModes[] = { "Opaque", "Masked", "Translucent" };
+        if (ImGui::Combo("Blend Mode", &blendMode, blendModes, 3))
         {
-            data.Mode = static_cast<AlphaMode>(alphaMode);
+            data.Mode = static_cast<AlphaMode>(blendMode);
             changed = true;
         }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Opaque: solid. Masked: pixels below the clip value are cut away (leaves, fences, dissolve) -- still lit like\n"
+                              "opaque surfaces. Translucent: blended by the base colour's alpha (glass, smoke), drawn after the opaque world.");
         if (data.Mode == AlphaMode::Mask)
-            changed |= ImGui::DragFloat("Alpha Cutoff", &data.AlphaMaskCutoff, 0.005f, 0.0f, 1.0f);
-        changed |= ImGui::Checkbox("Double Sided", &data.DoubleSided);
-        changed |= ImGui::Checkbox("Unlit", &data.Unlit);
+            changed |= ImGui::DragFloat("Opacity Mask Clip Value", &data.AlphaMaskCutoff, 0.005f, 0.0f, 1.0f);
+        changed |= ImGui::Checkbox("Two Sided", &data.DoubleSided);
+
+        // How the surface is lit (Unreal's Shading Model; ToonShading.slang for Toon).
+        int shadingModel = static_cast<int>(data.ShadingModel);
+        const char* shadingModels[] = { "Default Lit", "Unlit", "Toon" };
+        if (ImGui::Combo("Shading Model", &shadingModel, shadingModels, 3))
+        {
+            data.ShadingModel = static_cast<MaterialShadingModel>(shadingModel);
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Default Lit: physically based lighting.\n"
+                              "Unlit: the base colour and emissive as they are, no lighting.\n"
+                              "Toon: light in hard bands (or a ramp texture), a sharp highlight, an optional rim light. The ambient light\n"
+                              "and reflections stay as for Default Lit (Roughness 1: no reflections). Ray-traced reflections and the\n"
+                              "path tracer show a toon surface as Default Lit.");
+        if (data.ShadingModel == MaterialShadingModel::Toon)
+        {
+            ImGui::SeparatorText("Toon");
+            changed |= ImGui::SliderInt("Bands", &data.ToonBands, 1, 8);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Light steps between unlit and fully lit: 1 = two tones (lit / shadow), 3 = shadow, mid, lit ...");
+            changed |= ImGui::SliderFloat("Band Softness", &data.ToonBandSoftness, 0.0f, 1.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("How soft each band edge is: 0 = razor sharp, 1 = smooth like Default Lit.");
+            drawTextureReference("Ramp Texture", "ToonRamp", data.ToonRampTexture.Path);
+            ImGui::TextDisabled("(optional: replaces the bands -- left = shadow, right = fully lit)");
+            changed |= ImGui::SliderFloat("Highlight Size", &data.ToonSpecularSize, 0.0f, 1.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("The sharp highlight's size (0: no highlight). White on non-metals, the base colour on metals.");
+            changed |= ImGui::SliderFloat("Highlight Softness", &data.ToonSpecularSoftness, 0.0f, 1.0f);
+            changed |= ImGui::SliderFloat("Highlight Intensity", &data.ToonSpecularIntensity, 0.0f, 8.0f);
+            changed |= ImGui::ColorEdit3("Rim Color", glm::value_ptr(data.ToonRimColor));
+            changed |= ImGui::SliderFloat("Rim Width", &data.ToonRimWidth, 0.0f, 1.0f);
+            changed |= ImGui::SliderFloat("Rim Intensity", &data.ToonRimIntensity, 0.0f, 8.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("A light band along the silhouette, on the side the light reaches (0: none).");
+        }
 
         if (changed)
         {

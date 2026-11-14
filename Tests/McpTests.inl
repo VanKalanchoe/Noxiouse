@@ -594,6 +594,8 @@ static void TestMcpInputPlayer()
 #ifdef NOX_TOOLS_TEST_MCP
 // build_scripts' errors as data (ScriptDiagnostics) and materials as JSON (McpMaterial).
 #include "McpMaterial.h"
+#include "NoxCore/Asset/MaterialSerializer.h"
+#include <fstream>
 #include "ScriptDiagnostics.h"
 
 static void TestMcpAssets()
@@ -656,6 +658,45 @@ static void TestMcpAssets()
     const auto textures = MaterialTexturePaths(material);
     CHECK(textures.size() == 2 && std::any_of(textures.begin(), textures.end(), [](const auto& t) { return t.first == "ClearcoatTexture/Path" && t.second == "Textures/coat.png"; }),
           "the texture paths a material names, with their fields ({})", textures.size());
+
+    // The shading model (Default Lit / Unlit / Toon) and the toon settings: by name in JSON, the old Unlit flag still read, and in .nmat
+    // files ("NMA4"; an "NMA3" file reads with the defaults).
+    MaterialData toon = material;
+    toon.ShadingModel = MaterialShadingModel::Toon;
+    toon.ToonBands = 3;
+    toon.ToonRimIntensity = 1.5f;
+    toon.ToonRampTexture = { "Textures/ramp.png", 0 };
+    const Json toonJson = MaterialToJson(toon);
+    MaterialData toonBack;
+    CHECK(toonJson["ShadingModel"] == "Toon" && toonJson["ToonBands"] == 3 && MaterialFromJson(toonJson, toonBack).empty() &&
+          MaterialToJson(toonBack) == toonJson, "the Toon shading model and its settings as JSON and back");
+    MaterialData unlitAlias;
+    CHECK(MaterialFromJson(Json::parse(R"({ "Unlit": true })"), unlitAlias).empty() && unlitAlias.ShadingModel == MaterialShadingModel::Unlit,
+          "the old 'Unlit': true still sets the Unlit shading model");
+    MaterialData badModel = toon;
+    CHECK(!MaterialFromJson(Json::parse(R"({ "ShadingModel": "Cel" })"), badModel).empty() && badModel.ShadingModel == MaterialShadingModel::Toon,
+          "an unknown shading model: refused");
+    const std::filesystem::path folder = std::filesystem::temp_directory_path() / "nox_material_test";
+    std::filesystem::create_directories(folder);
+    MaterialData fromFile;
+    CHECK(MaterialSerializer::Serialize(folder / "Toon.nmat", toon) && MaterialSerializer::Deserialize(folder / "Toon.nmat", fromFile) &&
+          MaterialToJson(fromFile) == toonJson, "a toon material through a .nmat file: every field back");
+    {
+        // An "NMA3" file (before the shading settings): the same fields up to the lobes, the toon settings at their defaults; its
+        // shading-model byte (the old Unlit flag) is read as before.
+        std::ofstream old(folder / "Old.nmat", std::ios::binary | std::ios::trunc);
+        old.write("NMA3", 4);
+        MaterialData oldUnlit = material;
+        oldUnlit.ShadingModel = MaterialShadingModel::Unlit;
+        MaterialSerializer::WriteFields(old, oldUnlit);
+    }
+    MaterialData oldRead;
+    oldRead.ToonBands = 7;
+    const bool oldOk = MaterialSerializer::Deserialize(folder / "Old.nmat", oldRead);
+    CHECK(oldOk && oldRead.ShadingModel == MaterialShadingModel::Unlit && oldRead.RoughnessFactor == 0.35f && oldRead.ToonBands == 7,
+          "an NMA3 .nmat still loads (Unlit kept, the toon settings untouched)");
+    std::error_code ignored;
+    std::filesystem::remove_all(folder, ignored);
 }
 #endif
 

@@ -12,7 +12,9 @@
 namespace Nox
 {
     // A material's fields, as a .nmat file holds them and a cooked mesh embeds its materials (MeshSerializer): one writer for both,
-    // so the two carry the same fields. A file in an older layout is not read (its material is made again from the source model).
+    // so the two carry the same fields -- except the shading model's settings (the toon fields), which only .nmat files carry
+    // ("NMA4", after the others; a cooked mesh's glTF materials are never toon). "NMA3" files read with those settings' defaults; an
+    // older layout is not read (its material is made again from the source model).
     class MaterialSerializer
     {
     public:
@@ -27,6 +29,7 @@ namespace Nox
 
             stream.write(Magic, 4);
             WriteFields(stream, material);
+            WriteShadingFields(stream, material);
             return stream.good();
         }
 
@@ -40,9 +43,12 @@ namespace Nox
 
             char magic[4]{};
             stream.read(magic, 4);
-            if (std::string(magic, 4) != std::string(Magic, 4))
+            const std::string kind(magic, 4);
+            if (kind != std::string(Magic, 4) && kind != std::string(MagicWithoutShading, 4))
                 return false;
             ReadFields(stream, material);
+            if (kind == std::string(Magic, 4))
+                ReadShadingFields(stream, material);
             return !stream.fail();
         }
 
@@ -76,7 +82,7 @@ namespace Nox
             Write(stream, static_cast<uint32_t>(material.Mode));
             Write(stream, material.AlphaMaskCutoff);
             Write(stream, static_cast<uint8_t>(material.DoubleSided ? 1 : 0));
-            Write(stream, static_cast<uint8_t>(material.Unlit ? 1 : 0));
+            Write(stream, static_cast<uint8_t>(material.ShadingModel)); // (the old Unlit flag's byte: 0 / 1 the same)
             for (const MaterialUVChannel& channel : material.UVChannels)
             {
                 Write(stream, channel.Source);
@@ -142,11 +148,12 @@ namespace Nox
             Read(stream, mode);
             material.Mode = static_cast<AlphaMode>(mode);
             Read(stream, material.AlphaMaskCutoff);
-            uint8_t doubleSided = 0, unlit = 0;
+            uint8_t doubleSided = 0, shadingModel = 0;
             Read(stream, doubleSided);
-            Read(stream, unlit);
+            Read(stream, shadingModel);
             material.DoubleSided = doubleSided != 0;
-            material.Unlit = unlit != 0;
+            material.ShadingModel = shadingModel <= static_cast<uint8_t>(MaterialShadingModel::Toon) ? static_cast<MaterialShadingModel>(shadingModel)
+                                                                                                     : MaterialShadingModel::DefaultLit;
             for (MaterialUVChannel& channel : material.UVChannels)
             {
                 Read(stream, channel.Source);
@@ -181,9 +188,38 @@ namespace Nox
             Read(stream, material.Dispersion);
         }
 
+        // The shading model's settings, after the fields above (.nmat files only).
+        static void WriteShadingFields(std::ostream& stream, const MaterialData& material)
+        {
+            Write(stream, material.ToonBands);
+            Write(stream, material.ToonBandSoftness);
+            WriteTexture(stream, material.ToonRampTexture);
+            Write(stream, material.ToonSpecularSize);
+            Write(stream, material.ToonSpecularSoftness);
+            Write(stream, material.ToonSpecularIntensity);
+            Write(stream, material.ToonRimColor);
+            Write(stream, material.ToonRimWidth);
+            Write(stream, material.ToonRimIntensity);
+        }
+
+        static void ReadShadingFields(std::istream& stream, MaterialData& material)
+        {
+            Read(stream, material.ToonBands);
+            Read(stream, material.ToonBandSoftness);
+            ReadTexture(stream, material.ToonRampTexture);
+            Read(stream, material.ToonSpecularSize);
+            Read(stream, material.ToonSpecularSoftness);
+            Read(stream, material.ToonSpecularIntensity);
+            Read(stream, material.ToonRimColor);
+            Read(stream, material.ToonRimWidth);
+            Read(stream, material.ToonRimIntensity);
+        }
+
     private:
-        // "NMA3": the layout with every field (lobes, UV channels, normal / occlusion strength); older files are made again.
-        static constexpr char Magic[4] = { 'N', 'M', 'A', '3' };
+        // "NMA4": every field and the shading model's settings; "NMA3": the same without the latter (read with their defaults).
+        // Older files are made again.
+        static constexpr char Magic[4] = { 'N', 'M', 'A', '4' };
+        static constexpr char MagicWithoutShading[4] = { 'N', 'M', 'A', '3' };
 
         template<typename T>
         static void Write(std::ostream& stream, const T& value)

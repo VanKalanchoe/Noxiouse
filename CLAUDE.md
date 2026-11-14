@@ -41,6 +41,10 @@ with them; reference them by handle or path, and say that the files live only on
   `--mcp-port` 8770, `--mcp-access` write by default -- `quit` needs execute). Editor MCP port 8765; multiplayer Play's games with
   "Players' MCP servers" use editor port + 1 (dedicated server) / + n (player n). One token per project in `<Project>/.nox/mcp-token`.
   When the user tests runtime features, remind them to **build NoxRuntime too** (building NoxEditor does not). Offline tests:
-  `Tests/McpTests.inl` in NoxToolsTest (162 checks).
+  `Tests/McpTests.inl` in NoxToolsTest (167 checks).
+- Stylized rendering / material graph plan: `docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md` (step 1 Toon shading model
+  built; outlines, forward custom-lit pass, material graph, Custom Lit, hand-written material shaders, Physical / Stylized setting
+  open). `MaterialData::ShadingModel` (Default Lit / Unlit / Toon) replaced `Unlit`; toon pixels use G-buffer flag 0x40 and carry
+  their settings in the lobe target; lighting in `ToonShading.slang`. Material Editor labels use Unreal's names (labels only).
 - Networking plan: `docs/Networking_Plan_2026-11.md` (NET0-NET5 built; NET6 part 1 built: editor multiplayer Play, NetSession, Package Server; Steam backend and NoxServer target open). Offline network tests: `Tests/NetTest.cpp`
   (NoxNetTest; `--offline` skips the socket tests).

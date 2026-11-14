@@ -166,7 +166,7 @@ struct GpuMaterial
     uint32_t alphaMode;   // 0 = Opaque, 1 = Mask, 2 = Blend
     float alphaMaskCutoff;
     uint32_t doubleSided;
-    uint32_t unlit;
+    uint32_t shadingModel; // ShadingModel* (MaterialData::ShadingModel): Default Lit, Unlit, Toon
     float diffuseTransmission; // through a thin surface to its back (leaves, cloth); 0: none
     uint32_t pathTracerFlags;  // PathTracerThin... (above)
     float depthBias; // MaterialData::DepthBias: drawn this much closer to the camera along the view ray, world units (depth_bias_clip)
@@ -215,7 +215,24 @@ struct GpuMaterial
     float normalScale;          // glTF normalTextureInfo.scale
     float occlusionStrength;    // glTF occlusionTextureInfo.strength
     float clearcoatNormalScale;
+
+    // The Toon shading model (MaterialData::Toon*; ToonShading.slang). Bands 1..8 (1: two tones); the ramp (0xFFFFFFFF: none)
+    // replaces the bands; highlight size 0 and rim intensity 0 turn those off.
+    uint32_t toonRampTextureIndex;
+    uint32_t toonBands;
+    float toonBandSoftness;
+    float toonSpecularSize;
+    float toonSpecularSoftness;
+    float toonSpecularIntensity;
+    vec3 toonRimColor;
+    float toonRimWidth;
+    float toonRimIntensity;
 };
+
+// GpuMaterial::shadingModel (MaterialShadingModel, DataTypes.h).
+STATIC_CONST uint32_t ShadingModelDefaultLit = 0u;
+STATIC_CONST uint32_t ShadingModelUnlit = 1u;
+STATIC_CONST uint32_t ShadingModelToon = 2u;
 
 // GpuMaterial::lobes.
 STATIC_CONST uint32_t MaterialLobeClearcoat = 1u << 0;
@@ -258,13 +275,15 @@ float2 uv_transform_delta(float3 row0, float3 row1, float2 delta)
     return float2(dot(row0.xy, delta), dot(row1.xy, delta));
 }
 
-// The G-buffer material target's blue (RGBA8): the pixel's MaterialLobe* bits (which lobe targets hold data for it) and the unlit
-// bit, as a byte.
+// The G-buffer material target's blue (RGBA8): the pixel's MaterialLobe* bits (which lobe targets hold data for it) and the
+// shading model's bit -- unlit, or toon (its lobe target then holds the toon settings: gbuffer_encode_toon) -- as a byte.
 static const uint GBufferUnlit = 0x80u;
+static const uint GBufferToon = 0x40u;
 
-float gbuffer_encode_flags(uint lobes, bool unlit)
+float gbuffer_encode_flags(uint lobes, uint shadingModel)
 {
-    return float((lobes & 0x3Fu) | (unlit ? GBufferUnlit : 0u)) / 255.0;
+    const uint model = shadingModel == ShadingModelUnlit ? GBufferUnlit : shadingModel == ShadingModelToon ? GBufferToon : 0u;
+    return float((lobes & 0x3Fu) | model) / 255.0;
 }
 
 uint gbuffer_flags(float encoded)
@@ -275,6 +294,55 @@ uint gbuffer_flags(float encoded)
 bool gbuffer_unlit(float encoded)
 {
     return (gbuffer_flags(encoded) & GBufferUnlit) != 0u;
+}
+
+bool gbuffer_toon(float encoded)
+{
+    return (gbuffer_flags(encoded) & GBufferToon) != 0u;
+}
+
+// A toon pixel's settings in its lobe target (RGBA32_UINT; a toon pixel has no lobes -- they are Default Lit only), as Unreal keeps a
+// shading model's data in its CustomData target. x: the ramp texture (0xFFFFFFFF: none); y: bands, band softness, highlight size,
+// highlight softness (8 bits each); z: rim colour (sRGB-ish 8:8:8) and rim width; w: highlight and rim intensity (0..8, 8 bits each).
+struct ToonSettings
+{
+    uint rampTexture;
+    uint bands;
+    float bandSoftness;
+    float specularSize;
+    float specularSoftness;
+    float specularIntensity;
+    float3 rimColor;
+    float rimWidth;
+    float rimIntensity;
+};
+
+uint toon_unorm8(float value) { return uint(round(saturate(value) * 255.0)); }
+
+uint4 gbuffer_encode_toon(ToonSettings toon)
+{
+    const uint y = clamp(toon.bands, 1u, 8u) | (toon_unorm8(toon.bandSoftness) << 8u) | (toon_unorm8(toon.specularSize) << 16u) |
+                   (toon_unorm8(toon.specularSoftness) << 24u);
+    const float3 rim = sqrt(saturate(toon.rimColor)); // (a little more precision in the darks)
+    const uint z = toon_unorm8(rim.r) | (toon_unorm8(rim.g) << 8u) | (toon_unorm8(rim.b) << 16u) | (toon_unorm8(toon.rimWidth) << 24u);
+    const uint w = toon_unorm8(toon.specularIntensity / 8.0) | (toon_unorm8(toon.rimIntensity / 8.0) << 8u);
+    return uint4(toon.rampTexture, y, z, w);
+}
+
+ToonSettings gbuffer_decode_toon(uint4 packed)
+{
+    ToonSettings toon;
+    toon.rampTexture = packed.x;
+    toon.bands = max(packed.y & 0xFFu, 1u);
+    toon.bandSoftness = float((packed.y >> 8u) & 0xFFu) / 255.0;
+    toon.specularSize = float((packed.y >> 16u) & 0xFFu) / 255.0;
+    toon.specularSoftness = float(packed.y >> 24u) / 255.0;
+    const float3 rim = float3(packed.z & 0xFFu, (packed.z >> 8u) & 0xFFu, (packed.z >> 16u) & 0xFFu) / 255.0;
+    toon.rimColor = rim * rim;
+    toon.rimWidth = float(packed.z >> 24u) / 255.0;
+    toon.specularIntensity = float(packed.w & 0xFFu) / 255.0 * 8.0;
+    toon.rimIntensity = float((packed.w >> 8u) & 0xFFu) / 255.0 * 8.0;
+    return toon;
 }
 
 // A unit vector as two 16-bit octahedral coordinates (and back).
@@ -3541,7 +3609,7 @@ struct InstanceData
     uint32_t alphaMode;
     float alphaMaskCutoff;
     uint32_t doubleSided;
-    uint32_t unlit;
+    uint32_t shadingModel; // GpuMaterial::shadingModel
     float diffuseTransmission;
     float depthBias; // GpuMaterial::depthBias
     float3 uvRow0[MaterialUVChannels]; // GpuMaterial's UV channels (instance_texture_uv)
@@ -3638,7 +3706,7 @@ struct SceneInstances
             data.alphaMode = material.alphaMode;
             data.alphaMaskCutoff = material.alphaMaskCutoff;
             data.doubleSided = material.doubleSided;
-            data.unlit = material.unlit;
+            data.shadingModel = material.shadingModel;
             data.diffuseTransmission = material.diffuseTransmission;
             data.depthBias = material.depthBias;
             data.uvRow0 = material.uvRow0;

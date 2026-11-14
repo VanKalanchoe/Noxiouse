@@ -241,7 +241,17 @@ namespace Nox
         packed.alphaMode = static_cast<uint32_t>(material.Mode);
         packed.alphaMaskCutoff = material.AlphaMaskCutoff;
         packed.doubleSided = material.DoubleSided ? 1u : 0u;
-        packed.unlit = material.Unlit ? 1u : 0u;
+        packed.shadingModel = static_cast<uint32_t>(material.ShadingModel);
+        // The Toon shading model's settings (ToonShading.slang), clamped to what the G-buffer carries (gbuffer_encode_toon).
+        packed.toonRampTextureIndex = static_cast<uint32_t>(GetTextureIndex(material.ToonRampTexture.Path));
+        packed.toonBands = static_cast<uint32_t>(std::clamp(material.ToonBands, 1, 8));
+        packed.toonBandSoftness = std::clamp(material.ToonBandSoftness, 0.0f, 1.0f);
+        packed.toonSpecularSize = std::clamp(material.ToonSpecularSize, 0.0f, 1.0f);
+        packed.toonSpecularSoftness = std::clamp(material.ToonSpecularSoftness, 0.0f, 1.0f);
+        packed.toonSpecularIntensity = std::clamp(material.ToonSpecularIntensity, 0.0f, 8.0f);
+        packed.toonRimColor = glm::clamp(material.ToonRimColor, glm::vec3(0.0f), glm::vec3(1.0f));
+        packed.toonRimWidth = std::clamp(material.ToonRimWidth, 0.0f, 1.0f);
+        packed.toonRimIntensity = std::clamp(material.ToonRimIntensity, 0.0f, 8.0f);
         packed.diffuseTransmission = glm::clamp(material.DiffuseTransmission, 0.0f, 1.0f);
         packed.pathTracerFlags = material.PathTracerFlags;
         packed.depthBias = glm::max(material.DepthBias, 0.0f);

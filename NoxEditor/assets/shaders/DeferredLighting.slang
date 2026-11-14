@@ -2,6 +2,7 @@
 #include "NRDFrontEnd.slang"
 #include "DDGICommon.slang"
 #include "PBRLighting.slang"
+#include "ToonShading.slang"
 #include "HeightFog.slang"
 #include "ShadowMaps.slang"
 #include "IrradianceVolumeCommon.slang"
@@ -393,6 +394,14 @@
         // pixel without them shades exactly as the core model below always did.
         const GBufferLobes lobes = gbuffer_load_lobes(ubo, int2(pixelCoord), materialSample.b);
         const bool hasLobes = lobes.flags != 0u;
+        // The Toon shading model (ToonShading.slang): its settings in the lobe target (a toon pixel has no lobes).
+        const bool toon = gbuffer_toon(materialSample.b) && ubo->gbufferLobesTextureIndex != 0xFFFFFFFF;
+        ToonSettings toonSettings;
+        if (toon)
+        {
+            Texture2D<uint4> toonTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->gbufferLobesTextureIndex, 0));
+            toonSettings = gbuffer_decode_toon(toonTex.Load(int3(int2(pixelCoord), 0)));
+        }
 
         float3 diffuseColor, specularColor, specularEnvironmentR90;
         lobe_base_reflectance(lobes, baseColor, metallic, diffuseColor, specularColor, specularEnvironmentR90);
@@ -435,7 +444,8 @@
         // result, which shadow-rays every light regardless of count instead of only light index 0
         // (see the brute-force loop below: only `i == 0` ever gets a real shadow term).
         float3 directLighting = float3(0.0);
-        if (pushConstant.directLightingMode == 1 && pushConstant.restirDIDiffuseTextureIndex != 0xFFFFFFFF)
+        // (ReSTIR DI's resampled light is physical shading: a toon pixel takes the light loop below.)
+        if (pushConstant.directLightingMode == 1 && pushConstant.restirDIDiffuseTextureIndex != 0xFFFFFFFF && !toon)
         {
             // De-modulated diffuse and specular (ReSTIRDIFinalShading.slang): modulated back with the same factors.
             Texture2D diffuseDITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirDIDiffuseTextureIndex, 0));
@@ -582,6 +592,9 @@
                 // Light through a leaf or cloth from behind is diffuse: no specular highlight on the side it leaves.
                 if (backLit)
                     directLighting += NdotL * lightRadiance * diffuse(pbrInputs);
+                else if (toon) // the light and its shadow banded together (ToonShading.slang)
+                    directLighting += toon_direct_light(ubo, toonSettings, diffuseColor, baseColor, metallic, n, v, l, NdotL, lightShadow,
+                                                        light.color.rgb * light.color.w * attenuation);
                 else if (hasLobes)
                     directLighting += evaluateDirectLightLobes(ubo, pbrInputs, lobeShading, n, v, l, lightRadiance);
                 else

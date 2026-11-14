@@ -160,3 +160,14 @@ compute-only stages), the DDGI blends and the emissive light grid. The stats sho
 A streamed level or world cell is registered with the GPU scene **hidden** while it comes in (its records uploaded, in no draw
 bucket and not in the TLAS) and all of it is shown in one frame once complete -- Unreal's `ULevel::bRequireFullVisibilityToRender`.
 No level is ever seen half built.
+
+### Shading models: Default Lit, Unlit, Toon (November 2026)
+
+`MaterialData::ShadingModel` (`MaterialShadingModel`, `DataTypes.h`) replaces the old `Unlit` flag -- the same byte in the `.nmat` and cooked-mesh layouts (0 / 1 read as before). The Toon settings (`ToonBands`, `ToonBandSoftness`, `ToonRampTexture`, `ToonSpecular*`, `ToonRim*`) are stored only in `.nmat` files (magic `NMA4`; `NMA3` files load with their defaults); a cooked mesh's glTF materials are never toon. Plan: `docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md` (step 1 of 7).
+
+- **GPU:** `GpuMaterial::shadingModel` (was `unlit`) and the `toon*` fields (`Renderer.cpp` packs them; the ramp through `GetTextureIndex`). Unlit materials keep their forward buckets; toon ones use the Default Lit buckets.
+- **G-buffer:** the flag byte's free bit `GBufferToon` (0x40) marks toon pixels; their lobe target (RGBA32_UINT, unused: lobes are Default Lit only) carries the settings (`gbuffer_encode_toon` / `gbuffer_decode_toon`, `shaderIO.h`) -- as Unreal keeps a shading model's data in its CustomData target.
+- **Lighting:** `ToonShading.slang` -- `toon_direct_light` per directional / point / spot light: diffuse = albedo x light x tone(N.L x shadow), the tone banded (`toon_bands`, band k starting at k / bands) or read from the ramp; a sharp N.H highlight; a rim at grazing angles on the lit side. `DeferredLighting.slang` calls it in its light loop (a toon pixel skips ReSTIR DI's physical result and takes the loop); `Material_TransparentLit_Mesh.slang` uses it too (there the shadow map is in the attenuation, so a soft shadow edge dims instead of bands). Ambient, reflections and rect / disc lights stay Default Lit.
+- **Ray tracing / path tracer:** they read the material as Default Lit (the fallback).
+- **Editor and MCP:** the Material Editor's Shading Model combo and Toon section, with Unreal's labels (Blend Mode, Opacity Mask Clip Value, Two Sided, Ambient Occlusion); MCP material JSON `ShadingModel` ("DefaultLit" / "Unlit" / "Toon") and the `Toon*` fields, the old `Unlit: true` still read.
+- **Tests:** NoxToolsTest -- the JSON codec and a `.nmat` round trip, an `NMA3` file still loading (167 checks).

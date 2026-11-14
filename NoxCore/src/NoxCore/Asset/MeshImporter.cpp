@@ -3028,7 +3028,7 @@ namespace Nox
                 
                 if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_unlit")
                 {
-                    materialData.Unlit = true;
+                    materialData.ShadingModel = MaterialShadingModel::Unlit;
                 }
                 
                 if (std::string_view(ext.name.data, ext.name.len) == "KHR_materials_emissive_strength")

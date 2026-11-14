@@ -464,7 +464,18 @@ window.NOX_DOCS_PAGES = [
             "",
             "### Streamed levels drawn once complete",
             "",
-            "A streamed level or world cell is registered with the GPU scene **hidden** while it comes in (its records uploaded, in no draw bucket and not in the TLAS) and all of it is shown in one frame once complete -- Unreal's `ULevel::bRequireFullVisibilityToRender`. No level is ever seen half built."
+            "A streamed level or world cell is registered with the GPU scene **hidden** while it comes in (its records uploaded, in no draw bucket and not in the TLAS) and all of it is shown in one frame once complete -- Unreal's `ULevel::bRequireFullVisibilityToRender`. No level is ever seen half built.",
+            "",
+            "### Shading models: Default Lit, Unlit, Toon (November 2026)",
+            "",
+            "`MaterialData::ShadingModel` (`MaterialShadingModel`, `DataTypes.h`) replaces the old `Unlit` flag -- the same byte in the `.nmat` and cooked-mesh layouts (0 / 1 read as before). The Toon settings (`ToonBands`, `ToonBandSoftness`, `ToonRampTexture`, `ToonSpecular*`, `ToonRim*`) are stored only in `.nmat` files (magic `NMA4`; `NMA3` files load with their defaults); a cooked mesh's glTF materials are never toon. Plan: `docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md` (step 1 of 7).",
+            "",
+            "- **GPU:** `GpuMaterial::shadingModel` (was `unlit`) and the `toon*` fields (`Renderer.cpp` packs them; the ramp through `GetTextureIndex`). Unlit materials keep their forward buckets; toon ones use the Default Lit buckets.",
+            "- **G-buffer:** the flag byte's free bit `GBufferToon` (0x40) marks toon pixels; their lobe target (RGBA32_UINT, unused: lobes are Default Lit only) carries the settings (`gbuffer_encode_toon` / `gbuffer_decode_toon`, `shaderIO.h`) -- as Unreal keeps a shading model's data in its CustomData target.",
+            "- **Lighting:** `ToonShading.slang` -- `toon_direct_light` per directional / point / spot light: diffuse = albedo x light x tone(N.L x shadow), the tone banded (`toon_bands`, band k starting at k / bands) or read from the ramp; a sharp N.H highlight; a rim at grazing angles on the lit side. `DeferredLighting.slang` calls it in its light loop (a toon pixel skips ReSTIR DI's physical result and takes the loop); `Material_TransparentLit_Mesh.slang` uses it too (there the shadow map is in the attenuation, so a soft shadow edge dims instead of bands). Ambient, reflections and rect / disc lights stay Default Lit.",
+            "- **Ray tracing / path tracer:** they read the material as Default Lit (the fallback).",
+            "- **Editor and MCP:** the Material Editor's Shading Model combo and Toon section, with Unreal's labels (Blend Mode, Opacity Mask Clip Value, Two Sided, Ambient Occlusion); MCP material JSON `ShadingModel` (\"DefaultLit\" / \"Unlit\" / \"Toon\") and the `Toon*` fields, the old `Unlit: true` still read.",
+            "- **Tests:** NoxToolsTest -- the JSON codec and a `.nmat` round trip, an `NMA3` file still loading (167 checks).",
         ]
     },
     {
@@ -523,6 +534,7 @@ window.NOX_DOCS_PAGES = [
             "| 17 | [`VisibilityBuffer.slang`](file:///E:/dev/noxiouse/NoxEditor/assets/shaders/VisibilityBuffer.slang) | Primary deferred mesh/fragment shader: writes 64-bit `(instanceSlot + 1, meshletID << 8 | primID)`, `entityID`, and 2D motion vectors. |",
             "| 18 | [`GBufferMaterial.slang`](file:///E:/dev/noxiouse/NoxEditor/assets/shaders/GBufferMaterial.slang) | Fullscreen Visibility Buffer resolve pass: analytic ray-differential barycentrics (`ddx`/`ddy`), mip/VT feedback, geometric specular AA, and up to 8 G-Buffer MRTs. |",
             "| 19 | [`Material_Unlit_Mesh.slang`](file:///E:/dev/noxiouse/NoxEditor/assets/shaders/Material_Unlit_Mesh.slang) | Forward fragment shader for `KHR_materials_unlit` meshes (opaque/alpha-blend and WBOIT). |",
+            "| -- | [`ToonShading.slang`](file:///E:/dev/noxiouse/NoxEditor/assets/shaders/ToonShading.slang) | The Toon shading model: banded or ramp diffuse, sharp highlight, rim (`toon_direct_light`), used by the deferred lighting and the transparent forward shader. |",
             "| 20 | [`Material_TransparentLit_Mesh.slang`](file:///E:/dev/noxiouse/NoxEditor/assets/shaders/Material_TransparentLit_Mesh.slang) | Forward PBR fragment shader for transparent/glass meshes: inline RT shadows, multi-bounce RT volume refraction with TIR + Beer-Lambert absorption + RGB dispersion. |",
             "| 21 | [`OITComposite.slang`](file:///E:/dev/noxiouse/NoxEditor/assets/shaders/OITComposite.slang) | Fullscreen composite pass for McGuire & Bavoil Weighted Blended OIT. |",
             "| 22 | [`ColorPyramid.slang`](file:///E:/dev/noxiouse/NoxEditor/assets/shaders/ColorPyramid.slang) | Builds the mipmapped scene color pyramid behind transparent objects for rough refraction. |",
