@@ -1,5 +1,8 @@
 #include "DeviceVK.h"
 #include <algorithm>
+#include <cmath>
+#include <format>
+#include <mutex>
 #include <iostream>
 #include <string>
 #include <SDL3/SDL_vulkan.h>
@@ -54,6 +57,51 @@ namespace NRI
             settings.enableAntiFirefly = true;
             settings.hitDistanceReconstructionMode = ::nrd::HitDistanceReconstructionMode::AREA_3X3;
             return settings;
+        }
+
+        // The camera the last DLSS evaluation got (evaluateDLSS): what a warning NGX logs about it is reported with, so the log says which
+        // input it did not like -- NGX names none.
+        struct DlssCameraRecord
+        {
+            std::mutex Mutex;
+            glm::mat4 Projection{ 1.0f };
+            glm::mat4 View{ 1.0f };
+            glm::vec3 Position{ 0.0f }, Right{ 0.0f }, Up{ 0.0f }, Forward{ 0.0f };
+            float FovRadians = 0.0f, Near = 0.0f, Aspect = 0.0f;
+            uint32_t Width = 0, Height = 0;
+        };
+        DlssCameraRecord s_dlssCamera;
+
+        std::string DescribeDlssCamera()
+        {
+            std::lock_guard lock(s_dlssCamera.Mutex);
+            const DlssCameraRecord& c = s_dlssCamera;
+            auto v3 = [](const glm::vec3& v) { return std::format("({:.4g}, {:.4g}, {:.4g})", v.x, v.y, v.z); };
+            return std::format("output {}x{}, aspect {:.4g}, fov {:.4g} rad, near {:.4g}, position {}, right {}, up {}, forward {}, "
+                               "det(projection) {:.4g}, det(view) {:.4g}, projection[0][0] {:.4g}, projection[1][1] {:.4g}",
+                               c.Width, c.Height, c.Aspect, c.FovRadians, c.Near, v3(c.Position), v3(c.Right), v3(c.Up), v3(c.Forward),
+                               glm::determinant(c.Projection), glm::determinant(c.View), c.Projection[0][0], c.Projection[1][1]);
+        }
+
+        // A warning NGX repeats every frame (e.g. "WorldToScreenMatrix not invertible"): the first one and then one line per 5 s with how
+        // many came, each with the camera DLSS got. 180 lines a second written to the log stalled the editor (the user's test).
+        void ReportRepeatedNgxWarning(std::string_view message)
+        {
+            static std::mutex mutex;
+            static uint64_t count = 0;
+            static bool reported = false;
+            static std::chrono::steady_clock::time_point last{};
+            std::lock_guard lock(mutex);
+            ++count;
+            const auto now = std::chrono::steady_clock::now();
+            if (reported && now - last < std::chrono::seconds(5))
+                return;
+            reported = true;
+            const size_t start = message.find("Warning:");
+            NOX_CORE_WARN("[Streamline] NGX: {} ({} time(s) since the last report; the camera DLSS got: {})",
+                          start != std::string_view::npos ? message.substr(start) : message, count, DescribeDlssCamera());
+            count = 0;
+            last = now;
         }
     }
 
@@ -409,6 +457,11 @@ namespace NRI
                 // frame the GPU runs a frame behind; nothing to act on.
                 if (sv.find("PerfSection") != std::string_view::npos)
                     return;
+                if (sv.find("not invertible") != std::string_view::npos)
+                {
+                    ReportRepeatedNgxWarning(sv);
+                    return;
+                }
                 if (sv.find("DLSS") != std::string_view::npos || sv.find("NGX") != std::string_view::npos ||
                     sv.find("extents") != std::string_view::npos || sv.find("optimal") != std::string_view::npos)
                 {
@@ -1191,6 +1244,54 @@ namespace NRI
                            ? (static_cast<float>(outputColorVK->GetWidth()) / static_cast<float>(outputColorVK->GetHeight()))
                            : 1.777f;
         consts.cameraAspectRatio = aspect;
+
+        // The camera checked before NGX sees it (a matrix it cannot invert made it warn every frame): finite, invertible projection and
+        // view, a right / up / forward frame. A bad one is reported (once per 5 s) and this frame is not upscaled by DLSS (the caller
+        // copies the input), so the log names the input instead of NGX's bare warning.
+        {
+            std::lock_guard lock(s_dlssCamera.Mutex);
+            s_dlssCamera.Projection = params.nonJitteredProj;
+            s_dlssCamera.View = params.view;
+            s_dlssCamera.Position = params.cameraPos;
+            s_dlssCamera.Right = params.cameraRight;
+            s_dlssCamera.Up = params.cameraUp;
+            s_dlssCamera.Forward = params.cameraFwd;
+            s_dlssCamera.FovRadians = params.cameraFovRad;
+            s_dlssCamera.Near = params.cameraNear;
+            s_dlssCamera.Aspect = aspect;
+            s_dlssCamera.Width = outputColorVK->GetWidth();
+            s_dlssCamera.Height = outputColorVK->GetHeight();
+        }
+        auto finite = [](const glm::mat4& m)
+        {
+            for (int c = 0; c < 4; ++c)
+                for (int r = 0; r < 4; ++r)
+                    if (!std::isfinite(m[c][r]))
+                        return false;
+            return true;
+        };
+        auto finite3 = [](const glm::vec3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); };
+        auto unit = [](const glm::vec3& v) { const float length = glm::length(v); return length > 1e-12f ? v / length : glm::vec3(0.0f); };
+        // (a camera entity's axes carry its scale: compared as directions)
+        const float frame = std::abs(glm::dot(glm::cross(unit(params.cameraRight), unit(params.cameraUp)), unit(params.cameraFwd)));
+        const bool cameraValid = finite(params.nonJitteredProj) && finite(params.view) && finite(params.prevNonJitteredProj) && finite(params.prevView) &&
+                                 std::abs(glm::determinant(params.nonJitteredProj)) > 0.0f && std::abs(glm::determinant(params.view)) > 1e-12f &&
+                                 finite3(params.cameraPos) && std::isfinite(frame) && frame > 0.5f && std::isfinite(params.cameraFovRad) && params.cameraFovRad > 0.0f &&
+                                 std::isfinite(aspect) && aspect > 0.0f;
+        if (!cameraValid)
+        {
+            static std::mutex reportMutex;
+            static std::chrono::steady_clock::time_point lastReport{};
+            const auto now = std::chrono::steady_clock::now();
+            std::lock_guard reportLock(reportMutex);
+            if (now - lastReport > std::chrono::seconds(5))
+            {
+                lastReport = now;
+                NOX_CORE_WARN("[Streamline] DLSS skipped: the camera it would get is not valid ({}). The frame is shown without DLSS.",
+                              DescribeDlssCamera());
+            }
+            return false;
+        }
 
         consts.depthInverted = sl::Boolean::eTrue;
         consts.cameraMotionIncluded = sl::Boolean::eTrue; // Our G-buffer motion vectors already include camera motion; Streamline uses them directly

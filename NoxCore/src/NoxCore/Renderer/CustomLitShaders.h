@@ -12,9 +12,10 @@
 // the one a pixel's material names by its slot (custom_lit_light / custom_lit_ambient). Two small generated files then compile the
 // deferred lighting and the forward shader with them (NOX_CUSTOM_LIT): the Custom Lit pass and the forward passes' Custom Lit variant.
 //
-// The project's material graphs (Renderer/MaterialGraph.h) go into the same file, each graph's generated code in a namespace of its own
-// with a function that calls the one a material names (material_graph_surface; compiled where NOX_MATERIAL_GRAPH is defined): a third
-// small file compiles the G-buffer resolve with them, and the forward shader's variant has them too.
+// The project's material graphs (Renderer/MaterialGraph.h) go into a second generated file the same way, each graph's code in a namespace
+// of its own with a function that calls the one a material names (material_graph_surface): a third small file compiles the G-buffer
+// resolve with them, and the forward shader's variant has both files. Separate files: a graph's edit leaves the Custom Lit pass's cached
+// binary as it is, a Material Shader's edit the G-buffer resolve's (pipelines are cached by the hash of their sources).
 //
 // The generated files live next to the executable, in shaders/Generated (beside the precompiled binaries, so a packaged game ships them
 // and finds their binaries by the same keys); a manifest there lists the Material Shaders and the material graphs in slot order, which
@@ -55,9 +56,10 @@ namespace Nox
         std::filesystem::path GBufferSourcePath();  // GBufferMaterialGraph.slang
 
         // The generated file's text for these Material Shaders, `paths[slot]` naming each one's slot (a path with no source here: its
-        // case left out, it lights nothing), and these material graphs, `graphPaths[slot]` naming each one's.
-        std::string GenerateDispatcher(const std::vector<std::string>& paths, const std::vector<CustomLitSource>& sources,
-                                       const std::vector<std::string>& graphPaths = {}, const std::vector<MaterialGraphSource>& graphs = {});
+        // case left out, it lights nothing): CustomLitShaders.slang.
+        std::string GenerateDispatcher(const std::vector<std::string>& paths, const std::vector<CustomLitSource>& sources);
+        // MaterialGraphs.slang for these material graphs, `graphPaths[slot]` naming each one's slot (one with no code: no case).
+        std::string GenerateGraphDispatcher(const std::vector<std::string>& graphPaths, const std::vector<MaterialGraphSource>& graphs);
 
         // Writes the generated files and the manifest for `paths` / `graphPaths` (slot order) where their text changed. Returns whether
         // anything was written (the pipelines must be built again); throws nothing (a write that fails is logged and returns false).

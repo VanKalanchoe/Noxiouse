@@ -623,9 +623,13 @@ namespace Nox
     Renderer::~Renderer()
     {
         NOX_CORE_INFO("Renderer Shutdown");
-        // A Material Shader build still compiling on its worker thread (it uses the device and the compiler): finished first.
+        // A Material Shader / material graph build still compiling on its worker thread (it uses the device and the compiler): told to
+        // stop before its next stage, then waited for (the compile it is in finishes first; a closing editor waited for every stage).
         if (m_customLitBuild)
+        {
+            m_customLitBuild->Cancel = true;
             m_customLitBuild->Task.wait();
+        }
 
         // Release queued assets while the instance is still reachable: a Mesh destructor calls Renderer::UnloadMesh,
         // which asserts on s_Instance and queues its geometry, so this drains in rounds -- clearing the vector in place

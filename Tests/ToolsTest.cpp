@@ -179,23 +179,25 @@ static void TestCustomLitShaders()
     const std::vector<std::string> trimmed = CustomLitShaders::AssignSlots(later, { { "a.slang", "" } });
     CHECK(trimmed.size() == 2 && trimmed[1] == "a.slang", "empty slots at the end are dropped");
 
-    // Material graphs (MaterialGraph.h) in the same file: each in the namespace of its slot, compiled in only with NOX_MATERIAL_GRAPH, a
-    // graph that does not compile (no code) left without a case; their slots kept as the Material Shaders' are.
-    const std::string withGraphs = CustomLitShaders::GenerateDispatcher(paths, sources, { "G/A.nmatgraph", "G/Broken.nmatgraph", "G/C.nmatgraph" },
+    // Material graphs (MaterialGraph.h) in a file of their own: each in the namespace of its slot, a graph without code (it does not
+    // compile, or connects nothing) left without a case; their slots kept as the Material Shaders' are.
+    const std::string withGraphs = CustomLitShaders::GenerateGraphDispatcher({ "G/A.nmatgraph", "G/Broken.nmatgraph", "G/C.nmatgraph" },
         { { "G/A.nmatgraph", "static const uint Outputs = 1u;\nvoid surface(MaterialGraphInputs i, inout MaterialGraphOutputs o) { o.baseColor = 1; }" },
           { "G/Broken.nmatgraph", "" }, { "G/C.nmatgraph", "void surface(MaterialGraphInputs i, inout MaterialGraphOutputs o) {}\n" } });
-    const size_t graphSection = withGraphs.find("#ifdef NOX_MATERIAL_GRAPH\n#include \"MaterialGraph.slang\"");
+    const size_t graphSection = withGraphs.find("#include \"MaterialGraph.slang\"");
     CHECK(graphSection != std::string::npos && withGraphs.find("namespace MaterialGraph0") > graphSection &&
-          withGraphs.find("namespace MaterialGraph2") != std::string::npos && withGraphs.find("namespace MaterialGraph1") == std::string::npos,
-          "material graphs: after the Material Shaders, only with NOX_MATERIAL_GRAPH, each in its slot's namespace (one that does not compile left out)");
+          withGraphs.find("namespace MaterialGraph2") != std::string::npos && withGraphs.find("namespace MaterialGraph1") == std::string::npos &&
+          withGraphs.find("namespace CustomLit") == std::string::npos && withGraphs.find("custom_lit_light") == std::string::npos,
+          "material graphs: a file of their own (no Material Shader in it), each in its slot's namespace (one without code left out)");
     CHECK(withGraphs.find("case 0u: MaterialGraph0::surface(i, o); break;") != std::string::npos &&
           withGraphs.find("case 2u: MaterialGraph2::surface(i, o); break;") != std::string::npos && withGraphs.find("case 1u: MaterialGraph") == std::string::npos &&
-          withGraphs.find("default: break;") != std::string::npos && withGraphs.rfind("#endif\n") == withGraphs.size() - 7,
+          withGraphs.find("default: break;") != std::string::npos,
           "material_graph_surface calls the graph by slot (an unknown one: the material's own values)");
     CHECK(withGraphs.find("o.baseColor = 1; }\n}") != std::string::npos && withGraphs.find("#line 1 \"G/A.nmatgraph (generated)\"") != std::string::npos,
           "a graph's code without a final newline still closes its namespace; #line names the graph");
-    CHECK(text.find("material_graph_surface") != std::string::npos && text.find("MaterialGraph0") == std::string::npos,
-          "without graphs the dispatcher is there, empty (the G-buffer and forward variants always call it)");
+    CHECK(text.find("material_graph") == std::string::npos &&
+          CustomLitShaders::GenerateGraphDispatcher({}, {}).find("void material_graph_surface(uint slot") != std::string::npos,
+          "the Material Shaders' file has no graph; without graphs the graph dispatcher is there, empty (the variants always call it)");
     const std::vector<std::string> graphSlots = CustomLitShaders::AssignPathSlots({ "G/A.nmatgraph", "G/B.nmatgraph" }, { "G/B.nmatgraph", "G/D.nmatgraph" });
     CHECK(graphSlots.size() == 3 && graphSlots[0].empty() && graphSlots[1] == "G/B.nmatgraph" && graphSlots[2] == "G/D.nmatgraph",
           "graph slots: a kept graph keeps its slot, a removed one leaves it empty, a new one is appended");
@@ -293,8 +295,10 @@ static void TestMaterialGraph()
         // The whole generated file with both graphs (compile the G-buffer and forward variants with it: NoxEditor/assets/shaders on the
         // include path, NOX_MATERIAL_GRAPH defined).
         std::ofstream generated(std::string(dump) + "/CustomLitShaders.slang");
-        generated << CustomLitShaders::GenerateDispatcher({}, {}, { "Graphs/Panned.nmatgraph", "Graphs/Append.nmatgraph" },
-                                                          { { "Graphs/Panned.nmatgraph", program.Code }, { "Graphs/Append.nmatgraph", appendProgram.Code } });
+        generated << CustomLitShaders::GenerateDispatcher({}, {});
+        std::ofstream graphsFile(std::string(dump) + "/MaterialGraphs.slang");
+        graphsFile << CustomLitShaders::GenerateGraphDispatcher({ "Graphs/Panned.nmatgraph", "Graphs/Append.nmatgraph" },
+                                                                { { "Graphs/Panned.nmatgraph", program.Code }, { "Graphs/Append.nmatgraph", appendProgram.Code } });
     }
 }
 

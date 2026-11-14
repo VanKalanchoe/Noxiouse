@@ -116,6 +116,10 @@ namespace Nox
         for (const ProjectMaterialGraph& graph : graphs)
         {
             graphNames.push_back(graph.Path);
+            // A graph that connects no Material Output pin changes nothing: no case, no build (a new graph is one -- creating it
+            // compiled every variant again, the user's test).
+            if (graph.Program.Valid && graph.Program.Outputs == 0)
+                continue;
             if (graph.Program.Valid)
             {
                 graphSources.push_back({ graph.Path, graph.Program.Code });
@@ -169,8 +173,10 @@ namespace Nox
         // (or Default Lit) until each pipeline is done (pollCustomLitBuild swaps it in). First the Material Shaders alone
         // (CustomLitShaders::CheckSourcePath, about a second: an error is reported as one, the pipelines stay as they were), then the
         // Custom Lit pass's pipeline (a few seconds), then the forward variant (the slowest: transparent surfaces and the previews).
-        // Compiled when a source changed; at the start, the binaries cached from a previous run (keyed by the generated text's hash).
-        // With material graphs, the G-buffer resolve's variant comes first (opaque surfaces: most of what a graph is on).
+        // Each pipeline is compiled only when its sources changed: the binaries are cached by the hash of the source and everything it
+        // includes, so a graph's edit compiles the G-buffer resolve's variant and the forward variant and loads the Custom Lit pass's
+        // binary, a Material Shader's edit the other way round (every pipeline used to be compiled again: the user's test). With
+        // material graphs, the G-buffer resolve's variant comes first (opaque surfaces: most of what a graph is on).
         const bool compile = written && m_shaderCompiler->canCompile();
         auto build = std::make_shared<CustomLitBuild>();
         build->Paths = paths;
@@ -180,14 +186,26 @@ namespace Nox
         build->GraphCount = graphCount;
         build->Task = std::async(std::launch::async, [this, build, compile, shaderCount, graphCount]()
         {
+            // The renderer's shutdown (or a new project) stops the build between its stages: it waits for one compile, not all of them.
+            auto cancelled = [&]()
+            {
+                if (!build->Cancel.load())
+                    return false;
+                std::lock_guard lock(build->Mutex);
+                build->Error = "cancelled";
+                build->Failed = true;
+                return true;
+            };
             try
             {
                 if (compile)
                     m_shaderCompiler->compile(CustomLitShaders::CheckSourcePath().generic_string());
                 if (graphCount > 0)
                 {
-                    std::unique_ptr<NRI::Pipeline> gbuffer = buildMaterialGraphGBufferPipeline(compile, true);
-                    std::unique_ptr<NRI::Pipeline> gbufferNoVelocity = buildMaterialGraphGBufferPipeline(compile, false);
+                    if (cancelled())
+                        return;
+                    std::unique_ptr<NRI::Pipeline> gbuffer = buildMaterialGraphGBufferPipeline(false, true);
+                    std::unique_ptr<NRI::Pipeline> gbufferNoVelocity = buildMaterialGraphGBufferPipeline(false, false);
                     std::lock_guard lock(build->Mutex);
                     build->GBuffer = std::move(gbuffer);
                     build->GBufferNoVelocity = std::move(gbufferNoVelocity);
@@ -195,12 +213,16 @@ namespace Nox
                 }
                 if (shaderCount > 0)
                 {
-                    std::unique_ptr<NRI::Pipeline> deferred = buildCustomLitDeferredPipeline(compile);
+                    if (cancelled())
+                        return;
+                    std::unique_ptr<NRI::Pipeline> deferred = buildCustomLitDeferredPipeline(false);
                     std::lock_guard lock(build->Mutex);
                     build->Deferred = std::move(deferred);
                     build->DeferredDone = true;
                 }
-                std::unique_ptr<NRI::Pipeline> forward = buildCustomLitForwardPipeline(compile);
+                if (cancelled())
+                    return;
+                std::unique_ptr<NRI::Pipeline> forward = buildCustomLitForwardPipeline(false);
                 std::lock_guard lock(build->Mutex);
                 build->Forward = std::move(forward);
                 build->ForwardDone = true;

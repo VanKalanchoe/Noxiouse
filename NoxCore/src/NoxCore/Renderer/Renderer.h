@@ -11,6 +11,7 @@
 #include "NoxCore/Core/Window.h"
 #include "Mesh.h"
 #include <mutex>
+#include <atomic>
 #include <future>
 #include <optional>
 #include <variant>
@@ -1719,6 +1720,7 @@ namespace Nox
             std::vector<std::string> GraphPaths;
             std::unordered_map<std::string, MaterialGraphProgram> GraphPrograms;
             size_t GraphCount = 0;
+            std::atomic<bool> Cancel{ false }; // set by the renderer's shutdown: the build stops before its next stage
         };
         std::shared_ptr<CustomLitBuild> m_customLitBuild;
         struct CustomLitRequest
