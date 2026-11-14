@@ -231,14 +231,25 @@ namespace Nox
                 report.Warnings.push_back("Self-contained .NET: no .NET 9 runtime found (DOTNET_ROOT, Program Files/dotnet): the game needs one installed");
         }
 
-        // The project's Material Shaders (Custom Lit, CustomLitShaders.h) went with the executable's shaders/ folder above: the generated
-        // sources in shaders/Generated and their binaries, as the editor last built them. A build that failed has no binary to ship.
+        // The project's Material Shaders (Custom Lit, CustomLitShaders.h) and material graphs went with the executable's shaders/ folder
+        // above: the generated sources in shaders/Generated and their binaries, as the editor last built them (the graphs themselves go
+        // in the pack: the game compiles their parameter layouts again). A build that failed has no binary to ship.
         if (!settings.Server)
         {
             if (const Renderer* renderer = Application::Get().GetRenderer();
                 renderer && renderer->GetCustomLitStatus().ShaderCount > 0 && !renderer->GetCustomLitStatus().Ready)
                 report.Warnings.push_back("The project's Material Shaders do not compile (" + renderer->GetCustomLitStatus().Message +
                                           "): Custom Lit materials are lit as Default Lit in the game until they do and it is packaged again");
+            // The material graphs likewise (the same generated file; the G-buffer resolve's variant): a graph not built is not drawn.
+            if (const Renderer* renderer = Application::Get().GetRenderer(); renderer)
+            {
+                const Renderer::CustomLitStatus& status = renderer->GetCustomLitStatus();
+                if (status.GraphCount > 0 && !status.GraphsReady)
+                    report.Warnings.push_back("The project's material graphs are not built (" + (status.Building ? std::string("still building") : status.Message) +
+                                              "): their materials show their own values in the game until they are and it is packaged again");
+                for (const auto& [path, error] : status.GraphErrors)
+                    report.Warnings.push_back("Material graph " + path + " does not compile (" + error + "): its materials show their own values");
+            }
         }
 
         // 2. The engine's assets the runtime reads (shaders are compiled at start, fonts for text, textures for defaults) -- none for a

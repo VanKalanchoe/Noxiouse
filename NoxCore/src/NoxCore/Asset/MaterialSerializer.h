@@ -45,13 +45,21 @@ namespace Nox
             char magic[4]{};
             stream.read(magic, 4);
             const std::string kind(magic, 4);
-            const bool current = kind == std::string(Magic, 4);
-            const bool toonOnly = kind == std::string(MagicToonOnly, 4);
-            if (!current && !toonOnly && kind != std::string(MagicWithoutShading, 4))
+            // NMA6 (current), NMA5 (no material graph), NMA4 (no Custom Lit either), NMA3 (no shading model settings).
+            int version = 0;
+            if (kind == std::string(Magic, 4))
+                version = 6;
+            else if (kind == std::string(MagicWithoutGraph, 4))
+                version = 5;
+            else if (kind == std::string(MagicToonOnly, 4))
+                version = 4;
+            else if (kind == std::string(MagicWithoutShading, 4))
+                version = 3;
+            else
                 return false;
             ReadFields(stream, material);
-            if (current || toonOnly)
-                ReadShadingFields(stream, material, current);
+            if (version >= 4)
+                ReadShadingFields(stream, material, version);
             return !stream.fail();
         }
 
@@ -208,10 +216,20 @@ namespace Nox
                 Write(stream, parameter);
             WriteTexture(stream, material.CustomTexture1);
             WriteTexture(stream, material.CustomTexture2);
+            // The material graph and the material's overrides of its parameters ("NMA6").
+            WriteString(stream, material.SurfaceGraph);
+            Write(stream, static_cast<uint32_t>(material.GraphParameters.size()));
+            for (const MaterialGraphParameterValue& parameter : material.GraphParameters)
+            {
+                WriteString(stream, parameter.Name);
+                Write(stream, static_cast<uint8_t>(parameter.IsTexture ? 1 : 0));
+                Write(stream, parameter.Value);
+                WriteString(stream, parameter.Texture);
+            }
         }
 
-        // `customLit`: the file has the Custom Lit settings too ("NMA5"; "NMA4" ends after the toon ones).
-        static void ReadShadingFields(std::istream& stream, MaterialData& material, bool customLit = true)
+        // `version`: the file's (4: the toon settings only; 5: and the Custom Lit ones; 6: and the material graph).
+        static void ReadShadingFields(std::istream& stream, MaterialData& material, int version = 6)
         {
             Read(stream, material.ToonBands);
             Read(stream, material.ToonBandSoftness);
@@ -222,19 +240,37 @@ namespace Nox
             Read(stream, material.ToonRimColor);
             Read(stream, material.ToonRimWidth);
             Read(stream, material.ToonRimIntensity);
-            if (!customLit)
+            if (version < 5)
                 return;
             ReadString(stream, material.CustomShader);
             for (glm::vec4& parameter : material.CustomParameters)
                 Read(stream, parameter);
             ReadTexture(stream, material.CustomTexture1);
             ReadTexture(stream, material.CustomTexture2);
+            if (version < 6)
+                return;
+            ReadString(stream, material.SurfaceGraph);
+            uint32_t count = 0;
+            Read(stream, count);
+            material.GraphParameters.clear();
+            for (uint32_t index = 0; index < count && stream.good() && index < 1024; ++index)
+            {
+                MaterialGraphParameterValue parameter;
+                ReadString(stream, parameter.Name);
+                uint8_t texture = 0;
+                Read(stream, texture);
+                parameter.IsTexture = texture != 0;
+                Read(stream, parameter.Value);
+                ReadString(stream, parameter.Texture);
+                material.GraphParameters.push_back(std::move(parameter));
+            }
         }
 
     private:
-        // "NMA5": every field and the shading models' settings (toon, Custom Lit); "NMA4": without the Custom Lit ones; "NMA3": without
-        // either (read with their defaults). Older files are made again.
-        static constexpr char Magic[4] = { 'N', 'M', 'A', '5' };
+        // "NMA6": every field, the shading models' settings (toon, Custom Lit) and the material graph; "NMA5": without the graph; "NMA4":
+        // without the Custom Lit settings either; "NMA3": without any (read with their defaults). Older files are made again.
+        static constexpr char Magic[4] = { 'N', 'M', 'A', '6' };
+        static constexpr char MagicWithoutGraph[4] = { 'N', 'M', 'A', '5' };
         static constexpr char MagicToonOnly[4] = { 'N', 'M', 'A', '4' };
         static constexpr char MagicWithoutShading[4] = { 'N', 'M', 'A', '3' };
 

@@ -234,7 +234,24 @@ struct GpuMaterial
     uint32_t customLitSlot;
     uint32_t customTextureIndex[2];
     vec4 customParameters[4];
+
+    // A material graph (MaterialData::SurfaceGraph; MaterialGraph.slang, Renderer/MaterialGraph.h): the renderer's slot for its graph
+    // (0xFFFFFFFF: none, or not built yet -- the material's own values), which Material Output pins it connects (MaterialGraphOutput
+    // bits), its parameters (the graph's layout: the material's overrides, else the graph's defaults) and textures (0xFFFFFFFF: none).
+    uint32_t graphSlot;
+    uint32_t graphOutputs;
+    uint32_t graphTextureIndex[8];
+    vec4 graphParameters[16];
 };
+
+// GpuMaterial::graphOutputs (MaterialGraphOutput, Renderer/MaterialGraph.h).
+STATIC_CONST uint32_t MaterialGraphOutputBaseColor = 1u << 0;
+STATIC_CONST uint32_t MaterialGraphOutputMetallic = 1u << 1;
+STATIC_CONST uint32_t MaterialGraphOutputRoughness = 1u << 2;
+STATIC_CONST uint32_t MaterialGraphOutputNormal = 1u << 3;
+STATIC_CONST uint32_t MaterialGraphOutputEmissive = 1u << 4;
+STATIC_CONST uint32_t MaterialGraphOutputOcclusion = 1u << 5;
+STATIC_CONST uint32_t MaterialGraphOutputOpacity = 1u << 6;
 
 // GpuMaterial::shadingModel (MaterialShadingModel, DataTypes.h).
 STATIC_CONST uint32_t ShadingModelDefaultLit = 0u;
@@ -872,6 +889,9 @@ struct UniformBufferObject
     // Seconds since the renderer started, wrapped every hour (float precision stays sub-millisecond): what animated Custom Lit shaders
     // read (CustomLitSurface::time).
     float timeSeconds;
+    // Large world coordinates: the world position of the GPU's origin (Renderer::GetRenderOrigin; positions here are relative to it) --
+    // a material graph's World Position node adds it, so world-aligned patterns stay put when the origin moves.
+    vec3 renderOrigin;
 };
 
 STATIC_CONST uint32_t OIT_WEIGHTED_BLENDED = 0;

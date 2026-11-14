@@ -105,6 +105,33 @@ namespace Nox::Mcp
                 values["CustomShader"] = manager->GetMetadata(shader).FilePath.generic_string();
                 rewritten = rewritten || values["CustomShader"] != material.CustomShader;
             }
+            // The material graph: a Material Graph asset (.nmatgraph), stored by its path in Assets; its texture parameters' values as the
+            // textures above.
+            if (!material.SurfaceGraph.empty() && material.SurfaceGraph != before.SurfaceGraph)
+            {
+                std::string error;
+                const AssetHandle graph = ResolveAsset(Json(material.SurfaceGraph), AssetType::MaterialGraph, error);
+                if (graph == 0)
+                    return std::format("'SurfaceGraph': {}", error);
+                values["SurfaceGraph"] = manager->GetMetadata(graph).FilePath.generic_string();
+                rewritten = rewritten || values["SurfaceGraph"] != material.SurfaceGraph;
+            }
+            for (const MaterialGraphParameterValue& parameter : material.GraphParameters)
+            {
+                if (!parameter.IsTexture || parameter.Texture.empty())
+                    continue;
+                std::string error;
+                const AssetHandle texture = ResolveAsset(Json(parameter.Texture), AssetType::Texture2D, error);
+                if (texture == 0)
+                    return std::format("'GraphParameters/{}': {}", parameter.Name, error);
+                const AssetMetadata metadata = manager->GetMetadata(texture);
+                const std::string stored = metadata.SourceFilePath.empty() ? metadata.FilePath.generic_string() : metadata.SourceFilePath.generic_string();
+                if (stored != parameter.Texture)
+                {
+                    values["GraphParameters"][parameter.Name] = stored;
+                    rewritten = true;
+                }
+            }
             return rewritten ? MaterialFromJson(values, material) : std::string();
         }
 
@@ -446,9 +473,12 @@ namespace Nox::Mcp
             Tool tool;
             tool.Name = "get_material_shaders";
             tool.Title = "List the Material Shaders";
-            tool.Description = "The project's Material Shaders (Custom Lit lighting, .slang) with their slots, and whether the renderer built "
-                               "them: 'ready' false with 'message' when they did not compile (read_log has the compiler's message with the "
-                               "file and line; Custom Lit materials are lit as Default Lit meanwhile).";
+            tool.Description = "The project's Material Shaders (Custom Lit lighting, .slang) and material graphs (.nmatgraph, edited with "
+                               "get_graph / set_graph; a material uses one with set_material { \"SurfaceGraph\": \"<path>\", \"GraphParameters\": "
+                               "{ \"<name>\": [x, y, z, w] or \"<texture path>\" } }), and whether the renderer built them: 'ready' / "
+                               "'graphsReady' false with 'message' when they did not compile (read_log has the compiler's message with the file "
+                               "and line); a graph's 'error' names the node when the graph itself does not compile. Custom Lit materials are lit "
+                               "as Default Lit and graph materials keep their own values meanwhile.";
             tool.InputSchema = Schema().Build();
             tool.Handler = [](const Json&, ToolDone done)
             {
@@ -467,11 +497,32 @@ namespace Nox::Mcp
                                                 { "built", slot != 0xFFFFFFFFu } });
                     }
                 }
-                Json answer{ { "shaders", shaders } };
+                Json graphs = Json::array();
+                if (manager)
+                {
+                    for (const auto& [handle, metadata] : manager->GetAssetRegistry())
+                    {
+                        if (metadata.Type != AssetType::MaterialGraph)
+                            continue;
+                        const std::string path = metadata.FilePath.generic_string();
+                        Json entry{ { "uuid", std::to_string(static_cast<uint64_t>(handle)) }, { "path", path },
+                                    { "built", Renderer::FindMaterialGraph(path) != 0xFFFFFFFFu } };
+                        if (renderer)
+                        {
+                            const auto error = renderer->GetCustomLitStatus().GraphErrors.find(path);
+                            if (error != renderer->GetCustomLitStatus().GraphErrors.end())
+                                entry["error"] = error->second;
+                        }
+                        graphs.push_back(std::move(entry));
+                    }
+                }
+                Json answer{ { "shaders", shaders }, { "graphs", graphs } };
                 if (renderer)
                 {
                     const Renderer::CustomLitStatus& status = renderer->GetCustomLitStatus();
                     answer["ready"] = status.Ready;
+                    answer["graphsReady"] = status.GraphsReady;
+                    answer["building"] = status.Building;
                     answer["message"] = status.Message;
                     answer["builds"] = status.Version;
                 }

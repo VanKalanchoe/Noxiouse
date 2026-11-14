@@ -228,6 +228,40 @@ namespace Nox::Mcp
                        } },
                 NOX_MATERIAL_FIELD(CustomTexture1),
                 NOX_MATERIAL_FIELD(CustomTexture2),
+                NOX_MATERIAL_FIELD(SurfaceGraph),
+                // The material graph's parameter values: { "Name": [x, y, z, w] } for a scalar (x) / vector, { "Name": "<texture path>" }
+                // for a texture. Replaces the whole list (a name left out takes the graph's default).
+                Field{ "GraphParameters",
+                       [](const MaterialData& m)
+                       {
+                           Json values = Json::object();
+                           for (const MaterialGraphParameterValue& parameter : m.GraphParameters)
+                               values[parameter.Name] = parameter.IsTexture ? Json(parameter.Texture) : ToJson(parameter.Value);
+                           return values;
+                       },
+                       [](const Json& v, MaterialData& m) -> std::string
+                       {
+                           if (!v.is_object())
+                               return "must be an object: { \"<parameter name>\": [x, y, z, w] or a number or \"<texture path>\" }";
+                           std::vector<MaterialGraphParameterValue> parameters;
+                           for (auto it = v.begin(); it != v.end(); ++it)
+                           {
+                               MaterialGraphParameterValue parameter;
+                               parameter.Name = it.key();
+                               if (it.value().is_string())
+                               {
+                                   parameter.IsTexture = true;
+                                   parameter.Texture = it.value().get<std::string>();
+                               }
+                               else if (it.value().is_number())
+                                   parameter.Value = glm::vec4(it.value().get<float>(), 0.0f, 0.0f, 0.0f);
+                               else if (std::string problem = FromJson(it.value(), parameter.Value); !problem.empty())
+                                   return std::format("{}: {} (a number, 4 numbers or a texture path)", it.key(), problem);
+                               parameters.push_back(std::move(parameter));
+                           }
+                           m.GraphParameters = std::move(parameters);
+                           return {};
+                       } },
             };
             return fields;
         }

@@ -14,6 +14,8 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Renderer.h"
+#include "NoxCore/Renderer/MaterialGraph.h"
+#include "NoxCore/NodeGraph/NodeGraphAsset.h"
 #include "NoxCore/Core/Application.h"
 #include <SDL3/SDL_misc.h>
 #include "AssetPreviewRenderer.h"
@@ -446,6 +448,178 @@ namespace Nox
             drawTextureReference("Custom Texture 2 (linear)", "CustomTexture2", data.CustomTexture2.Path);
             ImGui::TextDisabled("(the shader reads them with custom_lit_texture(s, 0 or 1, uv))");
             ImGui::TextDisabled("Ray-traced reflections, GI bounces, the path tracer and order-independent\ntransparency show it as Default Lit.");
+        }
+
+        // The material graph (MaterialGraph.h; Unreal's material graph with this material as its instance): what its Material Output
+        // connects replaces the values above, its parameters take this material's values where it sets them.
+        ImGui::SeparatorText("Material Graph");
+        {
+            auto assets = Project::GetActive()->GetEditorAssetManager();
+            const AssetHandle currentGraph = data.SurfaceGraph.empty() ? AssetHandle(0) : assets->FindHandleByPath(data.SurfaceGraph, AssetType::MaterialGraph);
+            const std::string currentGraphPath = currentGraph != 0 ? assets->GetMetadata(currentGraph).FilePath.generic_string() : data.SurfaceGraph;
+            const std::string graphLabel = data.SurfaceGraph.empty() ? std::string("None") : std::filesystem::path(currentGraphPath).filename().string();
+            if (ImGui::BeginCombo("Surface Graph", graphLabel.c_str()))
+            {
+                if (ImGui::Selectable("None", data.SurfaceGraph.empty()))
+                {
+                    data.SurfaceGraph.clear();
+                    changed = true;
+                }
+                for (const auto& [graphHandle, graphMetadata] : assets->GetAssetRegistry())
+                {
+                    if (graphMetadata.Type != AssetType::MaterialGraph)
+                        continue;
+                    const std::string path = graphMetadata.FilePath.generic_string();
+                    if (ImGui::Selectable(path.c_str(), path == currentGraphPath))
+                    {
+                        data.SurfaceGraph = path;
+                        changed = true;
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("A Material Graph (.nmatgraph) that computes this surface: the Material Output pins it connects replace\n"
+                                  "the values above. Pick one or drag it from the Content Browser; make one with + Add > Material Graph.");
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    const AssetHandle dropped = *(const AssetHandle*)payload->Data;
+                    if (AssetManager::GetAssetType(dropped) == AssetType::MaterialGraph)
+                    {
+                        data.SurfaceGraph = assets->GetMetadata(dropped).FilePath.generic_string();
+                        changed = true;
+                    }
+                    else
+                        NOX_CORE_WARN("Wrong Asset Type - Expected a Material Graph (.nmatgraph)");
+                }
+                ImGui::EndDragDropTarget();
+            }
+            if (currentGraph != 0)
+            {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Open##SurfaceGraph") && OpenAssetCallback)
+                    OpenAssetCallback(currentGraph);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Opens the graph in the node graph editor. Save it there (Ctrl+S) to build it again.");
+            }
+
+            if (!data.SurfaceGraph.empty())
+            {
+                // The graph as it is in memory (the node graph editor edits the same asset), compiled for its parameters and errors.
+                const Ref<NodeGraphAsset> graphAsset = currentGraph != 0 ? AssetManager::GetAsset<NodeGraphAsset>(currentGraph) : nullptr;
+                const MaterialGraphProgram program = graphAsset ? CompileMaterialGraph(graphAsset->Graph) : MaterialGraphProgram{};
+                const Renderer* renderer = Application::Get().GetRenderer();
+                const ImVec4 warning(0.95f, 0.75f, 0.25f, 1.0f);
+                const bool built = renderer && Renderer::FindMaterialGraph(data.SurfaceGraph) != 0xFFFFFFFFu;
+                ImGui::PushTextWrapPos(0.0f);
+                if (!graphAsset)
+                    ImGui::TextColored(warning, "The graph is not in the project's Assets: the material keeps its own values.");
+                else if (!program.Valid)
+                    ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.3f, 1.0f), "The graph does not compile: %s %s", program.Error.c_str(),
+                                       built ? "(its last build draws until it does)" : "(the material keeps its own values)");
+                else if (renderer && renderer->GetCustomLitStatus().Building)
+                    ImGui::TextColored(warning, "Building the material graphs... (the last build draws meanwhile)");
+                else if (renderer && !renderer->GetCustomLitStatus().Message.empty())
+                    ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.3f, 1.0f), "%s", renderer->GetCustomLitStatus().Message.c_str());
+                else if (built)
+                    ImGui::TextDisabled("Built: %s computes the surface.", graphLabel.c_str());
+                else
+                    ImGui::TextColored(warning, "Not built yet (the material keeps its own values): save the graph.");
+                ImGui::PopTextWrapPos();
+
+                // Its parameters: ticked ones take this material's value, the others the graph's default.
+                for (const MaterialGraphParameter& parameter : program.Parameters)
+                {
+                    if (parameter.Name.starts_with('#'))
+                        continue; // (a Texture Sample without a parameter name: its texture is the graph's)
+                    const bool isTexture = parameter.Type == MaterialGraphParameter::Kind::Texture;
+                    auto value = std::find_if(data.GraphParameters.begin(), data.GraphParameters.end(), [&](const MaterialGraphParameterValue& v)
+                    {
+                        return v.Name == parameter.Name && v.IsTexture == isTexture;
+                    });
+                    bool overridden = value != data.GraphParameters.end();
+                    ImGui::PushID(parameter.Name.c_str());
+                    if (ImGui::Checkbox("##override", &overridden))
+                    {
+                        if (overridden)
+                        {
+                            MaterialGraphParameterValue added;
+                            added.Name = parameter.Name;
+                            added.IsTexture = isTexture;
+                            added.Value = parameter.Default;
+                            if (isTexture && parameter.DefaultTexture != 0 && AssetManager::IsAssetHandleValid(parameter.DefaultTexture))
+                                added.Texture = assets->GetMetadata(parameter.DefaultTexture).FilePath.generic_string();
+                            data.GraphParameters.push_back(std::move(added));
+                        }
+                        else
+                            data.GraphParameters.erase(value);
+                        changed = true;
+                        value = std::find_if(data.GraphParameters.begin(), data.GraphParameters.end(), [&](const MaterialGraphParameterValue& v)
+                        {
+                            return v.Name == parameter.Name && v.IsTexture == isTexture;
+                        });
+                    }
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Ticked: this material's value. Unticked: the graph's default.");
+                    ImGui::SameLine();
+                    const bool active = value != data.GraphParameters.end();
+                    if (isTexture)
+                    {
+                        if (active)
+                            drawTextureReference(parameter.Name.c_str(), "GraphTexture", value->Texture);
+                        else
+                        {
+                            const std::string fallback = parameter.DefaultTexture != 0 && AssetManager::IsAssetHandleValid(parameter.DefaultTexture)
+                                                             ? assets->GetMetadata(parameter.DefaultTexture).FilePath.filename().string()
+                                                             : std::string("None");
+                            ImGui::TextDisabled("%s: %s (the graph's)", parameter.Name.c_str(), fallback.c_str());
+                        }
+                    }
+                    else
+                    {
+                        glm::vec4 shown = active ? value->Value : parameter.Default;
+                        ImGui::BeginDisabled(!active);
+                        bool edited = false;
+                        if (parameter.Type == MaterialGraphParameter::Kind::Scalar)
+                            edited = ImGui::DragFloat(parameter.Name.c_str(), &shown.x, 0.01f);
+                        else
+                            edited = ImGui::ColorEdit4(parameter.Name.c_str(), glm::value_ptr(shown), ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+                        ImGui::EndDisabled();
+                        if (edited && active)
+                        {
+                            value->Value = shown;
+                            changed = true;
+                        }
+                    }
+                    ImGui::PopID();
+                }
+                // Values for parameters the graph no longer has (renamed or removed there): kept, shown so they can be dropped.
+                for (size_t index = 0; index < data.GraphParameters.size(); ++index)
+                {
+                    const MaterialGraphParameterValue& stale = data.GraphParameters[index];
+                    const bool known = std::any_of(program.Parameters.begin(), program.Parameters.end(), [&](const MaterialGraphParameter& p)
+                    {
+                        return p.Name == stale.Name && (p.Type == MaterialGraphParameter::Kind::Texture) == stale.IsTexture;
+                    });
+                    if (known || !program.Valid)
+                        continue;
+                    ImGui::PushID(static_cast<int>(index));
+                    ImGui::TextDisabled("%s: not in the graph any more", stale.Name.c_str());
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Remove"))
+                    {
+                        data.GraphParameters.erase(data.GraphParameters.begin() + static_cast<std::ptrdiff_t>(index));
+                        changed = true;
+                        ImGui::PopID();
+                        break;
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::TextDisabled("Opaque and translucent surfaces use it; ray-traced reflections, GI bounces and the path tracer\n"
+                                    "show the material's own values. Opacity Mask and World Position Offset come later.");
+            }
         }
 
         if (changed)

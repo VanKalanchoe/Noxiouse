@@ -652,6 +652,68 @@
             emission *= SampleMaterialTextureGrad(ubo, instance.emissiveTextureIndex, samp, emUV, ddx_em, ddy_em).rgb;
         }
 
+#ifdef NOX_MATERIAL_GRAPH
+        // 6. THE MATERIAL GRAPH (MaterialGraph.slang; this file compiled with the project's graphs, Renderer::createMaterialGraphPipelines):
+        // the Material Output pins the graph connects replace the values above, the others stay the material's own.
+        if (gpuMaterial.graphSlot != 0xFFFFFFFFu)
+        {
+            const float unbiased = exp2(-ubo->textureLodBias); // (the graph's Texture Samples apply the LOD bias themselves)
+            MaterialGraphInputs graphIn;
+            graphIn.uv0 = uv0;
+            graphIn.uv0Dx = ddx_uv0 * unbiased;
+            graphIn.uv0Dy = ddy_uv0 * unbiased;
+            graphIn.uv1 = uv1;
+            graphIn.uv1Dx = ddx_uv1 * unbiased;
+            graphIn.uv1Dy = ddy_uv1 * unbiased;
+            graphIn.position = worldPos + ubo->renderOrigin;
+            graphIn.positionDx = ddx_pos;
+            graphIn.positionDy = ddy_pos;
+            graphIn.normal = backFace ? -geomNormal : geomNormal;
+            graphIn.vertexColor = float4(1.0);
+            if (instance.vertexColors != 0)
+                graphIn.vertexColor = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + vIdx0, 1u) * w0 +
+                                      loadMeshVertexColor(ubo, meshlet.globalVertexOffset + vIdx1, 1u) * w1 +
+                                      loadMeshVertexColor(ubo, meshlet.globalVertexOffset + vIdx2, 1u) * w2;
+            graphIn.view = -viewDir;
+            graphIn.screenUV = uvScreen;
+            graphIn.screenUVDx = float2(invViewport.x, 0.0);
+            graphIn.screenUVDy = float2(0.0, invViewport.y);
+            graphIn.time = ubo->timeSeconds;
+            graphIn.cameraPosition = ubo->cameraWorldPos.xyz + ubo->renderOrigin;
+            graphIn.material = gpuMaterial;
+            graphIn.mipFeedback = ubo->mipFeedbackReference != 0 && isMipFeedbackPixel(pixelCoord, ubo->mipFeedbackFrame);
+            graphIn.ubo = ubo;
+            MaterialGraphOutputs graphOut;
+            graphOut.baseColor = baseColor.rgb;
+            graphOut.metallic = metallic;
+            graphOut.roughness = roughness;
+            graphOut.normal = float3(0.0, 0.0, 1.0);
+            graphOut.emissive = emission;
+            graphOut.occlusion = occlusion;
+            graphOut.opacity = baseColor.a;
+            material_graph_surface(gpuMaterial.graphSlot, graphIn, graphOut);
+            const uint outputs = gpuMaterial.graphOutputs;
+            if ((outputs & MaterialGraphOutputBaseColor) != 0u)
+                baseColor.rgb = saturate(graphOut.baseColor);
+            if ((outputs & MaterialGraphOutputMetallic) != 0u)
+                metallic = saturate(graphOut.metallic);
+            if ((outputs & MaterialGraphOutputRoughness) != 0u)
+                roughness = saturate(graphOut.roughness);
+            if ((outputs & MaterialGraphOutputNormal) != 0u)
+            {
+                // The graph's normal on the side seen (as the normal map's: flipping all three tangent axes for a back face).
+                finalNormal = material_graph_world_normal(graphOut.normal, geomNormal, rawGeomTangent, tangentHandedness);
+                rawNormalTex = graphOut.normal * 0.5 + 0.5;
+                if (backFace)
+                    finalNormal = -finalNormal;
+            }
+            if ((outputs & MaterialGraphOutputEmissive) != 0u)
+                emission = max(graphOut.emissive, float3(0.0));
+            if ((outputs & MaterialGraphOutputOcclusion) != 0u)
+                occlusion = saturate(graphOut.occlusion);
+        }
+#endif
+
         // Output to MRT
         output.albedo   = float4(baseColor.rgb, occlusion);
         // Debug view 20: the base color texture's mip residency against what this pixel needs.

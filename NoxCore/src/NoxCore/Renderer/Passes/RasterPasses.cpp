@@ -719,6 +719,10 @@ namespace Nox
         m_frame.gbufferVelocityWritten = writeVelocity;
 
         NRI::Pipeline* gbufferPipeline = writeVelocity ? m_gbufferPipeline.get() : m_gbufferPipelineNoVelocity.get();
+        // While a material has a material graph: the resolve compiled with the project's graphs (CustomLitPasses.cpp; one shader for
+        // every material, the graph a pixel's material names called by its slot). Without one, the plain resolve: no graph code costs.
+        if (m_gpuScene.GetGraphMaterialCount() > 0 && m_gbufferGraphPipeline && m_gbufferGraphPipelineNoVelocity)
+            gbufferPipeline = writeVelocity ? m_gbufferGraphPipeline.get() : m_gbufferGraphPipelineNoVelocity.get();
         const bool resolveMaterials = gbufferPipeline && !m_drawList.empty();
 
         // Texture streaming feedback starts empty every frame; the material resolve and the transparent pass fill it.

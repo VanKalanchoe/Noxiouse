@@ -363,6 +363,34 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     // A Custom Lit surface's UV footprint (CustomLitSurface::uvFootprint), here while every pixel of the quad is still running.
     const float customUVFootprint = max(length(ddx(vertIn.uv0)), length(ddy(vertIn.uv0)));
 #endif
+#ifdef NOX_MATERIAL_GRAPH
+    // A material graph's inputs (MaterialGraph.slang) with their screen derivatives, here while every pixel of the quad is still running.
+    MaterialGraphInputs graphIn;
+    {
+        graphIn.uv0 = vertIn.uv0;
+        graphIn.uv0Dx = ddx(vertIn.uv0);
+        graphIn.uv0Dy = ddy(vertIn.uv0);
+        graphIn.uv1 = vertIn.uv1;
+        graphIn.uv1Dx = ddx(vertIn.uv1);
+        graphIn.uv1Dy = ddy(vertIn.uv1);
+        graphIn.position = vertIn.worldPos + ubo->renderOrigin;
+        graphIn.positionDx = ddx(vertIn.worldPos);
+        graphIn.positionDy = ddy(vertIn.worldPos);
+        const float3 vertexNormal = normalize(vertIn.normal);
+        graphIn.normal = instance.doubleSided != 0 && !isFrontFace ? -vertexNormal : vertexNormal;
+        graphIn.vertexColor = vertIn.color;
+        graphIn.view = normalize(ubo->cameraWorldPos.xyz - vertIn.worldPos);
+        const float4 graphClip = mul(ubo->proj, mul(ubo->view, float4(vertIn.worldPos, 1.0)));
+        graphIn.screenUV = graphClip.w > 1e-6 ? float2(graphClip.x / graphClip.w * 0.5 + 0.5, 0.5 - graphClip.y / graphClip.w * 0.5) : float2(0.5);
+        graphIn.screenUVDx = ddx(graphIn.screenUV);
+        graphIn.screenUVDy = ddy(graphIn.screenUV);
+        graphIn.time = ubo->timeSeconds;
+        graphIn.cameraPosition = ubo->cameraWorldPos.xyz + ubo->renderOrigin;
+        graphIn.material = instances.material(vertIn.drawID);
+        graphIn.mipFeedback = ubo->mipFeedbackReference != 0 && isMipFeedbackPixel(int2(vertIn.pos.xy), ubo->mipFeedbackFrame);
+        graphIn.ubo = ubo;
+    }
+#endif
 
     // Texture streaming: transparent surfaces never reach the G-buffer, so they report here (hardware derivatives).
     if (ubo->mipFeedbackReference != 0 && isMipFeedbackPixel(int2(vertIn.pos.xy), ubo->mipFeedbackFrame))
@@ -460,6 +488,32 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     }
     baseColor *= vertIn.color; // glTF COLOR_0 (Material_PBR_Mesh.slang's meshMain; white without)
 
+#ifdef NOX_MATERIAL_GRAPH
+    // A material graph: the Material Output pins it connects replace the material's values (normal, emissive and occlusion below,
+    // where this shader reads them); Opacity is a blended surface's alpha.
+    const uint graphOutputs = graphIn.material.graphSlot != 0xFFFFFFFFu ? graphIn.material.graphOutputs : 0u;
+    MaterialGraphOutputs graphOut;
+    graphOut.baseColor = baseColor.rgb;
+    graphOut.metallic = metallic;
+    graphOut.roughness = perceptualRoughness;
+    graphOut.normal = float3(0.0, 0.0, 1.0);
+    graphOut.emissive = float3(0.0);
+    graphOut.occlusion = 1.0;
+    graphOut.opacity = baseColor.a;
+    if (graphOutputs != 0u)
+    {
+        material_graph_surface(graphIn.material.graphSlot, graphIn, graphOut);
+        if ((graphOutputs & MaterialGraphOutputBaseColor) != 0u)
+            baseColor.rgb = saturate(graphOut.baseColor);
+        if ((graphOutputs & MaterialGraphOutputMetallic) != 0u)
+            metallic = saturate(graphOut.metallic);
+        if ((graphOutputs & MaterialGraphOutputRoughness) != 0u)
+            perceptualRoughness = clamp(graphOut.roughness, c_MinRoughness, 1.0);
+        if ((graphOutputs & MaterialGraphOutputOpacity) != 0u)
+            baseColor.a = saturate(graphOut.opacity);
+    }
+#endif
+
     float transmission = instance.transmissionFactor;
     if (instance.transmissionTextureIndex != 0xFFFFFFFF)
     {
@@ -513,6 +567,10 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
                                                                                 : clamp(float3(reflectance * 25.0), 0.0, 1.0);
 
     float3 n = (instance.normalTextureIndex != 0xFFFFFFFF) ? getNormal(ubo, instance, vertIn, sampLinearHandle) : normalize(vertIn.normal);
+#ifdef NOX_MATERIAL_GRAPH
+    if ((graphOutputs & MaterialGraphOutputNormal) != 0u)
+        n = material_graph_world_normal(graphOut.normal, normalize(vertIn.normal), vertIn.tangent.xyz, vertIn.tangent.w);
+#endif
     if (instance.doubleSided != 0 && !isFrontFace)
     {
         n = -n;
@@ -545,6 +603,10 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         if (instance.emissiveTextureIndex != 0xFFFFFFFF)
             customEmissive *= SampleMaterialTextureBias(ubo, instance.emissiveTextureIndex, sampLinearHandle,
                                                         instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).rgb;
+#ifdef NOX_MATERIAL_GRAPH
+        if ((graphOutputs & MaterialGraphOutputEmissive) != 0u)
+            customEmissive = max(graphOut.emissive, float3(0.0));
+#endif
         const float4 clip = mul(ubo->proj, mul(ubo->view, float4(vertIn.worldPos, 1.0)));
         const float2 screenUV = clip.w > 1e-6 ? float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5) : float2(0.5);
         customSurface = custom_lit_surface(ubo, gpuMaterial, vertIn.worldPos, n, v, baseColor.rgb, metallic, perceptualRoughness, 1.0,
@@ -804,6 +866,10 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         ao = 1.0 + instance.occlusionStrength *
                    (SampleMaterialTextureBias(ubo, instance.occlusionTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.occlusionTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).r - 1.0);
     }
+#ifdef NOX_MATERIAL_GRAPH
+    if ((graphOutputs & MaterialGraphOutputOcclusion) != 0u)
+        ao = saturate(graphOut.occlusion);
+#endif
     // The screen-space AO at this pixel is the opaque surface's behind it: right for a decal lying on that surface, wrong for glass
     // or anything standing in front of it (the background's occlusion, noisy and sliding as the camera moves). Only where this
     // surface is the one the pixel sees (the screen-probe GI's distance says so; without it, only what lets no light through).
@@ -988,6 +1054,10 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     {
         emissive *= SampleMaterialTextureBias(ubo, instance.emissiveTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).rgb;
     }
+#ifdef NOX_MATERIAL_GRAPH
+    if ((graphOutputs & MaterialGraphOutputEmissive) != 0u)
+        emissive = max(graphOut.emissive, float3(0.0));
+#endif
     if (hasLobes)
         emissive *= 1.0 - lobeShading.coatWeight; // the coat over the emission (the spec's coated_emission)
     color += emissive;

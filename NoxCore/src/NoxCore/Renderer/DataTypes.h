@@ -85,6 +85,16 @@ namespace Nox
         int32_t Set = 0;
     };
 
+    // A material's value for a parameter of its material graph (MaterialData::GraphParameters): a scalar's in x, a vector's in xyzw, or a
+    // texture's path in the project's Assets (IsTexture).
+    struct MaterialGraphParameterValue
+    {
+        std::string Name;
+        bool IsTexture = false;
+        glm::vec4 Value = glm::vec4(0.0f);
+        std::string Texture;
+    };
+
     // A material's UV channel: the mesh UV set it reads and the transform applied to it (glTF KHR_texture_transform: offset, rotation
     // counter-clockwise in radians, scale; uv' = T x R x S x uv). A texture names the channel it reads (its Set), so two textures on
     // one UV set with different transforms read two channels -- each texture its own transform, as Unreal's per-texture UVs.
@@ -244,6 +254,13 @@ namespace Nox
         glm::vec4 CustomParameters[MaterialCustomParameterCount] = { glm::vec4(1.0f), glm::vec4(0.0f), glm::vec4(0.0f), glm::vec4(0.0f) };
         MaterialTexture CustomTexture1;            // RGBA, sRGB
         MaterialTexture CustomTexture2;            // RGBA, linear
+
+        // A material graph (Renderer/MaterialGraph.h; a .nmatgraph in the project's Assets): computes the surface -- what its Material Output
+        // connects replaces the values above, the rest stay -- with the material's values for its parameters (Scalar / Vector Parameter
+        // nodes, Texture Samples with a parameter name; by name, the graph's defaults where the material sets none: Unreal's material
+        // instances). Stored in .nmat files only ("NMA6").
+        std::string SurfaceGraph;                  // the graph's path in the project's Assets (empty: none)
+        std::vector<MaterialGraphParameterValue> GraphParameters;
     };
 
     // The lobe textures of a material, with how each is read: sRGB color, or a tangent-space normal map.

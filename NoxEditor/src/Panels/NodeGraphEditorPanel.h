@@ -71,6 +71,9 @@ namespace Nox
         // An audio graph's preview (MetaSounds' Play in the graph window): the graph heard as it is edited (an edit restarts it with
         // the new graph), its parameters as sliders / checkboxes / Fire buttons, the output's level.
         void DrawAudioPreview();
+        // A material graph: whether it compiles (the graph as edited: the error names the node) and what the renderer built from the
+        // saved file.
+        void DrawMaterialGraphStatus();
         void StopAudioPreview();
 
     private:

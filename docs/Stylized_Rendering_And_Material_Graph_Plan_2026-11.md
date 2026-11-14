@@ -1,8 +1,8 @@
 # Stylized rendering and the material graph -- plan (2026-11-14)
 
 Status (2026-11-14): **step 1 (Toon shading model) and step 2 (outlines, Post Process Volume) built and tested by the user; step 3 (Custom Lit
-with hand-written Material Shaders) built and tested by the user**; step 4a (the material graph) in progress -- part 1, the graph and its
-code generation, built; steps 4b-6 planned (the steps were re-cut when step 3 was built:
+with hand-written Material Shaders) built and tested by the user**; step 4a (the material graph for opaque and translucent materials) built
+(offline-tested; GPU test by the user pending); steps 4b-6 planned (the steps were re-cut when step 3 was built:
 section 8). Backlog item R13.
 
 Goal: Nox is not tied to realistic lighting. Materials can be lit physically (the default), not at all (Unlit), with a built-in toon
@@ -99,7 +99,7 @@ surface code (the rest of old step 6) is step 5; the Rendering style setting is 
 | 2 | **Outlines** post effect (depth / normal edges, thickness, colour, all surfaces or toon only), in a **Post Process Volume** (Unreal's; saved with the scene -- the post effects were editor-only before) | small | built (waiting for the user's test) |
 | 3 | **Custom Lit with hand-written Material Shaders**: a `.slang` asset with `light()` (per light) and `ambient()`; the Custom Lit pass over the G-buffer's Custom Lit pixels (the deferred lighting compiled with the project's Material Shaders) and the forward variant (translucent, previews); four parameters and two textures per material; live rebuild on save; packaged games ship the compiled shaders | medium | built (waiting for the user's test) |
 | 4 | **Material graph** (surface): Material domain in the NodeGraph framework, node library, Slang code generation into per-pass templates, material tile classification in the visibility buffer, RT fallback then per-material hit groups, parameters by name and instances, C# parameter API, packaging of every variant; **its Custom Lit output** generates step 3's light() / ambient() | large | planned |
-| 4a | ... **cut (2026-11-14):** the graph used by opaque and translucent materials -- `.nmatgraph` asset, 45 nodes, Slang code generation with analytic derivatives, scalar / vector / texture parameters overridden per `.nmat`, the G-buffer resolve and the forward shader calling it by slot | large | part 1 (graph, nodes, code generation) built; part 2 (materials, renderer, Material Editor) next |
+| 4a | ... **cut (2026-11-14):** the graph used by opaque and translucent materials -- `.nmatgraph` asset, 45 nodes, Slang code generation with analytic derivatives, scalar / vector / texture parameters overridden per `.nmat`, the G-buffer resolve and the forward shader calling it by slot | large | **built 2026-11-14** (part 1: graph, nodes, code generation; part 2: `.nmat` NMA6 Surface Graph + parameter values, `GpuMaterial` graph fields, the G-buffer resolve's graph variant and the forward variant, Material Editor section, graph editor status, MCP, packaging); offline: 203 checks + Slang compiles of the generated variants; GPU test by the user pending |
 | 4b | Opacity Mask (the visibility buffer, shadow maps and RT any-hit evaluate the graph), World Position Offset | medium | planned |
 | 4c | The graph's Custom Lit output (light() / ambient()), C# parameter API, RT / path tracer evaluation, tile classification | large | planned |
 | 5 | **Hand-written surface code** (a Material Shader's optional surface function: base colour, normal, roughness ... in Slang, the graph's surface output by hand) | medium | planned |

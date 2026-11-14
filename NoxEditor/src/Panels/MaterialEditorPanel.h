@@ -1,4 +1,6 @@
 #pragma once
+
+#include <functional>
 #include <string>
 
 #include "NoxCore/Asset/Asset.h"
@@ -23,6 +25,8 @@ namespace Nox
         // The material's factors, texture slots and alpha mode. Changes go into the loaded material (every instance shades with
         // them this frame) and are written to its .nmat. Shared with the Properties panel's Quick Edit.
         static void DrawProperties(AssetHandle handle, MaterialData& data);
+        // Opens an asset in its editor (EditorLayer::OpenAsset; set by the editor): the Material Graph section's Open button.
+        static inline std::function<void(AssetHandle)> OpenAssetCallback;
 
     private:
         AssetHandle m_Material = 0;

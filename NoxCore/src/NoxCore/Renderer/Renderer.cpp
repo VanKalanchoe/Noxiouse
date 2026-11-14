@@ -265,6 +265,40 @@ namespace Nox
         packed.customTextureIndex[1] = static_cast<uint32_t>(GetTextureIndex(material.CustomTexture2.Path));
         for (int32_t parameter = 0; parameter < MaterialCustomParameterCount; ++parameter)
             packed.customParameters[parameter] = material.CustomParameters[parameter];
+        // A material graph (MaterialGraph.h): its slot in the G-buffer resolve's variant in use and its parameters in that build's layout --
+        // the material's value by name and kind, else the graph's default (Unreal's material instances). None (no graph, not built
+        // yet, or it does not compile): the material's own values.
+        packed.graphSlot = 0xFFFFFFFFu;
+        packed.graphOutputs = 0;
+        std::fill(std::begin(packed.graphTextureIndex), std::end(packed.graphTextureIndex), 0xFFFFFFFFu);
+        if (!material.SurfaceGraph.empty())
+        {
+            const MaterialGraphProgram* program = nullptr;
+            const uint32_t slot = Renderer::FindMaterialGraph(material.SurfaceGraph, &program);
+            if (slot != 0xFFFFFFFFu && program)
+            {
+                packed.graphSlot = slot;
+                packed.graphOutputs = program->Outputs;
+                for (const MaterialGraphParameter& parameter : program->Parameters)
+                {
+                    const bool texture = parameter.Type == MaterialGraphParameter::Kind::Texture;
+                    const auto value = std::find_if(material.GraphParameters.begin(), material.GraphParameters.end(), [&](const MaterialGraphParameterValue& v)
+                    {
+                        return v.Name == parameter.Name && v.IsTexture == texture;
+                    });
+                    const bool overridden = value != material.GraphParameters.end();
+                    if (texture && parameter.Slot < MaterialGraphMaxTextures)
+                    {
+                        std::string path = overridden ? value->Texture : std::string();
+                        if (!overridden && parameter.DefaultTexture != 0 && AssetManager::IsAssetHandleValid(parameter.DefaultTexture))
+                            path = AssetManager::GetMetadata(parameter.DefaultTexture).FilePath.generic_string();
+                        packed.graphTextureIndex[parameter.Slot] = static_cast<uint32_t>(GetTextureIndex(path));
+                    }
+                    else if (!texture && parameter.Slot < MaterialGraphMaxParameters)
+                        packed.graphParameters[parameter.Slot] = overridden ? value->Value : parameter.Default;
+                }
+            }
+        }
         packed.diffuseTransmission = glm::clamp(material.DiffuseTransmission, 0.0f, 1.0f);
         packed.pathTracerFlags = material.PathTracerFlags;
         packed.depthBias = glm::max(material.DepthBias, 0.0f);
@@ -390,11 +424,13 @@ namespace Nox
         watchShader("assets/shaders/Material_Unlit_Mesh.slang", "Unlit", [this]() { createUnlitPipeline(true); createAVBOITPipelines(true); });
         watchShader("assets/shaders/Wireframe.slang", "Wireframe", [this]() { createWireframePipeline(true); });
         watchShader("assets/shaders/Material_TransparentLit_Mesh.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); createAVBOITPipelines(true); });
-        // The Custom Lit pipelines include the deferred lighting and the forward shader (CustomLitShaders.h): built again with them.
-        for (const char* shader : { "CustomLit", "Material_TransparentLit_Mesh", "DeferredLighting", "PBRLighting" })
+        // The Custom Lit and material graph pipelines include the deferred lighting, the forward shader and the G-buffer resolve
+        // (CustomLitShaders.h): built again with them.
+        for (const char* shader : { "CustomLit", "Material_TransparentLit_Mesh", "DeferredLighting", "PBRLighting", "GBufferMaterial", "MaterialGraph" })
             watchShader(std::string("assets/shaders/") + shader + ".slang", "CustomLit", [this]()
             {
-                if (m_customLitStatus.ShaderCount > 0 && m_shaderCompiler->canCompile() && !m_customLitBuild) // (a running build has the new text)
+                if ((m_customLitStatus.ShaderCount > 0 || m_customLitStatus.GraphCount > 0) && m_shaderCompiler->canCompile() &&
+                    !m_customLitBuild) // (a running build has the new text)
                 {
                     createCustomLitPipelines(true);
                     ++m_customLitStatus.Version;
@@ -2367,10 +2403,9 @@ namespace Nox
         m_computeSkinningPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
-    void Renderer::createGBufferPipeline(bool forceCompile)
+    NRI::PipelineDesc Renderer::gbufferPipelineDesc(const std::string& source, bool writeVelocity)
     {
         NRI::PipelineDesc desc{};
-        desc.forceCompile = forceCompile;
         desc.colorFormats = {
             NRI::ImageFormat::RGBA8, // 0: SV_Target0 (Albedo)
             NRI::ImageFormat::R16G16B16A16_SFLOAT, // 1: SV_Target1 (Normal)
@@ -2381,29 +2416,26 @@ namespace Nox
             NRI::ImageFormat::RGBA8, // 6: SV_Target6 (Specular)
             NRI::ImageFormat::R32G32_SFLOAT // 7: SV_Target7 (Velocity)
         };
-
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
-            .entryPoint = "taskMain",
-            .sourcePath = "assets/shaders/GBufferMaterial.slang"
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
-            .entryPoint = "meshMain",
-            .sourcePath = "assets/shaders/GBufferMaterial.slang"
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
-            .entryPoint = "fragMain",
-            .sourcePath = "assets/shaders/GBufferMaterial.slang"
-        });
-
-        m_gbufferPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = source });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = source });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = source });
         // Native raster frames do not need motion vectors. A matching seven-target variant avoids both
         // the RG32F attachment bandwidth and the per-pixel reprojection work in that case.
-        desc.colorFormats.pop_back();
-        desc.shaders.back().entryPoint = "fragMainNoVelocity";
+        if (!writeVelocity)
+        {
+            desc.colorFormats.pop_back();
+            desc.shaders.back().entryPoint = "fragMainNoVelocity";
+        }
+        return desc;
+    }
+
+    void Renderer::createGBufferPipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc = gbufferPipelineDesc("assets/shaders/GBufferMaterial.slang", true);
+        desc.forceCompile = forceCompile;
+        m_gbufferPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc = gbufferPipelineDesc("assets/shaders/GBufferMaterial.slang", false);
+        desc.forceCompile = forceCompile;
         m_gbufferPipelineNoVelocity = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
@@ -5642,6 +5674,7 @@ namespace Nox
             const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             uniformData.timeSeconds = static_cast<float>(std::fmod(seconds, 3600.0));
         }
+        uniformData.renderOrigin = glm::vec3(m_renderOrigin); // (a material graph's World Position)
         {
             // Texture LOD biases (shaderIO.h): textures as sharp as the shown resolution wants when DLSS renders fewer pixels; the
             // path tracer one mip sharper still (RTXPT's TexLODBias), and the streaming asked for the finest of what samples.

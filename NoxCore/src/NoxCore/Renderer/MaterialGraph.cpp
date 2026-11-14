@@ -558,7 +558,7 @@ namespace Nox
                                                                                          glm::vec4(value ? NodeGraphValueToFloat(*value) : 0.0f, 0.0f, 0.0f, 0.0f), 0);
                          if (!parameter)
                              return false;
-                         args.Out[0] = Constant("i.parameters[" + std::to_string(parameter->Slot) + "].x", 1);
+                         args.Out[0] = Constant("i.material.graphParameters[" + std::to_string(parameter->Slot) + "].x", 1);
                          return true;
                      });
             Register("Vector Parameter", "Parameters", {}, { V("RGB"), V("RGBA") }, { { "Name", std::string("Color") }, { "Default", glm::vec4(1.0f) } },
@@ -575,7 +575,7 @@ namespace Nox
                          const MaterialGraphParameter* parameter = args.Ctx.Parameter(name, MaterialGraphParameter::Kind::Vector, v ? *v : glm::vec4(1.0f), 0);
                          if (!parameter)
                              return false;
-                         const std::string slot = "i.parameters[" + std::to_string(parameter->Slot) + "]";
+                         const std::string slot = "i.material.graphParameters[" + std::to_string(parameter->Slot) + "]";
                          args.Out[0] = Constant(slot + ".rgb", 3);
                          args.Out[1] = Constant(slot, 4);
                          return true;

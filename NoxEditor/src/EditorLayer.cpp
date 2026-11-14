@@ -209,6 +209,8 @@ namespace Nox
             }
             m_AnimationClipPanels.push_back(CreateScope<AnimationClipPanel>(clip, handle));
         };
+        // The Material Editor's Material Graph section opens its graph here.
+        MaterialEditorPanel::OpenAssetCallback = [this](AssetHandle asset) { OpenAsset(asset); };
         // A Material Shader (Custom Lit): opened in the program the system opens .slang files with (a code editor); saving it there
         // builds it again (PollCustomLitShaders).
         m_AssetOpeners[AssetType::MaterialShader] = [](AssetHandle handle)
@@ -6766,7 +6768,7 @@ namespace Nox
 
     std::string EditorLayer::CustomLitSignature() const
     {
-        // Every Material Shader's path, size and last write: what changes when one is saved, added, moved or removed.
+        // Every Material Shader's and material graph's path, size and last write: what changes when one is saved, added, moved or removed.
         std::string signature;
         const Ref<Project> project = Project::GetActive();
         if (!project)
@@ -6774,7 +6776,7 @@ namespace Nox
         const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
         for (const auto& [handle, metadata] : project->GetEditorAssetManager()->GetAssetRegistry())
         {
-            if (metadata.Type != AssetType::MaterialShader)
+            if (metadata.Type != AssetType::MaterialShader && metadata.Type != AssetType::MaterialGraph)
                 continue;
             std::error_code error;
             const std::filesystem::path file = assetDirectory / metadata.FilePath;
@@ -6796,12 +6798,14 @@ namespace Nox
         m_CustomLitSignature = std::move(signature);
         // The Slang language server's config at the project's root (VS Code's / Visual Studio's Slang extensions): the engine's shader
         // folder as a search path, so a Material Shader's `#include "CustomLit.slang"` resolves in the code editor too.
-        if (!m_CustomLitSignature.empty())
-            WriteMaterialShaderEditorSettings();
         bool complete = true;
         const std::vector<CustomLitSource> sources = CustomLitShaders::GatherProjectSources(complete);
-        NOX_CORE_INFO("Custom Lit: Material Shaders changed, building them again");
-        m_Renderer->SetCustomLitShaders(sources);
+        if (!sources.empty())
+            WriteMaterialShaderEditorSettings();
+        bool graphsComplete = true;
+        const std::vector<ProjectMaterialGraph> graphs = GatherProjectMaterialGraphs(graphsComplete);
+        NOX_CORE_INFO("Custom Lit: Material Shaders or material graphs changed, building them again");
+        m_Renderer->SetCustomLitShaders(sources, graphs);
     }
 
     void EditorLayer::OpenAsset(AssetHandle handle)

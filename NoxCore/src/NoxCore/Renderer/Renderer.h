@@ -24,6 +24,7 @@
 #include "NoxCore/Core/WorldUnits.h"
 #include "PostProcessSettings.h"
 #include "CustomLitShaders.h"
+#include "MaterialGraph.h"
 #include "GpuScene.h"
 #include "NoxCore/RenderGraph/RenderGraph.h"
 #include "NRI/ShaderBindingTable.h"
@@ -700,7 +701,9 @@ namespace Nox
         // the Custom Lit pass and the forward variant (the editor, a development run with the project's files; on project load and when a
         // Material Shader changes); LoadPackagedCustomLitShaders builds them from what a packaged game ships (the manifest and the binaries).
         // A material whose Material Shader has no slot, or while the pipelines failed, is packed as Default Lit.
-        void SetCustomLitShaders(const std::vector<CustomLitSource>& sources);
+        // The project's material graphs (MaterialGraph.h) come with them: the same generated file, the G-buffer resolve's variant and the
+        // forward variant (a material whose graph has no slot yet keeps its own values).
+        void SetCustomLitShaders(const std::vector<CustomLitSource>& sources, const std::vector<ProjectMaterialGraph>& graphs = {});
         void LoadPackagedCustomLitShaders();
         // Gathers the active project's Material Shaders and calls the one of the two above that applies (project load). The build runs on
         // a worker thread (the editor keeps drawing; pollCustomLitBuild swaps the pipelines in); `wait`: until it is done (a game's start).
@@ -708,6 +711,13 @@ namespace Nox
         uint32_t GetCustomLitSlot(const std::string& path) const;
         // The running renderer's slot for a Material Shader (material packing); 0xFFFFFFFF without a renderer or that shader.
         static uint32_t FindCustomLitSlot(const std::string& path) { return s_Instance ? s_Instance->GetCustomLitSlot(path) : 0xFFFFFFFFu; }
+        // A material graph's slot in the G-buffer resolve's variant in use and its program (parameter layout, outputs); 0xFFFFFFFF while
+        // it has none (not built yet, or it does not compile).
+        uint32_t GetMaterialGraphSlot(const std::string& path, const MaterialGraphProgram** program = nullptr) const;
+        static uint32_t FindMaterialGraph(const std::string& path, const MaterialGraphProgram** program = nullptr)
+        {
+            return s_Instance ? s_Instance->GetMaterialGraphSlot(path, program) : 0xFFFFFFFFu;
+        }
         struct CustomLitStatus
         {
             size_t ShaderCount = 0;   // Material Shaders with a slot
@@ -715,6 +725,9 @@ namespace Nox
             bool Building = false;    // a build runs on a worker thread (the last working one draws meanwhile)
             std::string Message;      // what went wrong (a compile error: the log has Slang's message with the file and line)
             uint64_t Version = 0;     // counts rebuilds (the Material Editor shows the latest)
+            size_t GraphCount = 0;    // material graphs that compile (to Slang: CompileMaterialGraph)
+            bool GraphsReady = false; // the G-buffer resolve's material graph variant is built
+            std::map<std::string, std::string> GraphErrors; // a graph that does not compile: its path -> why (which node)
         };
         const CustomLitStatus& GetCustomLitStatus() const { return m_customLitStatus; }
         // What this frame's passes use: the scene's volume, else the Renderer Settings.
@@ -1152,6 +1165,8 @@ namespace Nox
         void createComputeSkinningPipeline(bool forceCompile = false);
         // G-Buffer
         void createGBufferPipeline(bool forceCompile = false);
+        // The G-buffer resolve's pipeline description for a source (GBufferMaterial.slang, or its material graph variant).
+        static NRI::PipelineDesc gbufferPipelineDesc(const std::string& source, bool writeVelocity);
         // PBR
         void createDeferredLightingPipeline(bool forceCompile = false);
         // SSAO / RTAO
@@ -1288,7 +1303,10 @@ namespace Nox
         bool createCustomLitPipelines(bool forceCompile);
         std::unique_ptr<NRI::Pipeline> buildCustomLitDeferredPipeline(bool forceCompile); // (any thread; throws when it does not compile)
         std::unique_ptr<NRI::Pipeline> buildCustomLitForwardPipeline(bool forceCompile);
-        void startCustomLitBuild(const std::vector<CustomLitSource>& sources);
+        void startCustomLitBuild(const std::vector<CustomLitSource>& sources, const std::vector<ProjectMaterialGraph>& graphs);
+        // The G-buffer resolve compiled with the material graphs (CustomLitShaders::GBufferSourcePath; any thread; throws when it does
+        // not compile).
+        std::unique_ptr<NRI::Pipeline> buildMaterialGraphGBufferPipeline(bool forceCompile, bool writeVelocity);
         void pollCustomLitBuild();    // main thread, each frame: a finished build's pipelines swapped in
         void waitForCustomLitBuild();
         // The forward shader for lit surfaces: its Custom Lit variant while the project has Material Shaders (it shades every other
@@ -1694,9 +1712,28 @@ namespace Nox
             std::string Error;
             std::vector<std::string> Paths;
             size_t ShaderCount = 0;
+            // The material graphs' variant of the G-buffer resolve (both pipelines: with and without motion vectors).
+            std::unique_ptr<NRI::Pipeline> GBuffer;
+            std::unique_ptr<NRI::Pipeline> GBufferNoVelocity;
+            bool GBufferDone = false;
+            std::vector<std::string> GraphPaths;
+            std::unordered_map<std::string, MaterialGraphProgram> GraphPrograms;
+            size_t GraphCount = 0;
         };
         std::shared_ptr<CustomLitBuild> m_customLitBuild;
-        std::optional<std::vector<CustomLitSource>> m_customLitPending; // the newest request while a build runs
+        struct CustomLitRequest
+        {
+            std::vector<CustomLitSource> Sources;
+            std::vector<ProjectMaterialGraph> Graphs;
+        };
+        std::optional<CustomLitRequest> m_customLitPending; // the newest request while a build runs
+        // Material graphs (MaterialGraph.h): the G-buffer resolve's variant with them, its slots and the programs (parameter layouts)
+        // materials are packed with -- all three as the variant in use has them.
+        std::unique_ptr<NRI::Pipeline> m_gbufferGraphPipeline;
+        std::unique_ptr<NRI::Pipeline> m_gbufferGraphPipelineNoVelocity;
+        std::vector<std::string> m_materialGraphPaths;          // slot -> graph path ("": none)
+        std::vector<std::string> m_materialGraphRequestedPaths; // as the latest build request gave them (the next one keeps these slots)
+        std::unordered_map<std::string, MaterialGraphProgram> m_materialGraphPrograms;
         std::unique_ptr<NRI::Pipeline> m_motionBlurPipeline;
         std::unique_ptr<NRI::Pipeline> m_bloomDownsamplePipeline;
         std::unique_ptr<NRI::Pipeline> m_bloomUpsamplePipeline;

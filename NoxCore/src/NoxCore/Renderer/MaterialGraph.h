@@ -46,7 +46,7 @@ namespace Nox
         Kind Type = Kind::Scalar;
         glm::vec4 Default = glm::vec4(0.0f); // a scalar's in x
         uint64_t DefaultTexture = 0;         // a texture's asset (0: none -- white, or flat for a normal map)
-        uint32_t Slot = 0;                   // into MaterialGraphInputs::parameters / textures
+        uint32_t Slot = 0;                   // into GpuMaterial::graphParameters / graphTextureIndex
     };
 
     struct MaterialGraphProgram
@@ -59,6 +59,17 @@ namespace Nox
         uint32_t TextureSlots = 0;
         uint32_t Outputs = 0; // MaterialGraphOutput bits
     };
+
+    // A graph of the project, compiled: its path in the project's Assets (generic separators; what MaterialData::SurfaceGraph names).
+    struct ProjectMaterialGraph
+    {
+        std::string Path;
+        MaterialGraphProgram Program;
+    };
+
+    // The active project's material graphs read from its Assets folder and compiled, sorted by path (CustomLitProject.cpp). `complete`
+    // says whether every one registered was read: false in a packaged game (its assets are in the pack: Renderer loads them as assets).
+    std::vector<ProjectMaterialGraph> GatherProjectMaterialGraphs(bool& complete);
 
     // Registers the domain's node types (Application start, with the animation and audio graphs').
     void RegisterMaterialGraphNodeTypes();

@@ -729,6 +729,41 @@ static void TestMcpAssets()
     const bool toonReadOk = MaterialSerializer::Deserialize(folder / "Toon4.nmat", toonRead);
     CHECK(toonReadOk && toonRead.ShadingModel == MaterialShadingModel::Toon && toonRead.ToonBands == 3 && toonRead.CustomShader == "kept.slang",
           "an NMA4 .nmat still loads (toon settings read, the Custom Lit ones untouched)");
+
+    // A material graph (stylized step 4a): the graph's path and the material's parameter values by name -- numbers, vectors, textures --
+    // in JSON and in .nmat files ("NMA6"; an "NMA5" file reads without them).
+    MaterialData graphMaterial = custom;
+    graphMaterial.SurfaceGraph = "Graphs/Lava.nmatgraph";
+    graphMaterial.GraphParameters = { { "Glow", false, glm::vec4(2.5f, 0.0f, 0.0f, 0.0f), {} },
+                                      { "Tint", false, glm::vec4(1.0f, 0.5f, 0.25f, 1.0f), {} },
+                                      { "Albedo", true, glm::vec4(0.0f), "Textures/lava.png" } };
+    const Json graphJson = MaterialToJson(graphMaterial);
+    MaterialData graphBack;
+    CHECK(graphJson["SurfaceGraph"] == "Graphs/Lava.nmatgraph" && graphJson["GraphParameters"]["Albedo"] == "Textures/lava.png" &&
+          graphJson["GraphParameters"]["Tint"][1] == 0.5f && MaterialFromJson(graphJson, graphBack).empty() && MaterialToJson(graphBack) == graphJson,
+          "a material graph and its parameter values (vector, texture) as JSON and back");
+    MaterialData graphPartial = graphMaterial;
+    CHECK(MaterialFromJson(Json::parse(R"({ "GraphParameters": { "Glow": 4 } })"), graphPartial).empty() && graphPartial.GraphParameters.size() == 1 &&
+          graphPartial.GraphParameters[0].Value.x == 4.0f && !graphPartial.GraphParameters[0].IsTexture,
+          "GraphParameters: a plain number is a scalar's value; the list is replaced (a name left out takes the graph's default)");
+    CHECK(!MaterialFromJson(Json::parse(R"({ "GraphParameters": [1, 2] })"), graphPartial).empty() &&
+          !MaterialFromJson(Json::parse(R"({ "GraphParameters": { "Tint": [1, 2, 3] } })"), graphPartial).empty(),
+          "refused: GraphParameters as a list, a vector of 3 numbers");
+    MaterialData graphFile;
+    CHECK(MaterialSerializer::Serialize(folder / "Graph.nmat", graphMaterial) && MaterialSerializer::Deserialize(folder / "Graph.nmat", graphFile) &&
+          MaterialToJson(graphFile) == graphJson, "a material graph material through a .nmat file (NMA6): every field back");
+    {
+        // An "NMA5" file (Custom Lit settings, no graph): what follows them is not read.
+        std::ofstream old(folder / "Custom5.nmat", std::ios::binary | std::ios::trunc);
+        old.write("NMA5", 4);
+        MaterialSerializer::WriteFields(old, graphMaterial);
+        MaterialSerializer::WriteShadingFields(old, graphMaterial);
+    }
+    MaterialData customRead;
+    customRead.SurfaceGraph = "kept.nmatgraph";
+    const bool customReadOk = MaterialSerializer::Deserialize(folder / "Custom5.nmat", customRead);
+    CHECK(customReadOk && customRead.CustomShader == "Shaders/Hatching.slang" && customRead.SurfaceGraph == "kept.nmatgraph" &&
+          customRead.GraphParameters.empty(), "an NMA5 .nmat still loads (Custom Lit settings read, the graph untouched)");
     std::error_code ignored;
     std::filesystem::remove_all(folder, ignored);
 }

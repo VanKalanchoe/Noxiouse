@@ -7,6 +7,7 @@
 // (its .nmat fields and textures): the graph writes only the Material Output pins it connects (Outputs says which).
 #pragma once
 #include "shaderIO.h"
+#include "MipFeedback.slang"
 
 // What a graph's input nodes read. Derivatives (Dx / Dy: the change across one pixel to the right / down) for what a Texture Sample's UV
 // may be computed from: the G-buffer resolve gets them from the triangle's barycentric derivatives, the forward shader from ddx / ddy.
@@ -29,8 +30,8 @@ struct MaterialGraphInputs
     float2 screenUVDy;
     float time;           // seconds (UniformBufferObject::timeSeconds)
     float3 cameraPosition;
-    float4 parameters[16]; // the material's parameter values (GpuMaterial::graphParameters: overrides, else the graph's defaults)
-    uint textures[8];      // their textures (0xFFFFFFFF: none)
+    GpuMaterial* material; // its graphParameters (the material's overrides, else the graph's defaults) and graphTextureIndex
+    bool mipFeedback;      // this pixel reports the mips its textures need (texture streaming: isMipFeedbackPixel)
     UniformBufferObject* ubo;
 };
 
@@ -47,13 +48,16 @@ struct MaterialGraphOutputs
 };
 
 // A Texture Sample: the material's texture in slot `slot` at `uv`, its mip from the UV's derivatives (times the frame's texture LOD bias,
-// as every material texture). No texture: white -- for a normal map, flat. A normal map is decoded to a tangent-space normal in rgb
+// as every material texture; texture streaming told which mip it needs, as for the material's own textures). No texture: white -- for a
+// normal map, flat. A normal map is decoded to a tangent-space normal in rgb
 // (two-channel BC5 maps: z rebuilt), its alpha 1.
 float4 material_graph_texture(MaterialGraphInputs i, uint slot, float2 uv, float2 uvDx, float2 uvDy, bool normalMap)
 {
-    const uint texture = i.textures[min(slot, 7u)];
+    const uint texture = i.material.graphTextureIndex[min(slot, 7u)];
     if (texture == 0xFFFFFFFFu)
         return normalMap ? float4(0.0, 0.0, 1.0, 1.0) : float4(1.0);
+    if (i.mipFeedback)
+        reportMipFeedback(i.ubo, texture, uv, uvDx, uvDy);
     SamplerState linearRepeat = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
     const float scale = exp2(i.ubo->textureLodBias);
     float4 value = SampleMaterialTextureGrad(i.ubo, texture, linearRepeat, uv, uvDx * scale, uvDy * scale);
@@ -64,6 +68,20 @@ float4 material_graph_texture(MaterialGraphInputs i, uint slot, float2 uv, float
         value = float4(n, 1.0);
     }
     return value;
+}
+
+// The graph's Normal (tangent space, +z out of the surface) in world space: the surface's frame from its normal N and the stored tangent
+// (Gram-Schmidt against N, the bitangent cross(N, T) x handedness -- the G-buffer's normal mapping); without a tangent, any frame
+// around N.
+float3 material_graph_world_normal(float3 tangentNormal, float3 N, float3 tangent, float handedness)
+{
+    const float3 n = dot(tangentNormal, tangentNormal) > 1e-12 ? normalize(tangentNormal) : float3(0.0, 0.0, 1.0);
+    float3 T = tangent - N * dot(N, tangent);
+    if (dot(T, T) <= 1e-12)
+        T = abs(N.x) < 0.9 ? cross(float3(1.0, 0.0, 0.0), N) : cross(float3(0.0, 1.0, 0.0), N);
+    T = normalize(T);
+    const float3 B = cross(N, T) * (handedness < 0.0 ? -1.0 : 1.0);
+    return normalize(n.x * T + n.y * B + n.z * N);
 }
 
 // Smooth value noise in [0, 1] (Noise node).

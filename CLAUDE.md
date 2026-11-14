@@ -41,9 +41,11 @@ with them; reference them by handle or path, and say that the files live only on
   `--mcp-port` 8770, `--mcp-access` write by default -- `quit` needs execute). Editor MCP port 8765; multiplayer Play's games with
   "Players' MCP servers" use editor port + 1 (dedicated server) / + n (player n). One token per project in `<Project>/.nox/mcp-token`.
   When the user tests runtime features, remind them to **build NoxRuntime too** (building NoxEditor does not). Offline tests:
-  `Tests/McpTests.inl` + `Tests/ToolsTest.cpp` in NoxToolsTest (193 checks).
+  `Tests/McpTests.inl` + `Tests/ToolsTest.cpp` in NoxToolsTest (203 checks).
 - Stylized rendering / material graph plan: `docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md` (step 1 Toon and step 2
-  outlines + Post Process Volume built and tested; step 3 Custom Lit with hand-written Material Shaders built; step 4a material graph part 1 (`.nmatgraph`, `Renderer/MaterialGraph.h`, `MaterialGraph.slang`, codegen) built, part 2 (materials + renderer) next; surface
+  outlines + Post Process Volume built and tested; step 3 Custom Lit with hand-written Material Shaders built; step 4a material graph built (`.nmatgraph`, `Renderer/MaterialGraph.h`, `MaterialGraph.slang`; graphs share the generated `CustomLitShaders.slang`
+  under `NOX_MATERIAL_GRAPH`, the G-buffer resolve's variant `GBufferMaterialGraph.slang` + the forward variant; `GpuMaterial::graphSlot` /
+  `graphParameters`; `.nmat` NMA6 `SurfaceGraph` + `GraphParameters`); 4b Opacity Mask / WPO and 4c Custom Lit output / C# / RT open; surface
   code, Physical / Stylized setting open). Custom Lit: `.slang` assets (`AssetType::MaterialShader`) with `light()` / `ambient()`
   (`CustomLit.slang`), generated into `<exe>/shaders/Generated` (`Renderer/CustomLitShaders.h`), lit by the "Custom Lit" pass after the
   deferred lighting (G-buffer model bits 0xC0) and the forward variant (`forwardLitPipeline()`); push-constant vec4s sit on 16 bytes. Post effects + outlines live in `PostProcessSettings`; a scene's

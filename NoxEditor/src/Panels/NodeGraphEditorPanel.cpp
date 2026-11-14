@@ -19,6 +19,8 @@
 #include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Audio/AudioGraph.h"
 #include "NoxCore/Renderer/MaterialGraph.h"
+#include "NoxCore/Renderer/Renderer.h"
+#include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 
@@ -338,6 +340,47 @@ namespace Nox
                 AudioEngine::SetGraphParameter(m_AudioPreviewVoice, index, NodeGraphValueToFloat(value));
             ImGui::PopID();
         }
+    }
+
+    void NodeGraphEditorPanel::DrawMaterialGraphStatus()
+    {
+        // Compiled here from the graph as it is on the canvas (a few microseconds), so an error shows while editing; the renderer builds
+        // the saved file (Ctrl+S) in the background, as it does Material Shaders.
+        const MaterialGraphProgram program = CompileMaterialGraph(m_Asset->Graph);
+        if (!program.Valid)
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "Does not compile: %s", program.Error.c_str());
+            return;
+        }
+        static constexpr const char* outputNames[] = { "Base Color", "Metallic", "Roughness", "Normal", "Emissive", "Ambient Occlusion", "Opacity" };
+        std::string outputs;
+        for (uint32_t bit = 0; bit < 7; ++bit)
+        {
+            if ((program.Outputs & (1u << bit)) != 0)
+                outputs += std::string(outputs.empty() ? "" : ", ") + outputNames[bit];
+        }
+        std::string parameters;
+        for (const MaterialGraphParameter& parameter : program.Parameters)
+        {
+            if (!parameter.Name.starts_with('#'))
+                parameters += std::string(parameters.empty() ? "" : ", ") + parameter.Name;
+        }
+        ImGui::TextDisabled("Compiles. Sets: %s. Parameters: %s.", outputs.empty() ? "nothing yet (connect the Material Output)" : outputs.c_str(),
+                            parameters.empty() ? "none" : parameters.c_str());
+        const Renderer* renderer = Application::Get().GetRenderer();
+        if (!renderer)
+            return;
+        const Renderer::CustomLitStatus& status = renderer->GetCustomLitStatus();
+        const std::string path = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager()->GetMetadata(m_GraphHandle).FilePath.generic_string() : std::string();
+        ImGui::SameLine();
+        if (m_Dirty)
+            ImGui::TextDisabled("(save with Ctrl+S to see it in the viewport)");
+        else if (status.Building)
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Building the shaders...");
+        else if (!status.Message.empty())
+            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", status.Message.c_str());
+        else if (renderer->GetMaterialGraphSlot(path) != 0xFFFFFFFFu)
+            ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.0f), "Built");
     }
 
     void NodeGraphEditorPanel::Save()
@@ -802,6 +845,8 @@ namespace Nox
                     DrawPreview();
                 else if (m_Asset->Graph.Domain == kAudioGraphDomain)
                     DrawAudioPreview();
+                else if (m_Asset->Graph.Domain == kMaterialGraphDomain)
+                    DrawMaterialGraphStatus();
 
                 auto onEdited = [this]()
                 {
