@@ -187,8 +187,11 @@ namespace Nox
             return;
         if (failed)
         {
-            m_customLitStatus.Message = std::string("A Material Shader does not compile (") + error +
-                                        "): the Console / Nox.log has the compiler's message with the file and line.";
+            // The compiler's first error (SlangCompiler puts it after the module's path) is what the Material Editor shows.
+            const size_t newline = error.find('\n');
+            const std::string detail = newline != std::string::npos ? error.substr(newline + 1) : error;
+            m_customLitStatus.Message = "A Material Shader does not compile: " + detail +
+                                        " (the Output Log / Nox.log has the whole message).";
             NOX_CORE_ERROR("Custom Lit: {} Custom Lit materials keep the last build that compiled (or Default Lit).", m_customLitStatus.Message);
             ++m_customLitStatus.Version;
         }

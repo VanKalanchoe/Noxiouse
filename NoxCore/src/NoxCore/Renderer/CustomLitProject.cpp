@@ -34,7 +34,8 @@ namespace Nox::CustomLitShaders
             }
             std::stringstream code;
             code << file.rdbuf();
-            sources.push_back({ metadata.FilePath.generic_string(), code.str() });
+            const std::filesystem::path onDisk = std::filesystem::absolute(assetDirectory / metadata.FilePath).lexically_normal();
+            sources.push_back({ metadata.FilePath.generic_string(), code.str(), onDisk.generic_string() });
         }
         std::sort(sources.begin(), sources.end(), [](const CustomLitSource& a, const CustomLitSource& b) { return a.Path < b.Path; });
         return sources;

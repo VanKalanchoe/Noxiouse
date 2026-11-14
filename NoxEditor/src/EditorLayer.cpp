@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <format>
 #include <fstream>
+#include <sstream>
 #include <iterator>
 #include <unordered_set>
 #include <functional>
@@ -17,6 +18,7 @@
 #include <ImGuizmo.h>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_misc.h>
+#include "json.hpp" // nlohmann/json (tinygltf's copy): .vscode/settings.json for Material Shaders
 #include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_video.h>
@@ -3856,7 +3858,7 @@ namespace Nox
             m_Renderer->InitializeCustomLitShaders();
             m_CustomLitSignature = CustomLitSignature();
             if (!m_CustomLitSignature.empty()) // (the project has Material Shaders: code editors find the engine's include)
-                CustomLitShaders::WriteCodeEditorConfig(Project::GetActiveProjectDirectory(), "assets/shaders");
+                WriteMaterialShaderEditorSettings();
             // The project's scripts (at startup ScriptEngine::Initialize loads them, after this).
             m_ScriptBuilder.SetProject(ScriptEngine::GetProjectScriptsProject());
             if (ScriptEngine::IsInitialized())
@@ -6718,6 +6720,49 @@ namespace Nox
         m_UnloadUnusedAssetsRequested = true;
     }
 
+    void EditorLayer::WriteMaterialShaderEditorSettings()
+    {
+        // What a code editor needs to check a Material Shader on its own (its `#include "CustomLit.slang"`): the engine's shader folder as
+        // a Slang search path -- in <project>/slangdconfig.json (the Slang language server's own file, read from a file's folder or a
+        // parent) and in <project>/.vscode/settings.json (VS Code's Slang extension, "slang.additionalSearchPaths", when the project's
+        // folder is the one opened). Absolute: per machine.
+        const std::filesystem::path projectDirectory = Project::GetActiveProjectDirectory();
+        const std::filesystem::path shaderFolder = std::filesystem::absolute("assets/shaders").lexically_normal();
+        CustomLitShaders::WriteCodeEditorConfig(projectDirectory, shaderFolder);
+
+        const std::filesystem::path settingsPath = projectDirectory / ".vscode" / "settings.json";
+        const std::string folder = shaderFolder.generic_string();
+        nlohmann::json settings = nlohmann::json::object();
+        std::error_code error;
+        if (std::filesystem::exists(settingsPath, error))
+        {
+            std::ifstream file(settingsPath, std::ios::binary);
+            std::stringstream text;
+            text << file.rdbuf();
+            // Rewritten only when it is plain JSON: a settings file with comments (VS Code allows them) is left as the user wrote it.
+            settings = nlohmann::json::parse(text.str(), nullptr, false);
+            if (settings.is_discarded() || !settings.is_object())
+            {
+                NOX_CORE_INFO("Material Shaders: {} has comments or is not plain JSON, left as it is -- for VS Code to find CustomLit.slang add "
+                              "\"slang.additionalSearchPaths\": [\"{}\"] to it", settingsPath.generic_string(), folder);
+                return;
+            }
+        }
+        nlohmann::json& paths = settings["slang.additionalSearchPaths"];
+        if (!paths.is_array())
+            paths = nlohmann::json::array();
+        for (const nlohmann::json& path : paths)
+        {
+            if (path.is_string() && path.get<std::string>() == folder)
+                return; // (there already)
+        }
+        paths.push_back(folder);
+        std::filesystem::create_directories(settingsPath.parent_path(), error);
+        std::ofstream out(settingsPath, std::ios::binary | std::ios::trunc);
+        out << settings.dump(4) << "\n";
+        NOX_CORE_INFO("Material Shaders: added the engine's shader folder to {} (VS Code's Slang extension finds CustomLit.slang)", settingsPath.generic_string());
+    }
+
     std::string EditorLayer::CustomLitSignature() const
     {
         // Every Material Shader's path, size and last write: what changes when one is saved, added, moved or removed.
@@ -6751,7 +6796,7 @@ namespace Nox
         // The Slang language server's config at the project's root (VS Code's / Visual Studio's Slang extensions): the engine's shader
         // folder as a search path, so a Material Shader's `#include "CustomLit.slang"` resolves in the code editor too.
         if (!m_CustomLitSignature.empty())
-            CustomLitShaders::WriteCodeEditorConfig(Project::GetActiveProjectDirectory(), "assets/shaders");
+            WriteMaterialShaderEditorSettings();
         bool complete = true;
         const std::vector<CustomLitSource> sources = CustomLitShaders::GatherProjectSources(complete);
         NOX_CORE_INFO("Custom Lit: Material Shaders changed, building them again");

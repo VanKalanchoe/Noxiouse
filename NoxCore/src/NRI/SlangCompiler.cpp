@@ -272,14 +272,35 @@ namespace NRI
         };
 
         
+        std::string diagnosticText;
         if (diagnostics)
         {
-            NOX_CORE_ERROR("Slang compile diagnostics ({}): {}", path,
-                static_cast<const char*>(diagnostics->getBufferPointer()));
+            diagnosticText = static_cast<const char*>(diagnostics->getBufferPointer());
+            NOX_CORE_ERROR("Slang compile diagnostics ({}): {}", path, diagnosticText);
         }
         
         if (!slangModule)
-            throw std::runtime_error("Slang failed to load module: " + path);
+        {
+            // The first error with its place (file:line:col and the message) in the exception too: what a caller shows the user (the
+            // Material Editor for a Material Shader) without the log.
+            std::string firstError;
+            if (const size_t error = diagnosticText.find("error"); error != std::string::npos)
+            {
+                const size_t end = diagnosticText.find("\n   |", error); // (before the quoted source)
+                firstError = diagnosticText.substr(error, end == std::string::npos ? std::string::npos : end - error);
+                if (const size_t message = diagnosticText.find("^", end == std::string::npos ? error : end); message != std::string::npos)
+                {
+                    const size_t lineEnd = diagnosticText.find('\n', message);
+                    std::string caret = diagnosticText.substr(message, lineEnd == std::string::npos ? std::string::npos : lineEnd - message);
+                    caret.erase(0, caret.find_first_not_of("^ "));
+                    if (!caret.empty())
+                        firstError += " -- " + caret;
+                }
+                if (firstError.size() > 600)
+                    firstError.resize(600);
+            }
+            throw std::runtime_error("Slang failed to load module: " + path + (firstError.empty() ? std::string() : "\n" + firstError));
+        }
         
         Slang::ComPtr<ISlangBlob> spirv;
         Slang::ComPtr<slang::IBlob> targetDiagnostics;

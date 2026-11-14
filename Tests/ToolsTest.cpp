@@ -151,6 +151,11 @@ static void TestCustomLitShaders()
           text.find("case 2u: return CustomLit2::ambient(s, a);") != std::string::npos && text.find("case 1u") == std::string::npos,
           "the dispatchers call light() / ambient() by slot");
     CHECK(text.find("// b\n}") != std::string::npos, "a source without a final newline still closes its namespace on a line of its own");
+    {
+        const std::string named = CustomLitShaders::GenerateDispatcher({ "Shaders/A.slang" }, { { "Shaders/A.slang", "// a\n", "E:/Game/Assets/Shaders/A.slang" } });
+        CHECK(named.find("#line 1 \"E:/Game/Assets/Shaders/A.slang\"") != std::string::npos,
+              "with its file on disk known, #line names that full path (the compiler quotes the real line, the path opens)");
+    }
     CHECK(text.find("default: return custom_lit_lambert(s, l);") != std::string::npos,
           "an unknown slot (a pipeline older than its Material Shader) lights as Default Lit's diffuse, not black");
     {

@@ -22,6 +22,9 @@ namespace Nox
     {
         std::string Path;
         std::string Code;
+        // The file on disk (absolute; empty: Path): what the #line before its code names, so a compile error names the real file and
+        // the compiler can show its line (a path it cannot open made Slang quote the generated file's line instead).
+        std::string File;
     };
 
     namespace CustomLitShaders

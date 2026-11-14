@@ -148,7 +148,7 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
                 continue;
             present[slot] = true;
             text += "namespace CustomLit" + std::to_string(slot) + "\n{\n";
-            text += "#line 1 \"" + LinePath(source->Path) + "\"\n";
+            text += "#line 1 \"" + LinePath(source->File.empty() ? source->Path : source->File) + "\"\n";
             const std::string code = WithoutEngineIncludes(source->Code);
             text += code;
             if (!code.empty() && code.back() != '\n')

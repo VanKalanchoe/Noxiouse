@@ -195,6 +195,7 @@ namespace Nox
         // Custom Lit: the project's Material Shaders, watched (their paths, sizes, last writes) and built again when one changes.
         std::string CustomLitSignature() const;
         void PollCustomLitShaders();
+        void WriteMaterialShaderEditorSettings(); // slangdconfig.json and .vscode/settings.json: code editors find CustomLit.slang
 
         // Prefab Mode (docs/Prefab_Architecture_Plan_2026.md P3): the prefab's entities as a scene of their own, edited in
         // isolation. The level is kept aside and comes back on exit; Save writes the .nprefab, reloads the asset and spawns every
