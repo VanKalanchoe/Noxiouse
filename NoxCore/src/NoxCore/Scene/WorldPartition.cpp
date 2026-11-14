@@ -111,7 +111,8 @@ namespace Nox
             return entity.HasComponent<CameraComponent>() || entity.HasComponent<DirectionalLightComponent>() ||
                    entity.HasComponent<EnvironmentLightComponent>() || entity.HasComponent<CharacterController3DComponent>() ||
                    entity.HasComponent<LevelStreamingVolumeComponent>() || entity.HasComponent<WorldStreamingSourceComponent>() ||
-                   entity.HasComponent<TimelinePlayerComponent>() || entity.HasComponent<AudioListenerComponent>();
+                   entity.HasComponent<TimelinePlayerComponent>() || entity.HasComponent<AudioListenerComponent>() ||
+                   entity.HasComponent<PostProcessVolumeComponent>();
         }
 
         bool IsRoot(Entity entity)

@@ -66,7 +66,7 @@ namespace Nox::Mcp
                 NOX_MCP_COMPONENT(IrradianceVolumeComponent), NOX_MCP_COMPONENT(EnvironmentLightComponent), NOX_MCP_COMPONENT(AnimatorComponent),
                 NOX_MCP_COMPONENT(TimelinePlayerComponent), MakeOps<AudioSourceComponent>("AudioSourceComponent", [](Entity e) { e.GetComponent<AudioSourceComponent>().GraphParameters["Parameter"] = 1.0f; },
                                           R"([{ "op": "replace", "path": "/GraphParameters/0/Value", "value": null }])"), NOX_MCP_COMPONENT(ImpactSoundComponent),
-                NOX_MCP_COMPONENT(AudioListenerComponent), NOX_MCP_COMPONENT(AudioVolumeComponent), NOX_MCP_COMPONENT(AcousticProbeVolumeComponent),
+                NOX_MCP_COMPONENT(AudioListenerComponent), NOX_MCP_COMPONENT(AudioVolumeComponent), NOX_MCP_COMPONENT(AcousticProbeVolumeComponent), NOX_MCP_COMPONENT(PostProcessVolumeComponent),
                 MakeOps<ParticleEmitterComponent>("ParticleEmitterComponent", [](Entity e)
                 {
                     auto& emitter = e.GetComponent<ParticleEmitterComponent>();

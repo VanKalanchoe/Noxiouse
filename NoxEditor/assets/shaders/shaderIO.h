@@ -2888,6 +2888,20 @@ struct PushConstantPostEffect
     vec4 params2;
 };
 
+// SceneOutline.slang (stylized rendering step 2): the G-buffer's depth, normals and material flags (sampled, heap offset included); the
+// lit scene is the colour target it multiplies.
+struct PushConstantSceneOutline
+{
+    uint64_t matrixReference;   // the UniformBufferObject (invViewProj, the camera)
+    uint32_t depthIndex;
+    uint32_t normalIndex;
+    uint32_t materialIndex;
+    uint32_t toonOnly;          // 1: only toon pixels (gbuffer_toon) get lines
+    vec4 color;                 // rgb: what an edge multiplies the scene by; w: unused
+    vec4 params;                // x thickness (render pixels), y depth threshold (relative), z normal threshold (1 - cos), w fade distance (0: none)
+    vec4 params2;               // xy: the render size, zw: unused
+};
+
 struct PushConstantAutoExposure
 {
     uint32_t sourceIndex;

@@ -1,6 +1,6 @@
 # Stylized rendering and the material graph -- plan (2026-11-14)
 
-Status (2026-11-14): **step 1 (Toon shading model) built, waiting for the user's test**; steps 2-7 planned. Backlog item R13.
+Status (2026-11-14): **step 1 (Toon shading model) built and tested by the user; step 2 (outlines, Post Process Volume) built, waiting for the user's test**; steps 3-7 planned. Backlog item R13.
 
 Goal: Nox is not tied to realistic lighting. Materials can be lit physically (the default), not at all (Unlit), with a built-in toon
 model, or -- later -- with lighting of their own; and artists build surfaces from nodes (a material graph) without writing shaders.
@@ -87,8 +87,8 @@ Sided, Shading Model. (Godot's ALPHA_ANTIALIASING_EDGE / alpha-to-coverage needs
 
 | Step | What | Size | Status |
 | :--- | :--- | :--- | :--- |
-| 1 | **Toon shading model**: Shading Model per material (Default Lit / Unlit / Toon), toon bands or ramp texture, sharp highlight, rim light; deferred (G-buffer flag + toon parameters in the lobe target) and forward transparent; RT / PT fallback = Default Lit; Material Editor labels to Unreal's names | small | built (waiting for the user's test) |
-| 2 | **Outlines** post effect (depth / normal edges, thickness, colour, all surfaces or toon only) | small | planned |
+| 1 | **Toon shading model**: Shading Model per material (Default Lit / Unlit / Toon), toon bands or ramp texture, sharp highlight, rim light; deferred (G-buffer flag + toon parameters in the lobe target) and forward transparent; RT / PT fallback = Default Lit; Material Editor labels to Unreal's names | small | built, tested by the user |
+| 2 | **Outlines** post effect (depth / normal edges, thickness, colour, all surfaces or toon only), in a **Post Process Volume** (Unreal's; saved with the scene -- the post effects were editor-only before) | small | built (waiting for the user's test) |
 | 3 | **Forward pass for opaque custom-lit materials** inside the deferred frame (writes depth, normals, velocity and a "custom lit" flag; deferred lighting skips those pixels); a light grid if many lights | medium | planned |
 | 4 | **Material graph** (surface): Material domain in the NodeGraph framework, node library, Slang code generation into per-pass templates, material tile classification in the visibility buffer, RT fallback then per-material hit groups, parameters and instances, C# parameter API, packaging of every variant | large | planned |
 | 5 | **Custom Lit** in the graph (a per-light function; forward pass from step 3) | medium | planned |
@@ -116,6 +116,16 @@ Sided, Shading Model. (Godot's ALPHA_ANTIALIASING_EDGE / alpha-to-coverage needs
 - Forward transparent: the same functions. RT hit shading and the path tracer: the material as Default Lit (the fallback).
 - Material Editor: Shading Model combo + Toon section; labels to Unreal's names (section 5). MCP material JSON: `ShadingModel` and
   the `Toon*` fields (`Unlit` still read).
+
+## 9b. Step 2 as built (outlines, Post Process Volume)
+
+The post effects lived only in the editor's Renderer Settings (not saved, not in a packaged game), so the outlines come with Unreal's
+Post Process Volume: `PostProcessVolumeComponent` (Unbound or a box, Priority) holds a `PostProcessSettings`; `Scene::SubmitPostProcess`
+hands the applying one to the renderer each frame (none: the Renderer Settings). Outlines: `SceneOutline.slang`, a full-screen raster
+draw into the lit scene before TAA / DLSS with Zero / SrcColor blending (the scene times the outline colour) -- depth edges
+(silhouettes, relative to the distance) and normal edges (creases) on a ring `thickness` pixels out, seen from the nearer side;
+toon-only by the G-buffer's toon bit; distance fade. Not with the path tracer or debug views; lines show through glass in front of an
+edge. Not yet: blending between volumes, a C# API for the volume, the LUT file packaged with the game.
 
 ## 10. Tests
 

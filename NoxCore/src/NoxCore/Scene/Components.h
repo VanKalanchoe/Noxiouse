@@ -1,5 +1,6 @@
 #pragma once
 #include "WorldPartition.h"
+#include "NoxCore/Renderer/PostProcessSettings.h"
 #include <entt/entt.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
@@ -651,6 +652,18 @@ namespace Nox
         float FadeTime = 0.5f;                // seconds
     };
 
+    // Unreal's Post Process Volume: the post effects and outlines (PostProcessSettings) for the whole scene (Unbound) or while the camera
+    // is inside the box (HalfExtents in the entity's space). Of the volumes that apply, the highest Priority wins (no blending yet); none:
+    // the editor's Renderer Settings. Saved with the scene, so they ship with the game (Scene::SubmitPostProcess each frame).
+    struct PostProcessVolumeComponent
+    {
+        bool Enabled = true;
+        bool Unbound = true;
+        glm::vec3 HalfExtents{ WorldUnits::FromMeters(5.0f), WorldUnits::FromMeters(5.0f), WorldUnits::FromMeters(5.0f) };
+        int32_t Priority = 0;
+        PostProcessSettings Settings;
+    };
+
     // A box whose acoustics are baked (docs/Audio_Architecture_Plan_2026.md §11 "A4c as built"; Steam Audio's Probe Batch, as its
     // Unity and Unreal plugins have it): sound probes over the floors inside it, the reverb heard at each (the Acoustic Reverb effect
     // applies the one where the listener is) and the paths between them (sounds with Pathing find their way around corners). The
@@ -1225,7 +1238,7 @@ namespace Nox
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
         MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent,
-        TimelinePlayerComponent, AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, ParticleEmitterComponent, SpriteRendererComponent,
+        TimelinePlayerComponent, AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, ParticleEmitterComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,

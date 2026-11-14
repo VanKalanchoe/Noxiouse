@@ -20,6 +20,7 @@
 #include "GeometryStreamer.h"
 #include "VirtualTextureStreamer.h"
 #include "NoxCore/Core/WorldUnits.h"
+#include "PostProcessSettings.h"
 #include "GpuScene.h"
 #include "NoxCore/RenderGraph/RenderGraph.h"
 #include "NRI/ShaderBindingTable.h"
@@ -679,35 +680,22 @@ namespace Nox
         glm::vec3 getVolumetricFogAlbedo() const { return m_volumetricFogAlbedo; }
         void setVolumetricFogLocalLights(bool enabled) { m_volumetricFogLocalLights = enabled; }
         bool getVolumetricFogLocalLights() const { return m_volumetricFogLocalLights; }
-        // Post effects (PP1; Passes/PostEffectPasses.cpp, PostProcess.slang): every one off by default. Bloom (Call of Duty's chain:
-        // how much of the image becomes its blur, its radius) with image-based lens flares; depth of field (a thin lens: focus distance,
-        // f-number, the focal length from the camera's field of view on a 24 mm sensor, the largest blur); motion blur (the motion
-        // vectors over the shutter); colour grading (saturation, contrast, a LUT strip file) and vignette, film grain, chromatic
-        // aberration, sharpening (CAS).
-        struct PostEffectSettings
-        {
-            bool Bloom = false;
-            float BloomIntensity = 0.04f;
-            float BloomRadius = 1.0f;
-            float LensFlares = 0.0f;
-            bool DepthOfField = false;
-            float FocusDistanceMeters = 10.0f;
-            float FStop = 2.8f;
-            float MaxBlurPixels = 16.0f;
-            bool MotionBlur = false;
-            float MotionBlurShutter = 0.5f; // fraction of the frame (UE's Motion Blur Amount)
-            float MotionBlurMaxPixels = 32.0f;
-            float Saturation = 1.0f;
-            float Contrast = 1.0f;
-            float Vignette = 0.0f;
-            float FilmGrain = 0.0f;
-            float ChromaticAberration = 0.0f;
-            float Sharpen = 0.0f;
-            std::string LutPath;
-            float LutStrength = 1.0f;
-        };
+        // Post effects (PostProcessSettings.h): the editor's Renderer Settings (getPostEffects), replaced while a scene's Post Process
+        // Volume applies (SetScenePostProcess, every frame by Scene; null: none).
+        using PostEffectSettings = PostProcessSettings;
         PostEffectSettings& getPostEffects() { return m_postEffects; }
         const PostEffectSettings& getPostEffects() const { return m_postEffects; }
+        void SetScenePostProcess(const PostProcessSettings* settings)
+        {
+            m_hasScenePostProcess = settings != nullptr;
+            if (settings)
+                m_scenePostProcess = *settings;
+        }
+        bool HasScenePostProcess() const { return m_hasScenePostProcess; }
+        // What this frame's passes use: the scene's volume, else the Renderer Settings.
+        const PostProcessSettings& activePostEffects() const { return m_hasScenePostProcess ? m_scenePostProcess : m_postEffects; }
+        // The camera of this frame's BeginScene in world space (double precision: GetRenderOrigin plus its render-space place).
+        glm::dvec3 GetCameraWorldPosition() const { return m_renderOrigin + glm::dvec3(m_currentCameraWorldPos); }
         // This frame's local lights with a shadow map and their views (stats).
         uint32_t getLocalShadowLightCount() const { return m_localShadowLightCount; }
         uint32_t getLocalShadowViewCount() const { return m_localShadows.viewCount; }
@@ -1269,6 +1257,9 @@ namespace Nox
         };
         void createPostEffectPipelines(bool forceCompile = false);
         PostEffectOutputs addPostEffectPasses(RGTexture hdrSource);
+        // Outlines (PostProcessSettings::Outlines; SceneOutline.slang): over the lit scene at the render resolution, before TAA / DLSS.
+        void createSceneOutlinePipeline(bool forceCompile = false);
+        void addSceneOutlinePass();
         // Reflection probes: the probe table of this frame and at most one probe's capture (six faces, assembled, prefiltered); after
         // Compile the capture faces' uniforms.
         void createReflectionProbePipelines(bool forceCompile = false);
@@ -1645,7 +1636,10 @@ namespace Nox
         } m_probeCaptureFrame;
         bool m_reflectionProbesEnabled = true;
         PostEffectSettings m_postEffects;
+        PostProcessSettings m_scenePostProcess;
+        bool m_hasScenePostProcess = false;
         std::unique_ptr<NRI::Pipeline> m_dofPipeline;
+        std::unique_ptr<NRI::Pipeline> m_sceneOutlinePipeline;
         std::unique_ptr<NRI::Pipeline> m_motionBlurPipeline;
         std::unique_ptr<NRI::Pipeline> m_bloomDownsamplePipeline;
         std::unique_ptr<NRI::Pipeline> m_bloomUpsamplePipeline;

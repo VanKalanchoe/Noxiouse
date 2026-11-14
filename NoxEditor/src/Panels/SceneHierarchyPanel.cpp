@@ -1,4 +1,5 @@
 #include "SceneHierarchyPanel.h"
+#include "PostProcessSettingsUI.h"
 #include "NoxCore/Math/Math.h"
 
 #include <algorithm>
@@ -1327,6 +1328,7 @@ namespace Nox
             DisplayAddComponentEntry<ImpactSoundComponent>("Impact Sound");
             DisplayAddComponentEntry<AudioListenerComponent>("Audio Listener");
             DisplayAddComponentEntry<AudioVolumeComponent>("Audio Volume");
+            DisplayAddComponentEntry<PostProcessVolumeComponent>("Post Process Volume");
             DisplayAddComponentEntry<AcousticProbeVolumeComponent>("Acoustic Probe Volume");
             DisplayAddComponentEntry<LevelStreamingVolumeComponent>("Level Streaming Volume");
             DisplayAddComponentEntry<WorldPartitionComponent>("World Partition");
@@ -2787,6 +2789,22 @@ namespace Nox
                 if (m_Context->IsRunning())
                     ImGui::TextDisabled("(Stop Play / Simulate to bake)");
             }
+        });
+
+        DrawComponent<PostProcessVolumeComponent>("Post Process Volume", entity, [](auto& component)
+        {
+            // Unreal's Post Process Volume: these settings replace the Renderer Settings' while the volume applies (the whole scene
+            // when Unbound, else while the camera is inside the box), and they are saved with the scene and ship with the game.
+            ImGui::Checkbox("Enabled", &component.Enabled);
+            ImGui::Checkbox("Unbound", &component.Unbound);
+            ImGui::SetItemTooltip("Applies to the whole scene. Off: only while the camera is inside the box (Half Extents, in the\n"
+                                  "entity's space; drawn violet in the viewport).");
+            if (!component.Unbound)
+                ImGui::DragFloat3("Half Extents", glm::value_ptr(component.HalfExtents), 1.0f, 0.0f, 1.0e7f, "%.1f");
+            ImGui::DragInt("Priority", &component.Priority);
+            ImGui::SetItemTooltip("Of the volumes that apply, the highest priority wins (no blending between them yet).");
+            ImGui::Separator();
+            DrawPostProcessSettings(component.Settings);
         });
 
         DrawComponent<LevelStreamingVolumeComponent>("Level Streaming Volume", entity, [this](auto& component)

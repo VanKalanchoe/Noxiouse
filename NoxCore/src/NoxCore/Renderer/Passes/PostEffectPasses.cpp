@@ -32,10 +32,77 @@ namespace Nox
         m_bloomUpsamplePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
+    void Renderer::createSceneOutlinePipeline(bool forceCompile)
+    {
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT }; // the HDR scene
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Vertex, .entryPoint = "vertMain", .sourcePath = "assets/shaders/SceneOutline.slang" });
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/SceneOutline.slang" });
+        m_sceneOutlinePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
+    void Renderer::addSceneOutlinePass()
+    {
+        const PostProcessSettings& settings = activePostEffects();
+        // From the G-buffer of this frame: not with the path tracer (its image does not come from it) or the debug views.
+        if (!settings.Outlines || !m_sceneOutlinePipeline || m_frame.pathTracerActive || m_frame.restirPTActive || m_debugMode != 0)
+            return;
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (!resources.HDRScene.IsValid() || !resources.Depth.IsValid() || !resources.GBufferNormal.IsValid() || !resources.GBufferMaterial.IsValid())
+            return;
+        const NRI::Extent2D extent = m_frame.renderExtent;
+        if (extent.width == 0 || extent.height == 0)
+            return;
+
+        shaderio::PushConstantSceneOutline push{};
+        push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+        push.toonOnly = settings.OutlineToonOnly ? 1u : 0u;
+        push.color = glm::vec4(glm::clamp(settings.OutlineColor, glm::vec3(0.0f), glm::vec3(1.0f)), 1.0f);
+        // The thickness is in output pixels: at a lower render resolution (DLSS) the same line is fewer render pixels.
+        const float renderScale = m_frame.outputExtent.width > 0 ? static_cast<float>(extent.width) / static_cast<float>(m_frame.outputExtent.width) : 1.0f;
+        const float depthSensitivity = std::clamp(settings.OutlineDepthSensitivity, 0.0f, 1.0f);
+        const float normalSensitivity = std::clamp(settings.OutlineNormalSensitivity, 0.0f, 1.0f);
+        push.params = glm::vec4(std::max(settings.OutlineThickness, 0.0f) * renderScale,
+                                depthSensitivity > 0.0f ? 0.02f + (1.0f - depthSensitivity) * 0.48f : 0.0f, // 2 % .. 50 % of the distance
+                                normalSensitivity > 0.0f ? 0.02f + (1.0f - normalSensitivity) * 0.68f : 0.0f, // ~11 .. ~72 degrees
+                                std::max(WorldUnits::FromMeters(std::max(settings.OutlineFadeDistanceMeters, 0.0f)), 0.0f));
+        push.params2 = glm::vec4(static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 0.0f);
+        m_renderGraph.AddPass("Scene Outlines", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
+                builder.Read(resources.Depth);
+                builder.Read(resources.GBufferNormal);
+                builder.Read(resources.GBufferMaterial);
+                builder.SetRenderArea(extent);
+            },
+            [this, push, res = &resources](RGPassContext& context) mutable
+            {
+                NRI::CommandBuffer& cmd = context.Cmd();
+                push.depthIndex = uniformData.imageHeapIndexOffset + context.Slot(res->Depth);
+                push.normalIndex = uniformData.imageHeapIndexOffset + context.Slot(res->GBufferNormal);
+                push.materialIndex = uniformData.imageHeapIndexOffset + context.Slot(res->GBufferMaterial);
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_sceneOutlinePipeline);
+                cmd.setCullMode(NRI::CullMode::None);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, true);
+                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                // The scene times the pixel's colour (white: unchanged); alpha stays.
+                cmd.setColorBlendEquation(0, {
+                    .srcColorBlendFactor = NRI::BlendFactor::Zero, .dstColorBlendFactor = NRI::BlendFactor::SrcColor, .colorBlendOp = NRI::BlendOp::Add,
+                    .srcAlphaBlendFactor = NRI::BlendFactor::Zero, .dstAlphaBlendFactor = NRI::BlendFactor::One, .alphaBlendOp = NRI::BlendOp::Add });
+                cmd.pushData(&push, sizeof(push));
+                cmd.draw(3, 1, 0, 0);
+                cmd.setColorBlendEnable(0, false);
+            });
+    }
+
     Renderer::PostEffectOutputs Renderer::addPostEffectPasses(RGTexture hdrSource)
     {
         PostEffectOutputs outputs{ hdrSource, RGTexture{} };
-        const PostEffectSettings& settings = m_postEffects;
+        const PostEffectSettings& settings = activePostEffects();
 
         // The grading LUT, loaded when its file changes (display values as they are stored: no sRGB decode, no mips).
         if (settings.LutPath != m_postLutLoadedPath)

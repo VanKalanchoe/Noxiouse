@@ -282,6 +282,7 @@ namespace Nox
         struct LightSubmission {};
         struct Renderer2DSubmission {};
         struct ParticleSubmission {};
+        struct PostProcessSubmission {};
 
         // Identifies the scene that owns the renderer's GPU scene (a scene address can be reused by the next scene). Atomic: scenes are
         // made on workers too (a world cell cooked on save).
@@ -1399,6 +1400,9 @@ namespace Nox
         m_SubmitSystems.AddSystem("Submit Particles",
             ComponentAccess().Read<WorldTransformComponent, ParticleEmitterComponent>().Write<ParticleSubmission>(),
             [this]() { SubmitParticles(); });
+        m_SubmitSystems.AddSystem("Submit Post Process",
+            ComponentAccess().Read<WorldTransformComponent, PostProcessVolumeComponent>().Write<PostProcessSubmission>(),
+            [this]() { SubmitPostProcess(); });
     }
 
     void Scene::RunUpdateSystems(Timestep ts, bool stepPhysics, bool stepAnimation)
@@ -1811,6 +1815,32 @@ namespace Nox
             auto [emitter, world] = view.get<ParticleEmitterComponent, WorldTransformComponent>(entity);
             ParticleSystem::Simulate(emitter, world.WorldMatrix, m_FrameInput.Timestep);
         }
+    }
+
+    void Scene::SubmitPostProcess()
+    {
+        if (!m_renderer)
+            return;
+        // After BeginScene: this frame's camera. Unbound volumes always apply; a bounded one while the camera is inside its box (in its
+        // entity's space, as the Level Streaming and Audio Volumes test). The highest Priority wins; a tie: the first found.
+        const glm::dvec3 camera = m_renderer->GetCameraWorldPosition();
+        const PostProcessVolumeComponent* chosen = nullptr;
+        auto view = m_Registry.view<WorldTransformComponent, PostProcessVolumeComponent>(entt::exclude<InactiveInHierarchyComponent>);
+        for (auto handle : view)
+        {
+            const auto& volume = view.get<PostProcessVolumeComponent>(handle);
+            if (!volume.Enabled || (chosen && volume.Priority <= chosen->Priority))
+                continue;
+            if (!volume.Unbound)
+            {
+                const glm::dmat4 toLocal = glm::inverse(view.get<WorldTransformComponent>(handle).WorldMatrix);
+                const glm::vec3 local = glm::vec3(toLocal * glm::dvec4(camera, 1.0));
+                if (!glm::all(glm::lessThanEqual(glm::abs(local), volume.HalfExtents)))
+                    continue;
+            }
+            chosen = &volume;
+        }
+        m_renderer->SetScenePostProcess(chosen ? &chosen->Settings : nullptr);
     }
 
     void Scene::SubmitParticles()
@@ -3463,7 +3493,7 @@ namespace Nox
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
             PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent,
-            AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
+            AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
             CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent, PhysicsJoint3DComponent, CollisionFilter3DComponent,
@@ -4074,6 +4104,11 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<AudioVolumeComponent>(Entity entity, AudioVolumeComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<PostProcessVolumeComponent>(Entity entity, PostProcessVolumeComponent& component)
     {
     }
 

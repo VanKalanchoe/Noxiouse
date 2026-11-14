@@ -413,6 +413,9 @@ namespace Nox
         void StartParticles();
         void UpdateParticles();
         void SubmitParticles();
+        // The Post Process Volume that applies at this frame's camera (Unbound, or the camera inside its box; the highest Priority),
+        // handed to the renderer -- or none (its Renderer Settings apply).
+        void SubmitPostProcess();
         // Audio (docs/Audio_Architecture_Plan_2026.md): Play / Simulate start the Play On Start sources and stop every game voice at
         // the end; each frame the listener (an AudioListenerComponent, else the camera) and the playing sources' positions and
         // settings go to the AudioEngine, after the late update.

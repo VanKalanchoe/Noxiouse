@@ -389,6 +389,7 @@ namespace Nox
         watchShader("assets/shaders/IrradianceProbeSH.slang", "IrradianceProbeSH", [this]() { createIrradianceVolumePipelines(true); });
         watchShader("assets/shaders/VolumetricFog.slang", "VolumetricFog", [this]() { createVolumetricFogPipelines(true); });
         watchShader("assets/shaders/PostEffects.slang", "PostEffects", [this]() { createPostEffectPipelines(true); });
+        watchShader("assets/shaders/SceneOutline.slang", "SceneOutline", [this]() { createSceneOutlinePipeline(true); });
         watchShader("assets/shaders/ComputeSkinning.slang", "ComputeSkinning", [this]() { createComputeSkinningPipeline(true); });
         // G-Buffer (Fix watcher to recompile m_gbufferPipeline)
         watchShader("assets/shaders/GBufferMaterial.slang", "GBuffer", [this]() { createGBufferPipeline(true); });
@@ -645,6 +646,7 @@ namespace Nox
         createIrradianceVolumePipelines();
         createVolumetricFogPipelines();
         createPostEffectPipelines();
+        createSceneOutlinePipeline();
         createNRDGuidesPipeline();
         createReflectionPipeline();
         // Path Tracer
@@ -5086,6 +5088,7 @@ namespace Nox
             addForward3DPass();
             addParticlePass(); // the alpha-blended ones into the OIT targets (with OIT), then their resolve, then the rest
             addSSRHistoryPass(); // the lit scene the SSR reflect next frame
+            addSceneOutlinePass(); // outlines (Post Process Volume) into the lit scene, before TAA / DLSS smooth them
             addDLSSPass();
             addTAAPass();
             addEntityDepthBlitPass();

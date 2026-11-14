@@ -113,6 +113,7 @@ file-reference
 
 ## What's New (November 2026)
 
+- **Post Process Volume and outlines:** post effects and outlines saved with the scene (Unreal's Post Process Volume: unbound or a box, priority), and outlines -- silhouettes and creases drawn before TAA / DLSS, optionally on toon surfaces only (see the Renderer page).
 - **Shading models:** each material picks **Default Lit**, **Unlit** or **Toon** (bands or a ramp texture, a sharp highlight, a rim light) in the Material Editor, whose labels now use Unreal's names (Blend Mode, Opacity Mask Clip Value, Two Sided); plan for outlines and a material graph in `docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md` (see the Renderer page).
 - **Multiplayer:** server-authoritative sessions, replication with RPCs, client prediction and interpolation, relevancy and bandwidth budgets, physics and animation replication, lag compensation, multiplayer Play in the editor and Package Server (see Networking).
 - **Engine console and Output Log:** commands and variables with access levels, the Output Log tab with a Cmd line, the dedicated server's terminal, `--exec` (see Console, Output Log & MCP Server).

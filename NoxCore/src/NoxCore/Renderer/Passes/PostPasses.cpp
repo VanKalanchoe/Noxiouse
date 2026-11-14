@@ -150,7 +150,7 @@ namespace Nox
                 postPush.exposureCompensation = m_exposureCompensation;
                 postPush.autoExposureMinEV = m_autoExposureMinEV;
                 postPush.autoExposureMaxEV = m_autoExposureMaxEV;
-                const PostEffectSettings& effects = m_postEffects;
+                const PostEffectSettings& effects = activePostEffects();
                 postPush.bloomTextureIndex = post.Bloom.IsValid() ? context.Slot(post.Bloom) : 0xFFFFFFFF;
                 postPush.bloomIntensity = effects.BloomIntensity;
                 postPush.lensFlareIntensity = effects.LensFlares;

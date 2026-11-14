@@ -362,6 +362,71 @@ namespace Nox
         spatial.Pathing = node["Pathing"].as<bool>(false);
     }
 
+    // A Post Process Volume's settings (PostProcessSettings): every field by name; one missing reads as its default.
+    static void EmitPostProcessSettings(YAML::Emitter& out, const PostProcessSettings& settings)
+    {
+        out << YAML::Key << "Settings" << YAML::Value << YAML::BeginMap;
+        out << YAML::Key << "Bloom" << YAML::Value << settings.Bloom;
+        out << YAML::Key << "BloomIntensity" << YAML::Value << settings.BloomIntensity;
+        out << YAML::Key << "BloomRadius" << YAML::Value << settings.BloomRadius;
+        out << YAML::Key << "LensFlares" << YAML::Value << settings.LensFlares;
+        out << YAML::Key << "DepthOfField" << YAML::Value << settings.DepthOfField;
+        out << YAML::Key << "FocusDistanceMeters" << YAML::Value << settings.FocusDistanceMeters;
+        out << YAML::Key << "FStop" << YAML::Value << settings.FStop;
+        out << YAML::Key << "MaxBlurPixels" << YAML::Value << settings.MaxBlurPixels;
+        out << YAML::Key << "MotionBlur" << YAML::Value << settings.MotionBlur;
+        out << YAML::Key << "MotionBlurShutter" << YAML::Value << settings.MotionBlurShutter;
+        out << YAML::Key << "MotionBlurMaxPixels" << YAML::Value << settings.MotionBlurMaxPixels;
+        out << YAML::Key << "Saturation" << YAML::Value << settings.Saturation;
+        out << YAML::Key << "Contrast" << YAML::Value << settings.Contrast;
+        out << YAML::Key << "Vignette" << YAML::Value << settings.Vignette;
+        out << YAML::Key << "FilmGrain" << YAML::Value << settings.FilmGrain;
+        out << YAML::Key << "ChromaticAberration" << YAML::Value << settings.ChromaticAberration;
+        out << YAML::Key << "Sharpen" << YAML::Value << settings.Sharpen;
+        out << YAML::Key << "LutPath" << YAML::Value << settings.LutPath;
+        out << YAML::Key << "LutStrength" << YAML::Value << settings.LutStrength;
+        out << YAML::Key << "Outlines" << YAML::Value << settings.Outlines;
+        out << YAML::Key << "OutlineColor" << YAML::Value << settings.OutlineColor;
+        out << YAML::Key << "OutlineThickness" << YAML::Value << settings.OutlineThickness;
+        out << YAML::Key << "OutlineDepthSensitivity" << YAML::Value << settings.OutlineDepthSensitivity;
+        out << YAML::Key << "OutlineNormalSensitivity" << YAML::Value << settings.OutlineNormalSensitivity;
+        out << YAML::Key << "OutlineToonOnly" << YAML::Value << settings.OutlineToonOnly;
+        out << YAML::Key << "OutlineFadeDistanceMeters" << YAML::Value << settings.OutlineFadeDistanceMeters;
+        out << YAML::EndMap;
+    }
+
+    static void ReadPostProcessSettings(const YAML::Node& node, PostProcessSettings& settings)
+    {
+        if (!node || !node.IsMap())
+            return;
+        settings.Bloom = node["Bloom"].as<bool>(settings.Bloom);
+        settings.BloomIntensity = node["BloomIntensity"].as<float>(settings.BloomIntensity);
+        settings.BloomRadius = node["BloomRadius"].as<float>(settings.BloomRadius);
+        settings.LensFlares = node["LensFlares"].as<float>(settings.LensFlares);
+        settings.DepthOfField = node["DepthOfField"].as<bool>(settings.DepthOfField);
+        settings.FocusDistanceMeters = node["FocusDistanceMeters"].as<float>(settings.FocusDistanceMeters);
+        settings.FStop = node["FStop"].as<float>(settings.FStop);
+        settings.MaxBlurPixels = node["MaxBlurPixels"].as<float>(settings.MaxBlurPixels);
+        settings.MotionBlur = node["MotionBlur"].as<bool>(settings.MotionBlur);
+        settings.MotionBlurShutter = node["MotionBlurShutter"].as<float>(settings.MotionBlurShutter);
+        settings.MotionBlurMaxPixels = node["MotionBlurMaxPixels"].as<float>(settings.MotionBlurMaxPixels);
+        settings.Saturation = node["Saturation"].as<float>(settings.Saturation);
+        settings.Contrast = node["Contrast"].as<float>(settings.Contrast);
+        settings.Vignette = node["Vignette"].as<float>(settings.Vignette);
+        settings.FilmGrain = node["FilmGrain"].as<float>(settings.FilmGrain);
+        settings.ChromaticAberration = node["ChromaticAberration"].as<float>(settings.ChromaticAberration);
+        settings.Sharpen = node["Sharpen"].as<float>(settings.Sharpen);
+        settings.LutPath = node["LutPath"].as<std::string>(settings.LutPath);
+        settings.LutStrength = node["LutStrength"].as<float>(settings.LutStrength);
+        settings.Outlines = node["Outlines"].as<bool>(settings.Outlines);
+        settings.OutlineColor = node["OutlineColor"].as<glm::vec3>(settings.OutlineColor);
+        settings.OutlineThickness = node["OutlineThickness"].as<float>(settings.OutlineThickness);
+        settings.OutlineDepthSensitivity = node["OutlineDepthSensitivity"].as<float>(settings.OutlineDepthSensitivity);
+        settings.OutlineNormalSensitivity = node["OutlineNormalSensitivity"].as<float>(settings.OutlineNormalSensitivity);
+        settings.OutlineToonOnly = node["OutlineToonOnly"].as<bool>(settings.OutlineToonOnly);
+        settings.OutlineFadeDistanceMeters = node["OutlineFadeDistanceMeters"].as<float>(settings.OutlineFadeDistanceMeters);
+    }
+
     static void SerializeEntity(YAML::Emitter& out, Scene& scene, Entity entity, bool full = false)
     {
         NOX_CORE_ASSERT(entity.HasComponent<IDComponent>(), "Entity does not have an ID component!");
@@ -795,6 +860,19 @@ namespace Nox
             out << YAML::Key << "Cooldown" << YAML::Value << impact.Cooldown;
             out << YAML::Key << "Bus" << YAML::Value << impact.Bus;
             EmitSpatialSettings(out, impact.Spatialization);
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<PostProcessVolumeComponent>())
+        {
+            const auto& volume = entity.GetComponent<PostProcessVolumeComponent>();
+            out << YAML::Key << "PostProcessVolumeComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Enabled" << YAML::Value << volume.Enabled;
+            out << YAML::Key << "Unbound" << YAML::Value << volume.Unbound;
+            out << YAML::Key << "HalfExtents" << YAML::Value << volume.HalfExtents;
+            out << YAML::Key << "Priority" << YAML::Value << volume.Priority;
+            EmitPostProcessSettings(out, volume.Settings);
             out << YAML::EndMap;
         }
 
@@ -2425,6 +2503,16 @@ namespace Nox
             impact.Cooldown = impactSound["Cooldown"].as<float>(impact.Cooldown);
             impact.Bus = impactSound["Bus"].as<uint64_t>(impact.Bus);
             ReadSpatialSettings(impactSound, impact.Spatialization);
+        }
+
+        if (const YAML::Node postVolume = entity["PostProcessVolumeComponent"])
+        {
+            auto& volume = deserializedEntity.AddComponent<PostProcessVolumeComponent>();
+            volume.Enabled = postVolume["Enabled"].as<bool>(volume.Enabled);
+            volume.Unbound = postVolume["Unbound"].as<bool>(volume.Unbound);
+            volume.HalfExtents = postVolume["HalfExtents"].as<glm::vec3>(volume.HalfExtents);
+            volume.Priority = postVolume["Priority"].as<int32_t>(volume.Priority);
+            ReadPostProcessSettings(postVolume["Settings"], volume.Settings);
         }
 
         if (const YAML::Node audioVolume = entity["AudioVolumeComponent"])
