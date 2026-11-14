@@ -80,7 +80,6 @@ Project:
 | **`.nproj`** | YAML | Project | Project configuration, startup scene, unit scale, and saved `ProjectRendererSettings`. |
 | **`.nxr`** | YAML | Asset Registry | Maps 64-bit `AssetHandle` UUIDs to cooked paths, source paths, import settings, and `FormerPaths` redirectors. |
 | **`.nox`** | YAML | Scene | Human-readable scene file storing all entities and their 47 ECS components. |
-| **`.noxbin`** | Binary | Cooked Scene | Fast binary scene representation used inside packaged `.npak` builds. |
 | **`.noxcell`** / **`.noxcell.cooked`** | YAML / Binary (`NXCL`) | World Partition Cell | Spatially partitioned streaming cell (authored YAML + auto-cooked binary cache). |
 | **`.nprefab`** | YAML | Prefab | Reusable entity hierarchy or Prefab Variant (`BasePrefab` + property/structural overrides). |
 | **`.ntex`** | Binary (`NTX1` / `NTV1`) | Texture2D | Cooked BC7/BC5/BC4/FP16 texture with mip chain (`NTX1`) or 128x128 + 4px border Virtual Texture tiles (`NTV1`). |

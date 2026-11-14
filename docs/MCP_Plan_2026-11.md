@@ -3,6 +3,13 @@
 Status (2026-11-14): **C1 console and MCP0-MCP3 built and tested by the user; MCP4 built** (part 1 tested by the user, part 2
 waiting for the user's test); MCP5 open. Backlog items C1 and N7.
 
+Graph files edited outside the editor (2026-11-14): a .nanimgraph / .naudiograph changed on disk (a text editor, an AI with file
+access, version control) is reimported **in place** (EditorAssetManager::ReimportAsset): animators held the old graph object until
+the scene reloaded (AnimationGraphInstance only resolves its graph when the handle changes), and an open graph editor window kept
+showing -- and on its next save wrote back -- its old copy. Now the asset object stays and its compile version tells every holder;
+the window follows (an undo step), or, with unsaved edits of its own, asks (load the file's version / keep mine) while the file's
+graph waits in NodeGraphAsset::DiskGraph. Its own saves are noted (NoteSourceWritten), so they are no change to reload.
+
 MCP4 part 2 (2026-11-14): `McpWorkflowTools` -- list_graph_node_types, get_graph / set_graph (`McpGraph`: a NodeGraph as JSON with
 links by pin name, property values typed by the node type's own declarations -- default properties, Float / Int / Bool pins,
 variable-group literals -- states with nested graphs, transitions with named comparisons; every reference checked, then

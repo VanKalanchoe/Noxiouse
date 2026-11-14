@@ -230,7 +230,7 @@ window.NOX_FILE_DATABASE = [
     { path: "NoxCore/src/NoxCore/Scene/PrefabInstance.cpp", category: "Scene & ECS", type: "C++ Source", desc: "Implements Prefab Variants, live instance refreshing, RevertOverride, and ApplyOverride." },
     { path: "NoxCore/src/NoxCore/Scene/MaterialVariants.h", category: "Scene & ECS", type: "C++ Header", desc: "Declares runtime switcher for glTF KHR_materials_variants." },
     { path: "NoxCore/src/NoxCore/Scene/MaterialVariants.cpp", category: "Scene & ECS", type: "C++ Source", desc: "Swaps submesh material slots based on active glTF material variant." },
-    { path: "NoxCore/src/NoxCore/Scene/SceneSerializer.h", category: "Scene & ECS", type: "C++ Header", desc: "Declares SceneSerializer for YAML (.nox) and binary (.noxbin, .noxcell.cooked)." },
+    { path: "NoxCore/src/NoxCore/Scene/SceneSerializer.h", category: "Scene & ECS", type: "C++ Header", desc: "Declares SceneSerializer for YAML (.nox, .nprefab, .noxcell) and cooked cells (.noxcell.cooked)." },
     { path: "NoxCore/src/NoxCore/Scene/SceneSerializer.cpp", category: "Scene & ECS", type: "C++ Source", desc: "Serializes and deserializes all 49 ECS components to/from YAML and fast binary streams." },
     { path: "NoxCore/src/NoxCore/Scene/SceneLoader.h", category: "Scene & ECS", type: "C++ Header", desc: "Declares non-blocking asynchronous scene/cell loader." },
     { path: "NoxCore/src/NoxCore/Scene/SceneLoader.cpp", category: "Scene & ECS", type: "C++ Source", desc: "Parses scenes on worker threads with time-sliced entity creation on the main thread." },

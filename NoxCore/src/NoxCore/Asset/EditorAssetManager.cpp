@@ -1,4 +1,5 @@
 #include "EditorAssetManager.h"
+#include "NoxCore/NodeGraph/NodeGraphAsset.h"
 
 #include <unordered_set>
 #include "NoxCore/Core/VirtualFileSystem.h"
@@ -425,6 +426,24 @@ namespace Nox
         // 2. Re-run the importer on the GLTF
         Ref<Asset> reimportedAsset = AssetImporter::ImportAsset(handle, metadata);
         
+        // A node graph is reimported in place: animators and graph editor windows hold the asset object itself (a replaced one would
+        // leave them on the old graph until the scene reloads). The new graph goes into it and is compiled -- CompileVersion tells its
+        // holders -- unless a graph editor window has unsaved edits of it: then it waits in DiskGraph for the window to ask.
+        if (auto* existing = reimportedAsset && m_LoadedAssets.contains(handle) ? dynamic_cast<NodeGraphAsset*>(m_LoadedAssets.at(handle).get()) : nullptr)
+        {
+            NodeGraph& incoming = static_cast<NodeGraphAsset*>(reimportedAsset.get())->Graph;
+            if (existing->HasUnsavedEdits)
+                existing->DiskGraph = std::move(incoming);
+            else
+            {
+                existing->Graph = std::move(incoming);
+                existing->DiskGraph.reset();
+                existing->Recompile();
+            }
+            existing->DiskVersion++;
+            return;
+        }
+
         // 3. Overwrite the loaded asset. (If your ECS holds a Ref<Asset> to this, 
         // it will automatically update in the viewport!)
         if (reimportedAsset)

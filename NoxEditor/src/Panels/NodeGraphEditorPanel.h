@@ -57,6 +57,10 @@ namespace Nox
         void Undo();
         void Redo();
         void RestoreGraph(NodeGraph graph);
+        // The file changed on disk (EditorAssetManager reimported the graph in place): the window shows the new graph -- an undo step,
+        // so Ctrl+Z goes back to what it showed -- or, with unsaved edits of its own, asks which to keep (DrawDiskChangeBar).
+        void FollowDiskChanges();
+        void DrawDiskChangeBar();
         // The graph's declared parameters (add / rename / retype / default / delete), above the canvas. Backend-
         // independent: it edits NodeGraph::Parameters, which every canvas backend draws its own nodes from.
         void DrawParametersPanel();
@@ -96,6 +100,7 @@ namespace Nox
         std::vector<NodeGraph> m_UndoStack;  // older states, newest last
         std::vector<NodeGraph> m_RedoStack;
         bool m_EditPending = false;          // edited since m_Committed
+        uint32_t m_DiskVersion = 0;          // the asset's DiskVersion this window last showed
 
         // The preview: its own graph instance (playheads, parameters), the mesh and skeleton it plays on.
         Scope<class AnimationGraphInstance> m_PreviewInstance;

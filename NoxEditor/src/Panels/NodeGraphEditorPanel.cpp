@@ -63,7 +63,68 @@ namespace Nox
         // docs/Animation_Graph_Architecture_Plan_2026.md Step 3.
         m_Backend = CreateScope<ThedmdCanvasBackend>();
         if (m_Asset)
+        {
             m_Committed = m_Asset->Graph;
+            m_DiskVersion = m_Asset->DiskVersion;
+        }
+    }
+
+    void NodeGraphEditorPanel::FollowDiskChanges()
+    {
+        if (!m_Asset)
+            return;
+        // What the asset manager needs to know before it applies a change from disk (next reimport): whether that would replace edits
+        // of this window that are not saved.
+        m_Asset->HasUnsavedEdits = m_Dirty || m_EditPending;
+        if (m_Asset->DiskVersion == m_DiskVersion || m_Asset->DiskGraph)
+            return; // (nothing new, or a conflict waiting for the bar's answer)
+        // Applied in place (this window had nothing unsaved): show it, as one undo step back to what was shown.
+        m_DiskVersion = m_Asset->DiskVersion;
+        constexpr size_t kMaxSteps = 200;
+        m_UndoStack.push_back(std::move(m_Committed));
+        if (m_UndoStack.size() > kMaxSteps)
+            m_UndoStack.erase(m_UndoStack.begin());
+        m_RedoStack.clear();
+        m_Committed = m_Asset->Graph;
+        m_EditPending = false;
+        m_Backend->ReloadGraph();
+        m_SelectedTransition = -1;
+        m_SelectedState = 0;
+        NOX_CORE_INFO("{}: reloaded, the file changed on disk (Ctrl+Z in its graph window goes back)", m_Title);
+    }
+
+    void NodeGraphEditorPanel::DrawDiskChangeBar()
+    {
+        if (!m_Asset || !m_Asset->DiskGraph)
+            return;
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.45f, 0.30f, 0.05f, 1.0f));
+        ImGui::BeginChild("##disk_change", ImVec2(0.0f, ImGui::GetFrameHeightWithSpacing() * 1.6f), ImGuiChildFlags_None);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("The file changed on disk, and this window has unsaved edits.");
+        ImGui::SameLine();
+        if (ImGui::Button("Load the file's version"))
+        {
+            // Mine become an undo step: Ctrl+Z brings them back.
+            NodeGraph fromDisk = std::move(*m_Asset->DiskGraph);
+            m_Asset->DiskGraph.reset();
+            m_DiskVersion = m_Asset->DiskVersion;
+            if (m_EditPending)
+                CommitHistory();
+            m_UndoStack.push_back(m_Asset->Graph);
+            m_RedoStack.clear();
+            RestoreGraph(std::move(fromDisk));
+            m_Dirty = false; // (it is what the file holds)
+        }
+        ImGui::SetItemTooltip("Shows the graph as the file has it now; your unsaved edits stay one Ctrl+Z away.");
+        ImGui::SameLine();
+        if (ImGui::Button("Keep mine"))
+        {
+            m_Asset->DiskGraph.reset();
+            m_DiskVersion = m_Asset->DiskVersion;
+        }
+        ImGui::SetItemTooltip("Keeps editing your version; saving writes it over the file's.");
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
     }
 
     void NodeGraphEditorPanel::CommitHistory()
@@ -103,12 +164,8 @@ namespace Nox
             m_UndoStack.erase(m_UndoStack.begin());
         m_RedoStack.clear();
         RestoreGraph(std::move(graph));
-        Save();
-        if (m_Dirty)
-            return false; // (Save logged why)
-        if (auto assets = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr)
-            assets->NoteSourceWritten(m_GraphHandle); // (the file watcher's event for this write: no reimport)
-        return true;
+        Save(); // (notes its write: the file watcher's event for it is no reload)
+        return !m_Dirty; // (Save logged why when it could not write)
     }
 
     void NodeGraphEditorPanel::Undo()
@@ -140,6 +197,18 @@ namespace Nox
     NodeGraphEditorPanel::~NodeGraphEditorPanel()
     {
         StopAudioPreview();
+        // Closed: nothing of this window waits any more. A version from disk it had not taken is what the file holds now -- applied,
+        // so the asset in memory matches the file again.
+        if (m_Asset)
+        {
+            m_Asset->HasUnsavedEdits = false;
+            if (m_Asset->DiskGraph)
+            {
+                m_Asset->Graph = std::move(*m_Asset->DiskGraph);
+                m_Asset->DiskGraph.reset();
+                m_Asset->Recompile();
+            }
+        }
     }
 
     void NodeGraphEditorPanel::StopAudioPreview()
@@ -285,7 +354,11 @@ namespace Nox
 
         std::filesystem::path path = Project::GetActiveAssetDirectory() / it->second.FilePath;
         if (NodeGraphSerializer::Serialize(path, m_Asset->Graph))
+        {
             m_Dirty = false;
+            assetManager->NoteSourceWritten(m_GraphHandle); // (its own save is no change on disk to reload)
+            m_Asset->HasUnsavedEdits = m_EditPending;
+        }
     }
 
     void NodeGraphEditorPanel::DrawParametersPanel()
@@ -668,6 +741,7 @@ namespace Nox
                 StopAudioPreview(); // (closing the window stops what it plays)
             return;
         }
+        FollowDiskChanges();
 
         // "###" gives the window a stable ID independent of the visible label, so the "*" dirty marker changing
         // doesn't make ImGui think this is a different window.
@@ -698,6 +772,7 @@ namespace Nox
                 }
                 ImGui::EndMenuBar();
             }
+            DrawDiskChangeBar();
 
             if (m_Asset && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
                 ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S))
