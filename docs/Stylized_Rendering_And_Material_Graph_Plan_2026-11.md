@@ -127,6 +127,12 @@ draw into the lit scene before TAA / DLSS with Zero / SrcColor blending (the sce
 toon-only by the G-buffer's toon bit; distance fade. Not with the path tracer or debug views; lines show through glass in front of an
 edge. Not yet: blending between volumes, a C# API for the volume, the LUT file packaged with the game.
 
+Fixed after the user's first step 2 test (2026-11-14): the Scene Outlines pass ran (Render Graph panel) but drew nothing -- its push
+constants put the first vec4 at byte 24 while the shader reads push-constant vec4s on 16-byte boundaries (as every other PushConstant*
+in shaderIO.h is laid out), so the shader saw a 0 x 0 render size and a normal threshold of about the screen width: no pixel was an
+edge. Padded, with a static_assert on the offsets; the depth sensitivity's default threshold also went from ~26 % to ~13 % of the
+distance (silhouettes against nearby surfaces too).
+
 ## 10. Tests
 
 Step 1: the `.nmat` round trip of the shading model and toon fields, NMA3 files read with defaults (NoxToolsTest); shader compile

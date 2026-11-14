@@ -1165,6 +1165,8 @@ window.NOX_MANUAL_PAGES = [
             "3. **NoxEditor:** **Depth Sensitivity** draws silhouettes (where the distance jumps), **Normal Sensitivity** draws creases (where the surface turns); 0 turns one off.",
             "4. **NoxEditor:** **Toon Surfaces Only** keeps the lines to materials with the Toon shading model (a realistic world with outlined toon characters). **Fade Distance** fades lines out towards that many metres (0: never).",
             "",
+            "No lines at all? Raise **Depth Sensitivity** / **Normal Sensitivity** (0 turns each off) and check Settings > Post Effects says a volume applies (else the volume is disabled, or the camera is outside its box).",
+            "",
             "The lines are drawn before anti-aliasing, so TAA / DLSS smooth them and they stay stable in motion. Not with the Path Tracer (its image does not come from the G-buffer) or the debug views. Lines show through glass in front of an edge (transparent surfaces are not in the depth the lines are found in).",
             "",
             "## Order-Independent Transparency (raster)",

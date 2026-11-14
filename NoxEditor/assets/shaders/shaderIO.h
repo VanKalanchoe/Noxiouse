@@ -2897,10 +2897,16 @@ struct PushConstantSceneOutline
     uint32_t normalIndex;
     uint32_t materialIndex;
     uint32_t toonOnly;          // 1: only toon pixels (gbuffer_toon) get lines
+    uint32_t padding0;          // (push constants lay vec4s out on 16 bytes, as every PushConstant* here: color at 32)
+    uint32_t padding1;
     vec4 color;                 // rgb: what an edge multiplies the scene by; w: unused
     vec4 params;                // x thickness (render pixels), y depth threshold (relative), z normal threshold (1 - cos), w fade distance (0: none)
     vec4 params2;               // xy: the render size, zw: unused
 };
+#ifndef __SLANG__
+static_assert(offsetof(PushConstantSceneOutline, color) % 16 == 0 && offsetof(PushConstantSceneOutline, params) % 16 == 0 &&
+              offsetof(PushConstantSceneOutline, params2) % 16 == 0, "push constant vec4s must start on 16 bytes (the shader's layout)");
+#endif
 
 struct PushConstantAutoExposure
 {

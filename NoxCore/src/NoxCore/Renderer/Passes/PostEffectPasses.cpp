@@ -64,7 +64,7 @@ namespace Nox
         const float depthSensitivity = std::clamp(settings.OutlineDepthSensitivity, 0.0f, 1.0f);
         const float normalSensitivity = std::clamp(settings.OutlineNormalSensitivity, 0.0f, 1.0f);
         push.params = glm::vec4(std::max(settings.OutlineThickness, 0.0f) * renderScale,
-                                depthSensitivity > 0.0f ? 0.02f + (1.0f - depthSensitivity) * 0.48f : 0.0f, // 2 % .. 50 % of the distance
+                                depthSensitivity > 0.0f ? 0.01f + (1.0f - depthSensitivity) * 0.24f : 0.0f, // 1 % .. 25 % of the distance (0.5: ~13 %)
                                 normalSensitivity > 0.0f ? 0.02f + (1.0f - normalSensitivity) * 0.68f : 0.0f, // ~11 .. ~72 degrees
                                 std::max(WorldUnits::FromMeters(std::max(settings.OutlineFadeDistanceMeters, 0.0f)), 0.0f));
         push.params2 = glm::vec4(static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 0.0f);
