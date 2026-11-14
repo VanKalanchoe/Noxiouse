@@ -45,6 +45,11 @@ namespace Nox
         // written (the pipelines must be built again); throws nothing (a write that fails is logged and returns false).
         bool WriteGenerated(const std::vector<std::string>& paths, const std::vector<CustomLitSource>& sources);
 
+        // <project>/slangdconfig.json for the Slang language server (VS Code's and Visual Studio's Slang extensions): the engine's shader
+        // folder as a search path, so a Material Shader's `#include "CustomLit.slang"` resolves there (the generated file blanks that
+        // line: it has the include already). Absolute, so per machine; written when the editor opens a project. False if not written.
+        bool WriteCodeEditorConfig(const std::filesystem::path& projectDirectory, const std::filesystem::path& engineShaderDirectory);
+
         // The manifest's paths in slot order (empty: none written).
         std::vector<std::string> ReadManifest();
 

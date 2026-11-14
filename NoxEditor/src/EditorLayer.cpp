@@ -3855,6 +3855,8 @@ namespace Nox
             // Its Material Shaders (Custom Lit, CustomLitShaders.h) before its materials are packed; then watched (PollCustomLitShaders).
             m_Renderer->InitializeCustomLitShaders();
             m_CustomLitSignature = CustomLitSignature();
+            if (!m_CustomLitSignature.empty()) // (the project has Material Shaders: code editors find the engine's include)
+                CustomLitShaders::WriteCodeEditorConfig(Project::GetActiveProjectDirectory(), "assets/shaders");
             // The project's scripts (at startup ScriptEngine::Initialize loads them, after this).
             m_ScriptBuilder.SetProject(ScriptEngine::GetProjectScriptsProject());
             if (ScriptEngine::IsInitialized())
@@ -6746,6 +6748,10 @@ namespace Nox
         if (signature == m_CustomLitSignature)
             return;
         m_CustomLitSignature = std::move(signature);
+        // The Slang language server's config at the project's root (VS Code's / Visual Studio's Slang extensions): the engine's shader
+        // folder as a search path, so a Material Shader's `#include "CustomLit.slang"` resolves in the code editor too.
+        if (!m_CustomLitSignature.empty())
+            CustomLitShaders::WriteCodeEditorConfig(Project::GetActiveProjectDirectory(), "assets/shaders");
         bool complete = true;
         const std::vector<CustomLitSource> sources = CustomLitShaders::GatherProjectSources(complete);
         NOX_CORE_INFO("Custom Lit: Material Shaders changed, building them again");

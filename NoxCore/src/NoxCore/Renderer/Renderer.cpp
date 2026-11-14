@@ -394,7 +394,7 @@ namespace Nox
         for (const char* shader : { "CustomLit", "Material_TransparentLit_Mesh", "DeferredLighting", "PBRLighting" })
             watchShader(std::string("assets/shaders/") + shader + ".slang", "CustomLit", [this]()
             {
-                if (m_customLitStatus.ShaderCount > 0 && m_shaderCompiler->canCompile())
+                if (m_customLitStatus.ShaderCount > 0 && m_shaderCompiler->canCompile() && !m_customLitBuild) // (a running build has the new text)
                 {
                     createCustomLitPipelines(true);
                     ++m_customLitStatus.Version;
@@ -587,6 +587,9 @@ namespace Nox
     Renderer::~Renderer()
     {
         NOX_CORE_INFO("Renderer Shutdown");
+        // A Material Shader build still compiling on its worker thread (it uses the device and the compiler): finished first.
+        if (m_customLitBuild)
+            m_customLitBuild->Task.wait();
 
         // Release queued assets while the instance is still reachable: a Mesh destructor calls Renderer::UnloadMesh,
         // which asserts on s_Instance and queues its geometry, so this drains in rounds -- clearing the vector in place
@@ -6073,6 +6076,9 @@ namespace Nox
         m_device->beginFrame(static_cast<uint32_t>(m_sceneFrameCounter));
         // Every build: the texture streaming pool is a share of the budget.
         sampleMemoryStats();
+
+        // A Custom Lit build finished on its worker thread: its pipelines swapped in (CustomLitPasses.cpp).
+        pollCustomLitBuild();
 
         // Process any queued shader hot-reloads
         if (!m_pendingReloads.empty())

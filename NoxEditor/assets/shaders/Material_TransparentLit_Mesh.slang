@@ -307,6 +307,9 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
     return shadeTransparent(vertIn, isFrontFace, pushConstant, transmittance);
 }
 
+// The other entry points are not in the Custom Lit build (its pipeline uses fragMain only): each one's code generation is time a
+// Material Shader edit would wait for.
+#ifndef NOX_CUSTOM_LIT
 // Order-independent transparency (Renderer::setOITEnabled): the same surface into the OIT targets (OITShared.slang).
 [shader("fragment")]
 FSOutputOIT fragMainOIT(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
@@ -344,6 +347,7 @@ void fragMainAVBOITSplat(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uni
     shadeTransparent(vertIn, isFrontFace, pushConstant, transmittance);
     avboit_splat(ubo, uint2(vertIn.pos.xy), length(vertIn.worldPos - ubo->cameraWorldPos.xyz), transmittance);
 }
+#endif
 
 FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant, out float3 transmittance)
 {
@@ -1111,6 +1115,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     return output;
 }
 
+#ifndef NOX_CUSTOM_LIT // (not in the Custom Lit build: above)
 // --- The irradiance volume's probe capture (Renderer::addIrradianceVolumePasses) -------------------------------------------------
 // What each texel of a capture face sees, unlit: the surface's diffuse albedo, its emission and its normal. IrradianceProbeSH.slang
 // keeps them per probe (packMain) and lights them again every frame (relightMain), so the light can change without drawing the
@@ -1173,3 +1178,4 @@ FSOutputProbeCapture captureFragMain(VSOutput vertIn, bool isFrontFace : SV_IsFr
     output.emission = float4(emission, octahedral.y);
     return output;
 }
+#endif

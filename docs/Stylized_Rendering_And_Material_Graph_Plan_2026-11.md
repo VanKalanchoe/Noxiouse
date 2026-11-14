@@ -168,7 +168,14 @@ distance (silhouettes against nearby surfaces too).
   textures); MCP `write_material_shader`, `get_material_shaders` and the material JSON fields; NoxRuntime builds from the project's files
   in a development run and from the shipped manifest and binaries in a package (the packager warns when they do not compile).
 - **Not yet:** the material graph's Custom Lit output (step 4), material parameters by name (only Parameter 1-4), Custom Lit with OIT,
-  renaming a Material Shader (materials name it by path), a per-light function for rect lights' soft shapes.
+  a per-light function for rect lights' soft shapes.
+- **Fixed after the user's first test (2026-11-14):** making a Material Shader froze the editor for about 40 s (the forward variant
+  compiled on the main thread) and its name could not be typed or renamed (`CanRename` did not list the type); VS Code's Slang extension
+  reported `undefined identifier 'CustomLitSurface'` (the file had no include). Now: the build runs on a worker thread, one at a time
+  (the Custom Lit pass swaps in first, the forward variant after; an unknown slot lights as Default Lit's diffuse meanwhile); the
+  Custom Lit build of the forward shader generates only `fragMain` (24 s to 8 s here); Material Shaders rename (materials find a renamed
+  one by its old path); the template starts with `#include "CustomLit.slang"` (blanked in the generated file, line numbers kept) and the
+  editor writes `<project>/slangdconfig.json` (the engine's shader folder as the Slang language server's search path).
 
 ## 10. Tests
 
@@ -177,7 +184,7 @@ checks; the user's look test on the UAL1 character in `AnimationTest2.nox` (the 
 
 Step 2: shader compile checks, the push-constant layout's static_assert; the user's test (outlines showed only after the layout fix).
 
-Step 3: NoxToolsTest (180 checks) -- the generated file's namespaces, `#line` and dispatch cases, the slot assignment, the template, the
+Step 3: NoxToolsTest (182 checks) -- the generated file's namespaces, `#line` and dispatch cases, the slot assignment, the template, the
 material JSON fields, an NMA5 round trip and an NMA4 file; Slang -- the template and a second Material Shader through the real generator
 output compile in the check, deferred and forward files (from a folder outside the engine's shaders, as next to the executable), the
 standard DeferredLighting / TransparentLit / GBufferMaterial still compile, and an error in a Material Shader names its file and line.

@@ -356,7 +356,10 @@ namespace Nox
             ImGui::SeparatorText("Custom Lit");
             // The Material Shader: a .slang asset (Content Browser > + Add > Material Shader), by its path in Assets.
             auto assets = Project::GetActive()->GetEditorAssetManager();
-            const std::string shaderLabel = data.CustomShader.empty() ? std::string("None") : std::filesystem::path(data.CustomShader).filename().string();
+            // (Renamed or moved since: the registry still finds it by the old path the material names -- shown by its name now.)
+            const AssetHandle currentShader = data.CustomShader.empty() ? AssetHandle(0) : assets->FindHandleByPath(data.CustomShader, AssetType::MaterialShader);
+            const std::string currentShaderPath = currentShader != 0 ? assets->GetMetadata(currentShader).FilePath.generic_string() : data.CustomShader;
+            const std::string shaderLabel = data.CustomShader.empty() ? std::string("None") : std::filesystem::path(currentShaderPath).filename().string();
             if (ImGui::BeginCombo("Material Shader", shaderLabel.c_str()))
             {
                 if (ImGui::Selectable("None", data.CustomShader.empty()))
@@ -369,7 +372,7 @@ namespace Nox
                     if (shaderMetadata.Type != AssetType::MaterialShader)
                         continue;
                     const std::string path = shaderMetadata.FilePath.generic_string();
-                    if (ImGui::Selectable(path.c_str(), path == data.CustomShader))
+                    if (ImGui::Selectable(path.c_str(), path == currentShaderPath))
                     {
                         data.CustomShader = path;
                         changed = true;
@@ -400,7 +403,7 @@ namespace Nox
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Open"))
                 {
-                    const std::string url = "file:///" + std::filesystem::absolute(Project::GetActiveAssetDirectory() / data.CustomShader).generic_string();
+                    const std::string url = "file:///" + std::filesystem::absolute(Project::GetActiveAssetDirectory() / currentShaderPath).generic_string();
                     if (!SDL_OpenURL(url.c_str()))
                         NOX_CORE_ERROR("Could not open {} ({})", data.CustomShader, SDL_GetError());
                 }
@@ -411,6 +414,8 @@ namespace Nox
             // Whether the renderer has it built (CustomLitShaders.h): else the material is lit as Default Lit.
             const Renderer* renderer = Application::Get().GetRenderer();
             const ImVec4 warning(0.95f, 0.75f, 0.25f, 1.0f);
+            if (renderer && renderer->GetCustomLitStatus().Building)
+                ImGui::TextColored(warning, "Compiling the Material Shaders... (the last build draws meanwhile)");
             if (data.CustomShader.empty())
                 ImGui::TextColored(warning, "No Material Shader: lit as Default Lit.");
             else if (renderer && Renderer::FindCustomLitSlot(data.CustomShader) != 0xFFFFFFFFu)

@@ -1111,6 +1111,7 @@ namespace Nox
         switch (metadata.Type)
         {
         case AssetType::Prefab:
+        case AssetType::MaterialShader: // (materials name it by path: the old one stays an alias, Renderer::GetCustomLitSlot)
         case AssetType::AnimationGraph:
         case AssetType::AudioGraph:
         case AssetType::AudioClip:

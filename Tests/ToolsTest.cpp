@@ -151,6 +151,18 @@ static void TestCustomLitShaders()
           text.find("case 2u: return CustomLit2::ambient(s, a);") != std::string::npos && text.find("case 1u") == std::string::npos,
           "the dispatchers call light() / ambient() by slot");
     CHECK(text.find("// b\n}") != std::string::npos, "a source without a final newline still closes its namespace on a line of its own");
+    CHECK(text.find("default: return custom_lit_lambert(s, l);") != std::string::npos,
+          "an unknown slot (a pipeline older than its Material Shader) lights as Default Lit's diffuse, not black");
+    {
+        // A Material Shader's own #include of the engine's file (there for a code editor): blanked in the generated file, the lines kept.
+        const std::string withInclude = CustomLitShaders::GenerateDispatcher(
+            { "S.slang" }, { { "S.slang", "#include \"CustomLit.slang\" // for the editor\n  #include \"shaderIO.h\"\nfloat3 light(CustomLitSurface s, CustomLitLight l) { return 0; }\n" } });
+        const size_t body = withInclude.find("#line 1 \"S.slang\"\n");
+        CHECK(body != std::string::npos && withInclude.find("#include \"CustomLit.slang\" // for") == std::string::npos &&
+              withInclude.find("#include \"shaderIO.h\"\nfloat3") == std::string::npos &&
+              withInclude.compare(body + std::string("#line 1 \"S.slang\"\n").size(), 3, "\n\nf") == 0,
+              "a Material Shader's #include of CustomLit.slang / shaderIO.h is blanked, its line numbers kept");
+    }
 
     const std::vector<std::string> first = CustomLitShaders::AssignSlots({}, { { "b.slang", "" }, { "a.slang", "" } });
     CHECK(first.size() == 2 && first[0] == "b.slang" && first[1] == "a.slang", "first slots: in the order given (GatherProjectSources sorts)");
@@ -159,7 +171,8 @@ static void TestCustomLitShaders()
           "later: a kept shader keeps its slot, a removed one leaves it empty, a new one is appended");
     const std::vector<std::string> trimmed = CustomLitShaders::AssignSlots(later, { { "a.slang", "" } });
     CHECK(trimmed.size() == 2 && trimmed[1] == "a.slang", "empty slots at the end are dropped");
-    CHECK(CustomLitShaders::TemplateSource().find("float3 light(CustomLitSurface s, CustomLitLight l)") != std::string_view::npos &&
+    CHECK(CustomLitShaders::TemplateSource().starts_with("#include \"CustomLit.slang\"") &&
+          CustomLitShaders::TemplateSource().find("float3 light(CustomLitSurface s, CustomLitLight l)") != std::string_view::npos &&
           CustomLitShaders::TemplateSource().find("float3 ambient(CustomLitSurface s, CustomLitAmbient a)") != std::string_view::npos,
           "the new Material Shader template has both functions");
 }

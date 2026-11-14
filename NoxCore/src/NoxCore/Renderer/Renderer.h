@@ -11,6 +11,8 @@
 #include "NoxCore/Core/Window.h"
 #include "Mesh.h"
 #include <mutex>
+#include <future>
+#include <optional>
 #include <variant>
 #include <unordered_map>
 
@@ -700,8 +702,9 @@ namespace Nox
         // A material whose Material Shader has no slot, or while the pipelines failed, is packed as Default Lit.
         void SetCustomLitShaders(const std::vector<CustomLitSource>& sources);
         void LoadPackagedCustomLitShaders();
-        // Gathers the active project's Material Shaders and calls the one of the two above that applies (Application start, project load).
-        void InitializeCustomLitShaders();
+        // Gathers the active project's Material Shaders and calls the one of the two above that applies (project load). The build runs on
+        // a worker thread (the editor keeps drawing; pollCustomLitBuild swaps the pipelines in); `wait`: until it is done (a game's start).
+        void InitializeCustomLitShaders(bool wait = false);
         uint32_t GetCustomLitSlot(const std::string& path) const;
         // The running renderer's slot for a Material Shader (material packing); 0xFFFFFFFF without a renderer or that shader.
         static uint32_t FindCustomLitSlot(const std::string& path) { return s_Instance ? s_Instance->GetCustomLitSlot(path) : 0xFFFFFFFFu; }
@@ -709,6 +712,7 @@ namespace Nox
         {
             size_t ShaderCount = 0;   // Material Shaders with a slot
             bool Ready = false;       // the Custom Lit pipelines are built
+            bool Building = false;    // a build runs on a worker thread (the last working one draws meanwhile)
             std::string Message;      // what went wrong (a compile error: the log has Slang's message with the file and line)
             uint64_t Version = 0;     // counts rebuilds (the Material Editor shows the latest)
         };
@@ -1282,6 +1286,11 @@ namespace Nox
         void createSceneOutlinePipeline(bool forceCompile = false);
         // The Custom Lit pass's and the forward variant's pipelines from the generated sources (CustomLitShaders.h); false when they fail.
         bool createCustomLitPipelines(bool forceCompile);
+        std::unique_ptr<NRI::Pipeline> buildCustomLitDeferredPipeline(bool forceCompile); // (any thread; throws when it does not compile)
+        std::unique_ptr<NRI::Pipeline> buildCustomLitForwardPipeline(bool forceCompile);
+        void startCustomLitBuild(const std::vector<CustomLitSource>& sources);
+        void pollCustomLitBuild();    // main thread, each frame: a finished build's pipelines swapped in
+        void waitForCustomLitBuild();
         // The forward shader for lit surfaces: its Custom Lit variant while the project has Material Shaders (it shades every other
         // material as the plain one does), else the plain one.
         NRI::Pipeline* forwardLitPipeline() const { return m_transparentLitCustomPipeline ? m_transparentLitCustomPipeline.get() : m_transparentLitPipeline.get(); }
@@ -1669,8 +1678,25 @@ namespace Nox
         // Custom Lit (CustomLitShaders.h): the deferred lighting and the forward shader compiled with the project's Material Shaders.
         std::unique_ptr<NRI::Pipeline> m_customLitPipeline;
         std::unique_ptr<NRI::Pipeline> m_transparentLitCustomPipeline;
-        std::vector<std::string> m_customLitPaths; // slot -> Material Shader path ("" : none)
+        std::vector<std::string> m_customLitPaths; // slot -> Material Shader path ("" : none), as the pass's pipeline in use has them
+        std::vector<std::string> m_customLitRequestedPaths; // as the latest build request gave them (the next one keeps these slots)
         CustomLitStatus m_customLitStatus;
+        // A build on a worker thread: its pipelines handed over as each is done (pollCustomLitBuild).
+        struct CustomLitBuild
+        {
+            std::future<void> Task;
+            std::mutex Mutex;
+            std::unique_ptr<NRI::Pipeline> Deferred;
+            std::unique_ptr<NRI::Pipeline> Forward;
+            bool DeferredDone = false;
+            bool ForwardDone = false;
+            bool Failed = false;
+            std::string Error;
+            std::vector<std::string> Paths;
+            size_t ShaderCount = 0;
+        };
+        std::shared_ptr<CustomLitBuild> m_customLitBuild;
+        std::optional<std::vector<CustomLitSource>> m_customLitPending; // the newest request while a build runs
         std::unique_ptr<NRI::Pipeline> m_motionBlurPipeline;
         std::unique_ptr<NRI::Pipeline> m_bloomDownsamplePipeline;
         std::unique_ptr<NRI::Pipeline> m_bloomUpsamplePipeline;

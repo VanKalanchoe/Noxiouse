@@ -12,14 +12,16 @@ namespace Nox::CustomLitShaders
 {
     namespace
     {
-        constexpr std::string_view kTemplate = R"(// A Material Shader (Custom Lit): how a material whose Shading Model is "Custom Lit" is lit.
+        constexpr std::string_view kTemplate = R"(#include "CustomLit.slang" // (for your code editor: the engine's inputs and helpers; the engine has them already)
+
+// A Material Shader (Custom Lit): how a material whose Shading Model is "Custom Lit" is lit.
 //   light()   runs once for every light that reaches the surface: that light's share of the pixel's light.
 //   ambient() runs once: the light from all around (sky, GI, reflections).
 // The pixel is the sum of light() over the lights + ambient() + the material's emissive (then the fog in front of it).
 // Inputs: CustomLitSurface s (position, normal, view, baseColor, metallic, roughness, occlusion, uv, screenUV, time,
 // parameters[0..3], textures), CustomLitLight l (direction, color, shadow, distance, type), CustomLitAmbient a (diffuse,
 // reflection). Helpers: custom_lit_texture(s, 0 or 1, uv), custom_lit_luminance, custom_lit_fresnel, custom_lit_lambert.
-// (NoxEditor/assets/shaders/CustomLit.slang describes every field.) No #include here: those are already there.
+// (NoxEditor/assets/shaders/CustomLit.slang describes every field.) No other #include: the engine puts this file in a namespace.
 //
 // This one: a two-tone toon. Parameter 1 (rgb) tints the shadow side, Parameter 2 x is the rim's strength.
 
@@ -62,6 +64,34 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
                 return false;
             }
             return true;
+        }
+
+        // A Material Shader's code as it goes into the generated file: its `#include "CustomLit.slang"` / `"shaderIO.h"` lines (there for a
+        // code editor, which compiles the file on its own) blanked -- the generated file has them already, outside the namespace -- so
+        // the line numbers stay the file's.
+        std::string WithoutEngineIncludes(const std::string& code)
+        {
+            std::string result;
+            result.reserve(code.size());
+            size_t start = 0;
+            while (start <= code.size())
+            {
+                size_t end = code.find('\n', start);
+                const bool last = end == std::string::npos;
+                if (last)
+                    end = code.size();
+                std::string_view line(code.data() + start, end - start);
+                const size_t first = line.find_first_not_of(" \t");
+                const bool engineInclude = first != std::string_view::npos && line.substr(first).starts_with("#include") &&
+                                           (line.find("CustomLit.slang") != std::string_view::npos || line.find("shaderIO.h") != std::string_view::npos);
+                if (!engineInclude)
+                    result.append(line);
+                if (last)
+                    break;
+                result.push_back('\n');
+                start = end + 1;
+            }
+            return result;
         }
 
         // A Material Shader's path inside a #line directive (quotes and backslashes would end or escape the string).
@@ -119,13 +149,16 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
             present[slot] = true;
             text += "namespace CustomLit" + std::to_string(slot) + "\n{\n";
             text += "#line 1 \"" + LinePath(source->Path) + "\"\n";
-            text += source->Code;
-            if (!source->Code.empty() && source->Code.back() != '\n')
+            const std::string code = WithoutEngineIncludes(source->Code);
+            text += code;
+            if (!code.empty() && code.back() != '\n')
                 text += '\n';
             text += "}\n\n";
         }
         text += "#line 1 \"CustomLitShaders.slang (generated)\"\n";
-        auto dispatcher = [&](const char* name, const char* function, const char* inputType, const char* input)
+        // A slot without a case (a pipeline built before that Material Shader existed, while the new build compiles) lights as
+        // Default Lit's diffuse would.
+        auto dispatcher = [&](const char* name, const char* function, const char* inputType, const char* input, const char* fallback)
         {
             text += std::string("float3 ") + name + "(uint slot, CustomLitSurface s, " + inputType + " " + input + ")\n{\n    switch (slot)\n    {\n";
             for (size_t slot = 0; slot < paths.size(); ++slot)
@@ -133,10 +166,10 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
                 if (present[slot])
                     text += "    case " + std::to_string(slot) + "u: return CustomLit" + std::to_string(slot) + "::" + function + "(s, " + input + ");\n";
             }
-            text += "    default: return float3(0.0);\n    }\n}\n\n";
+            text += std::string("    default: return ") + fallback + ";\n    }\n}\n\n";
         };
-        dispatcher("custom_lit_light", "light", "CustomLitLight", "l");
-        dispatcher("custom_lit_ambient", "ambient", "CustomLitAmbient", "a");
+        dispatcher("custom_lit_light", "light", "CustomLitLight", "l", "custom_lit_lambert(s, l)");
+        dispatcher("custom_lit_ambient", "ambient", "CustomLitAmbient", "a", "s.baseColor * a.diffuse * s.occlusion");
         return text;
     }
 
@@ -170,6 +203,24 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
             manifest += path + "\n";
         changed |= WriteIfChanged(folder / "CustomLitShaders.txt", manifest, failed);
         return changed && !failed;
+    }
+
+    bool WriteCodeEditorConfig(const std::filesystem::path& projectDirectory, const std::filesystem::path& engineShaderDirectory)
+    {
+        // Read by the Slang language server (the VS Code / Visual Studio Slang extensions) from a file's folder or any parent: its
+        // search paths find CustomLit.slang and shaderIO.h when the editor checks a Material Shader on its own.
+        std::string folder = std::filesystem::absolute(engineShaderDirectory).lexically_normal().generic_string();
+        std::string escaped;
+        for (const char c : folder)
+        {
+            if (c == '"' || c == '\\')
+                escaped.push_back('\\');
+            escaped.push_back(c);
+        }
+        const std::string text = "{\n    \"slang.additionalSearchPaths\": [ \"" + escaped + "\" ]\n}\n";
+        bool failed = false;
+        WriteIfChanged(projectDirectory / "slangdconfig.json", text, failed);
+        return !failed;
     }
 
     std::vector<std::string> ReadManifest()

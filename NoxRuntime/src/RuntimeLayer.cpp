@@ -104,7 +104,7 @@ namespace Nox
             m_Renderer->ApplyQualitySetting(Project::GetActive()->GetConfig().RenderQuality);
             m_Renderer->ApplyProjectRendererSettings(Project::GetActive()->GetConfig().Renderer);
             // Its Material Shaders (Custom Lit): compiled from the project's files in a development run, the shipped ones in a package.
-            m_Renderer->InitializeCustomLitShaders();
+            m_Renderer->InitializeCustomLitShaders(true); // (built before the first frame: the game starts lit as it should be)
         }
         AudioMixer::LoadProjectMixer(false); // its buses, effects and snapshots
 
