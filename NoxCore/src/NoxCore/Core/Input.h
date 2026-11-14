@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
+
 #include <glm/glm.hpp>
 #include <SDL3/SDL_scancode.h>
 #include <SDL3/SDL_mouse.h>
@@ -46,6 +49,8 @@ namespace Nox
             s_FrameScroll = s_PendingScroll;
             s_PendingMouseDelta = glm::vec2(0.0f);
             s_PendingScroll = 0.0f;
+            s_InjectedFrameMouseDelta = glm::vec2(0.0f);
+            s_InjectedFrameScroll = 0.0f;
         }
         static glm::vec2 GetFrameMouseDelta() { return s_FrameMouseDelta; }
         static float GetFrameScroll() { return s_FrameScroll; }
@@ -55,6 +60,46 @@ namespace Nox
         static void SetGameInputEnabled(bool keys, bool mouse) { s_GameKeysEnabled = keys; s_GameMouseEnabled = mouse; }
         static bool GameKeysEnabled() { return s_GameKeysEnabled; }
         static bool GameMouseEnabled() { return s_GameMouseEnabled; }
+
+        // Automation input (the editor's MCP inject_input; Unreal's automation input): keys and mouse buttons held as if pressed, and
+        // mouse motion / wheel notches, seen by game scripts only -- the editor's own camera, gizmos and panels read the real devices.
+        // Not gated by SetGameInputEnabled: an agent drives the game while the editor window is not the one in front. Whoever injects
+        // releases what it holds (ClearInjected lets go of everything: leaving Play, the MCP server stopping).
+        static void SetInjectedKey(SDL_Scancode key, bool down)
+        {
+            if (key > SDL_SCANCODE_UNKNOWN && key < SDL_SCANCODE_COUNT)
+                s_InjectedKeys[key] = down;
+        }
+        static void SetInjectedMouseButton(int button, bool down) // 1 left, 2 middle, 3 right (SDL's numbering, C# MouseButton)
+        {
+            if (button >= 1 && button <= 5)
+                s_InjectedButtons = down ? (s_InjectedButtons | SDL_BUTTON_MASK(button)) : (s_InjectedButtons & ~SDL_BUTTON_MASK(button));
+        }
+        // Motion and wheel count in this frame (inject before the game updates, as the editor does at the start of its frame).
+        static void AddInjectedMouseMotion(float dx, float dy) { s_InjectedFrameMouseDelta += glm::vec2(dx, dy); }
+        static void AddInjectedScroll(float dy) { s_InjectedFrameScroll += dy; }
+        static void ClearInjected()
+        {
+            s_InjectedKeys.fill(false);
+            s_InjectedButtons = 0;
+            s_InjectedFrameMouseDelta = glm::vec2(0.0f);
+            s_InjectedFrameScroll = 0.0f;
+        }
+
+        // What game scripts read (the C# Input API): the real devices while the game has them (SetGameInputEnabled), plus the
+        // injected input.
+        static bool IsGameKeyDown(SDL_Scancode key)
+        {
+            const bool injected = key > SDL_SCANCODE_UNKNOWN && key < SDL_SCANCODE_COUNT && s_InjectedKeys[key];
+            return injected || (s_GameKeysEnabled && IsKeyPressed(key));
+        }
+        static bool IsGameMouseButtonDown(int button)
+        {
+            const bool injected = button >= 1 && button <= 5 && (s_InjectedButtons & SDL_BUTTON_MASK(button)) != 0;
+            return injected || (s_GameMouseEnabled && IsMouseButtonPressed(static_cast<SDL_MouseButtonFlags>(button)));
+        }
+        static glm::vec2 GetGameMouseDelta() { return (s_GameMouseEnabled ? s_FrameMouseDelta : glm::vec2(0.0f)) + s_InjectedFrameMouseDelta; }
+        static float GetGameScroll() { return (s_GameMouseEnabled ? s_FrameScroll : 0.0f) + s_InjectedFrameScroll; }
     private:
         static inline bool s_GameKeysEnabled = true;
         static inline bool s_GameMouseEnabled = true;
@@ -63,5 +108,9 @@ namespace Nox
         static inline glm::vec2 s_FrameMouseDelta{ 0.0f };
         static inline float s_PendingScroll = 0.0f;
         static inline float s_FrameScroll = 0.0f;
+        static inline std::array<bool, SDL_SCANCODE_COUNT> s_InjectedKeys{};
+        static inline uint32_t s_InjectedButtons = 0;
+        static inline glm::vec2 s_InjectedFrameMouseDelta{ 0.0f };
+        static inline float s_InjectedFrameScroll = 0.0f;
     };
 }

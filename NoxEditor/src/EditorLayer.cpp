@@ -374,6 +374,106 @@ namespace Nox
                 return serializer.SerializeToText();
             };
             context.RestoreScene = [this](const std::string& text) { RestoreHistoryState(text); };
+            // MCP3, play and verify: what the Play / Simulate / Stop / Pause buttons do.
+            context.Play = [this](const Mcp::PlayOptions& options, std::string& error)
+            {
+                if (m_PrefabMode.Active)
+                {
+                    error = "the editor is in Prefab Mode: leave it first";
+                    return false;
+                }
+                if (m_SceneState == SceneState::Play)
+                {
+                    error = "already in Play";
+                    return false;
+                }
+                // The call's choices for this Play only: the user's Play settings stay as they were.
+                const PlayNetSettings userSettings = m_PlayNet;
+                m_PlayNet.Mode = options.NetMode == "listen_server" ? PlayNetMode::ListenServer
+                               : options.NetMode == "client"        ? PlayNetMode::Client
+                                                                    : PlayNetMode::Standalone;
+                m_PlayNet.Players = std::clamp(options.Players, 1, 8);
+                m_PlayNet.Emulation = options.Emulation == "bad" ? 2 : options.Emulation == "average" ? 1 : 0;
+                m_PlayNet.DebugTrace = options.DebugLog;
+                if (m_PlayNet.Mode != PlayNetMode::Standalone)
+                {
+                    if (m_EditorScenePath.empty())
+                    {
+                        m_PlayNet = userSettings;
+                        error = "multiplayer Play starts the other players on the saved scene, and this scene was never saved: the user names "
+                                "it once (File > Save Scene As)";
+                        return false;
+                    }
+                    m_PlayNet.SaveWithoutAsking = true; // (asking for multiplayer Play is asking for the save it needs; no dialog)
+                }
+                OnScenePlay();
+                m_PlayNet = userSettings;
+                if (m_SceneState != SceneState::Play)
+                {
+                    error = "Play did not start (read_log tells why)";
+                    return false;
+                }
+                return true;
+            };
+            context.Simulate = [this](std::string& error)
+            {
+                if (m_PrefabMode.Active)
+                {
+                    error = "the editor is in Prefab Mode: leave it first";
+                    return false;
+                }
+                if (m_SceneState == SceneState::Simulate)
+                {
+                    error = "already simulating";
+                    return false;
+                }
+                OnSceneSimulate();
+                return true;
+            };
+            context.Stop = [this](std::string& error)
+            {
+                if (m_SceneState == SceneState::Edit)
+                {
+                    error = "not in Play or Simulate";
+                    return false;
+                }
+                OnSceneStop();
+                return true;
+            };
+            context.PlayRunning = [this]() { return m_SceneState == SceneState::Play && !m_PlayWaitingForServer; };
+            context.Pause = [this](bool paused, int stepFrames, std::string& error)
+            {
+                if (m_SceneState == SceneState::Edit || !m_ActiveScene)
+                {
+                    error = "not in Play or Simulate";
+                    return false;
+                }
+                m_ActiveScene->SetPaused(paused);
+                if (paused && stepFrames > 0)
+                    m_ActiveScene->Step(stepFrames);
+                return true;
+            };
+            context.Paused = [this]() { return m_SceneState != SceneState::Edit && m_ActiveScene && m_ActiveScene->IsPaused(); };
+            context.FocusEntity = [this](Entity entity) { FocusOnEntity(entity); };
+            context.GetCamera = [this]()
+            {
+                Mcp::ViewportCamera camera;
+                camera.Position = m_EditorCamera.GetPosition();
+                camera.FocalPoint = m_EditorCamera.GetFocalPoint();
+                camera.Distance = m_EditorCamera.GetDistance();
+                camera.Pitch = m_EditorCamera.GetPitch();
+                camera.Yaw = m_EditorCamera.GetYaw();
+                camera.Forward = m_EditorCamera.GetForwardDirection();
+                camera.Orthographic = m_EditorCamera.IsOrthographic();
+                return camera;
+            };
+            context.SetCamera = [this](const glm::dvec3& focalPoint, double distance, float pitch, float yaw)
+            {
+                SetViewMode(EditorViewMode::Perspective); // (an orthographic view's direction is fixed)
+                m_EditorCamera.SetFocalPoint(focalPoint);
+                m_EditorCamera.SetDistance(static_cast<float>(distance));
+                m_EditorCamera.SetOrientation(pitch, yaw); // (places the camera)
+            };
             m_Mcp = std::make_unique<Mcp::McpEditor>(std::move(context));
         }
 #endif
@@ -6956,6 +7056,7 @@ namespace Nox
         m_SceneState = SceneState::Edit;
         if (Input::IsRelativeMouseMode()) // a script's locked cursor (Input.CursorLocked) is the session's, not the editor's
             Input::SetRelativeMouseMode(false);
+        Input::ClearInjected(); // (automation input -- MCP inject_input -- belongs to the session too)
 
         m_HoveredEntity = Entity(); // points into the play scene that is destroyed here
         m_ActiveScene = m_EditorScene;

@@ -1,7 +1,25 @@
 # MCP for NoxEditor -- plan (2026-11-13, revised the same day after a review)
 
-Status (2026-11-14): **C1 console, MCP0 and MCP1 built and tested by the user; MCP2 built** (editing the scene), waiting for the
-user's test; MCP3-MCP5 open. Backlog items C1 and N7.
+Status (2026-11-14): **C1 console, MCP0, MCP1 and MCP2 built and tested by the user; MCP3 built** (play and verify), waiting for
+the user's test; MCP4-MCP5 open. Backlog items C1 and N7.
+
+MCP3 (2026-11-14): `McpPlayTools` -- play (standalone, listen server or client with N players, network emulation, debug log; the
+call's choices are for that Play only, the user's Play settings stay; multiplayer saves the scene without the dialog, and is refused
+for a never-saved scene; answers once the game runs, a client once its server let it in, up to 40 s; Execute access: it runs the
+project's scripts), simulate, stop, pause (and step N frames), wait_for (seconds; or a log line with given words after a sequence, a
+mode, an entity by name or uuid existing / gone, until all hold or the time-out; met true / false; at most 50 s, under the 60 s call
+time-out), inject_input (keys by the C# KeyCode names, mouse buttons, mouse motion and wheel spread over a duration; answers when it
+lets go; overlapping calls combine), focus_entity, get_viewport_camera, set_viewport_camera (position + look_at, or focal point /
+distance / pitch / yaw). Input injection is `Input`'s automation input: injected keys, buttons, motion and wheel that only game scripts
+read (`Input::IsGameKeyDown` & co., used by the C# Input API), not gated by the viewport's focus -- the editor window need not be in
+front -- and let go when Play stops or the server stops. `McpInputPlayer` holds the timing (frames, shared keys, motion spread over the
+time; tested). Tools that take time answer later through `EditorContext::EveryFrame` polls in `McpEditor::Update`. screenshot
+`save`: the full-size PNG also goes to `<Project>/.nox/screenshots/` (path in the answer). Fixed: a float field the scene file wrote as
+a whole number (a light's Intensity 5) read as "integer" and refused 12.5 -- every number is "number" now; a field that only takes
+whole numbers refuses a fraction when it is written (rolled back). NoxToolsTest: 95 checks (ASan / UBSan). The editor side compiles; it has not run
+in the editor yet.
+
+MCP2 (2026-11-14, tested by the user): batch edits, one undo step, rollback of a failing batch, edits refused in Play.
 
 MCP2 (2026-11-14): `McpEditTools` -- create_entity (name, parent, position, a basic shape mesh), delete_entities, rename_entity,
 duplicate_entity, set_parent (no cycles, keeps the world place), add_component / remove_component / patch_component (`values` or a

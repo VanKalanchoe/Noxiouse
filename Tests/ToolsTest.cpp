@@ -139,6 +139,7 @@ int main()
 #ifdef NOX_TOOLS_TEST_MCP
     TestMcp();
     TestMcpValidation();
+    TestMcpInputPlayer();
 #endif
 #ifdef NOX_TOOLS_TEST_MCP_SERVER
     TestMcpServer();

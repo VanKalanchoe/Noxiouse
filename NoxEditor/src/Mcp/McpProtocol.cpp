@@ -89,6 +89,24 @@ namespace Nox::Mcp
         return *this;
     }
 
+    Schema& Schema::Number(const std::string& name, const std::string& description, bool required, std::optional<double> minimum,
+                           std::optional<double> maximum)
+    {
+        Json property{ { "type", "number" }, { "description", description } };
+        if (minimum)
+            property["minimum"] = *minimum;
+        if (maximum)
+            property["maximum"] = *maximum;
+        Add(name, std::move(property), required);
+        return *this;
+    }
+
+    Schema& Schema::Array(const std::string& name, const std::string& description, const std::string& itemType, bool required)
+    {
+        Add(name, Json{ { "type", "array" }, { "description", description }, { "items", Json{ { "type", itemType } } } }, required);
+        return *this;
+    }
+
     Schema& Schema::Boolean(const std::string& name, const std::string& description, bool required)
     {
         Add(name, Json{ { "type", "boolean" }, { "description", description } }, required);
@@ -127,6 +145,15 @@ namespace Nox::Mcp
                               (type == "array" && value.is_array());
             if (!fits)
                 return std::format("'{}' must be {} {}", it.key(), type == "integer" || type == "object" || type == "array" ? "an" : "a", type);
+            if (value.is_array() && property.contains("items") && property["items"].is_object() && property["items"].contains("type"))
+            {
+                const std::string itemType = property["items"]["type"].get<std::string>();
+                for (const Json& item : value)
+                    if (!((itemType == "string" && item.is_string()) || (itemType == "number" && item.is_number()) ||
+                          (itemType == "integer" && item.is_number_integer()) || (itemType == "boolean" && item.is_boolean()) ||
+                          (itemType == "object" && item.is_object()) || (itemType == "array" && item.is_array())))
+                        return std::format("'{}' must be a list of {}s", it.key(), itemType);
+            }
             if (property.contains("enum") && std::find(property["enum"].begin(), property["enum"].end(), value) == property["enum"].end())
                 return std::format("'{}' must be one of {}", it.key(), property["enum"].dump());
             if (value.is_number())

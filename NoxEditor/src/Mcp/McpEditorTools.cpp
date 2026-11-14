@@ -3,7 +3,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
+#include <ctime>
+#include <filesystem>
 #include <format>
 
 #include <yaml-cpp/yaml.h>
@@ -362,8 +365,11 @@ namespace Nox::Mcp
             tool.Name = "screenshot";
             tool.Title = "Viewport screenshot";
             tool.Description = "A PNG of the main viewport as it was last drawn (in Play: the game's view), scaled to fit 'max_size' pixels. "
-                               "Use it to check what a change looks like.";
-            tool.InputSchema = Schema().Integer("max_size", "The longest side in pixels (default 1024)", false, 64, 2048);
+                               "Use it to check what a change looks like. 'save': also written at full size to the project's "
+                               ".nox/screenshots folder (the answer gives the path) for the user to open.";
+            tool.InputSchema = Schema()
+                                   .Integer("max_size", "The longest side in pixels (default 1024)", false, 64, 2048)
+                                   .Boolean("save", "Also save it as a PNG file in <Project>/.nox/screenshots (default false)");
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 if (!context.CaptureViewport)
@@ -372,12 +378,51 @@ namespace Nox::Mcp
                     return;
                 }
                 const uint32_t maxSize = static_cast<uint32_t>(arguments.value("max_size", 1024));
-                context.CaptureViewport([done, maxSize](std::vector<uint8_t> pixels, uint32_t width, uint32_t height, bool bgra)
+                const bool save = arguments.value("save", false);
+                context.CaptureViewport([done, maxSize, save](std::vector<uint8_t> pixels, uint32_t width, uint32_t height, bool bgra)
                 {
                     if (pixels.size() != static_cast<size_t>(width) * height * 4 || width == 0 || height == 0)
                     {
                         done(ToolResult::Error("the viewport could not be read back (is it visible?)"));
                         return;
+                    }
+                    // The file: full size, RGB, <Project>/.nox/screenshots/screenshot-<date>-<time>.png (.nox is never committed).
+                    std::string savedPath, saveProblem;
+                    if (save)
+                    {
+                        if (!Project::GetActive())
+                            saveProblem = "no project open";
+                        else
+                        {
+                            const std::filesystem::path folder = Project::GetActiveProjectDirectory() / ".nox" / "screenshots";
+                            std::error_code error;
+                            std::filesystem::create_directories(folder, error);
+                            const auto now = std::chrono::system_clock::now();
+                            const std::time_t seconds = std::chrono::system_clock::to_time_t(now);
+                            std::tm local{};
+#ifdef _WIN32
+                            localtime_s(&local, &seconds);
+#else
+                            localtime_r(&seconds, &local);
+#endif
+                            const int milliseconds = static_cast<int>(
+                                std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000);
+                            const std::filesystem::path path = folder / std::format("screenshot-{:04}{:02}{:02}-{:02}{:02}{:02}-{:03}.png",
+                                                                                    local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
+                                                                                    local.tm_hour, local.tm_min, local.tm_sec, milliseconds);
+                            std::vector<uint8_t> rgb(static_cast<size_t>(width) * height * 3);
+                            for (size_t texel = 0; texel < static_cast<size_t>(width) * height; ++texel)
+                            {
+                                rgb[texel * 3 + 0] = pixels[texel * 4 + (bgra ? 2 : 0)];
+                                rgb[texel * 3 + 1] = pixels[texel * 4 + 1];
+                                rgb[texel * 3 + 2] = pixels[texel * 4 + (bgra ? 0 : 2)];
+                            }
+                            if (stbi_write_png(path.string().c_str(), static_cast<int>(width), static_cast<int>(height), 3, rgb.data(),
+                                               static_cast<int>(width * 3)))
+                                savedPath = path.generic_string();
+                            else
+                                saveProblem = std::format("{} could not be written", path.generic_string());
+                        }
                     }
                     // Scaled down by averaging the texels each output texel covers; RGB, opaque.
                     const float scale = std::min(1.0f, static_cast<float>(maxSize) / static_cast<float>(std::max(width, height)));
@@ -416,7 +461,12 @@ namespace Nox::Mcp
                         done(ToolResult::Error("the screenshot could not be encoded"));
                         return;
                     }
-                    ToolResult result = ToolResult::Text(std::format("Viewport {}x{} (shown at {}x{})", width, height, outWidth, outHeight));
+                    std::string text = std::format("Viewport {}x{} (shown at {}x{})", width, height, outWidth, outHeight);
+                    if (!savedPath.empty())
+                        text += std::format("; saved to {}", savedPath);
+                    else if (!saveProblem.empty())
+                        text += std::format("; not saved: {}", saveProblem);
+                    ToolResult result = ToolResult::Text(text);
                     result.AddImage(Base64(png.data(), png.size()), "image/png");
                     done(std::move(result));
                 });

@@ -63,7 +63,11 @@ namespace Nox::Mcp
         Schema& String(const std::string& name, const std::string& description, bool required = false);
         Schema& Integer(const std::string& name, const std::string& description, bool required = false, std::optional<int64_t> minimum = {},
                         std::optional<int64_t> maximum = {});
+        Schema& Number(const std::string& name, const std::string& description, bool required = false, std::optional<double> minimum = {},
+                       std::optional<double> maximum = {});
         Schema& Boolean(const std::string& name, const std::string& description, bool required = false);
+        // A list of `itemType` ("string", "number", "integer"); the validator checks the list, the handler its items.
+        Schema& Array(const std::string& name, const std::string& description, const std::string& itemType, bool required = false);
         Schema& Enum(const std::string& name, const std::string& description, const std::vector<std::string>& values, bool required = false);
         Json Build() const { return m_Schema; }
         operator Json() const { return m_Schema; }

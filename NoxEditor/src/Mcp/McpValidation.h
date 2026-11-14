@@ -14,7 +14,8 @@ namespace Nox::Mcp
     bool IsIdText(const Json& value);
 
     // The first way `value` does not fit `example` ("" when it fits): unknown fields (with the valid ones listed), a different kind,
-    // a fraction for a whole number, a vector of another length, an id that is not a digit string.
+    // a vector of another length, an id that is not a digit string. (Whole numbers and fractions are both "number": the file writes 5.0
+    // as 5; a field that only takes whole numbers refuses a fraction when it is written.)
     std::string CheckAgainstExample(const Json& example, const Json& value, const std::string& path = {});
 
     // Applies JSON-Patch operations (RFC 6902: add, remove, replace, test; paths like "/Translation" or "/Color/0") to `current`
@@ -28,7 +29,7 @@ namespace Nox::Mcp
     // `base` with `overlay`'s fields on top, recursively for objects (a component's defaults under its current values).
     Json Merge(const Json& base, const Json& overlay);
 
-    // The JSON kind of a field, for schemas and messages: "number", "integer", "bool", "string", "id", "vector3", "list", "object".
+    // The JSON kind of a field, for schemas and messages: "number", "bool", "string", "id", "vector3", "list", "object".
     std::string KindOf(const Json& value);
     // A component's schema from its example: { field: { kind, default } } (objects nested).
     Json SchemaFromExample(const Json& example);

@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -39,6 +40,7 @@ namespace Nox::Mcp
         std::filesystem::path Folder() const; // <Project>/.nox
         std::string Url() const;
         ConsoleAccess Granted() const;
+        void StopServer(); // (and what its calls were doing: polls dropped, injected input let go)
 
         EditorContext m_Context;
         McpServer m_Server;
@@ -46,6 +48,7 @@ namespace Nox::Mcp
         TConsoleVariable<int32_t>* m_Port = nullptr;
         TConsoleVariable<int32_t>* m_Access = nullptr;
         std::vector<Console::Registration> m_Commands;
+        std::vector<std::function<bool()>> m_Polls; // tools answering later (EditorContext::EveryFrame)
         std::string m_Token;
         std::string m_Problem;       // why it is not running when enabled (shown in the menu)
         uint16_t m_RunningPort = 0;

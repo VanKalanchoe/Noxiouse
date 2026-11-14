@@ -35,10 +35,8 @@ namespace Nox::Mcp
             return "id";
         if (value.is_boolean())
             return "bool";
-        if (value.is_number_integer() || value.is_number_unsigned())
-            return "integer";
         if (value.is_number())
-            return "number";
+            return "number"; // (whole or not: the file does not tell -- see CheckAgainstExample)
         if (value.is_string())
             return "string";
         if (IsNumberVector(value))
@@ -93,14 +91,15 @@ namespace Nox::Mcp
             return value.is_boolean() ? std::string() : std::format("{} must be true or false", Where(path));
         if (example.is_number_integer() || example.is_number_unsigned())
         {
-            if (value.is_number_integer() || value.is_number_unsigned())
+            // The scene file writes 5.0 as "5": a whole number there does not say whether the field takes fractions (a light's
+            // intensity does, a sample count does not). Any number fits here; a field that only takes whole numbers refuses a
+            // fraction when the serializer reads it, and the write is rolled back with that reason.
+            if (value.is_number())
                 return {};
             // An unset reference reads as 0 (a plain number in the file): it takes an id string (a mesh set where there was none).
             if (example.get<int64_t>() == 0 && IsIdText(value))
                 return {};
-            if (value.is_number_float() && std::floor(value.get<double>()) == value.get<double>())
-                return {};
-            return value.is_number() ? std::format("{} must be a whole number", Where(path)) : std::format("{} must be a number", Where(path));
+            return std::format("{} must be a number", Where(path));
         }
         if (example.is_number())
             return value.is_number() ? std::string() : std::format("{} must be a number", Where(path));

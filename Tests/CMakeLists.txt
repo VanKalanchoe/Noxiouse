@@ -17,7 +17,7 @@ add_dependencies(NoxToolsTest NoxEditor)
 # (with the editor's MCP protocol layer when it is built: NOX_WITH_MCP)
 if(NOX_WITH_MCP)
     target_sources(NoxToolsTest PRIVATE "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/McpProtocol.cpp" "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/McpServer.cpp"
-                                        "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/McpValidation.cpp")
+                                        "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/McpValidation.cpp" "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/McpInputPlayer.cpp")
     target_include_directories(NoxToolsTest PRIVATE "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp" "${CMAKE_SOURCE_DIR}/Tests"
                                "${CMAKE_SOURCE_DIR}/NoxCore/vendors/cpp-httplib")
     target_compile_definitions(NoxToolsTest PRIVATE NOX_TOOLS_TEST_MCP=1 NOX_TOOLS_TEST_MCP_SERVER=1)

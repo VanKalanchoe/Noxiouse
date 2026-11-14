@@ -70,23 +70,23 @@ namespace Nox
 
         Coral::Bool32 IsKeyDown(int32_t keycode)
         {
-            return Input::GameKeysEnabled() && Input::IsKeyPressed(static_cast<SDL_Scancode>(keycode));
+            return Input::IsGameKeyDown(static_cast<SDL_Scancode>(keycode)); // (the keyboard while the game has it, and injected keys)
         }
 
         Coral::Bool32 IsMouseButtonDown(int32_t button)
         {
             // 1 = left, 2 = middle, 3 = right
-            return Input::GameMouseEnabled() && Input::IsMouseButtonPressed(static_cast<SDL_MouseButtonFlags>(button));
+            return Input::IsGameMouseButtonDown(button);
         }
 
         void InputGetMouseDelta(glm::vec2* outDelta)
         {
-            *outDelta = Input::GameMouseEnabled() ? Input::GetFrameMouseDelta() : glm::vec2(0.0f);
+            *outDelta = Input::GetGameMouseDelta();
         }
 
         float InputGetScrollDelta()
         {
-            return Input::GameMouseEnabled() ? Input::GetFrameScroll() : 0.0f;
+            return Input::GetGameScroll();
         }
 
         // Locked: SDL's relative mouse mode (hidden, held in the window, motion still reported), as the editor camera flies. Only the
