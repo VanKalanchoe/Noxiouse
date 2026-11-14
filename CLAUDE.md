@@ -10,6 +10,12 @@
   `docs-site/assets/docs-pages.js` with their Sphinx mirrors `docs-site/*.md` + `docs-site/index.md` (toctree, What's New), and new
   source files in `docs-site/assets/file-db.js`. Only what is built and say what is not yet. Check it renders (open the page in
   Chromium; table cells cannot contain `|`, even escaped).
+- **Checklist before every commit of a feature or fix** (the user asked for this in every session -- do not skip it):
+  1. user manual page(s) in `manual-pages.js` updated (steps name the program; troubleshooting for what the user hit);
+  2. technical page in `docs-pages.js` and its `docs-site/*.md` mirror updated together (same text), What's New in `index.md`;
+  3. new / moved source files in `file-db.js`;
+  4. the plan doc (`docs/*_Plan_*.md`) status and `docs/Backlog_2026.md` updated, with fixes after the user's tests noted;
+  5. pages opened in Chromium (no script errors, no raw `|` rows), then commit, push, and a test guide naming every program.
 - Branch: develop on `claude/read-future-md-6zyo6c`, push with `git push -u origin claude/read-future-md-6zyo6c`. No pull requests
   unless asked. No model ids in commits, code or docs.
 
@@ -30,5 +36,11 @@ with them; reference them by handle or path, and say that the files live only on
 
 ## Engine facts worth keeping
 - World unit: centimetres in Facerun (WorldUnits); positions are double precision.
+- MCP plan: `docs/MCP_Plan_2026-11.md` (MCP0-MCP5 built). Shared server code is the `NoxMcp/` library (protocol, HTTP, token,
+  game tools); the editor's tools are `NoxEditor/src/Mcp`; NoxRuntime's server is `NoxRuntime/src/McpRuntime` (`--mcp`,
+  `--mcp-port` 8770, `--mcp-access` write by default -- `quit` needs execute). Editor MCP port 8765; multiplayer Play's games with
+  "Players' MCP servers" use editor port + 1 (dedicated server) / + n (player n). One token per project in `<Project>/.nox/mcp-token`.
+  When the user tests runtime features, remind them to **build NoxRuntime too** (building NoxEditor does not). Offline tests:
+  `Tests/McpTests.inl` in NoxToolsTest (162 checks).
 - Networking plan: `docs/Networking_Plan_2026-11.md` (NET0-NET5 built; NET6 part 1 built: editor multiplayer Play, NetSession, Package Server; Steam backend and NoxServer target open). Offline network tests: `Tests/NetTest.cpp`
   (NoxNetTest; `--offline` skips the socket tests).

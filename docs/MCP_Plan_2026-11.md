@@ -1,6 +1,6 @@
 # MCP for NoxEditor and NoxRuntime -- plan (2026-11-13, revised the same day after a review)
 
-Status (2026-11-14): **C1 console and MCP0-MCP4 built and tested by the user; MCP5 built** (waiting for the user's test).
+Status (2026-11-14): **C1 console and MCP0-MCP5 built and tested by the user** (MCP5: the players' servers, runtime_call, a dedicated server's status, a standalone game with --mcp; quit correctly refused with the default write access).
 Backlog items C1 and N7.
 
 Fixed after the user's first MCP5 test (2026-11-14): the players never answered -- NoxRuntime.exe was an older build (building
