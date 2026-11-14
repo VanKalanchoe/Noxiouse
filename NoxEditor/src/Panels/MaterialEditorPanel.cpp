@@ -416,16 +416,20 @@ namespace Nox
             const ImVec4 warning(0.95f, 0.75f, 0.25f, 1.0f);
             if (renderer && renderer->GetCustomLitStatus().Building)
                 ImGui::TextColored(warning, "Compiling the Material Shaders... (the last build draws meanwhile)");
-            if (data.CustomShader.empty())
-                ImGui::TextColored(warning, "No Material Shader: lit as Default Lit.");
-            else if (renderer && Renderer::FindCustomLitSlot(data.CustomShader) != 0xFFFFFFFFu)
-                ImGui::TextDisabled("Built: lit by %s.", shaderLabel.c_str());
-            else if (renderer && !renderer->GetCustomLitStatus().Message.empty())
+            // The last build's error first: a failed edit keeps the build before it drawing (so the shader still has a slot), and the
+            // error was hidden behind "Built" (the user's test).
+            const bool built = renderer && Renderer::FindCustomLitSlot(data.CustomShader) != 0xFFFFFFFFu;
+            if (!data.CustomShader.empty() && renderer && !renderer->GetCustomLitStatus().Message.empty())
             {
                 ImGui::PushTextWrapPos(0.0f);
-                ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.3f, 1.0f), "%s Lit as Default Lit until it compiles.", renderer->GetCustomLitStatus().Message.c_str());
+                ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.3f, 1.0f), "%s %s", renderer->GetCustomLitStatus().Message.c_str(),
+                                   built ? "The last build that compiled draws until it does." : "Lit as Default Lit until it compiles.");
                 ImGui::PopTextWrapPos();
             }
+            else if (data.CustomShader.empty())
+                ImGui::TextColored(warning, "No Material Shader: lit as Default Lit.");
+            else if (built)
+                ImGui::TextDisabled("Built: lit by %s.", shaderLabel.c_str());
             else
                 ImGui::TextColored(warning, "Not built yet (lit as Default Lit): is the file in Assets?");
 

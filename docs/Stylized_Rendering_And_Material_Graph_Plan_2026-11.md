@@ -1,7 +1,7 @@
 # Stylized rendering and the material graph -- plan (2026-11-14)
 
 Status (2026-11-14): **step 1 (Toon shading model) and step 2 (outlines, Post Process Volume) built and tested by the user; step 3 (Custom Lit
-with hand-written Material Shaders) built, waiting for the user's test**; steps 4-6 planned (the steps were re-cut when step 3 was built:
+with hand-written Material Shaders) built and tested by the user**; steps 4-6 planned (the steps were re-cut when step 3 was built:
 section 8). Backlog item R13.
 
 Goal: Nox is not tied to realistic lighting. Materials can be lit physically (the default), not at all (Unlit), with a built-in toon
@@ -180,6 +180,8 @@ distance (silhouettes against nearby surfaces too).
   Assets path): `#line` names the full path now, and the Material Editor shows the compiler's first error (file:line:col, message).
   VS Code: `slang.additionalSearchPaths` also goes into `<project>/.vscode/settings.json`. Compile time (measured on the user's machine):
   ~1-2 s to the Custom Lit pass, ~4 s more to the forward variant -- the Material Shaders are compiled into the whole lighting shaders.
+- **Fixed after the third test:** the Material Editor hid the error behind "Built" while an earlier build still drew (it checked the slot
+  first); the error now comes first. VS Code: the user setting `slang.additionalSearchPaths` works (tested by the user).
 
 ## 10. Tests
 
