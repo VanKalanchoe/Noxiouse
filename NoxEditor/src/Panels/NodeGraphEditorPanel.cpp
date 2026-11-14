@@ -91,6 +91,26 @@ namespace Nox
         m_SelectedState = 0;
     }
 
+    bool NodeGraphEditorPanel::ApplyExternalEdit(NodeGraph graph)
+    {
+        if (!m_Asset)
+            return false;
+        if (m_EditPending)
+            CommitHistory(); // (an edit of the user's not finished yet stays a step of its own)
+        constexpr size_t kMaxSteps = 200;
+        m_UndoStack.push_back(m_Asset->Graph);
+        if (m_UndoStack.size() > kMaxSteps)
+            m_UndoStack.erase(m_UndoStack.begin());
+        m_RedoStack.clear();
+        RestoreGraph(std::move(graph));
+        Save();
+        if (m_Dirty)
+            return false; // (Save logged why)
+        if (auto assets = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr)
+            assets->NoteSourceWritten(m_GraphHandle); // (the file watcher's event for this write: no reimport)
+        return true;
+    }
+
     void NodeGraphEditorPanel::Undo()
     {
         if (!m_Asset)

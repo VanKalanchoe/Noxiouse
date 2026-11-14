@@ -502,6 +502,21 @@ namespace Nox
                 if (m_ContentBrowserPanel)
                     m_ContentBrowserPanel->Refresh();
             };
+            // MCP4 part 2: graphs through their editor window, packaging as the dialog does.
+            context.ApplyGraph = [this](AssetHandle graph, NodeGraph replacement) -> std::string
+            {
+                OpenNodeGraphEditor(graph);
+                for (auto& panel : m_NodeGraphEditors)
+                    if (panel->GetGraphAsset() == graph)
+                        return panel->ApplyExternalEdit(std::move(replacement)) ? std::string() : std::string("the graph could not be saved (read_log)");
+                return "the graph editor could not be opened";
+            };
+            context.Package = [this](const PackageSettings& settings)
+            {
+                EndTimelinePreviews();
+                SaveScene(); // the scene as edited is what ships (the Package dialog does the same)
+                return PackageGame(settings);
+            };
             m_Mcp = std::make_unique<Mcp::McpEditor>(std::move(context));
         }
 #endif

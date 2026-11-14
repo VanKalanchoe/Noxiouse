@@ -597,3 +597,97 @@ static void TestMcpComponentShapes()
           "the schema shows a map, a list's item fields and an any-value field ({})", schema.dump());
 }
 #endif
+
+#ifdef NOX_TOOLS_TEST_MCP
+// Graphs as JSON (McpGraph): node types of a test domain, pins by name, typed properties, states, every refusal.
+#include "McpGraph.h"
+#include "NoxCore/NodeGraph/NodeType.h"
+
+static void TestMcpGraphs()
+{
+    using namespace Nox;
+    using namespace Nox::Mcp;
+    std::printf("\n== MCP graphs as JSON\n");
+    const std::string domain = "McpTestGraph";
+    auto add = [&](NodeTypeDesc desc) { desc.Domain = domain; NodeTypeRegistry::Register(std::move(desc)); };
+    { NodeTypeDesc d; d.TypeName = "Output"; d.Category = "Output"; d.Inputs = { { "Pose", "Pose" } }; add(d); }
+    { NodeTypeDesc d; d.TypeName = "Clip"; d.Category = "Sources"; d.Outputs = { { "Pose", "Pose" } };
+      d.DefaultProperties = { { "Clip", uint64_t(0) }, { "Loop", true }, { "Speed", 1.0f } }; add(d); }
+    { NodeTypeDesc d; d.TypeName = "Blend"; d.Category = "Blending"; d.Inputs = { { "PoseA", "Pose" }, { "PoseB", "Pose" }, { "Alpha", "Float" } };
+      d.Outputs = { { "Pose", "Pose" } }; d.DefaultProperties = { { "Alpha", 0.5f } }; add(d); }
+    { NodeTypeDesc d; d.TypeName = "Mix"; d.Category = "Blending"; d.Outputs = { { "Pose", "Pose" } }; d.VariableInputs = { { "In", "Pose" }, { "Gain", "Float" } };
+      d.VariableInputLiterals = { { "Gain", 1.0f } }; d.MinVariableInputs = 2; add(d); }
+    { NodeTypeDesc d; d.TypeName = "Machine"; d.Category = "State Machines"; d.Outputs = { { "Pose", "Pose" } }; d.OwnsSubGraphs = true; add(d); }
+
+    const Json source = Json::parse(R"({
+        "parameters": [ { "name": "Speed", "type": "Float", "default": 0.0 }, { "name": "Jump", "type": "Trigger" } ],
+        "outputNode": 1,
+        "nodes": [ { "id": 1, "type": "Output", "position": [400, 0] },
+                   { "id": 2, "type": "Clip", "properties": { "Clip": "17644891489966042489", "Loop": false } },
+                   { "id": 3, "type": "Blend" },
+                   { "id": 4, "type": "Mix", "properties": { "InputCount": 3 } },
+                   { "id": 5, "type": "Machine",
+                     "states": [ { "id": 1, "name": "Idle", "graph": { "outputNode": 10, "nodes": [ { "id": 10, "type": "Output" }, { "id": 11, "type": "Clip" } ],
+                                                                         "links": [ { "from": { "node": 11, "pin": "Pose" }, "to": { "node": 10, "pin": "Pose" } } ] } },
+                                 { "id": 2, "name": "Run", "graph": { "outputNode": 20, "nodes": [ { "id": 20, "type": "Output" } ] } } ],
+                     "transitions": [ { "from": 1, "to": 2, "duration": 0.3, "rules": [ { "parameter": "Speed", "compare": "Greater", "value": 1.5 } ] } ] } ],
+        "links": [ { "from": { "node": 2, "pin": "Pose" }, "to": { "node": 3, "pin": "PoseA" } },
+                   { "from": { "node": 3, "pin": "Pose" }, "to": { "node": 1, "pin": "Pose" } },
+                   { "from": { "node": 2, "pin": "Pose" }, "to": { "node": 4, "pin": "In 2" } } ] })");
+    NodeGraph graph;
+    const std::string problem = GraphFromJson(source, domain, graph);
+    CHECK(problem.empty(), "a graph with parameters, typed properties, a variable pin group and a state machine reads ('{}')", problem);
+    if (problem.empty())
+    {
+        const GraphNode& clip = graph.Nodes[1];
+        CHECK(std::get<uint64_t>(clip.Properties.at("Clip")) == 17644891489966042489ull && std::get<bool>(clip.Properties.at("Loop")) == false &&
+              std::get<float>(clip.Properties.at("Speed")) == 1.0f, "properties typed by the node type: an asset id, a bool, a default kept");
+        CHECK(std::get<float>(graph.Nodes[3].Properties.at("Gain 2")) == 1.0f, "a third variable group's literal seeded as the editor does");
+        CHECK(graph.Links[2].ToPin == 4 && graph.Links[0].ToPin == 0, "pins by name: \"In 2\" is input 4 (In 0, Gain 0, In 1, Gain 1, In 2)");
+        CHECK(graph.Parameters.size() == 2 && graph.Parameters[1].IsTrigger && graph.NextNodeId == 6 && graph.OutputNode == 1,
+              "parameters (a trigger), the next node id, the output node");
+        CHECK(graph.Nodes[4].SubGraphs.size() == 2 && graph.Nodes[4].SubGraphs[0].Graph.Links.size() == 1 &&
+              graph.Nodes[4].Transitions[0].Rules[0].Compare == TransitionCompare::Greater && graph.Nodes[4].Transitions[0].Duration == 0.3f,
+              "a state machine: states with their graphs, a transition with its rule");
+        const Json back = GraphToJson(graph);
+        NodeGraph again;
+        CHECK(GraphFromJson(back, domain, again).empty() && GraphToJson(again) == back, "to JSON and back: the same graph");
+        CHECK(back["links"][2]["to"]["pin"] == "In 2" && back["nodes"][1]["properties"]["Clip"] == "17644891489966042489",
+              "JSON names pins and writes ids as digit strings");
+
+        // A node keeps the properties left out (as it was), a new one gets its type's defaults.
+        Json changed = back;
+        changed["nodes"][1]["properties"] = Json::object({ { "Speed", 2.0 } });
+        NodeGraph edited;
+        CHECK(GraphFromJson(changed, domain, edited, &graph).empty() && std::get<bool>(edited.Nodes[1].Properties.at("Loop")) == false &&
+              std::get<float>(edited.Nodes[1].Properties.at("Speed")) == 2.0f, "a property left out keeps its value; the one given changes");
+    }
+
+    auto refused = [&](const char* what, auto change)
+    {
+        Json bad = source;
+        change(bad);
+        NodeGraph out;
+        const std::string reason = GraphFromJson(bad, domain, out);
+        CHECK(!reason.empty(), "refused: {} ('{}')", what, reason);
+    };
+    refused("an unknown node type", [](Json& g) { g["nodes"][2]["type"] = "Blender"; });
+    refused("a pin name the node does not have", [](Json& g) { g["links"][0]["to"]["pin"] = "PoseC"; });
+    refused("a link to a node that is not there", [](Json& g) { g["links"][1]["to"]["node"] = 99; });
+    refused("two links into one input", [](Json& g) { g["links"].push_back(Json::parse(R"({ "from": { "node": 3, "pin": "Pose" }, "to": { "node": 3, "pin": "PoseA" } })")); });
+    refused("a bool property given a number", [](Json& g) { g["nodes"][1]["properties"]["Loop"] = 1; });
+    refused("an asset id as a JSON number", [](Json& g) { g["nodes"][1]["properties"]["Clip"] = 17644891489966042489ull; });
+    refused("two nodes with one id", [](Json& g) { g["nodes"][2]["id"] = 2; });
+    refused("an output node that is not there", [](Json& g) { g["outputNode"] = 42; });
+    refused("a transition to a state that is not there", [](Json& g) { g["nodes"][4]["transitions"][0]["to"] = 9; });
+    refused("a rule reading an unknown parameter", [](Json& g) { g["nodes"][4]["transitions"][0]["rules"][0]["parameter"] = "Velocity"; });
+    refused("an unknown comparison", [](Json& g) { g["nodes"][4]["transitions"][0]["rules"][0]["compare"] = "Bigger"; });
+    refused("states on a node type without states", [](Json& g) { g["nodes"][2]["states"] = Json::array(); });
+    refused("a node id given as text", [](Json& g) { g["links"][0]["from"]["node"] = "two"; });
+    refused("another domain", [](Json& g) { g["domain"] = "AudioGraph"; });
+
+    const Json types = NodeTypesJson(domain);
+    CHECK(types.size() == 5 && types[0]["category"] == "Blending" && types[1]["type"] == "Mix" && types[1].contains("variableInputs") &&
+          types[3]["type"] == "Clip" && types[3]["properties"]["Clip"] == "0", "the domain's node types: sorted by category, pins, defaults");
+}
+#endif

@@ -37,6 +37,9 @@ namespace Nox
         bool IsOpen() const { return m_Open; }
         void SetOpen(bool open) { m_Open = open; }
         AssetHandle GetGraphAsset() const { return m_GraphHandle; }
+        // An edit from outside the window (MCP set_graph): the graph replaced as one undo step of this window (Ctrl+Z here takes it
+        // back), compiled, shown and saved. False when the window has no graph or the file could not be written.
+        bool ApplyExternalEdit(NodeGraph graph);
 
         // True while this window is focused or under the mouse (as of its last render). EditorLayer's global
         // shortcuts and viewport picking stand down then -- otherwise Delete on a selected node also deleted the

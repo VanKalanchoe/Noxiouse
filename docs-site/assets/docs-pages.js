@@ -925,7 +925,7 @@ window.NOX_DOCS_PAGES = [
         markdown: [
             "# Console, Output Log & MCP Server (`NoxCore/Console`, `NoxEditor/src/Mcp`)",
             "",
-            "The engine console is one registry of commands and variables in NoxCore that every front end uses: the editor's Output Log Cmd line, the dedicated server's terminal, `--exec`, and the editor's MCP server, which lets AI assistants read, edit and play the scene, build its scripts and work with its assets. Plan and status: `docs/MCP_Plan_2026-11.md` (C1 console, MCP0-MCP3 and MCP4 part 1 built; MCP4 part 2 and MCP5 open). How to use them: the manual's **The Engine Console** and **AI Assistants (MCP Server)** pages.",
+            "The engine console is one registry of commands and variables in NoxCore that every front end uses: the editor's Output Log Cmd line, the dedicated server's terminal, `--exec`, and the editor's MCP server, which lets AI assistants read, edit and play the scene, build its scripts, work with its assets and graphs, run the tests and package the game. Plan and status: `docs/MCP_Plan_2026-11.md` (C1 console and MCP0-MCP4 built; MCP5 open). How to use them: the manual's **The Engine Console** and **AI Assistants (MCP Server)** pages.",
             "",
             "---",
             "",
@@ -949,6 +949,8 @@ window.NOX_DOCS_PAGES = [
             "| `McpPlayTools.cpp` | play / simulate / stop / pause, `wait_for`, `inject_input`, the editor camera tools. |",
             "| `McpAssetTools.cpp` | MCP4: `build_scripts` / `get_build_status`, `get_material` / `create_material` / `set_material`, `create_prefab`, `import_asset` (`instantiate_prefab` is an edit tool). |",
             "| `McpMaterial.h/.cpp` | A material (`MaterialData`, `.nmat`) as JSON and back from one field table; the texture paths it names. |",
+            "| `McpWorkflowTools.cpp` | MCP4 part 2: `list_graph_node_types`, `get_graph` / `set_graph` (checked, compiled, applied through the graph editor window's history), `run_tests` / `get_test_results` (NoxToolsTest, NoxNetTest), `package_game` / `get_package_result`. |",
+            "| `McpGraph.h/.cpp` | A node graph (`NodeGraph`) as JSON and back: links by pin name, property values typed by the node type's declarations, states and transitions, every reference checked; a domain's node types as JSON. |",
             "| `NoxEditor/src/ScriptDiagnostics.h/.cpp` | The script build's output as data: each error and warning once with file, line, column, code and message (used by the Output Log and `build_scripts`). |",
             "| `McpValidation.h/.cpp` | Component values as JSON: the example (C++ defaults under current values) as schema, checks, JSON Patch, differences, YAML <-> JSON (ids as strings, 17-digit doubles). |",
             "| `McpInputPlayer.h/.cpp` | `inject_input`'s timing: holds per frame, shared keys, motion spread over the time. |",

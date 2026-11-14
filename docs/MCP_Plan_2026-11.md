@@ -1,7 +1,17 @@
 # MCP for NoxEditor -- plan (2026-11-13, revised the same day after a review)
 
-Status (2026-11-14): **C1 console and MCP0-MCP3 built and tested by the user; MCP4 part 1 built** (scripts and assets),
-waiting for the user's test; MCP4 part 2 (graphs as JSON, run_tests, packaging) and MCP5 open. Backlog items C1 and N7.
+Status (2026-11-14): **C1 console and MCP0-MCP3 built and tested by the user; MCP4 built** (part 1 tested by the user, part 2
+waiting for the user's test); MCP5 open. Backlog items C1 and N7.
+
+MCP4 part 2 (2026-11-14): `McpWorkflowTools` -- list_graph_node_types, get_graph / set_graph (`McpGraph`: a NodeGraph as JSON with
+links by pin name, property values typed by the node type's own declarations -- default properties, Float / Int / Bool pins,
+variable-group literals -- states with nested graphs, transitions with named comparisons; every reference checked, then
+GraphCompiler::Compile, whose logged reasons are returned when it refuses; applied through NodeGraphEditorPanel::ApplyExternalEdit:
+one undo step in the graph's editor window, opened when it is not, saved), run_tests / get_test_results (NoxToolsTest, NoxNetTest
+next to the editor, run from their folder with the output in <Project>/.nox/test-logs; checks and FAIL lines parsed; Execute
+access), package_game / get_package_result (the scene saved, PackageGame on the main thread as the dialog does; the output must be
+outside the project; the result kept for a call that outlasts the minute; Execute access). NoxToolsTest: 143 checks (ASan /
+UBSan). The editor side compiles; it has not run in the editor yet.
 
 MCP4 part 1 (2026-11-14): `McpAssetTools` -- build_scripts (asks ScriptBuilder for a build, or waits for the running one, and
 answers when it finished: succeeded, reloaded, the errors and warnings; Execute access: MSBuild runs the project's build; a build

@@ -142,6 +142,7 @@ int main()
     TestMcpInputPlayer();
     TestMcpAssets();
     TestMcpComponentShapes();
+    TestMcpGraphs();
 #endif
 #ifdef NOX_TOOLS_TEST_MCP_SERVER
     TestMcpServer();

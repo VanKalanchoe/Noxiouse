@@ -9,6 +9,8 @@
 #include "McpProtocol.h"
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Scene/Entity.h"
+#include "GamePackager.h"
+#include "NoxCore/NodeGraph/NodeGraph.h"
 #include "ScriptDiagnostics.h"
 
 namespace Nox
@@ -98,6 +100,13 @@ namespace Nox::Mcp
         std::function<void()> RequestScriptBuild;        // as Scripts > Build and Reload
         std::function<void(AssetHandle material)> MaterialChanged; // drawn with its new values from this frame (and its thumbnail)
         std::function<void()> AssetsChanged;              // the Content Browser lists the asset folder again
+
+        // MCP4 part 2: graphs and packaging.
+        // A graph replaced through its editor window (opened when it is not): one undo step there, compiled, saved. "" or why not.
+        std::function<std::string(AssetHandle graph, NodeGraph replacement)> ApplyGraph;
+        // File > Package Game / Package Server: the scene saved first (what ships is the scene as edited), then packaged -- on this
+        // thread, the editor waits (as the dialog does).
+        std::function<PackageReport(const PackageSettings& settings)> Package;
     };
 
     // MCP1, reading the editor: get_editor_status, read_log, get_hierarchy, find_entities, get_entity, get_selection, list_assets,
@@ -113,6 +122,8 @@ namespace Nox::Mcp
     // MCP4, scripts and assets: build_scripts, get_build_status, get_material, create_material, set_material, create_prefab,
     // import_asset (instantiate_prefab is an edit tool: CreateEditTools).
     std::vector<Tool> CreateAssetTools(const EditorContext& context);
+    // MCP4 part 2: list_graph_node_types, get_graph, set_graph, run_tests, get_test_results, package_game, get_package_result.
+    std::vector<Tool> CreateWorkflowTools(const EditorContext& context);
 
     // inject_input's key names: the C# KeyCode names (W, LeftShift, Space, Alpha1, F5 ...) and SDL's ("Left Shift"), case ignored.
     // 0 when unknown.
