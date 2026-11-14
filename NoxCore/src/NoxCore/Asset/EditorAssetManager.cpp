@@ -541,6 +541,25 @@ namespace Nox
         return progress;
     }
 
+    bool EditorAssetManager::IsCookingImport(const std::filesystem::path& sourcePath) const
+    {
+        const std::string wanted = sourcePath.lexically_normal().generic_string();
+        return std::any_of(m_PendingSplitImports.begin(), m_PendingSplitImports.end(), [&](const PendingSplitImport& pending)
+        {
+            return pending.MaterialBase.SourceFilePath.lexically_normal().generic_string() == wanted;
+        });
+    }
+
+    void EditorAssetManager::NoteSourceWritten(AssetHandle handle)
+    {
+        if (m_ReadOnly || !IsAssetHandleValid(handle) || m_MemoryAssets.contains(handle))
+            return;
+        const std::filesystem::path sourcePath = Project::GetActiveAssetDirectory() / GetMetadata(handle).SourceFilePath;
+        std::error_code error;
+        if (std::filesystem::exists(sourcePath, error))
+            m_LastKnownSourceHash[handle] = Utility::calcul_hash_streaming(sourcePath.string()); // (ReimportAsset compares against it)
+    }
+
     void EditorAssetManager::PublishSplitImports()
     {
         bool registryChanged = false;

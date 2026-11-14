@@ -429,6 +429,7 @@ namespace Nox::Mcp
                     return;
                 }
                 asset->GetData() = material;
+                Assets()->NoteSourceWritten(handle); // (the file watcher's event for this write: no reimport)
                 if (context.MaterialChanged)
                     context.MaterialChanged(handle);
                 Json changed, previous;
@@ -612,8 +613,8 @@ namespace Nox::Mcp
                 }
                 relativeSource = relativeSource.lexically_normal();
 
-                std::string note;
-                if (type == AssetType::MeshSource)
+                const bool model = type == AssetType::MeshSource;
+                if (model)
                 {
                     MeshImportSettings settings;
                     settings.ImportScale = static_cast<float>(arguments.value("import_scale", 1.0));
@@ -624,27 +625,39 @@ namespace Nox::Mcp
                         done(ToolResult::Error(std::format("{} could not be imported (read_log tells why)", relativeSource.generic_string())));
                         return;
                     }
-                    note = "separate meshes of a big model finish cooking in the background: list_assets again in a while";
                 }
                 else if (!manager->FindHandleByPath(relativeSource, type))
                     manager->RegisterExistingFile(relativeSource, type);
 
-                Json created = Json::array();
-                for (const auto& [handle, metadata] : manager->GetAssetRegistry())
-                    if (!before.contains(handle))
-                        created.push_back(Json{ { "uuid", IdText(static_cast<uint64_t>(handle)) }, { "type", std::string(AssetTypeToString(metadata.Type)) },
-                                                { "path", metadata.FilePath.generic_string() } });
-                if (created.empty())
-                    if (AssetHandle existing = manager->FindHandleByPath(relativeSource, type))
-                        created.push_back(Json{ { "uuid", IdText(static_cast<uint64_t>(existing)) }, { "type", std::string(AssetTypeToString(type)) },
-                                                { "path", relativeSource.generic_string() }, { "already", true } });
-                if (context.AssetsChanged)
-                    context.AssetsChanged();
-                NOX_CORE_INFO("MCP: imported {} ({} assets)", relativeSource.generic_string(), created.size());
-                Json result{ { "source", relativeSource.generic_string() }, { "assets", created } };
-                if (!note.empty())
-                    result["note"] = note;
-                done(ToolResult::Data(result));
+                // The answer: what the registry gained. A model's separate meshes cook in the background (PublishSplitImports registers
+                // them when that finished): answered then, or after the time-out with what there is so far.
+                const double start = Now();
+                context.EveryFrame([context, done, manager, before, relativeSource, type, model, start]()
+                {
+                    const bool cooking = model && manager->IsCookingImport(relativeSource);
+                    const bool timedOut = Now() - start > 45.0;
+                    if (cooking && !timedOut)
+                        return false;
+                    Json created = Json::array();
+                    for (const auto& [handle, metadata] : manager->GetAssetRegistry())
+                        if (!before.contains(handle))
+                            created.push_back(Json{ { "uuid", IdText(static_cast<uint64_t>(handle)) }, { "type", std::string(AssetTypeToString(metadata.Type)) },
+                                                    { "path", metadata.FilePath.generic_string() } });
+                    if (created.empty())
+                        if (AssetHandle existing = manager->FindHandleByPath(relativeSource, type))
+                            created.push_back(Json{ { "uuid", IdText(static_cast<uint64_t>(existing)) }, { "type", std::string(AssetTypeToString(type)) },
+                                                    { "path", relativeSource.generic_string() }, { "already", true } });
+                    if (context.AssetsChanged)
+                        context.AssetsChanged();
+                    NOX_CORE_INFO("MCP: imported {} ({} assets{})", relativeSource.generic_string(), created.size(), cooking ? ", still cooking" : "");
+                    Json result{ { "source", relativeSource.generic_string() }, { "assets", created } };
+                    if (cooking)
+                        result["note"] = "a big model: its meshes are still cooking in the background -- list_assets again in a while";
+                    else if (model)
+                        result["note"] = "its textures are registered (and cooked) the first time the mesh loads: when it is placed in the scene";
+                    done(ToolResult::Data(result));
+                    return true;
+                });
             };
             tools.push_back(std::move(tool));
         }

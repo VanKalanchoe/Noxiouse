@@ -2967,6 +2967,15 @@ namespace Nox
                     if (imageIndex >= 0 && imageIndex < (int32_t)model.images_count)
                     {
                         std::filesystem::path texPath = ExtractGltfImage(model, model.images[imageIndex], imageIndex, path);
+                        // Stored relative to the asset folder (as the Material Editor stores a texture), so the project can move:
+                        // an absolute path breaks on another machine or in a clone. One outside the asset folder stays absolute.
+                        if (texPath.is_absolute() && Project::GetActive())
+                        {
+                            const std::filesystem::path relative =
+                                texPath.lexically_normal().lexically_relative(Project::GetActiveAssetDirectory().lexically_normal());
+                            if (!relative.empty() && *relative.begin() != "..")
+                                return relative.generic_string();
+                        }
                         return texPath.string();
                     }
                 }

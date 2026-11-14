@@ -25,6 +25,14 @@ now has a sample that sets those on a scratch entity, so the serializer itself s
 fields whose kind varies take any value (null). Also: a one-number list is a list, not a vector (a list of material ids), and a
 number past 2^53 in a numeric field is refused as an id written as a number. NoxToolsTest: 119 checks.
 
+Fixed after the user's second MCP4 test (2026-11-14): import_asset answered before a model's background cook finished (no assets
+listed) -- it now waits for `EditorAssetManager::IsCookingImport` (up to 45 s). The model importer stored texture paths absolute
+(also from the Content Browser), so a moved or cloned project lost its textures: they are relative to the asset folder now, as the
+Material Editor stores them (every reader -- renderer, ImportMeshTextures, the packager's dependency walk -- takes both). The
+editor's own writes of a material (Material Editor on every change, set_material) were each re-imported by the file watcher, which
+replaced the asset in memory with a copy read back: `EditorAssetManager::NoteSourceWritten` records the written file's hash, so
+the watcher's event is no change.
+
 MCP3 (2026-11-14): `McpPlayTools` -- play (standalone, listen server or client with N players, network emulation, debug log; the
 call's choices are for that Play only, the user's Play settings stay; multiplayer saves the scene without the dialog, and is refused
 for a never-saved scene; answers once the game runs, a client once its server let it in, up to 40 s; Execute access: it runs the

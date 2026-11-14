@@ -303,11 +303,10 @@ namespace Nox
             // Every instance using this material shades with the edit from this frame; its Content Browser thumbnail is drawn again.
             Renderer::MarkMaterialChanged(handle);
             AssetPreviewRenderer::Get().Invalidate(handle);
-            const auto& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
-            MaterialSerializer::Serialize(
-                Project::GetActiveAssetDirectory() / metadata.FilePath,
-                data
-            );
+            auto assets = Project::GetActive()->GetEditorAssetManager();
+            const auto& metadata = assets->GetMetadata(handle);
+            if (MaterialSerializer::Serialize(Project::GetActiveAssetDirectory() / metadata.FilePath, data))
+                assets->NoteSourceWritten(handle); // (the watcher's event for this write is then no reimport)
         }
     }
 }

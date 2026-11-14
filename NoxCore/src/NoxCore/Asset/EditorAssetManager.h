@@ -57,6 +57,13 @@ namespace Nox
         void ImportAsset(const std::filesystem::path& sourcePath, const std::filesystem::path& destPath, AssetType targetType = AssetType::None, const MeshImportSettings& meshSettings = {});
         // Registers an asset file that already exists (relative to the asset directory) and returns its handle.
         AssetHandle RegisterExistingFile(const std::filesystem::path& relativePath, AssetType type);
+        // A background cook of this source file (relative to the asset directory) is still running: its per-mesh assets are not
+        // registered yet (PublishSplitImports registers them once it finished).
+        bool IsCookingImport(const std::filesystem::path& sourcePath) const;
+        // The editor itself just wrote this asset's source file (the Material Editor saving a .nmat on every change, an MCP
+        // set_material): the file watcher's event for it is then no change -- the asset in memory already holds what was written,
+        // and reimporting it would only replace it with a copy read back from the file.
+        void NoteSourceWritten(AssetHandle handle);
         // Registers a file a tool wrote in its final, cooked form (an .nsmesh, an .ntex: no source, it is its own cook), or returns
         // the handle already registered at that path. Without writing the registry: the caller does once after a batch.
         AssetHandle RegisterGeneratedFile(const std::filesystem::path& relativePath, AssetType type);

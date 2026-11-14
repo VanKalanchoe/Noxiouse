@@ -2086,7 +2086,7 @@ window.NOX_MANUAL_PAGES = [
             "| `set_material` | Changes a material (values or a JSON Patch), checked first; saved and drawn at once on every entity that uses it. Like the Material Editor it is not an undo step: the answer's `previous` holds the old values. |",
             "| `create_prefab` | Saves entities as a `.nprefab` (the first is the pivot), as dragging them into the Content Browser does. |",
             "| `instantiate_prefab` | Places a prefab instance (one undo step; also inside `apply_edits`). |",
-            "| `import_asset` | Brings a file from this computer into the asset folder: a glTF model (.gltf with its buffers and images, or .glb) is copied and cooked; textures, sounds and fonts are copied and registered. |",
+            "| `import_asset` | Brings a file from this computer into the asset folder: a glTF model (.gltf with its buffers and images, or .glb) is copied and cooked -- the answer waits for the cook and lists the meshes, materials and clips it made (a model's textures are registered the first time its mesh is placed); textures, sounds and fonts are copied and registered. |",
             "",
             "### Example requests",
             "",
