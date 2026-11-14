@@ -18,6 +18,10 @@ namespace Nox
 {
     class Renderer;
     class Scene;
+    namespace Mcp
+    {
+        class McpRuntime;
+    }
     namespace Net
     {
         class NetServer;
@@ -103,5 +107,13 @@ namespace Nox
         std::unique_ptr<Net::NetSession> m_Session;
         std::string m_ProjectName;
         float m_TitleTimer = 0.0f;
+        float m_FramesPerSecond = 0.0f; // smoothed (MCP's get_runtime_status)
+
+        // The MCP server (--mcp; McpRuntime.h): null without it; not in builds without MCP (NOX_DIST, NOX_WITH_MCP off: CMake
+        // defines NOX_RUNTIME_MCP 0, and --mcp only logs that it is not there).
+        void StartMcp();
+#if NOX_RUNTIME_MCP
+        std::unique_ptr<Mcp::McpRuntime> m_Mcp;
+#endif
     };
 }

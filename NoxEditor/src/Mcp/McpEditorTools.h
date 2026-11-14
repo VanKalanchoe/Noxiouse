@@ -1,12 +1,13 @@
 #pragma once
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include <glm/glm.hpp>
 
-#include "McpProtocol.h"
+#include "McpHost.h"
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Scene/Entity.h"
 #include "GamePackager.h"
@@ -27,6 +28,16 @@ namespace Nox::Mcp
         int Players = 2;                    // multiplayer: the editor's player included
         std::string Emulation = "off";      // "off", "average", "bad"
         bool DebugLog = false;              // the network debug trace (--net-debug)
+        std::optional<bool> PlayerMcp;      // MCP5: the other players get MCP servers (unset: the Play settings' choice)
+    };
+
+    // MCP5: a game multiplayer Play started with its own MCP server (NoxRuntime --mcp), reached with runtime_call.
+    struct RuntimeEndpoint
+    {
+        std::string Name;    // "dedicated server", "player 2" ...
+        int Player = 0;      // 2..8 (0: the dedicated server)
+        uint16_t Port = 0;   // its MCP server on 127.0.0.1
+        bool Running = false; // its process is still running
     };
 
     // MCP4: the script build as the tools see it (ScriptBuilder).
@@ -57,18 +68,13 @@ namespace Nox::Mcp
     };
 
     // What the tools may ask of the editor -- the only way they reach it (EditorLayer fills these in). All are called on the main thread.
-    struct EditorContext
+    // The shared part (HostContext: the scene, mode, view capture, access, pause, polls) is what the game tools of both hosts use.
+    struct EditorContext : HostContext
     {
-        std::function<Ref<Scene>()> ActiveScene;      // the scene the editor shows now (the running copy in Play / Simulate)
-        std::function<std::string()> Mode;            // "edit", "play", "simulate"
         std::function<std::string()> ScenePath;       // the open scene's file under the asset directory (empty: never saved)
         std::function<std::vector<Entity>()> Selection;
         std::function<std::string()> NetStatus;       // the multiplayer session's line, empty when none
         std::function<float()> FramesPerSecond;
-        // The main viewport's last image, read back from the GPU a frame or two later: `done` gets RGBA8 / BGRA8 texels (bgra true for
-        // the latter), empty when there was none.
-        std::function<void(std::function<void(std::vector<uint8_t> pixels, uint32_t width, uint32_t height, bool bgra)> done)> CaptureViewport;
-        std::function<ConsoleAccess()> GrantedAccess; // what MCP clients are granted (run_command passes it to the console)
 
         // MCP2, editing (Edit mode only):
         std::function<void(const std::string& step)> RecordEdit;       // the scene changed: one undo step with this name
@@ -85,15 +91,9 @@ namespace Nox::Mcp
         std::function<bool(const PlayOptions& options, std::string& error)> Play; // from Edit (multiplayer saves the scene first)
         std::function<bool(std::string& error)> Simulate;
         std::function<bool(std::string& error)> Stop;      // back to Edit
-        std::function<bool()> PlayRunning;                 // Play's scene runs (a client waiting for its server: not yet)
-        std::function<bool(bool paused, int stepFrames, std::string& error)> Pause; // Play / Simulate
-        std::function<bool()> Paused;
         std::function<void(Entity entity)> FocusEntity;    // the editor camera frames it (the F key)
         std::function<ViewportCamera()> GetCamera;
         std::function<void(const glm::dvec3& focalPoint, double distance, float pitch, float yaw)> SetCamera;
-        // Runs `poll` at the start of every frame (main thread) until it returns true -- tools that answer later (wait_for,
-        // inject_input). McpEditor fills it in; polls still going when the server stops are dropped (their calls were answered).
-        std::function<void(std::function<bool()> poll)> EveryFrame;
 
         // MCP4, scripts and assets:
         std::function<ScriptBuildInfo()> ScriptBuild;
@@ -107,29 +107,24 @@ namespace Nox::Mcp
         // File > Package Game / Package Server: the scene saved first (what ships is the scene as edited), then packaged -- on this
         // thread, the editor waits (as the dialog does).
         std::function<PackageReport(const PackageSettings& settings)> Package;
+
+        // MCP5: the games this Play started with MCP servers (empty: none -- Standalone, or the Play setting is off).
+        std::function<std::vector<RuntimeEndpoint>()> Runtimes;
     };
 
-    // MCP1, reading the editor: get_editor_status, read_log, get_hierarchy, find_entities, get_entity, get_selection, list_assets,
-    // screenshot; and the console: list_commands, run_command.
+    // MCP1, reading the editor: get_editor_status, get_selection, list_assets (the scene, log, view and console tools of both hosts:
+    // CreateGameTools, McpHost.h).
     std::vector<Tool> CreateEditorTools(const EditorContext& context);
     // MCP2, editing the scene (validated, each change an undo step): create_entity, delete_entities, rename_entity, duplicate_entity,
     // set_parent, add_component, remove_component, patch_component, get_component_schema, apply_edits (atomic), select, save_scene,
     // undo, redo.
     std::vector<Tool> CreateEditTools(const EditorContext& context);
-    // MCP3, play and verify: play, simulate, stop, pause, wait_for, inject_input, focus_entity, get_viewport_camera,
-    // set_viewport_camera.
+    // MCP3, play and verify: play, simulate, stop, focus_entity, get_viewport_camera, set_viewport_camera (pause, wait_for and
+    // inject_input: CreateGameTools); MCP5: runtime_call (a tool of a game multiplayer Play started with --mcp).
     std::vector<Tool> CreatePlayTools(const EditorContext& context);
     // MCP4, scripts and assets: build_scripts, get_build_status, get_material, create_material, set_material, create_prefab,
     // import_asset (instantiate_prefab is an edit tool: CreateEditTools).
     std::vector<Tool> CreateAssetTools(const EditorContext& context);
     // MCP4 part 2: list_graph_node_types, get_graph, set_graph, run_tests, get_test_results, package_game, get_package_result.
     std::vector<Tool> CreateWorkflowTools(const EditorContext& context);
-
-    // inject_input's key names: the C# KeyCode names (W, LeftShift, Space, Alpha1, F5 ...) and SDL's ("Left Shift"), case ignored.
-    // 0 when unknown.
-    int KeyScancode(const std::string& name);
-    std::vector<std::string> KeyNames(); // the KeyCode names
-
-    // YAML (the scene serializer's) to JSON: maps and sequences as they are, scalars as numbers / booleans when they read as one.
-    Json YamlTextToJson(const std::string& yaml);
 }

@@ -32,6 +32,10 @@
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
 
+#if NOX_RUNTIME_MCP
+#include "McpRuntime.h"
+#endif
+
 namespace Nox
 {
     namespace
@@ -166,6 +170,75 @@ namespace Nox
         // --exec="cmd; cmd": console commands once the game is up (Unreal's -ExecCmds), e.g. --exec="net.DebugTrace 1".
         if (const char* exec = Application::Get().GetSpecification().CommandLineArgs.Value("--exec"))
             Console::Get().Execute(exec);
+        StartMcp();
+    }
+
+    void RuntimeLayer::StartMcp()
+    {
+        const ApplicationCommandLineArgs& args = Application::Get().GetSpecification().CommandLineArgs;
+#if NOX_RUNTIME_MCP
+        // What the shared game tools may ask of the runtime (McpHost.h); the editor's Play passes --mcp to the players it starts.
+        Mcp::HostContext context;
+        context.ActiveScene = [this]() { return m_Scene; };
+        context.Mode = []() { return std::string("play"); };
+        context.PlayRunning = [this]() { return m_Scene != nullptr; };
+        if (m_Renderer)
+            context.CaptureViewport = [this](std::function<void(std::vector<uint8_t>, uint32_t, uint32_t, bool)> done)
+            {
+                // The game's view: the scene image the window shows (before the 2D overlay and the stats text).
+                Ref<Texture2D> image = m_Renderer ? m_Renderer->GetSceneResourceRef() : nullptr;
+                if (!image)
+                {
+                    done({}, 0, 0, false);
+                    return;
+                }
+                const bool bgra = m_Renderer->IsSurfaceFormatBGRA();
+                m_Renderer->ReadbackTexture(std::move(image), [done, bgra](std::vector<uint8_t> pixels, uint32_t width, uint32_t height)
+                {
+                    done(std::move(pixels), width, height, bgra);
+                });
+            };
+        context.Pause = [this](bool paused, int stepFrames, std::string& error)
+        {
+            // Only a game on its own: a server's clients and a client's server keep running (pausing one side would only break the
+            // session).
+            if (m_NetRole != NetRole::Standalone)
+            {
+                error = "a networked game cannot be paused (its server or clients keep running); pause works in a standalone game";
+                return false;
+            }
+            if (!m_Scene)
+            {
+                error = "no scene is running";
+                return false;
+            }
+            m_Scene->SetPaused(paused);
+            if (paused && stepFrames > 0)
+                m_Scene->Step(stepFrames);
+            return true;
+        };
+        context.Paused = [this]() { return m_Scene && m_Scene->IsPaused(); };
+        auto status = [this]()
+        {
+            Mcp::McpRuntime::Status status;
+            status.Role = m_NetRole == NetRole::DedicatedServer ? "dedicated server"
+                        : m_NetRole == NetRole::ListenServer   ? "listen server"
+                        : m_NetRole == NetRole::Client         ? "client"
+                                                               : "standalone";
+            status.Session = m_Session ? m_Session->Describe() : std::string();
+            auto assets = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr;
+            if (assets && m_SceneHandle != 0 && assets->IsAssetHandleValid(m_SceneHandle))
+                status.ScenePath = assets->GetMetadata(m_SceneHandle).FilePath.generic_string();
+            if (const char* name = Application::Get().GetSpecification().CommandLineArgs.Value("--name"))
+                status.PlayerName = name;
+            status.FramesPerSecond = m_FramesPerSecond;
+            return status;
+        };
+        m_Mcp = Mcp::McpRuntime::FromCommandLine(args, std::move(context), std::move(status), []() { Quit(); });
+#else
+        if (args.HasSwitch("--mcp"))
+            NOX_CORE_WARN("NoxRuntime: --mcp -- this build has no MCP server (shipping builds and NOX_WITH_MCP=OFF leave it out)");
+#endif
     }
 
     void RuntimeLayer::RegisterConsoleCommands()
@@ -210,6 +283,11 @@ namespace Nox
     {
         NOX_CORE_INFO("RuntimeLayer Shutdown");
 
+#if NOX_RUNTIME_MCP
+        // The MCP server first: its tools refer to the scene and the session.
+        m_Mcp.reset();
+#endif
+
         // The sessions first: the clients hear "server shut down" / the server hears "left", while the game still exists.
         m_Session.reset();
 
@@ -226,6 +304,14 @@ namespace Nox
 
     void RuntimeLayer::OnUpdate(Timestep ts)
     {
+        // The MCP server's calls (--mcp) run first, between frames, like the editor's: what they change is in this frame.
+        if (static_cast<float>(ts) > 0.0f)
+            m_FramesPerSecond = m_FramesPerSecond <= 0.0f ? 1.0f / static_cast<float>(ts)
+                                                          : m_FramesPerSecond + (1.0f / static_cast<float>(ts) - m_FramesPerSecond) * 0.05f;
+#if NOX_RUNTIME_MCP
+        if (m_Mcp)
+            m_Mcp->Update();
+#endif
         // Receive first (Unreal's TickDispatch): joins, leaves and the game's messages land before the simulation; a client that
         // joined switches to the server's scene here.
         UpdateNetworking(static_cast<float>(ts));

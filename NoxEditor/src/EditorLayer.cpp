@@ -29,6 +29,7 @@
 #include "NoxCore/Console/Console.h"
 #if NOX_WITH_MCP
 #include "Mcp/McpEditor.h"
+#include "McpProjectFiles.h"
 #endif
 #include "NoxCore/Asset/MeshSerializer.h"
 #include "NoxCore/Asset/SceneImporter.h"
@@ -395,6 +396,8 @@ namespace Nox
                 m_PlayNet.Players = std::clamp(options.Players, 1, 8);
                 m_PlayNet.Emulation = options.Emulation == "bad" ? 2 : options.Emulation == "average" ? 1 : 0;
                 m_PlayNet.DebugTrace = options.DebugLog;
+                if (options.PlayerMcp)
+                    m_PlayNet.PlayerMcp = *options.PlayerMcp;
                 if (m_PlayNet.Mode != PlayNetMode::Standalone)
                 {
                     if (m_EditorScenePath.empty())
@@ -516,6 +519,20 @@ namespace Nox
                 EndTimelinePreviews();
                 SaveScene(); // the scene as edited is what ships (the Package dialog does the same)
                 return PackageGame(settings);
+            };
+            context.Runtimes = [this]()
+            {
+                std::vector<Mcp::RuntimeEndpoint> runtimes;
+                for (const PlayRuntime& runtime : m_PlayRuntimes)
+                {
+                    Mcp::RuntimeEndpoint endpoint;
+                    endpoint.Name = runtime.Name;
+                    endpoint.Player = runtime.Player;
+                    endpoint.Port = runtime.McpPort;
+                    endpoint.Running = runtime.Process < m_PlayProcesses.size() && m_PlayProcesses[runtime.Process]->IsRunning();
+                    runtimes.push_back(std::move(endpoint));
+                }
+                return runtimes;
             };
             m_Mcp = std::make_unique<Mcp::McpEditor>(std::move(context));
         }
@@ -2988,6 +3005,13 @@ namespace Nox
                 ImGui::SetTooltip("Every player's log and the server's get the network debug trace (--net-debug): inputs that come unevenly,\n"
                                   "a standing character that moves, the animation parameters sent and applied, prediction corrections, long frames.");
             ImGui::SetItemTooltip("The other players load the scene from disk: Play saves it first.");
+#if NOX_WITH_MCP
+            ImGui::Checkbox("Players' MCP servers", &m_PlayNet.PlayerMcp);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Every other player's window and the dedicated server run an MCP server of their own (NoxRuntime --mcp), so an\n"
+                                  "AI tool connected to this editor can look at and drive them too (runtime_call). Ports: the editor's MCP\n"
+                                  "port + 1 for the dedicated server, + n for player n; the project's token; the editor's access level.");
+#endif
             ImGui::EndDisabled();
             ImGui::EndPopup();
         }
@@ -6996,6 +7020,48 @@ namespace Nox
                 arguments.push_back("--net-debug");
             return arguments;
         };
+        // MCP5, the Play setting "Players' MCP servers": each game it starts runs an MCP server on the editor's MCP port + 1 (the
+        // dedicated server) / + n (player n), with the project's token (made here once, before the games start: they would each make
+        // one otherwise) and the editor's access level.
+        m_PlayRuntimes.clear();
+        uint16_t mcpBasePort = 0;
+        std::string mcpAccess = "write";
+#if NOX_WITH_MCP
+        if (m_PlayNet.PlayerMcp)
+        {
+            std::string token;
+            if (!Mcp::LoadOrCreateToken(Mcp::NoxFolder(), false, token))
+                NOX_CORE_ERROR("Multiplayer Play: the MCP token could not be made in the project's .nox folder; the players start without MCP servers");
+            else
+            {
+                ConsoleVariable* portVariable = Console::Get().FindVariable("mcp.Port");
+                ConsoleVariable* accessVariable = Console::Get().FindVariable("mcp.Access");
+                const int base = portVariable ? std::atoi(portVariable->GetString().c_str()) : 8765;
+                mcpBasePort = static_cast<uint16_t>(std::clamp(base, 1024, 65535 - 9));
+                const int access = accessVariable ? std::atoi(accessVariable->GetString().c_str()) : 1;
+                mcpAccess = access <= 0 ? "read" : access == 1 ? "write" : "execute";
+            }
+        }
+#endif
+        auto withMcp = [&](std::vector<std::string> arguments, int player)
+        {
+            if (mcpBasePort != 0)
+            {
+                arguments.push_back("--mcp");
+                arguments.push_back(std::format("--mcp-port={}", mcpBasePort + (player == 0 ? 1 : player)));
+                arguments.push_back("--mcp-access=" + mcpAccess);
+            }
+            return arguments;
+        };
+        auto noteRuntime = [&](int player)
+        {
+            if (mcpBasePort == 0 || m_PlayProcesses.empty())
+                return;
+            const uint16_t mcpPort = static_cast<uint16_t>(mcpBasePort + (player == 0 ? 1 : player));
+            m_PlayRuntimes.push_back({ player == 0 ? std::string("dedicated server") : std::format("player {}", player), player, mcpPort,
+                                       m_PlayProcesses.size() - 1 });
+            NOX_CORE_INFO("Multiplayer Play: {} has an MCP server on http://127.0.0.1:{}/mcp", m_PlayRuntimes.back().Name, mcpPort);
+        };
 
         Net::NetSessionConfig config;
         config.Port = port;
@@ -7027,9 +7093,11 @@ namespace Nox
         {
             // The editor is a client of a dedicated server it starts (its console takes the server's commands); its Play scene starts
             // when the server lets it in.
-            if (!LaunchPlayer(withDebug({ projectFile.string(), "--server", "--port=" + std::to_string(port), "--scene=" + scene, "--net-emulation=" + emulation }),
+            if (!LaunchPlayer(withMcp(withDebug({ projectFile.string(), "--server", "--port=" + std::to_string(port), "--scene=" + scene,
+                                                 "--net-emulation=" + emulation }), 0),
                               true, "the dedicated server"))
                 return;
+            noteRuntime(0);
             config.Role = Net::SessionRole::Client;
             config.Address = "127.0.0.1:" + std::to_string(port);
             config.ConnectRetrySeconds = 30.0;
@@ -7053,13 +7121,15 @@ namespace Nox
                 m_PlaySessionEnded = true;
         }
         for (int player = 2; player <= std::clamp(m_PlayNet.Players, 1, 8); ++player)
-            LaunchPlayer(withDebug(playerArguments(player)), false, std::format("player {}", player).c_str());
+            if (LaunchPlayer(withMcp(withDebug(playerArguments(player)), player), false, std::format("player {}", player).c_str()))
+                noteRuntime(player);
     }
 
     void EditorLayer::EndMultiplayerPlay()
     {
         // The other players' windows and the dedicated server close (not left to return to their start scene), then the session.
         m_PlayProcesses.clear();
+        m_PlayRuntimes.clear();
         m_PlaySession.reset();
         m_PlaySessionEnded = false;
     }

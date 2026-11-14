@@ -295,6 +295,105 @@ static void TestMcpServer()
     running = false;
     editor.join();
 }
+
+// MCP5: the client the editor forwards runtime_call with (CallServer), against a real server; and the project's token file.
+#include "McpClient.h"
+#include "McpProjectFiles.h"
+
+static void TestMcpClient()
+{
+    using namespace McpTest;
+    std::printf("\n== MCP client (runtime_call) and the token file\n");
+    constexpr uint16_t port = 18766;
+
+    Tool echo;
+    echo.Name = "echo";
+    echo.Description = "Answers its arguments, with an image";
+    echo.InputSchema = Schema().String("text", "Some text", true);
+    echo.Handler = [](const Json& arguments, ToolDone done)
+    {
+        ToolResult result = ToolResult::Data(Json{ { "said", arguments["text"] } });
+        result.AddImage("iVBORw0KGgo=", "image/png");
+        done(std::move(result));
+    };
+    Tool fails;
+    fails.Name = "fails";
+    fails.Description = "A tool error";
+    fails.Handler = [](const Json&, ToolDone done) { done(ToolResult::Error("it failed")); };
+    Tool hidden;
+    hidden.Name = "hidden";
+    hidden.Description = "Needs execute";
+    hidden.Access = Nox::ConsoleAccess::Execute;
+    hidden.Handler = [](const Json&, ToolDone done) { done(ToolResult::Text("ran")); };
+
+    Settings settings;
+    settings.Token = Token;
+    settings.Port = port;
+    settings.Access = Nox::ConsoleAccess::Write;
+    settings.ServerName = "nox-runtime";
+    Nox::Mcp::McpServer server;
+    std::string error;
+    const bool started = server.Start(settings, { echo, fails, hidden }, error);
+    CHECK(started, "a game's server listens on 127.0.0.1:{} {}", port, error);
+    if (!started)
+        return;
+    std::atomic<bool> running{ true };
+    std::thread game([&]()
+    {
+        while (running)
+        {
+            server.Pump();
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        }
+    });
+
+    const ClientReply list = CallServer(port, Token, "tools/list", Json::object(), 10);
+    std::vector<std::string> names;
+    for (const Json& tool : list.Result.value("tools", Json::array()))
+        names.push_back(tool.value("name", std::string()));
+    CHECK(list.Error.empty() && names == std::vector<std::string>({ "echo", "fails" }),
+          "tools/list without initialize: the tools the access allows ({} tools; error '{}')", names.size(), list.Error);
+
+    const ClientReply call = CallServer(port, Token, "tools/call", Json{ { "name", "echo" }, { "arguments", Json{ { "text", "hello" } } } }, 10);
+    const ToolResult forwarded = ToolResultFromJson(call.Result);
+    const Json said{ { "said", "hello" } };
+    CHECK(call.Error.empty() && !forwarded.IsError && forwarded.Structured == said, "a call's structured answer comes back");
+    bool hasImage = false;
+    for (const Json& item : forwarded.Content)
+        hasImage = hasImage || (item.value("type", std::string()) == "image" && item.value("mimeType", std::string()) == "image/png");
+    CHECK(hasImage, "an image in the answer is forwarded as it came (a screenshot)");
+    CHECK(forwarded.ToJson() == call.Result, "forwarded unchanged: the same result JSON");
+
+    const ClientReply failed = CallServer(port, Token, "tools/call", Json{ { "name", "fails" } }, 10);
+    CHECK(failed.Error.empty() && ToolResultFromJson(failed.Result).IsError, "a tool error is an answer (isError), not a transport error");
+    const ClientReply badArguments = CallServer(port, Token, "tools/call", Json{ { "name", "echo" }, { "arguments", Json::object() } }, 10);
+    CHECK(badArguments.Error.empty() && ToolResultFromJson(badArguments.Result).IsError, "missing arguments: the server's own check answers");
+    const ClientReply refused = CallServer(port, Token, "tools/call", Json{ { "name", "hidden" } }, 10);
+    CHECK(!refused.Error.empty() || ToolResultFromJson(refused.Result).IsError, "a tool above the granted access is refused: '{}'", refused.Error);
+    const ClientReply wrongToken = CallServer(port, std::string(64, 'b'), "tools/list", Json::object(), 10);
+    CHECK(wrongToken.Error.find("401") != std::string::npos, "a wrong token: HTTP 401 ('{}')", wrongToken.Error);
+    const ClientReply unknown = CallServer(port, Token, "nothing/here", Json::object(), 10);
+    CHECK(!unknown.Error.empty(), "an unknown method: the JSON-RPC error ('{}')", unknown.Error);
+
+    running = false;
+    game.join();
+    server.Stop();
+    const ClientReply closed = CallServer(port, Token, "tools/list", Json::object(), 2);
+    CHECK(!closed.Error.empty() && closed.Error.find("no answer") != std::string::npos, "a game that is gone: '{}'", closed.Error);
+
+    // The token file: made once (64 hex digits), the same on the next read (the editor and its games share it), new on rotate; the
+    // folder gets its own .gitignore.
+    const std::filesystem::path folder = std::filesystem::temp_directory_path() / "nox_mcp_token_test" / ".nox";
+    std::error_code ignored;
+    std::filesystem::remove_all(folder.parent_path(), ignored);
+    std::string first, again, rotated;
+    CHECK(Nox::Mcp::LoadOrCreateToken(folder, false, first) && first.size() == 64, "a token is made when there is none");
+    CHECK(Nox::Mcp::LoadOrCreateToken(folder, false, again) && again == first, "read again: the same token");
+    CHECK(Nox::Mcp::LoadOrCreateToken(folder, true, rotated) && rotated != first && rotated.size() == 64, "rotate: a new one");
+    CHECK(std::filesystem::exists(folder / ".gitignore"), "the .nox folder carries its own .gitignore");
+    CHECK(!Nox::Mcp::LoadOrCreateToken({}, false, again), "no folder (no project): no token");
+    std::filesystem::remove_all(folder.parent_path(), ignored);
+}
 #endif
 
 #ifdef NOX_TOOLS_TEST_MCP

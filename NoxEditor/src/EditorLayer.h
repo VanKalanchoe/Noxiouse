@@ -153,7 +153,17 @@ namespace Nox
             int Port = Net::DefaultPort;
             bool SaveWithoutAsking = false;
             bool DebugTrace = false;   // the network debug trace in every player's log and the server's (--net-debug)
+            bool PlayerMcp = false;    // MCP5: every other player and the dedicated server get an MCP server (NoxRuntime --mcp)
         };
+        // MCP5: the games this Play started with MCP servers -- the dedicated server on the editor's MCP port + 1, player n on + n.
+        struct PlayRuntime
+        {
+            std::string Name;
+            int Player = 0;       // 0: the dedicated server
+            uint16_t McpPort = 0;
+            size_t Process = 0;   // its index in m_PlayProcesses
+        };
+        std::vector<PlayRuntime> m_PlayRuntimes;
         // The edited scene's path under the asset directory and its handle (m_EditorScenePath is absolute after Save As / the file dialog,
         // relative when opened from the Content Browser: the registry knows relative paths only). Empty / 0: not saved as an asset.
         std::filesystem::path EditorSceneAssetPath() const;

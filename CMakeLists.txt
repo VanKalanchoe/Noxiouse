@@ -44,11 +44,15 @@ if(NOX_DIST)
     set(NOX_BUILD_RUNTIME ON CACHE BOOL "" FORCE)
 endif()
 
-# The editor's MCP server (docs/MCP_Plan_2026-11.md): AI tools read and use the running editor over the Model Context Protocol. All
-# of it is NoxEditor/src/Mcp; OFF leaves that folder out of the build (and the editor's few NOX_WITH_MCP lines).
-option(NOX_WITH_MCP "Build the editor's MCP server (Tools > MCP Server; off at run time until enabled)" ON)
+# The MCP server (docs/MCP_Plan_2026-11.md): AI tools read and use the running editor -- and the games it starts (NoxRuntime --mcp,
+# not in NOX_DIST builds) -- over the Model Context Protocol. The shared part is the NoxMcp library, the editor's own tools are
+# NoxEditor/src/Mcp; OFF leaves both out of the build (and the few NOX_WITH_MCP lines in the editor and the runtime).
+option(NOX_WITH_MCP "Build the MCP server (editor: Tools > MCP Server, off at run time until enabled; NoxRuntime: --mcp)" ON)
 
 add_subdirectory(NoxCore)
+if(NOX_WITH_MCP)
+    add_subdirectory(NoxMcp)
+endif()
 add_subdirectory(NoxEditor)
 
 # The standalone player (docs/Runtime_And_Packaging_Plan_2026-10.md, R1). Off by default until it has been built and tried.

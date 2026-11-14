@@ -13,11 +13,11 @@
 
 #include "NoxCore/Console/Console.h"
 
-// MCP for NoxEditor (docs/MCP_Plan_2026-11.md): the protocol layer -- JSON-RPC 2.0 over Streamable HTTP, revision 2025-06-18 (and
-// 2025-03-26 accepted), plain JSON responses. It checks a request (token, Host, Origin, protocol version), answers initialize /
-// ping / tools/list / tools/call and hands a tool call to a dispatcher (the editor runs it on its main thread between frames). It
-// knows nothing of the editor: the tools come in from outside (McpEditorTools), the transport is McpServer. Testable alone
-// (NoxToolsTest).
+// MCP for NoxEditor and NoxRuntime (docs/MCP_Plan_2026-11.md; the NoxMcp library): the protocol layer -- JSON-RPC 2.0 over
+// Streamable HTTP, revision 2025-06-18 (and 2025-03-26 accepted), plain JSON responses. It checks a request (token, Host, Origin,
+// protocol version), answers initialize / ping / tools/list / tools/call and hands a tool call to a dispatcher (the host runs it on its
+// main thread between frames). It knows nothing of either program: the tools come in from outside (McpGameTools, the editor's
+// McpEditorTools ...), the transport is McpServer. Testable alone (NoxToolsTest).
 namespace Nox::Mcp
 {
     using Json = nlohmann::json;

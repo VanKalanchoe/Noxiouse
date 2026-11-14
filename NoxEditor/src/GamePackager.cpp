@@ -392,6 +392,7 @@ namespace Nox
             if (VFS::WritePack(output / "Game" / "Content.npak", gameAssets, files, packError, &packBytes))
             {
                 std::filesystem::remove_all(gameAssets, error);
+                report.Files = report.Files - std::min(report.Files, files.size()) + 1; // (the files on disk: the packed ones are one pack now)
                 NOX_CORE_INFO("Packed {} files into Content.npak ({:.1f} MB)", files.size(), static_cast<double>(packBytes) / (1024.0 * 1024.0));
             }
             else

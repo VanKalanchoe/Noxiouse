@@ -9,6 +9,16 @@ file(GLOB_RECURSE NOXRUNTIME_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
+# The MCP server (--mcp; docs/MCP_Plan_2026-11.md, MCP5): AI tools read and drive the running game. Never in a shipping build
+# (NOX_DIST): a packaged game has no MCP server at all.
+if(NOX_WITH_MCP AND NOT NOX_DIST)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE NOX_RUNTIME_MCP=1)
+    target_link_libraries(${PROJECT_NAME} PRIVATE NoxMcp)
+else()
+    list(FILTER NOXRUNTIME_FILES EXCLUDE REGEX ".*/src/McpRuntime\\..*")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE NOX_RUNTIME_MCP=0)
+endif()
+
 target_sources(${PROJECT_NAME} PRIVATE ${NOXRUNTIME_FILES})
 target_link_libraries(${PROJECT_NAME} PRIVATE NoxCore)
 # NoxCore's precompiled header (NoxCore/src/NoxPCH.h), built for this target's own compile flags.

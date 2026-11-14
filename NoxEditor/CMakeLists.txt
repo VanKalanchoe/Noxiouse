@@ -8,15 +8,11 @@ file(GLOB_RECURSE NOXEDITOR_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
-# The MCP server (src/Mcp, docs/MCP_Plan_2026-11.md): left out entirely with NOX_WITH_MCP=OFF.
+# The MCP server (src/Mcp, docs/MCP_Plan_2026-11.md): the editor's tools here, the shared server in the NoxMcp library; left out
+# entirely with NOX_WITH_MCP=OFF.
 if(NOX_WITH_MCP)
-    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/NoxCore/vendors/cpp-httplib/httplib.h")
-        message(FATAL_ERROR "NoxCore/vendors/cpp-httplib is missing (a git submodule, the MCP server's HTTP library): run "
-                            "'git submodule update --init NoxCore/vendors/cpp-httplib', "
-                            "or configure with -DNOX_WITH_MCP=OFF")
-    endif()
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOX_WITH_MCP=1)
-    target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/NoxCore/vendors/cpp-httplib")
+    target_link_libraries(${PROJECT_NAME} PRIVATE NoxMcp)
 else()
     list(FILTER NOXEDITOR_FILES EXCLUDE REGEX ".*/src/Mcp/.*")
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOX_WITH_MCP=0)

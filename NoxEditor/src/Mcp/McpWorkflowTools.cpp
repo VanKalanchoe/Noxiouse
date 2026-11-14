@@ -32,11 +32,6 @@ namespace Nox::Mcp
     {
         constexpr double MaxWaitSeconds = 50.0; // (under the server's 60 s call time-out)
 
-        double Now()
-        {
-            return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-        }
-
         // A graph asset (animation or audio) by uuid or path.
         AssetHandle ResolveGraph(const Json& value, std::string& error)
         {

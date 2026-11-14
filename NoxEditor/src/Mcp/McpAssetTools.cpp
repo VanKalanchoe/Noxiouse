@@ -26,11 +26,6 @@ namespace Nox::Mcp
     {
         constexpr double MaxWaitSeconds = 50.0; // (under the server's 60 s call time-out)
 
-        double Now()
-        {
-            return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-        }
-
         Json DiagnosticJson(const ScriptDiagnostic& diagnostic)
         {
             Json json{ { "severity", diagnostic.Severity }, { "code", diagnostic.Code }, { "message", diagnostic.Message } };
@@ -652,11 +647,11 @@ namespace Nox::Mcp
                     Json created = Json::array();
                     for (const auto& [handle, metadata] : manager->GetAssetRegistry())
                         if (!before.contains(handle))
-                            created.push_back(Json{ { "uuid", IdText(static_cast<uint64_t>(handle)) }, { "type", std::string(AssetTypeToString(metadata.Type)) },
+                            created.push_back(Json{ { "uuid", IdText(static_cast<uint64_t>(handle)) }, { "type", ShortTypeName(metadata.Type) },
                                                     { "path", metadata.FilePath.generic_string() } });
                     if (created.empty())
                         if (AssetHandle existing = manager->FindHandleByPath(relativeSource, type))
-                            created.push_back(Json{ { "uuid", IdText(static_cast<uint64_t>(existing)) }, { "type", std::string(AssetTypeToString(type)) },
+                            created.push_back(Json{ { "uuid", IdText(static_cast<uint64_t>(existing)) }, { "type", ShortTypeName(type) },
                                                     { "path", relativeSource.generic_string() }, { "already", true } });
                     if (context.AssetsChanged)
                         context.AssetsChanged();

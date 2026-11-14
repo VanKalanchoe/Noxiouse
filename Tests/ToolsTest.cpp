@@ -146,6 +146,7 @@ int main()
 #endif
 #ifdef NOX_TOOLS_TEST_MCP_SERVER
     TestMcpServer();
+    TestMcpClient();
 #endif
     std::printf("\n%d checks, %d failed\n", s_Checks, s_Failed);
     return s_Failed == 0 ? 0 : 1;

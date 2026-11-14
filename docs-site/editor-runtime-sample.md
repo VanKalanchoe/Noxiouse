@@ -52,6 +52,7 @@ This page documents every file in **`NoxEditor/src/`** (31 files), **`NoxRuntime
 | :--- | :--- |
 | [`Main.cpp`](file:///E:/dev/noxiouse/NoxRuntime/src/Main.cpp) | Entry point (`main` + `WinMain` for `WIN32` subsystem builds). Parses `--project` and `--pak` arguments, auto-discovers `<ExeName>.npak` or `Game.npak` next to the executable, mounts it via `VirtualFileSystem::MountPak`, and starts `RuntimeLayer`. |
 | [`RuntimeLayer.h`](file:///E:/dev/noxiouse/NoxRuntime/src/RuntimeLayer.h) & [`RuntimeLayer.cpp`](file:///E:/dev/noxiouse/NoxRuntime/src/RuntimeLayer.cpp) | Loads the `.nproj` project (from VFS or disk), initializes `RuntimeAssetManager` (or `EditorAssetManager`), applies saved `ProjectRendererSettings`, loads `StartScene` (its `.nox` text, from `Content.npak` when packed), calls `m_ActiveScene->OnRuntimeStart()`, and drives the game loop and window swapchain resize/fullscreen shortcuts (`F11` / `Alt+Enter`). |
+| [`McpRuntime.h`](file:///E:/dev/noxiouse/NoxRuntime/src/McpRuntime.h) & [`McpRuntime.cpp`](file:///E:/dev/noxiouse/NoxRuntime/src/McpRuntime.cpp) | The game's MCP server (MCP5): `--mcp`, `--mcp-port` (default 8770), `--mcp-access`; the shared NoxMcp game tools plus `get_runtime_status` and `quit`, run first in each frame. Not in `NOX_DIST` builds (see Console, Output Log & MCP Server). |
 
 ---
 

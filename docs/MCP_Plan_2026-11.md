@@ -1,7 +1,22 @@
-# MCP for NoxEditor -- plan (2026-11-13, revised the same day after a review)
+# MCP for NoxEditor and NoxRuntime -- plan (2026-11-13, revised the same day after a review)
 
-Status (2026-11-14): **C1 console and MCP0-MCP3 built and tested by the user; MCP4 built** (part 1 tested by the user, part 2
-waiting for the user's test); MCP5 open. Backlog items C1 and N7.
+Status (2026-11-14): **C1 console and MCP0-MCP4 built and tested by the user; MCP5 built** (waiting for the user's test).
+Backlog items C1 and N7.
+
+MCP5 (2026-11-14): the server in NoxRuntime. The shared part moved into a static library, **NoxMcp** (`NoxMcp/src/Mcp`: McpProtocol,
+McpServer, McpValidation, McpInputPlayer from the editor; new McpHost -- `HostContext`, the part of the editor's context the shared
+tools need --, McpGameTools -- read_log, get_hierarchy, find_entities, get_entity, screenshot, list_commands, run_command, pause,
+wait_for, inject_input, moved out of the editor's tool files --, McpSceneHelpers, McpProjectFiles -- the .nox folder and the token,
+one per project --, McpClient -- JSON-RPC to another Nox server); NoxEditor, NoxRuntime and NoxToolsTest link it. `EditorContext`
+extends `HostContext`. NoxRuntime (`NoxRuntime/src/McpRuntime`): `--mcp`, `--mcp-port` (8770), `--mcp-access` (write); the shared
+tools plus get_runtime_status and quit (Execute; answers, then quits 0.25 s later); pumped first in RuntimeLayer::OnUpdate; pause in
+a standalone game only; no screenshot on a dedicated server; never in NOX_DIST builds (CMake NOX_RUNTIME_MCP). The editor: the Play
+setting **Players' MCP servers** / `play player_mcp` passes `--mcp --mcp-port=<editor port + n> --mcp-access=<editor's level>` to
+player n and + 1 to the dedicated server, after making the token once; `runtime_call` forwards a tool call to one of them
+(McpClient on a detached thread, answered from a per-frame poll; a list of its tools without `tool`), get_editor_status and play list
+them. NoxToolsTest: 159 checks (ASan / UBSan), the client against a real server and the token file among them. Compiled (clang
+syntax checks of every changed file, with and without MCP); the CMake logic was configured with MCP on, off and NOX_DIST. The
+runtime and editor sides have not run yet (no GPU / .NET here).
 
 Graph files edited outside the editor (2026-11-14): a .nanimgraph / .naudiograph changed on disk (a text editor, an AI with file
 access, version control) is reimported **in place** (EditorAssetManager::ReimportAsset): animators held the old graph object until
@@ -215,7 +230,7 @@ deserialized blindly into live components:
 | MCP2 | Edit (validated, undoable) | `create_entity`, `delete_entities`, `rename`, `duplicate`, `set_parent`, `patch_component`, `add_component` / `remove_component`, `set_script_field`, `instantiate_prefab`, `apply_edits` (atomic batch), `select`, `open_scene`, `save_scene`, `undo` / `redo`, `run_command`, `get_operation_status` / `cancel_operation` |
 | MCP3 | Play and verify | `play` / `stop` / `simulate` (standalone, listen server, client with N players, network debug log), `wait_for` (seconds, a log line, an entity condition), `inject_input`, `set_camera` / `focus_entity` |
 | MCP4 | Wider workflows | `build_scripts` (errors as file / line / message), `reload_scripts`, `run_tests`, materials, prefabs, graphs as JSON (`get_graph` / `set_graph`), `import_asset`, `package_game` / `package_server` |
-| MCP5 | NoxRuntime | the same server in NoxRuntime (`--mcp`), its own permissions and lifecycle: automated multiplayer tests without the editor |
+| MCP5 | NoxRuntime | **built:** the same server in NoxRuntime (`--mcp`, `--mcp-port`, `--mcp-access`; get_runtime_status, quit), the shared NoxMcp library, the editor's Players' MCP servers and `runtime_call` |
 
 **Acceptance test (end of MCP3)**: Claude Code, connected to a running NoxEditor, makes a scene with a camera, a cube with a new
 material and a directional light; reads the hierarchy and the values back; presses Play; takes a screenshot; reads the screenshot
@@ -256,7 +271,8 @@ the acceptance test, the agent kept separate from the tools.
 Changed:
 - **Folders**: `NoxEditor/src/Mcp/` (transport, tools) and the registry in `NoxCore/src/NoxCore/Console/` instead of new top-level
   `NoxAI/` / `NoxAgent/` trees: the commands belong to the engine, the MCP adapter to the editor; an agent project gets its own
-  folder if it is ever started.
+  folder if it is ever started. (MCP5: the part NoxRuntime shares -- transport, protocol, token, the game tools -- moved into the
+  `NoxMcp/` library; the editor's own tools stay in `NoxEditor/src/Mcp/`.)
 - **Undo**: no per-command Undo() -- EditorHistory's snapshots already make every between-frames mutation undoable and give the
   rollback for batches.
 - **Operation ids only for long work**: reads and single edits answer directly (an id for every call doubles the round trips).

@@ -8,33 +8,15 @@
 #include <yaml-cpp/yaml.h>
 
 #include "McpEditorTools.h"
+#include "McpSceneHelpers.h"
 #include "McpValidation.h"
 #include "NoxCore/Asset/Asset.h"
 
-namespace Nox
-{
-    struct RelationshipComponent;
-}
-
-// Shared by the MCP tool files (McpEditorTools, McpEditTools): ids, the scene serializer's YAML as JSON and back, entity summaries.
+// Shared by the editor's MCP tool files: the shared scene helpers (McpSceneHelpers, NoxMcp) and assets by uuid or path.
 namespace Nox::Mcp
 {
-    std::string Lower(std::string_view text);
-    const RelationshipComponent* RelationshipOf(Entity entity);
-
-    // Ids as strings: 64-bit UUIDs and asset handles do not fit a JSON number exactly (JavaScript clients round them).
-    inline std::string IdText(uint64_t id) { return std::to_string(id); }
-    bool ParseId(const Json& value, uint64_t& id);
-
-    // The components an entity has, by the scene file's names ("TransformComponent", "ScriptComponent" ...).
-    std::vector<std::string> ComponentNames(Scene& scene, Entity entity);
-    Json EntitySummary(Scene& scene, Entity entity);
-    std::string PathOf(Scene& scene, Entity entity); // "Root / Parent / Name"
-    void SortEntities(std::vector<Entity>& entities); // by name, then id: a stable order to page through
-    Json Page(const std::vector<Json>& items, size_t offset, size_t limit);
-
-    // The scene the editor shows, or an error answered when there is none.
-    Ref<Scene> RequireScene(const EditorContext& context, ToolDone& done);
+    // "StaticMesh" for AssetType::StaticMesh: how the tools name asset types (AssetTypeToString's text without "AssetType::").
+    std::string ShortTypeName(AssetType type);
 
     // An asset of `type` named by its uuid (a digit string) or by its path under the asset directory ("Materials/Red.nmat"); 0 and
     // `error` when there is none (or it is another kind of asset).
