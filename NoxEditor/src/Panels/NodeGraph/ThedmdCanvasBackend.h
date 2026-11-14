@@ -57,6 +57,10 @@ namespace Nox
         // bone picker, drawn later like the asset picker (popups do not work inside a node).
         void DrawBonePickerButton(uint32_t nodeId, const std::string& propertyName, const std::string& current);
         void DrawPendingBonePicker(NodeGraph& graph, const std::function<void()>& onGraphEdited);
+        // A colour (glm::vec4) property: a swatch button in the node that queues the colour picker, drawn later like the asset picker
+        // (ImGui::ColorEdit4's own popup and fields could not be clicked inside a node: the user's test).
+        void DrawColorPickerButton(uint32_t nodeId, const std::string& propertyName, const glm::vec4& current);
+        void DrawPendingColorPicker(NodeGraph& graph, const std::function<void()>& onGraphEdited);
         void HandleLinkCreation(NodeGraph& graph, const std::function<void()>& onGraphEdited);
         // The graph's wires, routed orthogonally around the nodes (WireRouter) and drawn under them; see the .cpp.
         void DrawWires(NodeGraph& graph);
@@ -113,6 +117,9 @@ namespace Nox
         std::string m_BonePickerPropertyName;
         char m_BonePickerFilter[64] = "";
         char m_BonePickerTyped[128] = "";
+        bool m_ShowColorPicker = false;
+        uint32_t m_ColorPickerNodeId = 0;
+        std::string m_ColorPickerPropertyName;
         bool m_ShowAssetPicker = false;
         uint32_t m_AssetPickerNodeId = 0;
         std::string m_AssetPickerPropertyName;

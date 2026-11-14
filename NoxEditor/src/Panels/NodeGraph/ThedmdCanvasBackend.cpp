@@ -328,6 +328,7 @@ namespace Nox
 
         DrawPendingAssetPicker(graph, onGraphEdited);
         DrawPendingBonePicker(graph, onGraphEdited);
+        DrawPendingColorPicker(graph, onGraphEdited);
         HandleParameterDrop(graph, parameters, onGraphEdited);
 
         ed::Resume();
@@ -499,6 +500,10 @@ namespace Nox
                 if (text && boneHint != type.PropertyAssetTypeHints.end() && boneHint->second == "Bone")
                 {
                     DrawBonePickerButton(node.Id, name, *text);
+                }
+                else if (glm::vec4* color = std::get_if<glm::vec4>(&value))
+                {
+                    DrawColorPickerButton(node.Id, name, *color);
                 }
                 else if (uint64_t* handle = std::get_if<uint64_t>(&value))
                 {
@@ -684,6 +689,54 @@ namespace Nox
             m_AssetPickerTypeHint = assetTypeHint;
             m_AssetPickerFilter[0] = '\0';
         }
+    }
+
+    void ThedmdCanvasBackend::DrawColorPickerButton(uint32_t nodeId, const std::string& propertyName, const glm::vec4& current)
+    {
+        // A swatch (the colour, its alpha as a checkerboard half) and the numbers beside it; clicking it opens the picker, drawn after
+        // the nodes (DrawPendingColorPicker). Nothing here takes a popup or a drag: those do not work inside an imgui-node-editor node.
+        ImGui::Text("%s:", propertyName.c_str());
+        ImGui::SameLine();
+        if (ImGui::ColorButton("##color", ImVec4(current.r, current.g, current.b, current.a),
+                               ImGuiColorEditFlags_AlphaPreviewHalf | ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_NoTooltip, ImVec2(36.0f, 0.0f)))
+        {
+            m_ShowColorPicker = true;
+            m_ColorPickerNodeId = nodeId;
+            m_ColorPickerPropertyName = propertyName;
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Click to pick the colour");
+        ImGui::SameLine();
+        ImGui::TextDisabled("%.2f %.2f %.2f %.2f", current.r, current.g, current.b, current.a);
+    }
+
+    void ThedmdCanvasBackend::DrawPendingColorPicker(NodeGraph& graph, const std::function<void()>& onGraphEdited)
+    {
+        // Like the asset picker: opened the frame the swatch was clicked, drawn suspended (screen coordinates) every frame it is open.
+        if (m_ShowColorPicker)
+        {
+            ImGui::OpenPopup("ColorPicker");
+            m_ShowColorPicker = false;
+        }
+        if (!ImGui::BeginPopup("ColorPicker"))
+            return;
+        GraphNode* node = FindNodeById(graph, m_ColorPickerNodeId);
+        auto property = node ? node->Properties.find(m_ColorPickerPropertyName) : decltype(node->Properties.end()){};
+        glm::vec4* color = node && property != node->Properties.end() ? std::get_if<glm::vec4>(&property->second) : nullptr;
+        if (!color)
+        {
+            ImGui::CloseCurrentPopup(); // (the node was deleted, or its value is no colour)
+            ImGui::EndPopup();
+            return;
+        }
+        ImGui::TextUnformatted(m_ColorPickerPropertyName.c_str());
+        // HDR: values above 1 allowed (an emissive tint); the numbers below the wheel can be typed.
+        if (ImGui::ColorPicker4("##picker", &color->x, ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float | ImGuiColorEditFlags_AlphaBar |
+                                                      ImGuiColorEditFlags_AlphaPreviewHalf | ImGuiColorEditFlags_DisplayRGB))
+            onGraphEdited();
+        if (ImGui::Button("Close"))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
     }
 
     void ThedmdCanvasBackend::DrawPendingAssetPicker(NodeGraph& graph, const std::function<void()>& onGraphEdited)
