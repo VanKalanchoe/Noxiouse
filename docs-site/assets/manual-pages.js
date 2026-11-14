@@ -2062,7 +2062,7 @@ window.NOX_MANUAL_PAGES = [
             "| `apply_edits` | Several edits at once, all or nothing: if one fails, the scene is put back as it was. |",
             "| `select`, `save_scene`, `undo`, `redo` | As in the editor (a never-saved scene is not saved: you name it once). |",
             "",
-            "Every value is checked against the component's fields before it is written (unknown fields, wrong kinds, ids that name nothing are refused with the reason), written the way loading a scene writes it, and read back: the answer says which values the engine changed (a clamp, an unknown enum name). **Each change is one undo step named \"MCP: ...\"** in Edit > Undo. Ids are written as strings of digits.",
+            "Every value is checked against the component's fields before it is written -- also the fields a scene file only holds once they are set, such as MaterialComponent's `MaterialAssets` (one material per submesh), a text's outline or a joint's drives (unknown fields, wrong kinds, ids that name nothing are refused with the reason), written the way loading a scene writes it, and read back: the answer says which values the engine changed (a clamp, an unknown enum name). **Each change is one undo step named \"MCP: ...\"** in Edit > Undo. Ids are written as strings of digits.",
             "",
             "### Playing and checking",
             "",

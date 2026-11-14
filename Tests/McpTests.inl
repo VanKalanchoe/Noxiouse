@@ -541,3 +541,59 @@ static void TestMcpAssets()
           "the texture paths a material names, with their fields ({})", textures.size());
 }
 #endif
+
+#ifdef NOX_TOOLS_TEST_MCP
+// Fields the scene file leaves out while unset (MaterialComponent's MaterialAssets, a joint axis's drive, MeshComponent's MorphWeights):
+// the component's sample (as the serializer writes it) merged under its defaults and current values.
+static void TestMcpComponentShapes()
+{
+    using namespace Nox::Mcp;
+    std::printf("\n== MCP components with fields written only when set\n");
+
+    // MaterialComponent: defaults write nothing; the sample (asset fixed back to 0, as SampleFixes does) gives the fields.
+    const Json materialDefaults = Json::object();
+    const Json materialSample = Json::parse(R"({ "MaterialAssets": [0], "Parameters": [{ "Name": "Base Color", "Value": [1, 1, 1, 1], "Slot": 0 }] })");
+    const Json materialShape = MergeExample(materialSample, materialDefaults);
+    CHECK(!CheckAgainstExample(materialDefaults, Json::parse(R"({ "MaterialAssets": ["15793823495927804249"] })")).empty(),
+          "the old way (defaults only): MaterialAssets is an unknown field -- the bug the user found");
+    CHECK(CheckAgainstExample(materialShape, Json::parse(R"({ "MaterialAssets": ["15793823495927804249", "0"] })")).empty(),
+          "with the sample: MaterialAssets takes material ids, and 0 (the mesh's own) for a slot");
+    CHECK(!CheckAgainstExample(materialShape, Json::parse(R"({ "MaterialAssets": [15793823495927804249] })")).empty(),
+          "an id as a JSON number in the list: refused (it would lose digits)");
+    CHECK(CheckAgainstExample(materialShape, Json::parse(R"({ "Parameters": [{ "Name": "Roughness", "Value": [0.2, 0, 0, 0] }] })")).empty() &&
+          !CheckAgainstExample(materialShape, Json::parse(R"({ "Parameters": [{ "Name": "Roughness", "Strength": 1 }] })")).empty(),
+          "list items checked against the sample's item: a parameter fits, a misspelled field in one does not");
+
+    // A joint's axes: the sample's first axis has the drive fields; the current axes (no drive) must not hide them.
+    const Json jointSample = Json::parse(R"({ "Axes": [{ "Motion": 0, "Min": 0, "Max": 0, "LimitStiffness": 0, "LimitDamping": 0,
+                                             "DrivePosition": 0, "DriveVelocity": 0, "DriveStiffness": 0, "DriveDamping": 0, "DriveMaxForce": 0 }] })");
+    const Json jointCurrent = Json::parse(R"({ "Axes": [{ "Motion": 2, "Min": -1, "Max": 1, "LimitStiffness": 0, "LimitDamping": 0 },
+                                             { "Motion": 0, "Min": 0, "Max": 0 }] })");
+    const Json jointExample = MergeExample(jointSample, jointCurrent);
+    CHECK(jointExample["Axes"][0].contains("DriveStiffness") && jointExample["Axes"][0]["Motion"] == 2 && jointExample["Axes"].size() == 2,
+          "MergeExample keeps the drive fields in the item shape, the current values and the current length");
+    CHECK(Merge(jointSample, jointCurrent)["Axes"][0].contains("DriveStiffness") == false,
+          "(plain Merge would have dropped them: why MergeExample exists)");
+    CHECK(CheckAgainstExample(jointExample, Json::parse(R"({ "Axes": [{ "Motion": 2, "DriveStiffness": 50 }, { "Motion": 0 }] })")).empty(),
+          "a drive set on an axis: fits");
+
+    // MeshComponent's MorphWeights: a map of any target name.
+    const Json meshShape = Json::parse(R"({ "MeshHandle": 0, "SubmeshIndex": 0, "SubmeshCount": 1, "MorphWeights": { "*": 1.0 } })");
+    CHECK(CheckAgainstExample(meshShape, Json::parse(R"({ "MorphWeights": { "Smile": 0.5, "Blink": 1 } })")).empty(),
+          "a map: weights under any target name");
+    CHECK(!CheckAgainstExample(meshShape, Json::parse(R"({ "MorphWeights": { "Smile": "half" } })")).empty() &&
+          !CheckAgainstExample(meshShape, Json::parse(R"({ "MorphWeights": { "*": 1 } })")).empty(),
+          "a map's values are checked; '*' itself is not a name");
+
+    // A value whose kind varies (an audio graph parameter: bool, number, vector, text): null in the shape takes any.
+    const Json audioShape = Json::parse(R"({ "Volume": 1, "GraphParameters": [{ "Name": "", "Value": null }] })");
+    CHECK(CheckAgainstExample(audioShape, Json::parse(R"({ "GraphParameters": [{ "Name": "Speed", "Value": 2.5 }, { "Name": "On", "Value": true }] })")).empty(),
+          "a value of any kind fits where the shape has null");
+
+    // The schema: maps, lists of objects with their items, any.
+    const Json schema = SchemaFromExample(MergeExample(Json::parse(R"({ "MorphWeights": { "*": 1.0 }, "Parameters": [{ "Name": "", "Value": null }] })"), Json::object()));
+    CHECK(schema["MorphWeights"]["kind"] == "map" && schema["MorphWeights"]["values"]["kind"] == "number" && schema["Parameters"]["kind"] == "list" &&
+          schema["Parameters"]["items"]["kind"] == "object" && schema["Parameters"]["items"]["fields"]["Value"]["kind"] == "any",
+          "the schema shows a map, a list's item fields and an any-value field ({})", schema.dump());
+}
+#endif

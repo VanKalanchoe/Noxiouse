@@ -13,8 +13,17 @@ SerializePrefab, as dragging into the Content Browser), instantiate_prefab (an e
 .gltf with its referenced buffers and images, or a .glb, copied into a folder of its own and cooked with ImportModel; textures,
 sounds and fonts copied and registered; files already in the asset folder registered in place; answers the new registry entries).
 `ScriptDiagnostics` parses dotnet build output into file / line / column / code / message, each once (MSBuild repeats them in its
-summary); ScriptBuilder keeps the last build's result and logs one line per error. NoxToolsTest: 108 checks (ASan / UBSan). The
+summary); ScriptBuilder keeps the last build's result and logs one line per error. NoxToolsTest: 108 checks then (ASan / UBSan). The
 editor side compiles; it has not run in the editor yet.
+
+Fixed after the user's MCP4 test (2026-11-14): patch_component could not set MaterialComponent's MaterialAssets ("unknown field") --
+a component's fields were learnt by serializing a default component, and the serializer leaves fields out while they are empty or
+at their default (MaterialAssets / Parameters, MorphWeights, an audio source's graph parameters, particle curves and burst sound, a
+body's physical surface, a capsule's bottom radius, a joint axis's drive, a text's outline and background). Each editable component
+now has a sample that sets those on a scratch entity, so the serializer itself shows every field and the shape of list items
+(`MergeExample` keeps an item's optional fields when the current list replaces the sample's); map fields take any name ("*"),
+fields whose kind varies take any value (null). Also: a one-number list is a list, not a vector (a list of material ids), and a
+number past 2^53 in a numeric field is refused as an id written as a number. NoxToolsTest: 119 checks.
 
 MCP3 (2026-11-14): `McpPlayTools` -- play (standalone, listen server or client with N players, network emulation, debug log; the
 call's choices are for that Play only, the user's Play settings stay; multiplayer saves the scene without the dialog, and is refused

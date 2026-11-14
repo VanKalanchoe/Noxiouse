@@ -19,7 +19,8 @@ namespace Nox::Mcp
     {
         bool IsNumberVector(const Json& value)
         {
-            return value.is_array() && !value.empty() && value.size() <= 4 &&
+            // (2 to 4 numbers: the engine's vectors; a one-number list is a list -- of asset ids, say)
+            return value.is_array() && value.size() >= 2 && value.size() <= 4 &&
                    std::all_of(value.begin(), value.end(), [](const Json& item) { return item.is_number(); });
         }
 
@@ -56,8 +57,17 @@ namespace Nox::Mcp
         {
             if (!value.is_object())
                 return std::format("{} must be an object", Where(path));
+            const bool map = example.contains("*");
             for (auto it = value.begin(); it != value.end(); ++it)
             {
+                if (map && it.key() == "*")
+                    return std::format("'{}' is not a name ('*' stands for any name in the schema)", path.empty() ? std::string("*") : path + "/*");
+                if (!example.contains(it.key()) && map)
+                {
+                    if (std::string problem = CheckAgainstExample(example["*"], it.value(), path.empty() ? it.key() : path + "/" + it.key()); !problem.empty())
+                        return problem;
+                    continue;
+                }
                 if (!example.contains(it.key()))
                 {
                     std::string valid;
@@ -94,11 +104,15 @@ namespace Nox::Mcp
             // The scene file writes 5.0 as "5": a whole number there does not say whether the field takes fractions (a light's
             // intensity does, a sample count does not). Any number fits here; a field that only takes whole numbers refuses a
             // fraction when the serializer reads it, and the write is rolled back with that reason.
+            // A number past 2^53 is no count or index: an id written as a number (JSON clients round those).
+            if ((value.is_number_unsigned() && value.get<uint64_t>() > (1ull << 53)) ||
+                (value.is_number_integer() && !value.is_number_unsigned() && std::llabs(value.get<int64_t>()) > (1ll << 53)))
+                return std::format("{} is too large for a number: an id is written as a string (\"{}\")", Where(path), value.dump());
             if (value.is_number())
                 return {};
             // An unset reference reads as 0 (a plain number in the file): it takes an id string (a mesh set where there was none).
-            if (example.get<int64_t>() == 0 && IsIdText(value))
-                return {};
+            if (example.get<int64_t>() == 0 && (IsIdText(value) || (value.is_string() && value.get<std::string>() == "0")))
+                return {}; // (or "0": none, as the tools write a cleared id)
             return std::format("{} must be a number", Where(path));
         }
         if (example.is_number())
@@ -208,14 +222,50 @@ namespace Nox::Mcp
         return merged;
     }
 
+    Json MergeExample(const Json& base, const Json& overlay)
+    {
+        if (base.is_object() && overlay.is_object())
+        {
+            Json merged = base;
+            for (auto it = overlay.begin(); it != overlay.end(); ++it)
+                merged[it.key()] = merged.contains(it.key()) ? MergeExample(merged[it.key()], it.value()) : it.value();
+            return merged;
+        }
+        if (base.is_array() && overlay.is_array() && !base.empty() && !overlay.empty() && base[0].is_object() && overlay[0].is_object())
+        {
+            Json merged = overlay;
+            merged[0] = MergeExample(base[0], overlay[0]);
+            return merged;
+        }
+        if (overlay.is_array() && overlay.empty() && base.is_array())
+            return base; // (an empty list says nothing about its items)
+        return overlay.is_null() ? base : overlay;
+    }
+
+    namespace
+    {
+        Json FieldSchema(const Json& value)
+        {
+            if (value.is_object() && value.contains("*"))
+                return Json{ { "kind", "map" }, { "values", FieldSchema(value["*"]) }, { "default", Json::object() } };
+            if (value.is_object())
+                return Json{ { "kind", "object" }, { "fields", SchemaFromExample(value) } };
+            if (value.is_null())
+                return Json{ { "kind", "any" } };
+            Json field{ { "kind", KindOf(value) }, { "default", value } };
+            if (value.is_array() && !value.empty() && (value[0].is_object() || value[0].is_array()))
+                field["items"] = FieldSchema(value[0]);
+            return field;
+        }
+    }
+
     Json SchemaFromExample(const Json& example)
     {
         if (!example.is_object())
-            return Json{ { "kind", KindOf(example) }, { "default", example } };
+            return FieldSchema(example);
         Json schema = Json::object();
         for (auto it = example.begin(); it != example.end(); ++it)
-            schema[it.key()] = it.value().is_object() ? Json{ { "kind", "object" }, { "fields", SchemaFromExample(it.value()) } }
-                                                      : Json{ { "kind", KindOf(it.value()) }, { "default", it.value() } };
+            schema[it.key()] = FieldSchema(it.value());
         return schema;
     }
 

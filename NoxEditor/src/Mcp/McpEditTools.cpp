@@ -29,13 +29,20 @@ namespace Nox::Mcp
             bool (*Has)(Entity);
             void (*Add)(Entity);
             void (*Remove)(Entity);
+            // The scene file leaves some fields out while they are empty or at their default (MaterialComponent's MaterialAssets, a text's
+            // outline, a joint axis's drive). Sample sets each of them on a scratch component so the serializer writes it: the tools then
+            // know every field and the shape of list items -- learnt from the serializer itself, not a second list of fields. SampleFixes
+            // (JSON Patch on what was written) turns sample values into what the check needs: an asset reference back to 0 (takes any id),
+            // a value whose kind varies to null (takes anything).
+            void (*Sample)(Entity) = nullptr;
+            const char* SampleFixes = nullptr;
         };
 
         template<typename T>
-        ComponentOps MakeOps(const char* name)
+        ComponentOps MakeOps(const char* name, void (*sample)(Entity) = nullptr, const char* fixes = nullptr)
         {
             return { name, [](Entity entity) { return entity.HasComponent<T>(); }, [](Entity entity) { entity.AddComponent<T>(); },
-                     [](Entity entity) { entity.RemoveComponent<T>(); } };
+                     [](Entity entity) { entity.RemoveComponent<T>(); }, sample, fixes };
         }
 #define NOX_MCP_COMPONENT(T) MakeOps<T>(#T)
 
@@ -44,20 +51,40 @@ namespace Nox::Mcp
         // HLODs, the hidden bookkeeping ones.
         const std::vector<ComponentOps>& EditableComponents()
         {
+            // (every field the serializer writes only when set: SceneSerializer::SerializeEntity's conditional keys)
             static const std::vector<ComponentOps> components = {
-                NOX_MCP_COMPONENT(MeshComponent), NOX_MCP_COMPONENT(MaterialComponent), NOX_MCP_COMPONENT(MetadataComponent),
+                MakeOps<MeshComponent>("MeshComponent", [](Entity e) { e.GetComponent<MeshComponent>().MorphWeights["*"] = 1.0f; }, nullptr),
+                MakeOps<MaterialComponent>("MaterialComponent", [](Entity e)
+                {
+                    auto& material = e.GetComponent<MaterialComponent>();
+                    material.MaterialAssets = { AssetHandle(1) };
+                    material.Parameters = { MaterialComponent::Parameter{ MaterialParameter::BaseColor, glm::vec4(1.0f), 0 } };
+                }, R"([{ "op": "replace", "path": "/MaterialAssets/0", "value": 0 }])"),
+                NOX_MCP_COMPONENT(MetadataComponent),
                 NOX_MCP_COMPONENT(DirectionalLightComponent), NOX_MCP_COMPONENT(PointLightComponent), NOX_MCP_COMPONENT(SpotLightComponent),
                 NOX_MCP_COMPONENT(RectLightComponent), NOX_MCP_COMPONENT(DiscLightComponent), NOX_MCP_COMPONENT(ReflectionProbeComponent),
                 NOX_MCP_COMPONENT(IrradianceVolumeComponent), NOX_MCP_COMPONENT(EnvironmentLightComponent), NOX_MCP_COMPONENT(AnimatorComponent),
-                NOX_MCP_COMPONENT(TimelinePlayerComponent), NOX_MCP_COMPONENT(AudioSourceComponent), NOX_MCP_COMPONENT(ImpactSoundComponent),
+                NOX_MCP_COMPONENT(TimelinePlayerComponent), MakeOps<AudioSourceComponent>("AudioSourceComponent", [](Entity e) { e.GetComponent<AudioSourceComponent>().GraphParameters["Parameter"] = 1.0f; },
+                                          R"([{ "op": "replace", "path": "/GraphParameters/0/Value", "value": null }])"), NOX_MCP_COMPONENT(ImpactSoundComponent),
                 NOX_MCP_COMPONENT(AudioListenerComponent), NOX_MCP_COMPONENT(AudioVolumeComponent), NOX_MCP_COMPONENT(AcousticProbeVolumeComponent),
-                NOX_MCP_COMPONENT(ParticleEmitterComponent), NOX_MCP_COMPONENT(SpriteRendererComponent), NOX_MCP_COMPONENT(CircleRendererComponent),
+                MakeOps<ParticleEmitterComponent>("ParticleEmitterComponent", [](Entity e)
+                {
+                    auto& emitter = e.GetComponent<ParticleEmitterComponent>();
+                    emitter.ColorOverLife = { ParticleColorKey{} };
+                    emitter.SizeOverLife = { ParticleSizeKey{} };
+                    emitter.BurstSound = AssetHandle(1);
+                }, R"([{ "op": "replace", "path": "/BurstSound", "value": 0 }])"), NOX_MCP_COMPONENT(SpriteRendererComponent), NOX_MCP_COMPONENT(CircleRendererComponent),
                 NOX_MCP_COMPONENT(CameraComponent), NOX_MCP_COMPONENT(ScriptComponent), NOX_MCP_COMPONENT(RigidBody2DComponent),
-                NOX_MCP_COMPONENT(BoxCollider2DComponent), NOX_MCP_COMPONENT(CircleCollider2DComponent), NOX_MCP_COMPONENT(RigidBody3DComponent),
-                NOX_MCP_COMPONENT(BoxCollider3DComponent), NOX_MCP_COMPONENT(SphereCollider3DComponent), NOX_MCP_COMPONENT(CapsuleCollider3DComponent),
+                NOX_MCP_COMPONENT(BoxCollider2DComponent), NOX_MCP_COMPONENT(CircleCollider2DComponent), MakeOps<RigidBody3DComponent>("RigidBody3DComponent", [](Entity e) { e.GetComponent<RigidBody3DComponent>().PhysicalSurface = "Surface"; }, nullptr),
+                NOX_MCP_COMPONENT(BoxCollider3DComponent), NOX_MCP_COMPONENT(SphereCollider3DComponent), MakeOps<CapsuleCollider3DComponent>("CapsuleCollider3DComponent", [](Entity e) { e.GetComponent<CapsuleCollider3DComponent>().BottomRadius = 1.0f; }, nullptr),
                 NOX_MCP_COMPONENT(CylinderCollider3DComponent), NOX_MCP_COMPONENT(PlaneCollider3DComponent), NOX_MCP_COMPONENT(MeshCollider3DComponent),
-                NOX_MCP_COMPONENT(PhysicsJoint3DComponent), NOX_MCP_COMPONENT(CollisionFilter3DComponent), NOX_MCP_COMPONENT(CharacterController3DComponent),
-                NOX_MCP_COMPONENT(TextComponent), NOX_MCP_COMPONENT(BoneSocketComponent), NOX_MCP_COMPONENT(LevelStreamingVolumeComponent),
+                MakeOps<PhysicsJoint3DComponent>("PhysicsJoint3DComponent", [](Entity e) { e.GetComponent<PhysicsJoint3DComponent>().Drives[0].Enabled = true; }, nullptr), NOX_MCP_COMPONENT(CollisionFilter3DComponent), NOX_MCP_COMPONENT(CharacterController3DComponent),
+                MakeOps<TextComponent>("TextComponent", [](Entity e)
+                {
+                    auto& text = e.GetComponent<TextComponent>();
+                    text.OutlineThickness = 0.1f;
+                    text.BackgroundColor.a = 1.0f;
+                }, nullptr), NOX_MCP_COMPONENT(BoneSocketComponent), NOX_MCP_COMPONENT(LevelStreamingVolumeComponent),
                 NOX_MCP_COMPONENT(WorldPartitionComponent), NOX_MCP_COMPONENT(WorldStreamingSourceComponent), NOX_MCP_COMPONENT(NetworkIdentityComponent),
             };
             return components;
@@ -98,28 +125,51 @@ namespace Nox::Mcp
             return node[name] ? NodeToJson(node[name]) : Json();
         }
 
-        // A component's defaults as the scene file stores them: added with its C++ defaults to an entity of a scratch scene and
-        // serialized (so every field it writes is known, also the ones the current entity leaves at their defaults). Cached.
-        Json DefaultsOf(const std::string& name, const ComponentOps* ops)
+        // A component as the scene file stores it, added to an entity of a scratch scene (with its sample filled in, or not) and
+        // serialized. Cached.
+        Json StoredOnScratch(const std::string& name, const ComponentOps* ops, bool sampled)
         {
             static std::map<std::string, Json> cache;
-            if (auto found = cache.find(name); found != cache.end())
+            const std::string key = name + (sampled ? "#sample" : "");
+            if (auto found = cache.find(key); found != cache.end())
                 return found->second;
-            Json defaults;
+            Json stored;
             try
             {
                 Ref<Scene> scratch = CreateRef<Scene>();
                 Entity entity = scratch->CreateEntity("Defaults");
                 if (ops)
                     ops->Add(entity);
-                defaults = StoredComponent(*scratch, entity, name);
+                if (sampled && ops && ops->Sample)
+                    ops->Sample(entity);
+                stored = StoredComponent(*scratch, entity, name);
+                if (sampled && ops && ops->SampleFixes)
+                {
+                    Json fixed;
+                    if (std::string problem = ApplyPatch(stored, Json::parse(ops->SampleFixes), fixed); problem.empty())
+                        stored = fixed;
+                    else
+                        NOX_CORE_WARN("MCP: the sample of {} does not fit its fixes ({})", name, problem);
+                }
             }
             catch (const std::exception& error)
             {
-                NOX_CORE_WARN("MCP: the defaults of {} could not be read ({}): only its current fields are known", name, error.what());
+                NOX_CORE_WARN("MCP: {} could not be read from a scratch entity ({}): only its current fields are known", name, error.what());
             }
-            cache[name] = defaults;
-            return defaults;
+            cache[key] = stored;
+            return stored;
+        }
+
+        // A component's defaults as the scene file stores them (its C++ defaults; fields left out while unset are missing here).
+        Json DefaultsOf(const std::string& name, const ComponentOps* ops)
+        {
+            return StoredOnScratch(name, ops, false);
+        }
+
+        // Every field a component can have, with the shape of list items: its sample under its defaults.
+        Json ShapeOf(const std::string& name, const ComponentOps* ops)
+        {
+            return MergeExample(StoredOnScratch(name, ops, true), DefaultsOf(name, ops));
         }
 
         Entity FindEntity(Scene& scene, const Json& value, std::string& error)
@@ -229,7 +279,7 @@ namespace Nox::Mcp
         std::string PrepareValues(Scene& scene, Entity entity, const std::string& name, const ComponentOps* ops, const Json& arguments,
                                   const Json& current, Json& values)
         {
-            const Json example = Merge(DefaultsOf(name, ops), current);
+            const Json example = MergeExample(ShapeOf(name, ops), current);
             const bool hasValues = arguments.contains("values"), hasOperations = arguments.contains("operations");
             if (hasValues == hasOperations)
                 return "give either 'values' (fields to set) or 'operations' (a JSON Patch), not both or neither";
@@ -788,9 +838,25 @@ namespace Nox::Mcp
                     done(ToolResult::Error(std::format("{} is not a component a tool may change ({})", arguments["component"].dump(), ComponentList())));
                     return;
                 }
+                // Every field (with list items' shapes), each with its real default; the ones the file leaves out while unset are
+                // optional.
                 const Json defaults = DefaultsOf(name, ops);
+                Json fields = SchemaFromExample(ShapeOf(name, ops));
+                if (fields.is_object() && defaults.is_object())
+                    for (auto it = fields.begin(); it != fields.end(); ++it)
+                    {
+                        if (defaults.contains(it.key()))
+                        {
+                            if (it.value().contains("default"))
+                                it.value()["default"] = defaults[it.key()];
+                            continue;
+                        }
+                        it.value()["optional"] = true; // (left out of the file while unset)
+                        const std::string kind = it.value().value("kind", std::string());
+                        it.value()["default"] = kind == "list" ? Json::array() : kind == "map" ? Json::object() : Json();
+                    }
                 done(ToolResult::Data(Json{ { "component", name },
-                                            { "fields", SchemaFromExample(defaults) },
+                                            { "fields", fields },
                                             { "note", "Units: centimetres, radians, seconds, m/s where the field says so; ids are digit strings; "
                                                       "a field with an enum takes its name as text (an unknown name is reported as adjusted)." } }));
             };

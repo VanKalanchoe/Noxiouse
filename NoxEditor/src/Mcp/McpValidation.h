@@ -28,6 +28,12 @@ namespace Nox::Mcp
 
     // `base` with `overlay`'s fields on top, recursively for objects (a component's defaults under its current values).
     Json Merge(const Json& base, const Json& overlay);
+    // Merge for examples: a list keeps the shape of its first item from both sides (a joint axis's drive fields, known from a sample,
+    // stay known when the current list has axes without a drive) -- only that first item is what list items are checked against.
+    Json MergeExample(const Json& base, const Json& overlay);
+
+    // An example object with a "*" field is a map: fields of any name, each checked against example["*"] (MeshComponent's MorphWeights:
+    // a weight per morph target name). A null example takes any value (a field whose kind depends on another: a script field's value).
 
     // The JSON kind of a field, for schemas and messages: "number", "bool", "string", "id", "vector3", "list", "object".
     std::string KindOf(const Json& value);
