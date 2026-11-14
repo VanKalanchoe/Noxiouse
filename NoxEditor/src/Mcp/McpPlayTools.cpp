@@ -14,6 +14,7 @@
 #include "NoxCore/Core/Input.h"
 #include "NoxCore/Core/LogBuffer.h"
 #include "NoxCore/Scene/Components.h"
+#include "NoxCore/Scene/EntityBounds.h"
 #include "NoxCore/Scene/Scene.h"
 
 // MCP3: play and verify -- start and stop Play / Simulate, wait for something to happen, drive the game with input, look with the
@@ -557,16 +558,38 @@ namespace Nox::Mcp
                     done(ToolResult::Error("in Play the viewport shows the game's camera, not the editor camera (stop first, or use simulate)"));
                     return;
                 }
-                Entity entity = FindByIdOrName(*scene, arguments["entity"].get<std::string>());
-                if (!entity)
+                Entity found = FindByIdOrName(*scene, arguments["entity"].get<std::string>());
+                if (!found)
                 {
                     done(ToolResult::Error(std::format("no entity named '{}' (find_entities lists them)", arguments["entity"].get<std::string>())));
                     return;
                 }
-                context.FocusEntity(entity);
-                Json result = context.GetCamera ? CameraJson(context.GetCamera()) : Json::object();
-                result["entity"] = EntitySummary(*scene, entity);
-                done(ToolResult::Data(result));
+                // Framed by its size (what is drawn under it): an entity just placed may not have one yet -- its mesh or its model's
+                // parts are still loading -- so this waits for it a little (5 s at most), then frames what there is.
+                const UUID id = found.GetUUID();
+                const double start = Now();
+                context.EveryFrame([context, done, id, start]()
+                {
+                    Ref<Scene> current = context.ActiveScene ? context.ActiveScene() : nullptr;
+                    Entity entity = current ? current->GetEntityByUUID(id) : Entity();
+                    if (!entity)
+                    {
+                        done(ToolResult::Error("the entity is gone"));
+                        return true;
+                    }
+                    const WorldBounds bounds = ComputeWorldBounds(*current, entity);
+                    if (!bounds.Valid && Now() - start < 5.0)
+                        return false;
+                    context.FocusEntity(entity);
+                    Json result = context.GetCamera ? CameraJson(context.GetCamera()) : Json::object();
+                    result["entity"] = EntitySummary(*current, entity);
+                    if (bounds.Valid)
+                        result["framedSize"] = Vector(bounds.Max - bounds.Min); // (world units: the box it framed)
+                    else
+                        result["note"] = "it has nothing drawn (no mesh, or still loading): its position was framed at the closest distance";
+                    done(ToolResult::Data(result));
+                    return true;
+                });
             };
             tools.push_back(std::move(tool));
         }

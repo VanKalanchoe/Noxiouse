@@ -13,6 +13,7 @@
 #include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneSerializer.h"
@@ -524,13 +525,15 @@ namespace Nox::Mcp
             tool.Title = "Bring a file into the project";
             tool.Description = "Imports a file from this computer into the project's asset folder and registers it: a glTF model (.gltf with "
                                "its buffers and images, or .glb) is copied and cooked into meshes, materials, a skeleton and animations (big "
-                               "models finish cooking in the background); a texture (.png, .jpg, .ktx2), a sound (.wav, .ogg, .flac, .mp3) or a "
+                               "models: the answer waits for the cook; place one with place_model); a texture (.png, .jpg, .ktx2), a sound (.wav, .ogg, .flac, .mp3) or a "
                                "font (.ttf, .otf) is copied as it is. A file already under the asset folder is registered where it is. Answers "
                                "the assets it created.";
             tool.InputSchema = Schema()
                                    .String("source", "The file: an absolute path on this computer, or a path under the asset folder", true)
                                    .String("folder", "Where it goes under the asset folder (default \"Imported\"; a model gets a folder of its own in it)")
-                                   .Number("import_scale", "Models: a uniform scale (a model made in centimetres but saved as metres: 0.01)", false, 1e-6, 1e6)
+                                   .Enum("source_unit", "Models: the unit the file's numbers mean (default meters, glTF's; the import dialog's Source Unit)",
+                                         { "meters", "centimeters", "millimeters", "inches", "feet" })
+                                   .Number("import_scale", "Models: a custom scale in world units per file unit, instead of source_unit's", false, 1e-6, 1e6)
                                    .Boolean("animations", "Models: also import its animation clips (default true)");
             tool.Access = ConsoleAccess::Write;
             tool.Handler = [context](const Json& arguments, ToolDone done)
@@ -616,8 +619,16 @@ namespace Nox::Mcp
                 const bool model = type == AssetType::MeshSource;
                 if (model)
                 {
+                    // The import dialog's default: the file is in meters (glTF's unit), scaled into world units (centimetres in a cm
+                    // project: 100) and baked into the cooked geometry. A custom scale replaces it.
                     MeshImportSettings settings;
-                    settings.ImportScale = static_cast<float>(arguments.value("import_scale", 1.0));
+                    const std::string unit = arguments.value("source_unit", std::string("meters"));
+                    const WorldUnits::SourceUnit sourceUnit = unit == "centimeters" ? WorldUnits::SourceUnit::Centimeters
+                                                            : unit == "millimeters" ? WorldUnits::SourceUnit::Millimeters
+                                                            : unit == "inches"      ? WorldUnits::SourceUnit::Inches
+                                                            : unit == "feet"        ? WorldUnits::SourceUnit::Feet
+                                                                                    : WorldUnits::SourceUnit::Meters;
+                    settings.ImportScale = arguments.contains("import_scale") ? arguments["import_scale"].get<float>() : WorldUnits::PerSourceUnit(sourceUnit);
                     settings.ImportAnimations = arguments.value("animations", true);
                     const std::filesystem::path destination = relativeSource.parent_path() / "Meshes" / (relativeSource.stem().string() + ".nmesh");
                     if (!manager->ImportModel(relativeSource, destination, settings))
@@ -654,7 +665,8 @@ namespace Nox::Mcp
                     if (cooking)
                         result["note"] = "a big model: its meshes are still cooking in the background -- list_assets again in a while";
                     else if (model)
-                        result["note"] = "its textures are registered (and cooked) the first time the mesh loads: when it is placed in the scene";
+                        result["note"] = "place it with place_model (as dragging it in: the file's node rotation and position apply); its textures "
+                                         "are registered (and cooked) the first time the mesh loads";
                     done(ToolResult::Data(result));
                     return true;
                 });

@@ -428,6 +428,68 @@ namespace Nox::Mcp
                     });
             }
 
+            // ------------------------------------------------------------------------------------------------------ place_model
+            {
+                Json schema = Schema()
+                                  .String("model", "The mesh asset (static or skeletal): its uuid, or its path under the asset folder", true)
+                                  .String("parent", "The parent's uuid (left out: a root entity)")
+                                  .String("name", "The entity's name (default: the asset's file name)")
+                                  .Build();
+                schema["properties"]["position"] = Json{ { "type", "array" }, { "description", "Position [x, y, z] in centimetres, relative to the parent" },
+                                                         { "items", Json{ { "type", "number" } } }, { "minItems", 3 }, { "maxItems", 3 } };
+                add("place_model", "Place an imported model",
+                    "Places a mesh asset (an imported model: import_asset lists them) at 'position' exactly as dragging it from the Content "
+                    "Browser does: a model instance that applies the file's own node transform (a glTF's rotation from Z-up to Y-up, its "
+                    "offset) and spawns its parts, a skinned character with its animator. Use it rather than a bare MeshComponent (which "
+                    "would show the raw mesh without its node transform). Its entities appear once the mesh has loaded (a frame or two); "
+                    "focus_entity frames it after that. One undo step.",
+                    schema,
+                    [](Scene& scene, const Json& arguments, Outcome& outcome) -> std::string
+                    {
+                        std::string error;
+                        AssetHandle model = ResolveAsset(arguments["model"], AssetType::StaticMesh, error);
+                        if (model == 0)
+                        {
+                            std::string skeletalError;
+                            model = ResolveAsset(arguments["model"], AssetType::Mesh, skeletalError);
+                            if (model == 0)
+                                return error.find("is a Prefab,") != std::string::npos ? error + " (instantiate_prefab places prefabs)"
+                                                                                       : std::format("{} (a model is a StaticMesh or a Mesh asset)", error);
+                        }
+                        Entity parent;
+                        if (arguments.contains("parent") && !arguments["parent"].get<std::string>().empty())
+                            if (!(parent = FindEntity(scene, arguments["parent"], error)))
+                                return error;
+                        glm::dvec3 position(0.0);
+                        if (arguments.contains("position"))
+                        {
+                            const Json& p = arguments["position"];
+                            if (p.size() != 3 || !p[0].is_number() || !p[1].is_number() || !p[2].is_number())
+                                return "'position' must be three numbers [x, y, z]";
+                            position = glm::dvec3(p[0].get<double>(), p[1].get<double>(), p[2].get<double>());
+                        }
+                        std::string name = arguments.value("name", std::string());
+                        if (name.empty())
+                            name = std::filesystem::path(AssetPath(model)).stem().string();
+                        if (name.empty())
+                            name = "Model";
+                        // (EditorLayer::PlaceAssets: the same component and settings)
+                        Entity root = scene.CreateEntity(name);
+                        if (parent)
+                            root.SetParent(parent);
+                        auto& instance = root.AddComponent<ModelInstanceComponent>();
+                        instance.Model = model;
+                        instance.AtFileLayout = true; // (the file's node transform, as a drag places it)
+                        root.GetComponent<TransformComponent>().Translation = position;
+                        root.MarkTransformDirty();
+                        AssetManager::RequestAsset(model);
+                        outcome.Result = EntitySummary(scene, root);
+                        outcome.Result["model"] = AssetPath(model);
+                        outcome.Step = std::format("MCP: Place {}", name);
+                        return {};
+                    });
+            }
+
             // ----------------------------------------------------------------------------------------------- delete_entities
             {
                 Json schema = Schema().Build();

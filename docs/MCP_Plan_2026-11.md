@@ -33,6 +33,13 @@ editor's own writes of a material (Material Editor on every change, set_material
 replaced the asset in memory with a copy read back: `EditorAssetManager::NoteSourceWritten` records the written file's hash, so
 the watcher's event is no change.
 
+Fixed after the user's third MCP4 test (2026-11-14): the helmet placed by the assistant was about 2 cm big and lying on its back.
+import_asset cooked at scale 1 while the import dialog defaults to the file being in meters (100 world units per unit in a cm
+project): it now takes the dialog's `source_unit` (meters by default) or a custom `import_scale`. A bare MeshComponent shows a
+per-mesh asset without the glTF node's transform (the helmet's 90 degree X rotation): the new edit tool place_model places a model
+as EditorLayer::PlaceAssets does (ModelInstanceComponent, AtFileLayout). focus_entity waits (5 s at most) for the entity to have
+bounds, so a model still loading is framed by its size, not at the 10 cm minimum.
+
 MCP3 (2026-11-14): `McpPlayTools` -- play (standalone, listen server or client with N players, network emulation, debug log; the
 call's choices are for that Play only, the user's Play settings stay; multiplayer saves the scene without the dialog, and is refused
 for a never-saved scene; answers once the game runs, a client once its server let it in, up to 40 s; Execute access: it runs the

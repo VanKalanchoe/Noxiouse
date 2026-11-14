@@ -108,9 +108,21 @@ namespace Nox::Mcp
     }
 
 
+    namespace
+    {
+        // "StaticMesh" for AssetType::StaticMesh (AssetTypeToString's text without its "AssetType::").
+        std::string ShortTypeName(AssetType type)
+        {
+            std::string name(AssetTypeToString(type));
+            if (name.rfind("AssetType::", 0) == 0)
+                name.erase(0, 11);
+            return name;
+        }
+    }
+
     AssetHandle ResolveAsset(const Json& value, AssetType type, std::string& error)
     {
-        const std::string typeName(AssetTypeToString(type));
+        const std::string typeName = ShortTypeName(type);
         Ref<Project> project = Project::GetActive();
         if (!project || !project->GetEditorAssetManager())
         {
@@ -129,7 +141,7 @@ namespace Nox::Mcp
             }
             if (manager->GetAssetType(handle) != type)
             {
-                error = std::format("asset {} is a {}, not a {}", id, AssetTypeToString(manager->GetAssetType(handle)), typeName);
+                error = std::format("asset {} is a {}, not a {}", id, ShortTypeName(manager->GetAssetType(handle)), typeName);
                 return 0;
             }
             return handle;
