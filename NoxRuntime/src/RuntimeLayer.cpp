@@ -182,6 +182,7 @@ namespace Nox
         context.ActiveScene = [this]() { return m_Scene; };
         context.Mode = []() { return std::string("play"); };
         context.PlayRunning = [this]() { return m_Scene != nullptr; };
+        context.HasLocalPlayer = !m_Headless; // (a dedicated server: no inject_input, and no screenshot without a renderer)
         if (m_Renderer)
             context.CaptureViewport = [this](std::function<void(std::vector<uint8_t>, uint32_t, uint32_t, bool)> done)
             {
@@ -255,9 +256,20 @@ namespace Nox
         if (m_NetRole != NetRole::DedicatedServer && m_NetRole != NetRole::ListenServer)
             return;
         m_ConsoleCommands.push_back(console.RegisterCommand({ "status", "status", "The server's tick rate, load, entities, clients and bandwidth",
-            ConsoleAccess::Read, [this](const std::vector<std::string>&, ConsoleOutput&) { LogServerStatus(); } }));
+            ConsoleAccess::Read, [this](const std::vector<std::string>&, ConsoleOutput& output)
+            {
+                const std::string line = ServerStatusLine();
+                output.Info(line.empty() ? std::string("Server status: no scene running") : line);
+            } }));
         m_ConsoleCommands.push_back(console.RegisterCommand({ "clients", "clients", "The joined clients: id, name, address, ping",
-            ConsoleAccess::Read, [this](const std::vector<std::string>&, ConsoleOutput&) { LogClients(); } }));
+            ConsoleAccess::Read, [this](const std::vector<std::string>&, ConsoleOutput& output)
+            {
+                const std::vector<std::string> lines = ClientLines();
+                if (lines.empty())
+                    output.Info("Server: not running");
+                for (const std::string& line : lines)
+                    output.Info(line);
+            } }));
         m_ConsoleCommands.push_back(console.RegisterCommand({ "kick", "kick <client id> [reason]", "Disconnects a client", ConsoleAccess::Execute,
             [this](const std::vector<std::string>& arguments, ConsoleOutput& output)
             {
@@ -371,7 +383,8 @@ namespace Nox
         m_WorstWorkSinceStatus = std::max(m_WorstWorkSinceStatus, work);
         m_StatusTimer += ts;
         if (m_StatusTimer >= 10.0f)
-            LogServerStatus();
+            if (const std::string line = ServerStatusLine(); !line.empty())
+                NOX_CORE_INFO("{}", line);
 
         std::deque<std::string> lines;
         if (m_Console)
@@ -389,12 +402,13 @@ namespace Nox
         Console::Get().Execute(line);
     }
 
-    void RuntimeLayer::LogClients() const
+    std::vector<std::string> RuntimeLayer::ClientLines() const
     {
+        std::vector<std::string> lines;
         if (!Server())
-            return;
+            return lines;
         const auto& clients = Server()->GetClients();
-        NOX_CORE_INFO("Server: {}/{} clients", clients.size(), Server()->GetConfig().MaxClients);
+        lines.push_back(std::format("Server: {}/{} clients", clients.size(), Server()->GetConfig().MaxClients));
         const double now = Net::NetNow();
         const std::vector<Net::NetReplication::ClientNetStats> replication =
             Replication() ? Replication()->GetClientStats() : std::vector<Net::NetReplication::ClientNetStats>{};
@@ -402,21 +416,22 @@ namespace Nox
         {
             const Net::ConnectionStats stats = Server()->GetStats(client.Id);
             auto relevancy = std::find_if(replication.begin(), replication.end(), [&](const auto& r) { return r.Client == client.Id; });
-            NOX_CORE_INFO("  {} '{}' {}  ping {} ms, quality {} / {}, out {:.1f} KB/s, in {:.1f} KB/s, joined {:.0f} s ago", client.Id,
-                          client.Name, client.Address, stats.PingMs, Quality(stats.QualityLocal), Quality(stats.QualityRemote),
-                          stats.OutBytesPerSecond / 1024.0f, stats.InBytesPerSecond / 1024.0f, now - client.JoinedAt);
+            lines.push_back(std::format("  {} '{}' {}  ping {} ms, quality {} / {}, out {:.1f} KB/s, in {:.1f} KB/s, joined {:.0f} s ago", client.Id,
+                                        client.Name, client.Address, stats.PingMs, Quality(stats.QualityLocal), Quality(stats.QualityRemote),
+                                        stats.OutBytesPerSecond / 1024.0f, stats.InBytesPerSecond / 1024.0f, now - client.JoinedAt));
             if (relevancy != replication.end() && Replication())
-                NOX_CORE_INFO("      relevant: {} of {} replicated entities, snapshots {:.1f} KB/s of {:.0f}, {} changes waited (last second), "
-                              "{} streamed levels loaded", relevancy->Relevant, Replication()->GetReplicatedCount(),
-                              relevancy->BytesPerSecond / 1024.0f, Replication()->GetClientRate() / 1024.0f, relevancy->Deferred,
-                              relevancy->Levels);
+                lines.push_back(std::format("      relevant: {} of {} replicated entities, snapshots {:.1f} KB/s of {:.0f}, {} changes waited (last "
+                                            "second), {} streamed levels loaded", relevancy->Relevant, Replication()->GetReplicatedCount(),
+                                            relevancy->BytesPerSecond / 1024.0f, Replication()->GetClientRate() / 1024.0f, relevancy->Deferred,
+                                            relevancy->Levels));
         }
+        return lines;
     }
 
-    void RuntimeLayer::LogServerStatus()
+    std::string RuntimeLayer::ServerStatusLine()
     {
         if (!m_Scene)
-            return;
+            return {};
         const uint64_t tick = m_Scene->GetTick();
         const float seconds = std::max(m_StatusTimer, 1e-3f);
         size_t entities = 0;
@@ -426,8 +441,8 @@ namespace Nox
         // (an update longer than the budget makes the next ones catch up with several ticks).
         const double budget = 1.0 / static_cast<double>(Application::Get().GetTickRate());
         const double averageWork = m_FramesSinceStatus > 0 ? m_WorkSinceStatus / m_FramesSinceStatus : 0.0;
-        NOX_CORE_INFO("Server status: tick {} ({:.1f} ticks/s), {:.1f} updates/s, work {:.2f} ms average ({:.0f} % of the {:.1f} ms tick), "
-                      "{:.2f} ms worst, {} entities, {}/{} clients, snapshots {:.1f} KB/s",
+        std::string line = std::format("Server status: tick {} ({:.1f} ticks/s), {:.1f} updates/s, work {:.2f} ms average ({:.0f} % of the "
+                                       "{:.1f} ms tick), {:.2f} ms worst, {} entities, {}/{} clients, snapshots {:.1f} KB/s",
                       tick, static_cast<double>(tick - m_TickAtStatus) / seconds, static_cast<double>(m_FramesSinceStatus) / seconds,
                       averageWork * 1000.0, averageWork / budget * 100.0, budget * 1000.0, m_WorstWorkSinceStatus * 1000.0, entities,
                       Server() ? Server()->GetClients().size() : 0, Server() ? Server()->GetConfig().MaxClients : 0,
@@ -437,6 +452,7 @@ namespace Nox
         m_FramesSinceStatus = 0;
         m_WorkSinceStatus = 0.0;
         m_WorstWorkSinceStatus = 0.0;
+        return line;
     }
 
     void RuntimeLayer::OnEvent(Event& event)

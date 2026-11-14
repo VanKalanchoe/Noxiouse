@@ -29,6 +29,7 @@
 #include "NoxCore/Console/Console.h"
 #if NOX_WITH_MCP
 #include "Mcp/McpEditor.h"
+#include "McpClient.h"
 #include "McpProjectFiles.h"
 #endif
 #include "NoxCore/Asset/MeshSerializer.h"
@@ -530,6 +531,7 @@ namespace Nox
                     endpoint.Player = runtime.Player;
                     endpoint.Port = runtime.McpPort;
                     endpoint.Running = runtime.Process < m_PlayProcesses.size() && m_PlayProcesses[runtime.Process]->IsRunning();
+                    endpoint.McpState = runtime.Probe ? Mcp::ToString(runtime.Probe->Get()) : "starting";
                     runtimes.push_back(std::move(endpoint));
                 }
                 return runtimes;
@@ -7026,10 +7028,11 @@ namespace Nox
         m_PlayRuntimes.clear();
         uint16_t mcpBasePort = 0;
         std::string mcpAccess = "write";
+        std::string mcpToken;
 #if NOX_WITH_MCP
         if (m_PlayNet.PlayerMcp)
         {
-            std::string token;
+            std::string& token = mcpToken;
             if (!Mcp::LoadOrCreateToken(Mcp::NoxFolder(), false, token))
                 NOX_CORE_ERROR("Multiplayer Play: the MCP token could not be made in the project's .nox folder; the players start without MCP servers");
             else
@@ -7058,9 +7061,18 @@ namespace Nox
             if (mcpBasePort == 0 || m_PlayProcesses.empty())
                 return;
             const uint16_t mcpPort = static_cast<uint16_t>(mcpBasePort + (player == 0 ? 1 : player));
-            m_PlayRuntimes.push_back({ player == 0 ? std::string("dedicated server") : std::format("player {}", player), player, mcpPort,
-                                       m_PlayProcesses.size() - 1 });
-            NOX_CORE_INFO("Multiplayer Play: {} has an MCP server on http://127.0.0.1:{}/mcp", m_PlayRuntimes.back().Name, mcpPort);
+            PlayRuntime runtime;
+            runtime.Name = player == 0 ? std::string("dedicated server") : std::format("player {}", player);
+            runtime.Player = player;
+            runtime.McpPort = mcpPort;
+            runtime.Process = m_PlayProcesses.size() - 1;
+#if NOX_WITH_MCP
+            // Asked for, not yet there: the probe says once the game's server answers (or that it never did -- an old NoxRuntime ignores
+            // --mcp). 60 s: a game's start-up (shaders, scene) comes first.
+            runtime.Probe = Mcp::ServerProbe::Start(runtime.Name, mcpPort, mcpToken, 60.0);
+#endif
+            NOX_CORE_INFO("Multiplayer Play: {} started with --mcp on port {} (its server answers once the game is up)", runtime.Name, mcpPort);
+            m_PlayRuntimes.push_back(std::move(runtime));
         };
 
         Net::NetSessionConfig config;
@@ -7129,6 +7141,11 @@ namespace Nox
     {
         // The other players' windows and the dedicated server close (not left to return to their start scene), then the session.
         m_PlayProcesses.clear();
+#if NOX_WITH_MCP
+        for (PlayRuntime& runtime : m_PlayRuntimes)
+            if (runtime.Probe)
+                runtime.Probe->Cancel();
+#endif
         m_PlayRuntimes.clear();
         m_PlaySession.reset();
         m_PlaySessionEnded = false;

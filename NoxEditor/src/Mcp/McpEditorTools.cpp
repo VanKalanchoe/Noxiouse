@@ -48,7 +48,7 @@ namespace Nox::Mcp
                     Json runtimes = Json::array();
                     for (const RuntimeEndpoint& runtime : context.Runtimes())
                         runtimes.push_back(Json{ { "name", runtime.Name }, { "player", runtime.Player }, { "mcpPort", runtime.Port },
-                                                 { "running", runtime.Running } });
+                                                 { "running", runtime.Running }, { "mcp", runtime.McpState } });
                     if (!runtimes.empty())
                         status["runtimes"] = runtimes;
                 }

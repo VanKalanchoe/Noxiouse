@@ -57,7 +57,7 @@ namespace Nox::Mcp
             if (context.Runtimes)
                 for (const RuntimeEndpoint& runtime : context.Runtimes())
                     list.push_back(Json{ { "name", runtime.Name }, { "player", runtime.Player }, { "server", runtime.Player == 0 },
-                                         { "mcpPort", runtime.Port }, { "running", runtime.Running } });
+                                         { "mcpPort", runtime.Port }, { "running", runtime.Running }, { "mcp", runtime.McpState } });
             return list;
         }
     }
@@ -354,7 +354,8 @@ namespace Nox::Mcp
                                "one of their tools and answers with its result (screenshots included). 'player': 2..8, or 0 for the "
                                "dedicated server; 'tool' left out lists that game's tools. Their tools: get_runtime_status, read_log, "
                                "get_hierarchy, find_entities, get_entity, screenshot, inject_input, wait_for, pause, list_commands, "
-                               "run_command, quit. get_editor_status / play list the games ('runtimes').";
+                               "run_command, quit (a dedicated server has no screenshot or inject_input). get_editor_status / play list the games "
+                               "('runtimes', with 'mcp': starting / ready / not listening).";
             tool.InputSchema = Schema()
                                    .Integer("player", "Which game: 2..8 (a player window) or 0 (the dedicated server)", true, 0, 8)
                                    .String("tool", "The tool to call (left out: list its tools)");
@@ -378,6 +379,19 @@ namespace Nox::Mcp
                 if (!found->Running)
                 {
                     done(ToolResult::Error(std::format("{} is not running anymore (its window was closed?)", found->Name)));
+                    return;
+                }
+                if (found->McpState == "starting")
+                {
+                    done(ToolResult::Error(std::format("{} is still starting: its MCP server (port {}) has not answered yet -- wait_for a few "
+                                                       "seconds and call again", found->Name, found->Port)));
+                    return;
+                }
+                if (found->McpState == "not listening")
+                {
+                    done(ToolResult::Error(std::format("{} never opened its MCP server on port {}: a NoxRuntime built before MCP5 ignores --mcp "
+                                                       "(the user builds the NoxRuntime target too), or its log says why it could not start",
+                                                       found->Name, found->Port)));
                     return;
                 }
                 std::string token;

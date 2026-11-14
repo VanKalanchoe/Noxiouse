@@ -345,6 +345,8 @@ namespace Nox::Mcp
         }
 
         // ------------------------------------------------------------------------------------------------------------- screenshot
+        // (only where something is drawn: a dedicated server has no view)
+        if (context.CaptureViewport)
         {
             Tool tool;
             tool.Name = "screenshot";
@@ -489,18 +491,47 @@ namespace Nox::Mcp
             tool.Name = "run_command";
             tool.Title = "Run a console command";
             tool.Description = "Runs an engine console line, as typed into the Output Log's Cmd line (several separated by ';'; NoxRuntime: its console). A command "
-                               "that needs more access than this server grants is refused; its output is returned.";
+                               "that needs more access than this server grants is refused. Answers its output and the log lines it wrote "
+                               "while it ran ('logged': commands that report through the log).";
             tool.InputSchema = Schema().String("line", "The command line, e.g. 'net.Status' or 'net.DebugTrace 1'", true);
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 const ConsoleAccess access = context.GrantedAccess ? context.GrantedAccess() : ConsoleAccess::Read;
+                // The command runs here, on the main thread, and is done when Execute returns; what it logged meanwhile (some commands
+                // report through the log, not their output) is in the log buffer by then.
+                const uint64_t logBefore = LogBuffer::Get().GetLatestSequence();
                 const ConsoleOutput output = Console::Get().Execute(arguments["line"].get<std::string>(), access);
+                std::vector<LogEntry> entries;
+                LogBuffer::Get().CopySince(logBefore, entries);
                 Json lines = Json::array();
+                std::vector<std::string> said; // (the console logs each command's echo and output lines too: not repeated under 'logged')
                 for (const ConsoleOutput::Line& line : output.Lines)
+                {
                     lines.push_back(Json{ { "level", line.Level == ConsoleLevel::Error ? "error" : line.Level == ConsoleLevel::Warning ? "warning" : "info" },
                                           { "text", line.Text } });
-                ToolResult result = ToolResult::Text(output.Lines.empty() ? std::string("(no output: see read_log for what it logged)") : output.Text());
-                result.Structured = Json{ { "lines", lines }, { "ok", !output.HasErrors() } };
+                    said.push_back(line.Text);
+                }
+                Json logged = Json::array();
+                std::string loggedText;
+                for (const LogEntry& entry : entries)
+                {
+                    if (entry.Text.rfind("> ", 0) == 0)
+                        continue; // the echo of a command
+                    if (auto it = std::find(said.begin(), said.end(), entry.Text); it != said.end())
+                    {
+                        said.erase(it);
+                        continue;
+                    }
+                    if (entry.Text.rfind("MCP: ", 0) == 0)
+                        continue; // calls logged meanwhile
+                    logged.push_back(Json{ { "level", LevelName(entry.Level) }, { "text", entry.Text } });
+                    loggedText += entry.Text + "\n";
+                }
+                std::string text = output.Text();
+                if (!loggedText.empty())
+                    text += (text.empty() ? "" : "\n") + std::string("Logged:\n") + loggedText;
+                ToolResult result = ToolResult::Text(text.empty() ? std::string("(no output)") : text);
+                result.Structured = Json{ { "lines", lines }, { "logged", logged }, { "ok", !output.HasErrors() } };
                 result.IsError = output.HasErrors();
                 done(std::move(result));
             };
@@ -640,6 +671,8 @@ namespace Nox::Mcp
         }
 
         // -------------------------------------------------------------------------------------------------------- inject_input
+        // (only where a player plays: a dedicated server's scripts have no local input)
+        if (context.HasLocalPlayer)
         {
             auto driver = std::make_shared<InputDriver>();
             Tool tool;

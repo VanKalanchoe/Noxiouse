@@ -31,10 +31,13 @@ namespace Nox::Mcp
         // Runs `poll` at the start of every frame (main thread) until it returns true -- tools that answer later (wait_for,
         // inject_input). The host fills it in; polls still going when its server stops are dropped (their calls were answered).
         std::function<void(std::function<bool()> poll)> EveryFrame;
+        // A local player reads input here (false: a dedicated server -- inject_input is left out, as screenshot is without
+        // CaptureViewport).
+        bool HasLocalPlayer = true;
     };
 
-    // The tools of both hosts: read_log, get_hierarchy, find_entities, get_entity, screenshot, list_commands, run_command, pause,
-    // wait_for, inject_input.
+    // The tools of both hosts: read_log, get_hierarchy, find_entities, get_entity, screenshot (with CaptureViewport), list_commands,
+    // run_command, pause, wait_for, inject_input (with HasLocalPlayer).
     std::vector<Tool> CreateGameTools(const HostContext& context);
 
     // inject_input's key names: the C# KeyCode names (W, LeftShift, Space, Alpha1, F5 ...) and SDL's ("Left Shift"), case ignored.

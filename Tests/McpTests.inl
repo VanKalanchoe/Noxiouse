@@ -375,9 +375,27 @@ static void TestMcpClient()
     const ClientReply unknown = CallServer(port, Token, "nothing/here", Json::object(), 10);
     CHECK(!unknown.Error.empty(), "an unknown method: the JSON-RPC error ('{}')", unknown.Error);
 
+    // The probe the editor starts for each game it gives --mcp: answers Up once the server is there.
+    auto up = ServerProbe::Start("test game", port, Token, 10.0);
+    for (int wait = 0; wait < 200 && up->Get() == ServerProbe::State::Starting; ++wait)
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    CHECK(up->Get() == ServerProbe::State::Up && std::string(ToString(up->Get())) == "ready", "the probe finds a running server: {}",
+          ToString(up->Get()));
+
     running = false;
     game.join();
     server.Stop();
+    // Nothing on the port (an old NoxRuntime that ignores --mcp): Absent after the time-out; Cancel ends a probe quietly.
+    auto absent = ServerProbe::Start("old game", port, Token, 1.0);
+    for (int wait = 0; wait < 200 && absent->Get() == ServerProbe::State::Starting; ++wait)
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    CHECK(absent->Get() == ServerProbe::State::Absent && std::string(ToString(absent->Get())) == "not listening",
+          "the probe reports a game that never opened its server: {}", ToString(absent->Get()));
+    auto cancelled = ServerProbe::Start("stopped game", port, Token, 30.0);
+    cancelled->Cancel();
+    for (int wait = 0; wait < 200 && cancelled->Get() == ServerProbe::State::Starting; ++wait)
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    CHECK(cancelled->Get() == ServerProbe::State::Cancelled, "Cancel (Play stopped) ends a probe: {}", ToString(cancelled->Get()));
     const ClientReply closed = CallServer(port, Token, "tools/list", Json::object(), 2);
     CHECK(!closed.Error.empty() && closed.Error.find("no answer") != std::string::npos, "a game that is gone: '{}'", closed.Error);
 

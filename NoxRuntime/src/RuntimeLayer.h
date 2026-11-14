@@ -59,8 +59,10 @@ namespace Nox
         // Headless: the console's lines (a thread reads stdin) and the periodic status line.
         void UpdateServerConsole(float ts);
         void RunConsoleCommand(const std::string& line);
-        void LogServerStatus();
-        void LogClients() const;
+        // The server's status line (load since the last one; the counters start again) and the joined clients' lines: written to the
+        // log every 10 s (headless) and answered by the console's status / clients commands (so run_command returns them).
+        std::string ServerStatusLine();
+        std::vector<std::string> ClientLines() const;
 
         // Networking: the role and sessions from the command line (before the scene starts: its scripts see their role in OnCreate);
         // receive / send around the frame; the client's session events.

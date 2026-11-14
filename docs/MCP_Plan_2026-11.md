@@ -3,6 +3,14 @@
 Status (2026-11-14): **C1 console and MCP0-MCP4 built and tested by the user; MCP5 built** (waiting for the user's test).
 Backlog items C1 and N7.
 
+Fixed after the user's first MCP5 test (2026-11-14): the players never answered -- NoxRuntime.exe was an older build (building
+NoxEditor does not build NoxRuntime), and the editor's log said "has an MCP server" at launch. Now a ServerProbe per game asks its
+server until it answers ("MCP: player 2's MCP server answers on ...") or warns after 60 s that it never did (old NoxRuntime, or its
+log says why), and runtime_call says the same ("still starting" / "never opened"). run_command on the dedicated server answered no
+lines: status / clients wrote only to the log -- they answer through their output now, and run_command also returns the log lines
+any command writes while it runs ('logged'). A dedicated server no longer lists screenshot and inject_input (no view, no local
+player). NoxToolsTest: 162 checks.
+
 MCP5 (2026-11-14): the server in NoxRuntime. The shared part moved into a static library, **NoxMcp** (`NoxMcp/src/Mcp`: McpProtocol,
 McpServer, McpValidation, McpInputPlayer from the editor; new McpHost -- `HostContext`, the part of the editor's context the shared
 tools need --, McpGameTools -- read_log, get_hierarchy, find_entities, get_entity, screenshot, list_commands, run_command, pause,

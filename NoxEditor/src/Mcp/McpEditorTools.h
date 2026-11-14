@@ -38,6 +38,7 @@ namespace Nox::Mcp
         int Player = 0;      // 2..8 (0: the dedicated server)
         uint16_t Port = 0;   // its MCP server on 127.0.0.1
         bool Running = false; // its process is still running
+        std::string McpState; // "starting", "ready" (its server answered), "not listening" (an old NoxRuntime, or it failed: its log)
     };
 
     // MCP4: the script build as the tools see it (ScriptBuilder).
