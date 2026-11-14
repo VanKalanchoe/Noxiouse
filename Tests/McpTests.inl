@@ -695,6 +695,40 @@ static void TestMcpAssets()
     const bool oldOk = MaterialSerializer::Deserialize(folder / "Old.nmat", oldRead);
     CHECK(oldOk && oldRead.ShadingModel == MaterialShadingModel::Unlit && oldRead.RoughnessFactor == 0.35f && oldRead.ToonBands == 7,
           "an NMA3 .nmat still loads (Unlit kept, the toon settings untouched)");
+
+    // Custom Lit (stylized step 3): the shading model, its Material Shader, parameters and textures by name in JSON and in .nmat files
+    // ("NMA5"; an "NMA4" file reads with the Custom Lit settings at their defaults).
+    MaterialData custom = material;
+    custom.ShadingModel = MaterialShadingModel::CustomLit;
+    custom.CustomShader = "Shaders/Hatching.slang";
+    custom.CustomParameters[1] = glm::vec4(0.5f, 0.25f, 1.0f, 2.0f);
+    custom.CustomTexture1 = { "Textures/hatch.png", 0 };
+    const Json customJson = MaterialToJson(custom);
+    MaterialData customBack;
+    CHECK(customJson["ShadingModel"] == "CustomLit" && customJson["CustomShader"] == "Shaders/Hatching.slang" && customJson["CustomParameters"].size() == 4 &&
+          customJson["CustomParameters"][1][3] == 2.0f && MaterialFromJson(customJson, customBack).empty() && MaterialToJson(customBack) == customJson,
+          "the Custom Lit shading model, its Material Shader, parameters and textures as JSON and back");
+    MaterialData partial = custom;
+    CHECK(MaterialFromJson(Json::parse(R"({ "CustomParameters": [[1, 0, 0, 1]] })"), partial).empty() && partial.CustomParameters[0] == glm::vec4(1, 0, 0, 1) &&
+          partial.CustomParameters[1] == custom.CustomParameters[1], "CustomParameters: a shorter list sets the first ones, the rest kept");
+    CHECK(!MaterialFromJson(Json::parse(R"({ "CustomParameters": [[1, 0, 0]] })"), partial).empty() &&
+          !MaterialFromJson(Json::parse(R"({ "CustomParameters": [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]] })"), partial).empty(),
+          "refused: a parameter of 3 numbers, five parameters");
+    MaterialData customFile;
+    CHECK(MaterialSerializer::Serialize(folder / "Custom.nmat", custom) && MaterialSerializer::Deserialize(folder / "Custom.nmat", customFile) &&
+          MaterialToJson(customFile) == customJson, "a Custom Lit material through a .nmat file (NMA5): every field back");
+    {
+        // An "NMA4" file (toon settings, no Custom Lit ones): what follows the toon settings is not read.
+        std::ofstream old(folder / "Toon4.nmat", std::ios::binary | std::ios::trunc);
+        old.write("NMA4", 4);
+        MaterialSerializer::WriteFields(old, toon);
+        MaterialSerializer::WriteShadingFields(old, toon);
+    }
+    MaterialData toonRead;
+    toonRead.CustomShader = "kept.slang";
+    const bool toonReadOk = MaterialSerializer::Deserialize(folder / "Toon4.nmat", toonRead);
+    CHECK(toonReadOk && toonRead.ShadingModel == MaterialShadingModel::Toon && toonRead.ToonBands == 3 && toonRead.CustomShader == "kept.slang",
+          "an NMA4 .nmat still loads (toon settings read, the Custom Lit ones untouched)");
     std::error_code ignored;
     std::filesystem::remove_all(folder, ignored);
 }

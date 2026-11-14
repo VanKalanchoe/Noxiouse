@@ -16,6 +16,7 @@
 #include <imgui_internal.h>// For Docking
 #include <ImGuizmo.h>
 #include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_misc.h>
 #include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_video.h>
@@ -204,6 +205,15 @@ namespace Nox
                 }
             }
             m_AnimationClipPanels.push_back(CreateScope<AnimationClipPanel>(clip, handle));
+        };
+        // A Material Shader (Custom Lit): opened in the program the system opens .slang files with (a code editor); saving it there
+        // builds it again (PollCustomLitShaders).
+        m_AssetOpeners[AssetType::MaterialShader] = [](AssetHandle handle)
+        {
+            const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+            const std::string url = "file:///" + std::filesystem::absolute(Project::GetActiveAssetDirectory() / metadata.FilePath).generic_string();
+            if (!SDL_OpenURL(url.c_str()))
+                NOX_CORE_ERROR("Could not open {} ({}): open it in your code editor from the folder", metadata.FilePath.generic_string(), SDL_GetError());
         };
         m_AssetOpeners[AssetType::Timeline] = [this](AssetHandle handle)
         {
@@ -632,6 +642,13 @@ namespace Nox
         // A scene being opened: a slice of its entities each frame (8 ms), swapped in once complete.
         if (m_SceneLoad && m_SceneLoad->Step(8.0))
             FinishSceneLoad();
+        // A Material Shader saved, added or removed (Custom Lit): the renderer's Custom Lit pipelines built again (twice a second).
+        m_CustomLitPollTimer += ts;
+        if (m_CustomLitPollTimer > 0.5f)
+        {
+            m_CustomLitPollTimer = 0.0f;
+            PollCustomLitShaders();
+        }
         // The streaming test world: a step a frame; done, its scene opens.
         if (m_TestWorldGeneration && m_TestWorldGeneration->Step())
         {
@@ -3835,6 +3852,9 @@ namespace Nox
             m_Renderer->ApplyProjectRendererSettings(Project::GetActive()->GetConfig().Renderer);
             Project::GetActive()->GetEditorAssetManager()->Init();
             AudioMixer::LoadProjectMixer(true); // its buses and effects (made with the default ones if the project has none yet)
+            // Its Material Shaders (Custom Lit, CustomLitShaders.h) before its materials are packed; then watched (PollCustomLitShaders).
+            m_Renderer->InitializeCustomLitShaders();
+            m_CustomLitSignature = CustomLitSignature();
             // The project's scripts (at startup ScriptEngine::Initialize loads them, after this).
             m_ScriptBuilder.SetProject(ScriptEngine::GetProjectScriptsProject());
             if (ScriptEngine::IsInitialized())
@@ -6694,6 +6714,42 @@ namespace Nox
         m_SceneHierarchyPanel.SetContext(m_EditorScene);
         m_SceneHierarchyPanel.ClearSelection();
         m_UnloadUnusedAssetsRequested = true;
+    }
+
+    std::string EditorLayer::CustomLitSignature() const
+    {
+        // Every Material Shader's path, size and last write: what changes when one is saved, added, moved or removed.
+        std::string signature;
+        const Ref<Project> project = Project::GetActive();
+        if (!project)
+            return signature;
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        for (const auto& [handle, metadata] : project->GetEditorAssetManager()->GetAssetRegistry())
+        {
+            if (metadata.Type != AssetType::MaterialShader)
+                continue;
+            std::error_code error;
+            const std::filesystem::path file = assetDirectory / metadata.FilePath;
+            const auto written = std::filesystem::last_write_time(file, error);
+            const auto size = error ? 0 : std::filesystem::file_size(file, error);
+            signature += metadata.FilePath.generic_string() + '|' + std::to_string(error ? 0 : written.time_since_epoch().count()) + '|' +
+                         std::to_string(size) + '\n';
+        }
+        return signature;
+    }
+
+    void EditorLayer::PollCustomLitShaders()
+    {
+        if (!m_Renderer || !Project::GetActive())
+            return;
+        std::string signature = CustomLitSignature();
+        if (signature == m_CustomLitSignature)
+            return;
+        m_CustomLitSignature = std::move(signature);
+        bool complete = true;
+        const std::vector<CustomLitSource> sources = CustomLitShaders::GatherProjectSources(complete);
+        NOX_CORE_INFO("Custom Lit: Material Shaders changed, building them again");
+        m_Renderer->SetCustomLitShaders(sources);
     }
 
     void EditorLayer::OpenAsset(AssetHandle handle)

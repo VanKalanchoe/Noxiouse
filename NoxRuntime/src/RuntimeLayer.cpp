@@ -103,6 +103,8 @@ namespace Nox
             // The project's quality preset ("Auto": the one this GPU should run, the fallback on smaller RT cards).
             m_Renderer->ApplyQualitySetting(Project::GetActive()->GetConfig().RenderQuality);
             m_Renderer->ApplyProjectRendererSettings(Project::GetActive()->GetConfig().Renderer);
+            // Its Material Shaders (Custom Lit): compiled from the project's files in a development run, the shipped ones in a package.
+            m_Renderer->InitializeCustomLitShaders();
         }
         AudioMixer::LoadProjectMixer(false); // its buses, effects and snapshots
 

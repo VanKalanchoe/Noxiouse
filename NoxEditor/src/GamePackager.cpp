@@ -19,6 +19,8 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Project/ProjectSerializer.h"
+#include "NoxCore/Core/Application.h"
+#include "NoxCore/Renderer/Renderer.h"
 
 namespace Nox
 {
@@ -227,6 +229,16 @@ namespace Nox
             }
             if (!copied)
                 report.Warnings.push_back("Self-contained .NET: no .NET 9 runtime found (DOTNET_ROOT, Program Files/dotnet): the game needs one installed");
+        }
+
+        // The project's Material Shaders (Custom Lit, CustomLitShaders.h) went with the executable's shaders/ folder above: the generated
+        // sources in shaders/Generated and their binaries, as the editor last built them. A build that failed has no binary to ship.
+        if (!settings.Server)
+        {
+            if (const Renderer* renderer = Application::Get().GetRenderer();
+                renderer && renderer->GetCustomLitStatus().ShaderCount > 0 && !renderer->GetCustomLitStatus().Ready)
+                report.Warnings.push_back("The project's Material Shaders do not compile (" + renderer->GetCustomLitStatus().Message +
+                                          "): Custom Lit materials are lit as Default Lit in the game until they do and it is packaged again");
         }
 
         // 2. The engine's assets the runtime reads (shaders are compiled at start, fonts for text, textures for defaults) -- none for a

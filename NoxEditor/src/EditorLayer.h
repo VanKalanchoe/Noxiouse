@@ -91,6 +91,8 @@ namespace Nox
         void CaptureProjectThumbnail();
         bool m_ThumbnailPending = false; // a project without a picture: taken a few seconds after it opened
         float m_ThumbnailTimer = 0.0f;
+        float m_CustomLitPollTimer = 0.0f;
+        std::string m_CustomLitSignature; // CustomLitSignature() as last built
         void SaveProject();
         
         // Each viewport's camera per scene, in <project>/Cache/EditorCameras.txt: a scene opens where it was looked at last.
@@ -190,6 +192,9 @@ namespace Nox
         // Opens whatever editor window is registered for handle's AssetType (m_AssetOpeners); does nothing for
         // types with none. What double-clicking an asset in the Content Browser or an inspector reference calls.
         void OpenAsset(AssetHandle handle);
+        // Custom Lit: the project's Material Shaders, watched (their paths, sizes, last writes) and built again when one changes.
+        std::string CustomLitSignature() const;
+        void PollCustomLitShaders();
 
         // Prefab Mode (docs/Prefab_Architecture_Plan_2026.md P3): the prefab's entities as a scene of their own, edited in
         // isolation. The level is kept aside and comes back on exit; Save writes the .nprefab, reloads the asset and spawns every

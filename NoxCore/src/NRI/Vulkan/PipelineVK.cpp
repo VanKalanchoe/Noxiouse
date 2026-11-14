@@ -361,7 +361,7 @@ namespace NRI
 
         // Shader objects are built on the pool (the start-up, compiling what has no cached binary); a hot reload (forceCompile), a
         // ray tracing pipeline or the pipeline path build here, as before.
-        const bool async = m_deviceVK.isShaderObjectExtensionEnabled() && !desc.forceCompile &&
+        const bool async = m_deviceVK.isShaderObjectExtensionEnabled() && !desc.forceCompile && !desc.buildNow &&
                            (desc.type == PipelineType::Graphics || desc.type == PipelineType::Compute);
         if (!async)
         {

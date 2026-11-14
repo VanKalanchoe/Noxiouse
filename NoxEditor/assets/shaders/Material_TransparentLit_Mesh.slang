@@ -24,6 +24,10 @@
 #include "PBRLighting.slang"
 #include "MaterialLobes.slang"
 #include "ToonShading.slang"
+#include "CustomLit.slang"
+// The Custom Lit build (CustomLit.slang; Renderer: the forward pipelines' Custom Lit variants) is this file compiled with NOX_CUSTOM_LIT by a
+// generated file that first includes every Material Shader of the project (custom_lit_light / custom_lit_ambient by slot): a Custom Lit
+// material's lights and ambient come from its shader there, every other material is shaded as always.
 #include "MipFeedback.slang"
 #include "RayHitShading.slang"
 #include "HeightFog.slang"
@@ -351,6 +355,10 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     InstanceData instance = instances[vertIn.drawID];
 
     SamplerState sampLinearHandle = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
+#ifdef NOX_CUSTOM_LIT
+    // A Custom Lit surface's UV footprint (CustomLitSurface::uvFootprint), here while every pixel of the quad is still running.
+    const float customUVFootprint = max(length(ddx(vertIn.uv0)), length(ddy(vertIn.uv0)));
+#endif
 
     // Texture streaming: transparent surfaces never reach the G-buffer, so they report here (hardware derivatives).
     if (ubo->mipFeedbackReference != 0 && isMipFeedbackPixel(int2(vertIn.pos.xy), ubo->mipFeedbackFrame))
@@ -522,6 +530,26 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     if (hasLobes)
         lobeShading = lobe_prepare(ubo, lobes, anisotropicT, n, v, NdotV, baseColor.rgb, metallic, alphaRoughness);
 
+#ifdef NOX_CUSTOM_LIT
+    // A Custom Lit material (CustomLit.slang): its Material Shader lights it below. Its occlusion is filled in before ambient() (here
+    // the ambient occlusion is read after the lights).
+    const bool customLit = instance.shadingModel == ShadingModelCustomLit;
+    CustomLitSurface customSurface;
+    if (customLit)
+    {
+        float3 customEmissive = instance.emissiveFactor.rgb * instance.emissiveStrength;
+        if (instance.emissiveTextureIndex != 0xFFFFFFFF)
+            customEmissive *= SampleMaterialTextureBias(ubo, instance.emissiveTextureIndex, sampLinearHandle,
+                                                        instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).rgb;
+        const float4 clip = mul(ubo->proj, mul(ubo->view, float4(vertIn.worldPos, 1.0)));
+        const float2 screenUV = clip.w > 1e-6 ? float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5) : float2(0.5);
+        customSurface = custom_lit_surface(ubo, gpuMaterial, vertIn.worldPos, n, v, baseColor.rgb, metallic, perceptualRoughness, 1.0,
+                                           customEmissive, vertIn.uv0, customUVFootprint, screenUV);
+    }
+#else
+    const bool customLit = false;
+#endif
+
     // The glass's first pass (MESHLET_GLASS_MULTIPLY): what the pane lets through of the scene behind it, multiplied into it -- the
     // transmission past the Fresnel reflection, through the base color, where it covers the pixel. Glass that bends or blurs the view
     // (a volume, roughness: the color pyramid) lets nothing through here; its second pass adds what it shows. Smooth: up to the
@@ -572,7 +600,8 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         float lightDistance = 100000.0 * ubo->unitsPerMeter; // a directional light: as far as a shadow ray needs to go
         float3 contribution;
 
-        if (is_area_light(lightType))
+        // (A Custom Lit surface takes a rect / disc light as a point light at its centre: the punctual path below.)
+        if (is_area_light(lightType) && !customLit)
         {
             // Rect: exact diffuse, representative-point specular (PBRLighting.slang); its shadow ray to a point of it that moves
             // with the pixel and the frame (a soft shadow's grain the temporal upscale smooths).
@@ -596,36 +625,80 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         }
         else
         {
+            // The light's shadow map / cloud shadow (`shadow`), apart from its falloff (`attenuation`): a Custom Lit shader gets them
+            // apart (CustomLitLight), the others take their product.
+            float shadow = 1.0;
             if (lightType == 0)
             {
                 l = normalize(light.direction.xyz);
-                attenuation = cloud_shadow(ubo, vertIn.worldPos, i, l);
+                shadow = cloud_shadow(ubo, vertIn.worldPos, i, l);
                 if (i == ubo->shadowMaskLightIndex && sunCascades != nullptr && dot(n, l) > 0.0)
                 {
-                    attenuation *= sun_shadow_map(ubo, sunCascades, vertIn.worldPos, n, shadowNoise);
+                    shadow *= sun_shadow_map(ubo, sunCascades, vertIn.worldPos, n, shadowNoise);
                     shadowMapped = true;
                 }
             }
             else
             {
-                // Inverse square held at the source radius, range window, cone (shaderIO.h).
-                float3 lightVec = light.position.xyz - vertIn.worldPos;
-                float distance = length(lightVec);
-                lightDistance = distance;
-                l = distance > 0.0001 ? lightVec / distance : float3(0.0, 1.0, 0.0);
-                attenuation = light_distance_attenuation(light, distance) * light_spot_attenuation(light, l);
+                if (is_area_light(lightType)) // (a Custom Lit surface only: CustomLit.slang)
+                    attenuation = custom_lit_area_attenuation(light, vertIn.worldPos, l, lightDistance);
+                else
+                {
+                    // Inverse square held at the source radius, range window, cone (shaderIO.h).
+                    float3 lightVec = light.position.xyz - vertIn.worldPos;
+                    float distance = length(lightVec);
+                    lightDistance = distance;
+                    l = distance > 0.0001 ? lightVec / distance : float3(0.0, 1.0, 0.0);
+                    attenuation = light_distance_attenuation(light, distance) * light_spot_attenuation(light, l);
+                }
                 float mapVisibility;
                 if (attenuation > 0.0 && dot(n, l) > 0.0 && local_light_shadow_map(ubo, i, light, vertIn.worldPos, n, l, shadowNoise, mapVisibility))
                 {
-                    attenuation *= mapVisibility; // its shadow map (Settings > Local Light Shadows) instead of the shadow ray
+                    shadow = mapVisibility; // its shadow map (Settings > Local Light Shadows) instead of the shadow ray
                     shadowMapped = true;
                 }
             }
 
-            if (attenuation <= 0.0)
+            if (attenuation * shadow <= 0.0 && !customLit)
             {
                 continue;
             }
+
+#ifdef NOX_CUSTOM_LIT
+            // A Custom Lit surface: its Material Shader's light() -- every light in reach, the ones it faces away from in shadow (its own
+            // side); a traced shadow ray below takes a shadowed light's share back out, as for the others.
+            if (customLit)
+            {
+                if (attenuation <= 0.0)
+                    continue;
+                const bool facing = dot(n, l) > 0.0;
+                contribution = custom_lit_light(gpuMaterial.customLitSlot, customSurface,
+                                                custom_lit_make_light(l, light.color.rgb * light.color.w * attenuation, facing ? shadow : 0.0,
+                                                                      lightDistance, min(lightType, 3u)));
+                directLighting += contribution;
+                if (!facing)
+                    continue;
+                if (traceShadows && !shadowMapped)
+                {
+                    float weight = dot(contribution, float3(0.2126, 0.7152, 0.0722));
+                    uint weakest = 0;
+                    for (uint slot = 1; slot < ShadowedLightCount; ++slot)
+                    {
+                        if (shadowedWeight[slot] < shadowedWeight[weakest])
+                            weakest = slot;
+                    }
+                    if (weight > shadowedWeight[weakest])
+                    {
+                        shadowedContribution[weakest] = contribution;
+                        shadowedDirection[weakest] = l;
+                        shadowedDistance[weakest] = lightDistance;
+                        shadowedWeight[weakest] = weight;
+                    }
+                }
+                continue;
+            }
+#endif
+            attenuation *= shadow;
 
             float NdotL = clamp(dot(n, l), 0.001, 1.0);
             if (dot(n, l) <= 0.0)
@@ -686,6 +759,17 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         directLighting = max(directLighting, float3(0.0));
     }
 
+#ifdef NOX_CUSTOM_LIT
+    // The ambient as a white matte surface (diffuse) and a perfect mirror of this roughness (F0 = F90 = 1) receive it: what the Material
+    // Shader's ambient() gets (CustomLitAmbient, as the deferred Custom Lit pass gives it).
+    if (customLit)
+    {
+        diffuseColor = float3(1.0);
+        specularColor = float3(1.0);
+        specularEnvironmentR0 = float3(1.0);
+        specularEnvironmentR90 = float3(1.0);
+    }
+#endif
     // The lobes' ambient (as DeferredLighting.slang): the film's Fresnel as the split sum's F0, an anisotropic surface's environment
     // along its bent reflection.
     float3 environmentReflection = reflection;
@@ -885,6 +969,15 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     }
 
     float3 color = (directLighting + ambientDiffuse + ambientSpecular) * ao;
+#ifdef NOX_CUSTOM_LIT
+    if (customLit)
+    {
+        // (The diffuse ambient above is a white surface's: ambient() applies the occlusion and its colour.) A blended Custom Lit
+        // surface's transmission share is not taken out of its light here: ambient() gets the full light.
+        customSurface.occlusion = ao;
+        color = directLighting + custom_lit_ambient(gpuMaterial.customLitSlot, customSurface, custom_lit_make_ambient(ambientDiffuse, ambientSpecular));
+    }
+#endif
 
     float3 emissive = instance.emissiveFactor.rgb * instance.emissiveStrength;
     if (instance.emissiveTextureIndex != 0xFFFFFFFF)

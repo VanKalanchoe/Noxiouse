@@ -227,12 +227,20 @@ struct GpuMaterial
     vec3 toonRimColor;
     float toonRimWidth;
     float toonRimIntensity;
+
+    // The Custom Lit shading model (MaterialData::Custom*; CustomLit.slang): which Material Shader lights it (the renderer's slot for
+    // it, CustomLitShaders.h; a material whose shader is not ready packs as Default Lit instead), its four parameters and two textures
+    // (0xFFFFFFFF: none; the first sRGB, the second linear).
+    uint32_t customLitSlot;
+    uint32_t customTextureIndex[2];
+    vec4 customParameters[4];
 };
 
 // GpuMaterial::shadingModel (MaterialShadingModel, DataTypes.h).
 STATIC_CONST uint32_t ShadingModelDefaultLit = 0u;
 STATIC_CONST uint32_t ShadingModelUnlit = 1u;
 STATIC_CONST uint32_t ShadingModelToon = 2u;
+STATIC_CONST uint32_t ShadingModelCustomLit = 3u;
 
 // GpuMaterial::lobes.
 STATIC_CONST uint32_t MaterialLobeClearcoat = 1u << 0;
@@ -275,15 +283,19 @@ float2 uv_transform_delta(float3 row0, float3 row1, float2 delta)
     return float2(dot(row0.xy, delta), dot(row1.xy, delta));
 }
 
-// The G-buffer material target's blue (RGBA8): the pixel's MaterialLobe* bits (which lobe targets hold data for it) and the
-// shading model's bit -- unlit, or toon (its lobe target then holds the toon settings: gbuffer_encode_toon) -- as a byte.
-static const uint GBufferUnlit = 0x80u;
+// The G-buffer material target's blue (RGBA8): the pixel's MaterialLobe* bits (which lobe targets hold data for it; low 6 bits) and its
+// shading model in the top two bits -- Default Lit 0, toon 0x40 (its lobe target then holds the toon settings: gbuffer_encode_toon),
+// unlit 0x80, Custom Lit 0xC0 (its lobe target holds which Material Shader lights it: gbuffer_encode_custom_lit) -- as a byte.
+static const uint GBufferModelMask = 0xC0u;
 static const uint GBufferToon = 0x40u;
+static const uint GBufferUnlit = 0x80u;
+static const uint GBufferCustomLit = 0xC0u;
 
 float gbuffer_encode_flags(uint lobes, uint shadingModel)
 {
-    const uint model = shadingModel == ShadingModelUnlit ? GBufferUnlit : shadingModel == ShadingModelToon ? GBufferToon : 0u;
-    return float((lobes & 0x3Fu) | model) / 255.0;
+    const uint model = shadingModel == ShadingModelUnlit ? GBufferUnlit : shadingModel == ShadingModelToon ? GBufferToon
+                     : shadingModel == ShadingModelCustomLit ? GBufferCustomLit : 0u;
+    return float((model == 0u ? (lobes & 0x3Fu) : 0u) | model) / 255.0;
 }
 
 uint gbuffer_flags(float encoded)
@@ -293,12 +305,25 @@ uint gbuffer_flags(float encoded)
 
 bool gbuffer_unlit(float encoded)
 {
-    return (gbuffer_flags(encoded) & GBufferUnlit) != 0u;
+    return (gbuffer_flags(encoded) & GBufferModelMask) == GBufferUnlit;
 }
 
 bool gbuffer_toon(float encoded)
 {
-    return (gbuffer_flags(encoded) & GBufferToon) != 0u;
+    return (gbuffer_flags(encoded) & GBufferModelMask) == GBufferToon;
+}
+
+bool gbuffer_custom_lit(float encoded)
+{
+    return (gbuffer_flags(encoded) & GBufferModelMask) == GBufferCustomLit;
+}
+
+// A Custom Lit pixel's lobe target (RGBA32_UINT; it has no lobes, which are Default Lit only): x the Material Shader's slot
+// (GpuMaterial::customLitSlot), y the material's record (SceneInstances::materials: its parameters and textures), z the mesh's first UV
+// set (two halves), w how far that UV moves across a pixel (a half: the Material Shader's texture mips; CustomLit.slang decodes it).
+uint4 gbuffer_encode_custom_lit(uint slot, uint materialIndex, float2 uv, float uvFootprint)
+{
+    return uint4(slot, materialIndex, f32tof16(uv.x) | (f32tof16(uv.y) << 16u), f32tof16(min(uvFootprint, 60000.0)));
 }
 
 // A toon pixel's settings in its lobe target (RGBA32_UINT; a toon pixel has no lobes -- they are Default Lit only), as Unreal keeps a
@@ -843,6 +868,10 @@ struct UniformBufferObject
     float ssrMaxDistance;   // world units
     float ssrThickness;     // world units
     float ssrMaxRoughness;
+
+    // Seconds since the renderer started, wrapped every hour (float precision stays sub-millisecond): what animated Custom Lit shaders
+    // read (CustomLitSurface::time).
+    float timeSeconds;
 };
 
 STATIC_CONST uint32_t OIT_WEIGHTED_BLENDED = 0;

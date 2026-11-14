@@ -226,8 +226,7 @@ namespace Nox
 
                 cmd.bindPipeline(NRI::PipelineBindPoint::RayTracing, *m_pathTracerPipeline);
 
-                glm::mat4 viewProj = uniformData.proj * uniformData.view;
-                shaderio::PushConstantPathTracer ptPush{};
+                    shaderio::PushConstantPathTracer ptPush{};
                 ptPush.invViewProj = uniformData.invViewProj;
                 ptPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
                 ptPush.viewportSize = glm::vec2(rw, rh);
@@ -605,127 +604,163 @@ namespace Nox
         m_renderGraph.GetBlackboard().Get<FrameGraphResources>().AerialPerspective = aerialPerspective;
         const float aerialKmPerUnit = WorldUnits::ToMeters(1.0f) / 1000.0f * glm::max(m_proceduralSky.AerialPerspectiveScale, 0.0f);
 
+        // What the deferred lighting reads and its push constants: the pass below, and the Custom Lit pass after it (the same shader
+        // compiled with the project's Material Shaders, CustomLit.slang) on the pixels it leaves.
+        auto declareReads = [this, &resources, &frame, aerialPerspective](RGBuilder& builder)
+        {
+            builder.Read(resources.Visibility);
+            builder.Read(resources.GBufferAlbedo);
+            builder.Read(resources.GBufferNormal);
+            builder.Read(resources.GBufferMaterial);
+            builder.Read(resources.GBufferEmission);
+            builder.Read(resources.GBufferLobes);    // the lobes (gbuffer_load_lobes, through the uniforms)
+            builder.Read(resources.GBufferSpecular);
+            builder.Read(resources.Depth);
+            if (frame.gbufferVelocityWritten && m_debugMode == 15)
+                builder.Read(resources.GBufferVelocity);
+            // Entity ID debug view (through the uniforms).
+            builder.Read(resources.Entity);
+            // Only the outputs of features that run this frame.
+            if (frame.rtShadowsAdded || frame.shadowMapsAdded)
+                builder.Read(resources.RawShadowMask);
+            if (frame.ssrAdded)
+                builder.Read(resources.SSR);
+            if (frame.ssgiAdded)
+                builder.Read(resources.SSGI);
+            // Local lights' shadow maps (ShadowMaps.slang, through the uniforms).
+            if (resources.LocalShadowAtlas.IsValid())
+                builder.Read(resources.LocalShadowAtlas);
+            if (frame.nrdShadowsAdded)
+                builder.Read(resources.DenoisedShadowMask);
+            if (frame.rtReflectionsAdded)
+                builder.Read(resources.RawReflection);
+            if (frame.nrdReflectionsAdded)
+                builder.Read(resources.DenoisedReflection);
+            if (frame.restirGIAdded)
+                builder.Read(resources.ReSTIRGIRaw);
+            if (frame.nrdGIAdded)
+                builder.Read(resources.ReSTIRGIDenoised);
+            if (frame.restirDIAdded)
+            {
+                builder.Read(resources.ReSTIRDIDiffuse);
+                builder.Read(resources.ReSTIRDISpecular);
+            }
+            if (frame.nrdDIAdded)
+            {
+                builder.Read(resources.ReSTIRDIDiffuseDenoised);
+                builder.Read(resources.ReSTIRDISpecularDenoised);
+            }
+            if (frame.ddgiAdded)
+            {
+                ReadDDGI(builder, resources, frame.ddgiWriteIndex);
+            }
+            if (frame.screenProbeGIAdded)
+                builder.Read(resources.ScreenProbeGI[frame.screenProbeGIWriteIndex]);
+            if (frame.ssaoAdded)
+                builder.Read(resources.SSAO);
+            ReadIfValid(builder, resources.TLAS);
+            ReadGpuScene(builder, resources);
+            if (aerialPerspective.IsValid())
+                builder.Read(aerialPerspective);
+        };
+        auto makePush = [this, res = &resources, aerialPerspective, aerialKmPerUnit](RGPassContext& context)
+        {
+            const FrameGraphState& frame = m_frame;
+            const float rw = static_cast<float>(frame.renderExtent.width);
+            const float rh = static_cast<float>(frame.renderExtent.height);
+            glm::mat4 viewProj = uniformData.proj * uniformData.view;
+            shaderio::PushConstantDeferredLighting lightingPush{};
+            lightingPush.invViewProj = uniformData.invViewProj;
+            lightingPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+            lightingPush.visibilityTextureIndex = context.Slot(res->Visibility);
+            lightingPush.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);
+            lightingPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
+            lightingPush.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
+            lightingPush.gbufferEmissionIndex = context.Slot(res->GBufferEmission);
+            lightingPush.depthTextureIndex = context.Slot(res->Depth);
+            lightingPush.viewportSize = glm::vec2(rw, rh);
+            lightingPush.debugMode = m_debugMode;
+            lightingPush.gbufferVelocityIndex = frame.gbufferVelocityWritten && m_debugMode == 15
+                ? context.Slot(res->GBufferVelocity)
+                : 0xFFFFFFFF;
+            lightingPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+            // The denoised shadow mask / reflection is bound only when its NRD pass ran this frame (it runs only
+            // together with its RT pass, e.g. not when the master hybrid RT toggle is off); otherwise the raw result.
+            // Only report REBLUR/RELAX when the denoised texture is actually bound: the raw fallback is plain linear
+            // RGB, and reporting the denoiser would make the shader wrongly YCoCg-decode it.
+            lightingPush.shadowMaskTextureIndex = frame.nrdShadowsAdded
+                ? context.Slot(res->DenoisedShadowMask)
+                : ((frame.rtShadowsAdded || frame.shadowMapsAdded) ? context.Slot(res->RawShadowMask) : 0);
+            const uint32_t nrdShadowBit = frame.nrdShadowsAdded ? 1 : 0;
+            const uint32_t nrdReflMode = frame.nrdReflectionsAdded ? static_cast<uint32_t>(m_nrdReflectionDenoiser) : 0;
+            lightingPush.nrdShadowsEnabled = nrdShadowBit | (nrdReflMode << 1);
+            lightingPush.reflectionTextureIndex = frame.nrdReflectionsAdded
+                ? context.Slot(res->DenoisedReflection)
+                : (frame.rtReflectionsAdded ? context.Slot(res->RawReflection) : 0);
+            lightingPush.diffuseGIMode = uniformData.diffuseGIMode;
+            lightingPush.restirGIDiffuseTextureIndex = uniformData.restirGIDiffuseTextureIndex;
+            // The denoiser mode only when the denoised texture is bound (the raw result is plain linear color).
+            lightingPush.restirGIDenoiserMode = frame.nrdGIAdded ? static_cast<uint32_t>(m_nrdGIDenoiser) : 0;
+            lightingPush.directLightingMode = uniformData.directLightingMode;
+            lightingPush.restirDIDiffuseTextureIndex = uniformData.restirDIDiffuseTextureIndex;
+            lightingPush.restirDISpecularTextureIndex = uniformData.restirDISpecularTextureIndex;
+            lightingPush.restirDIDenoiserMode = frame.nrdDIAdded ? static_cast<uint32_t>(m_nrdDIDenoiser) : 0;
+            lightingPush.ssaoTextureIndex = frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
+            lightingPush.aerialPerspectiveTextureIndex = aerialPerspective.IsValid() ? context.Slot(aerialPerspective) : 0xFFFFFFFF;
+            lightingPush.aerialPerspectiveKmPerUnit = aerialKmPerUnit;
+            lightingPush.screenProbeGITextureIndex = frame.screenProbeGIAdded ? context.Slot(res->ScreenProbeGI[frame.screenProbeGIWriteIndex])
+                                                                              : 0xFFFFFFFF;
+            lightingPush.ssrTextureIndex = frame.ssrAdded ? context.Slot(res->SSR) : 0xFFFFFFFF;
+            lightingPush.ssgiTextureIndex = frame.ssgiAdded ? context.Slot(res->SSGI) : 0xFFFFFFFF;
+            return lightingPush;
+        };
+
         m_renderGraph.AddPass("Deferred Lighting", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
-                builder.Read(resources.Visibility);
-                builder.Read(resources.GBufferAlbedo);
-                builder.Read(resources.GBufferNormal);
-                builder.Read(resources.GBufferMaterial);
-                builder.Read(resources.GBufferEmission);
-                builder.Read(resources.GBufferLobes);    // the lobes (gbuffer_load_lobes, through the uniforms)
-                builder.Read(resources.GBufferSpecular);
-                builder.Read(resources.Depth);
-                if (frame.gbufferVelocityWritten && m_debugMode == 15)
-                    builder.Read(resources.GBufferVelocity);
-                // Entity ID debug view (through the uniforms).
-                builder.Read(resources.Entity);
-                // Only the outputs of features that run this frame.
-                if (frame.rtShadowsAdded || frame.shadowMapsAdded)
-                    builder.Read(resources.RawShadowMask);
-                if (frame.ssrAdded)
-                    builder.Read(resources.SSR);
-                if (frame.ssgiAdded)
-                    builder.Read(resources.SSGI);
-                // Local lights' shadow maps (ShadowMaps.slang, through the uniforms).
-                if (resources.LocalShadowAtlas.IsValid())
-                    builder.Read(resources.LocalShadowAtlas);
-                if (frame.nrdShadowsAdded)
-                    builder.Read(resources.DenoisedShadowMask);
-                if (frame.rtReflectionsAdded)
-                    builder.Read(resources.RawReflection);
-                if (frame.nrdReflectionsAdded)
-                    builder.Read(resources.DenoisedReflection);
-                if (frame.restirGIAdded)
-                    builder.Read(resources.ReSTIRGIRaw);
-                if (frame.nrdGIAdded)
-                    builder.Read(resources.ReSTIRGIDenoised);
-                if (frame.restirDIAdded)
-                {
-                    builder.Read(resources.ReSTIRDIDiffuse);
-                    builder.Read(resources.ReSTIRDISpecular);
-                }
-                if (frame.nrdDIAdded)
-                {
-                    builder.Read(resources.ReSTIRDIDiffuseDenoised);
-                    builder.Read(resources.ReSTIRDISpecularDenoised);
-                }
-                if (frame.ddgiAdded)
-                {
-                    ReadDDGI(builder, resources, frame.ddgiWriteIndex);
-                }
-                if (frame.screenProbeGIAdded)
-                    builder.Read(resources.ScreenProbeGI[frame.screenProbeGIWriteIndex]);
-                if (frame.ssaoAdded)
-                    builder.Read(resources.SSAO);
-                ReadIfValid(builder, resources.TLAS);
-                ReadGpuScene(builder, resources);
-                if (aerialPerspective.IsValid())
-                    builder.Read(aerialPerspective);
+                declareReads(builder);
                 builder.ColorTarget(resources.HDRScene, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
                 builder.SetRenderArea(frame.renderExtent);
             },
-            [this, res = &resources, aerialPerspective, aerialKmPerUnit](RGPassContext& context)
+            [this, makePush](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
-                const FrameGraphState& frame = m_frame;
-                const float rw = static_cast<float>(frame.renderExtent.width);
-                const float rh = static_cast<float>(frame.renderExtent.height);
-
                 cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_deferredLightingPipeline);
                 cmd.setCullMode(NRI::CullMode::None);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
                 cmd.setColorBlendEnable(0, false);
                 cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-
-                glm::mat4 viewProj = uniformData.proj * uniformData.view;
-                shaderio::PushConstantDeferredLighting lightingPush{};
-                lightingPush.invViewProj = uniformData.invViewProj;
-                lightingPush.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                lightingPush.visibilityTextureIndex = context.Slot(res->Visibility);
-                lightingPush.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);
-                lightingPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
-                lightingPush.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
-                lightingPush.gbufferEmissionIndex = context.Slot(res->GBufferEmission);
-                lightingPush.depthTextureIndex = context.Slot(res->Depth);
-                lightingPush.viewportSize = glm::vec2(rw, rh);
-                lightingPush.debugMode = m_debugMode;
-                lightingPush.gbufferVelocityIndex = frame.gbufferVelocityWritten && m_debugMode == 15
-                    ? context.Slot(res->GBufferVelocity)
-                    : 0xFFFFFFFF;
-                lightingPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                // The denoised shadow mask / reflection is bound only when its NRD pass ran this frame (it runs only
-                // together with its RT pass, e.g. not when the master hybrid RT toggle is off); otherwise the raw result.
-                // Only report REBLUR/RELAX when the denoised texture is actually bound: the raw fallback is plain linear
-                // RGB, and reporting the denoiser would make the shader wrongly YCoCg-decode it.
-                lightingPush.shadowMaskTextureIndex = frame.nrdShadowsAdded
-                    ? context.Slot(res->DenoisedShadowMask)
-                    : ((frame.rtShadowsAdded || frame.shadowMapsAdded) ? context.Slot(res->RawShadowMask) : 0);
-                const uint32_t nrdShadowBit = frame.nrdShadowsAdded ? 1 : 0;
-                const uint32_t nrdReflMode = frame.nrdReflectionsAdded ? static_cast<uint32_t>(m_nrdReflectionDenoiser) : 0;
-                lightingPush.nrdShadowsEnabled = nrdShadowBit | (nrdReflMode << 1);
-                lightingPush.reflectionTextureIndex = frame.nrdReflectionsAdded
-                    ? context.Slot(res->DenoisedReflection)
-                    : (frame.rtReflectionsAdded ? context.Slot(res->RawReflection) : 0);
-                lightingPush.diffuseGIMode = uniformData.diffuseGIMode;
-                lightingPush.restirGIDiffuseTextureIndex = uniformData.restirGIDiffuseTextureIndex;
-                // The denoiser mode only when the denoised texture is bound (the raw result is plain linear color).
-                lightingPush.restirGIDenoiserMode = frame.nrdGIAdded ? static_cast<uint32_t>(m_nrdGIDenoiser) : 0;
-                lightingPush.directLightingMode = uniformData.directLightingMode;
-                lightingPush.restirDIDiffuseTextureIndex = uniformData.restirDIDiffuseTextureIndex;
-                lightingPush.restirDISpecularTextureIndex = uniformData.restirDISpecularTextureIndex;
-                lightingPush.restirDIDenoiserMode = frame.nrdDIAdded ? static_cast<uint32_t>(m_nrdDIDenoiser) : 0;
-                lightingPush.ssaoTextureIndex = frame.ssaoAdded ? context.Slot(res->SSAO) : 0xFFFFFFFF;
-                lightingPush.aerialPerspectiveTextureIndex = aerialPerspective.IsValid() ? context.Slot(aerialPerspective) : 0xFFFFFFFF;
-                lightingPush.aerialPerspectiveKmPerUnit = aerialKmPerUnit;
-                lightingPush.screenProbeGITextureIndex = frame.screenProbeGIAdded ? context.Slot(res->ScreenProbeGI[frame.screenProbeGIWriteIndex])
-                                                                                  : 0xFFFFFFFF;
-                lightingPush.ssrTextureIndex = frame.ssrAdded ? context.Slot(res->SSR) : 0xFFFFFFFF;
-                lightingPush.ssgiTextureIndex = frame.ssgiAdded ? context.Slot(res->SSGI) : 0xFFFFFFFF;
+                const shaderio::PushConstantDeferredLighting lightingPush = makePush(context);
                 cmd.pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
-
                 cmd.drawMeshTasks(1, 1, 1);
             });
+
+        // Custom Lit (CustomLit.slang): the pixels of materials lit by the project's Material Shaders, which the pass above left, lit by
+        // the same shader compiled with them (one pass for every Material Shader: the pixel's material names its slot). Not with the
+        // debug views (they show those pixels above, as Default Lit).
+        if (m_customLitPipeline && m_gpuScene.GetCustomLitMaterialCount() > 0 && m_debugMode == 0)
+        {
+            m_renderGraph.AddPass("Custom Lit", RGPassFlags::Raster,
+                [&](RGBuilder& builder)
+                {
+                    declareReads(builder);
+                    builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
+                    builder.SetRenderArea(frame.renderExtent);
+                },
+                [this, makePush](RGPassContext& context)
+                {
+                    NRI::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_customLitPipeline);
+                    cmd.setCullMode(NRI::CullMode::None);
+                    cmd.setDepthTestEnable(false);
+                    cmd.setDepthWriteEnable(false);
+                    cmd.setColorBlendEnable(0, false);
+                    cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+                    const shaderio::PushConstantDeferredLighting lightingPush = makePush(context);
+                    cmd.pushData(&lightingPush, sizeof(shaderio::PushConstantDeferredLighting));
+                    cmd.drawMeshTasks(1, 1, 1);
+                });
+        }
     }
 }

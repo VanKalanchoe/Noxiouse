@@ -252,6 +252,19 @@ namespace Nox
         packed.toonRimColor = glm::clamp(material.ToonRimColor, glm::vec3(0.0f), glm::vec3(1.0f));
         packed.toonRimWidth = std::clamp(material.ToonRimWidth, 0.0f, 1.0f);
         packed.toonRimIntensity = std::clamp(material.ToonRimIntensity, 0.0f, 8.0f);
+        // The Custom Lit shading model (CustomLitShaders.h): its Material Shader's slot -- none (no such shader, or it did not compile):
+        // packed as Default Lit, so the surface is lit rather than black -- and what the material gives the shader.
+        packed.customLitSlot = 0xFFFFFFFFu;
+        if (material.ShadingModel == MaterialShadingModel::CustomLit)
+        {
+            packed.customLitSlot = Renderer::FindCustomLitSlot(material.CustomShader);
+            if (packed.customLitSlot == 0xFFFFFFFFu)
+                packed.shadingModel = shaderio::ShadingModelDefaultLit;
+        }
+        packed.customTextureIndex[0] = static_cast<uint32_t>(GetTextureIndex(material.CustomTexture1.Path));
+        packed.customTextureIndex[1] = static_cast<uint32_t>(GetTextureIndex(material.CustomTexture2.Path));
+        for (int32_t parameter = 0; parameter < MaterialCustomParameterCount; ++parameter)
+            packed.customParameters[parameter] = material.CustomParameters[parameter];
         packed.diffuseTransmission = glm::clamp(material.DiffuseTransmission, 0.0f, 1.0f);
         packed.pathTracerFlags = material.PathTracerFlags;
         packed.depthBias = glm::max(material.DepthBias, 0.0f);
@@ -377,6 +390,17 @@ namespace Nox
         watchShader("assets/shaders/Material_Unlit_Mesh.slang", "Unlit", [this]() { createUnlitPipeline(true); createAVBOITPipelines(true); });
         watchShader("assets/shaders/Wireframe.slang", "Wireframe", [this]() { createWireframePipeline(true); });
         watchShader("assets/shaders/Material_TransparentLit_Mesh.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); createAVBOITPipelines(true); });
+        // The Custom Lit pipelines include the deferred lighting and the forward shader (CustomLitShaders.h): built again with them.
+        for (const char* shader : { "CustomLit", "Material_TransparentLit_Mesh", "DeferredLighting", "PBRLighting" })
+            watchShader(std::string("assets/shaders/") + shader + ".slang", "CustomLit", [this]()
+            {
+                if (m_customLitStatus.ShaderCount > 0 && m_shaderCompiler->canCompile())
+                {
+                    createCustomLitPipelines(true);
+                    ++m_customLitStatus.Version;
+                    m_gpuMaterialsDirty = true;
+                }
+            });
         watchShader("assets/shaders/PBRLighting.slang", "TransparentLit", [this]() { createTransparentLitPipeline(true); createAVBOITPipelines(true); });
         watchShader("assets/shaders/PBRLighting.slang", "DeferredLighting", [this]() { createDeferredLightingPipeline(true); });
         // Visibility Buffer
@@ -5609,6 +5633,12 @@ namespace Nox
         uniformData.lodFullDetail = (m_lodFullDetail || m_orthographic) ? 1u : 0u; // the LOD cut assumes a perspective camera
         uniformData.clusterStatsReference = m_clusterStatsBuffer->getDeviceAddress();
         uniformData.unitsPerMeter = WorldUnits::PerMeter();
+        {
+            // Animated Custom Lit shaders (CustomLitSurface::time): seconds since the renderer started, wrapped every hour.
+            static const auto start = std::chrono::steady_clock::now();
+            const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+            uniformData.timeSeconds = static_cast<float>(std::fmod(seconds, 3600.0));
+        }
         {
             // Texture LOD biases (shaderIO.h): textures as sharp as the shown resolution wants when DLSS renders fewer pixels; the
             // path tracer one mip sharper still (RTXPT's TexLODBias), and the streaming asked for the finest of what samples.

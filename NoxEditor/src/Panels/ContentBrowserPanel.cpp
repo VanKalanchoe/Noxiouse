@@ -20,6 +20,7 @@
 #include "NoxCore/Asset/NodeGraphSerializer.h"
 #include "NoxCore/Asset/TextureImporter.h"
 #include "NoxCore/Asset/TimelineImporter.h"
+#include "NoxCore/Renderer/CustomLitShaders.h"
 #include "NoxCore/Audio/AudioClip.h"
 #include "NoxCore/Audio/AudioGraph.h"
 #include "NoxCore/Audio/AudioEngine.h"
@@ -971,6 +972,31 @@ namespace Nox
         }
     }
 
+    void ContentBrowserPanel::CreateMaterialShader()
+    {
+        // NewMaterialShader, NewMaterialShader 2, ... in the folder shown, from the template; registered, then its name goes into rename
+        // mode. The renderer picks it up within half a second (EditorLayer::PollCustomLitShaders).
+        std::filesystem::path path = m_CurrentDirectory / "NewMaterialShader.slang";
+        for (int index = 2; std::filesystem::exists(path); ++index)
+            path = m_CurrentDirectory / ("NewMaterialShader " + std::to_string(index) + ".slang");
+        {
+            std::ofstream file(path, std::ios::binary | std::ios::trunc);
+            const std::string_view source = CustomLitShaders::TemplateSource();
+            if (!file || !file.write(source.data(), static_cast<std::streamsize>(source.size())))
+            {
+                NOX_CORE_ERROR("Could not create {}", path.generic_string());
+                return;
+            }
+        }
+        std::filesystem::path relativeDirectory = m_CurrentDirectory.lexically_relative(m_BaseDirectory);
+        if (relativeDirectory == ".")
+            relativeDirectory.clear();
+        m_Project->GetEditorAssetManager()->ScanAndRegisterNewAssets(relativeDirectory);
+        RefreshAssetTree();
+        if (const AssetHandle handle = FindAssetHandle(path.lexically_relative(m_BaseDirectory)); handle != 0)
+            ShowNewAsset(handle);
+    }
+
     void ContentBrowserPanel::CreateTimeline()
     {
         // NewTimeline, NewTimeline 2, ... in the folder shown; registered, then its name goes into rename mode.
@@ -1011,6 +1037,11 @@ namespace Nox
             }
             ImGui::SetItemTooltip("A procedural sound (MetaSounds' Source): clips, oscillators, noise, triggers, envelopes, filters\n"
                                   "and parameters wired in a graph, played by an Audio Source like a clip.");
+            if (ImGui::MenuItem("Material Shader"))
+                CreateMaterialShader();
+            ImGui::SetItemTooltip("A Custom Lit material's lighting, written in Slang (Godot's light()): a .slang file with a light() function\n"
+                                  "run for every light and an ambient() function. Materials use it with Shading Model > Custom Lit.\n"
+                                  "Double-click it to open it in your code editor; saving it builds it again.");
             if (ImGui::MenuItem("Timeline"))
                 CreateTimeline();
             ImGui::SetItemTooltip("A sequencer timeline: keyed positions, rotations, lights, camera FOV and events over time,\n"
@@ -1204,7 +1235,7 @@ namespace Nox
         switch (m_TypeFilter)
         {
         case 1: return type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::MeshSource || type == AssetType::SkeletalMesh;
-        case 2: return type == AssetType::Material;
+        case 2: return type == AssetType::Material || type == AssetType::MaterialShader;
         case 3: return type == AssetType::Texture2D;
         case 4: return type == AssetType::Prefab;
         case 5: return type == AssetType::Scene;
@@ -1285,7 +1316,7 @@ namespace Nox
         for (const auto& entry : std::filesystem::directory_iterator(m_CurrentDirectory, error))
         {
             static const std::unordered_set<std::string> kSelfContained = { ".nox", ".nmat", ".nanimgraph", ".naudiograph", ".nprefab", ".ntimeline",
-                                                                            ".ttf", ".otf", ".wav", ".ogg", ".flac", ".mp3" };
+                                                                            ".ttf", ".otf", ".wav", ".ogg", ".flac", ".mp3", ".slang" };
             const auto relativePath = entry.path().lexically_relative(m_BaseDirectory).lexically_normal().generic_string();
             if (entry.is_regular_file() && kSelfContained.contains(entry.path().extension().string()) && !handleOfPath.contains(relativePath))
             {

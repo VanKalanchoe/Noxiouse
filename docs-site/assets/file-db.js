@@ -543,9 +543,13 @@ window.NOX_FILE_DATABASE = [
     { path: "docs/Virtual_Geometry_Streaming_Plan_2026.md", category: "Scripts & Docs", type: "Architecture Doc", desc: "Design for Nanite Cluster LOD DAG cooker, 128 KB pages, and 64 KB sparse buffers." },
     { path: "docs/Sky_Atmosphere_Cloud_Plan_2026.md", category: "Scripts & Docs", type: "Architecture Doc", desc: "Design for Hillaire sky atmosphere, volumetric clouds, and 3D froxels." },
     { path: "NoxCore/src/NoxCore/Renderer/PostProcessSettings.h", category: "Renderer", type: "C++ Header", desc: "Post effects and outlines settings: the editor's copy and a Post Process Volume's." },
+    { path: "NoxCore/src/NoxCore/Renderer/CustomLitShaders.h", category: "Renderer", type: "C++ Header", desc: "Custom Lit: the project's Material Shaders as generated shader files (namespaces, slot dispatch, manifest), the template, slot assignment." },
+    { path: "NoxCore/src/NoxCore/Renderer/CustomLitShaders.cpp", category: "Renderer", type: "C++ Source", desc: "Custom Lit: writes shaders/Generated (CustomLitShaders.slang, the deferred / forward / check wrappers, the manifest)." },
+    { path: "NoxCore/src/NoxCore/Renderer/CustomLitProject.cpp", category: "Renderer", type: "C++ Source", desc: "Custom Lit: reads the active project's Material Shaders from its Assets folder." },
+    { path: "NoxCore/src/NoxCore/Renderer/Passes/CustomLitPasses.cpp", category: "Renderer", type: "C++ Source", desc: "Custom Lit: the Custom Lit pass's and the forward variant's pipelines, the slots materials are packed with, project / packaged loading." },
     { path: "NoxEditor/src/Panels/PostProcessSettingsUI.h", category: "Editor", type: "C++ Header", desc: "The post-process controls shared by Renderer Settings and the Post Process Volume Inspector." },
     { path: "NoxEditor/src/Panels/PostProcessSettingsUI.cpp", category: "Editor", type: "C++ Source", desc: "Outlines, bloom, depth of field, motion blur, grading, LUT controls." },
-    { path: "docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md", category: "Scripts & Docs", type: "Architecture Doc", desc: "Shading models (Toon), outlines, forward custom-lit pass, material graph, Custom Lit, hand-written material shaders." },
+    { path: "docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md", category: "Scripts & Docs", type: "Architecture Doc", desc: "Shading models (Toon), outlines + Post Process Volume, Custom Lit with Material Shaders (built); material graph, surface code, Rendering style (planned)." },
     { path: "docs/World_Units_Convention_Plan_2026.md", category: "Scripts & Docs", type: "Architecture Doc", desc: "Specification for 1 unit = 1 cm world units and physics meter conversions." },
     { path: "docs/Perf_Audit_Scene_Rendering_2026-04.md", category: "Scripts & Docs", type: "Architecture Doc", desc: "CPU/GPU scene synchronization and rendering performance audit." }
 ];
@@ -559,6 +563,7 @@ window.NOX_FILE_DATABASE = [
         ["MaterialLobes.slang", "Evaluates glTF 2.0 extension textures for Clearcoat, Sheen, Specular, Iridescence, Anisotropy."],
         ["SceneOutline.slang", "Outlines: a full-screen multiply draw into the lit scene before TAA / DLSS (depth and normal edges)."],
         ["ToonShading.slang", "The Toon shading model: banded or ramp diffuse, sharp highlight, rim (deferred and transparent forward)."],
+        ["CustomLit.slang", "Custom Lit: the inputs and helpers a project's Material Shaders (light() / ambient()) code against."],
         ["MaterialLobeMath.slang", "Pure BRDF math: anisotropic GGX, Charlie sheen, and Belcour-Barla thin-film iridescence."],
         ["LightSelection.slang", "select_lights: top-4 deterministic lights + 1 weighted RIS sample for O(1) shadow rays."],
         ["SceneGI.slang", "Unified indirect diffuse lookup: Screen-Probe GI -> Cascaded DDGI -> IBL irradiance."],

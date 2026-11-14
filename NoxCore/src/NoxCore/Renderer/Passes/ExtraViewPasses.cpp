@@ -155,13 +155,13 @@ namespace Nox
                         drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_unlitPipeline, NRI::CullMode::Back, true, false);
                         drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_unlitPipeline, NRI::CullMode::None, true, false);
                     }
-                    else if (hasDraws && m_transparentLitPipeline)
+                    else if (hasDraws && forwardLitPipeline())
                     {
                         cursor.taskFlags = taskFlags | shaderio::MESHLET_SHADE_OPAQUE;
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_transparentLitPipeline, NRI::CullMode::Back, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_transparentLitPipeline, NRI::CullMode::Back, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *forwardLitPipeline(), NRI::CullMode::Back, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *forwardLitPipeline(), NRI::CullMode::None, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *forwardLitPipeline(), NRI::CullMode::Back, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *forwardLitPipeline(), NRI::CullMode::None, true, false);
                         cursor.taskFlags = taskFlags;
                     }
 
@@ -189,7 +189,7 @@ namespace Nox
                     }
 
                     // D. Transparent surfaces, blended (sorted back to front for the main camera, which is close enough here).
-                    if (hasDraws && m_unlitPipeline && m_transparentLitPipeline)
+                    if (hasDraws && m_unlitPipeline && forwardLitPipeline())
                     {
                         const NRI::ColorBlendEquation blendEquation
                         {
@@ -201,8 +201,8 @@ namespace Nox
                             .alphaBlendOp = NRI::BlendOp::Add,
                         };
                         cmd.setColorBlendEquation(0, blendEquation);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Transparent, *m_transparentLitPipeline, NRI::CullMode::Back, false, true);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, false, true);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Transparent, *forwardLitPipeline(), NRI::CullMode::Back, false, true);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentDoubleSided, *forwardLitPipeline(), NRI::CullMode::None, false, true);
                         drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlit, *m_unlitPipeline, NRI::CullMode::Back, false, true);
                         drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, false, true);
                         cmd.setColorBlendEnable(0, false);

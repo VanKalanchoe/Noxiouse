@@ -10,6 +10,15 @@
     import Tonemapping;
     import Math;
 
+// The Custom Lit pass (CustomLit.slang; Renderer::addCustomLitPass): this file compiled again with NOX_CUSTOM_LIT by a generated file that
+// first includes every Material Shader of the project (CustomLitShaders.slang: custom_lit_light / custom_lit_ambient by slot). That pass
+// lights only the Custom Lit pixels, this one every other pixel.
+#ifdef NOX_CUSTOM_LIT
+    static const bool CustomLitPass = true;
+#else
+    static const bool CustomLitPass = false;
+#endif
+
     struct DeferredLightingPayload
     {
         uint dummy;
@@ -325,6 +334,16 @@
         float4 materialSample = materialTex.Load(int3(pixelCoord, 0));
         float4 emissionSample = emissionTex.Load(int3(pixelCoord, 0));
 
+        // Custom Lit pixels belong to the Custom Lit pass, the others to this one (each leaves the other's; the debug views show every
+        // pixel here, the Custom Lit pass does not run with them).
+#ifdef NOX_CUSTOM_LIT
+        if (!gbuffer_custom_lit(materialSample.b))
+            discard;
+#else
+        if (gbuffer_custom_lit(materialSample.b) && pushConstant.debugMode == 0)
+            discard;
+#endif
+
         // The sun's shadow mask: ray traced (ShadowMask.slang, denoised by NRD SIGMA when it runs) or its cascaded shadow maps
         // resolved into the same format (ShadowMapResolve.slang).
         const bool sunShadowMaps = ubo->sunShadowCascadesReference != 0;
@@ -433,6 +452,20 @@
         float NdotV = clamp(dot(n, v), 0.001, 1.0);
         float3 reflection = normalize(reflect(-v, n));
 
+#ifdef NOX_CUSTOM_LIT
+        // The Material Shader's surface (CustomLit.slang): its slot, material, UV and footprint from the lobe target (GBufferMaterial).
+        uint4 customPacked = uint4(0xFFFFFFFFu, 0u, 0u, 0u);
+        if (ubo->gbufferLobesTextureIndex != 0xFFFFFFFF)
+        {
+            Texture2D<uint4> customTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->gbufferLobesTextureIndex, 0));
+            customPacked = customTex.Load(int3(int2(pixelCoord), 0));
+        }
+        const CustomLitPixel customPixel = custom_lit_decode_pixel(customPacked);
+        const CustomLitSurface customSurface = custom_lit_surface(ubo, &SceneInstances(ubo).materials[customPixel.materialIndex], worldPos, n, v,
+                                                                  baseColor, metallic, perceptualRoughness, occlusion, emissionSample.rgb,
+                                                                  customPixel.uv, customPixel.uvFootprint, uv);
+#endif
+
         LobeShading lobeShading;
         if (hasLobes)
         {
@@ -445,7 +478,7 @@
         // (see the brute-force loop below: only `i == 0` ever gets a real shadow term).
         float3 directLighting = float3(0.0);
         // (ReSTIR DI's resampled light is physical shading: a toon pixel takes the light loop below.)
-        if (pushConstant.directLightingMode == 1 && pushConstant.restirDIDiffuseTextureIndex != 0xFFFFFFFF && !toon)
+        if (pushConstant.directLightingMode == 1 && pushConstant.restirDIDiffuseTextureIndex != 0xFFFFFFFF && !toon && !CustomLitPass)
         {
             // De-modulated diffuse and specular (ReSTIRDIFinalShading.slang): modulated back with the same factors.
             Texture2D diffuseDITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirDIDiffuseTextureIndex, 0));
@@ -469,7 +502,8 @@
                 LightData light = lights[i];
                 uint lightType = (uint)light.position.w;
 
-                if (is_area_light(lightType)) // Rect: exact diffuse, representative-point specular (PBRLighting.slang), times its soft shadow
+                // (A Custom Lit surface takes a rect / disc light as a point light at its centre: the punctual path below.)
+                if (is_area_light(lightType) && !CustomLitPass) // Rect: exact diffuse, representative-point specular (PBRLighting.slang), times its soft shadow
                 {
                     PBRInfo rectInputs = PBRInfo(1.0, NdotV, 1.0, 1.0, 1.0, perceptualRoughness, metallic, specularEnvironmentR0,
                                                  specularEnvironmentR90, alphaRoughness, diffuseColor, specularColor);
@@ -498,6 +532,14 @@
                     l = normalize(light.direction.xyz);
                     attenuation = cloud_shadow(ubo, worldPos, i, l); // the clouds' shadow (the sun / moon of a procedural sky)
                 }
+#ifdef NOX_CUSTOM_LIT
+                else if (is_area_light(lightType)) // a rect / disc light on a Custom Lit surface: from its centre (CustomLit.slang)
+                {
+                    float distance;
+                    attenuation = custom_lit_area_attenuation(light, worldPos, l, distance);
+                    maxDist = distance;
+                }
+#endif
                 else // Point (1) or Spot (2): inverse square held at the source radius, range window, cone (shaderIO.h)
                 {
                     float3 lightVec = light.position.xyz - worldPos;
@@ -513,6 +555,16 @@
                 }
 
                 float NdotL_raw = dot(n, l);
+#ifdef NOX_CUSTOM_LIT
+                // A Custom Lit surface gets the lights it faces away from too (wrap lighting, rims), in shadow (its own side).
+                if (NdotL_raw <= 0.0)
+                {
+                    directLighting += custom_lit_light(customPixel.slot, customSurface,
+                                                       custom_lit_make_light(l, light.color.rgb * light.color.w * attenuation, 0.0, maxDist, min(lightType, 3u)));
+                    continue;
+                }
+                const bool backLit = false;
+#else
                 bool isDoubleSided = gbuffer_double_sided(materialSample.a);
                 const bool backLit = isDoubleSided && NdotL_raw < 0.0;
                 if (backLit)
@@ -525,6 +577,7 @@
                 {
                     continue;
                 }
+#endif
 
                 float lightShadow = 1.0;
                 bool shadowMapped = false; // by a shadow map: contact shadows add the detail its texels miss
@@ -589,6 +642,10 @@
                 );
 
                 float3 lightRadiance = light.color.rgb * light.color.w * attenuation * lightShadow;
+#ifdef NOX_CUSTOM_LIT
+                directLighting += custom_lit_light(customPixel.slot, customSurface,
+                                                   custom_lit_make_light(l, light.color.rgb * light.color.w * attenuation, lightShadow, maxDist, min(lightType, 3u)));
+#else
                 // Light through a leaf or cloth from behind is diffuse: no specular highlight on the side it leaves.
                 if (backLit)
                     directLighting += NdotL * lightRadiance * diffuse(pbrInputs);
@@ -599,9 +656,18 @@
                     directLighting += evaluateDirectLightLobes(ubo, pbrInputs, lobeShading, n, v, l, lightRadiance);
                 else
                     directLighting += evaluateDirectLight(pbrInputs, lightRadiance);
+#endif
             }
         }
 
+#ifdef NOX_CUSTOM_LIT
+        // The ambient as a white matte surface (diffuse) and a perfect mirror of this roughness (F0 = F90 = 1) receive it: what the
+        // Material Shader's ambient() gets (CustomLitAmbient). The occlusion is the shader's to apply (CustomLitSurface::occlusion).
+        diffuseColor = float3(1.0);
+        specularColor = float3(1.0);
+        specularEnvironmentR0 = float3(1.0);
+        specularEnvironmentR90 = float3(1.0);
+#endif
         // 7. Image-Based Lighting (IBL) & Decoupled RT Reflections
         // The lobes' ambient: the film's Fresnel at this view angle as the split sum's F0 (so environment, GI and reflections all
         // see it), an anisotropic surface's environment along its bent reflection.
@@ -945,7 +1011,11 @@
         // Ambient occlusion darkens the ambient diffuse only: the direct light has its shadows, the ambient specular its own
         // specular occlusion (getIBLContribution, the GI's above). Multiplying everything by it darkened lit surfaces and, with
         // half-resolution RTAO cycling through the pixels of each block, made the whole image flicker with it.
+#ifdef NOX_CUSTOM_LIT
+        float3 finalColor = directLighting + custom_lit_ambient(customPixel.slot, customSurface, custom_lit_make_ambient(ambientDiffuse, ambientSpecular));
+#else
         float3 finalColor = directLighting + ambientDiffuse * occlusion + ambientSpecular;
+#endif
         finalColor += emissionSample.rgb;
         const float3 toSurface = worldPos - ubo->cameraWorldPos.xyz;
         const float surfaceDistance = length(toSurface);

@@ -65,6 +65,8 @@ namespace Nox
         // and the tile size; the folder tree on the left; the tiles of the folder (or the search results) on the right.
         void DrawToolbar();
         void CreateTimeline();
+        // A Material Shader (Custom Lit: a .slang file with light() and ambient()) from the template, in the folder shown.
+        void CreateMaterialShader();
         void DrawBreadcrumb();
         void RebuildFolderTree();
         struct FolderNode;

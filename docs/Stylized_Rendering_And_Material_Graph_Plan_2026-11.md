@@ -1,6 +1,8 @@
 # Stylized rendering and the material graph -- plan (2026-11-14)
 
-Status (2026-11-14): **step 1 (Toon shading model) built and tested by the user; step 2 (outlines, Post Process Volume) built, waiting for the user's test**; steps 3-7 planned. Backlog item R13.
+Status (2026-11-14): **step 1 (Toon shading model) and step 2 (outlines, Post Process Volume) built and tested by the user; step 3 (Custom Lit
+with hand-written Material Shaders) built, waiting for the user's test**; steps 4-6 planned (the steps were re-cut when step 3 was built:
+section 8). Backlog item R13.
 
 Goal: Nox is not tied to realistic lighting. Materials can be lit physically (the default), not at all (Unlit), with a built-in toon
 model, or -- later -- with lighting of their own; and artists build surfaces from nodes (a material graph) without writing shaders.
@@ -19,8 +21,8 @@ engine lets you write:
 | Godot 4 | Visual Shader, its shader language | `light()` per material; toon built in (`diffuse_toon`, `specular_toon`) |
 
 The pattern: **deferred renderers fix the lighting models** (all pixels are lit in one pass), **forward renderers allow custom
-lighting** (each material lights itself). Nox is deferred (visibility buffer + deferred lighting) **and** has a forward path
-(transparent, unlit) -- realistic materials stay deferred, custom-lit ones draw forward.
+lighting** (each material lights itself). Nox is deferred (visibility buffer + deferred lighting) and lights custom-lit materials in a
+lighting pass of their own over the same G-buffer (step 3 as built: section 9c) -- custom lighting without a second renderer.
 
 Compute is never part of a material in any of the three: GPU particles are Niagara (Unreal) / VFX Graph (Unity), compute shaders are
 code. Nox keeps compute separate too (its particles have their own system; a node-based particle system would be its own project).
@@ -36,18 +38,18 @@ hybrid ray tracing starts from them: a forward renderer would write most of a G-
 streamed geometry cheap. Unreal 5 made the same choice.
 
 What it costs for custom materials: one system -- **material tile classification** in the visibility buffer (Unreal 5 does it for
-Nanite) when graph materials arrive (step 4); custom lighting goes through a **forward pass inside the deferred frame** (step 3),
-which Nox's transparent path already proves (`Material_TransparentLit_Mesh.slang` lights with the same `evaluateDirectLight`).
-A full second Forward+ renderer would double the work of every screen effect for no gain over that pass: not planned.
+Nanite) when graph materials arrive (step 4); custom lighting goes through a **lighting pass of its own after the deferred lighting**
+over the Custom Lit pixels (step 3 as built; the plan first said a forward pass -- section 9c says why not). A full second Forward+
+renderer would double the work of every screen effect for no gain: not planned.
 
 ## 3. Settings: nothing to switch globally
 
 | Where | Setting | Chosen by |
 | :--- | :--- | :--- |
-| Material Editor, per material | **Shading Model:** Default Lit / Unlit / Toon / later Custom Lit; Toon's own fields | the user |
+| Material Editor, per material | **Shading Model:** Default Lit / Unlit / Toon / Custom Lit; Toon's and Custom Lit's own fields | the user |
 | Post-process settings, per scene | **Outlines** (on, thickness, colour, which surfaces) | the user |
 | Project Settings, once (optional) | **Rendering style:** Physical (default) / Stylized -- Stylized hides the path tracer presets | the user |
-| Deferred or forward | none: Lit / Unlit / Toon are deferred, Custom Lit goes forward | the engine |
+| Deferred or forward | none: every opaque model goes through the G-buffer (Custom Lit lit by its own pass after it); translucent ones forward | the engine |
 | Ray tracing / path tracer | the quality preset as today; non-physical materials use their fallback, the editor warns | preset: user; fallback: automatic |
 
 Realistic and stylized materials mix in one scene. Every step only adds options; existing materials stay Default Lit and look the
@@ -85,17 +87,22 @@ Sided, Shading Model. (Godot's ALPHA_ANTIALIASING_EDGE / alpha-to-coverage needs
 
 ## 8. Steps
 
+Re-cut when step 3 was built (2026-11-14): the forward pass alone (old step 3) had nothing to use it, so step 3 became Custom Lit with
+hand-written Material Shaders -- the old step 3's infrastructure, the old step 5's per-light function and the old step 6's hand-written
+file, for lighting. The material graph (now step 4) generates the same light() / ambient() for its Custom Lit output; hand-written
+surface code (the rest of old step 6) is step 5; the Rendering style setting is step 6.
+
 | Step | What | Size | Status |
 | :--- | :--- | :--- | :--- |
 | 1 | **Toon shading model**: Shading Model per material (Default Lit / Unlit / Toon), toon bands or ramp texture, sharp highlight, rim light; deferred (G-buffer flag + toon parameters in the lobe target) and forward transparent; RT / PT fallback = Default Lit; Material Editor labels to Unreal's names | small | built, tested by the user |
 | 2 | **Outlines** post effect (depth / normal edges, thickness, colour, all surfaces or toon only), in a **Post Process Volume** (Unreal's; saved with the scene -- the post effects were editor-only before) | small | built (waiting for the user's test) |
-| 3 | **Forward pass for opaque custom-lit materials** inside the deferred frame (writes depth, normals, velocity and a "custom lit" flag; deferred lighting skips those pixels); a light grid if many lights | medium | planned |
-| 4 | **Material graph** (surface): Material domain in the NodeGraph framework, node library, Slang code generation into per-pass templates, material tile classification in the visibility buffer, RT fallback then per-material hit groups, parameters and instances, C# parameter API, packaging of every variant | large | planned |
-| 5 | **Custom Lit** in the graph (a per-light function; forward pass from step 3) | medium | planned |
-| 6 | **Hand-written material shaders** (a Slang file supplying the function the graph would generate) | medium | planned |
-| 7 | **Rendering style** project setting (Physical / Stylized) and the editor's list of non-physical materials | small | planned |
+| 3 | **Custom Lit with hand-written Material Shaders**: a `.slang` asset with `light()` (per light) and `ambient()`; the Custom Lit pass over the G-buffer's Custom Lit pixels (the deferred lighting compiled with the project's Material Shaders) and the forward variant (translucent, previews); four parameters and two textures per material; live rebuild on save; packaged games ship the compiled shaders | medium | built (waiting for the user's test) |
+| 4 | **Material graph** (surface): Material domain in the NodeGraph framework, node library, Slang code generation into per-pass templates, material tile classification in the visibility buffer, RT fallback then per-material hit groups, parameters by name and instances, C# parameter API, packaging of every variant; **its Custom Lit output** generates step 3's light() / ambient() | large | planned |
+| 5 | **Hand-written surface code** (a Material Shader's optional surface function: base colour, normal, roughness ... in Slang, the graph's surface output by hand) | medium | planned |
+| 6 | **Rendering style** project setting (Physical / Stylized) and the editor's list of non-physical materials | small | planned |
 | -- | Scriptable render passes (Unity SRP style) | -- | not planned |
 | -- | Vertex animation (World Position Offset): shadows, streaming bounds, BLAS refits | -- | after step 4 |
+| -- | A light grid / tile light lists (many lights per pixel, all models) | -- | when scenes need it |
 
 ## 9. Step 1 design (Toon shading model)
 
@@ -133,7 +140,45 @@ in shaderIO.h is laid out), so the shader saw a 0 x 0 render size and a normal t
 edge. Padded, with a static_assert on the offsets; the depth sensitivity's default threshold also went from ~26 % to ~13 % of the
 distance (silhouettes against nearby surfaces too).
 
+## 9c. Step 3 as built (Custom Lit, Material Shaders)
+
+- **Not a forward pass.** The plan had a forward pass writing depth, normals and velocity for custom-lit materials. With the visibility
+  buffer every opaque pixel already has its exact triangle and G-buffer; drawing the geometry again would need bit-identical depth from
+  another mesh shader (or a visibility-ID test with no early depth). So a Custom Lit surface is an ordinary opaque surface up to the
+  G-buffer -- depth, Hi-Z, normals, velocity, SSAO, GI, SSR, outlines and TAA / DLSS see it -- and only its lighting differs: a lighting
+  pass of its own over its pixels, how deferred renderers allow custom lighting (one pass for every Material Shader of the project, the
+  pixel's material naming its slot; tile classification can split it later, with the graph).
+- **Data:** `MaterialShadingModel::CustomLit` (3); `MaterialData::CustomShader` (the Material Shader's path in Assets), `CustomParameters[4]`,
+  `CustomTexture1` (sRGB) / `CustomTexture2` (linear); `.nmat` "NMA5" (NMA4 / NMA3 read with defaults). `AssetType::MaterialShader` (.slang).
+- **G-buffer:** the flag byte's top two bits are the shading model (0x40 toon, 0x80 unlit, 0xC0 Custom Lit); a Custom Lit pixel's lobe
+  target holds its slot, material record, UV and UV footprint.
+- **Shader side:** `CustomLit.slang` (the inputs: `CustomLitSurface`, `CustomLitLight`, `CustomLitAmbient`; helpers). The renderer writes
+  `shaders/Generated` next to the executable: every Material Shader in `namespace CustomLit<slot>` after a `#line` (errors name the user's
+  file and line) plus the slot dispatchers, the deferred and forward wrappers (`NOX_CUSTOM_LIT`), a small check file compiled first (so a
+  failed edit is reported, not silently replaced by the last working binary) and the manifest (slots in order).
+- **Lighting:** the deferred light loop as for every pixel (shadow mask, local shadow maps, RT shadow rays, contact and cloud shadows);
+  `light()` gets every light in reach -- the ones it faces away from with shadow 0 (wrap lighting, rims); rect / disc lights as a point light
+  at their centre. ReSTIR DI is skipped. `ambient()` gets the ambient as a white diffuse surface and an F0 = F90 = 1 mirror of its
+  roughness receive it (GI, sky, SSGI, SSR / RT reflections, probes). The emissive and the fog are added after.
+- **Elsewhere:** the forward shader's Custom Lit variant for translucent surfaces (not with OIT), the editor's other viewports and the
+  Material Editor's preview; probe captures, RT reflections, GI bounces and the path tracer see Default Lit (the ray-tracing fallback).
+  A material whose shader has no slot or does not compile is packed as Default Lit.
+- **Editor / runtime:** Content Browser > + Add > Material Shader (a toon template), double-click opens the system's code editor, saving
+  rebuilds within a second (`EditorLayer::PollCustomLitShaders`); the Material Editor's Custom Lit section (shader, status, Parameter 1-4,
+  textures); MCP `write_material_shader`, `get_material_shaders` and the material JSON fields; NoxRuntime builds from the project's files
+  in a development run and from the shipped manifest and binaries in a package (the packager warns when they do not compile).
+- **Not yet:** the material graph's Custom Lit output (step 4), material parameters by name (only Parameter 1-4), Custom Lit with OIT,
+  renaming a Material Shader (materials name it by path), a per-light function for rect lights' soft shapes.
+
 ## 10. Tests
 
 Step 1: the `.nmat` round trip of the shading model and toon fields, NMA3 files read with defaults (NoxToolsTest); shader compile
 checks; the user's look test on the UAL1 character in `AnimationTest2.nox` (the files live only on the user's machine).
+
+Step 2: shader compile checks, the push-constant layout's static_assert; the user's test (outlines showed only after the layout fix).
+
+Step 3: NoxToolsTest (180 checks) -- the generated file's namespaces, `#line` and dispatch cases, the slot assignment, the template, the
+material JSON fields, an NMA5 round trip and an NMA4 file; Slang -- the template and a second Material Shader through the real generator
+output compile in the check, deferred and forward files (from a folder outside the engine's shaders, as next to the executable), the
+standard DeferredLighting / TransparentLit / GBufferMaterial still compile, and an error in a Material Shader names its file and line.
+Not tested here: the pass on a GPU, the look, the live rebuild and packaging -- the user's test.

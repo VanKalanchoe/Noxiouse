@@ -2,6 +2,7 @@
 // window, GPU or editor. Exit code 0 when every check passed.
 #include "NoxCore/Console/Console.h"
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Renderer/CustomLitShaders.h"
 
 #include <cstdio>
 #include <format>
@@ -132,10 +133,42 @@ static void TestConsole()
     CHECK(console.FindVariable("test.Quality") == nullptr, "a variable is unregistered");
 }
 
+// Custom Lit (docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md step 3): the generated file the renderer compiles the project's
+// Material Shaders into, and the slots it gives them (CustomLitShaders.h). (Whether it compiles is the Slang check in the docs' test guide.)
+static void TestCustomLitShaders()
+{
+    using namespace Nox;
+    std::printf("\n== Custom Lit: generated Material Shader file and slots\n");
+    const std::vector<CustomLitSource> sources = { { "Shaders/A.slang", "float3 light(CustomLitSurface s, CustomLitLight l) { return 1; }\n"
+                                                                         "float3 ambient(CustomLitSurface s, CustomLitAmbient a) { return 0; }" },
+                                                   { "Shaders/B.slang", "// b\n" } };
+    const std::vector<std::string> paths = { "Shaders/A.slang", "", "Shaders/B.slang" };
+    const std::string text = CustomLitShaders::GenerateDispatcher(paths, sources);
+    CHECK(text.find("namespace CustomLit0") != std::string::npos && text.find("namespace CustomLit2") != std::string::npos &&
+          text.find("namespace CustomLit1") == std::string::npos, "each Material Shader in the namespace of its slot, an empty slot left out");
+    CHECK(text.find("#line 1 \"Shaders/A.slang\"") != std::string::npos, "#line names the Material Shader (compile errors point at its file)");
+    CHECK(text.find("case 0u: return CustomLit0::light(s, l);") != std::string::npos &&
+          text.find("case 2u: return CustomLit2::ambient(s, a);") != std::string::npos && text.find("case 1u") == std::string::npos,
+          "the dispatchers call light() / ambient() by slot");
+    CHECK(text.find("// b\n}") != std::string::npos, "a source without a final newline still closes its namespace on a line of its own");
+
+    const std::vector<std::string> first = CustomLitShaders::AssignSlots({}, { { "b.slang", "" }, { "a.slang", "" } });
+    CHECK(first.size() == 2 && first[0] == "b.slang" && first[1] == "a.slang", "first slots: in the order given (GatherProjectSources sorts)");
+    const std::vector<std::string> later = CustomLitShaders::AssignSlots(first, { { "a.slang", "" }, { "c.slang", "" } });
+    CHECK(later.size() == 3 && later[0].empty() && later[1] == "a.slang" && later[2] == "c.slang",
+          "later: a kept shader keeps its slot, a removed one leaves it empty, a new one is appended");
+    const std::vector<std::string> trimmed = CustomLitShaders::AssignSlots(later, { { "a.slang", "" } });
+    CHECK(trimmed.size() == 2 && trimmed[1] == "a.slang", "empty slots at the end are dropped");
+    CHECK(CustomLitShaders::TemplateSource().find("float3 light(CustomLitSurface s, CustomLitLight l)") != std::string_view::npos &&
+          CustomLitShaders::TemplateSource().find("float3 ambient(CustomLitSurface s, CustomLitAmbient a)") != std::string_view::npos,
+          "the new Material Shader template has both functions");
+}
+
 int main()
 {
     Log::Init("NoxToolsTest.log");
     TestConsole();
+    TestCustomLitShaders();
 #ifdef NOX_TOOLS_TEST_MCP
     TestMcp();
     TestMcpValidation();

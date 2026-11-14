@@ -948,7 +948,8 @@ namespace Nox
                                           TransparentBlend blend) const
     {
         const bool litOnly = blend != TransparentBlend::Over;
-        NRI::Pipeline* litPipeline = oit ? m_transparentLitOITPipeline.get() : m_transparentLitPipeline.get();
+        // (Order-independent transparency: a Custom Lit surface is lit as Default Lit there -- the OIT variant has no Custom Lit build.)
+        NRI::Pipeline* litPipeline = oit ? m_transparentLitOITPipeline.get() : forwardLitPipeline();
         NRI::Pipeline* unlitPipeline = oit ? m_unlitOITPipeline.get() : m_unlitPipeline.get();
         if (!unlitPipeline || !litPipeline || !hasTransparentDraws())
             return;

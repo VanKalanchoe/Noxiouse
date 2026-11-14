@@ -147,6 +147,8 @@ namespace Nox
         uint32_t AddMaterial(const GpuMaterialKey& key, const shaderio::GpuMaterial& material);
         void UpdateMaterial(uint32_t materialSlot, const shaderio::GpuMaterial& material);
         void ForEachMaterial(const std::function<void(uint32_t materialSlot, const GpuMaterialKey& key)>& function) const;
+        // How many material records are Custom Lit (CustomLitShaders.h): the renderer adds its Custom Lit pass only while some are.
+        uint32_t GetCustomLitMaterialCount() const { return m_CustomLitMaterials; }
 
         // Instances. AddInstance references the material, RemoveInstance releases it. World transforms are double precision
         // (large world coordinates, Engine_Architecture_Plan_2026.md §5.14a); the tables hold them relative to the render origin.
@@ -285,6 +287,7 @@ namespace Nox
         std::vector<std::pair<float, uint32_t>> m_TransparentSort;
 
         std::vector<uint32_t> m_MaterialReferences;
+        uint32_t m_CustomLitMaterials = 0;
         std::vector<GpuMaterialKey> m_MaterialKeys;
         std::unordered_map<GpuMaterialKey, uint32_t, GpuMaterialKeyHash> m_MaterialByKey;
 

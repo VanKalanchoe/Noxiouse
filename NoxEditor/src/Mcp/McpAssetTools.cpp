@@ -15,6 +15,9 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Project/Project.h"
+#include "NoxCore/Core/Application.h"
+#include "NoxCore/Renderer/CustomLitShaders.h"
+#include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneSerializer.h"
 
@@ -91,6 +94,16 @@ namespace Nox::Mcp
                     *slot = stored;
                     rewritten = true;
                 }
+            }
+            // The Custom Lit material shader: a Material Shader asset (.slang), stored by its path in Assets.
+            if (!material.CustomShader.empty() && material.CustomShader != before.CustomShader)
+            {
+                std::string error;
+                const AssetHandle shader = ResolveAsset(Json(material.CustomShader), AssetType::MaterialShader, error);
+                if (shader == 0)
+                    return std::format("'CustomShader': {}", error);
+                values["CustomShader"] = manager->GetMetadata(shader).FilePath.generic_string();
+                rewritten = rewritten || values["CustomShader"] != material.CustomShader;
             }
             return rewritten ? MaterialFromJson(values, material) : std::string();
         }
@@ -352,6 +365,117 @@ namespace Nox::Mcp
                     context.AssetsChanged();
                 NOX_CORE_INFO("MCP: created the material {}", relative.generic_string());
                 done(ToolResult::Data(MaterialAnswer(handle, material)));
+            };
+            tools.push_back(std::move(tool));
+        }
+
+        // ---------------------------------------------------------------------------------------------- write_material_shader
+        {
+            Tool tool;
+            tool.Name = "write_material_shader";
+            tool.Title = "Write a Material Shader";
+            tool.Description = "Creates or replaces a Material Shader: the lighting of Custom Lit materials, a .slang file with "
+                               "'float3 light(CustomLitSurface s, CustomLitLight l)' (once per light) and "
+                               "'float3 ambient(CustomLitSurface s, CustomLitAmbient a)' (once); the pixel is their sum + the emissive. "
+                               "s: position, normal, view, baseColor, metallic, roughness, occlusion, emissive, uv, screenUV, time, "
+                               "parameters[4] (the material's Parameter 1-4), textures; l: direction, color (falloff applied), shadow (0..1), "
+                               "distance, type; a: diffuse (a white matte surface's ambient), reflection. Helpers: custom_lit_texture(s, 0 or 1, uv), "
+                               "custom_lit_luminance, custom_lit_fresnel(f0, cos), custom_lit_lambert(s, l), CustomLitPi. No #include. Without "
+                               "'code' the template (a two-tone toon). The editor builds it within a second; get_material_shaders says whether it "
+                               "compiled (read_log has the compiler's message with the line). Use it with set_material: { \"ShadingModel\": "
+                               "\"CustomLit\", \"CustomShader\": \"<path>\" }.";
+            tool.InputSchema = Schema()
+                                   .String("name", "Its name (the file's: <name>.slang)", true)
+                                   .String("folder", "The folder under the asset folder (default \"Shaders\")")
+                                   .String("code", "The Slang code (default: the template)")
+                                   .Build();
+            tool.Access = ConsoleAccess::Write;
+            tool.Handler = [context](const Json& arguments, ToolDone done)
+            {
+                auto manager = Assets();
+                if (!manager)
+                {
+                    done(ToolResult::Error("no project is open"));
+                    return;
+                }
+                const std::string name = arguments["name"].get<std::string>();
+                if (name.empty() || name.find_first_of("\\/:*?\"<>|") != std::string::npos)
+                {
+                    done(ToolResult::Error("'name' must be a file name (no \\ / : * ? \" < > |)"));
+                    return;
+                }
+                std::string error;
+                const std::filesystem::path folder = AssetRelativePath(arguments.value("folder", std::string("Shaders")), error);
+                if (folder.empty())
+                {
+                    done(ToolResult::Error(error));
+                    return;
+                }
+                const std::filesystem::path relative = folder / (name + ".slang");
+                const std::filesystem::path absolute = Project::GetActiveAssetDirectory() / relative;
+                const std::string code = arguments.contains("code") ? arguments["code"].get<std::string>() : std::string(CustomLitShaders::TemplateSource());
+                std::error_code directoryError;
+                std::filesystem::create_directories(absolute.parent_path(), directoryError);
+                {
+                    std::ofstream file(absolute, std::ios::binary | std::ios::trunc);
+                    if (!file || !file.write(code.data(), static_cast<std::streamsize>(code.size())))
+                    {
+                        done(ToolResult::Error(std::format("{} could not be written", absolute.generic_string())));
+                        return;
+                    }
+                }
+                AssetHandle handle = manager->FindHandleByPath(relative, AssetType::MaterialShader);
+                if (handle == 0)
+                    handle = manager->RegisterExistingFile(relative, AssetType::MaterialShader);
+                if (handle == 0)
+                {
+                    done(ToolResult::Error(std::format("{} was written but could not be registered (read_log)", relative.generic_string())));
+                    return;
+                }
+                if (context.AssetsChanged)
+                    context.AssetsChanged();
+                NOX_CORE_INFO("MCP: wrote the Material Shader {}", relative.generic_string());
+                done(ToolResult::Data(Json{ { "uuid", std::to_string(static_cast<uint64_t>(handle)) }, { "path", relative.generic_string() },
+                                            { "note", "built within a second: get_material_shaders says whether it compiled" } }));
+            };
+            tools.push_back(std::move(tool));
+        }
+
+        // ------------------------------------------------------------------------------------------------ get_material_shaders
+        {
+            Tool tool;
+            tool.Name = "get_material_shaders";
+            tool.Title = "List the Material Shaders";
+            tool.Description = "The project's Material Shaders (Custom Lit lighting, .slang) with their slots, and whether the renderer built "
+                               "them: 'ready' false with 'message' when they did not compile (read_log has the compiler's message with the "
+                               "file and line; Custom Lit materials are lit as Default Lit meanwhile).";
+            tool.InputSchema = Schema().Build();
+            tool.Handler = [](const Json&, ToolDone done)
+            {
+                auto manager = Assets();
+                const Renderer* renderer = Application::Get().GetRenderer();
+                Json shaders = Json::array();
+                if (manager)
+                {
+                    for (const auto& [handle, metadata] : manager->GetAssetRegistry())
+                    {
+                        if (metadata.Type != AssetType::MaterialShader)
+                            continue;
+                        const std::string path = metadata.FilePath.generic_string();
+                        const uint32_t slot = Renderer::FindCustomLitSlot(path);
+                        shaders.push_back(Json{ { "uuid", std::to_string(static_cast<uint64_t>(handle)) }, { "path", path },
+                                                { "built", slot != 0xFFFFFFFFu } });
+                    }
+                }
+                Json answer{ { "shaders", shaders } };
+                if (renderer)
+                {
+                    const Renderer::CustomLitStatus& status = renderer->GetCustomLitStatus();
+                    answer["ready"] = status.Ready;
+                    answer["message"] = status.Message;
+                    answer["builds"] = status.Version;
+                }
+                done(ToolResult::Data(answer));
             };
             tools.push_back(std::move(tool));
         }

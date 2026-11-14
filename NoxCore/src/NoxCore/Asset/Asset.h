@@ -37,7 +37,10 @@ namespace Nox
 
         AudioMixer, // Audio/AudioMixer.h: the project's buses, effects, sends and snapshots (.nmixer), run by AudioMixer
 
-        AcousticData // Audio/AcousticData.h: an Acoustic Probe Volume's baked reverb and pathing (.nacoustics), made by its Bake button
+        AcousticData, // Audio/AcousticData.h: an Acoustic Probe Volume's baked reverb and pathing (.nacoustics), made by its Bake button
+
+        MaterialShader // Renderer/CustomLitShaders.h: a Custom Lit material's lighting functions (.slang), compiled into the renderer's
+                       // Custom Lit passes; never loaded as an asset object (the renderer reads the file)
     };
 
     // Where an asset is on its way into memory (§5.11.2). A request starts the load once; the asset is usable when Ready.

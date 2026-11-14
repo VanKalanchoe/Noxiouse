@@ -38,7 +38,8 @@ namespace Nox
     // stay unloaded (a material keeps its texture handles, a font component its font handle).
     static bool SkippedWhileHeadless(AssetType type)
     {
-        return type == AssetType::Texture2D || type == AssetType::Font || type == AssetType::AudioClip || type == AssetType::AcousticData;
+        return type == AssetType::Texture2D || type == AssetType::Font || type == AssetType::AudioClip || type == AssetType::AcousticData ||
+               type == AssetType::MaterialShader;
     }
 
     static std::string_view ImageFormatToString(NRI::ImageFormat format)
@@ -140,7 +141,8 @@ namespace Nox
         { ".wav", AssetType::AudioClip },
         { ".ogg", AssetType::AudioClip },
         { ".flac", AssetType::AudioClip },
-        { ".mp3", AssetType::AudioClip }
+        { ".mp3", AssetType::AudioClip },
+        { ".slang", AssetType::MaterialShader }
     };
 
     AssetType EditorAssetManager::GetAssetTypeFromExtension(const std::filesystem::path& extension)
@@ -2283,7 +2285,7 @@ namespace Nox
             std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (ext == ".nox" || ext == ".nanim" || ext == ".nskel" || ext == ".nmat" ||
                 ext == ".ntex" || ext == ".nanimgraph" || ext == ".naudiograph" || ext == ".nprefab" || ext == ".ntimeline" ||
-                ext == ".ttf" || ext == ".otf" || ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3")
+                ext == ".ttf" || ext == ".otf" || ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".slang")
             {
                 std::filesystem::path relativePath = entry.path().lexically_relative(assetDir).lexically_normal();
 

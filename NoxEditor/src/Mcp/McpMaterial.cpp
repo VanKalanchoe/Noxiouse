@@ -24,7 +24,8 @@ namespace Nox::Mcp
         }
         Json ToJson(MaterialShadingModel value)
         {
-            return value == MaterialShadingModel::Unlit ? "Unlit" : value == MaterialShadingModel::Toon ? "Toon" : "DefaultLit";
+            return value == MaterialShadingModel::Unlit ? "Unlit" : value == MaterialShadingModel::Toon ? "Toon"
+                 : value == MaterialShadingModel::CustomLit ? "CustomLit" : "DefaultLit";
         }
 
         std::string FromJson(const Json& value, float& out)
@@ -116,8 +117,10 @@ namespace Nox::Mcp
                 out = MaterialShadingModel::Unlit;
             else if (name == "Toon")
                 out = MaterialShadingModel::Toon;
+            else if (name == "CustomLit" || name == "Custom Lit")
+                out = MaterialShadingModel::CustomLit;
             else
-                return "must be \"DefaultLit\", \"Unlit\" or \"Toon\"";
+                return "must be \"DefaultLit\", \"Unlit\", \"Toon\" or \"CustomLit\"";
             return {};
         }
 
@@ -202,6 +205,29 @@ namespace Nox::Mcp
                 NOX_MATERIAL_FIELD(ToonRimColor),
                 NOX_MATERIAL_FIELD(ToonRimWidth),
                 NOX_MATERIAL_FIELD(ToonRimIntensity),
+                NOX_MATERIAL_FIELD(CustomShader),
+                Field{ "CustomParameters",
+                       [](const MaterialData& m)
+                       {
+                           Json list = Json::array();
+                           for (const glm::vec4& parameter : m.CustomParameters)
+                               list.push_back(ToJson(parameter));
+                           return list;
+                       },
+                       [](const Json& v, MaterialData& m) -> std::string
+                       {
+                           if (!v.is_array() || v.size() > static_cast<size_t>(MaterialCustomParameterCount))
+                               return std::format("must be a list of at most {} parameters, each 4 numbers", MaterialCustomParameterCount);
+                           glm::vec4 parameters[MaterialCustomParameterCount];
+                           std::copy(std::begin(m.CustomParameters), std::end(m.CustomParameters), parameters);
+                           for (size_t index = 0; index < v.size(); ++index)
+                               if (std::string problem = FromJson(v[index], parameters[index]); !problem.empty())
+                                   return std::format("{}: {}", index, problem);
+                           std::copy(std::begin(parameters), std::end(parameters), m.CustomParameters);
+                           return {};
+                       } },
+                NOX_MATERIAL_FIELD(CustomTexture1),
+                NOX_MATERIAL_FIELD(CustomTexture2),
             };
             return fields;
         }

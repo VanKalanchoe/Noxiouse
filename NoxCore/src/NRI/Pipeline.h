@@ -33,6 +33,9 @@ namespace NRI
         uint32_t maxRecursionDepth = 1;
         
         bool forceCompile = false;
+        // Built on the calling thread, a failure thrown from createPipeline (never left for the first bind to find): what a pipeline
+        // whose source may not compile -- a project's own shaders (Renderer/CustomLitShaders.h) -- needs to be known good before use.
+        bool buildNow = false;
     };
 
     class Pipeline

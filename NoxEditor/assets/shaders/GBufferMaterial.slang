@@ -707,8 +707,15 @@
             const float3 t = anisotropicT - storedNormal * dot(storedNormal, anisotropicT);
             lobes.anisotropyAngle = atan2(dot(t, b0), dot(t, t0));
         }
-        // A toon pixel's lobe target carries its toon settings instead (it has no lobes; DeferredLighting reads them by the toon bit).
-        output.lobes = instance.shadingModel == ShadingModelToon ? gbuffer_encode_toon(toon_settings(gpuMaterial)) : gbuffer_encode_lobes(lobes);
+        // A toon pixel's lobe target carries its toon settings instead (it has no lobes; DeferredLighting reads them by the toon bit), a
+        // Custom Lit pixel which Material Shader lights it, its material and its UV (the Custom Lit pass reads them: CustomLit.slang).
+        if (instance.shadingModel == ShadingModelToon)
+            output.lobes = gbuffer_encode_toon(toon_settings(gpuMaterial));
+        else if (instance.shadingModel == ShadingModelCustomLit)
+            output.lobes = gbuffer_encode_custom_lit(gpuMaterial.customLitSlot, instances.instances[instanceSlot].materialIndex, uv0,
+                                                     max(length(ddx_uv0), length(ddy_uv0)));
+        else
+            output.lobes = gbuffer_encode_lobes(lobes);
         output.specular = gbuffer_encode_specular(lobes);
 
         output.velocity = float2(0.0, 0.0);

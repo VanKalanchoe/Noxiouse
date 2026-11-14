@@ -21,6 +21,7 @@
 #include "VirtualTextureStreamer.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "PostProcessSettings.h"
+#include "CustomLitShaders.h"
 #include "GpuScene.h"
 #include "NoxCore/RenderGraph/RenderGraph.h"
 #include "NRI/ShaderBindingTable.h"
@@ -692,6 +693,26 @@ namespace Nox
                 m_scenePostProcess = *settings;
         }
         bool HasScenePostProcess() const { return m_hasScenePostProcess; }
+
+        // Custom Lit (CustomLitShaders.h): the project's Material Shaders. SetCustomLitShaders writes the generated files for them and builds
+        // the Custom Lit pass and the forward variant (the editor, a development run with the project's files; on project load and when a
+        // Material Shader changes); LoadPackagedCustomLitShaders builds them from what a packaged game ships (the manifest and the binaries).
+        // A material whose Material Shader has no slot, or while the pipelines failed, is packed as Default Lit.
+        void SetCustomLitShaders(const std::vector<CustomLitSource>& sources);
+        void LoadPackagedCustomLitShaders();
+        // Gathers the active project's Material Shaders and calls the one of the two above that applies (Application start, project load).
+        void InitializeCustomLitShaders();
+        uint32_t GetCustomLitSlot(const std::string& path) const;
+        // The running renderer's slot for a Material Shader (material packing); 0xFFFFFFFF without a renderer or that shader.
+        static uint32_t FindCustomLitSlot(const std::string& path) { return s_Instance ? s_Instance->GetCustomLitSlot(path) : 0xFFFFFFFFu; }
+        struct CustomLitStatus
+        {
+            size_t ShaderCount = 0;   // Material Shaders with a slot
+            bool Ready = false;       // the Custom Lit pipelines are built
+            std::string Message;      // what went wrong (a compile error: the log has Slang's message with the file and line)
+            uint64_t Version = 0;     // counts rebuilds (the Material Editor shows the latest)
+        };
+        const CustomLitStatus& GetCustomLitStatus() const { return m_customLitStatus; }
         // What this frame's passes use: the scene's volume, else the Renderer Settings.
         const PostProcessSettings& activePostEffects() const { return m_hasScenePostProcess ? m_scenePostProcess : m_postEffects; }
         // The camera of this frame's BeginScene in world space (double precision: GetRenderOrigin plus its render-space place).
@@ -1259,6 +1280,11 @@ namespace Nox
         PostEffectOutputs addPostEffectPasses(RGTexture hdrSource);
         // Outlines (PostProcessSettings::Outlines; SceneOutline.slang): over the lit scene at the render resolution, before TAA / DLSS.
         void createSceneOutlinePipeline(bool forceCompile = false);
+        // The Custom Lit pass's and the forward variant's pipelines from the generated sources (CustomLitShaders.h); false when they fail.
+        bool createCustomLitPipelines(bool forceCompile);
+        // The forward shader for lit surfaces: its Custom Lit variant while the project has Material Shaders (it shades every other
+        // material as the plain one does), else the plain one.
+        NRI::Pipeline* forwardLitPipeline() const { return m_transparentLitCustomPipeline ? m_transparentLitCustomPipeline.get() : m_transparentLitPipeline.get(); }
         void addSceneOutlinePass();
         // Reflection probes: the probe table of this frame and at most one probe's capture (six faces, assembled, prefiltered); after
         // Compile the capture faces' uniforms.
@@ -1640,6 +1666,11 @@ namespace Nox
         bool m_hasScenePostProcess = false;
         std::unique_ptr<NRI::Pipeline> m_dofPipeline;
         std::unique_ptr<NRI::Pipeline> m_sceneOutlinePipeline;
+        // Custom Lit (CustomLitShaders.h): the deferred lighting and the forward shader compiled with the project's Material Shaders.
+        std::unique_ptr<NRI::Pipeline> m_customLitPipeline;
+        std::unique_ptr<NRI::Pipeline> m_transparentLitCustomPipeline;
+        std::vector<std::string> m_customLitPaths; // slot -> Material Shader path ("" : none)
+        CustomLitStatus m_customLitStatus;
         std::unique_ptr<NRI::Pipeline> m_motionBlurPipeline;
         std::unique_ptr<NRI::Pipeline> m_bloomDownsamplePipeline;
         std::unique_ptr<NRI::Pipeline> m_bloomUpsamplePipeline;

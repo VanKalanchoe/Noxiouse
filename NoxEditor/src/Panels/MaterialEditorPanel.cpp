@@ -14,6 +14,8 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Renderer.h"
+#include "NoxCore/Core/Application.h"
+#include <SDL3/SDL_misc.h>
 #include "AssetPreviewRenderer.h"
 
 namespace Nox
@@ -312,10 +314,10 @@ namespace Nox
             changed |= ImGui::DragFloat("Opacity Mask Clip Value", &data.AlphaMaskCutoff, 0.005f, 0.0f, 1.0f);
         changed |= ImGui::Checkbox("Two Sided", &data.DoubleSided);
 
-        // How the surface is lit (Unreal's Shading Model; ToonShading.slang for Toon).
+        // How the surface is lit (Unreal's Shading Model; ToonShading.slang for Toon, CustomLit.slang for Custom Lit).
         int shadingModel = static_cast<int>(data.ShadingModel);
-        const char* shadingModels[] = { "Default Lit", "Unlit", "Toon" };
-        if (ImGui::Combo("Shading Model", &shadingModel, shadingModels, 3))
+        const char* shadingModels[] = { "Default Lit", "Unlit", "Toon", "Custom Lit" };
+        if (ImGui::Combo("Shading Model", &shadingModel, shadingModels, 4))
         {
             data.ShadingModel = static_cast<MaterialShadingModel>(shadingModel);
             changed = true;
@@ -325,7 +327,8 @@ namespace Nox
                               "Unlit: the base colour and emissive as they are, no lighting.\n"
                               "Toon: light in hard bands (or a ramp texture), a sharp highlight, an optional rim light. The ambient light\n"
                               "and reflections stay as for Default Lit (Roughness 1: no reflections). Ray-traced reflections and the\n"
-                              "path tracer show a toon surface as Default Lit.");
+                              "path tracer show a toon surface as Default Lit.\n"
+                              "Custom Lit: lit by a Material Shader of your own (a .slang file: its light() and ambient() functions).");
         if (data.ShadingModel == MaterialShadingModel::Toon)
         {
             ImGui::SeparatorText("Toon");
@@ -347,6 +350,93 @@ namespace Nox
             changed |= ImGui::SliderFloat("Rim Intensity", &data.ToonRimIntensity, 0.0f, 8.0f);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("A light band along the silhouette, on the side the light reaches (0: none).");
+        }
+        if (data.ShadingModel == MaterialShadingModel::CustomLit)
+        {
+            ImGui::SeparatorText("Custom Lit");
+            // The Material Shader: a .slang asset (Content Browser > + Add > Material Shader), by its path in Assets.
+            auto assets = Project::GetActive()->GetEditorAssetManager();
+            const std::string shaderLabel = data.CustomShader.empty() ? std::string("None") : std::filesystem::path(data.CustomShader).filename().string();
+            if (ImGui::BeginCombo("Material Shader", shaderLabel.c_str()))
+            {
+                if (ImGui::Selectable("None", data.CustomShader.empty()))
+                {
+                    data.CustomShader.clear();
+                    changed = true;
+                }
+                for (const auto& [shaderHandle, shaderMetadata] : assets->GetAssetRegistry())
+                {
+                    if (shaderMetadata.Type != AssetType::MaterialShader)
+                        continue;
+                    const std::string path = shaderMetadata.FilePath.generic_string();
+                    if (ImGui::Selectable(path.c_str(), path == data.CustomShader))
+                    {
+                        data.CustomShader = path;
+                        changed = true;
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("The Material Shader (.slang) whose light() and ambient() light this material.\n"
+                                  "Pick one here or drag it from the Content Browser; make one with Content Browser > + Add > Material Shader.");
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                {
+                    const AssetHandle dropped = *(const AssetHandle*)payload->Data;
+                    if (AssetManager::GetAssetType(dropped) == AssetType::MaterialShader)
+                    {
+                        data.CustomShader = assets->GetMetadata(dropped).FilePath.generic_string();
+                        changed = true;
+                    }
+                    else
+                        NOX_CORE_WARN("Wrong Asset Type - Expected a Material Shader (.slang)");
+                }
+                ImGui::EndDragDropTarget();
+            }
+            if (!data.CustomShader.empty())
+            {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Open"))
+                {
+                    const std::string url = "file:///" + std::filesystem::absolute(Project::GetActiveAssetDirectory() / data.CustomShader).generic_string();
+                    if (!SDL_OpenURL(url.c_str()))
+                        NOX_CORE_ERROR("Could not open {} ({})", data.CustomShader, SDL_GetError());
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Opens the .slang file in your code editor. Saving it there builds it again (about half a second later).");
+            }
+
+            // Whether the renderer has it built (CustomLitShaders.h): else the material is lit as Default Lit.
+            const Renderer* renderer = Application::Get().GetRenderer();
+            const ImVec4 warning(0.95f, 0.75f, 0.25f, 1.0f);
+            if (data.CustomShader.empty())
+                ImGui::TextColored(warning, "No Material Shader: lit as Default Lit.");
+            else if (renderer && Renderer::FindCustomLitSlot(data.CustomShader) != 0xFFFFFFFFu)
+                ImGui::TextDisabled("Built: lit by %s.", shaderLabel.c_str());
+            else if (renderer && !renderer->GetCustomLitStatus().Message.empty())
+            {
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.3f, 1.0f), "%s Lit as Default Lit until it compiles.", renderer->GetCustomLitStatus().Message.c_str());
+                ImGui::PopTextWrapPos();
+            }
+            else
+                ImGui::TextColored(warning, "Not built yet (lit as Default Lit): is the file in Assets?");
+
+            for (int parameter = 0; parameter < MaterialCustomParameterCount; ++parameter)
+            {
+                const std::string label = "Parameter " + std::to_string(parameter + 1);
+                changed |= ImGui::ColorEdit4(label.c_str(), glm::value_ptr(data.CustomParameters[parameter]),
+                                             ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("The shader reads it as s.parameters[%d]: a colour (rgb, a) or four numbers (x, y, z, w) -- as it uses them.",
+                                      parameter);
+            }
+            drawTextureReference("Custom Texture 1 (sRGB)", "CustomTexture1", data.CustomTexture1.Path);
+            drawTextureReference("Custom Texture 2 (linear)", "CustomTexture2", data.CustomTexture2.Path);
+            ImGui::TextDisabled("(the shader reads them with custom_lit_texture(s, 0 or 1, uv))");
+            ImGui::TextDisabled("Ray-traced reflections, GI bounces, the path tracer and order-independent\ntransparency show it as Default Lit.");
         }
 
         if (changed)

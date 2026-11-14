@@ -346,6 +346,8 @@ namespace Nox
         m_MaterialReferences[slot] = 0;
         m_MaterialKeys[slot] = key;
         m_MaterialByKey[key] = slot;
+        if (material.shadingModel == shaderio::ShadingModelCustomLit)
+            ++m_CustomLitMaterials;
         return slot;
     }
 
@@ -356,6 +358,9 @@ namespace Nox
 
         const bool bucketsChange = !SameBucketInputs(m_Materials.Get(materialSlot), material);
         const bool lookChanges = !SameLook(m_Materials.Get(materialSlot), material);
+        const bool wasCustomLit = m_Materials.Get(materialSlot).shadingModel == shaderio::ShadingModelCustomLit;
+        const bool isCustomLit = material.shadingModel == shaderio::ShadingModelCustomLit;
+        m_CustomLitMaterials += (isCustomLit ? 1u : 0u) - (wasCustomLit ? 1u : 0u);
         m_Materials.Edit(materialSlot) = material;
 
         // Instances copy material fields into their ray tracing records; alpha mode, unlit and double-sided also pick the
@@ -963,6 +968,8 @@ namespace Nox
             return;
 
         m_MaterialByKey.erase(m_MaterialKeys[materialSlot]);
+        if (m_Materials.Get(materialSlot).shadingModel == shaderio::ShadingModelCustomLit && m_CustomLitMaterials > 0)
+            --m_CustomLitMaterials;
         m_Materials.Free(materialSlot);
     }
 }

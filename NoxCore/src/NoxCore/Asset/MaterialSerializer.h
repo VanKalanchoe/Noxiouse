@@ -12,9 +12,10 @@
 namespace Nox
 {
     // A material's fields, as a .nmat file holds them and a cooked mesh embeds its materials (MeshSerializer): one writer for both,
-    // so the two carry the same fields -- except the shading model's settings (the toon fields), which only .nmat files carry
-    // ("NMA4", after the others; a cooked mesh's glTF materials are never toon). "NMA3" files read with those settings' defaults; an
-    // older layout is not read (its material is made again from the source model).
+    // so the two carry the same fields -- except the shading models' settings (toon, then Custom Lit), which only .nmat files carry
+    // ("NMA5", after the others; a cooked mesh's glTF materials are never toon or custom lit). "NMA4" files (toon only) and "NMA3"
+    // files (neither) read with the missing settings' defaults; an older layout is not read (its material is made again from the
+    // source model).
     class MaterialSerializer
     {
     public:
@@ -44,11 +45,13 @@ namespace Nox
             char magic[4]{};
             stream.read(magic, 4);
             const std::string kind(magic, 4);
-            if (kind != std::string(Magic, 4) && kind != std::string(MagicWithoutShading, 4))
+            const bool current = kind == std::string(Magic, 4);
+            const bool toonOnly = kind == std::string(MagicToonOnly, 4);
+            if (!current && !toonOnly && kind != std::string(MagicWithoutShading, 4))
                 return false;
             ReadFields(stream, material);
-            if (kind == std::string(Magic, 4))
-                ReadShadingFields(stream, material);
+            if (current || toonOnly)
+                ReadShadingFields(stream, material, current);
             return !stream.fail();
         }
 
@@ -152,8 +155,8 @@ namespace Nox
             Read(stream, doubleSided);
             Read(stream, shadingModel);
             material.DoubleSided = doubleSided != 0;
-            material.ShadingModel = shadingModel <= static_cast<uint8_t>(MaterialShadingModel::Toon) ? static_cast<MaterialShadingModel>(shadingModel)
-                                                                                                     : MaterialShadingModel::DefaultLit;
+            material.ShadingModel = shadingModel <= static_cast<uint8_t>(MaterialShadingModel::CustomLit) ? static_cast<MaterialShadingModel>(shadingModel)
+                                                                                                          : MaterialShadingModel::DefaultLit;
             for (MaterialUVChannel& channel : material.UVChannels)
             {
                 Read(stream, channel.Source);
@@ -200,9 +203,15 @@ namespace Nox
             Write(stream, material.ToonRimColor);
             Write(stream, material.ToonRimWidth);
             Write(stream, material.ToonRimIntensity);
+            WriteString(stream, material.CustomShader);
+            for (const glm::vec4& parameter : material.CustomParameters)
+                Write(stream, parameter);
+            WriteTexture(stream, material.CustomTexture1);
+            WriteTexture(stream, material.CustomTexture2);
         }
 
-        static void ReadShadingFields(std::istream& stream, MaterialData& material)
+        // `customLit`: the file has the Custom Lit settings too ("NMA5"; "NMA4" ends after the toon ones).
+        static void ReadShadingFields(std::istream& stream, MaterialData& material, bool customLit = true)
         {
             Read(stream, material.ToonBands);
             Read(stream, material.ToonBandSoftness);
@@ -213,12 +222,20 @@ namespace Nox
             Read(stream, material.ToonRimColor);
             Read(stream, material.ToonRimWidth);
             Read(stream, material.ToonRimIntensity);
+            if (!customLit)
+                return;
+            ReadString(stream, material.CustomShader);
+            for (glm::vec4& parameter : material.CustomParameters)
+                Read(stream, parameter);
+            ReadTexture(stream, material.CustomTexture1);
+            ReadTexture(stream, material.CustomTexture2);
         }
 
     private:
-        // "NMA4": every field and the shading model's settings; "NMA3": the same without the latter (read with their defaults).
-        // Older files are made again.
-        static constexpr char Magic[4] = { 'N', 'M', 'A', '4' };
+        // "NMA5": every field and the shading models' settings (toon, Custom Lit); "NMA4": without the Custom Lit ones; "NMA3": without
+        // either (read with their defaults). Older files are made again.
+        static constexpr char Magic[4] = { 'N', 'M', 'A', '5' };
+        static constexpr char MagicToonOnly[4] = { 'N', 'M', 'A', '4' };
         static constexpr char MagicWithoutShading[4] = { 'N', 'M', 'A', '3' };
 
         template<typename T>

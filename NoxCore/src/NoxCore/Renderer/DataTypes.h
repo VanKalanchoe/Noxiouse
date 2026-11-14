@@ -66,14 +66,17 @@ namespace Nox
     };
 
     // How a material is lit (Unreal's Shading Model; docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md): physically
-    // (Default Lit), not at all (Unlit: its base colour and emissive as they are), or with toon lighting (bands or a ramp, a sharp
-    // highlight, a rim). One byte in the .nmat / cooked layouts, where 0 / 1 were the old Unlit flag.
+    // (Default Lit), not at all (Unlit: its base colour and emissive as they are), with toon lighting (bands or a ramp, a sharp
+    // highlight, a rim), or by a lighting function of the project's own (Custom Lit: a Material Shader, MaterialData::CustomShader;
+    // Renderer/CustomLitShaders.h). One byte in the .nmat / cooked layouts, where 0 / 1 were the old Unlit flag.
     enum class MaterialShadingModel : uint8_t
     {
         DefaultLit = 0,
         Unlit = 1,
-        Toon = 2
+        Toon = 2,
+        CustomLit = 3
     };
+    inline constexpr int32_t MaterialCustomParameterCount = 4;
 
     // A texture a material reads: its file (empty: none) and the UV channel it is sampled with (MaterialData::UVChannels).
     struct MaterialTexture
@@ -232,6 +235,15 @@ namespace Nox
         glm::vec3 ToonRimColor = glm::vec3(1.0f);
         float ToonRimWidth = 0.3f;
         float ToonRimIntensity = 0.0f;
+
+        // The Custom Lit shading model's settings (ShadingModel CustomLit): the Material Shader that lights the surface (a .slang file
+        // in the project's Assets, its light() and ambient() functions: CustomLit.slang) and what the material gives it -- four
+        // parameters (Parameter 1-4: colours or numbers, as the shader reads them) and two textures (1: colour, sRGB; 2: data,
+        // linear). Stored in .nmat files only ("NMA5").
+        std::string CustomShader;                  // the Material Shader's path in the project's Assets (empty: none)
+        glm::vec4 CustomParameters[MaterialCustomParameterCount] = { glm::vec4(1.0f), glm::vec4(0.0f), glm::vec4(0.0f), glm::vec4(0.0f) };
+        MaterialTexture CustomTexture1;            // RGBA, sRGB
+        MaterialTexture CustomTexture2;            // RGBA, linear
     };
 
     // The lobe textures of a material, with how each is read: sRGB color, or a tangent-space normal map.
@@ -253,6 +265,8 @@ namespace Nox
         { &MaterialData::IridescenceThicknessTexture, false, false },
         { &MaterialData::AnisotropyTexture, false, false },
         { &MaterialData::ToonRampTexture, true, false },
+        { &MaterialData::CustomTexture1, true, false },
+        { &MaterialData::CustomTexture2, false, false },
     };
     
     enum class GltfLightType : uint32_t
