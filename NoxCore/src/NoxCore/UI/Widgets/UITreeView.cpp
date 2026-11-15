@@ -60,8 +60,29 @@ namespace Nox::UI
         return idx;
     }
 
+    void UITreeView::ScrollToPointerY(float y)
+    {
+        const UIRect& b = GetBounds();
+        const float contentH = static_cast<float>(m_FlatRows.size()) * RowHeight;
+        const float maxScroll = std::max(0.0f, contentH - b.Height());
+        if (maxScroll <= 0.0f)
+            return;
+
+        const float trackTop = b.Min.y + 4.0f;
+        const float trackH = std::max(1.0f, b.Height() - 8.0f);
+        const float thumbH = std::max(20.0f, trackH * (b.Height() / contentH));
+        const float usable = std::max(1.0f, trackH - thumbH);
+        const float t = std::clamp((y - trackTop - thumbH * 0.5f) / usable, 0.0f, 1.0f);
+        m_ScrollY = t * maxScroll;
+    }
+
     bool UITreeView::OnPointerMove(const UIPointerEvent& e)
     {
+        if (m_DraggingScrollbar)
+        {
+            ScrollToPointerY(e.Position.y);
+            return true;
+        }
         m_HoveredRow = RowIndexAt(e.Position.y);
         return true;
     }
@@ -76,6 +97,14 @@ namespace Nox::UI
     {
         if (e.Button != 1 || !IsEnabled())
             return UIElement::OnPointerDown(e);
+
+        const float contentH = static_cast<float>(m_FlatRows.size()) * RowHeight;
+        if (contentH > GetBounds().Height() && e.Position.x >= GetBounds().Max.x - 14.0f)
+        {
+            m_DraggingScrollbar = true;
+            ScrollToPointerY(e.Position.y);
+            return true;
+        }
 
         const int idx = RowIndexAt(e.Position.y);
         if (idx < 0)
@@ -94,6 +123,16 @@ namespace Nox::UI
         if (OnSelect)
             OnSelect(m_SelectedId);
         return true;
+    }
+
+    bool UITreeView::OnPointerUp(const UIPointerEvent& e)
+    {
+        if (m_DraggingScrollbar && e.Button == 1)
+        {
+            m_DraggingScrollbar = false;
+            return true;
+        }
+        return UIElement::OnPointerUp(e);
     }
 
     bool UITreeView::OnMouseWheel(const UIPointerEvent& e)

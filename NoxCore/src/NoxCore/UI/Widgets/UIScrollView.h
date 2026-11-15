@@ -14,6 +14,9 @@ namespace Nox::UI
         float ChildSpacing = 4.0f;
 
         bool OnMouseWheel(const UIPointerEvent& e) override;
+        bool OnPointerDown(const UIPointerEvent& e) override;
+        bool OnPointerMove(const UIPointerEvent& e) override;
+        bool OnPointerUp(const UIPointerEvent& e) override;
 
     protected:
         UIVec2 ComputeDesiredSize() override;
@@ -21,7 +24,10 @@ namespace Nox::UI
         void OnPaint(UIDrawList& drawList, const UITheme& theme) override;
 
     private:
+        void ScrollToPointerY(float y);
+
         float m_ContentHeight = 0.0f;
         float m_ViewportHeight = 0.0f;
+        bool m_DraggingScrollbar = false;
     };
 }

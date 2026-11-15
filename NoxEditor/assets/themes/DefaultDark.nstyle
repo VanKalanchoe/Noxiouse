@@ -149,3 +149,78 @@ styles:
   "SectionHeader:hover":
     fill: "#262C3B"
     border_color: "$Accent"
+
+  TabBar:
+    fill: "#14171F"
+    border_color: "$Border"
+    border_thickness: 0.0
+    corner_radius: [10, 10, 0, 0]
+    padding: [8, 4]
+
+  Tab:
+    fill: "#1A1E29"
+    border_color: "#00000000"
+    border_thickness: 1.0
+    corner_radius: 5
+    padding: [12, 4]
+    text_color: "$TextMuted"
+    font_size: 13
+
+  "Tab:hover":
+    fill: "#242A38"
+    text_color: "$Text"
+
+  "Tab.active":
+    fill: "#262E40"
+    border_color: "$Accent"
+    text_color: "#FFFFFF"
+
+  MenuBar:
+    fill: "#161922"
+    border_color: "$Border"
+    border_thickness: 1.0
+    corner_radius: 6
+    padding: [8, 3]
+
+  MenuTrigger:
+    fill: "#00000000"
+    border_thickness: 0
+    corner_radius: 4
+    padding: [10, 4]
+    text_color: "$Text"
+    font_size: 13
+
+  "MenuTrigger:hover":
+    fill: "#262D3D"
+
+  MenuPopup:
+    fill: "#1C202B"
+    border_color: "$Border"
+    border_thickness: 1.0
+    shadow_color: "#00000099"
+    shadow_offset: [0, 8]
+    shadow_blur: 18
+    corner_radius: 8
+    padding: 6
+
+  MenuItem:
+    fill: "#00000000"
+    border_thickness: 0
+    corner_radius: 4
+    padding: [10, 4]
+    text_color: "$Text"
+    font_size: 13
+
+  "MenuItem:hover":
+    fill: "$Accent"
+    text_color: "#FFFFFF"
+
+  Separator:
+    fill: "$Border"
+    corner_radius: 0
+
+  ViewportSlot:
+    fill: "#0E1117"
+    border_color: "$Border"
+    border_thickness: 1.0
+    corner_radius: 6

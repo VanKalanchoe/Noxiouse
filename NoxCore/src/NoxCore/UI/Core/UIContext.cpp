@@ -13,9 +13,15 @@ namespace Nox::UI
     void UIContext::SetRoot(const Ref<UIElement>& root)
     {
         m_Root = root;
+        m_Overlay = nullptr;
         m_Hovered = nullptr;
         m_Captured = nullptr;
         m_Focused = nullptr;
+    }
+
+    void UIContext::SetOverlay(const Ref<UIElement>& overlay)
+    {
+        m_Overlay = overlay;
     }
 
     void UIContext::SetTheme(const Ref<UITheme>& theme)
@@ -43,7 +49,9 @@ namespace Nox::UI
 
     void UIContext::UpdateHover(const UIVec2& pos)
     {
-        UIElement* nextHover = m_Root ? m_Root->HitTest(pos) : nullptr;
+        UIElement* nextHover = m_Overlay ? m_Overlay->HitTest(pos) : nullptr;
+        if (!nextHover && m_Root)
+            nextHover = m_Root->HitTest(pos);
         Ref<UIElement> prevHover = m_Hovered;
         if (prevHover.get() == nextHover)
             return;
@@ -94,6 +102,9 @@ namespace Nox::UI
     bool UIContext::DispatchPointerDown(const UIVec2& pos, int button)
     {
         m_LastMousePos = pos;
+        if (m_Overlay && !m_Overlay->HitTest(pos))
+            m_Overlay = nullptr;
+
         UpdateHover(pos);
 
         Ref<UIElement> hovered = m_Hovered;
@@ -220,5 +231,13 @@ namespace Nox::UI
         m_Root->Arrange({ { 0.0f, 0.0f }, viewportSize });
         m_Root->UpdateStylesRecursive(*m_Theme, dt);
         m_Root->PaintRecursive(drawList, *m_Theme);
+
+        if (m_Overlay)
+        {
+            m_Overlay->Measure();
+            m_Overlay->Arrange({ { 0.0f, 0.0f }, viewportSize });
+            m_Overlay->UpdateStylesRecursive(*m_Theme, dt);
+            m_Overlay->PaintRecursive(drawList, *m_Theme);
+        }
     }
 }

@@ -13,6 +13,53 @@ namespace Nox::UI
         HitTestMode = UIHitTestMode::Self;
     }
 
+    void UIScrollView::ScrollToPointerY(float y)
+    {
+        const float maxScroll = std::max(0.0f, m_ContentHeight - m_ViewportHeight);
+        if (maxScroll <= 0.0f)
+            return;
+
+        const UIRect& b = GetBounds();
+        const float trackTop = b.Min.y + 4.0f;
+        const float trackH = std::max(1.0f, b.Height() - 8.0f);
+        const float ratio = std::clamp(m_ViewportHeight / m_ContentHeight, 0.08f, 1.0f);
+        const float thumbH = std::max(20.0f, trackH * ratio);
+        const float usable = std::max(1.0f, trackH - thumbH);
+        const float t = std::clamp((y - trackTop - thumbH * 0.5f) / usable, 0.0f, 1.0f);
+        ScrollOffsetY = t * maxScroll;
+    }
+
+    bool UIScrollView::OnPointerDown(const UIPointerEvent& e)
+    {
+        if (e.Button == 1 && m_ContentHeight > m_ViewportHeight && e.Position.x >= GetBounds().Max.x - 14.0f)
+        {
+            m_DraggingScrollbar = true;
+            ScrollToPointerY(e.Position.y);
+            return true;
+        }
+        return UIElement::OnPointerDown(e);
+    }
+
+    bool UIScrollView::OnPointerMove(const UIPointerEvent& e)
+    {
+        if (m_DraggingScrollbar)
+        {
+            ScrollToPointerY(e.Position.y);
+            return true;
+        }
+        return UIElement::OnPointerMove(e);
+    }
+
+    bool UIScrollView::OnPointerUp(const UIPointerEvent& e)
+    {
+        if (m_DraggingScrollbar && e.Button == 1)
+        {
+            m_DraggingScrollbar = false;
+            return true;
+        }
+        return UIElement::OnPointerUp(e);
+    }
+
     bool UIScrollView::OnMouseWheel(const UIPointerEvent& e)
     {
         const float maxScroll = std::max(0.0f, m_ContentHeight - m_ViewportHeight);

@@ -39,6 +39,7 @@ namespace Nox::UI
         bool OnPointerMove(const UIPointerEvent& e) override;
         bool OnPointerLeave(const UIPointerEvent& e) override;
         bool OnPointerDown(const UIPointerEvent& e) override;
+        bool OnPointerUp(const UIPointerEvent& e) override;
         bool OnMouseWheel(const UIPointerEvent& e) override;
 
     protected:
@@ -55,11 +56,13 @@ namespace Nox::UI
         void RebuildFlatRows();
         void AppendFlatRows(UITreeNode& node, uint32_t depth);
         int RowIndexAt(float y) const;
+        void ScrollToPointerY(float y);
 
         std::vector<UITreeNode> m_Nodes;
         std::vector<FlatRow> m_FlatRows;
         uint64_t m_SelectedId = 0;
         int m_HoveredRow = -1;
         float m_ScrollY = 0.0f;
+        bool m_DraggingScrollbar = false;
     };
 }

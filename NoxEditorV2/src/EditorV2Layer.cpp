@@ -3,11 +3,15 @@
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/UI/Layout/UILayout.h"
+#include "NoxCore/UI/Layout/UISplitter.h"
+#include "NoxCore/UI/Layout/UITabPanel.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
+#include "NoxCore/UI/Widgets/UIMenu.h"
 #include "NoxCore/UI/Widgets/UIPropertyGrid.h"
 #include "NoxCore/UI/Widgets/UITreeView.h"
+#include "NoxCore/UI/Widgets/UIViewportSlot.h"
 
 namespace Nox
 {
@@ -36,20 +40,39 @@ namespace Nox
         m_UI.SetTheme(theme);
 
         // Root vertical stack
-        auto root = MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 12.0f);
-        root->Padding = UI::UIThickness::All(12.0f);
+        auto root = MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 8.0f);
+        root->Padding = UI::UIThickness::All(10.0f);
         root->DrawBackground = true;
         root->StyleClass = "Background";
+
+        // Menu Bar
+        auto menuBar = MakeUI<UI::UIMenuBar>();
+        menuBar->AddMenu("File", {
+            { "New Scene", "Ctrl+N", [this]() { if (m_StatusLabel) m_StatusLabel->Text = "Menu: File -> New Scene"; } },
+            { "Open Scene...", "Ctrl+O", [this]() { if (m_StatusLabel) m_StatusLabel->Text = "Menu: File -> Open Scene"; } },
+            { "Save Scene", "Ctrl+S", [this]() { if (m_StatusLabel) m_StatusLabel->Text = "Menu: File -> Save Scene"; } },
+            { "", "", {}, true },
+            { "Exit", "Alt+F4", []() { Application::Get().Shutdown(); } }
+        }, m_UI);
+        menuBar->AddMenu("Edit", {
+            { "Undo", "Ctrl+Z", [this]() { if (m_StatusLabel) m_StatusLabel->Text = "Menu: Edit -> Undo"; } },
+            { "Redo", "Ctrl+Y", [this]() { if (m_StatusLabel) m_StatusLabel->Text = "Menu: Edit -> Redo"; } }
+        }, m_UI);
+        menuBar->AddMenu("Window", {
+            { "Reset Layout", "", [this]() { BuildUI(); } },
+            { "Reload Theme", "", [theme]() { theme->LoadFromFile("assets/themes/DefaultDark.nstyle"); } }
+        }, m_UI);
+        root->AddChild(menuBar);
 
         // Top Bar (HBox)
         auto topBar = MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 10.0f);
         topBar->StyleClass = "TopBar";
         topBar->DrawBackground = true;
         topBar->HeightMode = UI::UISizeMode::Fixed;
-        topBar->FixedSize.y = 48.0f;
-        topBar->Padding = UI::UIThickness::Symmetric(14.0f, 8.0f);
+        topBar->FixedSize.y = 44.0f;
+        topBar->Padding = UI::UIThickness::Symmetric(14.0f, 6.0f);
 
-        auto title = MakeUI<UI::UILabel>("NoxEditorV2  |  Phase 1: Retained UI + .nstyle Hot Reload", 17.0f);
+        auto title = MakeUI<UI::UILabel>("NoxEditorV2  |  Phase 3: Splitters, Tabs, Menus & Viewport Slot", 16.0f);
         title->VAlign = UI::UIAlignment::Center;
         title->WidthMode = UI::UISizeMode::Fill;
         topBar->AddChild(title);
@@ -75,20 +98,9 @@ namespace Nox
 
         root->AddChild(topBar);
 
-        // Main 3-column workspace (HBox)
-        auto body = MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 12.0f);
-        body->HeightMode = UI::UISizeMode::Fill;
-
-        auto leftPanel = MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 8.0f);
-        leftPanel->StyleClass = "Panel";
-        leftPanel->DrawBackground = true;
-        leftPanel->WidthMode = UI::UISizeMode::Fixed;
-        leftPanel->FixedSize.x = 300.0f;
-        leftPanel->Padding = UI::UIThickness::All(12.0f);
-        leftPanel->AddChild(MakeUI<UI::UILabel>("Scene Hierarchy (1,500 Virtualized)", 15.0f));
-
+        // Left Dock: Hierarchy + Outliner Tabs
+        auto leftTabs = MakeUI<UI::UITabPanel>();
         auto tree = MakeUI<UI::UITreeView>();
-        tree->HeightMode = UI::UISizeMode::Fill;
         std::vector<UI::UITreeNode> nodes;
         UI::UITreeNode sceneRoot{ 1, "MainScene", true, { 0.24f, 0.56f, 0.96f, 1.0f }, {} };
         sceneRoot.Children.push_back({ 2, "DirectionalLight", false, { 0.96f, 0.78f, 0.24f, 1.0f }, {} });
@@ -114,30 +126,29 @@ namespace Nox
             if (m_StatusLabel)
                 m_StatusLabel->Text = "Selected Entity ID: " + std::to_string(id);
         };
-        leftPanel->AddChild(tree);
-        body->AddChild(leftPanel);
+        leftTabs->AddTab("Hierarchy", tree);
+        leftTabs->AddTab("Layers", MakeUI<UI::UILabel>("Render & Collision Layers", 14.0f));
 
-        auto centerPanel = MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 10.0f);
-        centerPanel->StyleClass = "Panel";
-        centerPanel->DrawBackground = true;
-        centerPanel->WidthMode = UI::UISizeMode::Fill;
-        centerPanel->Padding = UI::UIThickness::All(16.0f);
-        centerPanel->AddChild(MakeUI<UI::UILabel>("Workspace Canvas", 16.0f));
+        // Center-Top: Viewport Tabs
+        auto centerTabs = MakeUI<UI::UITabPanel>();
+        auto viewportSlot = MakeUI<UI::UIViewportSlot>();
+        centerTabs->AddTab("Scene Viewport", viewportSlot);
+        centerTabs->AddTab("Game View", MakeUI<UI::UILabel>("Game Camera Output", 14.0f));
 
-        m_StatusLabel = MakeUI<UI::UILabel>("Phase 2: Test hover/click, text input, drag scalars, sliders & 1,500-item tree!", 14.0f);
-        centerPanel->AddChild(m_StatusLabel);
-        body->AddChild(centerPanel);
+        // Center-Bottom: Content Browser & Console Tabs
+        auto bottomTabs = MakeUI<UI::UITabPanel>();
+        auto consoleBox = MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
+        m_StatusLabel = MakeUI<UI::UILabel>("Phase 3 Ready: Drag splitters, switch tabs, open File/Edit/Window menus, or drag scrollbars!", 13.5f);
+        consoleBox->AddChild(m_StatusLabel);
+        bottomTabs->AddTab("Console", consoleBox);
+        bottomTabs->AddTab("Content Browser", MakeUI<UI::UILabel>("Assets / Shaders / Materials / Themes", 14.0f));
 
-        auto rightPanel = MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 8.0f);
-        rightPanel->StyleClass = "Panel";
-        rightPanel->DrawBackground = true;
-        rightPanel->WidthMode = UI::UISizeMode::Fixed;
-        rightPanel->FixedSize.x = 340.0f;
-        rightPanel->Padding = UI::UIThickness::All(12.0f);
-        rightPanel->AddChild(MakeUI<UI::UILabel>("Inspector", 15.0f));
+        auto centerVSplit = MakeUI<UI::UISplitter>(UI::UIOrientation::Vertical, 0.72f);
+        centerVSplit->SetPanes(centerTabs, bottomTabs);
 
+        // Right Dock: Inspector & Lighting Tabs
+        auto rightTabs = MakeUI<UI::UITabPanel>();
         auto inspector = MakeUI<UI::UIPropertyGrid>();
-        inspector->HeightMode = UI::UISizeMode::Fill;
 
         auto entitySec = inspector->AddSection("Entity", true);
         inspector->AddString("Name", "DirectionalLight", "Entity name...", [this](const std::string& v)
@@ -170,10 +181,18 @@ namespace Nox
         inspector->AddDragFloat("Shadow Bias", 0.002f, 0.0005f, {}, lightSec);
         inspector->AddBool("Cast Shadows", true, {}, lightSec);
 
-        rightPanel->AddChild(inspector);
-        body->AddChild(rightPanel);
+        rightTabs->AddTab("Inspector", inspector);
+        rightTabs->AddTab("World", MakeUI<UI::UILabel>("Sky, DDGI, Path Tracer & Post-Process", 14.0f));
 
-        root->AddChild(body);
+        // Main 3-way horizontal splitter: Left | (Center / Bottom) | Right
+        auto centerRightSplit = MakeUI<UI::UISplitter>(UI::UIOrientation::Horizontal, 0.72f);
+        centerRightSplit->SetPanes(centerVSplit, rightTabs);
+
+        auto mainSplit = MakeUI<UI::UISplitter>(UI::UIOrientation::Horizontal, 0.22f);
+        mainSplit->HeightMode = UI::UISizeMode::Fill;
+        mainSplit->SetPanes(leftTabs, centerRightSplit);
+
+        root->AddChild(mainSplit);
         m_UI.SetRoot(root);
     }
 

@@ -19,6 +19,10 @@ namespace Nox::UI
         void SetRoot(const Ref<UIElement>& root);
         const Ref<UIElement>& GetRoot() const { return m_Root; }
 
+        void SetOverlay(const Ref<UIElement>& overlay);
+        const Ref<UIElement>& GetOverlay() const { return m_Overlay; }
+        void ClearOverlay() { SetOverlay(nullptr); }
+
         void SetTheme(const Ref<UITheme>& theme);
         const Ref<UITheme>& GetTheme() const { return m_Theme; }
 
@@ -39,6 +43,7 @@ namespace Nox::UI
         bool DispatchTextInput(std::string_view text);
 
         Ref<UIElement> m_Root;
+        Ref<UIElement> m_Overlay;
         Ref<UITheme> m_Theme;
 
         Ref<UIElement> m_Hovered;
