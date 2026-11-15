@@ -1,5 +1,6 @@
 #include "UIDemoGallery.h"
 
+#include <cstdio>
 #include <memory>
 
 #include "NoxCore/UI/Core/UIContext.h"
@@ -13,9 +14,11 @@
 #include "NoxCore/UI/Widgets/UILabel.h"
 #include "NoxCore/UI/Widgets/UIProgressBar.h"
 #include "NoxCore/UI/Widgets/UIPropertyGrid.h"
+#include "NoxCore/UI/Widgets/UIRadioGroup.h"
 #include "NoxCore/UI/Widgets/UIScrollView.h"
 #include "NoxCore/UI/Widgets/UISeparator.h"
 #include "NoxCore/UI/Widgets/UISlider.h"
+#include "NoxCore/UI/Widgets/UITableView.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
 #include "NoxCore/UI/Widgets/UITreeView.h"
 
@@ -289,6 +292,76 @@ namespace Nox::UI
         colorRow->AddChild(colorEdit);
         colorPanel->AddChild(colorRow);
         scroll->AddChild(colorPanel);
+
+        // 8. RadioGroup, Live Theme Switcher & Virtualized Sortable UITableView
+        auto tablePanel = MakeUI<UIStackBox>(UIOrientation::Vertical, 8.0f);
+        tablePanel->StyleClass = "Panel";
+        tablePanel->DrawBackground = true;
+        tablePanel->Padding = UIThickness::All(12.0f);
+        tablePanel->AddChild(MakeUI<UILabel>("7. RadioGroup, Live Theme Switcher & Sortable UITableView (500 Rows)", 14.5f));
+
+        auto radio = MakeUI<UIRadioGroup>(
+            std::vector<std::string>{ "Default Dark", "Midnight Cyan", "Warm Amber" },
+            0,
+            [&context, report](int idx)
+            {
+                auto theme = UITheme::CreateDefault();
+                if (idx == 1)
+                {
+                    auto panel = theme->Resolve("Panel", "", UIState::Normal);
+                    panel.FillColor = { 0.06f, 0.09f, 0.14f, 0.96f };
+                    panel.BorderColor = { 0.14f, 0.28f, 0.42f, 1.0f };
+                    theme->SetStyle("Panel", panel);
+
+                    auto primary = theme->Resolve("Button", "primary", UIState::Normal);
+                    primary.FillColor = { 0.08f, 0.56f, 0.72f, 1.0f };
+                    theme->SetStyle("Button.primary", primary);
+                }
+                else if (idx == 2)
+                {
+                    auto panel = theme->Resolve("Panel", "", UIState::Normal);
+                    panel.FillColor = { 0.12f, 0.10f, 0.09f, 0.96f };
+                    panel.BorderColor = { 0.36f, 0.27f, 0.18f, 1.0f };
+                    theme->SetStyle("Panel", panel);
+
+                    auto primary = theme->Resolve("Button", "primary", UIState::Normal);
+                    primary.FillColor = { 0.80f, 0.52f, 0.14f, 1.0f };
+                    theme->SetStyle("Button.primary", primary);
+                }
+                context.SetTheme(theme);
+                report("Theme preset switched (" + std::to_string(idx) + ")");
+            },
+            UIOrientation::Horizontal
+        );
+        tablePanel->AddChild(radio);
+
+        auto table = MakeUI<UITableView>();
+        table->HeightMode = UISizeMode::Fixed;
+        table->FixedSize.y = 200.0f;
+        table->SetColumns({
+            { "ID", 70.0f, 0.0f, true },
+            { "Entity / Asset Name", 0.0f, 1.6f, true },
+            { "Category", 0.0f, 1.0f, true }
+        });
+        std::vector<UITableRow> rows;
+        rows.reserve(500);
+        static const char* kCategories[] = { "Mesh", "Material", "Light", "Shader", "Audio" };
+        for (int i = 0; i < 500; ++i)
+        {
+            char idBuf[16]{};
+            std::snprintf(idBuf, sizeof(idBuf), "%04d", i + 1);
+            rows.push_back({
+                static_cast<uint64_t>(i + 1),
+                { idBuf, "DemoItem_" + std::to_string(i + 1), kCategories[i % 5] }
+            });
+        }
+        table->SetRows(std::move(rows));
+        table->OnSelect = [report](uint64_t rowId, int)
+        {
+            report("UITableView selected row ID: " + std::to_string(rowId));
+        };
+        tablePanel->AddChild(table);
+        scroll->AddChild(tablePanel);
 
         return scroll;
     }
