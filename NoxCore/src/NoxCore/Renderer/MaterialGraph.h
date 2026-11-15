@@ -67,6 +67,10 @@ namespace Nox
         // `float opacity_mask(MaterialGraphInputs i)` alone (the ray tracing passes' variants get the graphs' masks only: MaterialGraphMasks.slang,
         // which changes only when a mask does). Empty when the graph does not connect Opacity Mask.
         std::string MaskCode;
+        // `void surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)` alone: the ray tracing passes that shade their hits (reflections,
+        // the path tracer, the GI passes) get the graphs' surfaces from MaterialGraphSurfaces.slang -- no World Position Offset, so an offset
+        // edit leaves them alone.
+        std::string SurfaceCode;
         std::vector<MaterialGraphParameter> Parameters;
         uint32_t ParameterSlots = 0;
         uint32_t TextureSlots = 0;

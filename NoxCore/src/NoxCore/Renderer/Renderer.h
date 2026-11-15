@@ -1328,8 +1328,10 @@ namespace Nox
         // Swapped in (main thread): what the GPU may still run waited for, the path tracer's shader table baked for its new pipeline.
         void installRayTracingPassPipelines(RayTracingPassPipelines pipelines, bool graphMasks, uint64_t masksHash);
         void bakePathTracerShaderTable();
-        // Whether a graph of these connects Opacity Mask.
-        static bool AnyGraphMask(const std::unordered_map<std::string, MaterialGraphProgram>& programs);
+        // Whether these graphs reach the ray tracing passes: a mask (cuts hits) or a surface output (colours hits).
+        static bool GraphsUseRayTracing(const std::unordered_map<std::string, MaterialGraphProgram>& programs);
+        // The hash of what the ray tracing variants compile from (MaterialGraphMasks.slang, MaterialGraphSurfaces.slang).
+        uint64_t rayTracingGraphsHash() const;
         void startCustomLitBuild(const std::vector<CustomLitSource>& sources, const std::vector<ProjectMaterialGraph>& graphs);
         // The G-buffer resolve compiled with the material graphs (CustomLitShaders::GBufferSourcePath; any thread; throws when it does
         // not compile).
@@ -2541,7 +2543,7 @@ namespace Nox
         bool m_lodFullDetail = false;
         float m_previousTimeSeconds = -1.0f;
         bool m_rayTracingGraphMasks = false;       // updateRayTracingGraphMasks: the ray tracing passes run their graph variants
-        uint64_t m_rayTracingGraphMasksHash = 0;   // of MaterialGraphMasks.slang when they were created // UniformBufferObject::previousTimeSeconds (a World Position Offset's motion vectors)
+        uint64_t m_rayTracingGraphMasksHash = 0;   // rayTracingGraphsHash() when they were created // UniformBufferObject::previousTimeSeconds (a World Position Offset's motion vectors)
         std::unique_ptr<NRI::Buffer> m_clusterStatsBuffer;
         std::vector<std::unique_ptr<NRI::Buffer>> m_clusterStatsReadback;
         std::array<bool, MAX_FRAMES_IN_FLIGHT> m_clusterStatsPending{};

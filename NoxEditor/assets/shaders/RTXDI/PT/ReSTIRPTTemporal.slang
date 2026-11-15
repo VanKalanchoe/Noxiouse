@@ -1184,7 +1184,23 @@ RAB_Surface LoadSurfaceFromRayPayload(RAB_RayPayload rp, float3 rayOrigin, float
         metallic = clamp(metallic * mrSample.b, 0.0, 1.0);
     }
 
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+    // The material's graph (material graph step 4c): the pins it connects replace the values above, as the G-buffer resolve does.
+    MaterialGraphOutputs graphSurface = material_graph_ray_defaults(albedo, metallic, roughness, lut.emissiveFactor.rgb * lut.emissiveFactor.a);
+    const uint graphOutputs = material_graph_ray_surface(g_UBO, lut, rp.primitiveIndex, rp.barycentrics, graphSurface);
+    albedo = graphSurface.baseColor;
+    metallic = graphSurface.metallic;
+    roughness = clamp(graphSurface.roughness, kMinRoughness, 1.0);
+    if ((graphOutputs & MaterialGraphOutputNormal) != 0u)
+        hitNormal = material_graph_world_normal(graphSurface.normal, hitNormal,
+                                                mul((float3x3)((GpuTransform*)g_UBO->sceneTransformsReference)[lut.instanceSlot].world,
+                                                    w0 * vertex0.tangent.xyz + w1 * vertex1.tangent.xyz + w2 * vertex2.tangent.xyz),
+                                                vertex0.tangent.w < 0.0 ? -1.0 : 1.0);
+    else
+        hitNormal = perturb_normal(lut, vertex0, vertex1, vertex2, hitNormal, hitUV, textureSampler);
+#else
     hitNormal = perturb_normal(lut, vertex0, vertex1, vertex2, hitNormal, hitUV, textureSampler);
+#endif
 
     surface.worldPos = hitPos;
     surface.geoNormal = normalize(mul((float3x3)lut.normalMatrix, localNormal));
@@ -1194,6 +1210,9 @@ RAB_Surface LoadSurfaceFromRayPayload(RAB_RayPayload rp, float3 rayOrigin, float
     surface.material.specularF0 = lerp(float3(0.04), albedo, metallic);
     surface.material.roughness = roughness;
     surface.material.emissiveColor = lut.emissiveFactor.rgb * lut.emissiveFactor.a;
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+    surface.material.emissiveColor = graphSurface.emissive;
+#endif
     surface.diffuseProbability = GetSurfaceDiffuseProbability(surface);
     surface.viewDepth = 1.0; // unused for secondary surfaces
     surface.valid = true;

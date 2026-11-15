@@ -232,6 +232,12 @@ float4 fragMain(
         albedo *= SampleMaterialTextureLevel(ubo, hitLut.baseColorTextureIndex, textureSampler, hitUV, 0).rgb;
     }
     albedo *= RayTracingVertexColor(hitLut, uint3(i0, i1, i2), committedBary).rgb; // glTF COLOR_0
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+    // The material's graph (material graph step 4c): its Base Color and Emissive where it connects them.
+    MaterialGraphOutputs graphSurface = material_graph_ray_defaults(albedo, 0.0, 1.0, float3(0.0));
+    const uint graphOutputs = material_graph_ray_surface(ubo, hitLut, committedPrimIndex, committedBary, graphSurface);
+    albedo = graphSurface.baseColor;
+#endif
 
     // Direct light: the strongest lights at the hit exactly, one more for all the others (LightSelection.slang), each behind its
     // shadow ray; point and spot lights at most what they give 10 cm away.
@@ -248,6 +254,10 @@ float4 fragMain(
 
     // Emissive component (e.g. glowing panels)
     float3 emissiveLight = hitLut.emissiveFactor.rgb * hitLut.emissiveFactor.a;
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+    if ((graphOutputs & MaterialGraphOutputEmissive) != 0u)
+        emissiveLight = graphSurface.emissive;
+#endif
 
     // Multi-bounce diffuse GI: last frame's atlases at the hit surface. Not on the atlases' first frame: nothing has written them yet
     // (uninitialized memory can hold NaN, which the blend's hysteresis would then keep forever).

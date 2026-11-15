@@ -81,8 +81,15 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
         albedo *= SampleMaterialTextureLevel(ubo, hit.baseColorTextureIndex, linearRepeat, uv, lod).rgb;
     }
     albedo *= RayTracingVertexColor(hit, uint3(i0, i1, i2), barycentrics).rgb; // glTF COLOR_0
-    if (hit.workflow < 0.5) // metal reflects, it has no diffuse color
-        albedo *= 1.0 - saturate(hit.metallicFactor);
+    float hitMetallic = hit.workflow < 0.5 ? saturate(hit.metallicFactor) : 0.0; // (spec-gloss: the diffuse factor is its diffuse colour)
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+    // The material's graph (material graph step 4c): its Base Color, Metallic and Emissive where it connects them.
+    MaterialGraphOutputs graphSurface = material_graph_ray_defaults(albedo, hitMetallic, 1.0, float3(0.0));
+    const uint graphOutputs = material_graph_ray_surface(ubo, hit, primitive, barycentrics, graphSurface);
+    albedo = graphSurface.baseColor;
+    hitMetallic = graphSurface.metallic;
+#endif
+    albedo *= 1.0 - hitMetallic; // metal reflects, it has no diffuse color
 
     float3 emission = hit.emissiveFactor.rgb * hit.emissiveFactor.a;
     // An emissive mesh the probes sample as a light: its light comes in through those samples (screen_probe_trace), not through the rays.
@@ -92,6 +99,10 @@ float3 screen_probe_shade_hit(UniformBufferObject* ubo, uint instanceSlot, uint 
     {
         emission *= SampleMaterialTextureLevel(ubo, hit.emissiveTextureIndex, linearRepeat, uv, lod).rgb;
     }
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+    if ((graphOutputs & MaterialGraphOutputEmissive) != 0u && EmissiveLights::find(ubo, instanceSlot) == 0xFFFFFFFF)
+        emission = graphSurface.emissive;
+#endif
 
     // Direct light: the strongest lights at the hit exactly, one more for all the others (LightSelection.slang), each behind its
     // shadow ray. Point and spot lights give at most what they give 10 cm away (a ray grazing a lamp's own fixture is no firefly).

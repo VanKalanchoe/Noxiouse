@@ -296,8 +296,26 @@ namespace Bridge
             specGlossToMetalRough(baseColor.rgb, lut.specularFactor.rgb, dielectricF0, metallic, diffuseAlbedo, specularF0);
         }
 
-        // Normal mapping
-        if (lut.normalTextureIndex != 0xFFFFFFFF)
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+        // The material's graph (material graph step 4c): the pins it connects replace the values above, as the G-buffer resolve does.
+        MaterialGraphOutputs graphSurface = material_graph_ray_defaults(baseColor.rgb, saturate(metallic), saturate(roughness), float3(0.0));
+        const uint graphOutputs = material_graph_ray_surface(ubo, lut, primitiveIndex, barycentrics, graphSurface);
+        if ((graphOutputs & (MaterialGraphOutputBaseColor | MaterialGraphOutputMetallic)) != 0u)
+        {
+            baseColor.rgb = graphSurface.baseColor;
+            metallic = graphSurface.metallic;
+            diffuseAlbedo = baseColor.rgb * (1.0 - metallic);
+            specularF0 = lerp(float3(dielectricF0), baseColor.rgb, metallic);
+        }
+        if ((graphOutputs & MaterialGraphOutputRoughness) != 0u)
+            roughness = graphSurface.roughness;
+        const bool graphNormal = (graphOutputs & MaterialGraphOutputNormal) != 0u;
+#else
+        const bool graphNormal = false;
+#endif
+
+        // Normal mapping (the graph's Normal instead of the material's normal map when it connects one)
+        if (lut.normalTextureIndex != 0xFFFFFFFF && !graphNormal)
         {
             float3 tangentNormal = SampleMaterialTextureLevel(ubo, lut.normalTextureIndex, textureSampler, material_texture_uv(material, material.normalTextureSet, meshUV0, meshUV1),
                 textureLod(ubo, lut.normalTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.normalTextureSet), ubo->pathTracerTexLodBias)).xyz;
@@ -316,6 +334,16 @@ namespace Bridge
             );
             buildOrthonormalBasis(surface.shadingData.N, surface.shadingData.T, surface.shadingData.B);
         }
+
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+        if (graphNormal)
+        {
+            const float3 graphTangentNormal = dot(graphSurface.normal, graphSurface.normal) > 1e-12 ? normalize(graphSurface.normal) : float3(0.0, 0.0, 1.0);
+            surface.shadingData.N = normalize(surface.shadingData.T * graphTangentNormal.x + surface.shadingData.B * graphTangentNormal.y +
+                                              surface.shadingData.N * graphTangentNormal.z);
+            buildOrthonormalBasis(surface.shadingData.N, surface.shadingData.T, surface.shadingData.B);
+        }
+#endif
 
         float transmission = lut.transmissionFactor;
         if (lut.transmissionTextureIndex != 0xFFFFFFFF)
@@ -435,6 +463,10 @@ namespace Bridge
             surface.emission *= SampleMaterialTextureLevel(ubo, lut.emissiveTextureIndex, textureSampler, material_texture_uv(material, material.emissiveTextureSet, meshUV0, meshUV1),
                 textureLod(ubo, lut.emissiveTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.emissiveTextureSet), ubo->pathTracerTexLodBias)).rgb;
         }
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+        if ((graphOutputs & MaterialGraphOutputEmissive) != 0u)
+            surface.emission = graphSurface.emissive; // (found by BSDF rays; the emissive light list has the material's own emission)
+#endif
         // The coat is over the emission too (the spec's coated emission).
         surface.emission *= 1.0 - bsdfLobes.coatWeight;
         surface.ior = ior;

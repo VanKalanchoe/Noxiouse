@@ -182,7 +182,7 @@ namespace Nox
                 continue;
             if (graph.Program.Valid)
             {
-                graphSources.push_back({ graph.Path, graph.Program.Code, graph.Program.MaskCode });
+                graphSources.push_back({ graph.Path, graph.Program.Code, graph.Program.MaskCode, graph.Program.SurfaceCode });
                 programs.emplace(graph.Path, graph.Program);
             }
             else
@@ -230,7 +230,7 @@ namespace Nox
             if (m_materialGraphPaths == graphPaths)
                 m_materialGraphPrograms = std::move(programs);
             NOX_CORE_INFO("Custom Lit / material graphs: no shader code changed (a parameter's default, or a layout change): nothing to compile");
-            updateRayTracingGraphMasks(m_gbufferGraphPipeline && AnyGraphMask(m_materialGraphPrograms));
+            updateRayTracingGraphMasks(m_gbufferGraphPipeline && GraphsUseRayTracing(m_materialGraphPrograms));
             ++m_customLitStatus.Version;
             m_gpuMaterialsDirty = true;
             return;
@@ -251,11 +251,11 @@ namespace Nox
         build->GraphPaths = graphPaths;
         build->GraphPrograms = std::move(programs);
         build->GraphCount = graphCount;
-        build->RayMasksOn = AnyGraphMask(build->GraphPrograms);
+        build->RayMasksOn = GraphsUseRayTracing(build->GraphPrograms);
         if (build->RayMasksOn)
         {
             // (the generated files are written: the masks' text this build compiles)
-            build->RayMasksHash = m_shaderCompiler->sourceHash(CustomLitShaders::GraphMasksSourcePath().generic_string());
+            build->RayMasksHash = rayTracingGraphsHash();
             build->RayPipelinesNeeded = !m_rayTracingGraphMasks || build->RayMasksHash != m_rayTracingGraphMasksHash;
         }
         // The forward variant (the slowest) compiles on a thread of its own beside the others; both above the editor's priority.
@@ -525,9 +525,21 @@ namespace Nox
         }
     }
 
-    bool Renderer::AnyGraphMask(const std::unordered_map<std::string, MaterialGraphProgram>& programs)
+    bool Renderer::GraphsUseRayTracing(const std::unordered_map<std::string, MaterialGraphProgram>& programs)
     {
-        return std::any_of(programs.begin(), programs.end(), [](const auto& entry) { return !entry.second.MaskCode.empty(); });
+        // A graph's mask cuts ray hits, its surface colours them (reflections, the path tracer, GI): any graph built.
+        return std::any_of(programs.begin(), programs.end(), [](const auto& entry)
+        {
+            return !entry.second.MaskCode.empty() || (entry.second.Outputs & ~(MaterialGraphOutputOpacityMask | MaterialGraphOutputWorldPositionOffset)) != 0u;
+        });
+    }
+
+    uint64_t Renderer::rayTracingGraphsHash() const
+    {
+        // What the variants compile from: the masks (every variant) and the surfaces (those that shade their hits) with what they include.
+        const uint64_t masks = m_shaderCompiler->sourceHash(CustomLitShaders::GraphMasksSourcePath().generic_string());
+        const uint64_t surfaces = m_shaderCompiler->sourceHash(CustomLitShaders::GraphSurfacesSourcePath().generic_string());
+        return masks ^ (surfaces + 0x9E3779B97F4A7C15ull + (masks << 6) + (masks >> 2));
     }
 
     NRI::PipelineDesc Renderer::rayTracingPassDesc(RayTracingPass pass, bool graphMasks, bool forceCompile)
@@ -664,14 +676,14 @@ namespace Nox
         bakePathTracerShaderTable();
         m_rayTracingGraphMasks = graphMasks;
         m_rayTracingGraphMasksHash = masksHash;
-        NOX_CORE_INFO(graphMasks ? "Material graphs: ray-traced shadows, reflections, GI, AO and the path tracer cut the graphs' Opacity Mask"
-                                 : "Material graphs: the ray tracing passes test the materials' own alpha again (no graph connects Opacity Mask)");
+        NOX_CORE_INFO(graphMasks ? "Material graphs: ray tracing uses the graphs (Opacity Mask in shadows, AO, reflections, GI and the path tracer; the surface at reflection, GI and path tracer hits)"
+                                 : "Material graphs: the ray tracing passes use the materials' own values again (no graph built)");
     }
 
     void Renderer::updateRayTracingGraphMasks(bool wanted)
     {
         // Created again only when something they compile from changed: whether the masks are on, or the masks' text.
-        const uint64_t hash = wanted ? m_shaderCompiler->sourceHash(CustomLitShaders::GraphMasksSourcePath().generic_string()) : 0;
+        const uint64_t hash = wanted ? rayTracingGraphsHash() : 0;
         if (wanted == m_rayTracingGraphMasks && hash == m_rayTracingGraphMasksHash)
             return;
         installRayTracingPassPipelines(buildRayTracingPassPipelines(wanted), wanted, hash);
@@ -726,7 +738,7 @@ namespace Nox
             // (the ray tracing passes' mask variants shipped with their binaries when the editor had built them)
             const bool variantsShipped = std::all_of(CustomLitShaders::RayTracingMaskVariants().begin(), CustomLitShaders::RayTracingMaskVariants().end(),
                                                      [](const CustomLitShaders::RayTracingMaskVariant& variant) { return std::filesystem::exists(variant.Variant); });
-            updateRayTracingGraphMasks(m_gbufferGraphPipeline && variantsShipped && AnyGraphMask(m_materialGraphPrograms));
+            updateRayTracingGraphMasks(m_gbufferGraphPipeline && variantsShipped && GraphsUseRayTracing(m_materialGraphPrograms));
         }
         ++m_customLitStatus.Version;
         m_gpuMaterialsDirty = true;

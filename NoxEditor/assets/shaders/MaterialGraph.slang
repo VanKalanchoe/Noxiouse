@@ -201,21 +201,16 @@ bool material_graph_mask_cuts(float2 uv0, float2 uv1, float3 worldPos, float3 no
 
 #endif // NOX_MATERIAL_GRAPH_MASK_ONLY
 
-// --- Opacity Mask at a ray hit (NOX_MATERIAL_GRAPH_MASK: shaderIO.h's RayHitAlpha / RayHitCoverage in the ray tracing passes' graph
-// variants, and the forward shader's ray-traced shadows): the graph's inputs rebuilt from the hit triangle -- its corners as the ray
-// tracing scene holds them (LoadRayTracingVertex: skinned, unmoved by World Position Offset), the UVs, the vertex normal (world), the
-// vertex colour, the world position through the instance's transform. No screen derivatives (a Texture Sample reads the finest mip),
-// Camera Vector towards the main camera, Screen Position the view's centre.
-#ifdef NOX_MATERIAL_GRAPH_MASK
-float material_graph_ray_mask(UniformBufferObject* ubo, GpuRayTracingInstance instance, uint primitive, float2 barycentrics, out bool handled)
+// --- The graphs at a ray hit: the Opacity Mask (NOX_MATERIAL_GRAPH_MASK: shaderIO.h's RayHitAlpha / RayHitCoverage in the ray tracing
+// passes' graph variants, and the forward shader's ray-traced shadows) and the surface (NOX_MATERIAL_GRAPH_SURFACE: the passes that shade
+// their hits). The graph's inputs rebuilt from the hit triangle -- its corners as the ray tracing scene holds them (LoadRayTracingVertex:
+// skinned, unmoved by World Position Offset), the UVs, the vertex normal (world), the vertex colour, the world position through the
+// instance's transform. No screen derivatives (a Texture Sample reads the finest mip), Camera Vector towards the main camera, Screen
+// Position the view's centre.
+#if defined(NOX_MATERIAL_GRAPH_MASK) || defined(NOX_MATERIAL_GRAPH_SURFACE)
+MaterialGraphInputs material_graph_ray_inputs(UniformBufferObject* ubo, GpuRayTracingInstance instance, GpuMaterial* material, uint primitive,
+                                              float2 barycentrics)
 {
-    handled = false;
-    if (instance.alphaMode != 1)
-        return 1.0;
-    GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
-    if (material.graphSlot == 0xFFFFFFFFu || (material.graphOutputs & MaterialGraphOutputOpacityMask) == 0u)
-        return 1.0;
-    handled = true;
     const uint3 corners = RayTracingTriangle(instance, primitive);
     const Vertex v0 = LoadRayTracingVertex(instance, corners.x);
     const Vertex v1 = LoadRayTracingVertex(instance, corners.y);
@@ -239,7 +234,68 @@ float material_graph_ray_mask(UniformBufferObject* ubo, GpuRayTracingInstance in
     i.material = material;
     i.mipFeedback = false;
     i.ubo = ubo;
-    return material_graph_opacity_mask(material.graphSlot, i);
+    return i;
+}
+#endif
+
+#ifdef NOX_MATERIAL_GRAPH_MASK
+float material_graph_ray_mask(UniformBufferObject* ubo, GpuRayTracingInstance instance, uint primitive, float2 barycentrics, out bool handled)
+{
+    handled = false;
+    if (instance.alphaMode != 1)
+        return 1.0;
+    GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
+    if (material.graphSlot == 0xFFFFFFFFu || (material.graphOutputs & MaterialGraphOutputOpacityMask) == 0u)
+        return 1.0;
+    handled = true;
+    return material_graph_opacity_mask(material.graphSlot, material_graph_ray_inputs(ubo, instance, material, primitive, barycentrics));
+}
+#endif
+
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+// A ray hit's surface with its material's graph, as the G-buffer resolve applies it (GBufferMaterial.slang): `o` holds the hit's own values
+// on entry (its material's factors and textures; normal (0, 0, 1)), the graph writes the Material Output pins it connects -- base colour,
+// metallic, roughness and occlusion saturated, emissive at least 0, the normal in tangent space (the caller puts it in its frame:
+// material_graph_world_normal). Returns which pins (MaterialGraphOutput* bits; 0: no graph, `o` as it was). Opacity is the forward
+// shader's (a translucent hit keeps its material's).
+uint material_graph_ray_surface(UniformBufferObject* ubo, GpuRayTracingInstance instance, uint primitive, float2 barycentrics, inout MaterialGraphOutputs o)
+{
+    GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
+    if (material.graphSlot == 0xFFFFFFFFu)
+        return 0u;
+    const uint outputs = material.graphOutputs & (MaterialGraphOutputBaseColor | MaterialGraphOutputMetallic | MaterialGraphOutputRoughness |
+                                                  MaterialGraphOutputNormal | MaterialGraphOutputEmissive | MaterialGraphOutputOcclusion);
+    if (outputs == 0u)
+        return 0u;
+    MaterialGraphOutputs graph = o;
+    material_graph_surface(material.graphSlot, material_graph_ray_inputs(ubo, instance, material, primitive, barycentrics), graph);
+    if ((outputs & MaterialGraphOutputBaseColor) != 0u)
+        o.baseColor = saturate(graph.baseColor);
+    if ((outputs & MaterialGraphOutputMetallic) != 0u)
+        o.metallic = saturate(graph.metallic);
+    if ((outputs & MaterialGraphOutputRoughness) != 0u)
+        o.roughness = saturate(graph.roughness);
+    if ((outputs & MaterialGraphOutputNormal) != 0u)
+        o.normal = graph.normal;
+    if ((outputs & MaterialGraphOutputEmissive) != 0u)
+        o.emissive = max(graph.emissive, float3(0.0));
+    if ((outputs & MaterialGraphOutputOcclusion) != 0u)
+        o.occlusion = saturate(graph.occlusion);
+    return outputs;
+}
+
+// The hit's own values in, for material_graph_ray_surface.
+MaterialGraphOutputs material_graph_ray_defaults(float3 baseColor, float metallic, float roughness, float3 emissive)
+{
+    MaterialGraphOutputs o;
+    o.baseColor = baseColor;
+    o.metallic = metallic;
+    o.roughness = roughness;
+    o.normal = float3(0.0, 0.0, 1.0);
+    o.emissive = emissive;
+    o.occlusion = 1.0;
+    o.opacity = 1.0;
+    return o;
 }
 #endif
 

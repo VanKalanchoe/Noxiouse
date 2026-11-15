@@ -38,7 +38,8 @@ namespace Nox
     {
         std::string Path;
         std::string Code;
-        std::string MaskCode; // MaterialGraphProgram::MaskCode (empty: no Opacity Mask)
+        std::string MaskCode;    // MaterialGraphProgram::MaskCode (empty: no Opacity Mask)
+        std::string SurfaceCode; // MaterialGraphProgram::SurfaceCode
     };
 
     namespace CustomLitShaders
@@ -67,16 +68,22 @@ namespace Nox
         // The graphs' Opacity Mask functions alone (MaterialGraphMasks.slang): what the ray tracing passes' variants include, so they compile
         // again only when a mask changes.
         std::filesystem::path GraphMasksSourcePath();
-        // The ray tracing passes whose alpha tests read the graphs' masks (shaderIO.h RayHitAlpha with NOX_MATERIAL_GRAPH_MASK): each engine
-        // shader and its generated variant (<name>GraphMask.slang beside the other generated files).
+        // The graphs' surface functions alone (MaterialGraphSurfaces.slang): what the ray tracing passes that shade their hits include
+        // besides the masks (NOX_MATERIAL_GRAPH_SURFACE: MaterialGraph.slang's material_graph_ray_surface).
+        std::filesystem::path GraphSurfacesSourcePath();
+        // The ray tracing passes with the material graphs (shaderIO.h RayHitAlpha with NOX_MATERIAL_GRAPH_MASK; the hit shading with
+        // NOX_MATERIAL_GRAPH_SURFACE): each engine shader and its generated variant (<name>GraphMask.slang beside the other generated files).
         struct RayTracingMaskVariant
         {
             std::string Source;  // as the pipelines name it, "assets/shaders/ShadowMask.slang"
             std::string Variant; // the generated file (generic separators)
+            bool Surface = false; // it shades its hits: the graphs' surfaces too (else the masks alone: shadows, AO)
         };
         const std::vector<RayTracingMaskVariant>& RayTracingMaskVariants();
         // The generated text of MaterialGraphMasks.slang (the graphs with a mask, in their slots).
         std::string GenerateGraphMaskDispatcher(const std::vector<std::string>& graphPaths, const std::vector<MaterialGraphSource>& graphs);
+        // The generated text of MaterialGraphSurfaces.slang (every graph's surface, in its slot).
+        std::string GenerateGraphSurfaceDispatcher(const std::vector<std::string>& graphPaths, const std::vector<MaterialGraphSource>& graphs);
 
         // The generated file's text for these Material Shaders, `paths[slot]` naming each one's slot (a path with no source here: its
         // case left out, it lights nothing): CustomLitShaders.slang.

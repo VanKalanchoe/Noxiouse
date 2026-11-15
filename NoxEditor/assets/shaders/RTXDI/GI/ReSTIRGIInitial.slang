@@ -509,6 +509,13 @@ PSOutput fragMain(
         albedo *= RayTracingVertexColor(hitLut, uint3(i0, i1, i2), committedBary).rgb; // glTF COLOR_0
 
         float3 emissive = hitLut.emissiveFactor.rgb * hitLut.emissiveFactor.a;
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+        // The material's graph (material graph step 4c): its Base Color and Emissive where it connects them.
+        MaterialGraphOutputs graphSurface = material_graph_ray_defaults(albedo, 0.0, 1.0, emissive);
+        material_graph_ray_surface(ubo, hitLut, committedPrimIndex, committedBary, graphSurface);
+        albedo = graphSurface.baseColor;
+        emissive = graphSurface.emissive;
+#endif
 
         // Direct analytical lighting at the secondary hit, selected with the same RTXDI
         // importance distribution used by ReSTIR DI.

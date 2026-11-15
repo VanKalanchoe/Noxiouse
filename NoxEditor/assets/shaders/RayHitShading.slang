@@ -207,6 +207,27 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     float roughness, metallic;
     hit_material(ubo, hitLut, baseColor, material_texture_uv(hitMaterial, hitMaterial.physicalDescriptorTextureSet, meshUV0, meshUV1),
                  textureSampler, albedo, specularF0, roughness, metallic);
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+    // The material's graph (material graph step 4c): the pins it connects replace the hit's own values, as in the G-buffer resolve.
+    MaterialGraphOutputs graphSurface = material_graph_ray_defaults(baseColor, metallic, roughness, float3(0.0));
+    const uint graphOutputs = material_graph_ray_surface(ubo, hitLut, primitive, barycentrics, graphSurface);
+    if ((graphOutputs & (MaterialGraphOutputBaseColor | MaterialGraphOutputMetallic)) != 0u)
+    {
+        baseColor = graphSurface.baseColor;
+        metallic = graphSurface.metallic;
+        const float graphIor = hitLut.ior > 0.0 ? hitLut.ior : 1.5;
+        albedo = baseColor * (1.0 - metallic);
+        specularF0 = lerp(float3(pow((graphIor - 1.0) / (graphIor + 1.0), 2.0)), baseColor, metallic);
+    }
+    roughness = graphSurface.roughness;
+    if ((graphOutputs & MaterialGraphOutputNormal) != 0u)
+    {
+        const float3x3 graphWorld = (float3x3)((GpuTransform*)ubo->sceneTransformsReference)[instanceSlot].world;
+        hitNormal = material_graph_world_normal(graphSurface.normal, hitNormal,
+                                                mul(graphWorld, w0 * vertex0.tangent.xyz + w1 * vertex1.tangent.xyz + w2 * vertex2.tangent.xyz),
+                                                vertex0.tangent.w < 0.0 ? -1.0 : 1.0);
+    }
+#endif
     const float hitNdotV = clamp(dot(hitNormal, -R), 0.001, 1.0);
 
     // The hit's lobes (MaterialLobes.slang): the specular lobe's F0 and weight, the film's Fresnel as the environment's F0, and the
@@ -276,6 +297,9 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
         ambientLight = albedo * sceneIrradiance;
         specularOcclusion = scene_gi_specular_occlusion(ubo, sceneIrradiance, hitNormal);
     }
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+    ambientLight *= graphSurface.occlusion; // (the graph's Ambient Occlusion; 1 without)
+#endif
 
     // The hit's own reflection, its last bounce: the environment along its mirror direction (no further ray), through its specular
     // color and the split-sum BRDF, occluded as the deferred lighting occludes it. Unreal's ray traced reflections end the same way
@@ -318,6 +342,11 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
         emissiveLight *= SampleMaterialTextureLevel(ubo, hitLut.emissiveTextureIndex, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)),
                                                     material_texture_uv(hitMaterial, hitMaterial.emissiveTextureSet, meshUV0, meshUV1), 2.0).rgb;
     }
+
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+    if ((graphOutputs & MaterialGraphOutputEmissive) != 0u)
+        emissiveLight = graphSurface.emissive;
+#endif
 
     // The coat over the emission (the spec's coated_emission).
     return directShare + ambientLight + specularLight + emissiveLight * emissionWeight * (1.0 - coatWeight);
