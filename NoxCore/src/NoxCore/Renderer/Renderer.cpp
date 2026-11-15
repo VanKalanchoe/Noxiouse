@@ -67,6 +67,9 @@ namespace Nox
                     Project::GetActiveAssetDirectory(),
                     ec
                 );
+
+
+
                 if (ec)
                     return 0;
             }
@@ -374,7 +377,7 @@ namespace Nox
         return packed;
     }
 
-    Renderer::Renderer(std::shared_ptr<Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
+    Renderer::Renderer(std::shared_ptr<Window> window, bool isEditor, bool useImGui) : m_window(std::move(window)), m_isEditor(isEditor), m_useImGui(useImGui)
     {
         NOX_CORE_INFO("Renderer Start");
 
@@ -605,6 +608,9 @@ namespace Nox
             }));
         }
 
+        if (!m_useImGui)
+            m_uiRenderer = std::make_unique<UI::UIRenderer>(*m_device, *m_shaderCompiler, m_fileWatcher);
+
         m_renderer2D = std::make_unique<Renderer2D>(isEditor, RendererContext
                                                     {
                                                         *m_device,
@@ -622,6 +628,9 @@ namespace Nox
                                                         }
                                                     }
         );
+
+
+
     }
 
     Renderer::~Renderer()
@@ -1407,6 +1416,9 @@ namespace Nox
             {},
             m_pathTracerSBTState
         );
+
+
+
 
         m_pathTracerSBTBuffer->unmap();
     }
@@ -4758,6 +4770,9 @@ namespace Nox
                 }
             );
 
+
+
+
             void* mapped = buffer->map(0, bufferSize);
 
             m_selectedEntityIDBuffers.emplace_back(std::move(buffer));
@@ -5535,6 +5550,9 @@ namespace Nox
                 )
             );
 
+
+
+
         if (selectedCount > 0)
         {
             memcpy(
@@ -5542,6 +5560,9 @@ namespace Nox
                 m_SelectedEntityIDs.data(),
                 selectedCount * sizeof(int32_t)
             );
+
+
+
         }
     }
 
@@ -6127,6 +6148,11 @@ namespace Nox
         {
             NOX_PROFILE_SCOPE("Renderer2D Update");
             m_renderer2D->Update(frameIndex, uniformData);
+            if (m_uiRenderer)
+            {
+                m_uiRenderer->BeginFrame();
+                m_uiRenderer->Upload(frameIndex);
+            }
         }
 
         std::span<const RGSubmission> submissions;
@@ -6980,6 +7006,9 @@ namespace Nox
             m_ddgiHysteresis,
             m_ddgiNormalBias
         );
+
+
+
         uint32_t ddgiTotalProbes = getDDGIProbeCountTotal();
         uint32_t ddgiProbeRows = (ddgiTotalProbes + DDGIProbesPerRow - 1) / DDGIProbesPerRow;
         uniformData.ddgiAtlasParams = glm::vec4(
@@ -6988,6 +7017,9 @@ namespace Nox
             static_cast<float>(DDGIProbesPerRow * 18),
             static_cast<float>(ddgiProbeRows * 18)
         );
+
+
+
 
         // ReSTIR GI
         uniformData.diffuseGIMode = m_diffuseGIMode;
@@ -7117,6 +7149,9 @@ namespace Nox
             m_ddgiHysteresis,
             m_ddgiNormalBias
         );
+
+
+
         uint32_t ddgiTotalProbes = getDDGIProbeCountTotal();
         uint32_t ddgiProbeRows = (ddgiTotalProbes + DDGIProbesPerRow - 1) / DDGIProbesPerRow;
         uniformData.ddgiAtlasParams = glm::vec4(
@@ -7125,6 +7160,9 @@ namespace Nox
             static_cast<float>(DDGIProbesPerRow * 18),
             static_cast<float>(ddgiProbeRows * 18)
         );
+
+
+
 
         // ReSTIR GI
         uniformData.diffuseGIMode = m_diffuseGIMode;

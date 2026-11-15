@@ -26,7 +26,7 @@ namespace Nox
         m_renderGraph.AddPass("ImGui / Present Pass", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
-                builder.Read(resources.Scene);
+                ReadIfValid(builder, resources.Scene);
                 for (const RGTexture image : extraViewImages)
                     ReadIfValid(builder, image);
                 // The image arrives from an Undefined transition (contents discarded) and ImGui / the present triangle cover
@@ -34,15 +34,15 @@ namespace Nox
                 builder.SwapchainTarget(*m_swapChain, m_frame.imageIndex, NRI::LoadOP::clear, NRI::StoreOP::store);
                 // ImGui's Vulkan backend may also submit texture uploads to the queue while rendering: safe from a worker,
                 // only the main thread submits and it waits for recording.
-                if (m_isEditor)
+                if (m_isEditor && m_useImGui)
                     builder.RecordExclusive("ImGui");
                 builder.SetRenderArea(m_swapChainExtent, RGViewport::None);
             },
-            [this](RGPassContext& context)
+            [this, hasScene = resources.Scene.IsValid()](RGPassContext& context)
             {
                 NRI::CommandBuffer& cmd = context.Cmd();
 
-                if (m_isEditor)
+                if (m_isEditor && m_useImGui)
                 {
                     cmd.renderImGui();
                     return;
@@ -102,16 +102,40 @@ namespace Nox
                 cmd.setColorWriteMask(0, colorWriteMask);
                 cmd.setLogicOpEnable(false);
 
-                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_presentPipeline);
+                if (hasScene && m_presentPipeline)
+                {
+                    cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_presentPipeline);
 
-                PushConstantBlock references{};
-                // Pass pointer to the global matrix via a buffer device address
-                references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                references.vertexReference = -1;
-                references.instanceReference = -1;
-                cmd.pushData(&references, sizeof(PushConstantBlock));
+                    PushConstantBlock references{};
+                    // Pass pointer to the global matrix via a buffer device address
+                    references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                    references.vertexReference = -1;
+                    references.instanceReference = -1;
+                    cmd.pushData(&references, sizeof(PushConstantBlock));
 
-                cmd.draw(3, 1, 0, 0);
+                    cmd.draw(3, 1, 0, 0);
+
+    
+    
+    
+    
+    
+    
+
+    
+                }
+
+                if (m_uiRenderer)
+                    m_uiRenderer->Render(cmd, { w, h }, uniformData.imageHeapIndexOffset, frameIndex);
+
+
+
+
+
+
+
+
+
             });
     }
 

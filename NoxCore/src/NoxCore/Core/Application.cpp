@@ -76,10 +76,10 @@ namespace Nox
 #endif
         m_Window = std::make_shared<Window>(m_Specification.WindowSpec);
 
-        renderer = std::make_unique<Renderer>(m_Window, m_Specification.isEditor);
+        renderer = std::make_unique<Renderer>(m_Window, m_Specification.isEditor, m_Specification.UseImGui);
 
         // ImGui
-        if (m_Specification.isEditor)
+        if (m_Specification.isEditor && m_Specification.UseImGui)
             m_ImGuiLayer = PushLayer<ImGuiLayer>(*renderer);
 
 #if NOX_PROFILE_STATS
@@ -311,7 +311,7 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
     if (!applicationState || !applicationState->app)
         return SDL_APP_CONTINUE;
 
-    if (applicationState->app->GetSpecification().isEditor && ImGuiTakesEvent(*currentEvent))
+    if (applicationState->app->GetSpecification().isEditor && applicationState->app->GetSpecification().UseImGui && ImGuiTakesEvent(*currentEvent))
         ImGui_ImplSDL3_ProcessEvent(currentEvent);
 
     switch (currentEvent->type)

@@ -3864,4 +3864,49 @@ struct SceneInstances
 
 #endif
 
+// ============================================================================
+// Nox::UI GPU Primitives (shared C++20 & Slang)
+// ============================================================================
+enum UIPrimitiveType : uint32_t
+{
+    UI_PRIM_ROUNDED_RECT  = 0u,
+    UI_PRIM_TEXTURED_QUAD = 1u,
+    UI_PRIM_MSDF_GLYPH    = 2u,
+    UI_PRIM_CUBIC_BEZIER  = 3u
+};
+
+struct UIClipRect
+{
+    vec4 rect;        // (minX, minY, maxX, maxY) in pixels
+    vec4 cornerRadii; // (topLeft, topRight, bottomRight, bottomLeft)
+};
+
+struct UIPrimitive
+{
+    vec4 bounds;          // (minX, minY, maxX, maxY) in pixels
+    vec4 color0;          // primary fill / tint
+    vec4 color1;          // secondary gradient color / MSDF outline color
+    vec4 borderColor;     // border RGBA
+    vec4 shadowColor;     // drop shadow RGBA
+    vec4 cornerRadii;     // (topLeft, topRight, bottomRight, bottomLeft)
+    vec4 uvOrP0P1;        // Textured/MSDF: (uMin, vMin, uMax, vMax); Bezier: (p0.xy, p1.xy)
+    vec4 extraOrP2P3;     // Bezier: (p2.xy, p3.xy); RoundedRect: (gradientAngle, strokeWidth, 0, 0)
+    vec2 shadowOffset;    // drop shadow offset in pixels
+    float shadowBlur;     // drop shadow blur radius in pixels (0 = disabled)
+    float borderThickness;
+    uint32_t type;        // UIPrimitiveType
+    uint32_t clipIndex;   // index into UIClipRect buffer
+    uint32_t textureIndex;// bindless slot relative to imageHeapIndexOffset
+    uint32_t flags;       // bit 0: gradient enabled, bit 1: MSDF outline enabled
+};
+
+struct UIPushConstants
+{
+    uint64_t primitiveReference;
+    uint64_t clipRectReference;
+    vec2 screenSize;
+    uint32_t imageHeapIndexOffset;
+    uint32_t primitiveCount;
+};
+
 #endif  // HOST_DEVICE_H

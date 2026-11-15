@@ -133,6 +133,7 @@ namespace Nox
         ApplicationCommandLineArgs CommandLineArgs;
         WindowSpecification WindowSpec;
         bool isEditor = false;
+        bool UseImGui = true;
         // A dedicated server (docs/Networking_Plan_2026-11.md, NET0): no window, no renderer, no ImGui, no audio device; the main loop
         // runs at TickRate and sleeps in between (nothing paces it otherwise). Assets load without the GPU (Application::IsHeadless).
         bool Headless = false;

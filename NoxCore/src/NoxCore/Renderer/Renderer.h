@@ -28,6 +28,7 @@
 #include "MaterialGraph.h"
 #include "GpuScene.h"
 #include "NoxCore/RenderGraph/RenderGraph.h"
+#include "NoxCore/UI/Rendering/UIRenderer.h"
 #include "NRI/ShaderBindingTable.h"
 
 // Forward declaration only -- the RTXDI SDK must never be #included from this header (it's engine-
@@ -209,8 +210,11 @@ namespace Nox
     class Renderer
     {
     public:
-        Renderer(std::shared_ptr<Nox::Window> window, bool isEditor);
+        Renderer(std::shared_ptr<Nox::Window> window, bool isEditor, bool useImGui = true);
         ~Renderer();
+
+        UI::UIRenderer* GetUIRenderer() { return m_uiRenderer.get(); }
+        UI::UIDrawList* GetUIDrawList() { return m_uiRenderer ? &m_uiRenderer->GetDrawList() : nullptr; }
 
         // Call this from EditorLayer during mouse hover/click
         // Single click (1x1)
@@ -2777,5 +2781,7 @@ namespace Nox
         glm::vec3 m_cameraForward{0.0f, 0.0f, -1.0f};
         float m_cameraNear = 0.1f;
         float m_cameraFOV = 30.0f;
+        bool m_useImGui = true;
+        std::unique_ptr<UI::UIRenderer> m_uiRenderer;
     };
 }

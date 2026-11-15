@@ -55,6 +55,11 @@ if(NOX_WITH_MCP)
 endif()
 add_subdirectory(NoxEditor)
 
+option(NOX_BUILD_EDITOR_V2 "Build NoxEditorV2 (custom UI editor)" ON)
+if(NOX_BUILD_EDITOR_V2)
+    add_subdirectory(NoxEditorV2)
+endif()
+
 # The standalone player (docs/Runtime_And_Packaging_Plan_2026-10.md, R1). Off by default until it has been built and tried.
 option(NOX_BUILD_RUNTIME "Build NoxRuntime, the standalone player (no editor)" OFF)
 if(NOX_BUILD_RUNTIME)
