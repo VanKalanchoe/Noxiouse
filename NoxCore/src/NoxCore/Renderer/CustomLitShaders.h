@@ -55,11 +55,14 @@ namespace Nox
         // The G-buffer resolve compiled with the material graphs (GBufferMaterial.slang with NOX_MATERIAL_GRAPH).
         std::filesystem::path GBufferSourcePath();  // GBufferMaterialGraph.slang
         // The visibility buffer and the shadow maps' depth with the material graphs (VisibilityBuffer.slang with NOX_MATERIAL_GRAPH):
-        // a Masked material's Opacity Mask.
+        // a Masked material's Opacity Mask, any graph material's World Position Offset.
         std::filesystem::path VisibilitySourcePath(); // VisibilityBufferMaterialGraph.slang
-        // The editor's stable entity IDs / depth and selection mask with the material graphs (their Opacity Mask).
+        // The editor's stable entity IDs / depth and selection mask with the material graphs (their Opacity Mask and World Position Offset).
         std::filesystem::path StableDepthSourcePath();   // EditorStableDepthMaterialGraph.slang
         std::filesystem::path SelectionMaskSourcePath(); // SelectionMaskMaterialGraph.slang
+        // The forward shader's mesh stage with the material graphs (Material_PBR_Mesh.slang with NOX_MATERIAL_GRAPH): World Position Offset
+        // for translucent surfaces.
+        std::filesystem::path ForwardMeshSourcePath(); // ForwardMeshMaterialGraph.slang
 
         // The generated file's text for these Material Shaders, `paths[slot]` naming each one's slot (a path with no source here: its
         // case left out, it lights nothing): CustomLitShaders.slang.

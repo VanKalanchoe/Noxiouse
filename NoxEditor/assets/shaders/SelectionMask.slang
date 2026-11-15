@@ -78,12 +78,18 @@
                 localPos = mul(skinTransform, localPos);
             }
 
-            vertices[i].pos = mul(viewProj, mul(modelMatrix, localPos));
+            float4 worldPos = mul(modelMatrix, localPos);
+#ifdef NOX_MATERIAL_GRAPH
+            // A graph's World Position Offset (as the visibility pass moves the vertex: the outline follows the moving surface).
+            worldPos.xyz += material_graph_vertex_offset(instances.material(sharedPayload.drawID), instance, vert, localVertexIndex,
+                                                         meshlet.globalVertexOffset + localVertexIndex, worldPos.xyz, ubo, pushConstant);
+#endif
+            vertices[i].pos = mul(viewProj, worldPos);
             vertices[i].uv0 = vert.uv0;
             vertices[i].uv1 = vert.uv1;
             vertices[i].vertexAlpha = instance.alphaMode == 1 ? loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors).a : 1.0;
 #ifdef NOX_MATERIAL_GRAPH
-            vertices[i].worldPos = mul(modelMatrix, localPos).xyz;
+            vertices[i].worldPos = worldPos.xyz;
             vertices[i].normal = material_graph_vertex_normal(instance, vert, localVertexIndex, pushConstant);
             vertices[i].vertexColor = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors);
 #endif

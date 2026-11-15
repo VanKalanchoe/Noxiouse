@@ -623,7 +623,7 @@ namespace Nox
                     ImGui::PopID();
                 }
                 ImGui::TextDisabled("Opaque and translucent surfaces use it; ray-traced reflections, GI bounces and the path tracer\n"
-                                    "show the material's own values. Opacity Mask and World Position Offset come later.");
+                                    "show the material's own values (unmoved by World Position Offset).");
             }
         }
 

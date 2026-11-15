@@ -1303,12 +1303,14 @@ namespace Nox
         // The Custom Lit pass's and the forward variant's pipelines from the generated sources (CustomLitShaders.h); false when they fail.
         bool createCustomLitPipelines(bool forceCompile);
         std::unique_ptr<NRI::Pipeline> buildCustomLitDeferredPipeline(bool forceCompile); // (any thread; throws when it does not compile)
-        std::unique_ptr<NRI::Pipeline> buildCustomLitForwardPipeline(bool forceCompile);
+        // `withGraphs`: its mesh stage with the material graphs too (a graph's World Position Offset: CustomLitShaders::ForwardMeshSourcePath).
+        std::unique_ptr<NRI::Pipeline> buildCustomLitForwardPipeline(bool forceCompile, bool withGraphs);
         void startCustomLitBuild(const std::vector<CustomLitSource>& sources, const std::vector<ProjectMaterialGraph>& graphs);
         // The G-buffer resolve compiled with the material graphs (CustomLitShaders::GBufferSourcePath; any thread; throws when it does
         // not compile).
         std::unique_ptr<NRI::Pipeline> buildMaterialGraphGBufferPipeline(bool forceCompile, bool writeVelocity);
-        // The visibility buffer's and the shadow maps' Masked pipelines with the graphs' Opacity Mask (CustomLitShaders::VisibilitySourcePath).
+        // The visibility buffer's and the shadow maps' Masked pipelines with the graphs' Opacity Mask and World Position Offset
+        // (CustomLitShaders::VisibilitySourcePath).
         std::unique_ptr<NRI::Pipeline> buildMaterialGraphVisibilityPipeline(bool forceCompile, bool shadowDepth);
         // The editor's stable entity IDs / depth (`selection` false) or selection mask with the graphs' Opacity Mask.
         std::unique_ptr<NRI::Pipeline> buildMaterialGraphEditorPipeline(bool selection);
@@ -1317,8 +1319,8 @@ namespace Nox
         // The forward shader for lit surfaces: its Custom Lit variant while the project has Material Shaders (it shades every other
         // material as the plain one does), else the plain one.
         NRI::Pipeline* forwardLitPipeline() const { return m_transparentLitCustomPipeline ? m_transparentLitCustomPipeline.get() : m_transparentLitPipeline.get(); }
-        // The Masked buckets' visibility / shadow depth pipeline: the material graph variant (a graph's Opacity Mask) while a material has
-        // a graph and it is built, else the plain one.
+        // The Masked buckets' visibility / shadow depth pipeline: the material graph variant (a graph's Opacity Mask; World Position Offset,
+        // whose materials the GPU scene puts in these buckets) while a material has a graph and it is built, else the plain one.
         NRI::Pipeline* visibilityMaskPipeline() const
         {
             return m_visibilityGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0 ? m_visibilityGraphPipeline.get() : m_visibilityPipeline.get();
@@ -2501,6 +2503,7 @@ namespace Nox
         // Cluster LOD (§5.7), and what the visibility passes drew with it: cleared each frame, read back per frame slot.
         float m_lodErrorPixels = 1.0f;
         bool m_lodFullDetail = false;
+        float m_previousTimeSeconds = -1.0f; // UniformBufferObject::previousTimeSeconds (a World Position Offset's motion vectors)
         std::unique_ptr<NRI::Buffer> m_clusterStatsBuffer;
         std::vector<std::unique_ptr<NRI::Buffer>> m_clusterStatsReadback;
         std::array<bool, MAX_FRAMES_IN_FLIGHT> m_clusterStatsPending{};

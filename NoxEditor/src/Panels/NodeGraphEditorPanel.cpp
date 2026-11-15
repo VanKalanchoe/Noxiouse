@@ -353,9 +353,9 @@ namespace Nox
             return;
         }
         static constexpr const char* outputNames[] = { "Base Color", "Metallic", "Roughness", "Normal", "Emissive", "Ambient Occlusion", "Opacity",
-                                                       "Opacity Mask" };
+                                                       "Opacity Mask", "World Position Offset" };
         std::string outputs;
-        for (uint32_t bit = 0; bit < 8; ++bit)
+        for (uint32_t bit = 0; bit < 9; ++bit)
         {
             if ((program.Outputs & (1u << bit)) != 0)
                 outputs += std::string(outputs.empty() ? "" : ", ") + outputNames[bit];
@@ -368,6 +368,11 @@ namespace Nox
         }
         ImGui::TextDisabled("Compiles. Sets: %s. Parameters: %s.", outputs.empty() ? "nothing yet (connect the Material Output)" : outputs.c_str(),
                             parameters.empty() ? "none" : parameters.c_str());
+        // World Position Offset without a Max World Position Offset Displacement: the culling keeps the mesh's own bounds (Unreal's 0), so a
+        // surface pushed past them can vanish at the screen's edge or behind something while still visible.
+        if ((program.Outputs & MaterialGraphOutputWorldPositionOffset) != 0 && program.MaxDisplacement <= 0.0f)
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "World Position Offset: set Max World Position Offset Displacement on the Material Output "
+                                                             "(how far it moves the surface, world units) or the surface may be culled while it is pushed out of its bounds.");
         const Renderer* renderer = Application::Get().GetRenderer();
         if (!renderer)
             return;

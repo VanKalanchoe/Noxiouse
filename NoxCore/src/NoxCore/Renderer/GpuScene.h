@@ -193,7 +193,8 @@ namespace Nox
         bool ComputeWorldBounds(glm::vec3& outMin, glm::vec3& outMax) const;
         // Where the drawn scene changed since the last call, for views that keep what they drew (the sun's cached shadow cascades):
         // world bounding spheres (render space) of instances added, removed, moved (their old and new place) or given another material,
-        // then (from outChangedCount on) every deformed (skinned / morphed) instance's, inflated (its mesh's bounds are the bind pose's;
+        // then (from outChangedCount on) every deformed (skinned / morphed, or moved by a material graph's World Position Offset) instance's,
+        // inflated (its mesh's bounds are the bind pose's / the offset's Max Displacement;
         // what only shadows need, not what a GI capture keeps). outMoved: every position moved (a new render origin); outLost: more
         // changed than was tracked (or nothing was yet), so anything may have. Once a frame, before the views decide what to redraw.
         void TakeChangedBounds(std::vector<glm::vec4>& outSpheres, uint32_t& outChangedCount, bool& outMoved, bool& outLost);
@@ -291,6 +292,7 @@ namespace Nox
         std::vector<uint32_t> m_MaterialReferences;
         uint32_t m_CustomLitMaterials = 0;
         uint32_t m_GraphMaterials = 0;
+        uint32_t m_OffsetMaterials = 0; // of them, with a World Position Offset (TakeChangedBounds: drawn moved every frame)
         std::vector<GpuMaterialKey> m_MaterialKeys;
         std::unordered_map<GpuMaterialKey, uint32_t, GpuMaterialKeyHash> m_MaterialByKey;
 

@@ -80,9 +80,11 @@ namespace Nox
             uint32_t TextureSlots = 0;
             uint32_t Outputs = 0;
             std::string Error;
-            // Which function is being generated: surface() (every Material Output pin but Opacity Mask) or opacity_mask() (that pin
-            // alone; the Material Output then writes `return`).
-            bool MaskPass = false;
+            // Which function is being generated: surface() (every Material Output pin but Opacity Mask and World Position Offset),
+            // opacity_mask() or world_position_offset() (that pin alone; the Material Output then writes `return`). The offset is
+            // computed per vertex: no screen derivatives, nothing that needs the pixel on screen.
+            enum class Function { Surface, OpacityMask, WorldPositionOffset };
+            Function Pass = Function::Surface;
 
             // A value into named locals (its derivatives too), so what reads it twice computes it once.
             Value Store(const Value& value)
@@ -508,6 +510,12 @@ namespace Nox
             Register("Screen Position", "Inputs", {}, { V("UV") }, {},
                      [](EmitArgs& args)
                      {
+                         if (args.Ctx.Pass == Context::Function::WorldPositionOffset)
+                         {
+                             // (Unreal's rule too: World Position Offset runs per vertex, before the vertex has a place on the screen)
+                             args.Ctx.Error = "Screen Position cannot feed World Position Offset (the offset is computed per vertex, before it is on screen)";
+                             return false;
+                         }
                          args.Out[0] = Value{ "i.screenUV", "i.screenUVDx", "i.screenUVDy", 2 };
                          return true;
                      });
@@ -665,11 +673,25 @@ namespace Nox
         {
             Register("Material Output", "Output",
                      { V("Base Color"), V("Metallic"), V("Roughness"), V("Normal"), V("Emissive"), V("Ambient Occlusion"), V("Opacity"),
-                       V("Opacity Mask") }, {}, {},
+                       V("Opacity Mask"), V("World Position Offset") }, {},
+                     // (appended after the pins: links name pins by index, so graphs saved before World Position Offset keep theirs)
+                     { { "Max World Position Offset Displacement", 0.0f } },
                      [](EmitArgs& args)
                      {
                          constexpr size_t maskPin = 7;
-                         if (args.Ctx.MaskPass)
+                         constexpr size_t offsetPin = 8;
+                         if (args.Ctx.Pass == Context::Function::WorldPositionOffset)
+                         {
+                             if (args.Connected.size() > offsetPin && args.Connected[offsetPin])
+                             {
+                                 args.Ctx.Body += "    return " + Convert(args.In[offsetPin], 3).Code + ";\n";
+                                 args.Ctx.Outputs |= MaterialGraphOutputWorldPositionOffset;
+                             }
+                             else
+                                 args.Ctx.Body += "    return float3(0.0);\n";
+                             return true;
+                         }
+                         if (args.Ctx.Pass == Context::Function::OpacityMask)
                          {
                              if (args.Connected.size() > maskPin && args.Connected[maskPin])
                              {
@@ -752,18 +774,24 @@ namespace Nox
             return program;
         }
 
-        // Two functions: surface() from what every Material Output pin but Opacity Mask needs, opacity_mask() from what that pin needs
-        // (the visibility and shadow passes run it alone). An unconnected node computes nothing, and its errors do not count. The
-        // second pass starts from the first's parameters, so a parameter both read has one slot.
+        // Three functions: surface() from what every Material Output pin but Opacity Mask and World Position Offset needs,
+        // opacity_mask() and world_position_offset() from what their pin needs (the geometry passes run them alone; the offset per
+        // vertex). An unconnected node computes nothing, and its errors do not count. Each pass starts from the one before's
+        // parameters, so a parameter several read has one slot.
         constexpr uint32_t kMaskPin = 7;
-        auto neededFor = [&](bool mask)
+        constexpr uint32_t kOffsetPin = 8;
+        auto pinFunction = [&](uint32_t pin)
+        {
+            return pin == kMaskPin ? Context::Function::OpacityMask : pin == kOffsetPin ? Context::Function::WorldPositionOffset : Context::Function::Surface;
+        };
+        auto neededFor = [&](Context::Function function)
         {
             std::vector<bool> needed(compiled.Nodes.size(), false);
             std::vector<uint32_t> stack;
             needed[compiled.OutputNodeIndex] = true;
             const std::vector<CompiledPin>& outputPins = outputNode.Inputs;
             for (uint32_t pin = 0; pin < outputPins.size(); ++pin)
-                if ((pin == kMaskPin) == mask && outputPins[pin].Node != kInvalidGraphIndex)
+                if (pinFunction(pin) == function && outputPins[pin].Node != kInvalidGraphIndex)
                     stack.push_back(outputPins[pin].Node);
             while (!stack.empty())
             {
@@ -781,7 +809,9 @@ namespace Nox
 
         Context context;
         Context maskContext;
-        maskContext.MaskPass = true;
+        maskContext.Pass = Context::Function::OpacityMask;
+        Context offsetContext;
+        offsetContext.Pass = Context::Function::WorldPositionOffset;
         auto generate = [&](Context& ctx, const std::vector<bool>& needed) -> bool
         {
         std::vector<std::vector<Value>> outputs(compiled.Nodes.size());
@@ -829,22 +859,33 @@ namespace Nox
         return true;
         };
 
-        if (!generate(context, neededFor(false)))
+        if (!generate(context, neededFor(Context::Function::Surface)))
             return program;
-        maskContext.Parameters = context.Parameters;
-        maskContext.ParameterSlots = context.ParameterSlots;
-        maskContext.TextureSlots = context.TextureSlots;
-        if (!generate(maskContext, neededFor(true)))
+        auto continueFrom = [](Context& next, const Context& previous)
+        {
+            next.Parameters = previous.Parameters;
+            next.ParameterSlots = previous.ParameterSlots;
+            next.TextureSlots = previous.TextureSlots;
+        };
+        continueFrom(maskContext, context);
+        if (!generate(maskContext, neededFor(Context::Function::OpacityMask)))
+            return program;
+        continueFrom(offsetContext, maskContext);
+        if (!generate(offsetContext, neededFor(Context::Function::WorldPositionOffset)))
             return program;
 
         program.Valid = true;
-        program.Parameters = std::move(maskContext.Parameters);
-        program.ParameterSlots = maskContext.ParameterSlots;
-        program.TextureSlots = maskContext.TextureSlots;
-        program.Outputs = context.Outputs | maskContext.Outputs;
+        program.Parameters = std::move(offsetContext.Parameters);
+        program.ParameterSlots = offsetContext.ParameterSlots;
+        program.TextureSlots = offsetContext.TextureSlots;
+        program.Outputs = context.Outputs | maskContext.Outputs | offsetContext.Outputs;
+        if (const NodeGraphValue* displacement = Property(outputNode, "Max World Position Offset Displacement"))
+            if (const float* value = std::get_if<float>(displacement))
+                program.MaxDisplacement = std::max(*value, 0.0f);
         program.Code = std::format("static const uint Outputs = {}u;\n\nvoid surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)\n{{\n{}}}\n\n"
-                                   "float opacity_mask(MaterialGraphInputs i)\n{{\n{}}}\n",
-                                   program.Outputs, context.Body, maskContext.Body);
+                                   "float opacity_mask(MaterialGraphInputs i)\n{{\n{}}}\n\n"
+                                   "float3 world_position_offset(MaterialGraphInputs i)\n{{\n{}}}\n",
+                                   program.Outputs, context.Body, maskContext.Body, offsetContext.Body);
         return program;
     }
 }

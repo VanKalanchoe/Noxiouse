@@ -18,6 +18,12 @@ namespace Nox
     {
         constexpr uint32_t MinimumTableCapacity = 64;
 
+        // A material graph's World Position Offset moves the material's vertices (MaterialGraph.slang).
+        bool HasVertexOffset(const shaderio::GpuMaterial& material)
+        {
+            return material.graphSlot != 0xFFFFFFFFu && (material.graphOutputs & shaderio::MaterialGraphOutputWorldPositionOffset) != 0;
+        }
+
         RenderBucket SelectRenderBucket(const shaderio::GpuMaterial& material)
         {
             const bool doubleSided = material.doubleSided != 0;
@@ -48,7 +54,10 @@ namespace Nox
             // Opaque and alpha-mask unlit materials share the unlit buckets.
             if (unlit)
                 return doubleSided ? RenderBucket::UnlitDoubleSided : RenderBucket::Unlit;
-            if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Mask))
+            // A World Position Offset: the Masked buckets, whose geometry passes run the material graph variant (Unreal's programmable
+            // raster bins, which take Masked and World Position Offset materials alike) -- the Opaque buckets' fixed-function pipelines
+            // would draw the mesh unmoved. An opaque material there is not alpha tested (the test is for alphaMode Mask only).
+            if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Mask) || HasVertexOffset(material))
                 return doubleSided ? RenderBucket::MaskDoubleSided : RenderBucket::Mask;
             return doubleSided ? RenderBucket::OpaqueDoubleSided : RenderBucket::Opaque;
         }
@@ -350,6 +359,8 @@ namespace Nox
             ++m_CustomLitMaterials;
         if (material.graphSlot != 0xFFFFFFFFu)
             ++m_GraphMaterials;
+        if (HasVertexOffset(material))
+            ++m_OffsetMaterials;
         return slot;
     }
 
@@ -366,6 +377,7 @@ namespace Nox
         const bool hadGraph = m_Materials.Get(materialSlot).graphSlot != 0xFFFFFFFFu;
         const bool hasGraph = material.graphSlot != 0xFFFFFFFFu;
         m_GraphMaterials += (hasGraph ? 1u : 0u) - (hadGraph ? 1u : 0u);
+        m_OffsetMaterials += (HasVertexOffset(material) ? 1u : 0u) - (HasVertexOffset(m_Materials.Get(materialSlot)) ? 1u : 0u);
         m_Materials.Edit(materialSlot) = material;
 
         // Instances copy material fields into their ray tracing records; alpha mode, unlit and double-sided also pick the
@@ -634,6 +646,19 @@ namespace Nox
             const InstanceState& state = m_InstanceStates[instanceSlot];
             if (state.Mesh != InvalidSlot && state.Bucket != RenderBucket::Count)
                 outSpheres.push_back(glm::vec4(glm::vec3(state.WorldSphere), 2.0f * state.WorldSphere.w));
+        }
+        // Moved every frame by a material graph's World Position Offset (it may animate: Time): its bounds grown by the offset's Max
+        // Displacement (Unreal's virtual shadow maps invalidate World Position Offset materials every frame too).
+        if (m_OffsetMaterials > 0)
+        {
+            for (const InstanceState& state : m_InstanceStates)
+            {
+                if (state.Mesh == InvalidSlot || state.Material == InvalidSlot || state.Bucket == RenderBucket::Count || state.Hidden)
+                    continue;
+                const shaderio::GpuMaterial& material = m_Materials.Get(state.Material);
+                if (HasVertexOffset(material))
+                    outSpheres.push_back(glm::vec4(glm::vec3(state.WorldSphere), state.WorldSphere.w + material.graphMaxDisplacement));
+            }
         }
     }
 
@@ -977,6 +1002,8 @@ namespace Nox
             --m_CustomLitMaterials;
         if (m_Materials.Get(materialSlot).graphSlot != 0xFFFFFFFFu && m_GraphMaterials > 0)
             --m_GraphMaterials;
+        if (HasVertexOffset(m_Materials.Get(materialSlot)) && m_OffsetMaterials > 0)
+            --m_OffsetMaterials;
         m_Materials.Free(materialSlot);
     }
 }

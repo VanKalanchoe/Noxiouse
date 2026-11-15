@@ -312,6 +312,58 @@ static void TestMaterialGraph()
     CHECK(maskOnlyProgram.Valid && maskOnlyProgram.Outputs == MaterialGraphOutputOpacityMask && program.Code.find("    return 1.0;") != std::string::npos,
           "a graph connecting only Opacity Mask has an output (it is built); one without the mask returns 1 from opacity_mask()");
 
+    // World Position Offset (stylized step 4b part 2): its own function, per vertex, from only the nodes feeding that pin (a wave along the
+    // vertex normal: Vertex Normal x Sine(Time x Speed + World Position.x x 0.05) x Amplitude, plus a texture's red); the Material Output's
+    // Max World Position Offset Displacement in the program; Screen Position refused there; graphs saved before the pin existed keep theirs.
+    NodeGraph waving = CreateEmptyMaterialGraph();
+    waving.Nodes[0].Properties["Max World Position Offset Displacement"] = 12.5f;
+    const uint32_t waveSplit = node(waving, "Split");
+    link(waving, node(waving, "World Position"), 0, waveSplit, 0);
+    const uint32_t waveTime = node(waving, "Multiply");
+    link(waving, node(waving, "Time"), 0, waveTime, 0);
+    link(waving, node(waving, "Scalar Parameter", { { "Name", std::string("Speed") }, { "Default", 2.0f } }), 0, waveTime, 1);
+    const uint32_t wavePhase = node(waving, "Multiply", { { "B", 0.05f } });
+    link(waving, waveSplit, 0, wavePhase, 0); // X
+    const uint32_t waveSum = node(waving, "Add");
+    link(waving, waveTime, 0, waveSum, 0);
+    link(waving, wavePhase, 0, waveSum, 1);
+    const uint32_t waveSine = node(waving, "Sine");
+    link(waving, waveSum, 0, waveSine, 0);
+    const uint32_t waveAmplitude = node(waving, "Multiply");
+    link(waving, waveSine, 0, waveAmplitude, 0);
+    link(waving, node(waving, "Scalar Parameter", { { "Name", std::string("Amplitude") }, { "Default", 10.0f } }), 0, waveAmplitude, 1);
+    const uint32_t waveTexture = node(waving, "Texture Sample", { { "Parameter Name", std::string("WindMask") } });
+    const uint32_t waveMasked = node(waving, "Multiply");
+    link(waving, waveAmplitude, 0, waveMasked, 0);
+    link(waving, waveTexture, 1, waveMasked, 1); // R
+    const uint32_t waveOffset = node(waving, "Multiply");
+    link(waving, node(waving, "Vertex Normal"), 0, waveOffset, 0);
+    link(waving, waveMasked, 0, waveOffset, 1);
+    link(waving, waveOffset, 0, waving.OutputNode, 8);
+    link(waving, node(waving, "Color", { { "Value", glm::vec4(0.1f, 0.3f, 0.8f, 1.0f) } }), 0, waving.OutputNode, 0);
+    const MaterialGraphProgram waveProgram = CompileMaterialGraph(waving);
+    const size_t offsetFunction = waveProgram.Code.find("float3 world_position_offset(MaterialGraphInputs i)");
+    CHECK(waveProgram.Valid && waveProgram.Outputs == (MaterialGraphOutputBaseColor | MaterialGraphOutputWorldPositionOffset) && offsetFunction != std::string::npos &&
+          waveProgram.Code.find("sin(", offsetFunction) != std::string::npos && waveProgram.Code.find("i.normal", offsetFunction) != std::string::npos,
+          "World Position Offset: its own function returning the offset, the output bit set: '{}'", waveProgram.Error);
+    CHECK(waveProgram.Code.substr(0, offsetFunction).find("sin(") == std::string::npos, "the offset's nodes are only in world_position_offset()");
+    CHECK(waveProgram.MaxDisplacement == 12.5f, "the Material Output's Max World Position Offset Displacement is in the program: {}", waveProgram.MaxDisplacement);
+    CHECK(waveProgram.ParameterSlots == 2 && waveProgram.TextureSlots == 1, "the offset's parameters and texture have slots: {} / {}", waveProgram.ParameterSlots,
+          waveProgram.TextureSlots);
+    CHECK(program.Code.find("    return float3(0.0);") != std::string::npos && program.MaxDisplacement == 0.0f,
+          "a graph without the offset returns 0 from world_position_offset() and has no Max Displacement");
+    NodeGraph screenOffset = CreateEmptyMaterialGraph();
+    link(screenOffset, node(screenOffset, "Screen Position"), 0, screenOffset.OutputNode, 8);
+    const MaterialGraphProgram screenOffsetProgram = CompileMaterialGraph(screenOffset);
+    CHECK(!screenOffsetProgram.Valid && screenOffsetProgram.Error.find("Screen Position cannot feed World Position Offset") != std::string::npos,
+          "Screen Position into World Position Offset is refused, naming the node: '{}'", screenOffsetProgram.Error);
+    NodeGraph screenSurface = CreateEmptyMaterialGraph();
+    link(screenSurface, node(screenSurface, "Screen Position"), 0, screenSurface.OutputNode, 4);
+    CHECK(CompileMaterialGraph(screenSurface).Valid, "Screen Position still feeds the surface pins");
+    const NodeTypeDesc* outputType = NodeTypeRegistry::Find(kMaterialGraphDomain, "Material Output");
+    CHECK(outputType && outputType->Inputs.size() == 9 && outputType->Inputs[7].Name == "Opacity Mask" && outputType->Inputs[8].Name == "World Position Offset",
+          "the Material Output's pins: Opacity Mask stays pin 7, World Position Offset is appended as pin 8 (saved links keep their pins)");
+
     // Every node is offered in the node graph editor's Add menu: a "Parameter" property marks a node reading a graph variable, which the
     // menu lists only as "Get <variable>" -- Texture Sample had one and was missing from the menu (the user's test).
     size_t offered = 0, hidden = 0;
@@ -343,6 +395,11 @@ static void TestMaterialGraph()
                                                                 { { "Graphs/Panned.nmatgraph", program.Code }, { "Graphs/Append.nmatgraph", appendProgram.Code } });
         std::ofstream maskFile(std::string(dump) + "/MaterialGraphsMask.slang");
         maskFile << CustomLitShaders::GenerateGraphDispatcher({ "Graphs/Leaves.nmatgraph" }, { { "Graphs/Leaves.nmatgraph", maskProgram.Code } });
+        // Every function in use: a surface graph, a masked one and a waving one (compile every graph variant with it).
+        std::ofstream allFile(std::string(dump) + "/MaterialGraphsAll.slang");
+        allFile << CustomLitShaders::GenerateGraphDispatcher({ "Graphs/Panned.nmatgraph", "Graphs/Leaves.nmatgraph", "Graphs/Waving.nmatgraph" },
+                                                             { { "Graphs/Panned.nmatgraph", program.Code }, { "Graphs/Leaves.nmatgraph", maskProgram.Code },
+                                                               { "Graphs/Waving.nmatgraph", waveProgram.Code } });
     }
 }
 

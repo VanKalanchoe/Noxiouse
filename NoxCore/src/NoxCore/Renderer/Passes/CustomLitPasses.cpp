@@ -45,7 +45,7 @@ namespace Nox
         return m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
-    std::unique_ptr<NRI::Pipeline> Renderer::buildCustomLitForwardPipeline(bool forceCompile)
+    std::unique_ptr<NRI::Pipeline> Renderer::buildCustomLitForwardPipeline(bool forceCompile, bool withGraphs)
     {
         // The forward shader's variant: as createTransparentLitPipeline's plain one (the meshlet stages are the same files).
         NRI::PipelineDesc desc{};
@@ -53,7 +53,11 @@ namespace Nox
         desc.buildNow = true;
         desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32SINT };
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Material_PBR_Mesh.slang" });
+        // With graphs, the mesh stage moves the vertices by a graph's World Position Offset (a game packaged before it has no such file: the
+        // plain mesh stage).
+        const std::filesystem::path graphMesh = CustomLitShaders::ForwardMeshSourcePath();
+        const std::string meshSource = withGraphs && std::filesystem::exists(graphMesh) ? graphMesh.generic_string() : std::string("assets/shaders/Material_PBR_Mesh.slang");
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = meshSource });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = CustomLitShaders::ForwardSourcePath().generic_string() });
         return m_device->createPipeline(desc, *m_shaderCompiler);
     }
@@ -111,7 +115,7 @@ namespace Nox
             std::unique_ptr<NRI::Pipeline> shadowDepthMask = graphs ? buildMaterialGraphVisibilityPipeline(forceCompile, true) : nullptr;
             std::unique_ptr<NRI::Pipeline> stableDepth = graphs && m_isEditor ? buildMaterialGraphEditorPipeline(false) : nullptr;
             std::unique_ptr<NRI::Pipeline> selectionMask = graphs && m_isEditor ? buildMaterialGraphEditorPipeline(true) : nullptr;
-            std::unique_ptr<NRI::Pipeline> forward = shaders || graphs ? buildCustomLitForwardPipeline(forceCompile) : nullptr;
+            std::unique_ptr<NRI::Pipeline> forward = shaders || graphs ? buildCustomLitForwardPipeline(forceCompile, graphs) : nullptr;
             m_customLitPipeline = std::move(deferred);
             m_gbufferGraphPipeline = std::move(gbuffer);
             m_gbufferGraphPipelineNoVelocity = std::move(gbufferNoVelocity);
@@ -259,10 +263,10 @@ namespace Nox
             const BuildThreadPriority priority;
             auto phase = [&]() -> bool
             {
-                std::future<std::unique_ptr<NRI::Pipeline>> forwardTask = std::async(std::launch::async, [this]()
+                std::future<std::unique_ptr<NRI::Pipeline>> forwardTask = std::async(std::launch::async, [this, graphCount]()
                 {
                     const BuildThreadPriority priority;
-                    return buildCustomLitForwardPipeline(false);
+                    return buildCustomLitForwardPipeline(false, graphCount > 0);
                 });
                 if (graphCount > 0 && !cancelled())
                 {

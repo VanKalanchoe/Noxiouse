@@ -152,6 +152,11 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
         return GeneratedFolder() / "SelectionMaskMaterialGraph.slang";
     }
 
+    std::filesystem::path ForwardMeshSourcePath()
+    {
+        return GeneratedFolder() / "ForwardMeshMaterialGraph.slang";
+    }
+
     std::string GenerateDispatcher(const std::vector<std::string>& paths, const std::vector<CustomLitSource>& sources)
     {
         std::string text;
@@ -237,7 +242,15 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
             if (graphPresent[slot])
                 text += "    case " + std::to_string(slot) + "u: return MaterialGraph" + std::to_string(slot) + "::opacity_mask(i);\n";
         }
-        text += "    default: return 1.0;\n    }\n}\n";
+        text += "    default: return 1.0;\n    }\n}\n\n";
+        // World Position Offset (per vertex: every pass that draws the geometry). An unknown slot: no offset.
+        text += "float3 material_graph_world_position_offset(uint slot, MaterialGraphInputs i)\n{\n    switch (slot)\n    {\n";
+        for (size_t slot = 0; slot < graphPaths.size(); ++slot)
+        {
+            if (graphPresent[slot])
+                text += "    case " + std::to_string(slot) + "u: return MaterialGraph" + std::to_string(slot) + "::world_position_offset(i);\n";
+        }
+        text += "    default: return float3(0.0);\n    }\n}\n";
         return text;
     }
 
@@ -260,6 +273,10 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
         changed |= WriteIfChanged(DeferredSourcePath(), wrapper("deferred lighting (the Custom Lit pass)", "#include \"DeferredLighting.slang\""), failed);
         defines = "#define NOX_CUSTOM_LIT 1\n#define NOX_MATERIAL_GRAPH 1\n#include \"CustomLitShaders.slang\"\n#include \"MaterialGraphs.slang\"\n";
         changed |= WriteIfChanged(ForwardSourcePath(), wrapper("forward shader (its Custom Lit and material graph variant)", "#include \"Material_TransparentLit_Mesh.slang\""), failed);
+        // The forward shader's mesh stage with the graphs: a graph's World Position Offset for translucent surfaces.
+        defines = "#define NOX_MATERIAL_GRAPH 1\n#include \"MaterialGraphs.slang\"\n";
+        changed |= WriteIfChanged(ForwardMeshSourcePath(), wrapper("forward shader's mesh stage (its material graph variant: World Position Offset)",
+                                                                   "#include \"Material_PBR_Mesh.slang\""), failed);
         defines = "#define NOX_MATERIAL_GRAPH 1\n#include \"MaterialGraphs.slang\"\n";
         changed |= WriteIfChanged(GBufferSourcePath(), wrapper("G-buffer resolve (its material graph variant)", "#include \"GBufferMaterial.slang\""), failed);
         changed |= WriteIfChanged(VisibilitySourcePath(), wrapper("visibility buffer and shadow map depth (their material graph variant: Opacity Mask)",
@@ -285,6 +302,7 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
                                   "    MaterialGraphOutputs go = (MaterialGraphOutputs)0;\n"
                                   "    material_graph_surface(id.x, gi, go);\n"
                                   "    go.opacity *= material_graph_opacity_mask(id.x, gi);\n"
+                                  "    go.emissive += material_graph_world_position_offset(id.x, gi);\n"
                                   "    customLitCheckOutput[id.x] = float4(custom_lit_light(id.x, s, l) + custom_lit_ambient(id.x, s, a) + go.baseColor + go.emissive, go.opacity);\n}\n",
                                   failed);
         std::string manifest;

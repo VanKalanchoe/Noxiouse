@@ -270,6 +270,7 @@ namespace Nox
         // yet, or it does not compile): the material's own values.
         packed.graphSlot = 0xFFFFFFFFu;
         packed.graphOutputs = 0;
+        packed.graphMaxDisplacement = 0.0f;
         std::fill(std::begin(packed.graphTextureIndex), std::end(packed.graphTextureIndex), 0xFFFFFFFFu);
         if (!material.SurfaceGraph.empty())
         {
@@ -279,6 +280,7 @@ namespace Nox
             {
                 packed.graphSlot = slot;
                 packed.graphOutputs = program->Outputs;
+                packed.graphMaxDisplacement = program->MaxDisplacement;
                 for (const MaterialGraphParameter& parameter : program->Parameters)
                 {
                     const bool texture = parameter.Type == MaterialGraphParameter::Kind::Texture;
@@ -427,7 +429,7 @@ namespace Nox
         // The Custom Lit and material graph pipelines include the deferred lighting, the forward shader and the G-buffer resolve
         // (CustomLitShaders.h): built again with them.
         for (const char* shader : { "CustomLit", "Material_TransparentLit_Mesh", "DeferredLighting", "PBRLighting", "GBufferMaterial", "MaterialGraph",
-                                    "VisibilityBuffer", "EditorStableDepth", "SelectionMask" })
+                                    "VisibilityBuffer", "EditorStableDepth", "SelectionMask", "Material_PBR_Mesh" })
             watchShader(std::string("assets/shaders/") + shader + ".slang", "CustomLit", [this]()
             {
                 if ((m_customLitStatus.ShaderCount > 0 || m_customLitStatus.GraphCount > 0) && m_shaderCompiler->canCompile() &&
@@ -5681,6 +5683,9 @@ namespace Nox
             static const auto start = std::chrono::steady_clock::now();
             const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             uniformData.timeSeconds = static_cast<float>(std::fmod(seconds, 3600.0));
+            // (a World Position Offset's motion vectors: the time of the frame before; none when the hour wrapped)
+            uniformData.previousTimeSeconds = m_previousTimeSeconds >= 0.0f && m_previousTimeSeconds <= uniformData.timeSeconds ? m_previousTimeSeconds : uniformData.timeSeconds;
+            m_previousTimeSeconds = uniformData.timeSeconds;
         }
         uniformData.renderOrigin = glm::vec3(m_renderOrigin); // (a material graph's World Position)
         {

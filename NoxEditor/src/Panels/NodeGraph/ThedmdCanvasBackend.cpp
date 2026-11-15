@@ -450,8 +450,12 @@ namespace Nox
 
         // Properties a state machine sets from its own view are not drawn; a separator with nothing under it would stretch
         // the node to the canvas width.
-        const bool hasVisibleProperties = std::any_of(node.Properties.begin(), node.Properties.end(),
-            [&](const auto& property) { return !(type.OwnsSubGraphs && property.first == "EntryState"); });
+        // A property the type declares counts even when the node was saved without any (a Material Output saved before it had Max World
+        // Position Offset Displacement: its section would never show, so the default below would never be filled in).
+        auto visibleProperty = [&](const std::string& name) { return !(type.OwnsSubGraphs && name == "EntryState") && name != kVariableInputCountProperty; };
+        const bool hasVisibleProperties =
+            std::any_of(node.Properties.begin(), node.Properties.end(), [&](const auto& property) { return visibleProperty(property.first); }) ||
+            std::any_of(type.DefaultProperties.begin(), type.DefaultProperties.end(), [&](const auto& property) { return visibleProperty(property.first); });
         if (hasVisibleProperties)
         {
             ImGui::Separator();

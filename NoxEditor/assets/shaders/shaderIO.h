@@ -242,6 +242,8 @@ struct GpuMaterial
     uint32_t graphOutputs;
     uint32_t graphTextureIndex[8];
     vec4 graphParameters[16];
+    // Its World Position Offset's Max Displacement (MaterialGraphProgram::MaxDisplacement, world units; 0: no clamp, no larger bounds).
+    float graphMaxDisplacement;
 };
 
 // GpuMaterial::graphOutputs (MaterialGraphOutput, Renderer/MaterialGraph.h).
@@ -253,6 +255,7 @@ STATIC_CONST uint32_t MaterialGraphOutputEmissive = 1u << 4;
 STATIC_CONST uint32_t MaterialGraphOutputOcclusion = 1u << 5;
 STATIC_CONST uint32_t MaterialGraphOutputOpacity = 1u << 6;
 STATIC_CONST uint32_t MaterialGraphOutputOpacityMask = 1u << 7; // its own function (material_graph_opacity_mask): a Masked material's alpha test
+STATIC_CONST uint32_t MaterialGraphOutputWorldPositionOffset = 1u << 8; // its own function (material_graph_world_position_offset): per vertex
 
 // GpuMaterial::shadingModel (MaterialShadingModel, DataTypes.h).
 STATIC_CONST uint32_t ShadingModelDefaultLit = 0u;
@@ -893,6 +896,9 @@ struct UniformBufferObject
     // Large world coordinates: the world position of the GPU's origin (Renderer::GetRenderOrigin; positions here are relative to it) --
     // a material graph's World Position node adds it, so world-aligned patterns stay put when the origin moves.
     vec3 renderOrigin;
+    // timeSeconds of the previous frame (equal to it on the first frame and when the hour wrapped): a material graph's World Position
+    // Offset of the previous frame (the G-buffer resolve's motion vectors) reads it.
+    float previousTimeSeconds;
 };
 
 STATIC_CONST uint32_t OIT_WEIGHTED_BLENDED = 0;
@@ -3724,6 +3730,14 @@ struct SceneInstances
     GpuMaterial* material(uint slot)
     {
         return &materials[instances[slot].materialIndex];
+    }
+
+    // How far (world units) a material graph's World Position Offset may move the instance's vertices past its mesh's bounds: the culling
+    // grows the bounds by it (its Max World Position Offset Displacement; 0 without an offset, or with no maximum set).
+    float offsetBounds(uint slot)
+    {
+        GpuMaterial* m = material(slot);
+        return m.graphSlot != 0xFFFFFFFFu && (m.graphOutputs & MaterialGraphOutputWorldPositionOffset) != 0u ? m.graphMaxDisplacement : 0.0;
     }
 
     // Field by field through the pointers: a lookup loads only the fields its caller uses (whole-record loads would

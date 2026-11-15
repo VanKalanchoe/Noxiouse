@@ -38,6 +38,10 @@ namespace Nox
         // Opacity Mask (Unreal's: a Masked material's pixels below its Opacity Mask Clip Value are not drawn): its own function,
         // opacity_mask(), evaluated by the passes that test the mask (the visibility buffer, the shadow maps, the forward shader).
         MaterialGraphOutputOpacityMask = 1u << 7,
+        // World Position Offset (Unreal's): a vector in world units added to each vertex's world position, its own function,
+        // world_position_offset(), evaluated per vertex by every pass that draws the geometry (the visibility buffer, the shadow maps,
+        // the G-buffer resolve -- this frame and the last, for motion vectors --, the forward shader, the editor's overlays).
+        MaterialGraphOutputWorldPositionOffset = 1u << 8,
     };
 
     // A value a material (.nmat) may override: a Scalar / Vector Parameter node's, or a Texture Sample's with a parameter name. Texture
@@ -56,13 +60,18 @@ namespace Nox
     {
         bool Valid = false;
         std::string Error;  // why not (which node and what), for the editor and the log
-        // `static const uint Outputs = ...;`, `void surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)` and
-        // `float opacity_mask(MaterialGraphInputs i)` (only the nodes feeding the Opacity Mask pin; 1 when it is not connected).
+        // `static const uint Outputs = ...;`, `void surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)`,
+        // `float opacity_mask(MaterialGraphInputs i)` (only the nodes feeding the Opacity Mask pin; 1 when it is not connected) and
+        // `float3 world_position_offset(MaterialGraphInputs i)` (only the nodes feeding World Position Offset; 0 when not connected).
         std::string Code;
         std::vector<MaterialGraphParameter> Parameters;
         uint32_t ParameterSlots = 0;
         uint32_t TextureSlots = 0;
         uint32_t Outputs = 0; // MaterialGraphOutput bits
+        // The Material Output's Max World Position Offset Displacement (Unreal's, world units): the offset is clamped to that length and
+        // the culling bounds grow by it, so a moving surface is not culled where its mesh's bounds end. 0: neither (no clamp, the mesh's
+        // own bounds -- a surface pushed past them may be culled while still on screen).
+        float MaxDisplacement = 0.0f;
     };
 
     // A graph of the project, compiled: its path in the project's Assets (generic separators; what MaterialData::SurfaceGraph names).

@@ -106,7 +106,8 @@ void taskMain
         if (visible && (pushConstant.meshletCulling & MESHLET_CULL_FRUSTUM) != 0)
         {
             float3 worldCenter = mul(instance.modelMatrix, float4(meshletBounds.center, 1.0)).xyz;
-            float worldRadius = meshletBounds.radius * maxScale;
+            // (grown by a material graph's World Position Offset reach: its moved vertices may leave the cluster's bounds)
+            float worldRadius = meshletBounds.radius * maxScale + instances.offsetBounds(instanceSlot);
 
             for (uint i = 0; i < 4; i++)
             {

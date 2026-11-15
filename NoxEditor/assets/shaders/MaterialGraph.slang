@@ -105,6 +105,61 @@ float3 material_graph_vertex_normal(InstanceData instance, Vertex vert, uint loc
     return mul((float3x3)instance.normalMatrix, localNormal);
 }
 
+// --- World Position Offset (MaterialGraphOutputWorldPositionOffset): one implementation for every pass that draws the geometry --
+// the visibility buffer and the shadow maps (VisibilityBuffer.slang), the G-buffer resolve (GBufferMaterial.slang: the triangle it
+// rebuilds must be the one rasterized, and last frame's for the motion vectors), the forward mesh stage (Material_PBR_Mesh.slang) and
+// the editor's overlays -- so they all move the vertex the same way.
+
+// Whether the material's graph offsets its vertices.
+bool material_graph_has_offset(GpuMaterial* material)
+{
+    return material.graphSlot != 0xFFFFFFFFu && (material.graphOutputs & MaterialGraphOutputWorldPositionOffset) != 0u;
+}
+
+// A vertex's offset (world units) at `time`: `renderPos` its position before the offset (render space), `worldNormal` its normal
+// (world), its UVs and vertex colour. The graph's inputs have no screen derivatives here (a Texture Sample reads the finest mip; Unreal
+// samples level 0 in vertex shaders too); Camera Vector and Camera Position are the main camera's in every pass (the shadow views use
+// the same offset as the view). Clamped to the graph's Max World Position Offset Displacement when it has one (Unreal's).
+float3 material_graph_offset(GpuMaterial* material, float3 renderPos, float3 worldNormal, float2 uv0, float2 uv1, float4 vertexColor, float time,
+                             UniformBufferObject* ubo)
+{
+    if (!material_graph_has_offset(material))
+        return float3(0.0);
+    MaterialGraphInputs i = (MaterialGraphInputs)0;
+    i.uv0 = uv0;
+    i.uv1 = uv1;
+    i.position = renderPos + ubo->renderOrigin;
+    i.normal = dot(worldNormal, worldNormal) > 1e-12 ? normalize(worldNormal) : float3(0.0, 0.0, 1.0);
+    i.vertexColor = vertexColor;
+    const float3 toCamera = ubo->cameraWorldPos.xyz - renderPos;
+    i.view = dot(toCamera, toCamera) > 1e-12 ? normalize(toCamera) : float3(0.0, 0.0, 1.0);
+    i.screenUV = float2(0.5); // (not available per vertex: the graph compiler refuses Screen Position there)
+    i.time = time;
+    i.cameraPosition = ubo->cameraWorldPos.xyz + ubo->renderOrigin;
+    i.material = material;
+    i.mipFeedback = false;
+    i.ubo = ubo;
+    float3 offset = material_graph_world_position_offset(material.graphSlot, i);
+    if (any(isnan(offset)) || any(isinf(offset)))
+        return float3(0.0);
+    const float limit = material.graphMaxDisplacement;
+    const float length2 = dot(offset, offset);
+    if (limit > 0.0 && length2 > limit * limit)
+        offset *= limit * rsqrt(length2);
+    return offset;
+}
+
+// The same for a vertex of a meshlet in a mesh stage: its normal (skinned as its position is) and colour are read only when the
+// material offsets vertices.
+float3 material_graph_vertex_offset(GpuMaterial* material, InstanceData instance, Vertex vert, uint localVertexIndex, uint globalVertexIndex,
+                                    float3 renderPos, UniformBufferObject* ubo, PushConstantMeshlets pushConstant)
+{
+    if (!material_graph_has_offset(material))
+        return float3(0.0);
+    return material_graph_offset(material, renderPos, material_graph_vertex_normal(instance, vert, localVertexIndex, pushConstant), vert.uv0, vert.uv1,
+                                 loadMeshVertexColor(ubo, globalVertexIndex, instance.vertexColors), ubo->timeSeconds, ubo);
+}
+
 // Whether a Masked material whose graph connects Opacity Mask has this pixel cut away (its mask below its Opacity Mask Clip Value);
 // `handled` false: the material has no graph mask (the pass tests its base colour's alpha as before). The graph's inputs from the
 // interpolated vertex values (render-space `worldPos`), their derivatives from this pixel's quad; `viewProj`: the pass's projection

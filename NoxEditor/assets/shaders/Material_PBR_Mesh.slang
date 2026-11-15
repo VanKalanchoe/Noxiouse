@@ -83,6 +83,11 @@ void meshMain
 
         float4 worldPos = mul(modelMatrix, localPos);
         float3 worldNormal = normalize(mul(float3x3(instance.normalMatrix), localNormal));
+#ifdef NOX_MATERIAL_GRAPH
+        // The forward variant's mesh stage (ForwardMeshMaterialGraph.slang): a graph's World Position Offset for translucent surfaces.
+        worldPos.xyz += material_graph_offset(instances.material(sharedPayload.drawID), worldPos.xyz, worldNormal, v.uv0, v.uv1,
+                                              loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors), ubo->timeSeconds, ubo);
+#endif
         float4 clipPos = depth_bias_clip(mul(viewProj, worldPos), worldPos.xyz, ubo->cameraWorldPos.xyz, instance.depthBias); // as the visibility pass
 
         vertices[i].pos = clipPos;

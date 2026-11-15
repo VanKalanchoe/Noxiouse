@@ -13,11 +13,13 @@ static const uint EntryCulled = 0;
 static const uint EntryVisible = 1;
 static const uint EntryOccluded = 2;
 
-bool IsInsideFrustum(CullView* view, GpuMesh* mesh, GpuTransform* transform)
+// `grow`: world units the instance's vertices may be moved past its mesh's bounds (SceneInstances::offsetBounds: a material graph's World
+// Position Offset).
+bool IsInsideFrustum(CullView* view, GpuMesh* mesh, GpuTransform* transform, float grow)
 {
     float3 center = mul(transform.world, float4(mesh.boundsSphere.xyz, 1.0)).xyz;
     float scale = max(length(transform.world[0].xyz), max(length(transform.world[1].xyz), length(transform.world[2].xyz)));
-    float radius = mesh.boundsSphere.w * scale;
+    float radius = mesh.boundsSphere.w * scale + grow;
 
     // Left, right, bottom, top (reverse-Z without a far plane: the near plane culls little and the far plane is none).
     for (uint i = 0; i < 4; i++)
@@ -31,18 +33,23 @@ bool IsInsideFrustum(CullView* view, GpuMesh* mesh, GpuTransform* transform)
 
 // The instance is behind everything drawn in its screen area: its nearest point is farther than the pyramid's farthest
 // depth there (reverse-Z, so nearest is the largest value).
-bool IsOccluded(PushConstantInstanceCulling pushConstant, GpuMesh* mesh, float4x4 world, float4x4 viewProj)
+bool IsOccluded(PushConstantInstanceCulling pushConstant, GpuMesh* mesh, float4x4 world, float4x4 viewProj, float grow)
 {
     if (pushConstant.hiZTextureIndex == 0xFFFFFFFF)
         return false;
 
+    // The box grown by `grow` world units: in the mesh's space, by it over the smallest axis scale (at least that far in every direction).
+    float minScale = min(length(world[0].xyz), min(length(world[1].xyz), length(world[2].xyz)));
+    float3 localGrow = float3(grow > 0.0 ? grow / max(minScale, 1e-6) : 0.0);
+    float3 growMin = mesh.boundsMin - localGrow;
+    float3 growMax = mesh.boundsMax + localGrow;
     float3 boundsMin = float3(1e30), boundsMax = float3(-1e30);
     float nearest = 0.0;
     for (uint corner = 0; corner < 8; corner++)
     {
-        float3 local = float3((corner & 1) != 0 ? mesh.boundsMax.x : mesh.boundsMin.x,
-                              (corner & 2) != 0 ? mesh.boundsMax.y : mesh.boundsMin.y,
-                              (corner & 4) != 0 ? mesh.boundsMax.z : mesh.boundsMin.z);
+        float3 local = float3((corner & 1) != 0 ? growMax.x : growMin.x,
+                              (corner & 2) != 0 ? growMax.y : growMin.y,
+                              (corner & 4) != 0 ? growMax.z : growMin.z);
         float4 clip = mul(viewProj, mul(world, float4(local, 1.0)));
 
         // Crosses the near plane: the screen rectangle is not meaningful, so keep the instance.
@@ -111,10 +118,13 @@ void cullMain(uint3 id: SV_DispatchThreadID, uniform PushConstantInstanceCulling
     uint state = EntryVisible;
     // Skinned vertices leave the bind pose bounds.
     bool testBounds = instance.boneMatrixOffset == 0xFFFFFFFF;
-    if (testBounds && (view.flags & CULL_INSTANCES) != 0 && !IsInsideFrustum(view, mesh, transform))
+    // A material graph's World Position Offset moves them by up to its Max Displacement.
+    GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
+    float grow = material.graphSlot != 0xFFFFFFFFu && (material.graphOutputs & MaterialGraphOutputWorldPositionOffset) != 0u ? material.graphMaxDisplacement : 0.0;
+    if (testBounds && (view.flags & CULL_INSTANCES) != 0 && !IsInsideFrustum(view, mesh, transform, grow))
         state = EntryCulled;
     else if (testBounds && (view.flags & CULL_OCCLUSION) != 0 &&
-             IsOccluded(pushConstant, mesh, transform.previousWorld, view.previousViewProj))
+             IsOccluded(pushConstant, mesh, transform.previousWorld, view.previousViewProj, grow))
         state = EntryOccluded;
 
     ((uint32_t*)pushConstant.flagsReference)[entry] = state;
@@ -281,7 +291,9 @@ void lateMain(uint3 id: SV_DispatchThreadID, uniform PushConstantInstanceCulling
     GpuMesh* mesh = &((GpuMesh*)ubo->sceneMeshesReference)[instance.meshIndex];
     GpuTransform* transform = &((GpuTransform*)ubo->sceneTransformsReference)[slot];
 
-    if (IsOccluded(pushConstant, mesh, transform.world, view.viewProj))
+    GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
+    float grow = material.graphSlot != 0xFFFFFFFFu && (material.graphOutputs & MaterialGraphOutputWorldPositionOffset) != 0u ? material.graphMaxDisplacement : 0.0;
+    if (IsOccluded(pushConstant, mesh, transform.world, view.viewProj, grow))
         return;
 
     commands[entry].groupCountX = (mesh.meshletCount + TASK_SHADER_DISPATCH_X - 1) / TASK_SHADER_DISPATCH_X;

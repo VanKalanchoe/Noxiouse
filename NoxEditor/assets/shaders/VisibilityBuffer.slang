@@ -2,7 +2,9 @@
 
 // The material graph variant (VisibilityBufferMaterialGraph.slang, generated: NOX_MATERIAL_GRAPH and the project's graphs): a Masked
 // material whose graph connects Opacity Mask tests that instead of its base colour's alpha (material_graph_opacity_mask), so the
-// visibility buffer and the shadow maps hold the graph's shape. Its vertices carry what a graph's inputs read besides the UVs.
+// visibility buffer and the shadow maps hold the graph's shape; a graph's World Position Offset moves the vertices (the renderer draws
+// materials with one in the Masked buckets, which use this variant: Unreal's programmable raster bins). Its vertices carry what a graph's
+// inputs read besides the UVs.
 
     struct VSOutput
     {
@@ -90,6 +92,10 @@
 
             float4 worldPos = mul(modelMatrix, localPos);
 #ifdef NOX_MATERIAL_GRAPH
+            // A graph's World Position Offset (the same function the G-buffer resolve rebuilds the triangle with; the shadow maps draw
+            // with this mesh stage too, so the shadow moves with the surface).
+            worldPos.xyz += material_graph_vertex_offset(instances.material(sharedPayload.drawID), instance, vert, localVertexIndex,
+                                                         meshlet.globalVertexOffset + localVertexIndex, worldPos.xyz, ubo, pushConstant);
             // A graph's World Position, Vertex Normal (skinned as the position is) and Vertex Color.
             vertices[i].worldPos = worldPos.xyz;
             vertices[i].normal = material_graph_vertex_normal(instance, vert, localVertexIndex, pushConstant);

@@ -78,7 +78,12 @@ void meshMain
             localPos = mul(skinTransform, localPos);
         }
 
-        const float4 worldPos = mul(modelMatrix, localPos);
+        float4 worldPos = mul(modelMatrix, localPos);
+#ifdef NOX_MATERIAL_GRAPH
+        // A graph's World Position Offset (as the visibility pass moves the vertex: picking and the overlays' depth follow it).
+        worldPos.xyz += material_graph_vertex_offset(instances.material(sharedPayload.drawID), instance, vert, localVertexIndex,
+                                                     meshlet.globalVertexOffset + localVertexIndex, worldPos.xyz, ubo, pushConstant);
+#endif
         vertices[i].pos = depth_bias_clip(mul(viewProj, worldPos), worldPos.xyz, ubo->cameraWorldPos.xyz, instance.depthBias); // as the visibility pass
         vertices[i].uv0 = vert.uv0;
         vertices[i].uv1 = vert.uv1;

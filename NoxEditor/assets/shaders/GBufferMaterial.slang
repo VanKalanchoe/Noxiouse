@@ -299,6 +299,35 @@
             float4 worldPos0 = mul(instance.modelMatrix, localPos0);
             float4 worldPos1 = mul(instance.modelMatrix, localPos1);
             float4 worldPos2 = mul(instance.modelMatrix, localPos2);
+            float3 previousOffset0 = float3(0.0);
+            float3 previousOffset1 = float3(0.0);
+            float3 previousOffset2 = float3(0.0);
+#ifdef NOX_MATERIAL_GRAPH
+            // A graph's World Position Offset: the triangle the visibility pass rasterized had its corners moved by it (the same function,
+            // MaterialGraph.slang, with the same inputs: the vertex normal as the mesh stage reads it, the UVs, the vertex colour, this
+            // frame's time), so it is rebuilt moved; and where it was last frame, for the motion vectors: last frame's transform and pose
+            // with the offset at last frame's time (Unreal's previous-frame World Position Offset).
+            GpuMaterial* offsetMaterial = instances.material(instanceSlot);
+            if (material_graph_has_offset(offsetMaterial))
+            {
+                const uint vertexBase = meshlet.globalVertexOffset;
+                const float3 offsetNormal0 = mul((float3x3)instance.normalMatrix, localNorm0);
+                const float3 offsetNormal1 = mul((float3x3)instance.normalMatrix, localNorm1);
+                const float3 offsetNormal2 = mul((float3x3)instance.normalMatrix, localNorm2);
+                const float4 offsetColor0 = loadMeshVertexColor(ubo, vertexBase + vIdx0, instance.vertexColors);
+                const float4 offsetColor1 = loadMeshVertexColor(ubo, vertexBase + vIdx1, instance.vertexColors);
+                const float4 offsetColor2 = loadMeshVertexColor(ubo, vertexBase + vIdx2, instance.vertexColors);
+                const float3 previousCorner0 = mul(instance.previousModelMatrix, previousLocalPos0).xyz;
+                const float3 previousCorner1 = mul(instance.previousModelMatrix, previousLocalPos1).xyz;
+                const float3 previousCorner2 = mul(instance.previousModelMatrix, previousLocalPos2).xyz;
+                previousOffset0 = material_graph_offset(offsetMaterial, previousCorner0, offsetNormal0, v0.uv0, v0.uv1, offsetColor0, ubo->previousTimeSeconds, ubo);
+                previousOffset1 = material_graph_offset(offsetMaterial, previousCorner1, offsetNormal1, v1.uv0, v1.uv1, offsetColor1, ubo->previousTimeSeconds, ubo);
+                previousOffset2 = material_graph_offset(offsetMaterial, previousCorner2, offsetNormal2, v2.uv0, v2.uv1, offsetColor2, ubo->previousTimeSeconds, ubo);
+                worldPos0.xyz += material_graph_offset(offsetMaterial, worldPos0.xyz, offsetNormal0, v0.uv0, v0.uv1, offsetColor0, ubo->timeSeconds, ubo);
+                worldPos1.xyz += material_graph_offset(offsetMaterial, worldPos1.xyz, offsetNormal1, v1.uv0, v1.uv1, offsetColor1, ubo->timeSeconds, ubo);
+                worldPos2.xyz += material_graph_offset(offsetMaterial, worldPos2.xyz, offsetNormal2, v2.uv0, v2.uv1, offsetColor2, ubo->timeSeconds, ubo);
+            }
+#endif
 
             // 3D World-Space Barycentric Reconstruction
             float2 invViewport = 1.0 / pushConstant.viewportSize;
@@ -420,9 +449,10 @@
 
         float3 worldPos = worldPos0.xyz * w0 + worldPos1.xyz * w1 + worldPos2.xyz * w2;
         // Where this surface point was last frame, including the previous skeletal pose when its cache is valid.
-        float3 previousWorldPos = mul(instance.previousModelMatrix, previousLocalPos0).xyz * w0 +
-                                  mul(instance.previousModelMatrix, previousLocalPos1).xyz * w1 +
-                                  mul(instance.previousModelMatrix, previousLocalPos2).xyz * w2;
+        // (a graph's World Position Offset: last frame's, previousOffset*)
+        float3 previousWorldPos = (mul(instance.previousModelMatrix, previousLocalPos0).xyz + previousOffset0) * w0 +
+                                  (mul(instance.previousModelMatrix, previousLocalPos1).xyz + previousOffset1) * w1 +
+                                  (mul(instance.previousModelMatrix, previousLocalPos2).xyz + previousOffset2) * w2;
         float3 worldPos_dx = worldPos0.xyz * w0_dx + worldPos1.xyz * w1_dx + worldPos2.xyz * w2_dx;
         float3 worldPos_dy = worldPos0.xyz * w0_dy + worldPos1.xyz * w1_dy + worldPos2.xyz * w2_dy;
         float3 ddx_pos = worldPos_dx - worldPos;
