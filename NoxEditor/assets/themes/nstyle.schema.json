@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Nox::UI Theme (.nstyle)",
+  "description": "Schema for Nox::UI .nstyle YAML theme files (tokens + style rules).",
+  "type": "object",
+  "properties": {
+    "tokens": {
+      "type": "object",
+      "description": "Named color tokens referenced in styles as $TokenName.",
+      "additionalProperties": {
+        "$ref": "#/$defs/color"
+      }
+    },
+    "styles": {
+      "type": "object",
+      "description": "Widget style rules keyed by Class, Class.variant, and :hover / :pressed / :focus / :disabled.",
+      "additionalProperties": {
+        "$ref": "#/$defs/styleBox"
+      }
+    }
+  },
+  "$defs": {
+    "color": {
+      "oneOf": [
+        { "type": "string", "pattern": "^(#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?|\\$[A-Za-z0-9_]+)$" },
+        { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 4 }
+      ]
+    },
+    "styleBox": {
+      "type": "object",
+      "properties": {
+        "fill": { "$ref": "#/$defs/color", "description": "Primary background color (or gradient top color)." },
+        "fill_bottom": { "$ref": "#/$defs/color", "description": "Gradient bottom color (enables vertical gradient)." },
+        "gradient": { "type": "boolean" },
+        "border_color": { "$ref": "#/$defs/color" },
+        "border_thickness": { "type": "number", "minimum": 0 },
+        "shadow_color": { "$ref": "#/$defs/color" },
+        "shadow_offset": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+        "shadow_blur": { "type": "number", "minimum": 0 },
+        "corner_radius": {
+          "oneOf": [
+            { "type": "number", "minimum": 0 },
+            { "type": "array", "items": { "type": "number", "minimum": 0 }, "minItems": 4, "maxItems": 4 }
+          ]
+        },
+        "padding": {
+          "oneOf": [
+            { "type": "number", "minimum": 0 },
+            { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+            { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
+          ]
+        },
+        "text_color": { "$ref": "#/$defs/color" },
+        "font_size": { "type": "number", "minimum": 1 },
+        "transition_ms": { "type": "number", "minimum": 0, "description": "State transition duration in milliseconds." }
+      }
+    }
+  }
+}

@@ -215,6 +215,7 @@ namespace Nox
 
         UI::UIRenderer* GetUIRenderer() { return m_uiRenderer.get(); }
         UI::UIDrawList* GetUIDrawList() { return m_uiRenderer ? &m_uiRenderer->GetDrawList() : nullptr; }
+        Utils::NOXWatcher& GetFileWatcher() { return m_fileWatcher; }
 
         // Call this from EditorLayer during mouse hover/click
         // Single click (1x1)

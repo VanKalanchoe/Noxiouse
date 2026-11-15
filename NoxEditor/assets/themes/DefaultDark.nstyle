@@ -1,0 +1,81 @@
+# Nox::UI Theme (.nstyle) - Live hot-reloaded by NOXWatcher
+tokens:
+  Background: "#12141A"
+  Surface0: "#1A1D26F5"
+  Surface1: "#222632F5"
+  Border: "#384054E6"
+  Accent: "#3D8FF5"
+  AccentHover: "#5CA3FF"
+  Success: "#2FA870"
+  Text: "#EBF0FA"
+  TextMuted: "#9BA8C2"
+
+styles:
+  Background:
+    fill: "$Background"
+    border_thickness: 0
+    shadow_blur: 0
+    corner_radius: 0
+    padding: 0
+
+  Label:
+    text_color: "$Text"
+    font_size: 15
+
+  Panel:
+    fill: "$Surface0"
+    border_color: "$Border"
+    border_thickness: 1.0
+    shadow_color: "#00000073"
+    shadow_offset: [0, 6]
+    shadow_blur: 14
+    corner_radius: 10
+    padding: 12
+
+  TopBar:
+    fill: "#202430"
+    fill_bottom: "#191D26"
+    border_color: "$Border"
+    border_thickness: 1.0
+    shadow_color: "#00000073"
+    shadow_offset: [0, 4]
+    shadow_blur: 10
+    corner_radius: 8
+    padding: [14, 8]
+
+  Button:
+    fill: "$Surface1"
+    fill_bottom: "#1B1E28"
+    border_color: "$Border"
+    border_thickness: 1.0
+    corner_radius: 7
+    padding: [14, 8]
+    text_color: "$Text"
+    font_size: 14
+    transition_ms: 90
+
+  "Button:hover":
+    fill: "#2C3344"
+    fill_bottom: "#232836"
+    border_color: "$Accent"
+    text_color: "#FFFFFF"
+
+  "Button:pressed":
+    fill: "#2864B8"
+    fill_bottom: "#1E4C8C"
+    border_color: "$AccentHover"
+
+  "Button.primary":
+    fill: "$Accent"
+    fill_bottom: "#2A6EC9"
+    border_color: "$AccentHover"
+    text_color: "#FFFFFF"
+
+  "Button.primary:hover":
+    fill: "$AccentHover"
+    fill_bottom: "$Accent"
+    border_color: "#FFFFFF80"
+
+  "Button.primary:pressed":
+    fill: "#235CA8"
+    fill_bottom: "#1A4785"

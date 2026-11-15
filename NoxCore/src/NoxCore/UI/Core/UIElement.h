@@ -1,0 +1,112 @@
+#pragma once
+
+#include <atomic>
+#include <functional>
+#include <string>
+#include <vector>
+
+#include "NoxCore/Core/Ref.h"
+#include "NoxCore/UI/Core/UITheme.h"
+#include "NoxCore/UI/Core/UITypes.h"
+
+namespace Nox::UI
+{
+    class UIDrawList;
+
+    class UIElement : public RefCounted
+    {
+    public:
+        UIElement();
+        ~UIElement() override = default;
+
+        uint64_t GetId() const { return m_Id; }
+
+        // Tree management
+        void AddChild(const IntrusiveRef<UIElement>& child);
+        void RemoveChild(const IntrusiveRef<UIElement>& child);
+        void ClearChildren();
+
+        UIElement* GetParent() const { return m_Parent; }
+        const std::vector<IntrusiveRef<UIElement>>& GetChildren() const { return m_Children; }
+
+        // Layout pass (Pass 1: bottom-up Measure, Pass 2: top-down Arrange)
+        UIVec2 Measure();
+        void Arrange(const UIRect& allottedRect);
+
+        const UIRect& GetBounds() const { return m_Bounds; }
+        const UIVec2& GetDesiredSize() const { return m_DesiredSize; }
+
+        // Style & Paint
+        void UpdateStylesRecursive(const UITheme& theme, float dt);
+        void PaintRecursive(UIDrawList& drawList, const UITheme& theme);
+
+        // Hit-testing (reverse paint order)
+        virtual UIElement* HitTest(const UIVec2& pos);
+
+        // State helpers (managed by UIContext)
+        UIState GetState() const { return m_State; }
+        void SetStateFlag(UIState flag, bool enabled);
+        bool IsEnabled() const { return !HasState(m_State, UIState::Disabled); }
+        void SetEnabled(bool enabled) { SetStateFlag(UIState::Disabled, !enabled); }
+
+        // Public layout / visual properties
+        std::string Name;
+        std::string StyleClass = "Panel";
+        std::string StyleVariant;
+
+        bool Visible = true;
+        bool ClipChildren = false;
+        bool DrawBackground = false;
+        bool Focusable = false;
+        UIHitTestMode HitTestMode = UIHitTestMode::PassThrough;
+
+        UISizeMode WidthMode = UISizeMode::Auto;
+        UISizeMode HeightMode = UISizeMode::Auto;
+        UIVec2 FixedSize{ 0.0f, 0.0f };
+        UIVec2 MinSize{ 0.0f, 0.0f };
+        UIVec2 MaxSize{ 1e6f, 1e6f };
+        float FlexWeight = 1.0f;
+
+        UIAlignment HAlign = UIAlignment::Stretch;
+        UIAlignment VAlign = UIAlignment::Stretch;
+        UIThickness Margin{};
+        UIThickness Padding{}; // overrides or adds inner spacing
+
+        // Godot-style anchors (used by UIAnchorBox)
+        UIVec2 AnchorMin{ 0.0f, 0.0f };
+        UIVec2 AnchorMax{ 0.0f, 0.0f };
+        UIThickness AnchorOffsets{};
+
+        // Events (return true if handled to stop bubbling)
+        virtual bool OnPointerEnter(const UIPointerEvent&) { return false; }
+        virtual bool OnPointerLeave(const UIPointerEvent&) { return false; }
+        virtual bool OnPointerDown(const UIPointerEvent& e) { return OnMouseDown ? OnMouseDown(e) : false; }
+        virtual bool OnPointerUp(const UIPointerEvent& e) { return OnMouseUp ? OnMouseUp(e) : false; }
+        virtual bool OnPointerMove(const UIPointerEvent&) { return false; }
+        virtual bool OnMouseWheel(const UIPointerEvent&) { return false; }
+        virtual bool OnKeyDown(const UIKeyEvent&) { return false; }
+        virtual bool OnTextInput(std::string_view) { return false; }
+
+        std::function<bool(const UIPointerEvent&)> OnMouseDown;
+        std::function<bool(const UIPointerEvent&)> OnMouseUp;
+
+    protected:
+        virtual UIVec2 ComputeDesiredSize();
+        virtual void ArrangeChildren(const UIRect& contentRect);
+        virtual void OnPaint(UIDrawList& drawList, const UITheme& theme);
+
+        const UIStyleBox& GetResolvedStyle() const { return m_CurrentStyle; }
+
+    private:
+        uint64_t m_Id = 0;
+        UIElement* m_Parent = nullptr;
+        std::vector<IntrusiveRef<UIElement>> m_Children;
+
+        UIVec2 m_DesiredSize{ 0.0f, 0.0f };
+        UIRect m_Bounds{};
+
+        UIState m_State = UIState::Normal;
+        UIStyleBox m_CurrentStyle{};
+        bool m_HasResolvedStyle = false;
+    };
+}
