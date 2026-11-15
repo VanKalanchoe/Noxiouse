@@ -257,7 +257,8 @@ namespace Nox
         packed.customLitSlot = 0xFFFFFFFFu;
         if (material.ShadingModel == MaterialShadingModel::CustomLit)
         {
-            packed.customLitSlot = Renderer::FindCustomLitSlot(material.CustomShader);
+            // Its Material Shader, else its graph's lighting (Custom Light / Custom Ambient: the graph's slot in the same dispatcher).
+            packed.customLitSlot = Renderer::FindCustomLitSlot(material.CustomShader.empty() ? material.SurfaceGraph : material.CustomShader);
             if (packed.customLitSlot == 0xFFFFFFFFu)
                 packed.shadingModel = shaderio::ShadingModelDefaultLit;
         }

@@ -397,6 +397,46 @@ static void TestMaterialGraph()
           surfacesFile.find("case 2u: MaterialGraphSurface2::surface(i, o); return;") != std::string::npos &&
           surfacesFile.find("opacity_mask") == std::string::npos && surfacesFile.find("world_position_offset") == std::string::npos,
           "MaterialGraphSurfaces.slang: a case per graph, no mask or offset code");
+    // Custom Light / Custom Ambient (step 4c part 5): the graph's own lighting for a Custom Lit material, as a Material Shader's light() /
+    // ambient() -- a two-band toon light (Step of the light's N.L x its shadow) in the base colour; the Light node anywhere else refused.
+    NodeGraph toonLit = CreateEmptyMaterialGraph();
+    const uint32_t litSurface = node(toonLit, "Lit Surface");
+    const uint32_t litLight = node(toonLit, "Light");
+    const uint32_t litDot = node(toonLit, "Dot");
+    link(toonLit, litSurface, 1, litDot, 0); // Normal
+    link(toonLit, litLight, 0, litDot, 1);   // Direction
+    const uint32_t litBand = node(toonLit, "Step", { { "Edge", 0.2f } });
+    link(toonLit, litDot, 0, litBand, 1);
+    const uint32_t litLit = node(toonLit, "Multiply");
+    link(toonLit, litBand, 0, litLit, 0);
+    link(toonLit, litLight, 2, litLit, 1);   // Shadow
+    const uint32_t litColor = node(toonLit, "Multiply");
+    link(toonLit, litLight, 1, litColor, 0); // Color
+    link(toonLit, litLit, 0, litColor, 1);
+    const uint32_t litOut = node(toonLit, "Multiply");
+    link(toonLit, litColor, 0, litOut, 0);
+    link(toonLit, litSurface, 0, litOut, 1); // Base Color
+    link(toonLit, litOut, 0, toonLit.OutputNode, 9);
+    link(toonLit, node(toonLit, "Vector Parameter", { { "Name", std::string("Shade") }, { "Default", glm::vec4(0.2f, 0.2f, 0.4f, 1.0f) } }), 0,
+         toonLit.OutputNode, 10);
+    const MaterialGraphProgram toonLitProgram = CompileMaterialGraph(toonLit);
+    CHECK(toonLitProgram.Valid && (toonLitProgram.Outputs & (MaterialGraphOutputCustomLight | MaterialGraphOutputCustomAmbient)) ==
+                                      (MaterialGraphOutputCustomLight | MaterialGraphOutputCustomAmbient) &&
+              toonLitProgram.LightCode.find("float3 light(CustomLitSurface s, CustomLitLight l)") == 0 &&
+              toonLitProgram.LightCode.find("l.shadow") != std::string::npos && toonLitProgram.LightCode.find("float3 ambient(CustomLitSurface s") != std::string::npos &&
+              toonLitProgram.Code.find("l.direction") == std::string::npos,
+          "Custom Light / Custom Ambient: light() and ambient() in LightCode, none of it in the surface code: '{}'", toonLitProgram.Error);
+    CHECK(program.LightCode.empty(), "a graph without the lighting pins has no LightCode");
+    NodeGraph lightMisused = CreateEmptyMaterialGraph();
+    link(lightMisused, node(lightMisused, "Light"), 1, lightMisused.OutputNode, 0);
+    const MaterialGraphProgram lightMisusedProgram = CompileMaterialGraph(lightMisused);
+    CHECK(!lightMisusedProgram.Valid && lightMisusedProgram.Error.find("Light can only feed Custom Light") != std::string::npos,
+          "the Light node feeding Base Color is refused: '{}'", lightMisusedProgram.Error);
+    const std::string litDispatcher = CustomLitShaders::GenerateDispatcher({ "Graphs/ToonLit.nmatgraph" },
+                                                                           { { "Graphs/ToonLit.nmatgraph", toonLitProgram.LightCode, std::string(), true } });
+    CHECK(litDispatcher.find("MaterialGraphInputs material_graph_lit_inputs(CustomLitSurface s)") != std::string::npos &&
+              litDispatcher.find("case 0u: return CustomLit0::light(s, l);") != std::string::npos,
+          "a graph's lighting takes a slot of the Material Shaders' dispatcher, with the graph inputs' helper");
     const auto& rayVariants = CustomLitShaders::RayTracingMaskVariants();
     CHECK(std::count_if(rayVariants.begin(), rayVariants.end(), [](const CustomLitShaders::RayTracingMaskVariant& v) { return v.Surface; }) == 7 &&
           std::any_of(rayVariants.begin(), rayVariants.end(), [](const CustomLitShaders::RayTracingMaskVariant& v)
@@ -416,8 +456,9 @@ static void TestMaterialGraph()
     link(screenSurface, node(screenSurface, "Screen Position"), 0, screenSurface.OutputNode, 4);
     CHECK(CompileMaterialGraph(screenSurface).Valid, "Screen Position still feeds the surface pins");
     const NodeTypeDesc* outputType = NodeTypeRegistry::Find(kMaterialGraphDomain, "Material Output");
-    CHECK(outputType && outputType->Inputs.size() == 9 && outputType->Inputs[7].Name == "Opacity Mask" && outputType->Inputs[8].Name == "World Position Offset",
-          "the Material Output's pins: Opacity Mask stays pin 7, World Position Offset is appended as pin 8 (saved links keep their pins)");
+    CHECK(outputType && outputType->Inputs.size() == 11 && outputType->Inputs[7].Name == "Opacity Mask" && outputType->Inputs[8].Name == "World Position Offset" &&
+              outputType->Inputs[9].Name == "Custom Light" && outputType->Inputs[10].Name == "Custom Ambient",
+          "the Material Output's pins: Opacity Mask stays pin 7, World Position Offset pin 8, Custom Light / Custom Ambient appended as 9 / 10 (saved links keep their pins)");
 
     // Every node is offered in the node graph editor's Add menu: a "Parameter" property marks a node reading a graph variable, which the
     // menu lists only as "Get <variable>" -- Texture Sample had one and was missing from the menu (the user's test).
@@ -456,6 +497,8 @@ static void TestMaterialGraph()
                                                                   { { "Graphs/Panned.nmatgraph", program.Code, program.MaskCode },
                                                                     { "Graphs/Leaves.nmatgraph", maskProgram.Code, maskProgram.MaskCode },
                                                                     { "Graphs/Waving.nmatgraph", waveProgram.Code, waveProgram.MaskCode } });
+        std::ofstream litOut(std::string(dump) + "/CustomLitShadersGraph.slang");
+        litOut << litDispatcher;
         std::ofstream surfacesOut(std::string(dump) + "/MaterialGraphSurfaces.slang");
         surfacesOut << surfacesFile;
         std::ofstream allFile(std::string(dump) + "/MaterialGraphsAll.slang");

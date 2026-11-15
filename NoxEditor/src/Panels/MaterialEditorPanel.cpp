@@ -428,8 +428,10 @@ namespace Nox
                                    built ? "The last build that compiled draws until it does." : "Lit as Default Lit until it compiles.");
                 ImGui::PopTextWrapPos();
             }
+            else if (data.CustomShader.empty() && !data.SurfaceGraph.empty() && renderer && Renderer::FindCustomLitSlot(data.SurfaceGraph) != 0xFFFFFFFFu)
+                ImGui::TextDisabled("Lit by its Surface Graph's Custom Light / Custom Ambient.");
             else if (data.CustomShader.empty())
-                ImGui::TextColored(warning, "No Material Shader: lit as Default Lit.");
+                ImGui::TextColored(warning, "No Material Shader (and its Surface Graph connects neither Custom Light nor Custom Ambient): lit as Default Lit.");
             else if (built)
                 ImGui::TextDisabled("Built: lit by %s.", shaderLabel.c_str());
             else

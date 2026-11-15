@@ -47,7 +47,7 @@ with them; reference them by handle or path, and say that the files live only on
   `--mcp-port` 8770, `--mcp-access` write by default -- `quit` needs execute). Editor MCP port 8765; multiplayer Play's games with
   "Players' MCP servers" use editor port + 1 (dedicated server) / + n (player n). One token per project in `<Project>/.nox/mcp-token`.
   When the user tests runtime features, remind them to **build NoxRuntime too** (building NoxEditor does not). Offline tests:
-  `Tests/McpTests.inl` + `Tests/ToolsTest.cpp` in NoxToolsTest (231 checks).
+  `Tests/McpTests.inl` + `Tests/ToolsTest.cpp` in NoxToolsTest (235 checks).
 - Stylized rendering / material graph plan: `docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md` (step 1 Toon and step 2
   outlines + Post Process Volume built and tested; step 3 Custom Lit with hand-written Material Shaders built; step 4a material graph built (`.nmatgraph`, `Renderer/MaterialGraph.h`, `MaterialGraph.slang`; graphs in the generated `MaterialGraphs.slang`
   (Material Shaders in `CustomLitShaders.slang`; pipelines cached by source hash, not force-compiled), the G-buffer resolve's variant `GBufferMaterialGraph.slang` + the forward variant; `GpuMaterial::graphSlot` /
@@ -62,7 +62,10 @@ with them; reference them by handle or path, and say that the files live only on
   (`SurfaceCode` -> `MaterialGraphSurfaces.slang`, `RayTracingMaskVariant::Surface` on 7 variants, `NOX_MATERIAL_GRAPH_SURFACE` ->
   `material_graph_ray_surface` in shadeRayHit / PathTracerBridge / ScreenProbeTrace / DDGIRadiance / ReSTIR GI + PT; tested; shader cache files never renamed over (`writeFileAtomic` replace only when forced), unreadable binaries compiled again);
   4c part 4 WPO in the ray tracing scene built (`RayTracingOffset.slang` -> `RayTracingOffsetMaterialGraph.slang`, `updateRayTracingOffsetLayout`,
-  "Ray Tracing Offset" pass, dynamic BLAS per WPO instance in `updateAnimatedBLAS`; not yet user-tested); 4c Custom Lit output open; surface
+  "Ray Tracing Offset" pass, dynamic BLAS per WPO instance in `updateAnimatedBLAS`; tested); 4c part 5 graph Custom Lit output built (Material
+  Output pins 9/10 Custom Light / Custom Ambient -> `MaterialGraphProgram::LightCode`, Lit Surface / Light / Ambient Light nodes, graph as a
+  `CustomLitSource{Graph}` slot in the Material Shaders' dispatcher, `material_graph_lit_inputs`; not yet user-tested); a Local Position
+  node open (UAL1 mannequin: all UVs one point, so UV dissolves vanish at once); surface
   code, Physical / Stylized setting open). Custom Lit: `.slang` assets (`AssetType::MaterialShader`) with `light()` / `ambient()`
   (`CustomLit.slang`), generated into `<exe>/shaders/Generated` (`Renderer/CustomLitShaders.h`), lit by the "Custom Lit" pass after the
   deferred lighting (G-buffer model bits 0xC0) and the forward variant (`forwardLitPipeline()`); push-constant vec4s sit on 16 bytes. Post effects + outlines live in `PostProcessSettings`; a scene's

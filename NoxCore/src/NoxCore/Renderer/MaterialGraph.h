@@ -42,6 +42,11 @@ namespace Nox
         // world_position_offset(), evaluated per vertex by every pass that draws the geometry (the visibility buffer, the shadow maps,
         // the G-buffer resolve -- this frame and the last, for motion vectors --, the forward shader, the editor's overlays).
         MaterialGraphOutputWorldPositionOffset = 1u << 8,
+        // Custom Light / Custom Ambient (material graph step 4c part 5): the graph's own lighting for a Custom Lit material -- each light's
+        // share and the light from all around, as a Material Shader's light() / ambient() (CustomLit.slang). Read by the Custom Lit pass
+        // and the forward shader through the Material Shaders' dispatcher (the graph takes a slot there: MaterialGraphProgram::LightCode).
+        MaterialGraphOutputCustomLight = 1u << 9,
+        MaterialGraphOutputCustomAmbient = 1u << 10,
     };
 
     // A value a material (.nmat) may override: a Scalar / Vector Parameter node's, or a Texture Sample's with a parameter name. Texture
@@ -71,6 +76,9 @@ namespace Nox
         // the path tracer, the GI passes) get the graphs' surfaces from MaterialGraphSurfaces.slang -- no World Position Offset, so an offset
         // edit leaves them alone.
         std::string SurfaceCode;
+        // `float3 light(CustomLitSurface s, CustomLitLight l)` and `float3 ambient(CustomLitSurface s, CustomLitAmbient a)` from Custom Light
+        // and Custom Ambient (an unconnected one lights as Default Lit's diffuse would); empty when the graph connects neither.
+        std::string LightCode;
         std::vector<MaterialGraphParameter> Parameters;
         uint32_t ParameterSlots = 0;
         uint32_t TextureSlots = 0;

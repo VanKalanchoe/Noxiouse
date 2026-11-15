@@ -41,6 +41,7 @@ struct CustomLitSurface
     float4 parameters[4];       // the material's Parameter 1-4 (Material Editor > Custom Lit): colours or numbers, as the shader reads them
     uint textures[2];           // Custom Texture 1 (sRGB colour) and 2 (linear data); 0xFFFFFFFF: not set -- read with custom_lit_texture
     UniformBufferObject* ubo;   // (the renderer's frame data: custom_lit_texture reads through it)
+    GpuMaterial* material;      // (the material's record: a material graph's lighting reads its parameters through it)
 };
 
 // One light, as it reaches the surface.
@@ -141,6 +142,7 @@ CustomLitSurface custom_lit_surface(UniformBufferObject* ubo, GpuMaterial* mater
     s.textures[0] = material.customTextureIndex[0];
     s.textures[1] = material.customTextureIndex[1];
     s.ubo = ubo;
+    s.material = material;
     return s;
 }
 

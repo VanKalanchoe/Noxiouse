@@ -353,9 +353,9 @@ namespace Nox
             return;
         }
         static constexpr const char* outputNames[] = { "Base Color", "Metallic", "Roughness", "Normal", "Emissive", "Ambient Occlusion", "Opacity",
-                                                       "Opacity Mask", "World Position Offset" };
+                                                       "Opacity Mask", "World Position Offset", "Custom Light", "Custom Ambient" };
         std::string outputs;
-        for (uint32_t bit = 0; bit < 9; ++bit)
+        for (uint32_t bit = 0; bit < std::size(outputNames); ++bit)
         {
             if ((program.Outputs & (1u << bit)) != 0)
                 outputs += std::string(outputs.empty() ? "" : ", ") + outputNames[bit];

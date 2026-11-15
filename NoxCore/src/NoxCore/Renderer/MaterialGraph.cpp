@@ -84,7 +84,9 @@ namespace Nox
             // Which function is being generated: surface() (every Material Output pin but Opacity Mask and World Position Offset),
             // opacity_mask() or world_position_offset() (that pin alone; the Material Output then writes `return`). The offset is
             // computed per vertex: no screen derivatives, nothing that needs the pixel on screen.
-            enum class Function { Surface, OpacityMask, WorldPositionOffset };
+            // custom_light() / custom_ambient(): the Custom Light / Custom Ambient pins (the Lit Surface, Light and Ambient Light nodes
+            // only there).
+            enum class Function { Surface, OpacityMask, WorldPositionOffset, CustomLight, CustomAmbient };
             Function Pass = Function::Surface;
 
             // A value into named locals (its derivatives too), so what reads it twice computes it once.
@@ -535,6 +537,50 @@ namespace Nox
             simple("Camera Position", "i.cameraPosition", 3);
             simple("Time", "i.time", 1);
 
+            // Custom Lit lighting (Custom Light / Custom Ambient): the surface the lighting sees (the G-buffer's, after the graph's own
+            // surface pins), the light being added, the light from all around -- CustomLit.slang's CustomLitSurface, CustomLitLight and
+            // CustomLitAmbient.
+            auto lightingOnly = [](EmitArgs& args, const char* node, bool light, bool ambient)
+            {
+                const bool allowed = (light && args.Ctx.Pass == Context::Function::CustomLight) || (ambient && args.Ctx.Pass == Context::Function::CustomAmbient);
+                if (!allowed)
+                    args.Ctx.Error = std::format("{} can only feed {}", node, light && ambient ? "Custom Light or Custom Ambient" : light ? "Custom Light" : "Custom Ambient");
+                return allowed;
+            };
+            Register("Lit Surface", "Lighting", {}, { V("Base Color"), V("Normal"), V("View"), V("Metallic"), V("Roughness"), V("Occlusion") }, {},
+                     [lightingOnly](EmitArgs& args)
+                     {
+                         if (!lightingOnly(args, "Lit Surface", true, true))
+                             return false;
+                         args.Out[0] = Constant("s.baseColor", 3);
+                         args.Out[1] = Constant("s.normal", 3);
+                         args.Out[2] = Constant("s.view", 3);
+                         args.Out[3] = Constant("s.metallic", 1);
+                         args.Out[4] = Constant("s.roughness", 1);
+                         args.Out[5] = Constant("s.occlusion", 1);
+                         return true;
+                     });
+            Register("Light", "Lighting", {}, { V("Direction"), V("Color"), V("Shadow"), V("Distance") }, {},
+                     [lightingOnly](EmitArgs& args)
+                     {
+                         if (!lightingOnly(args, "Light", true, false))
+                             return false;
+                         args.Out[0] = Constant("l.direction", 3);
+                         args.Out[1] = Constant("l.color", 3);
+                         args.Out[2] = Constant("l.shadow", 1);
+                         args.Out[3] = Constant("l.distance", 1);
+                         return true;
+                     });
+            Register("Ambient Light", "Lighting", {}, { V("Diffuse"), V("Reflection") }, {},
+                     [lightingOnly](EmitArgs& args)
+                     {
+                         if (!lightingOnly(args, "Ambient Light", false, true))
+                             return false;
+                         args.Out[0] = Constant("a.diffuse", 3);
+                         args.Out[1] = Constant("a.reflection", 3);
+                         return true;
+                     });
+
             Register("Constant", "Constants", {}, { V("Value") }, { { "Value", 0.0f } },
                      [](EmitArgs& args)
                      {
@@ -674,13 +720,37 @@ namespace Nox
         {
             Register("Material Output", "Output",
                      { V("Base Color"), V("Metallic"), V("Roughness"), V("Normal"), V("Emissive"), V("Ambient Occlusion"), V("Opacity"),
-                       V("Opacity Mask"), V("World Position Offset") }, {},
+                       V("Opacity Mask"), V("World Position Offset"), V("Custom Light"), V("Custom Ambient") }, {},
                      // (appended after the pins: links name pins by index, so graphs saved before World Position Offset keep theirs)
                      { { "Max World Position Offset Displacement", 0.0f } },
                      [](EmitArgs& args)
                      {
                          constexpr size_t maskPin = 7;
                          constexpr size_t offsetPin = 8;
+                         constexpr size_t lightPin = 9;
+                         constexpr size_t ambientPin = 10;
+                         if (args.Ctx.Pass == Context::Function::CustomLight)
+                         {
+                             if (args.Connected.size() > lightPin && args.Connected[lightPin])
+                             {
+                                 args.Ctx.Body += "    return max(" + Convert(args.In[lightPin], 3).Code + ", float3(0.0));\n";
+                                 args.Ctx.Outputs |= MaterialGraphOutputCustomLight;
+                             }
+                             else
+                                 args.Ctx.Body += "    return custom_lit_lambert(s, l);\n"; // (Default Lit's diffuse, as a Material Shader starts)
+                             return true;
+                         }
+                         if (args.Ctx.Pass == Context::Function::CustomAmbient)
+                         {
+                             if (args.Connected.size() > ambientPin && args.Connected[ambientPin])
+                             {
+                                 args.Ctx.Body += "    return max(" + Convert(args.In[ambientPin], 3).Code + ", float3(0.0));\n";
+                                 args.Ctx.Outputs |= MaterialGraphOutputCustomAmbient;
+                             }
+                             else
+                                 args.Ctx.Body += "    return s.baseColor * a.diffuse * s.occlusion;\n";
+                             return true;
+                         }
                          if (args.Ctx.Pass == Context::Function::WorldPositionOffset)
                          {
                              if (args.Connected.size() > offsetPin && args.Connected[offsetPin])
@@ -781,9 +851,13 @@ namespace Nox
         // parameters, so a parameter several read has one slot.
         constexpr uint32_t kMaskPin = 7;
         constexpr uint32_t kOffsetPin = 8;
+        constexpr uint32_t kLightPin = 9;
+        constexpr uint32_t kAmbientPin = 10;
         auto pinFunction = [&](uint32_t pin)
         {
-            return pin == kMaskPin ? Context::Function::OpacityMask : pin == kOffsetPin ? Context::Function::WorldPositionOffset : Context::Function::Surface;
+            return pin == kMaskPin ? Context::Function::OpacityMask : pin == kOffsetPin ? Context::Function::WorldPositionOffset
+                 : pin == kLightPin ? Context::Function::CustomLight : pin == kAmbientPin ? Context::Function::CustomAmbient
+                 : Context::Function::Surface;
         };
         auto neededFor = [&](Context::Function function)
         {
@@ -813,6 +887,10 @@ namespace Nox
         maskContext.Pass = Context::Function::OpacityMask;
         Context offsetContext;
         offsetContext.Pass = Context::Function::WorldPositionOffset;
+        Context lightContext;
+        lightContext.Pass = Context::Function::CustomLight;
+        Context ambientContext;
+        ambientContext.Pass = Context::Function::CustomAmbient;
         auto generate = [&](Context& ctx, const std::vector<bool>& needed) -> bool
         {
         std::vector<std::vector<Value>> outputs(compiled.Nodes.size());
@@ -877,18 +955,27 @@ namespace Nox
         continueFrom(offsetContext, context);
         if (!generate(offsetContext, neededFor(Context::Function::WorldPositionOffset)))
             return program;
+        // The lighting last: its parameters after the others' (a lighting edit moves no slot the other functions use).
+        continueFrom(lightContext, offsetContext);
+        if (!generate(lightContext, neededFor(Context::Function::CustomLight)))
+            return program;
+        continueFrom(ambientContext, lightContext);
+        if (!generate(ambientContext, neededFor(Context::Function::CustomAmbient)))
+            return program;
+        Context& lastContext = ambientContext;
 
         program.Valid = true;
-        program.Parameters = std::move(offsetContext.Parameters);
+        program.Parameters = std::move(lastContext.Parameters);
         // Listed by name (the Material Editor and the graph editor show them in this order; each keeps its Slot).
         std::stable_sort(program.Parameters.begin(), program.Parameters.end(), [](const MaterialGraphParameter& a, const MaterialGraphParameter& b)
         {
             return std::lexicographical_compare(a.Name.begin(), a.Name.end(), b.Name.begin(), b.Name.end(),
                                                 [](char x, char y) { return std::tolower(static_cast<unsigned char>(x)) < std::tolower(static_cast<unsigned char>(y)); });
         });
-        program.ParameterSlots = offsetContext.ParameterSlots;
-        program.TextureSlots = offsetContext.TextureSlots;
-        program.Outputs = context.Outputs | maskContext.Outputs | offsetContext.Outputs;
+        program.ParameterSlots = lastContext.ParameterSlots;
+        program.TextureSlots = lastContext.TextureSlots;
+        const uint32_t geometryOutputs = context.Outputs | maskContext.Outputs | offsetContext.Outputs;
+        program.Outputs = geometryOutputs | lightContext.Outputs | ambientContext.Outputs;
         if (const NodeGraphValue* displacement = Property(outputNode, "Max World Position Offset Displacement"))
             if (const float* value = std::get_if<float>(displacement))
                 program.MaxDisplacement = std::max(*value, 0.0f);
@@ -898,7 +985,13 @@ namespace Nox
         program.Code = std::format("static const uint Outputs = {}u;\n\nvoid surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)\n{{\n{}}}\n\n"
                                    "float opacity_mask(MaterialGraphInputs i)\n{{\n{}}}\n\n"
                                    "float3 world_position_offset(MaterialGraphInputs i)\n{{\n{}}}\n",
-                                   program.Outputs, context.Body, maskContext.Body, offsetContext.Body);
+                                   geometryOutputs, context.Body, maskContext.Body, offsetContext.Body);
+        // The graph's lighting for a Custom Lit material (Custom Light / Custom Ambient): its inputs from the Custom Lit surface
+        // (material_graph_lit_inputs, generated into CustomLitShaders.slang with it), so the graph's other nodes read there too.
+        if ((program.Outputs & (MaterialGraphOutputCustomLight | MaterialGraphOutputCustomAmbient)) != 0)
+            program.LightCode = std::format("float3 light(CustomLitSurface s, CustomLitLight l)\n{{\n    const MaterialGraphInputs i = material_graph_lit_inputs(s);\n{}}}\n\n"
+                                            "float3 ambient(CustomLitSurface s, CustomLitAmbient a)\n{{\n    const MaterialGraphInputs i = material_graph_lit_inputs(s);\n{}}}\n",
+                                            lightContext.Body, ambientContext.Body);
         return program;
     }
 }

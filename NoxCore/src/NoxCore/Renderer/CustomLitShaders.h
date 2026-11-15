@@ -30,6 +30,9 @@ namespace Nox
         // The file on disk (absolute; empty: Path): what the #line before its code names, so a compile error names the real file and
         // the compiler can show its line (a path it cannot open made Slang quote the generated file's line instead).
         std::string File;
+        // A material graph's lighting (MaterialGraphProgram::LightCode, its Custom Light / Custom Ambient pins) in a slot of its own,
+        // rather than a Material Shader: its code reads the graph's inputs (material_graph_lit_inputs, generated with it).
+        bool Graph = false;
     };
 
     // A material graph as the generated file has it: its path in the project's Assets and its generated code (CompileMaterialGraph's

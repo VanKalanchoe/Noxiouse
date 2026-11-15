@@ -179,8 +179,14 @@ namespace Nox
         startCustomLitBuild(sources, graphs);
     }
 
-    void Renderer::startCustomLitBuild(const std::vector<CustomLitSource>& sources, const std::vector<ProjectMaterialGraph>& graphs)
+    void Renderer::startCustomLitBuild(const std::vector<CustomLitSource>& shaderSources, const std::vector<ProjectMaterialGraph>& graphs)
     {
+        // The Material Shaders, and the material graphs whose Custom Light / Custom Ambient light a Custom Lit material (material graph
+        // step 4c part 5): each takes a slot of the same dispatcher, so the Custom Lit pass and the forward shader light both alike.
+        std::vector<CustomLitSource> sources = shaderSources;
+        for (const ProjectMaterialGraph& graph : graphs)
+            if (graph.Program.Valid && !graph.Program.LightCode.empty())
+                sources.push_back({ graph.Path, graph.Program.LightCode, std::string(), true });
         const std::vector<std::string> paths = CustomLitShaders::AssignSlots(m_customLitRequestedPaths, sources);
         const size_t shaderCount = static_cast<size_t>(std::count_if(paths.begin(), paths.end(), [](const std::string& path) { return !path.empty(); }));
         // Every graph has a slot, compiling or not (a graph fixed later keeps it); one that does not compile has no case in the shader.

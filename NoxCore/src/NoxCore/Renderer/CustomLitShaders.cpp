@@ -207,6 +207,25 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
                 "// a pixel's material names by its slot (GpuMaterial::customLitSlot).\n"
                 "#pragma once\n"
                 "#include \"CustomLit.slang\"\n\n";
+        // A material graph's lighting reads the graph's inputs, rebuilt from the Custom Lit surface (MaterialGraph.slang without its raster
+        // helpers when nothing included it whole before: the deferred pass has the masks' copy, the forward shader the whole graphs).
+        const bool graphLighting = std::any_of(sources.begin(), sources.end(), [&](const CustomLitSource& s)
+        {
+            return s.Graph && std::find(paths.begin(), paths.end(), s.Path) != paths.end();
+        });
+        if (graphLighting)
+            text += "#ifndef NOX_MATERIAL_GRAPH_MASK_ONLY\n#define NOX_MATERIAL_GRAPH_MASK_ONLY 1\n#endif\n"
+                    "#include \"MaterialGraph.slang\"\n\n"
+                    "// A material graph's inputs where its Custom Light / Custom Ambient run: from the surface the lighting sees (no second UV set\n"
+                    "// or vertex colour there; texture mips from the surface's UV footprint).\n"
+                    "MaterialGraphInputs material_graph_lit_inputs(CustomLitSurface s)\n{\n"
+                    "    MaterialGraphInputs i = (MaterialGraphInputs)0;\n"
+                    "    i.uv0 = s.uv;\n    i.uv0Dx = float2(s.uvFootprint, 0.0);\n    i.uv0Dy = float2(0.0, s.uvFootprint);\n"
+                    "    i.uv1 = s.uv;\n    i.uv1Dx = i.uv0Dx;\n    i.uv1Dy = i.uv0Dy;\n"
+                    "    i.position = s.position + s.ubo->renderOrigin;\n"
+                    "    i.normal = s.normal;\n    i.vertexColor = float4(1.0);\n    i.view = s.view;\n    i.screenUV = s.screenUV;\n"
+                    "    i.time = s.time;\n    i.cameraPosition = s.ubo->cameraWorldPos.xyz + s.ubo->renderOrigin;\n"
+                    "    i.material = s.material;\n    i.mipFeedback = false;\n    i.ubo = s.ubo;\n    return i;\n}\n\n";
         std::vector<bool> present(paths.size(), false);
         for (size_t slot = 0; slot < paths.size(); ++slot)
         {
