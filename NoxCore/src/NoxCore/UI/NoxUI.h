@@ -15,6 +15,7 @@
 #include "NoxCore/UI/Rendering/UIDrawList.h"
 #include "NoxCore/UI/Rendering/UIRenderer.h"
 
+#include "NoxCore/UI/Widgets/UIBadge.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UICheckBox.h"
 #include "NoxCore/UI/Widgets/UICollapsingHeader.h"
@@ -35,5 +36,6 @@
 #include "NoxCore/UI/Widgets/UISlider.h"
 #include "NoxCore/UI/Widgets/UITableView.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
+#include "NoxCore/UI/Widgets/UIToggleSwitch.h"
 #include "NoxCore/UI/Widgets/UITreeView.h"
 #include "NoxCore/UI/Widgets/UIViewportSlot.h"

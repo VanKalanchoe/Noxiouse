@@ -153,6 +153,8 @@ namespace Nox::UI
         if (!Visible)
             return;
 
+        OnUpdate(dt);
+
         const UIStyleBox target = theme.Resolve(StyleClass, StyleVariant, m_State);
         if (!m_HasResolvedStyle || target.TransitionSeconds <= 0.0f)
         {

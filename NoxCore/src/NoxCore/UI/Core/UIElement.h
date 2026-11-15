@@ -92,6 +92,7 @@ namespace Nox::UI
         std::function<bool(const UIPointerEvent&)> OnMouseUp;
 
     protected:
+        virtual void OnUpdate(float dt) {}
         virtual UIVec2 ComputeDesiredSize();
         virtual void ArrangeChildren(const UIRect& contentRect);
         virtual void OnPaint(UIDrawList& drawList, const UITheme& theme);

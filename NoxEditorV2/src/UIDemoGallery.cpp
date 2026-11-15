@@ -7,6 +7,7 @@
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Layout/UILayout.h"
 #include "NoxCore/UI/Layout/UIWindow.h"
+#include "NoxCore/UI/Widgets/UIBadge.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UICheckBox.h"
 #include "NoxCore/UI/Widgets/UICollapsingHeader.h"
@@ -25,6 +26,7 @@
 #include "NoxCore/UI/Widgets/UISlider.h"
 #include "NoxCore/UI/Widgets/UITableView.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
+#include "NoxCore/UI/Widgets/UIToggleSwitch.h"
 #include "NoxCore/UI/Widgets/UITreeView.h"
 
 namespace Nox::UI
@@ -486,6 +488,33 @@ namespace Nox::UI
         logPanel->AddChild(logBtns);
         logPanel->AddChild(logView);
         scroll->AddChild(logPanel);
+
+        // 12. Animated UIToggleSwitch & UIBadge Pills
+        auto switchPanel = MakeUI<UIStackBox>(UIOrientation::Vertical, 8.0f);
+        switchPanel->StyleClass = "Panel";
+        switchPanel->DrawBackground = true;
+        switchPanel->Padding = UIThickness::All(12.0f);
+        switchPanel->AddChild(MakeUI<UILabel>("11. Animated UIToggleSwitch & UIBadge Pills", 14.5f));
+
+        auto switchRow = MakeUI<UIStackBox>(UIOrientation::Horizontal, 14.0f);
+        auto sw1 = MakeUI<UIToggleSwitch>("VSync", true, [report](bool on) { report(std::string("VSync: ") + (on ? "ON" : "OFF")); });
+        auto sw2 = MakeUI<UIToggleSwitch>("Path Tracer", false, [report](bool on) { report(std::string("Path Tracer: ") + (on ? "ON" : "OFF")); });
+        sw2->OnColor = { 0.24f, 0.76f, 0.48f, 1.0f };
+
+        auto badge1 = MakeUI<UIBadge>("SDF UI", UIColor{ 0.24f, 0.56f, 0.96f, 1.0f });
+        auto badge2 = MakeUI<UIBadge>("READY", UIColor{ 0.22f, 0.76f, 0.46f, 1.0f });
+        auto badge3 = MakeUI<UIBadge>("BETA", UIColor{ 0.92f, 0.62f, 0.16f, 1.0f });
+        badge1->VAlign = UIAlignment::Center;
+        badge2->VAlign = UIAlignment::Center;
+        badge3->VAlign = UIAlignment::Center;
+
+        switchRow->AddChild(sw1);
+        switchRow->AddChild(sw2);
+        switchRow->AddChild(badge1);
+        switchRow->AddChild(badge2);
+        switchRow->AddChild(badge3);
+        switchPanel->AddChild(switchRow);
+        scroll->AddChild(switchPanel);
 
         return scroll;
     }
