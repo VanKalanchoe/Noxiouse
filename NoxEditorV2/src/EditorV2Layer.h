@@ -11,7 +11,7 @@ namespace Nox
     {
     public:
         EditorV2Layer();
-        ~EditorV2Layer() override = default;
+        ~EditorV2Layer() override;
 
         void OnUpdate(Timestep ts) override;
         void OnRender() override;

@@ -1,4 +1,5 @@
 #include "Renderer.h"
+#include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Math/Math.h"
 #include "ShaderCompileSplash.h"
@@ -670,6 +671,10 @@ namespace Nox
         m_device->waitIdle();
         // Before the descriptor heap and device go away.
         m_renderGraph.ReleaseResources();
+
+
+        m_uiRenderer.reset();
+        Font::ReleaseDefault();
         m_device->shutdown(); // needed for texture to not remove imguitexture
         m_renderer2D.reset();
         // Cleanup Vulkan resources here
@@ -1323,6 +1328,8 @@ namespace Nox
         // Graph-owned targets and histories follow the new sizes; with the GPU idle, drop the old-size ones right away
         // instead of letting them age out, and invalidate every history (reservoirs, accumulation, NRD, DLSS).
         m_renderGraph.ReleaseResources();
+
+
         m_renderGraph.ResetAllHistory();
         m_device->initNRD(m_renderSize.width, m_renderSize.height);
         createReSTIRPTContext();

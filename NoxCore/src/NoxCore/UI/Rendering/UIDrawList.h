@@ -20,7 +20,6 @@ namespace shaderio
 namespace Nox
 {
     class Font;
-    class Texture2D;
 }
 
 namespace Nox::UI

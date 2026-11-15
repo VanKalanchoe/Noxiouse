@@ -12,6 +12,8 @@ namespace Nox
         m_DefaultFont = Font::GetDefault();
     }
 
+    EditorV2Layer::~EditorV2Layer() = default;
+
     void EditorV2Layer::OnUpdate(Timestep ts)
     {
         m_Elapsed += ts.GetSeconds();

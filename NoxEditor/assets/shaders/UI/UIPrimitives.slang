@@ -37,13 +37,13 @@ void meshMain(
     // Expand quad bounds to cover soft drop shadows or Bezier stroke thickness.
     float2 padMin = float2(0.0, 0.0);
     float2 padMax = float2(0.0, 0.0);
-    if (prim.type == UI_PRIM_ROUNDED_RECT && prim.shadowBlur > 0.0)
+    if (prim.type == uint(UIPrimitiveType.UI_PRIM_ROUNDED_RECT) && prim.shadowBlur > 0.0)
     {
         const float expand = prim.shadowBlur * 1.5;
         padMin = max(float2(0.0, 0.0), float2(expand, expand) - prim.shadowOffset);
         padMax = max(float2(0.0, 0.0), float2(expand, expand) + prim.shadowOffset);
     }
-    else if (prim.type == UI_PRIM_CUBIC_BEZIER)
+    else if (prim.type == uint(UIPrimitiveType.UI_PRIM_CUBIC_BEZIER))
     {
         const float strokePad = prim.borderThickness * 0.5 + 2.0;
         padMin = float2(strokePad, strokePad);
@@ -161,7 +161,7 @@ float4 fragMain(UIVSOutput input, uniform UIPushConstants pc) : SV_TARGET0
 
     float4 outColor = float4(0.0);
 
-    if (prim.type == UI_PRIM_ROUNDED_RECT)
+    if (prim.type == uint(UIPrimitiveType.UI_PRIM_ROUNDED_RECT))
     {
         const float2 center = 0.5 * (prim.bounds.xy + prim.bounds.zw);
         const float2 halfSize = 0.5 * (prim.bounds.zw - prim.bounds.xy);
@@ -200,10 +200,10 @@ float4 fragMain(UIVSOutput input, uniform UIPushConstants pc) : SV_TARGET0
                 outColor = blendOver(float4(prim.borderColor.rgb, prim.borderColor.a * borderAlpha), outColor);
         }
     }
-    else if (prim.type == UI_PRIM_TEXTURED_QUAD)
+    else if (prim.type == uint(UIPrimitiveType.UI_PRIM_TEXTURED_QUAD))
     {
         Texture2D tex = Texture2D.Handle(uint2(pc.imageHeapIndexOffset + prim.textureIndex, 0));
-        SamplerState samp = SamplerState.Handle(uint2(SAMPLER_LINEAR_CLAMP, 0));
+        SamplerState samp = SamplerState.Handle(uint2(uint(SamplerIndex.SAMPLER_LINEAR_CLAMP), 0));
         float4 sampled = tex.Sample(samp, input.uv) * prim.color0;
 
         const float2 center = 0.5 * (prim.bounds.xy + prim.bounds.zw);
@@ -213,17 +213,17 @@ float4 fragMain(UIVSOutput input, uniform UIPushConstants pc) : SV_TARGET0
         const float mask = 1.0 - smoothstep(-aa * 0.5, aa * 0.5, d);
         outColor = float4(sampled.rgb, sampled.a * mask);
     }
-    else if (prim.type == UI_PRIM_MSDF_GLYPH)
+    else if (prim.type == uint(UIPrimitiveType.UI_PRIM_MSDF_GLYPH))
     {
         Texture2D atlas = Texture2D.Handle(uint2(pc.imageHeapIndexOffset + prim.textureIndex, 0));
-        SamplerState samp = SamplerState.Handle(uint2(SAMPLER_LINEAR_CLAMP, 0));
+        SamplerState samp = SamplerState.Handle(uint2(uint(SamplerIndex.SAMPLER_LINEAR_CLAMP), 0));
         const float3 msd = atlas.Sample(samp, input.uv).rgb;
         const float sd = median3(msd.r, msd.g, msd.b);
         const float pxRange = screenPxRange(atlas, input.uv);
         const float opacity = clamp(pxRange * (sd - 0.5) + 0.5, 0.0, 1.0);
         outColor = float4(prim.color0.rgb, prim.color0.a * opacity);
     }
-    else if (prim.type == UI_PRIM_CUBIC_BEZIER)
+    else if (prim.type == uint(UIPrimitiveType.UI_PRIM_CUBIC_BEZIER))
     {
         const float d = sdCubicBezierApprox(input.pixelPos,
                                             prim.uvOrP0P1.xy, prim.uvOrP0P1.zw,
