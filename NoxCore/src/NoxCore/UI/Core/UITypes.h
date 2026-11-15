@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <string>
 
 #include <glm/glm.hpp>
 
@@ -118,5 +119,12 @@ namespace Nox::UI
         uint16_t Modifiers = 0;
         bool Repeat = false;
         bool Handled = false;
+    };
+
+    struct UIDragPayload
+    {
+        std::string Type;
+        std::string Text;
+        uint64_t UserId = 0;
     };
 }

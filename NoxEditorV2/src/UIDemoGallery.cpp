@@ -563,6 +563,44 @@ namespace Nox::UI
 
         scroll->AddChild(flowPanel);
 
+        // 14. Drag & Drop Payloads
+        auto dndPanel = MakeUI<UIStackBox>(UIOrientation::Vertical, 8.0f);
+        dndPanel->StyleClass = "Panel";
+        dndPanel->DrawBackground = true;
+        dndPanel->Padding = UIThickness::All(12.0f);
+        dndPanel->AddChild(MakeUI<UILabel>("13. Drag & Drop Payloads (UIElement::OnDragStart / OnDrop)", 14.5f));
+
+        auto dndRow = MakeUI<UIStackBox>(UIOrientation::Horizontal, 10.0f);
+        auto src1 = MakeUI<UIButton>("Drag: Material_Gold");
+        src1->OnDragStart = []() -> std::optional<UIDragPayload>
+        {
+            return UIDragPayload{ "DemoAsset", "Material_Gold", 101 };
+        };
+        auto src2 = MakeUI<UIButton>("Drag: Mesh_Sphere");
+        src2->OnDragStart = []() -> std::optional<UIDragPayload>
+        {
+            return UIDragPayload{ "DemoAsset", "Mesh_Sphere", 102 };
+        };
+
+        auto dropTarget = MakeUI<UIButton>("Drop Asset Here");
+        dropTarget->StyleClass = "TextInput";
+        dropTarget->WidthMode = UISizeMode::Fill;
+        dropTarget->AcceptedDropType = "DemoAsset";
+        UIButton* dropPtr = dropTarget.get();
+        dropTarget->OnDrop = [&context, dropPtr, report](const UIDragPayload& payload) -> bool
+        {
+            dropPtr->SetText("Dropped: " + payload.Text + " (ID " + std::to_string(payload.UserId) + ")");
+            context.PushToast("Dropped '" + payload.Text + "'", 2.0f, { 0.24f, 0.76f, 0.48f, 1.0f });
+            report("Dropped payload: " + payload.Text);
+            return true;
+        };
+
+        dndRow->AddChild(src1);
+        dndRow->AddChild(src2);
+        dndRow->AddChild(dropTarget);
+        dndPanel->AddChild(dndRow);
+        scroll->AddChild(dndPanel);
+
         return scroll;
     }
 }

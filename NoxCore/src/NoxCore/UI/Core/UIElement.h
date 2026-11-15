@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -90,6 +91,11 @@ namespace Nox::UI
 
         std::function<bool(const UIPointerEvent&)> OnMouseDown;
         std::function<bool(const UIPointerEvent&)> OnMouseUp;
+
+        // Drag & drop callbacks
+        std::function<std::optional<UIDragPayload>()> OnDragStart;
+        std::string AcceptedDropType;
+        std::function<bool(const UIDragPayload&)> OnDrop;
 
     protected:
         virtual void OnUpdate(float dt) {}

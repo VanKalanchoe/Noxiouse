@@ -98,6 +98,29 @@ namespace Nox::UI
 
         if (m_Captured)
         {
+            if (m_DragPending && !m_DragActive)
+            {
+                const UIVec2 diff = pos - m_DragOrigin;
+                if (diff.x * diff.x + diff.y * diff.y > 36.0f)
+                {
+                    for (UIElement* cur = m_Captured.get(); cur != nullptr; cur = cur->GetParent())
+                    {
+                        if (cur->OnDragStart)
+                        {
+                            if (auto payload = cur->OnDragStart())
+                            {
+                                m_ActivePayload = std::move(*payload);
+                                m_DragActive = true;
+                                break;
+                            }
+                        }
+                    }
+                    m_DragPending = false;
+                }
+            }
+            if (m_DragActive)
+                return true;
+
             UIPointerEvent ev{ pos, delta, {}, 0, false };
             return m_Captured->OnPointerMove(ev);
         }
@@ -133,6 +156,12 @@ namespace Nox::UI
         SetFocus(hovered.get());
         hovered->SetStateFlag(UIState::Pressed, true);
         m_Captured = hovered;
+        if (button == 1)
+        {
+            m_DragOrigin = pos;
+            m_DragPending = true;
+            m_DragActive = false;
+        }
 
         UIPointerEvent ev{ pos, {}, {}, button, false };
         for (UIElement* cur = hovered.get(); cur != nullptr; cur = cur->GetParent())
@@ -150,6 +179,32 @@ namespace Nox::UI
         m_Captured = nullptr;
 
         bool handled = false;
+        if (m_DragActive && button == 1)
+        {
+            UIElement* target = m_Overlay ? m_Overlay->HitTest(pos) : nullptr;
+            if (!target && m_Root)
+                target = m_Root->HitTest(pos);
+            for (UIElement* cur = target; cur != nullptr; cur = cur->GetParent())
+            {
+                if (cur->OnDrop && (cur->AcceptedDropType.empty() || cur->AcceptedDropType == m_ActivePayload.Type))
+                {
+                    if (cur->OnDrop(m_ActivePayload))
+                    {
+                        handled = true;
+                        break;
+                    }
+                }
+            }
+            m_DragActive = false;
+            m_DragPending = false;
+            m_ActivePayload = {};
+            if (captured)
+                captured->SetStateFlag(UIState::Pressed, false);
+            UpdateHover(pos);
+            return handled;
+        }
+        m_DragPending = false;
+
         if (captured)
         {
             captured->SetStateFlag(UIState::Pressed, false);
@@ -347,6 +402,44 @@ namespace Nox::UI
         else
         {
             m_HoverTime = 0.0f;
+        }
+
+        if (m_DragActive)
+        {
+            UIElement* target = m_Overlay ? m_Overlay->HitTest(m_LastMousePos) : nullptr;
+            if (!target && m_Root)
+                target = m_Root->HitTest(m_LastMousePos);
+            for (UIElement* cur = target; cur != nullptr; cur = cur->GetParent())
+            {
+                if (cur->OnDrop && (cur->AcceptedDropType.empty() || cur->AcceptedDropType == m_ActivePayload.Type))
+                {
+                    const UIRect& tb = cur->GetBounds();
+                    drawList.AddRoundedRect(
+                        tb.Min,
+                        tb.Max,
+                        { 0.24f, 0.56f, 0.96f, 0.14f },
+                        glm::vec4(6.0f),
+                        2.0f,
+                        { 0.30f, 0.68f, 1.0f, 0.95f }
+                    );
+                    break;
+                }
+            }
+
+            const std::string label = m_ActivePayload.Text.empty() ? m_ActivePayload.Type : m_ActivePayload.Text;
+            const Ref<Font> font = Font::GetDefault();
+            const UIVec2 textSize = UILabel::MeasureText(label, font, 12.5f);
+            const UIVec2 boxPos = m_LastMousePos + UIVec2{ 14.0f, 14.0f };
+            const UIVec2 boxSize{ textSize.x + 20.0f, textSize.y + 12.0f };
+            drawList.AddRoundedRect(
+                boxPos,
+                boxPos + boxSize,
+                { 0.12f, 0.16f, 0.24f, 0.94f },
+                glm::vec4(6.0f),
+                1.5f,
+                { 0.30f, 0.64f, 1.0f, 0.95f }
+            );
+            drawList.AddText(label, font, boxPos + UIVec2{ 10.0f, 6.0f }, 12.5f, { 0.94f, 0.97f, 1.0f, 1.0f });
         }
 
         // Render bottom-right stacked toast notifications

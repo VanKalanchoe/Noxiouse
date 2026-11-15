@@ -58,6 +58,11 @@ namespace Nox::UI
         UIVec2 m_LastMousePos{ 0.0f, 0.0f };
         float m_HoverTime = 0.0f;
 
+        bool m_DragPending = false;
+        bool m_DragActive = false;
+        UIVec2 m_DragOrigin{ 0.0f, 0.0f };
+        UIDragPayload m_ActivePayload{};
+
         struct ToastItem
         {
             std::string Message;
