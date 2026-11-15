@@ -8,12 +8,17 @@ file(GLOB_RECURSE NOXEDITORV2_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
-target_sources(${PROJECT_NAME} PRIVATE ${NOXEDITORV2_FILES})
+target_sources(${PROJECT_NAME} PRIVATE
+    ${NOXEDITORV2_FILES}
+    "${CMAKE_SOURCE_DIR}/NoxEditor/src/ProjectManager/ProjectLibrary.cpp"
+    "${CMAKE_SOURCE_DIR}/NoxEditor/src/ProjectManager/ProjectLibrary.h"
+)
 target_link_libraries(${PROJECT_NAME} PRIVATE NoxCore)
 target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/NoxCore/src/NoxPCH.h")
 
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/NoxEditor")
+target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/NoxEditor/src")
 
 if(WIN32)
     if(MSVC OR ${CMAKE_GENERATOR} MATCHES "Visual Studio.*")

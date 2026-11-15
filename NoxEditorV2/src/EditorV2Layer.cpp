@@ -3,8 +3,11 @@
 #include <algorithm>
 #include <cmath>
 
+#include <SDL3/SDL_video.h>
+
 #include "NoxCore/Audio/AudioMixer.h"
 #include "NoxCore/Core/Application.h"
+#include "NoxCore/Core/Window.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Renderer.h"
@@ -12,9 +15,9 @@
 #include "NoxCore/Scene/SceneSerializer.h"
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UILayer.h"
-#include "NoxCore/UI/Demo/UIDemoGallery.h"
 #include "NoxCore/UI/Layout/UIDockSpace.h"
 #include "NoxCore/UI/Widgets/UIImage.h"
+#include "ProjectManager/ProjectLibrary.h"
 
 namespace Nox
 {
@@ -51,6 +54,12 @@ namespace Nox
             Project::New();
 
         Ref<Project> project = Project::GetActive();
+        if (loaded)
+        {
+            ProjectLibrary::RememberRecentProject(path);
+            if (auto win = Application::Get().getWindow(); win && win->getHandle() && project)
+                SDL_SetWindowTitle(win->getHandle(), ("Nox Editor - " + project->GetConfig().Name).c_str());
+        }
         m_EditorCamera.ApplyWorldUnitDefaults();
         if (renderer && project)
         {
@@ -161,16 +170,6 @@ namespace Nox
         );
 
         m_StatusLabel = UI::Label("Ready").Margin(10.0f, 4.0f);
-
-        auto panels = UI::CreateUIDemoPanels(uiLayer->GetContext(),
-                                             [this](const std::string& msg) { if (m_StatusLabel) m_StatusLabel->Text = msg; });
-        for (size_t i = 0; i < panels.size(); ++i)
-        {
-            if (i == 0)
-                uiLayer->AddPanel(panels[i].Title, panels[i].Content, UI::UIDockDropZone::Right, "Viewport", 0.30f);
-            else
-                uiLayer->AddPanel(panels[i].Title, panels[i].Content, UI::UIDockDropZone::Center, panels[0].Title);
-        }
 
         if (loadSavedLayout)
         {
