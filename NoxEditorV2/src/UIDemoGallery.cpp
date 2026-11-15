@@ -718,6 +718,78 @@ namespace Nox::UI
         groupBox->AddContent(rangeSlider);
         scroll->AddChild(groupBox);
 
+        // 18. In-Game HUD Overlay Demo (UIAnchorBox Corners & Anchors)
+        auto hudBox = MakeUI<UIGroupBox>("17. In-Game HUD Overlay Demo (UIAnchorBox)");
+        hudBox->AddContent(MakeUI<UILabel>("Tests responsive 0..1 anchors (top-left vitals, top-right badges, bottom-center hotbar).", 13.0f));
+        auto hudBtn = MakeUI<UIButton>("Launch In-Game HUD Preview", [&context, report]()
+        {
+            auto hudRoot = MakeUI<UIAnchorBox>();
+            hudRoot->HitTestMode = UIHitTestMode::PassThrough;
+
+            // Top-left vitals
+            auto vitals = MakeUI<UIStackBox>(UIOrientation::Vertical, 6.0f);
+            vitals->StyleClass = "Panel";
+            vitals->DrawBackground = true;
+            vitals->Padding = UIThickness::All(10.0f);
+            vitals->WidthMode = UISizeMode::Fixed;
+            vitals->FixedSize.x = 240.0f;
+            vitals->AnchorMin = { 0.0f, 0.0f };
+            vitals->AnchorMax = { 0.0f, 0.0f };
+            vitals->AnchorOffsets = { 20.0f, 20.0f, 0.0f, 0.0f };
+
+            auto hpBar = MakeUI<UIProgressBar>(0.84f, "HP  84 / 100");
+            hpBar->FillColor = { 0.86f, 0.24f, 0.28f, 1.0f };
+            auto staminaBar = MakeUI<UIProgressBar>(0.62f, "Stamina  62%");
+            staminaBar->FillColor = { 0.24f, 0.76f, 0.48f, 1.0f };
+            vitals->AddChild(hpBar);
+            vitals->AddChild(staminaBar);
+            hudRoot->AddChild(vitals);
+
+            // Top-right status badges + close
+            auto topRight = MakeUI<UIStackBox>(UIOrientation::Horizontal, 8.0f);
+            topRight->AnchorMin = { 1.0f, 0.0f };
+            topRight->AnchorMax = { 1.0f, 0.0f };
+            topRight->AnchorOffsets = { -240.0f, 20.0f, 0.0f, 0.0f };
+            topRight->AddChild(MakeUI<UIBadge>("HUD LIVE", UIColor{ 0.22f, 0.76f, 0.46f, 1.0f }));
+            auto exitHud = MakeUI<UIButton>("Exit HUD (Esc)", [&context, report]()
+            {
+                context.ClearOverlay();
+                report("Exited In-Game HUD Preview");
+            });
+            exitHud->StyleVariant = "primary";
+            topRight->AddChild(exitHud);
+            hudRoot->AddChild(topRight);
+
+            // Bottom-center hotbar
+            auto hotbar = MakeUI<UIStackBox>(UIOrientation::Horizontal, 6.0f);
+            hotbar->StyleClass = "MenuPopup";
+            hotbar->DrawBackground = true;
+            hotbar->Padding = UIThickness::All(8.0f);
+            hotbar->WidthMode = UISizeMode::Fixed;
+            hotbar->FixedSize.x = 340.0f;
+            hotbar->AnchorMin = { 0.5f, 1.0f };
+            hotbar->AnchorMax = { 0.5f, 1.0f };
+            hotbar->AnchorOffsets = { -170.0f, -72.0f, 0.0f, 0.0f };
+            for (int s = 1; s <= 5; ++s)
+            {
+                auto slot = MakeUI<UIButton>("[" + std::to_string(s) + "]", [&context, s]()
+                {
+                    context.PushToast("Activated Hotbar Slot #" + std::to_string(s), 1.4f);
+                });
+                slot->WidthMode = UISizeMode::Fill;
+                if (s == 1)
+                    slot->StyleVariant = "primary";
+                hotbar->AddChild(slot);
+            }
+            hudRoot->AddChild(hotbar);
+
+            context.SetOverlay(hudRoot);
+            report("Launched In-Game HUD Preview");
+        });
+        hudBtn->StyleVariant = "primary";
+        hudBox->AddContent(hudBtn);
+        scroll->AddChild(hudBox);
+
         return scroll;
     }
 }
