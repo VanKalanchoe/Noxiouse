@@ -26,9 +26,11 @@ namespace Nox::UI
             {
                 if (e.Button == 1 && m_Context)
                 {
-                    m_Context->ClearOverlay();
-                    if (m_OnDismiss)
-                        m_OnDismiss();
+                    UIContext* ctx = m_Context;
+                    auto onDismiss = std::move(m_OnDismiss);
+                    ctx->ClearOverlay();
+                    if (onDismiss)
+                        onDismiss();
                     return true;
                 }
                 return false;
@@ -111,7 +113,7 @@ namespace Nox::UI
         Ref<UIStackBox> card = CreateModalCard(420.0f, 205.0f);
 
         card->AddChild(Ref<UILabel>(new UILabel(std::move(title), 16.0f)));
-        card->AddChild(Ref<UILabel>(std::move(message), 13.5f));
+        card->AddChild(Ref<UILabel>(new UILabel(std::move(message), 13.5f)));
 
         Ref<UITextInput> input(new UITextInput(std::move(defaultValue), std::move(placeholder)));
         input->OnSubmit = [&context, onSubmit](const std::string& val)

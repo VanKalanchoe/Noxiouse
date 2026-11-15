@@ -27,8 +27,10 @@
 #include "NoxCore/UI/Widgets/UIPropertyGrid.h"
 #include "NoxCore/UI/Widgets/UIRadioGroup.h"
 #include "NoxCore/UI/Widgets/UIScrollView.h"
+#include "NoxCore/UI/Widgets/UISegmentedControl.h"
 #include "NoxCore/UI/Widgets/UISeparator.h"
 #include "NoxCore/UI/Widgets/UISlider.h"
+#include "NoxCore/UI/Widgets/UISpinBox.h"
 #include "NoxCore/UI/Widgets/UISpinner.h"
 #include "NoxCore/UI/Widgets/UITableView.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
@@ -668,6 +670,37 @@ namespace Nox::UI
         modalRow->AddChild(spinLabel);
         modalPanel->AddChild(modalRow);
         scroll->AddChild(modalPanel);
+
+        // 16. UISegmentedControl & UISpinBox
+        auto segPanel = MakeUI<UIStackBox>(UIOrientation::Vertical, 8.0f);
+        segPanel->StyleClass = "Panel";
+        segPanel->DrawBackground = true;
+        segPanel->Padding = UIThickness::All(12.0f);
+        segPanel->AddChild(MakeUI<UILabel>("15. UISegmentedControl & UISpinBox", 14.5f));
+
+        auto segRow = MakeUI<UIStackBox>(UIOrientation::Horizontal, 12.0f);
+        auto seg = MakeUI<UISegmentedControl>(
+            std::vector<std::string>{ "Low", "Medium", "High", "Ultra" },
+            2,
+            [&context, report](int idx)
+            {
+                context.PushToast("Quality preset #" + std::to_string(idx), 1.5f);
+                report("SegmentedControl index: " + std::to_string(idx));
+            }
+        );
+        seg->WidthMode = UISizeMode::Fill;
+
+        auto spin = MakeUI<UISpinBox>(8.0f, 1.0f, 0.0f, 64.0f, [report](float v)
+        {
+            report("SpinBox value: " + std::to_string(v));
+        });
+        spin->WidthMode = UISizeMode::Fixed;
+        spin->FixedSize.x = 150.0f;
+
+        segRow->AddChild(seg);
+        segRow->AddChild(spin);
+        segPanel->AddChild(segRow);
+        scroll->AddChild(segPanel);
 
         return scroll;
     }
