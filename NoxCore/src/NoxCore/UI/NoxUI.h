@@ -18,6 +18,7 @@
 #include "NoxCore/UI/Rendering/UIDrawList.h"
 #include "NoxCore/UI/Rendering/UIRenderer.h"
 
+#include "NoxCore/UI/Widgets/UIAlertBanner.h"
 #include "NoxCore/UI/Widgets/UIBadge.h"
 #include "NoxCore/UI/Widgets/UIBreadcrumb.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
@@ -49,8 +50,10 @@
 #include "NoxCore/UI/Widgets/UISlider.h"
 #include "NoxCore/UI/Widgets/UISpinBox.h"
 #include "NoxCore/UI/Widgets/UISpinner.h"
+#include "NoxCore/UI/Widgets/UISplitButton.h"
 #include "NoxCore/UI/Widgets/UIStatCard.h"
 #include "NoxCore/UI/Widgets/UITableView.h"
+#include "NoxCore/UI/Widgets/UITagInput.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
 #include "NoxCore/UI/Widgets/UITimeline.h"
 #include "NoxCore/UI/Widgets/UIToggleSwitch.h"

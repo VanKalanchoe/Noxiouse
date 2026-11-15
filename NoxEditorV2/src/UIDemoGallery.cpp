@@ -13,6 +13,7 @@
 #include "NoxCore/UI/Layout/UILayout.h"
 #include "NoxCore/UI/Layout/UIWindow.h"
 #include "NoxCore/UI/Layout/UIWrapBox.h"
+#include "NoxCore/UI/Widgets/UIAlertBanner.h"
 #include "NoxCore/UI/Widgets/UIBadge.h"
 #include "NoxCore/UI/Widgets/UIBreadcrumb.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
@@ -42,8 +43,10 @@
 #include "NoxCore/UI/Widgets/UISlider.h"
 #include "NoxCore/UI/Widgets/UISpinBox.h"
 #include "NoxCore/UI/Widgets/UISpinner.h"
+#include "NoxCore/UI/Widgets/UISplitButton.h"
 #include "NoxCore/UI/Widgets/UIStatCard.h"
 #include "NoxCore/UI/Widgets/UITableView.h"
+#include "NoxCore/UI/Widgets/UITagInput.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
 #include "NoxCore/UI/Widgets/UITimeline.h"
 #include "NoxCore/UI/Widgets/UIToggleSwitch.h"
@@ -896,6 +899,40 @@ namespace Nox::UI
         };
         timeBox->AddContent(radialBtn);
         scroll->AddChild(timeBox);
+
+        // 24. UITagInput, UIAlertBanner & UISplitButton
+        auto extrasBox = MakeUI<UIGroupBox>("23. UITagInput, UIAlertBanner & UISplitButton");
+        auto tags = MakeUI<UITagInput>(std::vector<std::string>{ "PBR", "Static", "CastShadow" });
+        tags->OnTagsChanged = [report](const std::vector<std::string>& t)
+        {
+            report("TagInput count: " + std::to_string(t.size()));
+        };
+        extrasBox->AddContent(tags);
+
+        extrasBox->AddContent(MakeUI<UIAlertBanner>(
+            UIAlertSeverity::Warning,
+            "Shader cache rebuild recommended after editing .slang files.",
+            "Rebuild",
+            [&context, report]()
+            {
+                context.PushToast("Rebuilding shader cache...", 2.0f, { 0.92f, 0.64f, 0.16f, 1.0f });
+                report("AlertBanner action clicked");
+            }
+        ));
+
+        auto splitBtn = MakeUI<UISplitButton>(
+            context,
+            "Build Project",
+            [&context, report]() { context.PushToast("Primary: Build Project"); report("SplitButton: Build Project"); },
+            std::vector<UIMenuItem>{
+                { "Rebuild All", "", [&context, report]() { context.PushToast("Secondary: Rebuild All"); report("SplitButton: Rebuild All"); } },
+                { "Clean Intermediate", "", [&context, report]() { context.PushToast("Secondary: Clean"); report("SplitButton: Clean"); } },
+                { "", "", {}, true },
+                { "Package Release", "", [&context, report]() { context.PushToast("Secondary: Package Release"); report("SplitButton: Package"); } }
+            }
+        );
+        extrasBox->AddContent(splitBtn);
+        scroll->AddChild(extrasBox);
 
         return scroll;
     }
