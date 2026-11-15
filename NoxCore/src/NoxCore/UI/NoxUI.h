@@ -7,6 +7,7 @@
 #include "NoxCore/UI/Core/UITheme.h"
 #include "NoxCore/UI/Core/UITypes.h"
 
+#include "NoxCore/UI/Layout/UIGroupBox.h"
 #include "NoxCore/UI/Layout/UILayout.h"
 #include "NoxCore/UI/Layout/UISplitter.h"
 #include "NoxCore/UI/Layout/UITabPanel.h"
@@ -36,6 +37,7 @@
 #include "NoxCore/UI/Widgets/UIProgressBar.h"
 #include "NoxCore/UI/Widgets/UIPropertyGrid.h"
 #include "NoxCore/UI/Widgets/UIRadioGroup.h"
+#include "NoxCore/UI/Widgets/UIRangeSlider.h"
 #include "NoxCore/UI/Widgets/UIScrollView.h"
 #include "NoxCore/UI/Widgets/UISegmentedControl.h"
 #include "NoxCore/UI/Widgets/UISeparator.h"

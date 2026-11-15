@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "NoxCore/UI/Core/UIContext.h"
+#include "NoxCore/UI/Layout/UIGroupBox.h"
 #include "NoxCore/UI/Layout/UILayout.h"
 #include "NoxCore/UI/Layout/UIWindow.h"
 #include "NoxCore/UI/Layout/UIWrapBox.h"
@@ -26,6 +27,7 @@
 #include "NoxCore/UI/Widgets/UIProgressBar.h"
 #include "NoxCore/UI/Widgets/UIPropertyGrid.h"
 #include "NoxCore/UI/Widgets/UIRadioGroup.h"
+#include "NoxCore/UI/Widgets/UIRangeSlider.h"
 #include "NoxCore/UI/Widgets/UIScrollView.h"
 #include "NoxCore/UI/Widgets/UISegmentedControl.h"
 #include "NoxCore/UI/Widgets/UISeparator.h"
@@ -701,6 +703,20 @@ namespace Nox::UI
         segRow->AddChild(spin);
         segPanel->AddChild(segRow);
         scroll->AddChild(segPanel);
+
+        // 17. UIGroupBox & Dual-Handle UIRangeSlider
+        auto groupBox = MakeUI<UIGroupBox>("16. UIGroupBox & Dual-Handle UIRangeSlider");
+        auto rangeLabel = MakeUI<UILabel>("LOD Distance Range: 10.0m - 75.0m", 13.0f);
+        auto rangeSlider = MakeUI<UIRangeSlider>(10.0f, 75.0f, 0.0f, 100.0f, [rangeLabel, report](float lo, float hi)
+        {
+            char buf[64]{};
+            std::snprintf(buf, sizeof(buf), "LOD Distance Range: %.1fm - %.1fm", lo, hi);
+            rangeLabel->Text = buf;
+            report(buf);
+        });
+        groupBox->AddContent(rangeLabel);
+        groupBox->AddContent(rangeSlider);
+        scroll->AddChild(groupBox);
 
         return scroll;
     }
