@@ -4,6 +4,9 @@
 #include <cstdio>
 #include <memory>
 
+#include <SDL3/SDL_keycode.h>
+#include <SDL3/SDL_scancode.h>
+
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Layout/UIGroupBox.h"
 #include "NoxCore/UI/Layout/UILayout.h"
@@ -16,9 +19,11 @@
 #include "NoxCore/UI/Widgets/UICollapsingHeader.h"
 #include "NoxCore/UI/Widgets/UIColorPicker.h"
 #include "NoxCore/UI/Widgets/UICommandPalette.h"
+#include "NoxCore/UI/Widgets/UICurveEditor.h"
 #include "NoxCore/UI/Widgets/UIDragScalar.h"
 #include "NoxCore/UI/Widgets/UIDropdown.h"
 #include "NoxCore/UI/Widgets/UIImage.h"
+#include "NoxCore/UI/Widgets/UIKeybindButton.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 #include "NoxCore/UI/Widgets/UILogView.h"
 #include "NoxCore/UI/Widgets/UIMenu.h"
@@ -29,11 +34,13 @@
 #include "NoxCore/UI/Widgets/UIRadioGroup.h"
 #include "NoxCore/UI/Widgets/UIRangeSlider.h"
 #include "NoxCore/UI/Widgets/UIScrollView.h"
+#include "NoxCore/UI/Widgets/UISearchBar.h"
 #include "NoxCore/UI/Widgets/UISegmentedControl.h"
 #include "NoxCore/UI/Widgets/UISeparator.h"
 #include "NoxCore/UI/Widgets/UISlider.h"
 #include "NoxCore/UI/Widgets/UISpinBox.h"
 #include "NoxCore/UI/Widgets/UISpinner.h"
+#include "NoxCore/UI/Widgets/UIStatCard.h"
 #include "NoxCore/UI/Widgets/UITableView.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
 #include "NoxCore/UI/Widgets/UIToggleSwitch.h"
@@ -806,6 +813,52 @@ namespace Nox::UI
             report("Vec4: (" + std::to_string(v.x) + ", " + std::to_string(v.y) + ", " + std::to_string(v.z) + ", " + std::to_string(v.w) + ")");
         }));
         scroll->AddChild(vecBox);
+
+        // 20. UICurveEditor (Left-click add/drag, Right-click remove)
+        auto curveBox = MakeUI<UIGroupBox>("19. UICurveEditor (Left-Click Add/Drag, Right-Click Remove)");
+        auto curveVal = MakeUI<UILabel>("Curve(0.5) = 0.65", 13.0f);
+        auto curve = MakeUI<UICurveEditor>();
+        curve->HeightMode = UISizeMode::Fixed;
+        curve->FixedSize.y = 140.0f;
+        UICurveEditor* curvePtr = curve.get();
+        curve->OnCurveChanged = [curveVal, curvePtr, report](const std::vector<UIVec2>&)
+        {
+            char buf[64]{};
+            std::snprintf(buf, sizeof(buf), "Curve(0.5) = %.2f", curvePtr->Evaluate(0.5f));
+            curveVal->Text = buf;
+            report(buf);
+        };
+        curveBox->AddContent(curveVal);
+        curveBox->AddContent(curve);
+        scroll->AddChild(curveBox);
+
+        // 21. UIKeybindButton, UISearchBar & UIStatCard Dashboard Row
+        auto dashBox = MakeUI<UIGroupBox>("20. UIKeybindButton, UISearchBar & UIStatCard");
+        auto statRow = MakeUI<UIStackBox>(UIOrientation::Horizontal, 10.0f);
+        statRow->AddChild(MakeUI<UIStatCard>("Frame Time", "4.2 ms", "240 FPS", UIColor{ 0.22f, 0.76f, 0.46f, 1.0f }));
+        statRow->AddChild(MakeUI<UIStatCard>("Draw Calls", "128", "Meshlets", UIColor{ 0.24f, 0.56f, 0.96f, 1.0f }));
+        statRow->AddChild(MakeUI<UIStatCard>("VRAM Used", "1.8 GB", "OK", UIColor{ 0.92f, 0.62f, 0.16f, 1.0f }));
+        dashBox->AddContent(statRow);
+
+        auto toolRow = MakeUI<UIStackBox>(UIOrientation::Horizontal, 10.0f);
+        auto search = MakeUI<UISearchBar>("Filter widgets...");
+        UISearchBar* searchPtr = search.get();
+        search->OnSearchChanged = [searchPtr, report](const std::string& q)
+        {
+            searchPtr->SetResultCount(q.empty() ? -1 : static_cast<int>(q.size() * 3));
+            report("Search query: " + q);
+        };
+        auto keybind = MakeUI<UIKeybindButton>(SDL_SCANCODE_S, static_cast<uint16_t>(SDL_KMOD_CTRL), [&context, report](int kc, uint16_t)
+        {
+            context.PushToast("Bound shortcut scancode " + std::to_string(kc), 1.8f);
+            report("Keybind updated: scancode " + std::to_string(kc));
+        });
+        keybind->Tooltip = "Click and press any key + modifiers (Esc cancels)";
+
+        toolRow->AddChild(search);
+        toolRow->AddChild(keybind);
+        dashBox->AddContent(toolRow);
+        scroll->AddChild(dashBox);
 
         return scroll;
     }

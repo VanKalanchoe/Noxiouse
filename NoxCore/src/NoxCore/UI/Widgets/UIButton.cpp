@@ -18,6 +18,8 @@ namespace Nox::UI
         AddChild(m_Label);
     }
 
+    UIButton::~UIButton() = default;
+
     void UIButton::SetText(const std::string& text)
     {
         m_Label->Text = text;
