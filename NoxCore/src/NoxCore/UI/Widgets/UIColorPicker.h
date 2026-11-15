@@ -20,7 +20,12 @@ namespace Nox::UI
 
         void SetColor(const UIColor& color, bool notify = false);
         UIColor GetColor() const;
+        void SetLinearColor(const UIColor& linearColor, bool notify = false);
+        UIColor GetLinearColor() const;
         std::string GetHexString() const;
+
+        static UIColor SrgbToLinear(const UIColor& srgb);
+        static UIColor LinearToSrgb(const UIColor& linear);
 
         std::function<void(const UIColor&)> OnColorChanged;
 

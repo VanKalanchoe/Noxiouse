@@ -77,6 +77,18 @@ namespace Nox::UI
             return buf;
         }
 
+        float SrgbChannelToLinear(float c)
+        {
+            c = std::clamp(c, 0.0f, 1.0f);
+            return (c <= 0.04045f) ? (c / 12.92f) : std::pow((c + 0.055f) / 1.055f, 2.4f);
+        }
+
+        float LinearChannelToSrgb(float c)
+        {
+            c = std::clamp(c, 0.0f, 1.0f);
+            return (c <= 0.0031308f) ? (c * 12.92f) : (1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f);
+        }
+
         class UIColorPopoverBackdrop : public UIAnchorBox
         {
         public:
@@ -125,6 +137,36 @@ namespace Nox::UI
     UIColor UIColorPicker::GetColor() const
     {
         return HsvToRgb(m_Hue, m_Sat, m_Val, m_Alpha);
+    }
+
+    UIColor UIColorPicker::SrgbToLinear(const UIColor& srgb)
+    {
+        return {
+            SrgbChannelToLinear(srgb.r),
+            SrgbChannelToLinear(srgb.g),
+            SrgbChannelToLinear(srgb.b),
+            srgb.a
+        };
+    }
+
+    UIColor UIColorPicker::LinearToSrgb(const UIColor& linear)
+    {
+        return {
+            LinearChannelToSrgb(linear.r),
+            LinearChannelToSrgb(linear.g),
+            LinearChannelToSrgb(linear.b),
+            linear.a
+        };
+    }
+
+    void UIColorPicker::SetLinearColor(const UIColor& linearColor, bool notify)
+    {
+        SetColor(LinearToSrgb(linearColor), notify);
+    }
+
+    UIColor UIColorPicker::GetLinearColor() const
+    {
+        return SrgbToLinear(GetColor());
     }
 
     std::string UIColorPicker::GetHexString() const
@@ -240,7 +282,7 @@ namespace Nox::UI
             drawList.AddRoundedRectGradient(
                 { xA, r.SV.Min.y },
                 { xB, r.SV.Max.y },
-                topColor,
+                SrgbToLinear(topColor),
                 { 0.0f, 0.0f, 0.0f, 1.0f }
             );
         }
@@ -294,7 +336,7 @@ namespace Nox::UI
 
         // 3. Alpha bar
         drawList.AddRoundedRect(r.Alpha.Min, r.Alpha.Max, { 0.14f, 0.16f, 0.20f, 1.0f }, glm::vec4(4.0f), 1.0f, { 0.25f, 0.28f, 0.34f, 1.0f });
-        const UIColor solidColor = HsvToRgb(m_Hue, m_Sat, m_Val, 1.0f);
+        const UIColor solidColor = SrgbToLinear(HsvToRgb(m_Hue, m_Sat, m_Val, 1.0f));
         const float alphaW = std::max(0.0f, (r.Alpha.Width() - 2.0f) * m_Alpha);
         if (alphaW > 0.5f)
         {
@@ -317,7 +359,7 @@ namespace Nox::UI
 
         // 4. Preview swatch & hex text
         const UIColor cur = GetColor();
-        drawList.AddRoundedRect(r.Preview.Min, r.Preview.Max, cur, glm::vec4(4.0f), 1.0f, { 0.28f, 0.32f, 0.38f, 1.0f });
+        drawList.AddRoundedRect(r.Preview.Min, r.Preview.Max, SrgbToLinear(cur), glm::vec4(4.0f), 1.0f, { 0.28f, 0.32f, 0.38f, 1.0f });
         const std::string hex = FormatHex(cur);
         drawList.AddText(hex, nullptr, { r.Preview.Max.x + 10.0f, r.Preview.Min.y + 3.0f }, 13.0f, { 0.88f, 0.91f, 0.96f, 1.0f });
     }
@@ -390,7 +432,7 @@ namespace Nox::UI
         drawList.AddRoundedRect(
             sMin,
             sMin + UIVec2{ swatchSize, swatchSize },
-            m_Color,
+            UIColorPicker::SrgbToLinear(m_Color),
             glm::vec4(4.0f),
             1.0f,
             { 0.30f, 0.34f, 0.42f, 1.0f }

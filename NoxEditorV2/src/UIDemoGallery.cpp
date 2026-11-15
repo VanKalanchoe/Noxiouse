@@ -21,6 +21,7 @@
 #include "NoxCore/UI/Widgets/UILabel.h"
 #include "NoxCore/UI/Widgets/UILogView.h"
 #include "NoxCore/UI/Widgets/UIMenu.h"
+#include "NoxCore/UI/Widgets/UIModal.h"
 #include "NoxCore/UI/Widgets/UIPlotGraph.h"
 #include "NoxCore/UI/Widgets/UIProgressBar.h"
 #include "NoxCore/UI/Widgets/UIPropertyGrid.h"
@@ -28,6 +29,7 @@
 #include "NoxCore/UI/Widgets/UIScrollView.h"
 #include "NoxCore/UI/Widgets/UISeparator.h"
 #include "NoxCore/UI/Widgets/UISlider.h"
+#include "NoxCore/UI/Widgets/UISpinner.h"
 #include "NoxCore/UI/Widgets/UITableView.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
 #include "NoxCore/UI/Widgets/UIToggleSwitch.h"
@@ -614,6 +616,58 @@ namespace Nox::UI
         dndRow->AddChild(dropTarget);
         dndPanel->AddChild(dndRow);
         scroll->AddChild(dndPanel);
+
+        // 15. UIModal::ShowConfirm / ShowPrompt & Animated UISpinner
+        auto modalPanel = MakeUI<UIStackBox>(UIOrientation::Vertical, 8.0f);
+        modalPanel->StyleClass = "Panel";
+        modalPanel->DrawBackground = true;
+        modalPanel->Padding = UIThickness::All(12.0f);
+        modalPanel->AddChild(MakeUI<UILabel>("14. UIModal (Confirm / Prompt) & Animated UISpinner", 14.5f));
+
+        auto modalRow = MakeUI<UIStackBox>(UIOrientation::Horizontal, 12.0f);
+        auto confirmBtn = MakeUI<UIButton>("Confirm Dialog", [&context, report]()
+        {
+            UIModal::ShowConfirm(
+                context,
+                "Delete Asset?",
+                "This demonstrates UIModal::ShowConfirm with backdrop & callbacks.",
+                [&context, report]()
+                {
+                    context.PushToast("Confirmed action!", 2.0f, { 0.24f, 0.76f, 0.48f, 1.0f });
+                    report("Modal Confirm: Accepted");
+                },
+                [report]() { report("Modal Confirm: Cancelled"); }
+            );
+        });
+        auto promptBtn = MakeUI<UIButton>("Prompt Dialog", [&context, report]()
+        {
+            UIModal::ShowPrompt(
+                context,
+                "Rename Entity",
+                "Enter a new name below and press Enter or OK:",
+                "SunLight_01",
+                "Entity name...",
+                [&context, report](const std::string& value)
+                {
+                    context.PushToast("Renamed to '" + value + "'", 2.0f);
+                    report("Modal Prompt submitted: " + value);
+                },
+                [report]() { report("Modal Prompt cancelled"); }
+            );
+        });
+        promptBtn->StyleVariant = "primary";
+
+        auto spinner = MakeUI<UISpinner>(26.0f);
+        spinner->VAlign = UIAlignment::Center;
+        auto spinLabel = MakeUI<UILabel>("Compiling shaders...", 13.0f);
+        spinLabel->VAlign = UIAlignment::Center;
+
+        modalRow->AddChild(confirmBtn);
+        modalRow->AddChild(promptBtn);
+        modalRow->AddChild(spinner);
+        modalRow->AddChild(spinLabel);
+        modalPanel->AddChild(modalRow);
+        scroll->AddChild(modalPanel);
 
         return scroll;
     }
