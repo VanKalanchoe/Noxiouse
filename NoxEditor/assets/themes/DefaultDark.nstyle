@@ -5,7 +5,7 @@ tokens:
   Surface1: "#222632F5"
   Border: "#384054E6"
   Accent: "#3D8FF5"
-  AccentHover: "#5CA3FF"
+  AccentHover: "#5ca3ff"
   Success: "#2FA870"
   Text: "#EBF0FA"
   TextMuted: "#9BA8C2"
@@ -79,3 +79,73 @@ styles:
   "Button.primary:pressed":
     fill: "#235CA8"
     fill_bottom: "#1A4785"
+
+  CheckBox:
+    fill: "#141720"
+    border_color: "$Border"
+    border_thickness: 1.2
+    corner_radius: 4
+    text_color: "$Text"
+    font_size: 13.5
+
+  "CheckBox:hover":
+    border_color: "$Accent"
+
+  Slider:
+    fill: "#141720"
+    border_color: "$Border"
+    text_color: "$TextMuted"
+    font_size: 12.5
+
+  DragScalar:
+    fill: "#141720"
+    border_color: "$Border"
+    border_thickness: 1.0
+    corner_radius: 5
+    padding: [6, 4]
+    text_color: "$Text"
+    font_size: 13
+
+  "DragScalar:hover":
+    border_color: "$Accent"
+
+  "DragScalar:focus":
+    border_color: "$AccentHover"
+
+  TextInput:
+    fill: "#141720"
+    border_color: "$Border"
+    border_thickness: 1.0
+    corner_radius: 5
+    padding: [8, 5]
+    text_color: "$Text"
+    font_size: 13.5
+
+  "TextInput:hover":
+    border_color: "#526080"
+
+  "TextInput:focus":
+    fill: "#161B26"
+    border_color: "$Accent"
+
+  TreeView:
+    fill: "#13161E"
+    border_color: "$Border"
+    border_thickness: 1.0
+    corner_radius: 6
+    text_color: "$Text"
+    font_size: 13.5
+
+  SectionHeader:
+    fill: "#1E222E"
+    fill_bottom: "#191C26"
+    border_color: "$Border"
+    border_thickness: 1.0
+    corner_radius: 5
+    padding: [10, 4]
+    text_color: "$Text"
+    font_size: 13
+
+  "SectionHeader:hover":
+    fill: "#262C3B"
+    border_color: "$Accent"

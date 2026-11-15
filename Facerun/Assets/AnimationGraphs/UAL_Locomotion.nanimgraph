@@ -1,0 +1,386 @@
+Domain: AnimationGraph
+OutputNode: 1
+NextNodeId: 7
+Nodes:
+  - Id: 1
+    Type: Output
+    Position: [1049, 129]
+    Properties:
+      []
+  - Id: 2
+    Type: StateMachine
+    Position: [-379, 161]
+    Properties:
+      - Name: EntryState
+        Value:
+          Int: 1
+    SubGraphs:
+      - Id: 1
+        Name: Locomotion
+        Position: [303, 18]
+        Graph:
+          Domain: AnimationGraph
+          OutputNode: 1
+          NextNodeId: 5
+          Nodes:
+            - Id: 1
+              Type: Output
+              Position: [400, 100]
+              Properties:
+                []
+            - Id: 2
+              Type: BlendSpace1D
+              Position: [42, 65]
+              Properties:
+                - Name: Value
+                  Value:
+                    Float: 0
+                - Name: Clip0
+                  Value:
+                    U64: 15269137354669674032
+                - Name: Position1
+                  Value:
+                    Float: 1
+                - Name: Position0
+                  Value:
+                    Float: 0
+                - Name: Clip1
+                  Value:
+                    U64: 14934744449865830001
+                - Name: Clip2
+                  Value:
+                    U64: 11635699620333085038
+                - Name: Loop
+                  Value:
+                    Bool: true
+                - Name: Clip3
+                  Value:
+                    U64: 0
+                - Name: Position2
+                  Value:
+                    Float: 5.4
+                - Name: Position3
+                  Value:
+                    Float: 3
+                - Name: Speed
+                  Value:
+                    Float: 1
+            - Id: 3
+              Type: GetParameter
+              Position: [-286, 129]
+              Properties:
+                - Name: Parameter
+                  Value:
+                    Str: Speed
+          Links:
+            - FromNode: 2
+              FromPin: 0
+              ToNode: 1
+              ToPin: 0
+            - FromNode: 3
+              FromPin: 0
+              ToNode: 2
+              ToPin: 0
+          Parameters:
+            []
+      - Id: 2
+        Name: JumpStart
+        Position: [480, 34]
+        Graph:
+          Domain: AnimationGraph
+          OutputNode: 1
+          NextNodeId: 3
+          Nodes:
+            - Id: 1
+              Type: Output
+              Position: [573, 97]
+              Properties:
+                []
+            - Id: 2
+              Type: Clip
+              Position: [248, 113]
+              Properties:
+                - Name: Loop
+                  Value:
+                    Bool: false
+                - Name: Clip
+                  Value:
+                    U64: 13883068304259869370
+                - Name: Speed
+                  Value:
+                    Float: 1
+                - Name: StartPosition
+                  Value:
+                    Float: 0
+          Links:
+            - FromNode: 2
+              FromPin: 0
+              ToNode: 1
+              ToPin: 0
+          Parameters:
+            []
+      - Id: 3
+        Name: JumpLoop
+        Position: [576, 130]
+        Graph:
+          Domain: AnimationGraph
+          OutputNode: 1
+          NextNodeId: 3
+          Nodes:
+            - Id: 1
+              Type: Output
+              Position: [589, 129]
+              Properties:
+                []
+            - Id: 2
+              Type: Clip
+              Position: [296, 129]
+              Properties:
+                - Name: Loop
+                  Value:
+                    Bool: true
+                - Name: Clip
+                  Value:
+                    U64: 7364685570017297721
+                - Name: Speed
+                  Value:
+                    Float: 1
+                - Name: StartPosition
+                  Value:
+                    Float: 0
+          Links:
+            - FromNode: 2
+              FromPin: 0
+              ToNode: 1
+              ToPin: 0
+          Parameters:
+            []
+      - Id: 4
+        Name: JumpLand
+        Position: [704, 66]
+        Graph:
+          Domain: AnimationGraph
+          OutputNode: 1
+          NextNodeId: 3
+          Nodes:
+            - Id: 1
+              Type: Output
+              Position: [541, 97]
+              Properties:
+                []
+            - Id: 2
+              Type: Clip
+              Position: [292, 126]
+              Properties:
+                - Name: Loop
+                  Value:
+                    Bool: false
+                - Name: Clip
+                  Value:
+                    U64: 51189899548256502
+                - Name: Speed
+                  Value:
+                    Float: 1
+                - Name: StartPosition
+                  Value:
+                    Float: 0
+          Links:
+            - FromNode: 2
+              FromPin: 0
+              ToNode: 1
+              ToPin: 0
+          Parameters:
+            []
+    Transitions:
+      - From: 1
+        To: 2
+        Duration: 0.1
+        EaseInOut: true
+        Rules:
+          - Parameter: IsGrounded
+            Compare: 7
+            Value:
+              Float: 0
+          - Parameter: VerticalSpeed
+            Compare: 2
+            Value:
+              Float: 0.5
+      - From: 1
+        To: 3
+        Duration: 0.2
+        EaseInOut: true
+        Rules:
+          - Parameter: IsGrounded
+            Compare: 7
+            Value:
+              Float: 0
+          - Parameter: VerticalSpeed
+            Compare: 4
+            Value:
+              Float: 0.5
+      - From: 2
+        To: 3
+        Duration: 0.15
+        EaseInOut: true
+        AtStateEnd: true
+        Rules:
+          []
+      - From: 2
+        To: 4
+        Duration: 0.05
+        EaseInOut: true
+        Rules:
+          - Parameter: IsGrounded
+            Compare: 6
+            Value:
+              Float: 0
+      - From: 3
+        To: 4
+        Duration: 0.05
+        EaseInOut: true
+        Rules:
+          - Parameter: IsGrounded
+            Compare: 6
+            Value:
+              Float: 0
+      - From: 4
+        To: 1
+        Duration: 0.2
+        EaseInOut: true
+        AtStateEnd: true
+        Rules:
+          []
+      - From: 4
+        To: 1
+        Duration: 0.25
+        EaseInOut: true
+        Rules:
+          - Parameter: Speed
+            Compare: 2
+            Value:
+              Float: 1
+  - Id: 3
+    Type: LookAt
+    Position: [73, 139]
+    Properties:
+      - Name: Alpha
+        Value:
+          Float: 0.3
+      - Name: Bone
+        Value:
+          Str: spine_03
+      - Name: Target
+        Value:
+          Str: LookAt
+      - Name: InterpolationTime
+        Value:
+          Float: 0.15
+      - Name: MaxAngle
+        Value:
+          Float: 30
+      - Name: Axis
+        Value:
+          Int: 0
+  - Id: 4
+    Type: LookAt
+    Position: [357, 139]
+    Properties:
+      - Name: Alpha
+        Value:
+          Float: 1
+      - Name: Bone
+        Value:
+          Str: Head
+      - Name: Target
+        Value:
+          Str: LookAt
+      - Name: InterpolationTime
+        Value:
+          Float: 0.15
+      - Name: Axis
+        Value:
+          Int: 0
+      - Name: MaxAngle
+        Value:
+          Float: 70
+  - Id: 5
+    Type: TwoBoneIK
+    Position: [-166, 155]
+    Properties:
+      - Name: Pole
+        Value:
+          Str: ""
+      - Name: Alpha
+        Value:
+          Float: 1
+      - Name: EndBone
+        Value:
+          Str: hand_r
+      - Name: Target
+        Value:
+          Str: RightHand
+  - Id: 6
+    Type: FootPlacement
+    Position: [681, 145]
+    Properties:
+      - Name: Alpha
+        Value:
+          Float: 1
+      - Name: TraceUp
+        Value:
+          Float: 0.5
+      - Name: LeftFoot
+        Value:
+          Str: foot_l
+      - Name: RightFoot
+        Value:
+          Str: foot_r
+      - Name: MaxPelvisDrop
+        Value:
+          Float: 0.35
+      - Name: Pelvis
+        Value:
+          Str: pelvis
+      - Name: Speed
+        Value:
+          Float: 12
+      - Name: TraceDown
+        Value:
+          Float: 0.6
+      - Name: AlignToGround
+        Value:
+          Bool: true
+      - Name: MaxAlignAngle
+        Value:
+          Float: 35
+Links:
+  - FromNode: 3
+    FromPin: 0
+    ToNode: 4
+    ToPin: 0
+  - FromNode: 2
+    FromPin: 0
+    ToNode: 5
+    ToPin: 0
+  - FromNode: 5
+    FromPin: 0
+    ToNode: 3
+    ToPin: 0
+  - FromNode: 4
+    FromPin: 0
+    ToNode: 6
+    ToPin: 0
+  - FromNode: 6
+    FromPin: 0
+    ToNode: 1
+    ToPin: 0
+Parameters:
+  - Name: Speed
+    Default:
+      Float: 0
+  - Name: VerticalSpeed
+    Default:
+      Float: 0
+  - Name: IsGrounded
+    Default:
+      Bool: true

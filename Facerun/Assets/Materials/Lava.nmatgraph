@@ -1,0 +1,331 @@
+Domain: MaterialGraph
+OutputNode: 1
+NextNodeId: 26
+Nodes:
+  - Id: 1
+    Type: Material Output
+    Position: [2144, 248]
+    Properties:
+      - Name: Max World Position Offset Displacement
+        Value:
+          Float: 50
+  - Id: 2
+    Type: Vector Parameter
+    Position: [-88, 98]
+    Properties:
+      - Name: Default
+        Value:
+          Vec4: [0.7012987, 0, 1, 1]
+      - Name: Name
+        Value:
+          Str: Tint
+  - Id: 3
+    Type: Scalar Parameter
+    Position: [-86, 268]
+    Properties:
+      - Name: Default
+        Value:
+          Float: 0.6
+      - Name: Name
+        Value:
+          Str: Rough
+  - Id: 4
+    Type: Texture Coordinate
+    Position: [-95, 418]
+    Properties:
+      - Name: Index
+        Value:
+          Int: 0
+      - Name: Tiling
+        Value:
+          Vec2: [4, 4]
+  - Id: 5
+    Type: Panner
+    Position: [144, 412]
+    Properties:
+      - Name: Speed
+        Value:
+          Vec2: [0.1, 0]
+  - Id: 6
+    Type: Texture Sample
+    Position: [432, 326]
+    Properties:
+      - Name: Texture
+        Value:
+          U64: 1900992288864453027
+      - Name: Parameter Name
+        Value:
+          Str: LavaTexture
+      - Name: Normal Map
+        Value:
+          Bool: false
+  - Id: 7
+    Type: Noise
+    Position: [-16, 738]
+    Properties:
+      - Name: Scale
+        Value:
+          Float: 20
+  - Id: 8
+    Type: Scalar Parameter
+    Position: [-25, 610]
+    Properties:
+      - Name: Default
+        Value:
+          Float: 0.3
+      - Name: Name
+        Value:
+          Str: Dissolve
+  - Id: 9
+    Type: Step
+    Position: [305, 652]
+    Properties:
+      - Name: Edge
+        Value:
+          Float: 0.5
+      - Name: Value
+        Value:
+          Float: 0
+  - Id: 10
+    Type: Time
+    Position: [501, 786]
+    Properties:
+      []
+  - Id: 11
+    Type: Sine
+    Position: [657, 770]
+    Properties:
+      - Name: Value
+        Value:
+          Float: 0
+  - Id: 12
+    Type: Scalar Parameter
+    Position: [503, 914]
+    Properties:
+      - Name: Name
+        Value:
+          Str: Wave
+      - Name: Default
+        Value:
+          Float: 20
+  - Id: 13
+    Type: Multiply
+    Position: [911, 918]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 1
+  - Id: 14
+    Type: Vertex Normal
+    Position: [934, 786]
+    Properties:
+      []
+  - Id: 15
+    Type: Multiply
+    Position: [1120, 786]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 1
+  - Id: 16
+    Type: Lit Surface
+    Position: [420, -188]
+    Properties:
+      []
+  - Id: 17
+    Type: Light
+    Position: [399, 22]
+    Properties:
+      []
+  - Id: 18
+    Type: Dot
+    Position: [754, -52]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 0
+  - Id: 19
+    Type: Step
+    Position: [944, -68]
+    Properties:
+      - Name: Edge
+        Value:
+          Float: 0.2
+      - Name: Value
+        Value:
+          Float: 0
+  - Id: 20
+    Type: Multiply
+    Position: [1259, -78]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 1
+  - Id: 21
+    Type: Multiply
+    Position: [1504, -132]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 1
+  - Id: 22
+    Type: Multiply
+    Position: [1541, 103]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 1
+  - Id: 23
+    Type: Multiply
+    Position: [1851, 354]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 0.318
+  - Id: 24
+    Type: Ambient Light
+    Position: [1194, -292]
+    Properties:
+      []
+  - Id: 25
+    Type: Multiply
+    Position: [1872, 530]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 1
+Links:
+  - FromNode: 4
+    FromPin: 0
+    ToNode: 5
+    ToPin: 0
+  - FromNode: 5
+    FromPin: 0
+    ToNode: 6
+    ToPin: 0
+  - FromNode: 7
+    FromPin: 0
+    ToNode: 9
+    ToPin: 1
+  - FromNode: 8
+    FromPin: 0
+    ToNode: 9
+    ToPin: 0
+  - FromNode: 11
+    FromPin: 0
+    ToNode: 13
+    ToPin: 0
+  - FromNode: 12
+    FromPin: 0
+    ToNode: 13
+    ToPin: 1
+  - FromNode: 14
+    FromPin: 0
+    ToNode: 15
+    ToPin: 0
+  - FromNode: 13
+    FromPin: 0
+    ToNode: 15
+    ToPin: 1
+  - FromNode: 2
+    FromPin: 0
+    ToNode: 1
+    ToPin: 0
+  - FromNode: 3
+    FromPin: 0
+    ToNode: 1
+    ToPin: 2
+  - FromNode: 6
+    FromPin: 0
+    ToNode: 1
+    ToPin: 4
+  - FromNode: 9
+    FromPin: 0
+    ToNode: 1
+    ToPin: 7
+  - FromNode: 15
+    FromPin: 0
+    ToNode: 1
+    ToPin: 8
+  - FromNode: 16
+    FromPin: 1
+    ToNode: 18
+    ToPin: 0
+  - FromNode: 17
+    FromPin: 0
+    ToNode: 18
+    ToPin: 1
+  - FromNode: 18
+    FromPin: 0
+    ToNode: 19
+    ToPin: 1
+  - FromNode: 19
+    FromPin: 0
+    ToNode: 20
+    ToPin: 0
+  - FromNode: 17
+    FromPin: 2
+    ToNode: 20
+    ToPin: 1
+  - FromNode: 17
+    FromPin: 1
+    ToNode: 21
+    ToPin: 0
+  - FromNode: 20
+    FromPin: 0
+    ToNode: 21
+    ToPin: 1
+  - FromNode: 21
+    FromPin: 0
+    ToNode: 22
+    ToPin: 0
+  - FromNode: 16
+    FromPin: 0
+    ToNode: 22
+    ToPin: 1
+  - FromNode: 22
+    FromPin: 0
+    ToNode: 23
+    ToPin: 0
+  - FromNode: 24
+    FromPin: 0
+    ToNode: 25
+    ToPin: 0
+  - FromNode: 16
+    FromPin: 0
+    ToNode: 25
+    ToPin: 1
+  - FromNode: 25
+    FromPin: 0
+    ToNode: 1
+    ToPin: 10
+  - FromNode: 23
+    FromPin: 0
+    ToNode: 1
+    ToPin: 9
+Parameters:
+  []

@@ -1,0 +1,21 @@
+{
+  "asset": { "version": "2.0", "generator": "Nox PrimitiveShapes" },
+  "scene": 0,
+  "scenes": [ { "nodes": [ 0 ] } ],
+  "nodes": [ { "name": "Plane", "mesh": 0 } ],
+  "meshes": [ { "name": "Plane", "primitives": [ { "attributes": { "POSITION": 1, "NORMAL": 2, "TEXCOORD_0": 3 }, "indices": 0, "material": 0 } ] } ],
+  "materials": [ { "name": "Plane_Material", "pbrMetallicRoughness": { "baseColorFactor": [0.8, 0.8, 0.8, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.6 }, "doubleSided": true } ],
+  "accessors": [
+    { "bufferView": 0, "componentType": 5125, "count": 6, "type": "SCALAR" },
+    { "bufferView": 1, "componentType": 5126, "count": 4, "type": "VEC3", "min": [-0.5, 0, -0.5], "max": [0.5, 0, 0.5] },
+    { "bufferView": 2, "componentType": 5126, "count": 4, "type": "VEC3" },
+    { "bufferView": 3, "componentType": 5126, "count": 4, "type": "VEC2" }
+  ],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": 0, "byteLength": 24, "target": 34963 },
+    { "buffer": 0, "byteOffset": 24, "byteLength": 48, "target": 34962 },
+    { "buffer": 0, "byteOffset": 72, "byteLength": 48, "target": 34962 },
+    { "buffer": 0, "byteOffset": 120, "byteLength": 32, "target": 34962 }
+  ],
+  "buffers": [ { "uri": "Plane.bin", "byteLength": 152 } ]
+}

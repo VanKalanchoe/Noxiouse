@@ -1,0 +1,21 @@
+{
+  "asset": { "version": "2.0", "generator": "Nox PrimitiveShapes" },
+  "scene": 0,
+  "scenes": [ { "nodes": [ 0 ] } ],
+  "nodes": [ { "name": "Pyramid", "mesh": 0 } ],
+  "meshes": [ { "name": "Pyramid", "primitives": [ { "attributes": { "POSITION": 1, "NORMAL": 2, "TEXCOORD_0": 3 }, "indices": 0, "material": 0 } ] } ],
+  "materials": [ { "name": "Pyramid_Material", "pbrMetallicRoughness": { "baseColorFactor": [0.8, 0.8, 0.8, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.6 } } ],
+  "accessors": [
+    { "bufferView": 0, "componentType": 5125, "count": 18, "type": "SCALAR" },
+    { "bufferView": 1, "componentType": 5126, "count": 16, "type": "VEC3", "min": [-0.5, -0.5, -0.5], "max": [0.5, 0.5, 0.5] },
+    { "bufferView": 2, "componentType": 5126, "count": 16, "type": "VEC3" },
+    { "bufferView": 3, "componentType": 5126, "count": 16, "type": "VEC2" }
+  ],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": 0, "byteLength": 72, "target": 34963 },
+    { "buffer": 0, "byteOffset": 72, "byteLength": 192, "target": 34962 },
+    { "buffer": 0, "byteOffset": 264, "byteLength": 192, "target": 34962 },
+    { "buffer": 0, "byteOffset": 456, "byteLength": 128, "target": 34962 }
+  ],
+  "buffers": [ { "uri": "Pyramid.bin", "byteLength": 584 } ]
+}

@@ -16,17 +16,17 @@ namespace Nox::UI
     public:
         UIContext();
 
-        void SetRoot(const IntrusiveRef<UIElement>& root);
-        const IntrusiveRef<UIElement>& GetRoot() const { return m_Root; }
+        void SetRoot(const Ref<UIElement>& root);
+        const Ref<UIElement>& GetRoot() const { return m_Root; }
 
-        void SetTheme(const IntrusiveRef<UITheme>& theme);
-        const IntrusiveRef<UITheme>& GetTheme() const { return m_Theme; }
+        void SetTheme(const Ref<UITheme>& theme);
+        const Ref<UITheme>& GetTheme() const { return m_Theme; }
 
         void OnEvent(Event& event);
         void UpdateAndRender(UIDrawList& drawList, const UIVec2& viewportSize, float dt);
 
-        UIElement* GetHovered() const { return m_Hovered.lock().get(); }
-        UIElement* GetFocused() const { return m_Focused.lock().get(); }
+        UIElement* GetHovered() const { return m_Hovered.get(); }
+        UIElement* GetFocused() const { return m_Focused.get(); }
         void SetFocus(UIElement* element);
 
     private:
@@ -36,13 +36,14 @@ namespace Nox::UI
         bool DispatchPointerUp(const UIVec2& pos, int button);
         bool DispatchScroll(const UIVec2& scrollDelta);
         bool DispatchKeyDown(int keyCode, uint16_t mods, bool repeat);
+        bool DispatchTextInput(std::string_view text);
 
-        IntrusiveRef<UIElement> m_Root;
-        IntrusiveRef<UITheme> m_Theme;
+        Ref<UIElement> m_Root;
+        Ref<UITheme> m_Theme;
 
-        WeakRef<UIElement> m_Hovered;
-        WeakRef<UIElement> m_Captured;
-        WeakRef<UIElement> m_Focused;
+        Ref<UIElement> m_Hovered;
+        Ref<UIElement> m_Captured;
+        Ref<UIElement> m_Focused;
 
         UIVec2 m_LastMousePos{ 0.0f, 0.0f };
     };

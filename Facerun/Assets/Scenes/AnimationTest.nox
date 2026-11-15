@@ -1,0 +1,303 @@
+Scene: Untitled
+Entities:
+  - Entity: 17940840130257770570
+    TagComponent:
+      Tag: Ramp
+    TransformComponent:
+      Translation: [370, 55, 0]
+      Rotation: [0, 0, -1.1013027]
+      Scale: [1, 5, 5]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 262533699273590146
+    TagComponent:
+      Tag: HandTarget
+    TransformComponent:
+      Translation: [-20, 130, 30]
+      Rotation: [0, -0, 0]
+      Scale: [0.1, 0.1, 0.1]
+    MeshComponent:
+      MeshHandle: 6911129549795693436
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+  - Entity: 6035648435269262899
+    TagComponent:
+      Tag: Env
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    EnvironmentLightComponent:
+      Source: ProceduralSky
+      TexturePath: ""
+      RadianceScale: [1, 1, 1]
+      Rotation: 0
+      Enabled: true
+      RayleighScale: 1
+      MieScale: 1
+      OzoneScale: 1
+      MieAnisotropy: 0.8
+      GroundAlbedo: [0.3, 0.3, 0.3]
+      AltitudeKm: 0
+      AerialPerspectiveScale: 1
+      Clouds: true
+      CloudCoverage: 0.35
+      CloudDensity: 1
+      CloudBottomKm: 1.5
+      CloudThicknessKm: 2
+      CloudScaleKm: 8
+      CloudOffsetKm: [0, 0]
+      CloudWind: [0, 0]
+      SunThroughAtmosphere: true
+      Moon: true
+      MoonIntensity: 0.004
+      MoonColor: [0.75, 0.85, 1]
+      MoonAngularDiameter: 0.53
+      MoonOppositeSun: true
+      MoonElevation: 40
+      MoonAzimuth: 200
+      Stars: true
+      StarIntensity: 1
+      HeightFog: false
+      FogDensity: 0.5
+      FogHeightFalloff: 5
+      FogHeight: 0
+      FogStartDistance: 0
+      FogMaxOpacity: 1
+      FogColor: [1, 1, 1]
+      FogFromEnvironment: true
+      FogSunScattering: 0.05
+      FogSunExponent: 8
+  - Entity: 10156721963444547918
+    TagComponent:
+      Tag: Floor
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [100, 1, 100]
+    MeshComponent:
+      MeshHandle: 10000201986349826000
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    PlaneCollider3DComponent:
+      HalfSize: [0, 0]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 11039610221379602872
+    TagComponent:
+      Tag: Cube
+    TransformComponent:
+      Translation: [-150, 50, 0]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 7900504514769074192
+    TagComponent:
+      Tag: Camera
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    CameraComponent:
+      Camera:
+        ProjectionType: 0
+        PerspectiveFOV: 0.7853982
+        PerspectiveNear: 10
+        PerspectiveFar: 100000
+        OrthographicSize: 10
+        OrthographicNear: -1
+        OrthographicFar: 1
+      Primary: true
+      FixedAspectRatio: false
+      AutoExposure: false
+      ManualEV100: 2
+      ExposureCompensation: 0
+      AutoExposureMinEV: -16
+      AutoExposureMaxEV: 16
+    ScriptComponent:
+      Classes:
+        - Facerun.CameraFollow
+      EntityReferences:
+        - Class: Facerun.CameraFollow
+          Field: Target
+          Entity: 2699422253669067374
+      FieldOverrides:
+        - Class: Facerun.CameraFollow
+          Field: Distance
+          Type: Float
+          Value: 500
+        - Class: Facerun.CameraFollow
+          Field: Height
+          Type: Float
+          Value: 100
+  - Entity: 2699422253669067374
+    TagComponent:
+      Tag: UAL1_Standard_RM
+    Active: false
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 10922256994577822127
+      SubmeshIndex: 0
+      SubmeshCount: 4294967295
+    MaterialComponent:
+      {}
+    AnimatorComponent:
+      Animation: 7687004529706626963
+      Skeleton: 16507523730877177931
+      Playing: true
+      Looping: true
+      PlaybackSpeed: 1
+      NodeEntities:
+        []
+      Graph: 5969131657674364168
+      RootMotion: true
+      RootBone: root
+      GraphParameterOverrides:
+        []
+    ScriptComponent:
+      Classes:
+        - Facerun.CharacterMovement
+      EntityReferences:
+        []
+      FieldOverrides:
+        - Class: Facerun.CharacterMovement
+          Field: WalkSpeed
+          Type: Float
+          Value: 100
+        - Class: Facerun.CharacterMovement
+          Field: RunSpeed
+          Type: Float
+          Value: 540
+        - Class: Facerun.CharacterMovement
+          Field: UseRootMotion
+          Type: Bool
+          Value: true
+    CharacterController3DComponent:
+      Radius: 34
+      Height: 108.00001
+      StepHeight: 45
+      MaxSlopeDegrees: 44.8
+      GravityScale: 1.75
+      AirControl: 0.35
+      MaxAcceleration: 2048
+      BrakingDeceleration: 2000
+  - Entity: 12203696487460098035
+    TagComponent:
+      Tag: UAL1_Standard
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 16531713622870338582
+      SubmeshIndex: 0
+      SubmeshCount: 4294967295
+    MaterialComponent:
+      {}
+    AnimatorComponent:
+      Animation: 17644891489966042489
+      Skeleton: 6087766411216149246
+      Playing: true
+      Looping: true
+      PlaybackSpeed: 1
+      NodeEntities:
+        []
+      Graph: 8121772498988545577
+      RootMotion: false
+      RootBone: ""
+      GraphParameterOverrides:
+        []
+    ScriptComponent:
+      Classes:
+        - Facerun.CharacterMovement
+        - Facerun.IKTargetTest
+      EntityReferences:
+        []
+      FieldOverrides:
+        - Class: Facerun.CharacterMovement
+          Field: WalkSpeed
+          Type: Float
+          Value: 100
+        - Class: Facerun.CharacterMovement
+          Field: RunSpeed
+          Type: Float
+          Value: 540
+    CharacterController3DComponent:
+      Radius: 34
+      Height: 108.00001
+      StepHeight: 45
+      MaxSlopeDegrees: 44.8
+      GravityScale: 1.75
+      AirControl: 0.35
+      MaxAcceleration: 2048
+      BrakingDeceleration: 2000
+  - Entity: 11455971011173680928
+    TagComponent:
+      Tag: LookTarget
+    TransformComponent:
+      Translation: [0, 160, 30]
+      Rotation: [0, -0, 0]
+      Scale: [0.1, 0.1, 0.1]
+    MeshComponent:
+      MeshHandle: 6911129549795693436
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}

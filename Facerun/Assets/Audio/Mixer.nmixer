@@ -1,0 +1,245 @@
+AudioMixer:
+  Headphones: true
+  RealVoices: 64
+  Reflections:
+    Enabled: true
+    Rays: 4096
+    Bounces: 4
+    Duration: 1
+    MaxSources: 4
+    Bus: 12019835267919125295
+    LevelDb: 0
+    ListenerReverb: Baked
+    PathingSources: 8
+  Buses:
+    - Id: 1
+      Name: Master
+      Parent: 0
+      VolumeDb: 0
+      Mute: false
+      Solo: false
+      Bypass: false
+      PlaysWhilePaused: false
+      Effects:
+        - Id: 101
+          Type: Limiter
+          Bypass: false
+          Parameters:
+            Input Gain: 0
+            Ceiling: -0.3
+            Release: 50
+            Lookahead: 5
+      Sends:
+        []
+      Duck:
+        Source: 0
+        DepthDb: -10
+        ThresholdDb: -40
+        Attack: 0.05
+        Release: 0.6
+    - Id: 2
+      Name: Music
+      Parent: 1
+      VolumeDb: 0
+      Mute: false
+      Solo: false
+      Bypass: false
+      PlaysWhilePaused: false
+      Effects:
+        []
+      Sends:
+        []
+      Duck:
+        Source: 0
+        DepthDb: -20
+        ThresholdDb: -40
+        Attack: 0.05
+        Release: 0.6
+    - Id: 3
+      Name: SFX
+      Parent: 1
+      VolumeDb: 0
+      Mute: false
+      Solo: false
+      Bypass: false
+      PlaysWhilePaused: false
+      Effects:
+        - Id: 9541770917245149709
+          Type: Filter
+          Bypass: false
+          Parameters:
+            Type: 0
+            Frequency: 5000
+            Resonance: 0.707
+      Sends:
+        - Target: 6003571904737552736
+          LevelDb: 0
+          PreFader: false
+      Duck:
+        Source: 0
+        DepthDb: -10
+        ThresholdDb: -40
+        Attack: 0.05
+        Release: 0.6
+    - Id: 4
+      Name: Voice
+      Parent: 1
+      VolumeDb: 0
+      Mute: false
+      Solo: false
+      Bypass: false
+      PlaysWhilePaused: false
+      Effects:
+        []
+      Sends:
+        []
+      Duck:
+        Source: 0
+        DepthDb: -10
+        ThresholdDb: -40
+        Attack: 0.05
+        Release: 0.6
+    - Id: 5
+      Name: UI
+      Parent: 1
+      VolumeDb: 0
+      Mute: false
+      Solo: false
+      Bypass: false
+      PlaysWhilePaused: true
+      Effects:
+        []
+      Sends:
+        []
+      Duck:
+        Source: 0
+        DepthDb: -10
+        ThresholdDb: -40
+        Attack: 0.05
+        Release: 0.6
+    - Id: 6
+      Name: Ambience
+      Parent: 1
+      VolumeDb: 0
+      Mute: false
+      Solo: false
+      Bypass: false
+      PlaysWhilePaused: false
+      Effects:
+        []
+      Sends:
+        []
+      Duck:
+        Source: 0
+        DepthDb: -10
+        ThresholdDb: -40
+        Attack: 0.05
+        Release: 0.6
+    - Id: 7
+      Name: Reverb
+      Parent: 1
+      VolumeDb: 0
+      Mute: false
+      Solo: false
+      Bypass: false
+      PlaysWhilePaused: false
+      Effects:
+        - Id: 701
+          Type: Reverb
+          Bypass: false
+          Parameters:
+            Pre-Delay: 10
+            Decay Time: 1.8
+            HF Ratio: 0.5
+            Room Size: 0.6
+            Diffusion: 0.8
+            Early Level: -6
+            Width: 1
+            Wet: 0
+            Dry: -80
+      Sends:
+        []
+      Duck:
+        Source: 0
+        DepthDb: -10
+        ThresholdDb: -40
+        Attack: 0.05
+        Release: 0.6
+    - Id: 6918042031587073680
+      Name: Hall Reverb
+      Parent: 1
+      VolumeDb: 0
+      Mute: false
+      Solo: false
+      Bypass: false
+      PlaysWhilePaused: false
+      Effects:
+        - Id: 14039472336500685628
+          Type: Reverb
+          Bypass: false
+          Parameters:
+            Pre-Delay: 10
+            Decay Time: 4
+            HF Ratio: 0.5
+            Room Size: 1
+            Diffusion: 0.8
+            Early Level: -6
+            Width: 1
+            Wet: 0
+            Dry: -80
+      Sends:
+        []
+      Duck:
+        Source: 0
+        DepthDb: -10
+        ThresholdDb: -40
+        Attack: 0.05
+        Release: 0.6
+    - Id: 12019835267919125295
+      Name: Reflections
+      Parent: 1
+      VolumeDb: 0
+      Mute: false
+      Solo: false
+      Bypass: false
+      PlaysWhilePaused: false
+      Effects:
+        []
+      Sends:
+        []
+      Duck:
+        Source: 0
+        DepthDb: -10
+        ThresholdDb: -40
+        Attack: 0.05
+        Release: 0.6
+    - Id: 6003571904737552736
+      Name: Room Reverb
+      Parent: 1
+      VolumeDb: 0
+      Mute: false
+      Solo: false
+      Bypass: false
+      PlaysWhilePaused: false
+      Effects:
+        - Id: 9142470544562631823
+          Type: Acoustic Reverb
+          Bypass: false
+          Parameters:
+            Wet: 0
+            Dry: -80
+            HRTF: 0
+      Sends:
+        []
+      Duck:
+        Source: 0
+        DepthDb: -10
+        ThresholdDb: -40
+        Attack: 0.05
+        Release: 0.6
+  Snapshots:
+    - Name: Pause
+      Values:
+        - {Bus: 3, Kind: Effect, Item: 9541770917245149709, Parameter: Frequency, Value: 500}
+        - {Bus: 2, Kind: Volume, Value: 0}
+        - {Bus: 3, Kind: Volume, Value: -12}

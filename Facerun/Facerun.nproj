@@ -1,6 +1,11 @@
 Project:
   Name: Facerun
-  StartScene: 284400685509200133
-  AssetDirectory: "assets"
-  AssetRegistryPath: "AssetRegistry.nxr"
-  ScriptModulePath: "Scripts/Binaries/Facerun.dll"
+  StartScene: 2705503397852889058
+  AssetDirectory: assets
+  AssetRegistryPath: AssetRegistry.nxr
+  ScriptModulePath: Scripts/Binaries/Facerun.dll
+  WorldUnitsPerMeter: 100
+  RenderQuality: Raster (All)
+  WindowMode: Borderless
+  AudioMixer: Audio/Mixer.nmixer
+  PhysicalSurfaces: [Default, Concrete, Stone, Grass, Dirt, Sand, Gravel, Wood, Metal, Water, Snow, Carpet, Tile, Glass]

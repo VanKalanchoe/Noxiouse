@@ -22,12 +22,12 @@ namespace Nox::UI
         uint64_t GetId() const { return m_Id; }
 
         // Tree management
-        void AddChild(const IntrusiveRef<UIElement>& child);
-        void RemoveChild(const IntrusiveRef<UIElement>& child);
+        void AddChild(const Ref<UIElement>& child);
+        void RemoveChild(const Ref<UIElement>& child);
         void ClearChildren();
 
         UIElement* GetParent() const { return m_Parent; }
-        const std::vector<IntrusiveRef<UIElement>>& GetChildren() const { return m_Children; }
+        const std::vector<Ref<UIElement>>& GetChildren() const { return m_Children; }
 
         // Layout pass (Pass 1: bottom-up Measure, Pass 2: top-down Arrange)
         UIVec2 Measure();
@@ -100,7 +100,7 @@ namespace Nox::UI
     private:
         uint64_t m_Id = 0;
         UIElement* m_Parent = nullptr;
-        std::vector<IntrusiveRef<UIElement>> m_Children;
+        std::vector<Ref<UIElement>> m_Children;
 
         UIVec2 m_DesiredSize{ 0.0f, 0.0f };
         UIRect m_Bounds{};

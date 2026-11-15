@@ -1,0 +1,276 @@
+Domain: AnimationGraph
+OutputNode: 1
+NextNodeId: 3
+Nodes:
+  - Id: 1
+    Type: Output
+    Position: [685, 209]
+    Properties:
+      []
+  - Id: 2
+    Type: StateMachine
+    Position: [357, 225]
+    Properties:
+      - Name: EntryState
+        Value:
+          Int: 1
+    SubGraphs:
+      - Id: 1
+        Name: Locomotion
+        Position: [303, 18]
+        Graph:
+          Domain: AnimationGraph
+          OutputNode: 1
+          NextNodeId: 5
+          Nodes:
+            - Id: 1
+              Type: Output
+              Position: [400, 100]
+              Properties:
+                []
+            - Id: 2
+              Type: BlendSpace1D
+              Position: [42, 65]
+              Properties:
+                - Name: Value
+                  Value:
+                    Float: 0
+                - Name: Position1
+                  Value:
+                    Float: 1
+                - Name: Clip0
+                  Value:
+                    U64: 5382057295761680262
+                - Name: Clip1
+                  Value:
+                    U64: 2789735027630729488
+                - Name: Position0
+                  Value:
+                    Float: 0
+                - Name: Loop
+                  Value:
+                    Bool: true
+                - Name: Clip2
+                  Value:
+                    U64: 302605464475066048
+                - Name: Clip3
+                  Value:
+                    U64: 0
+                - Name: Position2
+                  Value:
+                    Float: 5.4
+                - Name: Position3
+                  Value:
+                    Float: 3
+                - Name: Speed
+                  Value:
+                    Float: 1
+            - Id: 3
+              Type: GetParameter
+              Position: [-286, 129]
+              Properties:
+                - Name: Parameter
+                  Value:
+                    Str: Speed
+          Links:
+            - FromNode: 2
+              FromPin: 0
+              ToNode: 1
+              ToPin: 0
+            - FromNode: 3
+              FromPin: 0
+              ToNode: 2
+              ToPin: 0
+          Parameters:
+            []
+      - Id: 2
+        Name: JumpStart
+        Position: [480, 34]
+        Graph:
+          Domain: AnimationGraph
+          OutputNode: 1
+          NextNodeId: 3
+          Nodes:
+            - Id: 1
+              Type: Output
+              Position: [573, 97]
+              Properties:
+                []
+            - Id: 2
+              Type: Clip
+              Position: [248, 113]
+              Properties:
+                - Name: Clip
+                  Value:
+                    U64: 13883068304259869370
+                - Name: Loop
+                  Value:
+                    Bool: false
+                - Name: Speed
+                  Value:
+                    Float: 1
+                - Name: StartPosition
+                  Value:
+                    Float: 0
+          Links:
+            - FromNode: 2
+              FromPin: 0
+              ToNode: 1
+              ToPin: 0
+          Parameters:
+            []
+      - Id: 3
+        Name: JumpLoop
+        Position: [576, 130]
+        Graph:
+          Domain: AnimationGraph
+          OutputNode: 1
+          NextNodeId: 3
+          Nodes:
+            - Id: 1
+              Type: Output
+              Position: [589, 129]
+              Properties:
+                []
+            - Id: 2
+              Type: Clip
+              Position: [296, 129]
+              Properties:
+                - Name: Clip
+                  Value:
+                    U64: 7364685570017297721
+                - Name: Loop
+                  Value:
+                    Bool: true
+                - Name: Speed
+                  Value:
+                    Float: 1
+                - Name: StartPosition
+                  Value:
+                    Float: 0
+          Links:
+            - FromNode: 2
+              FromPin: 0
+              ToNode: 1
+              ToPin: 0
+          Parameters:
+            []
+      - Id: 4
+        Name: JumpLand
+        Position: [704, 66]
+        Graph:
+          Domain: AnimationGraph
+          OutputNode: 1
+          NextNodeId: 3
+          Nodes:
+            - Id: 1
+              Type: Output
+              Position: [541, 97]
+              Properties:
+                []
+            - Id: 2
+              Type: Clip
+              Position: [292, 126]
+              Properties:
+                - Name: Clip
+                  Value:
+                    U64: 51189899548256502
+                - Name: Loop
+                  Value:
+                    Bool: false
+                - Name: Speed
+                  Value:
+                    Float: 1
+                - Name: StartPosition
+                  Value:
+                    Float: 0
+          Links:
+            - FromNode: 2
+              FromPin: 0
+              ToNode: 1
+              ToPin: 0
+          Parameters:
+            []
+    Transitions:
+      - From: 1
+        To: 2
+        Duration: 0.1
+        EaseInOut: true
+        Rules:
+          - Parameter: IsGrounded
+            Compare: 7
+            Value:
+              Float: 0
+          - Parameter: VerticalSpeed
+            Compare: 2
+            Value:
+              Float: 0.5
+      - From: 1
+        To: 3
+        Duration: 0.2
+        EaseInOut: true
+        Rules:
+          - Parameter: IsGrounded
+            Compare: 7
+            Value:
+              Float: 0
+          - Parameter: VerticalSpeed
+            Compare: 4
+            Value:
+              Float: 0.5
+      - From: 2
+        To: 3
+        Duration: 0.15
+        EaseInOut: true
+        AtStateEnd: true
+        Rules:
+          []
+      - From: 2
+        To: 4
+        Duration: 0.05
+        EaseInOut: true
+        Rules:
+          - Parameter: IsGrounded
+            Compare: 6
+            Value:
+              Float: 0
+      - From: 3
+        To: 4
+        Duration: 0.05
+        EaseInOut: true
+        Rules:
+          - Parameter: IsGrounded
+            Compare: 6
+            Value:
+              Float: 0
+      - From: 4
+        To: 1
+        Duration: 0.2
+        EaseInOut: true
+        AtStateEnd: true
+        Rules:
+          []
+      - From: 4
+        To: 1
+        Duration: 0.25
+        EaseInOut: true
+        Rules:
+          - Parameter: Speed
+            Compare: 2
+            Value:
+              Float: 1
+Links:
+  - FromNode: 2
+    FromPin: 0
+    ToNode: 1
+    ToPin: 0
+Parameters:
+  - Name: Speed
+    Default:
+      Float: 0
+  - Name: VerticalSpeed
+    Default:
+      Float: 0
+  - Name: IsGrounded
+    Default:
+      Bool: true

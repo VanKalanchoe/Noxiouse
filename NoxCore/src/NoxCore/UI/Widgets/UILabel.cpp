@@ -18,15 +18,14 @@ namespace Nox::UI
 
     UILabel::~UILabel() = default;
 
-    UIVec2 UILabel::ComputeDesiredSize()
+    UIVec2 UILabel::MeasureText(std::string_view text, const Ref<Font>& fontAsset, float fontSize)
     {
-        const float fontSize = FontSizeOverride > 0.0f ? FontSizeOverride : GetResolvedStyle().FontSize;
-        if (Text.empty())
+        if (text.empty())
             return { 0.0f, fontSize };
 
-        Ref<Font> font = FontAsset ? FontAsset : Font::GetDefault();
+        Ref<Font> font = fontAsset ? fontAsset : Font::GetDefault();
         if (!font || !font->IsValid() || !font->GetMSDFData())
-            return { static_cast<float>(Text.size()) * fontSize * 0.55f, fontSize };
+            return { static_cast<float>(text.size()) * fontSize * 0.55f, fontSize };
 
         const auto& fontGeometry = font->GetMSDFData()->FontGeometry;
         const auto& metrics = fontGeometry.getMetrics();
@@ -39,9 +38,9 @@ namespace Nox::UI
         double maxW = 0.0;
         double lineW = 0.0;
         int lines = 1;
-        for (size_t i = 0; i < Text.size(); ++i)
+        for (size_t i = 0; i < text.size(); ++i)
         {
-            const char c = Text[i];
+            const char c = text[i];
             if (c == '\r')
                 continue;
             if (c == '\n')
@@ -70,6 +69,12 @@ namespace Nox::UI
         maxW = std::max(maxW, lineW);
         const double totalH = static_cast<double>(lines) * metrics.lineHeight * scale;
         return { static_cast<float>(maxW), static_cast<float>(totalH) };
+    }
+
+    UIVec2 UILabel::ComputeDesiredSize()
+    {
+        const float fontSize = FontSizeOverride > 0.0f ? FontSizeOverride : GetResolvedStyle().FontSize;
+        return MeasureText(Text, FontAsset, fontSize);
     }
 
     void UILabel::OnPaint(UIDrawList& drawList, const UITheme& theme)

@@ -1,0 +1,727 @@
+Scene: Untitled
+Entities:
+  - Entity: 10862049896960496017
+    TagComponent:
+      Tag: Empty Entity
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    FolderComponent:
+      Path: Test 6 Audio Track in Timeline
+    TimelinePlayerComponent:
+      Timeline: 604337530878989423
+      PlayOnStart: true
+      Speed: 1
+  - Entity: 5511174737851139304
+    TagComponent:
+      Tag: Speaker Room B
+    Active: false
+    TransformComponent:
+      Translation: [3400, 150, 300]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    FolderComponent:
+      Path: Test 4 Baked
+    AudioSourceComponent:
+      Sound: 1826615405299885159
+      Volume: 1
+      Pitch: 1
+      Loop: true
+      PlayOnStart: true
+      Bus: 3
+      Spatial: true
+      MinDistance: 1
+      MaxDistance: 50
+      Attenuation: Inverse
+      DopplerLevel: 0
+      Spatialization: Default
+      AirAbsorption: false
+      Occlusion: true
+      SourceRadius: 0.5
+      Reflections: false
+      Pathing: true
+  - Entity: 7852954056511796451
+    TagComponent:
+      Tag: Probes
+    Active: false
+    TransformComponent:
+      Translation: [3000, 125, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    FolderComponent:
+      Path: Test 4 Baked
+    AcousticProbeVolumeComponent:
+      HalfExtents: [850, 160, 450]
+      Spacing: 1.5
+      Height: 1.5
+      Reverb: true
+      Pathing: true
+      Rays: 16384
+      Bounces: 16
+      Duration: 1
+      VisSamples: 4
+      VisRadius: 1
+      VisThreshold: 0.1
+      VisRange: 1000
+      PathRange: 1000
+      BakedData: 13481115598889320892
+  - Entity: 5728040522548077747
+    TagComponent:
+      Tag: Door Lintel
+    Active: false
+    TransformComponent:
+      Translation: [3000, 250, 0]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 1, 1]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 4 Baked
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 7472295284014592777
+    TagComponent:
+      Tag: Shared Wall South
+    Active: false
+    TransformComponent:
+      Translation: [3000, 150, -225]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 3, 3.5]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 4 Baked
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 8671953669396616896
+    TagComponent:
+      Tag: Shared Wall North
+    Active: false
+    TransformComponent:
+      Translation: [3000, 150, 225]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 3, 3.5]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 4 Baked
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 7139789657123455444
+    TagComponent:
+      Tag: Wall East
+    Active: false
+    TransformComponent:
+      Translation: [3815, 150, 0]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 3, 8]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 4 Baked
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 6721868891926988421
+    TagComponent:
+      Tag: Wall West
+    Active: false
+    TransformComponent:
+      Translation: [2185, 150, 0]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 3, 8]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 4 Baked
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 7914736793501508669
+    TagComponent:
+      Tag: Wall South
+    Active: false
+    TransformComponent:
+      Translation: [3000, 150, -415]
+      Rotation: [0, 0, 0]
+      Scale: [16.6, 3, 0.3]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 4 Baked
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 8533003929253969233
+    TagComponent:
+      Tag: Wall North
+    Active: false
+    TransformComponent:
+      Translation: [3000, 150, 415]
+      Rotation: [0, 0, 0]
+      Scale: [16.6, 3, 0.3]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 4 Baked
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 7590255895028777161
+    TagComponent:
+      Tag: Ceiling
+    Active: false
+    TransformComponent:
+      Translation: [3000, 315, 0]
+      Rotation: [0, 0, 0]
+      Scale: [16.6, 0.3, 8.6]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 4 Baked
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 5047411686054895499
+    TagComponent:
+      Tag: Floor
+    Active: false
+    TransformComponent:
+      Translation: [3000, -15, 0]
+      Rotation: [0, 0, 0]
+      Scale: [16.6, 0.3, 8.6]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 4 Baked
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 17001021683751712250
+    TagComponent:
+      Tag: Speaker
+    Active: false
+    TransformComponent:
+      Translation: [0, 150, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    FolderComponent:
+      Path: Test 3 Reflections
+    AudioSourceComponent:
+      Sound: 1826615405299885159
+      Volume: 1
+      Pitch: 1
+      Loop: true
+      PlayOnStart: true
+      Bus: 3
+      Spatial: true
+      MinDistance: 1
+      MaxDistance: 50
+      Attenuation: Inverse
+      DopplerLevel: 0
+      Spatialization: Default
+      AirAbsorption: false
+      Occlusion: true
+      SourceRadius: 0.5
+      Reflections: true
+      Pathing: false
+  - Entity: 7852290857975501884
+    TagComponent:
+      Tag: Wall East
+    Active: false
+    TransformComponent:
+      Translation: [500, 200, 0]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 4, 8]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 3 Reflections
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 5719135303150832136
+    TagComponent:
+      Tag: Wall West
+    Active: false
+    TransformComponent:
+      Translation: [-500, 200, 0]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 4, 8]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 3 Reflections
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 5865168618314400288
+    TagComponent:
+      Tag: Wall North
+    Active: false
+    TransformComponent:
+      Translation: [0, 200, 400]
+      Rotation: [0, 0, 0]
+      Scale: [10, 4, 0.3]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 3 Reflections
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 4923675289765319612
+    TagComponent:
+      Tag: Wall South
+    Active: false
+    TransformComponent:
+      Translation: [0, 200, -400]
+      Rotation: [0, 0, 0]
+      Scale: [10, 4, 0.3]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 3 Reflections
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 6760449986011013613
+    TagComponent:
+      Tag: Ceiling
+    Active: false
+    TransformComponent:
+      Translation: [0, 400, 0]
+      Rotation: [0, 0, 0]
+      Scale: [10, 0.3, 8]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 3 Reflections
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 7684858328726095245
+    TagComponent:
+      Tag: Floor
+    Active: false
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [10, 0.3, 8]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 3 Reflections
+    MaterialComponent:
+      MaterialAssets:
+        - 9065232913309162434
+  - Entity: 13081541443094925415
+    TagComponent:
+      Tag: Speaker
+    Active: false
+    TransformComponent:
+      Translation: [2000, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    FolderComponent:
+      Path: Test 2
+    AudioSourceComponent:
+      Sound: 1826615405299885159
+      Volume: 1
+      Pitch: 1
+      Loop: true
+      PlayOnStart: true
+      Bus: 3
+      Spatial: true
+      MinDistance: 1
+      MaxDistance: 50
+      Attenuation: Inverse
+      DopplerLevel: 1
+      Spatialization: Default
+      AirAbsorption: true
+      Occlusion: true
+      SourceRadius: 0.5
+      Reflections: true
+      Pathing: false
+  - Entity: 14857083185565491350
+    TagComponent:
+      Tag: Dialogue
+    Active: false
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    FolderComponent:
+      Path: Test 1
+    AudioSourceComponent:
+      Sound: 1826615405299885159
+      Volume: 1
+      Pitch: 1
+      Loop: true
+      PlayOnStart: true
+      Bus: 4
+      Spatial: false
+      MinDistance: 1
+      MaxDistance: 50
+      Attenuation: Inverse
+      DopplerLevel: 1
+      Spatialization: Default
+      AirAbsorption: true
+      Occlusion: true
+      SourceRadius: 0.5
+      Reflections: true
+      Pathing: false
+  - Entity: 12352494062553627143
+    TagComponent:
+      Tag: Music
+    Active: false
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    FolderComponent:
+      Path: Test 1
+    AudioSourceComponent:
+      Sound: 4135585114064598667
+      Volume: 1
+      Pitch: 1
+      Loop: true
+      PlayOnStart: true
+      Bus: 2
+      Spatial: false
+      MinDistance: 1
+      MaxDistance: 50
+      Attenuation: Inverse
+      DopplerLevel: 1
+      Spatialization: Default
+      AirAbsorption: true
+      Occlusion: true
+      SourceRadius: 0.5
+      Reflections: true
+      Pathing: false
+  - Entity: 17269929267230437230
+    TagComponent:
+      Tag: Env
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    EnvironmentLightComponent:
+      Source: ProceduralSky
+      TexturePath: ""
+      RadianceScale: [1, 1, 1]
+      Rotation: 0
+      Enabled: true
+      RayleighScale: 1
+      MieScale: 1
+      OzoneScale: 1
+      MieAnisotropy: 0.8
+      GroundAlbedo: [0.3, 0.3, 0.3]
+      AltitudeKm: 0
+      AerialPerspectiveScale: 1
+      Clouds: true
+      CloudCoverage: 0.35
+      CloudDensity: 1
+      CloudBottomKm: 1.5
+      CloudThicknessKm: 2
+      CloudScaleKm: 8
+      CloudOffsetKm: [0, 0]
+      CloudWind: [0, 0]
+      SunThroughAtmosphere: true
+      Moon: true
+      MoonIntensity: 0.004
+      MoonColor: [0.75, 0.85, 1]
+      MoonAngularDiameter: 0.53
+      MoonOppositeSun: true
+      MoonElevation: 40
+      MoonAzimuth: 200
+      Stars: true
+      StarIntensity: 1
+      HeightFog: false
+      FogDensity: 0.5
+      FogHeightFalloff: 5
+      FogHeight: 0
+      FogStartDistance: 0
+      FogMaxOpacity: 1
+      FogColor: [1, 1, 1]
+      FogFromEnvironment: true
+      FogSunScattering: 0.05
+      FogSunExponent: 8
+  - Entity: 13608396923467277071
+    TagComponent:
+      Tag: Room A
+    Active: false
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    FolderComponent:
+      Path: Test 2
+    AudioVolumeComponent:
+      HalfExtents: [500, 250, 500]
+      Priority: 0
+      ReverbBus: 7
+      ReverbSend: 0.5
+      InteriorVolume: 0.5
+      InteriorLowPass: 2000
+      ExteriorVolume: 0.5
+      ExteriorLowPass: 2000
+      FadeTime: 0.5
+  - Entity: 2091526794226325711
+    TagComponent:
+      Tag: Room B
+    Active: false
+    TransformComponent:
+      Translation: [2000, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    FolderComponent:
+      Path: Test 2
+    AudioVolumeComponent:
+      HalfExtents: [500, 250, 500]
+      Priority: 0
+      ReverbBus: 6918042031587073680
+      ReverbSend: 0.7
+      InteriorVolume: 0.5
+      InteriorLowPass: 2000
+      ExteriorVolume: 0.5
+      ExteriorLowPass: 2000
+      FadeTime: 0.5
+  - Entity: 9697819024252246943
+    TagComponent:
+      Tag: Cube
+    Active: false
+    TransformComponent:
+      Translation: [0, 300, 0]
+      Rotation: [0, -0, 0]
+      Scale: [2, 1, 1]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 5 concurrency
+    MaterialComponent:
+      {}
+    ImpactSoundComponent:
+      Sound: 7721550169096927268
+      Volume: 1
+      MinSpeed: 0.5
+      MaxSpeed: 8
+      PitchVariation: 0.05
+      Cooldown: 0.08
+      Bus: 3
+      MinDistance: 1
+      MaxDistance: 50
+      Attenuation: Inverse
+      DopplerLevel: 1
+      Spatialization: Default
+      AirAbsorption: true
+      Occlusion: true
+      SourceRadius: 0.5
+      Reflections: true
+      Pathing: false
+    RigidBody3DComponent:
+      BodyType: Dynamic
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 4366249602954031427
+    TagComponent:
+      Tag: Floor
+    Active: false
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [20, 0.5, 20]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    FolderComponent:
+      Path: Test 5 concurrency
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 4662078712763977618
+    TagComponent:
+      Tag: Empty Entity
+    Active: false
+    TransformComponent:
+      Translation: [2000, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    FolderComponent:
+      Path: Test 5 real and virtual voices
+    AudioSourceComponent:
+      Sound: 4328551529812645971
+      Volume: 1
+      Pitch: 1
+      Loop: true
+      PlayOnStart: true
+      Bus: 3
+      Spatial: true
+      MinDistance: 1
+      MaxDistance: 30
+      Attenuation: Inverse
+      DopplerLevel: 1
+      Spatialization: Default
+      AirAbsorption: true
+      Occlusion: true
+      SourceRadius: 0.5
+      Reflections: true
+      Pathing: false
+  - Entity: 10019335317026436184
+    TagComponent:
+      Tag: Empty Entity
+    Active: false
+    TransformComponent:
+      Translation: [1000, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    FolderComponent:
+      Path: Test 5 real and virtual voices
+    AudioSourceComponent:
+      Sound: 4135585114064598667
+      Volume: 1
+      Pitch: 1
+      Loop: true
+      PlayOnStart: true
+      Bus: 3
+      Spatial: true
+      MinDistance: 1
+      MaxDistance: 30
+      Attenuation: Inverse
+      DopplerLevel: 1
+      Spatialization: Default
+      AirAbsorption: true
+      Occlusion: true
+      SourceRadius: 0.5
+      Reflections: true
+      Pathing: false
+  - Entity: 9263036677936304806
+    TagComponent:
+      Tag: Empty Entity
+    Active: false
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    FolderComponent:
+      Path: Test 5 real and virtual voices
+    AudioSourceComponent:
+      Sound: 1826615405299885159
+      Volume: 1
+      Pitch: 1
+      Loop: true
+      PlayOnStart: true
+      Bus: 3
+      Spatial: true
+      MinDistance: 1
+      MaxDistance: 30
+      Attenuation: Inverse
+      DopplerLevel: 1
+      Spatialization: Default
+      AirAbsorption: true
+      Occlusion: true
+      SourceRadius: 0.5
+      Reflections: true
+      Pathing: false
+  - Entity: 12616206320851677655
+    TagComponent:
+      Tag: Camera
+    TransformComponent:
+      Translation: [0, 0, 1280]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    CameraComponent:
+      Camera:
+        ProjectionType: 0
+        PerspectiveFOV: 0.7853982
+        PerspectiveNear: 10
+        PerspectiveFar: 100000
+        OrthographicSize: 10
+        OrthographicNear: -1
+        OrthographicFar: 1
+      Primary: true
+      FixedAspectRatio: false
+      AutoExposure: true
+      ManualEV100: 2
+      ExposureCompensation: 0
+      AutoExposureMinEV: -16
+      AutoExposureMaxEV: 16
+    ScriptComponent:
+      Classes:
+        - Facerun.FlyCamera
+      EntityReferences:
+        []
+      FieldOverrides:
+        []
+Folders:
+  - Test 1
+  - Test 2
+  - Test 3 Reflections
+  - Test 4 Baked
+  - Test 5 concurrency
+  - Test 5 real and virtual voices
+  - Test 6 Audio Track in Timeline
+  - Test 6 a graph inside a graph
+CollapsedFolders: [Test 1, Test 2, Test 3 Reflections, Test 4 Baked, Test 5 concurrency, Test 5 real and virtual voices]

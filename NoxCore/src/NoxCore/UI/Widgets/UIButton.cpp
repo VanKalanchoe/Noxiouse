@@ -12,7 +12,7 @@ namespace Nox::UI
         HitTestMode = UIHitTestMode::Self;
         Focusable = true;
 
-        m_Label = CreateIntrusive<UILabel>(std::move(text));
+        m_Label = Ref<UILabel>(new UILabel(std::move(text)));
         m_Label->HAlign = UIAlignment::Center;
         m_Label->VAlign = UIAlignment::Center;
         AddChild(m_Label);
@@ -30,7 +30,7 @@ namespace Nox::UI
 
     bool UIButton::OnPointerUp(const UIPointerEvent& e)
     {
-        if (e.Button == 0 && IsEnabled() && GetBounds().Contains(e.Position))
+        if (e.Button == 1 && IsEnabled() && GetBounds().Contains(e.Position))
         {
             if (OnClick)
                 OnClick();

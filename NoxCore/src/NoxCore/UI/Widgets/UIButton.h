@@ -26,6 +26,6 @@ namespace Nox::UI
         void ArrangeChildren(const UIRect& contentRect) override;
 
     private:
-        IntrusiveRef<UILabel> m_Label;
+        Ref<UILabel> m_Label;
     };
 }

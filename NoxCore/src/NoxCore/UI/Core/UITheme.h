@@ -8,7 +8,7 @@
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/UI/Core/UITypes.h"
 
-namespace Nox::Utils
+namespace Utils
 {
     class NOXWatcher;
 }
@@ -44,13 +44,13 @@ namespace Nox::UI
     public:
         UITheme() = default;
 
-        static IntrusiveRef<UITheme> CreateDefault();
+        static Ref<UITheme> CreateDefault();
 
         // Loads a .nstyle YAML file. Falls back safely to default values on parse errors.
         bool LoadFromFile(const std::filesystem::path& path);
 
         // Watches a .nstyle file for live hot-reloading.
-        void WatchFile(Utils::NOXWatcher& watcher, const std::filesystem::path& path);
+        void WatchFile(::Utils::NOXWatcher& watcher, const std::filesystem::path& path);
 
         // Polls any pending hot reload on the main thread. Returns true if reloaded.
         bool PollHotReload();

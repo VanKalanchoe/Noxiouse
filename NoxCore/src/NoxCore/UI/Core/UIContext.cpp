@@ -10,22 +10,22 @@ namespace Nox::UI
         m_Theme = UITheme::CreateDefault();
     }
 
-    void UIContext::SetRoot(const IntrusiveRef<UIElement>& root)
+    void UIContext::SetRoot(const Ref<UIElement>& root)
     {
         m_Root = root;
-        m_Hovered.reset();
-        m_Captured.reset();
-        m_Focused.reset();
+        m_Hovered = nullptr;
+        m_Captured = nullptr;
+        m_Focused = nullptr;
     }
 
-    void UIContext::SetTheme(const IntrusiveRef<UITheme>& theme)
+    void UIContext::SetTheme(const Ref<UITheme>& theme)
     {
         m_Theme = theme ? theme : UITheme::CreateDefault();
     }
 
     void UIContext::SetFocus(UIElement* element)
     {
-        auto prev = m_Focused.lock();
+        Ref<UIElement> prev = m_Focused;
         if (prev.get() == element)
             return;
         if (prev)
@@ -33,18 +33,18 @@ namespace Nox::UI
         if (element && element->Focusable && element->IsEnabled())
         {
             element->SetStateFlag(UIState::Focused, true);
-            m_Focused = WeakRef<UIElement>(element);
+            m_Focused = Ref<UIElement>(element);
         }
         else
         {
-            m_Focused.reset();
+            m_Focused = nullptr;
         }
     }
 
     void UIContext::UpdateHover(const UIVec2& pos)
     {
         UIElement* nextHover = m_Root ? m_Root->HitTest(pos) : nullptr;
-        auto prevHover = m_Hovered.lock();
+        Ref<UIElement> prevHover = m_Hovered;
         if (prevHover.get() == nextHover)
             return;
 
@@ -59,11 +59,11 @@ namespace Nox::UI
         {
             nextHover->SetStateFlag(UIState::Hovered, true);
             nextHover->OnPointerEnter(ev);
-            m_Hovered = WeakRef<UIElement>(nextHover);
+            m_Hovered = Ref<UIElement>(nextHover);
         }
         else
         {
-            m_Hovered.reset();
+            m_Hovered = nullptr;
         }
     }
 
@@ -72,17 +72,17 @@ namespace Nox::UI
         const UIVec2 delta = pos - m_LastMousePos;
         m_LastMousePos = pos;
 
-        if (auto captured = m_Captured.lock())
+        if (m_Captured)
         {
             UIPointerEvent ev{ pos, delta, {}, 0, false };
-            return captured->OnPointerMove(ev);
+            return m_Captured->OnPointerMove(ev);
         }
 
         UpdateHover(pos);
-        if (auto hovered = m_Hovered.lock())
+        if (m_Hovered)
         {
             UIPointerEvent ev{ pos, delta, {}, 0, false };
-            for (UIElement* cur = hovered.get(); cur != nullptr; cur = cur->GetParent())
+            for (UIElement* cur = m_Hovered.get(); cur != nullptr; cur = cur->GetParent())
             {
                 if (cur->OnPointerMove(ev))
                     return true;
@@ -96,7 +96,7 @@ namespace Nox::UI
         m_LastMousePos = pos;
         UpdateHover(pos);
 
-        auto hovered = m_Hovered.lock();
+        Ref<UIElement> hovered = m_Hovered;
         if (!hovered || !hovered->IsEnabled())
         {
             SetFocus(nullptr);
@@ -119,8 +119,8 @@ namespace Nox::UI
     bool UIContext::DispatchPointerUp(const UIVec2& pos, int button)
     {
         m_LastMousePos = pos;
-        auto captured = m_Captured.lock();
-        m_Captured.reset();
+        Ref<UIElement> captured = m_Captured;
+        m_Captured = nullptr;
 
         bool handled = false;
         if (captured)
@@ -136,7 +136,7 @@ namespace Nox::UI
 
     bool UIContext::DispatchScroll(const UIVec2& scrollDelta)
     {
-        auto target = m_Hovered.lock();
+        Ref<UIElement> target = m_Hovered;
         if (!target)
             return false;
 
@@ -151,7 +151,7 @@ namespace Nox::UI
 
     bool UIContext::DispatchKeyDown(int keyCode, uint16_t mods, bool repeat)
     {
-        auto focused = m_Focused.lock();
+        Ref<UIElement> focused = m_Focused;
         if (!focused)
             return false;
 
@@ -159,6 +159,20 @@ namespace Nox::UI
         for (UIElement* cur = focused.get(); cur != nullptr; cur = cur->GetParent())
         {
             if (cur->OnKeyDown(ev))
+                return true;
+        }
+        return false;
+    }
+
+    bool UIContext::DispatchTextInput(std::string_view text)
+    {
+        Ref<UIElement> focused = m_Focused;
+        if (!focused)
+            return false;
+
+        for (UIElement* cur = focused.get(); cur != nullptr; cur = cur->GetParent())
+        {
+            if (cur->OnTextInput(text))
                 return true;
         }
         return false;
@@ -186,6 +200,10 @@ namespace Nox::UI
         dispatcher.Dispatch<KeyPressedEvent>([this](KeyPressedEvent& e)
         {
             return DispatchKeyDown(e.GetKeyCode(), static_cast<uint16_t>(e.GetModifiers()), e.IsRepeat());
+        });
+        dispatcher.Dispatch<TextInputEvent>([this](TextInputEvent& e)
+        {
+            return DispatchTextInput(e.GetText());
         });
     }
 

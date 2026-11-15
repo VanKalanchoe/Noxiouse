@@ -76,6 +76,26 @@ namespace Nox {
 		EVENT_CLASS_TYPE(KeyReleased)
 	};
 
+	class TextInputEvent : public Event
+	{
+	public:
+		explicit TextInputEvent(std::string text)
+			: m_Text(std::move(text)) {}
+
+		const std::string& GetText() const { return m_Text; }
+
+		std::string ToString() const override
+		{
+			return std::format("TextInputEvent: {}", m_Text);
+		}
+
+		EVENT_CLASS_TYPE(TextInput)
+		EVENT_CLASS_CATEGORY(EventCategoryKeyboard | EventCategoryInput)
+
+	private:
+		std::string m_Text;
+	};
+
 	//
 	// Mouse Events
 	//

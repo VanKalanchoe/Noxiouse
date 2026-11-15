@@ -24,6 +24,8 @@ namespace Nox::UI
         UIColor ColorOverride{ 1.0f, 1.0f, 1.0f, 1.0f };
         Ref<Font> FontAsset;
 
+        static UIVec2 MeasureText(std::string_view text, const Ref<Font>& fontAsset, float fontSize);
+
     protected:
         UIVec2 ComputeDesiredSize() override;
         void OnPaint(UIDrawList& drawList, const UITheme& theme) override;

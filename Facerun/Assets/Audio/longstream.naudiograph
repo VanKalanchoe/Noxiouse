@@ -1,0 +1,51 @@
+Domain: AudioGraph
+OutputNode: 1
+NextNodeId: 4
+Nodes:
+  - Id: 1
+    Type: Output
+    Position: [606, 43]
+    Properties:
+      []
+  - Id: 2
+    Type: On Play
+    Position: [-40, 33]
+    Properties:
+      []
+  - Id: 3
+    Type: Wave Player
+    Position: [203, 81]
+    Properties:
+      - Name: Start Time
+        Value:
+          Float: 0
+      - Name: Pitch Shift
+        Value:
+          Float: 0
+      - Name: Loop Duration
+        Value:
+          Float: 2
+      - Name: Loop
+        Value:
+          Bool: true
+      - Name: Loop Start
+        Value:
+          Float: 3
+      - Name: Clip
+        Value:
+          U64: 4328551529812645971
+Links:
+  - FromNode: 2
+    FromPin: 0
+    ToNode: 3
+    ToPin: 0
+  - FromNode: 3
+    FromPin: 0
+    ToNode: 1
+    ToPin: 0
+  - FromNode: 3
+    FromPin: 1
+    ToNode: 1
+    ToPin: 1
+Parameters:
+  []

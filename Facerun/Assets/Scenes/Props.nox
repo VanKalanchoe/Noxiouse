@@ -1,0 +1,28 @@
+Scene: Props
+Entities:
+  - Entity: 6422503389889860131
+    TagComponent:
+      Tag: Cube
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [0.1, 0.1, 0.1]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+  - Entity: 17215864729422862126
+    TagComponent:
+      Tag: Cube
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [0.1, 0.1, 0.1]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}

@@ -1,0 +1,8 @@
+Timeline:
+  Duration: 10
+  Loop: true
+  Tracks:
+    - Target: ""
+      Property: Audio
+      Keys:
+        - {Time: 1, Value: [0, 0, 1, 1], Sound: 4135585114064598667}

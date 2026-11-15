@@ -380,6 +380,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 43601608928812600
+    FilePath: StreamingTest/Materials/Tile_3_0_Tile_3_0.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_3_0_Tile_3_0.nmat
+    Type: AssetType::Material
   - Handle: 44499258661112807
     FilePath: StreamingTest/Textures/Tile_19_9.ntex
     Type: AssetType::Texture2D
@@ -436,6 +440,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_45_71_Tile_45_71.nmat
     SourceFilePath: StreamingTest/Materials/Tile_45_71_Tile_45_71.nmat
     Type: AssetType::Material
+  - Handle: 51189899548256502
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Jump_Land.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Jump_Land.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 55689268520182946
     FilePath: StreamingTest/Meshes/Tile_37_41.nsmesh
     Type: AssetType::StaticMesh
@@ -1358,6 +1366,10 @@ AssetRegistry:
     FilePath: StreamingDense/Materials/Tile_20_18_Tile_20_18.nmat
     SourceFilePath: StreamingDense/Materials/Tile_20_18_Tile_20_18.nmat
     Type: AssetType::Material
+  - Handle: 179215023092744784
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Punch_Jab.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Punch_Jab.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 179390516605329413
     FilePath: StreamingTest/Textures/Tile_32_38.ntex
     Type: AssetType::Texture2D
@@ -2605,6 +2617,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_52_18_Tile_52_18.nmat
     SourceFilePath: StreamingTest/Materials/Tile_52_18_Tile_52_18.nmat
     Type: AssetType::Material
+  - Handle: 302605464475066048
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Jog_Fwd_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Jog_Fwd_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 303011540645417344
     FilePath: StreamingTest/Textures/Tile_69_0.ntex
     Type: AssetType::Texture2D
@@ -4978,6 +4994,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_34_16_Tile_34_16.nmat
     SourceFilePath: StreamingTest/Materials/Tile_34_16_Tile_34_16.nmat
     Type: AssetType::Material
+  - Handle: 595224990240164164
+    FilePath: Audio/Tall_Grass_Mono_02.wav
+    SourceFilePath: Audio/Tall_Grass_Mono_02.wav
+    Type: AssetType::AudioClip
   - Handle: 595670463599645291
     FilePath: StreamingTest/Meshes/Tile_22_23.nsmesh
     Type: AssetType::StaticMesh
@@ -5025,6 +5045,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 604337530878989423
+    FilePath: NewTimeline.ntimeline
+    SourceFilePath: NewTimeline.ntimeline
+    Type: AssetType::Timeline
   - Handle: 604478578619136315
     FilePath: StreamingTest/Textures/Tile_68_54.ntex
     Type: AssetType::Texture2D
@@ -5496,6 +5520,14 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 668631983136790682
+    FilePath: Models/AnisotropyBarnLamp/AnisotropyBarnLamp_anisotropy.ntex
+    SourceFilePath: Models/AnisotropyBarnLamp/AnisotropyBarnLamp_anisotropy.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 670247173095137505
     FilePath: StreamingTest/Meshes/Tile_52_74.nsmesh
     Type: AssetType::StaticMesh
@@ -7491,6 +7523,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 891914383308328208
+    FilePath: Audio/DirtRoad_Mono_02.wav
+    SourceFilePath: Audio/DirtRoad_Mono_02.wav
+    Type: AssetType::AudioClip
   - Handle: 892297487463157491
     FilePath: StreamingTest/Textures/Tile_23_26.ntex
     Type: AssetType::Texture2D
@@ -7989,6 +8025,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 951414519356553479
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Dance_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Dance_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 952451644924563220
     FilePath: StreamingTest/Textures/Tile_11_53.ntex
     Type: AssetType::Texture2D
@@ -8276,6 +8316,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 983973954887256521
+    FilePath: Audio/Footsteps_Grass.naudiograph
+    SourceFilePath: Audio/Footsteps_Grass.naudiograph
+    Type: AssetType::AudioGraph
+    FormerPaths:
+      - Audio/Footsteps Copy.naudiograph
   - Handle: 984761730489094700
     FilePath: Models/bistro/Materials/bistro_LMBR_000014d_Glass.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000014d_Glass.nmat
@@ -9262,6 +9308,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 1119777399170532198
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Driving_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Driving_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 1119993027761797894
     FilePath: Models/bistro/Materials/bistro_LMBR_0000111_details.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000111_details.nmat
@@ -10393,6 +10443,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 1256414772411108606
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sitting_Enter.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sitting_Enter.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 1256903531294080080
     FilePath: StreamingTest/Textures/Tile_81_29.ntex
     Type: AssetType::Texture2D
@@ -11553,6 +11607,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 1386200967577402279
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Pistol_Aim_Neutral.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Pistol_Aim_Neutral.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 1386571165413506405
     FilePath: StreamingTest/Materials/Tile_24_21_Tile_24_21.nmat
     SourceFilePath: StreamingTest/Materials/Tile_24_21_Tile_24_21.nmat
@@ -12422,6 +12480,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_0000044_Concrete_Smooth.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000044_Concrete_Smooth.nmat
     Type: AssetType::Material
+  - Handle: 1482100795055732168
+    FilePath: Audio/Beep.naudiograph
+    SourceFilePath: Audio/Beep.naudiograph
+    Type: AssetType::AudioGraph
   - Handle: 1482739393710525865
     FilePath: Models/bistro/Meshes/subset_8_161.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -12578,6 +12640,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_64_62_Tile_64_62.nmat
     SourceFilePath: StreamingTest/Materials/Tile_64_62_Tile_64_62.nmat
     Type: AssetType::Material
+  - Handle: 1495128029166714960
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sword_Idle.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sword_Idle.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 1496589313046428947
     FilePath: StreamingTest/Meshes/Tile_31_66.nsmesh
     Type: AssetType::StaticMesh
@@ -14239,6 +14305,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 1688291352962272220
+    FilePath: Audio/Tall_Grass_Mono_03.wav
+    SourceFilePath: Audio/Tall_Grass_Mono_03.wav
+    Type: AssetType::AudioClip
   - Handle: 1688621096488600200
     FilePath: StreamingTest/Meshes/Tile_80_72.nsmesh
     Type: AssetType::StaticMesh
@@ -15408,6 +15478,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 1826615405299885159
+    FilePath: Sounds/VOXMale_Voice Wet Male Emergency Broadcast Announcement Dry War 01_ESM_FA.wav
+    SourceFilePath: Sounds/VOXMale_Voice Wet Male Emergency Broadcast Announcement Dry War 01_ESM_FA.wav
+    Type: AssetType::AudioClip
   - Handle: 1827877898838858404
     FilePath: StreamingDense/Textures/Tile_11_10.ntex
     Type: AssetType::Texture2D
@@ -17884,6 +17958,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 2090549398030223924
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Hit_Chest.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Hit_Chest.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 2092219023629973604
     FilePath: StreamingTest/Meshes/Tile_18_35.nsmesh
     Type: AssetType::StaticMesh
@@ -18091,6 +18169,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 2123581550333276026
+    FilePath: Prefabs/GlossyRedCube.nprefab
+    SourceFilePath: Prefabs/GlossyRedCube.nprefab
+    Type: AssetType::Prefab
   - Handle: 2123748595880617851
     FilePath: StreamingTest/Meshes/Tile_34_44.nsmesh
     Type: AssetType::StaticMesh
@@ -18221,6 +18303,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 2139369826222430038
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Fixing_Kneeling.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Fixing_Kneeling.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 2139592436720235825
     FilePath: StreamingTest/Meshes/Tile_54_1.nsmesh
     Type: AssetType::StaticMesh
@@ -18708,6 +18794,10 @@ AssetRegistry:
       SourceMeshIndex: 332
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 2187072167710488171
+    FilePath: Scenes/Props2.nox
+    SourceFilePath: Scenes/Props2.nox
+    Type: AssetType::Scene
   - Handle: 2187167958999248257
     FilePath: StreamingTest/Meshes/Tile_78_65.nsmesh
     Type: AssetType::StaticMesh
@@ -20350,6 +20440,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 2365850936738475698
+    FilePath: Models/Fox/Meshes/Fox_Walk.nanim
+    SourceFilePath: Models/Fox/Meshes/Fox_Walk.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 2366473985040162872
     FilePath: StreamingTest/Textures/Tile_30_32.ntex
     Type: AssetType::Texture2D
@@ -23255,6 +23349,10 @@ AssetRegistry:
     FilePath: StreamingDense/Materials/Tile_7_12_Tile_7_12.nmat
     SourceFilePath: StreamingDense/Materials/Tile_7_12_Tile_7_12.nmat
     Type: AssetType::Material
+  - Handle: 2705503397852889058
+    FilePath: Scenes/AnimationTest2.nox
+    SourceFilePath: Scenes/AnimationTest2.nox
+    Type: AssetType::Scene
   - Handle: 2706053757875007037
     FilePath: StreamingTest/Materials/Tile_20_66_Tile_20_66.nmat
     SourceFilePath: StreamingTest/Materials/Tile_20_66_Tile_20_66.nmat
@@ -23878,6 +23976,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 2789735027630729488
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Walk_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Walk_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 2789862345136404481
     FilePath: StreamingTest/Meshes/Tile_51_74.nsmesh
     Type: AssetType::StaticMesh
@@ -24160,6 +24262,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 2823040071077735737
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Roll.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Roll.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 2823647277330131636
     FilePath: StreamingDense/Materials/Tile_20_5_Tile_20_5.nmat
     SourceFilePath: StreamingDense/Materials/Tile_20_5_Tile_20_5.nmat
@@ -25233,6 +25339,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 2934808467936826322
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Walk_Formal_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Walk_Formal_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 2936312081538645703
     FilePath: StreamingTest/Textures/Tile_35_34.ntex
     Type: AssetType::Texture2D
@@ -25485,14 +25595,6 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
-  - Handle: 2955402065219567063
-    FilePath: Materials/TH_Wood_Table_mtlx/Textures/TH_Wood_Table_BaseColor.ntex
-    SourceFilePath: Materials/TH_Wood_Table_mtlx/Textures/TH_Wood_Table_BaseColor.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: SRGBA8
-      GenerateMips: true
-      Flip: false
   - Handle: 2955700337086308417
     FilePath: StreamingTest/Meshes/Tile_69_40.nsmesh
     Type: AssetType::StaticMesh
@@ -25806,6 +25908,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 2993991652714175552
+    FilePath: Models/UAL1_Standard_RM/Materials/UAL1_Standard_RM_M_Main.nmat
+    SourceFilePath: Models/UAL1_Standard_RM/Materials/UAL1_Standard_RM_M_Main.nmat
+    Type: AssetType::Material
   - Handle: 2994202490682341567
     FilePath: StreamingTest/Textures/Tile_12_62.ntex
     Type: AssetType::Texture2D
@@ -26507,6 +26613,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3093704385257409363
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Idle_Talking_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Idle_Talking_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 3095569470249980096
     FilePath: StreamingTest/Meshes/Tile_35_31.nsmesh
     Type: AssetType::StaticMesh
@@ -26955,6 +27065,15 @@ AssetRegistry:
       SourceMeshIndex: 422
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 3153843427696230998
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_4.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_4.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
+      Compression: Normalmap
   - Handle: 3153983474438403690
     FilePath: StreamingTest/Meshes/Tile_10_69.nsmesh
     Type: AssetType::StaticMesh
@@ -27008,6 +27127,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3158655530483937311
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Roll.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Roll.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 3159198477145301534
     FilePath: StreamingTest/Meshes/Tile_56_4.nsmesh
     Type: AssetType::StaticMesh
@@ -27660,6 +27783,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 3235414157035070573
+    FilePath: Audio/BootsLinoleum_02.wav
+    SourceFilePath: Audio/BootsLinoleum_02.wav
+    Type: AssetType::AudioClip
   - Handle: 3235935219572224848
     FilePath: StreamingTest/Meshes/Tile_42_50.nsmesh
     Type: AssetType::StaticMesh
@@ -29783,6 +29910,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 3463413978202751882
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Crouch_Idle_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Crouch_Idle_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 3464666930401417711
     FilePath: StreamingTest/Meshes/Tile_4_36.nsmesh
     Type: AssetType::StaticMesh
@@ -29923,6 +30054,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 3477428489525346446
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Punch_Jab.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Punch_Jab.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 3478908815358282369
     FilePath: Models/bistro/Meshes/subset_1_390.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -30506,6 +30641,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 3539830488794304121
+    FilePath: Models/UAL1_Standard_RM/Materials/UAL1_Standard_RM_M_Joints.nmat
+    SourceFilePath: Models/UAL1_Standard_RM/Materials/UAL1_Standard_RM_M_Joints.nmat
+    Type: AssetType::Material
   - Handle: 3540149904150736958
     FilePath: StreamingTest/Meshes/Tile_43_80.nsmesh
     Type: AssetType::StaticMesh
@@ -31313,6 +31452,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3633363211117244166
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Crouch_Idle_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Crouch_Idle_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 3633483423339340719
     FilePath: StreamingTest/Meshes/Tile_65_7.nsmesh
     Type: AssetType::StaticMesh
@@ -32735,6 +32878,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3782477897468221787
+    FilePath: Models/Fox/Meshes/Fox_Run.nanim
+    SourceFilePath: Models/Fox/Meshes/Fox_Run.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 3782805465454130442
     FilePath: StreamingTest/Textures/Tile_67_15.ntex
     Type: AssetType::Texture2D
@@ -33446,6 +33593,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3869375307449491399
+    FilePath: StreamingTest/Materials/Tile_18_0_Tile_18_0.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_18_0_Tile_18_0.nmat
+    Type: AssetType::Material
   - Handle: 3869416301521817610
     FilePath: StreamingTest/Meshes/Tile_62_54.nsmesh
     Type: AssetType::StaticMesh
@@ -34591,6 +34742,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3991518463885637361
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Fixing_Kneeling.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Fixing_Kneeling.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 3993324184436827420
     FilePath: StreamingTest/Meshes/Tile_42_53.nsmesh
     Type: AssetType::StaticMesh
@@ -35806,6 +35961,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 4126099528919814906
+    FilePath: Scenes/Props.nox
+    SourceFilePath: Scenes/Props.nox
+    Type: AssetType::Scene
   - Handle: 4127394537991091603
     FilePath: StreamingTest/Materials/Tile_65_31_Tile_65_31.nmat
     SourceFilePath: StreamingTest/Materials/Tile_65_31_Tile_65_31.nmat
@@ -35880,6 +36039,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 4135585114064598667
+    FilePath: Sounds/Horror She is Here Main.wav
+    SourceFilePath: Sounds/Horror She is Here Main.wav
+    Type: AssetType::AudioClip
   - Handle: 4137768406031526206
     FilePath: StreamingTest/Meshes/Tile_53_24.nsmesh
     Type: AssetType::StaticMesh
@@ -36339,6 +36502,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 4201044751675607094
+    FilePath: Audio/Tall_Grass_Mono_04.wav
+    SourceFilePath: Audio/Tall_Grass_Mono_04.wav
+    Type: AssetType::AudioClip
   - Handle: 4201339205296037665
     FilePath: Models/bistro/Meshes/subset_9_171.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -37423,6 +37590,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 4328551529812645971
+    FilePath: Audio/Fantasy Retreat Main.wav
+    SourceFilePath: Audio/Fantasy Retreat Main.wav
+    Type: AssetType::AudioClip
+    AudioSettings:
+      LoadType: Streaming
   - Handle: 4329072176214204213
     FilePath: StreamingTest/Meshes/Tile_59_10.nsmesh
     Type: AssetType::StaticMesh
@@ -38856,6 +39029,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_68_55_Tile_68_55.nmat
     SourceFilePath: StreamingTest/Materials/Tile_68_55_Tile_68_55.nmat
     Type: AssetType::Material
+  - Handle: 4478554590205820294
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sprint_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sprint_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 4480017356446754500
     FilePath: StreamingTest/Meshes/Tile_47_17.nsmesh
     Type: AssetType::StaticMesh
@@ -40057,6 +40234,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 4640408889470166046
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Punch_Cross.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Punch_Cross.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 4641264876956481980
     FilePath: StreamingTest/Meshes/Tile_0_61.nsmesh
     Type: AssetType::StaticMesh
@@ -44866,6 +45047,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_61_24_Tile_61_24.nmat
     SourceFilePath: StreamingTest/Materials/Tile_61_24_Tile_61_24.nmat
     Type: AssetType::Material
+  - Handle: 5196775510452366254
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Driving_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Driving_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 5197014377279655514
     FilePath: StreamingTest/Meshes/Tile_46_18.nsmesh
     Type: AssetType::StaticMesh
@@ -45097,6 +45282,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5219401061091944763
+    FilePath: Prefabs/NetPlayer.nprefab
+    SourceFilePath: Prefabs/NetPlayer.nprefab
+    Type: AssetType::Prefab
   - Handle: 5221802196849716691
     FilePath: StreamingTest/Meshes/Tile_66_54.nsmesh
     Type: AssetType::StaticMesh
@@ -45781,6 +45970,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5299871840473486654
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Pistol_Shoot.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Pistol_Shoot.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 5300378886108860710
     FilePath: StreamingTest/Meshes/Tile_14_44.nsmesh
     Type: AssetType::StaticMesh
@@ -46692,6 +46885,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 5382057295761680262
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Idle_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Idle_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 5383039199801379903
     FilePath: StreamingTest/Meshes/Tile_64_34.nsmesh
     Type: AssetType::StaticMesh
@@ -49386,6 +49583,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5673632166429903916
+    FilePath: Models/UAL1_Standard/Materials/UAL1_Standard_M_Main.nmat
+    SourceFilePath: Models/UAL1_Standard/Materials/UAL1_Standard_M_Main.nmat
+    Type: AssetType::Material
   - Handle: 5674535308194563658
     FilePath: StreamingTest/Meshes/Tile_34_24.nsmesh
     Type: AssetType::StaticMesh
@@ -49849,6 +50050,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5718293483661772377
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Spell_Simple_Exit.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Spell_Simple_Exit.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 5718407826427593653
     FilePath: StreamingTest/Meshes/Tile_29_48.nsmesh
     Type: AssetType::StaticMesh
@@ -50062,6 +50267,10 @@ AssetRegistry:
     FilePath: StreamingDense/Materials/Tile_20_17_Tile_20_17.nmat
     SourceFilePath: StreamingDense/Materials/Tile_20_17_Tile_20_17.nmat
     Type: AssetType::Material
+  - Handle: 5737566282069636683
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Pistol_Aim_Down.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Pistol_Aim_Down.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 5737643917495007389
     FilePath: StreamingTest/Meshes/Tile_55_59.nsmesh
     Type: AssetType::StaticMesh
@@ -50549,6 +50758,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 5799001274224527076
+    FilePath: Scenes/AnimationTest.nox
+    SourceFilePath: Scenes/AnimationTest.nox
+    Type: AssetType::Scene
   - Handle: 5802662214816395354
     FilePath: StreamingTest/Meshes/Tile_47_51.nsmesh
     Type: AssetType::StaticMesh
@@ -52011,6 +52224,12 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 5969131657674364168
+    FilePath: AnimationGraphs/UAL_Locomotion_RM.nanimgraph
+    SourceFilePath: AnimationGraphs/UAL_Locomotion_RM.nanimgraph
+    Type: AssetType::AnimationGraph
+    FormerPaths:
+      - AnimationGraphs/UAL_Locomotion Copy.nanimgraph
   - Handle: 5969577538605628867
     FilePath: StreamingTest/Meshes/Tile_60_23.nsmesh
     Type: AssetType::StaticMesh
@@ -52439,6 +52658,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_000001c_metal_grain_01.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000001c_metal_grain_01.nmat
     Type: AssetType::Material
+  - Handle: 6013474375219142905
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Spell_Simple_Enter.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Spell_Simple_Enter.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 6014040307542262035
     FilePath: StreamingTest/Textures/Tile_53_81.ntex
     Type: AssetType::Texture2D
@@ -52724,6 +52947,14 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_39_46_Tile_39_46.nmat
     SourceFilePath: StreamingTest/Materials/Tile_39_46_Tile_39_46.nmat
     Type: AssetType::Material
+  - Handle: 6043882119712916505
+    FilePath: Models/AnisotropyBarnLamp/AnisotropyBarnLamp_normalbump.ntex
+    SourceFilePath: Models/AnisotropyBarnLamp/AnisotropyBarnLamp_normalbump.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 6044182233028595333
     FilePath: StreamingTest/Textures/Tile_14_17.ntex
     Type: AssetType::Texture2D
@@ -53030,6 +53261,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 6087766411216149246
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard.nskel
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard.nskel
+    Type: AssetType::Skeleton
   - Handle: 6090098422277048998
     FilePath: StreamingTest/Textures/Tile_77_66.ntex
     Type: AssetType::Texture2D
@@ -53309,6 +53544,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 6127212233820236934
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sword_Idle.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sword_Idle.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 6129031317747320392
     FilePath: StreamingTest/Meshes/Tile_40_48.nsmesh
     Type: AssetType::StaticMesh
@@ -54738,6 +54977,14 @@ AssetRegistry:
       GenerateMips: true
       Flip: false
       Compression: Normalmap
+  - Handle: 6299068172915441380
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_2.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 6299345295741321320
     FilePath: StreamingTest/Materials/Tile_14_39_Tile_14_39.nmat
     SourceFilePath: StreamingTest/Materials/Tile_14_39_Tile_14_39.nmat
@@ -56075,6 +56322,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 6450071967510207274
+    FilePath: StreamingTest/Materials/Tile_0_18_Tile_0_18.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_0_18_Tile_0_18.nmat
+    Type: AssetType::Material
   - Handle: 6450276347187257932
     FilePath: StreamingTest/Meshes/Tile_38_21.nsmesh
     Type: AssetType::StaticMesh
@@ -56296,6 +56547,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 6469976082249635669
+    FilePath: Audio/DirtRoad_Mono_04.wav
+    SourceFilePath: Audio/DirtRoad_Mono_04.wav
+    Type: AssetType::AudioClip
   - Handle: 6470214372583889080
     FilePath: StreamingDense/Textures/Tile_12_14.ntex
     Type: AssetType::Texture2D
@@ -56436,6 +56691,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 6476496692811626533
+    FilePath: StreamingTest/Materials/Tile_17_0_Tile_17_0.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_17_0_Tile_17_0.nmat
+    Type: AssetType::Material
   - Handle: 6477778334332161917
     FilePath: StreamingTest/Materials/Tile_40_36_Tile_40_36.nmat
     SourceFilePath: StreamingTest/Materials/Tile_40_36_Tile_40_36.nmat
@@ -56785,6 +57044,10 @@ AssetRegistry:
       SourceMeshIndex: 372
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 6528310267746364944
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Swim_Fwd_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Swim_Fwd_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 6529160677700830373
     FilePath: StreamingTest/Textures/Tile_7_38.ntex
     Type: AssetType::Texture2D
@@ -57055,6 +57318,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 6552738915756358070
+    FilePath: Audio/Tall_Grass_Mono_01.wav
+    SourceFilePath: Audio/Tall_Grass_Mono_01.wav
+    Type: AssetType::AudioClip
   - Handle: 6553018916068220254
     FilePath: StreamingTest/Textures/Tile_14_45.ntex
     Type: AssetType::Texture2D
@@ -57852,6 +58119,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_6_3_Tile_6_3.nmat
     SourceFilePath: StreamingTest/Materials/Tile_6_3_Tile_6_3.nmat
     Type: AssetType::Material
+  - Handle: 6642770445168549070
+    FilePath: StreamingTest/Materials/Tile_1_20_Tile_1_20.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_1_20_Tile_1_20.nmat
+    Type: AssetType::Material
   - Handle: 6642792134734866962
     FilePath: StreamingTest/Meshes/Tile_54_16.nsmesh
     Type: AssetType::StaticMesh
@@ -58267,6 +58538,14 @@ AssetRegistry:
     Type: AssetType::Material
   - Handle: 6686016177990435025
     FilePath: StreamingTest/Textures/Tile_46_44.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 6686062831441523840
+    FilePath: Models/AnisotropyBarnLamp/AnisotropyBarnLamp_basecolor.ntex
+    SourceFilePath: Models/AnisotropyBarnLamp/AnisotropyBarnLamp_basecolor.ntex
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
@@ -59073,6 +59352,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 6793765045106586783
+    FilePath: Audio/Tall_Grass_Mono_05.wav
+    SourceFilePath: Audio/Tall_Grass_Mono_05.wav
+    Type: AssetType::AudioClip
   - Handle: 6795385430121948752
     FilePath: StreamingTest/Materials/Tile_12_37_Tile_12_37.nmat
     SourceFilePath: StreamingTest/Materials/Tile_12_37_Tile_12_37.nmat
@@ -60919,6 +61202,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7003859127014987454
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sitting_Idle_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sitting_Idle_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 7004405610095083256
     FilePath: StreamingTest/Textures/Tile_55_24.ntex
     Type: AssetType::Texture2D
@@ -61386,6 +61673,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7051714106249955165
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Interact.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Interact.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 7053651194126515784
     FilePath: StreamingTest/Textures/Tile_26_57.ntex
     Type: AssetType::Texture2D
@@ -61434,6 +61725,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7059841942008568622
+    FilePath: StreamingTest/Materials/Tile_19_0_Tile_19_0.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_19_0_Tile_19_0.nmat
+    Type: AssetType::Material
   - Handle: 7061190793003644358
     FilePath: StreamingTest/Meshes/Tile_60_41.nsmesh
     Type: AssetType::StaticMesh
@@ -64310,6 +64605,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 7364685570017297721
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Jump_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Jump_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 7365091877286001691
     FilePath: Models/DispersionTest/Materials/DispersionTest_Mat_IOR_1.50_D2.nmat
     SourceFilePath: Models/DispersionTest/Materials/DispersionTest_Mat_IOR_1.50_D2.nmat
@@ -65647,6 +65946,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7537289373295161367
+    FilePath: Materials/Cube_Cube_Material_Instance_5361172958159612969.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_5361172958159612969.nmat
+    Type: AssetType::Material
+    AudioSettings:
+      AcousticMaterial: Concrete
   - Handle: 7540176027775010903
     FilePath: StreamingTest/Meshes/Tile_22_37.nsmesh
     Type: AssetType::StaticMesh
@@ -66150,6 +66455,18 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7597106681871701893
+    FilePath: StreamingTest/Meshes/Prop_Rock.nsmesh
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: true
+      ImportAnimations: true
+      ImportSkinWeights: true
+      StaticCombine: 0
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 1
   - Handle: 7597247194567627736
     FilePath: StreamingTest/Meshes/Tile_21_79.nsmesh
     Type: AssetType::StaticMesh
@@ -66887,6 +67204,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 7687004529706626963
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_A_TPose.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_A_TPose.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 7687791117537518847
     FilePath: StreamingTest/Meshes/Tile_75_35.nsmesh
     Type: AssetType::StaticMesh
@@ -67227,6 +67548,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7721550169096927268
+    FilePath: Audio/BootsLinoleum_03.wav
+    SourceFilePath: Audio/BootsLinoleum_03.wav
+    Type: AssetType::AudioClip
   - Handle: 7722357582979789013
     FilePath: StreamingTest/Textures/Tile_39_61.ntex
     Type: AssetType::Texture2D
@@ -67535,6 +67860,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7760504335270845442
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Walk_Formal_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Walk_Formal_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 7762174546905746292
     FilePath: StreamingTest/Textures/Tile_23_48.ntex
     Type: AssetType::Texture2D
@@ -70246,6 +70575,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_70_53_Tile_70_53.nmat
     SourceFilePath: StreamingTest/Materials/Tile_70_53_Tile_70_53.nmat
     Type: AssetType::Material
+  - Handle: 8077694431583872970
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Pistol_Aim_Down.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Pistol_Aim_Down.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 8078521851384818112
     FilePath: StreamingTest/Textures/Tile_9_30.ntex
     Type: AssetType::Texture2D
@@ -70603,6 +70936,10 @@ AssetRegistry:
       SourceMeshIndex: 515
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 8121772498988545577
+    FilePath: AnimationGraphs/UAL_Locomotion.nanimgraph
+    SourceFilePath: AnimationGraphs/UAL_Locomotion.nanimgraph
+    Type: AssetType::AnimationGraph
   - Handle: 8124300688789030227
     FilePath: StreamingTest/Meshes/Tile_49_17.nsmesh
     Type: AssetType::StaticMesh
@@ -71380,6 +71717,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 8220242606822255962
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Pistol_Aim_Up.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Pistol_Aim_Up.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 8220493425827005691
     FilePath: StreamingTest/Textures/Tile_34_76.ntex
     Type: AssetType::Texture2D
@@ -72341,6 +72682,10 @@ AssetRegistry:
       SourceMeshIndex: 503
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 8318210918105888814
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Spell_Simple_Idle_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Spell_Simple_Idle_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 8318247744720955611
     FilePath: StreamingTest/Meshes/Tile_72_21.nsmesh
     Type: AssetType::StaticMesh
@@ -73567,6 +73912,12 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_61_23_Tile_61_23.nmat
     SourceFilePath: StreamingTest/Materials/Tile_61_23_Tile_61_23.nmat
     Type: AssetType::Material
+  - Handle: 8443262610442629807
+    FilePath: Materials/Cube_Cube_Material_Instance_7204795744570180972.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_7204795744570180972.nmat
+    Type: AssetType::Material
+    AudioSettings:
+      AcousticMaterial: Concrete
   - Handle: 8444860958034646007
     FilePath: StreamingTest/Meshes/Tile_43_68.nsmesh
     Type: AssetType::StaticMesh
@@ -74228,6 +74579,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 8524003149147490452
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Death01.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Death01.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 8524397429757895659
     FilePath: StreamingDense/Textures/Tile_6_17.ntex
     Type: AssetType::Texture2D
@@ -74263,6 +74618,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 8525417694301654827
+    FilePath: StreamingTest/Materials/Tile_20_0_Tile_20_0.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_20_0_Tile_20_0.nmat
+    Type: AssetType::Material
   - Handle: 8526433349297606089
     FilePath: StreamingTest/Materials/Tile_3_5_Tile_3_5.nmat
     SourceFilePath: StreamingTest/Materials/Tile_3_5_Tile_3_5.nmat
@@ -74442,6 +74801,14 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_66_47_Tile_66_47.nmat
     SourceFilePath: StreamingTest/Materials/Tile_66_47_Tile_66_47.nmat
     Type: AssetType::Material
+  - Handle: 8558624370334829258
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_3.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_3.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 8560074068759713694
     FilePath: StreamingTest/Textures/Tile_77_8.ntex
     Type: AssetType::Texture2D
@@ -75821,6 +76188,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 8706148223232901882
+    FilePath: Models/UAL1_Standard/Materials/UAL1_Standard_M_Joints.nmat
+    SourceFilePath: Models/UAL1_Standard/Materials/UAL1_Standard_M_Joints.nmat
+    Type: AssetType::Material
   - Handle: 8706578861959581531
     FilePath: StreamingDense/Meshes/Tile_12_6.nsmesh
     Type: AssetType::StaticMesh
@@ -75876,6 +76247,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 8712698109988941070
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sitting_Exit.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sitting_Exit.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 8715644654562004824
     FilePath: StreamingTest/Meshes/Tile_45_11.nsmesh
     Type: AssetType::StaticMesh
@@ -76420,6 +76795,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_0000146_Metal_Chrome.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000146_Metal_Chrome.nmat
     Type: AssetType::Material
+  - Handle: 8781448753274361904
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Swim_Idle_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Swim_Idle_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 8782834444084479369
     FilePath: StreamingTest/Textures/Tile_59_0.ntex
     Type: AssetType::Texture2D
@@ -77088,6 +77467,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 8859654841038096912
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Jump_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Jump_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 8860316156024522914
     FilePath: StreamingTest/Meshes/Tile_21_9.nsmesh
     Type: AssetType::StaticMesh
@@ -77656,6 +78039,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 8932079231333945447
+    FilePath: Scenes/NetDemo.nox
+    SourceFilePath: Scenes/NetDemo.nox
+    Type: AssetType::Scene
   - Handle: 8932126438813883946
     FilePath: StreamingTest/Meshes/Tile_61_49.nsmesh
     Type: AssetType::StaticMesh
@@ -78144,6 +78531,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9001175460926990178
+    FilePath: StreamingTest/Materials/Tile_0_17_Tile_0_17.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_0_17_Tile_0_17.nmat
+    Type: AssetType::Material
   - Handle: 9001894304431208857
     FilePath: Models/DispersionTest/Materials/DispersionTest_Mat_IOR_1.50_D1.nmat
     SourceFilePath: Models/DispersionTest/Materials/DispersionTest_Mat_IOR_1.50_D1.nmat
@@ -78691,6 +79082,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9065232913309162434
+    FilePath: Materials/Cube_Cube_Material_Instance_83647600814813923.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_83647600814813923.nmat
+    Type: AssetType::Material
+    AudioSettings:
+      AcousticMaterial: Carpet
   - Handle: 9067055948907715965
     FilePath: StreamingTest/Textures/Tile_14_74.ntex
     Type: AssetType::Texture2D
@@ -79805,6 +80202,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 9192811542566124200
+    FilePath: Materials/Cube_Cube_Material_Instance_9955532239087628733.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_9955532239087628733.nmat
+    Type: AssetType::Material
   - Handle: 9195943216838504792
     FilePath: StreamingTest/Meshes/Tile_53_36.nsmesh
     Type: AssetType::StaticMesh
@@ -80891,6 +81292,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9306725377657302640
+    FilePath: Materials/Lava.nmatgraph
+    SourceFilePath: Materials/Lava.nmatgraph
+    Type: AssetType::MaterialGraph
   - Handle: 9309054436077332542
     FilePath: StreamingTest/Textures/Tile_60_16.ntex
     Type: AssetType::Texture2D
@@ -81371,6 +81776,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9355161461933348592
+    FilePath: Materials/Cube_Cube_Material_Instance_13273064555760152728.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_13273064555760152728.nmat
+    Type: AssetType::Material
+    AudioSettings:
+      AcousticMaterial: Carpet
   - Handle: 9356760571679352334
     FilePath: StreamingTest/Meshes/Tile_0_21.nsmesh
     Type: AssetType::StaticMesh
@@ -81390,6 +81801,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9359561783010261612
+    FilePath: StreamingTest/Materials/Tile_1_19_Tile_1_19.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_1_19_Tile_1_19.nmat
+    Type: AssetType::Material
   - Handle: 9360343936698846470
     FilePath: StreamingTest/Textures/Tile_44_10.ntex
     Type: AssetType::Texture2D
@@ -81474,6 +81889,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 9368780616760444596
+    FilePath: Models/Fox/Meshes/Fox_Survey.nanim
+    SourceFilePath: Models/Fox/Meshes/Fox_Survey.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 9373098398346707054
     FilePath: StreamingTest/Textures/Tile_80_58.ntex
     Type: AssetType::Texture2D
@@ -82568,6 +82987,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9488912155349381407
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Punch_Cross.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Punch_Cross.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 9488973971922608555
     FilePath: StreamingTest/Textures/Tile_32_61.ntex
     Type: AssetType::Texture2D
@@ -83483,6 +83906,12 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_65_51_Tile_65_51.nmat
     SourceFilePath: StreamingTest/Materials/Tile_65_51_Tile_65_51.nmat
     Type: AssetType::Material
+  - Handle: 9585751462555445838
+    FilePath: Materials/Cube_Cube_Material_Instance_1692408418410633127.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_1692408418410633127.nmat
+    Type: AssetType::Material
+    AudioSettings:
+      AcousticMaterial: Carpet
   - Handle: 9586171851664701724
     FilePath: StreamingDense/Textures/Tile_13_0.ntex
     Type: AssetType::Texture2D
@@ -84465,6 +84894,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9696879013605127168
+    FilePath: Prefabs/NetBox.nprefab
+    SourceFilePath: Prefabs/NetBox.nprefab
+    Type: AssetType::Prefab
   - Handle: 9697917256699827672
     FilePath: StreamingTest/Textures/Tile_39_53.ntex
     Type: AssetType::Texture2D
@@ -86371,6 +86804,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9909578589791345884
+    FilePath: Materials/Pyramid_Pyramid_Material.nmat
+    SourceFilePath: Materials/Pyramid_Pyramid_Material.nmat
+    Type: AssetType::Material
   - Handle: 9909657963731598798
     FilePath: StreamingTest/Materials/Tile_0_14_Tile_0_14.nmat
     SourceFilePath: StreamingTest/Materials/Tile_0_14_Tile_0_14.nmat
@@ -87180,6 +87617,19 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10000201986349826000
+    FilePath: Shapes/Plane.nsmesh
+    SourceFilePath: Shapes/Plane.gltf
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: false
+      ImportAnimations: false
+      ImportSkinWeights: true
+      StaticCombine: 2
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 100
   - Handle: 10000577017500270299
     FilePath: StreamingTest/Textures/Tile_51_77.ntex
     Type: AssetType::Texture2D
@@ -87562,6 +88012,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10052227601730646693
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sitting_Enter.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sitting_Enter.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 10053358856888620971
     FilePath: StreamingTest/Meshes/Tile_47_72.nsmesh
     Type: AssetType::StaticMesh
@@ -88009,6 +88463,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10109571564245950902
+    FilePath: Audio/DirtRoad_Mono_03.wav
+    SourceFilePath: Audio/DirtRoad_Mono_03.wav
+    Type: AssetType::AudioClip
   - Handle: 10109586768241892423
     FilePath: StreamingTest/Textures/Tile_5_40.ntex
     Type: AssetType::Texture2D
@@ -89037,6 +89495,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10234707887340862825
+    FilePath: Prefabs/NetBot.nprefab
+    SourceFilePath: Prefabs/NetBot.nprefab
+    Type: AssetType::Prefab
   - Handle: 10234998603693237271
     FilePath: StreamingTest/Materials/Tile_62_26_Tile_62_26.nmat
     SourceFilePath: StreamingTest/Materials/Tile_62_26_Tile_62_26.nmat
@@ -89613,6 +90075,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 10296353264590798881
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Push_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Push_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 10299461539504668004
     FilePath: StreamingTest/Materials/Tile_57_62_Tile_57_62.nmat
     SourceFilePath: StreamingTest/Materials/Tile_57_62_Tile_57_62.nmat
@@ -90780,6 +91246,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10429624435689511844
+    FilePath: StreamingTest/Materials/Tile_2_20_Tile_2_20.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_2_20_Tile_2_20.nmat
+    Type: AssetType::Material
   - Handle: 10431432462050337097
     FilePath: StreamingTest/Meshes/Tile_75_59.nsmesh
     Type: AssetType::StaticMesh
@@ -90951,6 +91421,19 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10448199616700934988
+    FilePath: Models/Fox/Meshes/Fox.nmesh
+    SourceFilePath: Models/Fox/Fox.gltf
+    Type: AssetType::Mesh
+    MeshSettings:
+      ImportStaticMeshes: false
+      ImportSkeletalMeshes: true
+      ImportAnimations: true
+      ImportSkinWeights: true
+      StaticCombine: 0
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 100
   - Handle: 10449140786852434296
     FilePath: StreamingTest/Textures/Tile_71_54.ntex
     Type: AssetType::Texture2D
@@ -92267,6 +92750,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 10612637786571893684
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Jump_Start.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Jump_Start.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 10613835307525360682
     FilePath: StreamingTest/Textures/Tile_64_37.ntex
     Type: AssetType::Texture2D
@@ -93932,6 +94419,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_70_34_Tile_70_34.nmat
     SourceFilePath: StreamingTest/Materials/Tile_70_34_Tile_70_34.nmat
     Type: AssetType::Material
+  - Handle: 10828316312569213535
+    FilePath: StreamingTest/Materials/Tile_20_3_Tile_20_3.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_20_3_Tile_20_3.nmat
+    Type: AssetType::Material
   - Handle: 10829338687169770610
     FilePath: StreamingTest/Materials/Tile_25_22_Tile_25_22.nmat
     SourceFilePath: StreamingTest/Materials/Tile_25_22_Tile_25_22.nmat
@@ -94173,6 +94664,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_47_13_Tile_47_13.nmat
     SourceFilePath: StreamingTest/Materials/Tile_47_13_Tile_47_13.nmat
     Type: AssetType::Material
+  - Handle: 10854508503715685070
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Hit_Head.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Hit_Head.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 10854675085029344744
     FilePath: StreamingTest/Textures/Tile_40_15.ntex
     Type: AssetType::Texture2D
@@ -94745,6 +95240,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 10920392214318000621
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Spell_Simple_Enter.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Spell_Simple_Enter.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 10920639119017045947
     FilePath: StreamingTest/Meshes/Tile_19_34.nsmesh
     Type: AssetType::StaticMesh
@@ -94769,6 +95268,19 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10922256994577822127
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM.nmesh
+    SourceFilePath: Models/UAL1_Standard_RM/UAL1_Standard_RM.glb
+    Type: AssetType::Mesh
+    MeshSettings:
+      ImportStaticMeshes: false
+      ImportSkeletalMeshes: true
+      ImportAnimations: true
+      ImportSkinWeights: true
+      StaticCombine: 0
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 100
   - Handle: 10922551721754739255
     FilePath: StreamingTest/Materials/Tile_12_28_Tile_12_28.nmat
     SourceFilePath: StreamingTest/Materials/Tile_12_28_Tile_12_28.nmat
@@ -94870,6 +95382,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10933838558994229795
+    FilePath: StreamingTest/Materials/Tile_3_20_Tile_3_20.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_3_20_Tile_3_20.nmat
+    Type: AssetType::Material
   - Handle: 10939179360440753987
     FilePath: Models/bistro/Meshes/subset_1_36.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -95342,6 +95858,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10983504312762894336
+    FilePath: Audio/DirtRoad_Mono_01.wav
+    SourceFilePath: Audio/DirtRoad_Mono_01.wav
+    Type: AssetType::AudioClip
   - Handle: 10983668738248198672
     FilePath: StreamingTest/Meshes/Tile_81_26.nsmesh
     Type: AssetType::StaticMesh
@@ -95696,6 +96216,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 11023924918684422222
+    FilePath: StreamingTest/Materials/Prop_Pine_Prop_Pine.nmat
+    SourceFilePath: StreamingTest/Materials/Prop_Pine_Prop_Pine.nmat
+    Type: AssetType::Material
   - Handle: 11024600078783461651
     FilePath: StreamingTest/Meshes/Tile_31_46.nsmesh
     Type: AssetType::StaticMesh
@@ -95712,6 +96236,19 @@ AssetRegistry:
     FilePath: StreamingDense/Materials/Tile_2_8_Tile_2_8.nmat
     SourceFilePath: StreamingDense/Materials/Tile_2_8_Tile_2_8.nmat
     Type: AssetType::Material
+  - Handle: 11025342519802008604
+    FilePath: Shapes/Cube.nsmesh
+    SourceFilePath: Shapes/Cube.gltf
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: false
+      ImportAnimations: false
+      ImportSkinWeights: true
+      StaticCombine: 2
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 100
   - Handle: 11026203907669590488
     FilePath: StreamingTest/Meshes/Tile_29_61.nsmesh
     Type: AssetType::StaticMesh
@@ -96897,6 +97434,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 11162818010133260826
+    FilePath: Audio/Wind.naudiograph
+    SourceFilePath: Audio/Wind.naudiograph
+    Type: AssetType::AudioGraph
+    FormerPaths:
+      - Audio/NewAudioGraph.naudiograph
   - Handle: 11162837575633055357
     FilePath: StreamingTest/Materials/Tile_68_28_Tile_68_28.nmat
     SourceFilePath: StreamingTest/Materials/Tile_68_28_Tile_68_28.nmat
@@ -97571,6 +98114,19 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 11246735619916862008
+    FilePath: Shapes/Pyramid.nsmesh
+    SourceFilePath: Shapes/Pyramid.gltf
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: false
+      ImportAnimations: false
+      ImportSkinWeights: true
+      StaticCombine: 2
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 100
   - Handle: 11246783028944042926
     FilePath: StreamingTest/Textures/Tile_19_3.ntex
     Type: AssetType::Texture2D
@@ -98363,6 +98919,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 11326743626334736882
+    FilePath: Audio/BootsLinoleum_01.wav
+    SourceFilePath: Audio/BootsLinoleum_01.wav
+    Type: AssetType::AudioClip
   - Handle: 11327702445904935852
     FilePath: Models/bistro/Meshes/subset_11_543.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -100854,6 +101414,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 11619329745004147920
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Push_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Push_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 11619518841029646810
     FilePath: Models/DispersionTest/Materials/DispersionTest_Mat_IOR_2.42_D3.nmat
     SourceFilePath: Models/DispersionTest/Materials/DispersionTest_Mat_IOR_2.42_D3.nmat
@@ -100909,6 +101473,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 11628974903233506074
+    FilePath: StreamingTest/Materials/Tile_0_20_Tile_0_20.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_0_20_Tile_0_20.nmat
+    Type: AssetType::Material
   - Handle: 11629459737526107363
     FilePath: StreamingTest/Materials/Tile_69_25_Tile_69_25.nmat
     SourceFilePath: StreamingTest/Materials/Tile_69_25_Tile_69_25.nmat
@@ -100946,6 +101514,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 11635699620333085038
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Jog_Fwd_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Jog_Fwd_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 11636980564303493281
     FilePath: StreamingTest/Meshes/Tile_34_30.nsmesh
     Type: AssetType::StaticMesh
@@ -101163,6 +101735,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 11656635678102930937
+    FilePath: Audio/longstream.naudiograph
+    SourceFilePath: Audio/longstream.naudiograph
+    Type: AssetType::AudioGraph
   - Handle: 11657104369238003049
     FilePath: Models/bistro/Meshes/subset_11_206.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -102572,6 +103148,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00000dc_Plastic_Dark.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000dc_Plastic_Dark.nmat
     Type: AssetType::Material
+  - Handle: 11815318348787089234
+    FilePath: Audio/Mixer.nmixer
+    SourceFilePath: Audio/Mixer.nmixer
+    Type: AssetType::AudioMixer
   - Handle: 11815957547855528210
     FilePath: StreamingTest/Textures/Tile_29_48.ntex
     Type: AssetType::Texture2D
@@ -102897,6 +103477,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 11852979490891293779
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Hit_Head.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Hit_Head.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 11854248889923624190
     FilePath: StreamingTest/Meshes/Tile_22_30.nsmesh
     Type: AssetType::StaticMesh
@@ -102909,6 +103493,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 11854772638464698094
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Idle_Torch_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Idle_Torch_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 11856133103136739393
     FilePath: StreamingTest/Textures/Tile_29_22.ntex
     Type: AssetType::Texture2D
@@ -103057,6 +103645,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 11868145173765257170
+    FilePath: Audio/Footsteps_Dirt.naudiograph
+    SourceFilePath: Audio/Footsteps_Dirt.naudiograph
+    Type: AssetType::AudioGraph
+    FormerPaths:
+      - Audio/Footsteps Copy.naudiograph
   - Handle: 11868658758469339799
     FilePath: StreamingTest/Materials/Tile_53_15_Tile_53_15.nmat
     SourceFilePath: StreamingTest/Materials/Tile_53_15_Tile_53_15.nmat
@@ -105016,6 +105610,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 12121957805438806790
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Pistol_Idle_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Pistol_Idle_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 12123042174792103129
     FilePath: Models/bistro/Materials/bistro_LMBR_000010d_Paris_LiquorBottle_01_Glass.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000010d_Paris_LiquorBottle_01_Glass.nmat
@@ -105617,6 +106215,14 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 12182791640123103237
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_1.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_1.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 12183128515242586075
     FilePath: StreamingTest/Textures/Tile_52_21.ntex
     Type: AssetType::Texture2D
@@ -106151,6 +106757,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 12248800676554763683
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sitting_Exit.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sitting_Exit.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 12249141952916943629
     FilePath: StreamingTest/Meshes/Tile_33_6.nsmesh
     Type: AssetType::StaticMesh
@@ -107515,6 +108125,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_66_33_Tile_66_33.nmat
     SourceFilePath: StreamingTest/Materials/Tile_66_33_Tile_66_33.nmat
     Type: AssetType::Material
+  - Handle: 12399819960723620983
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Pistol_Aim_Up.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Pistol_Aim_Up.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 12400457556229592078
     FilePath: StreamingTest/Meshes/Tile_39_25.nsmesh
     Type: AssetType::StaticMesh
@@ -107593,6 +108207,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 12407922997516175907
+    FilePath: Materials/Cube_Cube_Material.nmat
+    SourceFilePath: Materials/Cube_Cube_Material.nmat
+    Type: AssetType::Material
   - Handle: 12408507461644260173
     FilePath: StreamingTest/Materials/Tile_14_40_Tile_14_40.nmat
     SourceFilePath: StreamingTest/Materials/Tile_14_40_Tile_14_40.nmat
@@ -107962,6 +108580,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 12445368221791120952
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Pistol_Reload.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Pistol_Reload.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 12445674293675019450
     FilePath: StreamingDense/Materials/Tile_14_9_Tile_14_9.nmat
     SourceFilePath: StreamingDense/Materials/Tile_14_9_Tile_14_9.nmat
@@ -108634,6 +109256,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 12518484509580640309
+    FilePath: StreamingTest/Materials/Tile_19_1_Tile_19_1.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_19_1_Tile_19_1.nmat
+    Type: AssetType::Material
   - Handle: 12518636441625401916
     FilePath: StreamingTest/Meshes/Tile_8_29.nsmesh
     Type: AssetType::StaticMesh
@@ -109571,6 +110197,15 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 12630146478902769933
+    FilePath: Audio/BootsLinoleum_05.wav
+    SourceFilePath: Audio/BootsLinoleum_05.wav
+    Type: AssetType::AudioClip
+    AudioSettings:
+      Priority: 1
+      MaxCount: 3
+      ConcurrencyRule: StopQuietest
+      RetriggerTime: 0
   - Handle: 12630870222760134888
     FilePath: StreamingTest/Meshes/Tile_56_78.nsmesh
     Type: AssetType::StaticMesh
@@ -111067,6 +111702,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 12810051207279138061
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Death01.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Death01.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 12810327565588174997
     FilePath: StreamingTest/Textures/Tile_63_1.ntex
     Type: AssetType::Texture2D
@@ -112783,6 +113422,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 13016562707534060570
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_PickUp_Table.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_PickUp_Table.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 13016582020761664256
     FilePath: StreamingTest/Meshes/Tile_66_4.nsmesh
     Type: AssetType::StaticMesh
@@ -113346,6 +113989,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 13081658588790167395
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Spell_Simple_Shoot.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Spell_Simple_Shoot.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 13083428345281759864
     FilePath: StreamingTest/Textures/Tile_30_78.ntex
     Type: AssetType::Texture2D
@@ -115329,6 +115976,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 13314156535311529067
+    FilePath: Audio/Outer.naudiograph
+    SourceFilePath: Audio/Outer.naudiograph
+    Type: AssetType::AudioGraph
   - Handle: 13316540607560217945
     FilePath: StreamingTest/Materials/Tile_68_35_Tile_68_35.nmat
     SourceFilePath: StreamingTest/Materials/Tile_68_35_Tile_68_35.nmat
@@ -116091,6 +116742,10 @@ AssetRegistry:
       SourceMeshIndex: 268
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 13403424564370929091
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Jump_Land.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Jump_Land.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 13404042252381412343
     FilePath: Models/SheenChair/Textures/SheenChair_tex_4.ntex
     SourceFilePath: Models/SheenChair/Textures/SheenChair_tex_4.png
@@ -116746,6 +117401,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_56_12_Tile_56_12.nmat
     SourceFilePath: StreamingTest/Materials/Tile_56_12_Tile_56_12.nmat
     Type: AssetType::Material
+  - Handle: 13481115598889320892
+    FilePath: Acoustics/AudioTest/Probes_7852954056511796451.nacoustics
+    SourceFilePath: Acoustics/AudioTest/Probes_7852954056511796451.nacoustics
+    Type: AssetType::AcousticData
   - Handle: 13481714178601672303
     FilePath: StreamingTest/Textures/Tile_49_42.ntex
     Type: AssetType::Texture2D
@@ -116894,6 +117553,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 13494449869861910650
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Dance_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Dance_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 13495318044178065919
     FilePath: StreamingTest/Textures/Tile_62_51.ntex
     Type: AssetType::Texture2D
@@ -117104,6 +117767,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 13525738522753829183
+    FilePath: Materials/Cone_Cone_Material.nmat
+    SourceFilePath: Materials/Cone_Cone_Material.nmat
+    Type: AssetType::Material
   - Handle: 13525916556338075114
     FilePath: StreamingTest/Materials/Tile_65_35_Tile_65_35.nmat
     SourceFilePath: StreamingTest/Materials/Tile_65_35_Tile_65_35.nmat
@@ -117377,6 +118044,10 @@ AssetRegistry:
     FilePath: StreamingDense/Materials/Tile_1_17_Tile_1_17.nmat
     SourceFilePath: StreamingDense/Materials/Tile_1_17_Tile_1_17.nmat
     Type: AssetType::Material
+  - Handle: 13568203118922407391
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Spell_Simple_Shoot.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Spell_Simple_Shoot.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 13568322244142238818
     FilePath: StreamingTest/Meshes/Tile_77_18.nsmesh
     Type: AssetType::StaticMesh
@@ -118112,6 +118783,14 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_24_67_Tile_24_67.nmat
     SourceFilePath: StreamingTest/Materials/Tile_24_67_Tile_24_67.nmat
     Type: AssetType::Material
+  - Handle: 13652367939659553715
+    FilePath: Models/AnisotropyBarnLamp/AnisotropyBarnLamp_occlusionroughnessmetal.ntex
+    SourceFilePath: Models/AnisotropyBarnLamp/AnisotropyBarnLamp_occlusionroughnessmetal.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 13652438653540980187
     FilePath: StreamingTest/Meshes/Tile_64_43.nsmesh
     Type: AssetType::StaticMesh
@@ -118334,6 +119013,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 13690386603198960500
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_PickUp_Table.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_PickUp_Table.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 13690402982498205551
     FilePath: StreamingTest/Textures/Tile_65_38.ntex
     Type: AssetType::Texture2D
@@ -118645,6 +119328,10 @@ AssetRegistry:
   - Handle: 13732471545536240731
     FilePath: StreamingTest/Materials/Tile_56_13_Tile_56_13.nmat
     SourceFilePath: StreamingTest/Materials/Tile_56_13_Tile_56_13.nmat
+    Type: AssetType::Material
+  - Handle: 13732755347937945924
+    FilePath: Models/Fox/Materials/Fox_fox_material.nmat
+    SourceFilePath: Models/Fox/Materials/Fox_fox_material.nmat
     Type: AssetType::Material
   - Handle: 13734008278461172452
     FilePath: StreamingTest/Meshes/Tile_33_45.nsmesh
@@ -119351,6 +120038,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 13821916934525364871
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Spell_Simple_Idle_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Spell_Simple_Idle_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 13823067692642265484
     FilePath: StreamingTest/Meshes/Tile_13_20.nsmesh
     Type: AssetType::StaticMesh
@@ -119979,6 +120670,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 13883068304259869370
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Jump_Start.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Jump_Start.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 13883693208933554181
     FilePath: StreamingTest/Textures/Tile_5_20.ntex
     Type: AssetType::Texture2D
@@ -120002,6 +120697,12 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 13888252342970357495
+    FilePath: Materials/Cube_Cube_Material_Instance_14651696712892980676.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_14651696712892980676.nmat
+    Type: AssetType::Material
+    AudioSettings:
+      AcousticMaterial: Carpet
   - Handle: 13888481369927666602
     FilePath: StreamingTest/Materials/Tile_72_39_Tile_72_39.nmat
     SourceFilePath: StreamingTest/Materials/Tile_72_39_Tile_72_39.nmat
@@ -120213,6 +120914,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 13912877330872926135
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Interact.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Interact.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 13913709171666350863
     FilePath: StreamingTest/Meshes/Tile_20_33.nsmesh
     Type: AssetType::StaticMesh
@@ -121473,6 +122178,18 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 14043808205525645100
+    FilePath: StreamingTest/Meshes/Prop_Pine.nsmesh
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: true
+      ImportAnimations: true
+      ImportSkinWeights: true
+      StaticCombine: 0
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 1
   - Handle: 14043845197789600251
     FilePath: StreamingTest/Textures/Tile_41_77.ntex
     Type: AssetType::Texture2D
@@ -121821,6 +122538,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 14085878340097546032
+    FilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
+    SourceFilePath: Models/DamagedHelmet/Materials/DamagedHelmet_Material_MR.nmat
+    Type: AssetType::Material
   - Handle: 14086173218051458817
     FilePath: StreamingTest/Meshes/Tile_45_14.nsmesh
     Type: AssetType::StaticMesh
@@ -122500,6 +123221,20 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 14164356874926710674
+    FilePath: Models/DamagedHelmet/Meshes/mesh_helmet_LP_13930damagedHelmet.nsmesh
+    SourceFilePath: Models/DamagedHelmet/DamagedHelmet.gltf
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: false
+      ImportAnimations: false
+      ImportSkinWeights: true
+      StaticCombine: 0
+      SkeletalCombine: 0
+      SourceMeshIndex: 0
+      ImportScale: 100
+      MaterialBasePath: Models/DamagedHelmet/Meshes/DamagedHelmet.nsmesh
   - Handle: 14164844563735770835
     FilePath: StreamingTest/Textures/Tile_34_66.ntex
     Type: AssetType::Texture2D
@@ -122740,6 +123475,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 14188430732833498067
+    FilePath: StreamingTest/Materials/Prop_Rock_Prop_Rock.nmat
+    SourceFilePath: StreamingTest/Materials/Prop_Rock_Prop_Rock.nmat
+    Type: AssetType::Material
   - Handle: 14188443921730358188
     FilePath: StreamingTest/Textures/Tile_29_4.ntex
     Type: AssetType::Texture2D
@@ -123060,6 +123799,12 @@ AssetRegistry:
     FilePath: StreamingDense/Materials/Tile_4_5_Tile_4_5.nmat
     SourceFilePath: StreamingDense/Materials/Tile_4_5_Tile_4_5.nmat
     Type: AssetType::Material
+  - Handle: 14223814416384582365
+    FilePath: Materials/Cube_Cube_Material_Instance_11897715842609412813.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_11897715842609412813.nmat
+    Type: AssetType::Material
+    AudioSettings:
+      AcousticMaterial: Carpet
   - Handle: 14224152967798008491
     FilePath: StreamingTest/Textures/Tile_41_8.ntex
     Type: AssetType::Texture2D
@@ -124307,6 +125052,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 14366097419048031753
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sword_Attack.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sword_Attack.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 14366314003443607409
     FilePath: StreamingTest/Textures/Tile_24_39.ntex
     Type: AssetType::Texture2D
@@ -125070,6 +125819,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 14457107092600271152
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sword_Attack.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sword_Attack.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 14457478604024994146
     FilePath: StreamingTest/Textures/Tile_60_78.ntex
     Type: AssetType::Texture2D
@@ -126699,6 +127452,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 14668738973275679137
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Crouch_Fwd_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Crouch_Fwd_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 14668818600425875481
     FilePath: StreamingTest/Meshes/Tile_46_63.nsmesh
     Type: AssetType::StaticMesh
@@ -128234,6 +128991,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 14834222627070017853
+    FilePath: Models/Fox/Meshes/Fox.nskel
+    SourceFilePath: Models/Fox/Meshes/Fox.nskel
+    Type: AssetType::Skeleton
   - Handle: 14834325295429160460
     FilePath: Models/bistro/Meshes/subset_1_56.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -128251,6 +129012,10 @@ AssetRegistry:
   - Handle: 14834348115945849778
     FilePath: Models/bistro/Materials/bistro_LMBR_0000046_Metal.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_0000046_Metal.nmat
+    Type: AssetType::Material
+  - Handle: 14834474351739990312
+    FilePath: Materials/Plane_Plane_Material.nmat
+    SourceFilePath: Materials/Plane_Plane_Material.nmat
     Type: AssetType::Material
   - Handle: 14836847340580824095
     FilePath: StreamingTest/Meshes/Tile_42_17.nsmesh
@@ -128316,6 +129081,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 14848183037212325616
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Pistol_Shoot.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Pistol_Shoot.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 14848405652801710039
     FilePath: StreamingTest/Materials/Tile_70_31_Tile_70_31.nmat
     SourceFilePath: StreamingTest/Materials/Tile_70_31_Tile_70_31.nmat
@@ -129073,6 +129842,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_9_51_Tile_9_51.nmat
     SourceFilePath: StreamingTest/Materials/Tile_9_51_Tile_9_51.nmat
     Type: AssetType::Material
+  - Handle: 14934744449865830001
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Walk_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Walk_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 14936823713502434786
     FilePath: StreamingTest/Textures/Tile_71_59.ntex
     Type: AssetType::Texture2D
@@ -129477,6 +130250,14 @@ AssetRegistry:
     Type: AssetType::Material
   - Handle: 14982079475549449599
     FilePath: StreamingTest/Textures/Tile_61_81.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 14983798456995386657
+    FilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_0.ntex
+    SourceFilePath: Models/DamagedHelmet/Textures/DamagedHelmet_tex_0.png
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
@@ -131052,14 +131833,6 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
-  - Handle: 15149521379257772189
-    FilePath: Materials/TH_Wood_Table_mtlx/Textures/TH_Wood_Table_MetallicRoughness.ntex
-    SourceFilePath: Materials/TH_Wood_Table_mtlx/Textures/TH_Wood_Table_MetallicRoughness.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
   - Handle: 15149708527369732445
     FilePath: StreamingDense/Textures/Tile_15_12.ntex
     Type: AssetType::Texture2D
@@ -132063,10 +132836,18 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 15245678356820889349
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Idle_Torch_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Idle_Torch_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 15249144008430453001
     FilePath: StreamingTest/Materials/Tile_14_6_Tile_14_6.nmat
     SourceFilePath: StreamingTest/Materials/Tile_14_6_Tile_14_6.nmat
     Type: AssetType::Material
+  - Handle: 15250971069302366260
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Pistol_Aim_Neutral.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Pistol_Aim_Neutral.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 15251773617872737262
     FilePath: StreamingTest/Meshes/Tile_10_32.nsmesh
     Type: AssetType::StaticMesh
@@ -132195,6 +132976,14 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 15269137354669674032
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Idle_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Idle_Loop.nanim
+    Type: AssetType::AnimationSequence
+  - Handle: 15269599811345954969
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sprint_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sprint_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 15269691453247660602
     FilePath: StreamingTest/Materials/Tile_61_59_Tile_61_59.nmat
     SourceFilePath: StreamingTest/Materials/Tile_61_59_Tile_61_59.nmat
@@ -133393,6 +134182,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 15406735325392421545
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Pistol_Idle_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Pistol_Idle_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 15407544937244863589
     FilePath: StreamingTest/Meshes/Tile_24_24.nsmesh
     Type: AssetType::StaticMesh
@@ -133571,6 +134364,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 15428778852574149530
+    FilePath: Audio/Footsteps.naudiograph
+    SourceFilePath: Audio/Footsteps.naudiograph
+    Type: AssetType::AudioGraph
   - Handle: 15429647277898169891
     FilePath: StreamingTest/Textures/Tile_29_24.ntex
     Type: AssetType::Texture2D
@@ -134284,6 +135081,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 15505680380422734833
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sitting_Talking_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Sitting_Talking_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 15507354695580258820
     FilePath: StreamingTest/Meshes/Tile_52_28.nsmesh
     Type: AssetType::StaticMesh
@@ -134545,6 +135346,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 15539553627429648708
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Crouch_Fwd_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Crouch_Fwd_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 15539939883631790360
     FilePath: StreamingTest/Materials/Tile_15_18_Tile_15_18.nmat
     SourceFilePath: StreamingTest/Materials/Tile_15_18_Tile_15_18.nmat
@@ -135488,6 +136293,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 15639641613644743261
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Idle_Talking_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Idle_Talking_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 15640139942907014356
     FilePath: StreamingTest/Textures/Tile_42_36.ntex
     Type: AssetType::Texture2D
@@ -136157,6 +136966,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_23_22_Tile_23_22.nmat
     SourceFilePath: StreamingTest/Materials/Tile_23_22_Tile_23_22.nmat
     Type: AssetType::Material
+  - Handle: 15730891953030608254
+    FilePath: Audio/BootsLinoleum_04.wav
+    SourceFilePath: Audio/BootsLinoleum_04.wav
+    Type: AssetType::AudioClip
   - Handle: 15733279926614230464
     FilePath: StreamingTest/Textures/Tile_28_62.ntex
     Type: AssetType::Texture2D
@@ -136913,6 +137726,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 15793823495927804249
+    FilePath: Materials/GlossyRed.nmat
+    SourceFilePath: Materials/GlossyRed.nmat
+    Type: AssetType::Material
   - Handle: 15794130635092351440
     FilePath: StreamingTest/Meshes/Tile_61_4.nsmesh
     Type: AssetType::StaticMesh
@@ -138263,15 +139080,6 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
-  - Handle: 15953952887801798348
-    FilePath: Materials/TH_Wood_Table_mtlx/Textures/TH_Wood_Table_Normal.ntex
-    SourceFilePath: Materials/TH_Wood_Table_mtlx/Textures/TH_Wood_Table_Normal.png
-    Type: AssetType::Texture2D
-    TextureSpec:
-      Format: RGBA8
-      GenerateMips: true
-      Flip: false
-      Compression: Normalmap
   - Handle: 15954522488817492581
     FilePath: StreamingTest/Meshes/Tile_78_10.nsmesh
     Type: AssetType::StaticMesh
@@ -139251,6 +140059,10 @@ AssetRegistry:
       SourceMeshIndex: 412
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 16078260544251109742
+    FilePath: Scenes/AudioTest.nox
+    SourceFilePath: Scenes/AudioTest.nox
+    Type: AssetType::Scene
   - Handle: 16079262820099743738
     FilePath: StreamingTest/Meshes/Tile_60_59.nsmesh
     Type: AssetType::StaticMesh
@@ -139454,6 +140266,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 16090925499724139676
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sitting_Talking_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sitting_Talking_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 16092180286687158597
     FilePath: StreamingTest/Meshes/Tile_80_21.nsmesh
     Type: AssetType::StaticMesh
@@ -140403,6 +141219,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 16205452759093178743
+    FilePath: StreamingTest/Materials/Tile_20_1_Tile_20_1.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_20_1_Tile_20_1.nmat
+    Type: AssetType::Material
   - Handle: 16206729677326634948
     FilePath: StreamingTest/Meshes/Tile_0_38.nsmesh
     Type: AssetType::StaticMesh
@@ -141623,6 +142443,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 16364045512563114325
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Swim_Idle_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Swim_Idle_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 16367484964306641837
     FilePath: StreamingTest/Meshes/Tile_54_18.nsmesh
     Type: AssetType::StaticMesh
@@ -142863,6 +143687,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 16499354868330585942
+    FilePath: Audio/DirtRoad_Mono_05.wav
+    SourceFilePath: Audio/DirtRoad_Mono_05.wav
+    Type: AssetType::AudioClip
   - Handle: 16501698367771499909
     FilePath: StreamingTest/Textures/Tile_2_72.ntex
     Type: AssetType::Texture2D
@@ -142925,6 +143753,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 16507523730877177931
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM.nskel
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM.nskel
+    Type: AssetType::Skeleton
   - Handle: 16508146225221545820
     FilePath: StreamingTest/Textures/Tile_10_27.ntex
     Type: AssetType::Texture2D
@@ -143113,6 +143945,23 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 16531713622870338582
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard.nmesh
+    SourceFilePath: Models/UAL1_Standard/UAL1_Standard.glb
+    Type: AssetType::Mesh
+    MeshSettings:
+      ImportStaticMeshes: false
+      ImportSkeletalMeshes: true
+      ImportAnimations: true
+      ImportSkinWeights: true
+      StaticCombine: 0
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 100
+  - Handle: 16532310745899745280
+    FilePath: Prefabs/NetPlayerAnimated.nprefab
+    SourceFilePath: Prefabs/NetPlayerAnimated.nprefab
+    Type: AssetType::Prefab
   - Handle: 16533884348715218436
     FilePath: StreamingTest/Textures/Tile_34_50.ntex
     Type: AssetType::Texture2D
@@ -145647,6 +146496,18 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_0_11_Tile_0_11.nmat
     SourceFilePath: StreamingTest/Materials/Tile_0_11_Tile_0_11.nmat
     Type: AssetType::Material
+  - Handle: 16798742095852653845
+    FilePath: StreamingTest/Meshes/Prop_Stump.nsmesh
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: true
+      ImportAnimations: true
+      ImportSkinWeights: true
+      StaticCombine: 0
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 1
   - Handle: 16799025142884880804
     FilePath: StreamingTest/Meshes/Tile_22_8.nsmesh
     Type: AssetType::StaticMesh
@@ -145731,6 +146592,13 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 16813226047600153215
+    FilePath: Shaders/MyToon2.slang
+    SourceFilePath: Shaders/MyToon2.slang
+    Type: AssetType::MaterialShader
+    FormerPaths:
+      - Shaders/NewMaterialShader.slang
+      - Shaders/MyToon.slang
   - Handle: 16815999887422198543
     FilePath: StreamingTest/Meshes/Tile_18_59.nsmesh
     Type: AssetType::StaticMesh
@@ -150544,6 +151412,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_14_7_Tile_14_7.nmat
     SourceFilePath: StreamingTest/Materials/Tile_14_7_Tile_14_7.nmat
     Type: AssetType::Material
+  - Handle: 17333559182926511727
+    FilePath: StreamingTest/Materials/Tile_20_2_Tile_20_2.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_20_2_Tile_20_2.nmat
+    Type: AssetType::Material
   - Handle: 17335021131541305896
     FilePath: StreamingTest/Textures/Tile_0_6.ntex
     Type: AssetType::Texture2D
@@ -151094,6 +151966,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_23_61_Tile_23_61.nmat
     SourceFilePath: StreamingTest/Materials/Tile_23_61_Tile_23_61.nmat
     Type: AssetType::Material
+  - Handle: 17392838601863192000
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Spell_Simple_Exit.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Spell_Simple_Exit.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 17394048223652211006
     FilePath: StreamingTest/Textures/Tile_41_44.ntex
     Type: AssetType::Texture2D
@@ -152435,6 +153311,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_63_28_Tile_63_28.nmat
     SourceFilePath: StreamingTest/Materials/Tile_63_28_Tile_63_28.nmat
     Type: AssetType::Material
+  - Handle: 17544422995592476383
+    FilePath: StreamingTest/Materials/Prop_Stump_Prop_Stump.nmat
+    SourceFilePath: StreamingTest/Materials/Prop_Stump_Prop_Stump.nmat
+    Type: AssetType::Material
   - Handle: 17544987528500195946
     FilePath: StreamingTest/Textures/Tile_68_31.ntex
     Type: AssetType::Texture2D
@@ -153201,6 +154081,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 17644891489966042489
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_A_TPose.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_A_TPose.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 17645429900622096150
     FilePath: StreamingTest/Textures/Tile_62_48.ntex
     Type: AssetType::Texture2D
@@ -153408,6 +154292,19 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 17674066163854617595
+    FilePath: Shapes/Cone.nsmesh
+    SourceFilePath: Shapes/Cone.gltf
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: false
+      ImportAnimations: false
+      ImportSkinWeights: true
+      StaticCombine: 2
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 100
   - Handle: 17674629072659009017
     FilePath: StreamingTest/Meshes/Tile_14_16.nsmesh
     Type: AssetType::StaticMesh
@@ -153439,6 +154336,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 17677813461565045520
+    FilePath: Scenes/Main.nox
+    SourceFilePath: Scenes/Main.nox
+    Type: AssetType::Scene
   - Handle: 17677871282978746426
     FilePath: StreamingTest/Textures/Tile_78_68.ntex
     Type: AssetType::Texture2D
@@ -154281,6 +155182,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 17767198172869100787
+    FilePath: StreamingTest/Materials/Tile_0_19_Tile_0_19.nmat
+    SourceFilePath: StreamingTest/Materials/Tile_0_19_Tile_0_19.nmat
+    Type: AssetType::Material
   - Handle: 17767870629277897005
     FilePath: StreamingTest/Textures/Tile_37_79.ntex
     Type: AssetType::Texture2D
@@ -155078,6 +155983,14 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 17864553427982850230
+    FilePath: Models/Fox/Textures/Texture.ntex
+    SourceFilePath: Models/Fox/Texture.png
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 17864856775677122822
     FilePath: StreamingTest/Meshes/Tile_73_0.nsmesh
     Type: AssetType::StaticMesh
@@ -155646,6 +156559,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 17922068077971637749
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Pistol_Reload.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Pistol_Reload.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 17922181372358949119
     FilePath: StreamingTest/Meshes/Tile_13_71.nsmesh
     Type: AssetType::StaticMesh
@@ -155789,6 +156706,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 17933732229284926392
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Hit_Chest.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Hit_Chest.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 17933775951499170207
     FilePath: StreamingTest/Textures/Tile_79_8.ntex
     Type: AssetType::Texture2D
@@ -156425,6 +157346,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 18006193454448579167
+    FilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sitting_Idle_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard_RM/Meshes/UAL1_Standard_RM_Sitting_Idle_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 18007895445185850788
     FilePath: StreamingTest/Textures/Tile_66_0.ntex
     Type: AssetType::Texture2D
@@ -157246,6 +158171,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 18108718255215356240
+    FilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Swim_Fwd_Loop.nanim
+    SourceFilePath: Models/UAL1_Standard/Meshes/UAL1_Standard_Swim_Fwd_Loop.nanim
+    Type: AssetType::AnimationSequence
   - Handle: 18111611294127021480
     FilePath: StreamingTest/Meshes/Tile_50_50.nsmesh
     Type: AssetType::StaticMesh

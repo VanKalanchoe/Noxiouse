@@ -1,0 +1,1456 @@
+[21:06:44] NOX: Application Start
+[21:06:44] NOX: JobSystem: 15 frame workers, 15 background workers (low priority, 12 for Background jobs), 2 IO workers
+[21:06:44] NOX: Steam Audio 4.8.1: HRTF, occlusion, transmission, reflections, baked reverb and pathing on
+[21:06:44] NOX: Audio: System (Elgato Virtual Audio) at 48000 Hz, 480-frame periods, 256-frame blocks (5.3 ms)
+[21:06:45] NOX: Renderer Start
+[21:06:45] NOX: [Streamline] [21-06-45][streamline][info][tid:21296][0s:424ms:401us]ota.cpp:242[invokeNGXUpdater] Invoking NGX Updater: C:\WINDOWS\System32\DriverStore\FileRepository\nv_dispig.inf_amd64_cc526ccc3287f5cd\nvngx_update.exe -cmsid 0 -feature sl_sdk_0 -api update -type zip -gpuarch 0x170 -bootstrap
+
+[21:06:45] NOX: [Streamline] [21-06-45][streamline][warn][tid:21296][0s:465ms:009us]pluginManager.cpp:797[mapPlugins] Ignoring plugin 'sl.deepdvc' since it is was not requested by the host
+
+[21:06:45] NOX: [Streamline] [21-06-45][streamline][warn][tid:21296][0s:470ms:613us]pluginManager.cpp:797[mapPlugins] Ignoring plugin 'sl.directsr' since it is was not requested by the host
+
+[21:06:45] NOX: [Streamline] [21-06-45][streamline][info][tid:21296][0s:566ms:706us]commonEntry.cpp:1042[getNGXFeatureRequirements] Native VK OFA feature supported on this device!
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][1s:843ms:314us]commonEntry.cpp:1100[getNGXFeatureRequirements] NGX feature 1 requirements - minOS 10.0.0 minHW 0x160
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][1s:843ms:537us]commonEntry.cpp:1457[updateCommonEmbeddedJSONConfig] Registering required tag 'kBufferTypeDepth' life-cycle 'ResourceLifecycle::eValidUntilEvaluate' for feature `kFeatureDLSS`
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][1s:843ms:744us]commonEntry.cpp:1457[updateCommonEmbeddedJSONConfig] Registering required tag 'kBufferTypeMotionVectors' life-cycle 'ResourceLifecycle::eValidUntilEvaluate' for feature `kFeatureDLSS`
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][1s:843ms:935us]commonEntry.cpp:1457[updateCommonEmbeddedJSONConfig] Registering required tag 'kBufferTypeScalingInputColor' life-cycle 'ResourceLifecycle::eValidUntilEvaluate' for feature `kFeatureDLSS`
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][1s:844ms:110us]commonEntry.cpp:1457[updateCommonEmbeddedJSONConfig] Registering required tag 'kBufferTypeScalingOutputColor' life-cycle 'ResourceLifecycle::eValidUntilEvaluate' for feature `kFeatureDLSS`
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][1s:859ms:064us]commonEntry.cpp:1042[getNGXFeatureRequirements] Native VK OFA feature supported on this device!
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][1s:864ms:118us]commonEntry.cpp:1100[getNGXFeatureRequirements] NGX feature 13 requirements - minOS 10.0.0 minHW 0x160
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][1s:864ms:364us]commonEntry.cpp:1457[updateCommonEmbeddedJSONConfig] Registering required tag 'kBufferTypeDepth' life-cycle 'ResourceLifecycle::eValidUntilEvaluate' for feature `kFeatureDLSS_RR`
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][1s:864ms:580us]commonEntry.cpp:1457[updateCommonEmbeddedJSONConfig] Registering required tag 'kBufferTypeMotionVectors' life-cycle 'ResourceLifecycle::eValidUntilEvaluate' for feature `kFeatureDLSS_RR`
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][1s:864ms:783us]commonEntry.cpp:1457[updateCommonEmbeddedJSONConfig] Registering required tag 'kBufferTypeScalingInputColor' life-cycle 'ResourceLifecycle::eValidUntilEvaluate' for feature `kFeatureDLSS_RR`
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][1s:864ms:973us]commonEntry.cpp:1457[updateCommonEmbeddedJSONConfig] Registering required tag 'kBufferTypeScalingOutputColor' life-cycle 'ResourceLifecycle::eValidUntilEvaluate' for feature `kFeatureDLSS_RR`
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][1s:881ms:355us]commonEntry.cpp:1042[getNGXFeatureRequirements] Native VK OFA feature supported on this device!
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][1s:886ms:199us]commonEntry.cpp:1115[getNGXFeatureRequirements] NGX_*_GetFeatureRequirements feature: 11 FeatureSupported == AdapterUnsupported
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][warn][tid:21296][1s:886ms:362us]dlss_gEntry.cpp:143[updateEmbeddedJSON] Failed to obtain DLSS-G min spec requirements from NGX, using SL defaults
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][warn][tid:21296][1s:886ms:586us]dlss_gEntry.cpp:345[updateEmbeddedJSON] Disabling DLSS-G since it is not supported on current hardware
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][warn][tid:21296][1s:886ms:802us]pluginManager.cpp:797[mapPlugins] Ignoring plugin 'sl.dlss_g' since it is was not requested by the host
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][warn][tid:21296][1s:893ms:252us]pluginManager.cpp:797[mapPlugins] Ignoring plugin 'sl.nis' since it is was not requested by the host
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][warn][tid:21296][1s:899ms:205us]pluginManager.cpp:797[mapPlugins] Ignoring plugin 'sl.nvperf' since it is was not requested by the host
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][warn][tid:21296][1s:910ms:336us]pluginManager.cpp:797[mapPlugins] Ignoring plugin 'sl.reflex' since it is was not requested by the host
+
+[21:06:46] NOX: [Streamline] Initialized successfully.
+[21:06:46] NOX: [Streamline] DLSS requirements: vkGraphicsQueues=0, vkComputeQueues=0, deviceExt=5, instanceExt=3, vk12Features=3, vk13Features=0
+[21:06:46] NOX: [Streamline]   DLSS needs device extension: VK_KHR_push_descriptor
+[21:06:46] NOX: [Streamline]   DLSS needs device extension: VK_NVX_binary_import
+[21:06:46] NOX: [Streamline]   DLSS needs device extension: VK_NVX_image_view_handle
+[21:06:46] NOX: [Streamline]   DLSS needs device extension: VK_KHR_buffer_device_address
+[21:06:46] NOX: [Streamline]   DLSS needs device extension: VK_EXT_buffer_device_address
+[21:06:46] NOX: [Streamline]   DLSS needs instance extension: VK_KHR_external_semaphore_capabilities
+[21:06:46] NOX: [Streamline]   DLSS needs instance extension: VK_KHR_get_physical_device_properties2
+[21:06:46] NOX: [Streamline]   DLSS needs instance extension: VK_KHR_external_memory_capabilities
+[21:06:46] NOX: [Streamline]   DLSS needs VK1.2 feature: timelineSemaphore
+[21:06:46] NOX: [Streamline]   DLSS needs VK1.2 feature: descriptorIndexing
+[21:06:46] NOX: [Streamline]   DLSS needs VK1.2 feature: bufferDeviceAddress
+[21:06:46] NOX: [Streamline] DLSS_RR requirements: vkGraphicsQueues=0, vkComputeQueues=0, deviceExt=5, instanceExt=3, vk12Features=3, vk13Features=0
+[21:06:46] NOX: [Streamline]   DLSS_RR needs device extension: VK_KHR_push_descriptor
+[21:06:46] NOX: [Streamline]   DLSS_RR needs device extension: VK_NVX_binary_import
+[21:06:46] NOX: [Streamline]   DLSS_RR needs device extension: VK_NVX_image_view_handle
+[21:06:46] NOX: [Streamline]   DLSS_RR needs device extension: VK_KHR_buffer_device_address
+[21:06:46] NOX: [Streamline]   DLSS_RR needs device extension: VK_EXT_buffer_device_address
+[21:06:46] NOX: [Streamline]   DLSS_RR needs instance extension: VK_KHR_external_semaphore_capabilities
+[21:06:46] NOX: [Streamline]   DLSS_RR needs instance extension: VK_KHR_get_physical_device_properties2
+[21:06:46] NOX: [Streamline]   DLSS_RR needs instance extension: VK_KHR_external_memory_capabilities
+[21:06:46] NOX: [Streamline]   DLSS_RR needs VK1.2 feature: timelineSemaphore
+[21:06:46] NOX: [Streamline]   DLSS_RR needs VK1.2 feature: descriptorIndexing
+[21:06:46] NOX: [Streamline]   DLSS_RR needs VK1.2 feature: bufferDeviceAddress
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:31084][1s:933ms:416us]ota.cpp:156[execThreadProc] NGX Updater reported: 2.14.16
+
+
+[21:06:46] NOX: Transfer queue: dedicated family
+[21:06:46] NOX: Async compute queue: compute-only family 2
+[21:06:46] NOX: Sparse buffers: on (transfer queue), 64 GB reservable per buffer (sparse address space 1024 GB, largest buffer 1024 GB)
+[21:06:46] NOX: RT Pipeline Properties: handleSize=32, baseAlignment=64, handleAlignment=32, maxStride=4096
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][2s:090ms:598us]commonEntry.cpp:1568[slOnPluginStartup] At least one plugin requires NGX, trying to initialize ...
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][2s:090ms:714us]commonEntry.cpp:1368[ngxLog] [Unknown(32764)] [2026-11-13 21:06:46] [NGXSafeInitializeLog:150] App logging hooks successfully initialized
+
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][2s:090ms:825us]commonEntry.cpp:1369[ngxLog] [Unknown(32764)] [2026-11-13 21:06:46] [NGXLoadLibrary:328] Loaded NGXCore from path (vulkan-1.dll)
+
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][2s:090ms:955us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:46] [NGXSafeInitializeLog:139] App logging hooks successfully initialized
+
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][2s:091ms:084us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:46] [NGXLoadLibrary:34] Loaded NGXCore from path (vulkan-1.dll)
+
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][2s:091ms:685us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:46] [NGXCheckArchitectureSupport:229] Found matching adapter with NVAPI physical GPU handle: 0xb00 and LUID: { 0x0, 0x131b2 }
+
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][2s:101ms:738us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:46] [NGXGetPathUsingQAI:475] Checking for path to NGX using QueryAdapterInfo
+
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][2s:101ms:869us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:46] [NGXGetPathUsingQAI:512] Path to driverStore found using QAI: C:\WINDOWS\System32\DriverStore\FileRepository\nv_dispig.inf_amd64_cc526ccc3287f5cd
+
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][2s:102ms:026us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:46] [NGXGetPath:1045] using path for models: C:\ProgramData\NVIDIA\NGX\models
+
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][2s:102ms:137us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:46] [NGXGetPath:1045] using path for models: C:\ProgramData\NVIDIA\NGX\models
+
+
+[21:06:46] NOX: [Streamline] [21-06-46][streamline][info][tid:21296][2s:102ms:258us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:46] [CreateFolderWithACEs:154] using generated security descriptor for creating folder at: C:\ProgramData\NVIDIA\NGX\models
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:144ms:966us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [ModifyExistingFolderDACL:211] updated access control list for NGX cache (NGX cache should now be usable by all authenticated users)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:145ms:151us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXCreateModelsFolder:1072] model folder created: C:\ProgramData\NVIDIA\NGX\models
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:145ms:278us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [dlss]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:145ms:353us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658702=0.0.0
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:145ms:453us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658701=0.0.0
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:145ms:559us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9FEB50=1.0.108
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:145ms:664us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9FF4BC=1.0.108
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:145ms:745us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9FD524=1.0.108
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:145ms:826us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9DF510=1.3.106
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:145ms:914us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9CB0B8=1.0.108
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:146ms:012us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9E26B0=2.1.28
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:146ms:103us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9D48D0=1.0.108
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:146ms:192us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E99B5EC=1.2.109
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:146ms:287us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9DFA64=1.0.108
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:146ms:404us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9FD6C0=1.0.108
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:146ms:493us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9CF688=2.2.15
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:146ms:577us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9D6F08=1.0.108
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:146ms:648us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9BF564=2.1.201
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:146ms:750us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9DB4F4=1.0.108
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:146ms:836us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9D2F5C=1.2.110
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:146ms:929us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9D7388=1.0.108
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:146ms:995us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9F5618=2.1.29
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:147ms:112us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9DAE68=1.2.109
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:147ms:215us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9D8C54=1.2.109
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:147ms:287us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9D3EF0=2.1.28
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:147ms:357us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9FACDC=2.1.201
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:147ms:467us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_F7361DC=2.1.28
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:147ms:574us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9C3560=2.1.201
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:147ms:664us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9B0430=2.1.28
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:147ms:752us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=310.9.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:147ms:836us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9DB490=2.3.4
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:147ms:942us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [dlss_override]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:148ms:050us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=310.9.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:148ms:118us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_sdk_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:148ms:202us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658703=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:148ms:342us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_common_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:148ms:429us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658703=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:148ms:509us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_deepdvc_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:148ms:588us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658703=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:148ms:690us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_dlss_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:148ms:777us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658703=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:148ms:885us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_dlss_d_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:149ms:009us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658703=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:149ms:125us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_dlss_g_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:149ms:215us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658703=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:149ms:284us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_nis_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:149ms:351us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658703=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:149ms:470us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_deepdvc_override_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:149ms:578us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:149ms:664us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_nvperf_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:149ms:777us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658703=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:149ms:892us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_pcl_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:150ms:001us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658703=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:150ms:071us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_reflex_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:150ms:174us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658703=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:150ms:262us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [dlssg]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:150ms:378us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=310.9.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:150ms:475us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [dlssd]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:150ms:572us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=310.9.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:150ms:656us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [dlisp]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:150ms:765us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9CF688=2.1.15
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:150ms:858us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E99B5EC=1.2.102
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:150ms:938us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658703=310.0.0
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:151ms:093us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9D8C54=1.2.106
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:151ms:189us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9D2F5C=1.2.106
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:151ms:287us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9DF510=1.3.101
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:151ms:371us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_B9DAE68=1.2.106
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:151ms:502us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_sdk_override_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:151ms:663us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:151ms:749us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_dlss_g_override_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:151ms:884us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:152ms:015us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_common_override_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:152ms:121us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:152ms:246us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_dlss_override_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:152ms:340us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:152ms:448us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_nis_override_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:152ms:529us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:152ms:648us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_dlss_d_override_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:152ms:762us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:152ms:850us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_nvperf_override_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:152ms:936us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:153ms:049us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_pcl_override_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:153ms:174us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:153ms:273us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1144] [sl_reflex_override_0]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:153ms:403us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadConfig:1150] app_E658700=2.14.16
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:241ms:767us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXDRSInit:182] NvAPI_DRS_FindApplicationByName -166
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:253ms:050us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXInitContext:245] called from module sl.common.dll at E:\dev\noxiouse\build\NoxEditor\Release
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:253ms:233us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature dldenoiser, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:253ms:359us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:253ms:451us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:253ms:540us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_dldenoiser.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:253ms:640us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXReportStatusFeedback:1076] Override shared memory was opened successfully
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:253ms:725us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXReportStatusFeedback:1088] Override shared memory was mapped successfully
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:253ms:863us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature dlss, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:306ms:348us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadLibrary:34] Loaded NGXCore from path (E:\dev\noxiouse\build\NoxEditor\Release\/nvngx_dlss.dll)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:306ms:490us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1490] Validating snippet E:\dev\noxiouse\build\NoxEditor\Release\/nvngx_dlss.dll
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:306ms:589us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1492] NGX CORE API version : 0x15, Snippet requires at least : 0x13
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:306ms:770us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1494] GPU architecture : 0x170, Snippet expects at least : 0x160
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:306ms:886us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1508] Driver support flags : 0xF(SEAMLESS_OTA|LINUX_EXTENDED_DRIVER_VERSIONS|API_SPECIFIC_POPULATE_PARAMS|REQUIRE_CMSID), Snippet required flags : 0xF(SEAMLESS_OTA|LINUX_EXTENDED_DRIVER_VERSIONS|API_SPECIFIC_POPULATE_PARAMS|REQUIRE_CMSID)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:306ms:994us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1535] Driver version : 610.88, Snippet expects at least : 470.0
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:307ms:110us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1561] Snippet version : 310.9.1, Embedded app Id : E658703 (0)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:307ms:228us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:307ms:331us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1345] Feature dlss failed to load (cmsid 141959980) from cache (location: C:\ProgramData\NVIDIA\NGX\models\dlss\versions\0\files, name: 160_876232C.bin)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:307ms:411us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:307ms:518us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1345] Feature dlss failed to load (cmsid 241534723) from cache (location: C:\ProgramData\NVIDIA\NGX\models\dlss\versions\0\files, name: 160_E658703.bin)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:469ms:057us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:469ms:315us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1459] app 876232C feature dlss snippet: E:\dev\noxiouse\build\NoxEditor\Release\/nvngx_dlss.dll version: 310.9.1
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:469ms:571us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadFeature:1535] Setting telemetry callback for dlss [schema 3.0+]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:469ms:729us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadFeature:1540] Setting override status callback for dlss
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:469ms:913us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature dlinpainting, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:470ms:076us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:470ms:238us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:470ms:362us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_dlinpainting.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:470ms:488us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature dlisr, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:470ms:604us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:470ms:711us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:470ms:836us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_dlisr.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:470ms:980us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature dlslowmo, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:471ms:171us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:471ms:306us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:471ms:473us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_dlslowmo.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:471ms:618us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature dlvsr, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:471ms:756us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:471ms:922us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:472ms:034us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_dlvsr.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:472ms:155us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature dlcolorize, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:472ms:291us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:472ms:431us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:472ms:528us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_dlcolorize.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:472ms:654us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature dlstyletransfer, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:472ms:790us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:472ms:888us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:473ms:015us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_dlstyletransfer.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:473ms:134us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature dlvdenoiser, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:473ms:228us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:473ms:373us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:473ms:490us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_dlvdenoiser.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:473ms:579us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature dlisp, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:473ms:685us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:473ms:828us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:473ms:933us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_dlisp.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:474ms:025us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature dlresolve, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:474ms:122us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:474ms:267us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:474ms:357us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_dlresolve.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:474ms:452us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature dlssg, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:483ms:907us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadLibrary:34] Loaded NGXCore from path (E:\dev\noxiouse\build\NoxEditor\Release\/nvngx_dlssg.dll)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:484ms:097us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1490] Validating snippet E:\dev\noxiouse\build\NoxEditor\Release\/nvngx_dlssg.dll
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:484ms:323us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1492] NGX CORE API version : 0x15, Snippet requires at least : 0x13
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:484ms:517us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1494] GPU architecture : 0x170, Snippet expects at least : 0x190
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:484ms:628us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1498] error: snippet is using newer GPU arch 190 > 170
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:484ms:763us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:484ms:885us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1345] Feature dlssg failed to load (cmsid 141959980) from cache (location: C:\ProgramData\NVIDIA\NGX\models\dlssg\versions\0\files, name: 160_876232C.bin)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:485ms:000us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:485ms:137us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1345] Feature dlssg failed to load (cmsid 241534723) from cache (location: C:\ProgramData\NVIDIA\NGX\models\dlssg\versions\0\files, name: 160_E658703.bin)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:665ms:772us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadLibrary:34] Loaded NGXCore from path (C:\WINDOWS\System32\DriverStore\FileRepository\nv_dispig.inf_amd64_cc526ccc3287f5cd/nvngx_dlssg.dll)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:665ms:908us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1490] Validating snippet C:\WINDOWS\System32\DriverStore\FileRepository\nv_dispig.inf_amd64_cc526ccc3287f5cd/nvngx_dlssg.dll
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:665ms:995us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1492] NGX CORE API version : 0x15, Snippet requires at least : 0x13
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:666ms:102us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1494] GPU architecture : 0x170, Snippet expects at least : 0x190
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:666ms:174us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1498] error: snippet is using newer GPU arch 190 > 170
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:666ms:283us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1381] Found dlssg driver fallback snippet at C:\WINDOWS\System32\DriverStore\FileRepository\nv_dispig.inf_amd64_cc526ccc3287f5cd
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:666ms:394us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1459] app 876232C feature dlssg snippet: E:\dev\noxiouse\build\NoxEditor\Release\/nvngx_dlssg.dll version: 310.9.1
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:666ms:515us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature deepdvc, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:674ms:491us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadLibrary:34] Loaded NGXCore from path (E:\dev\noxiouse\build\NoxEditor\Release\/nvngx_deepdvc.dll)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:674ms:634us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1490] Validating snippet E:\dev\noxiouse\build\NoxEditor\Release\/nvngx_deepdvc.dll
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:674ms:707us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1492] NGX CORE API version : 0x15, Snippet requires at least : 0x13
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:674ms:831us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1494] GPU architecture : 0x170, Snippet expects at least : 0x160
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:674ms:932us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1508] Driver support flags : 0xF(SEAMLESS_OTA|LINUX_EXTENDED_DRIVER_VERSIONS|API_SPECIFIC_POPULATE_PARAMS|REQUIRE_CMSID), Snippet required flags : 0x0()
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:675ms:054us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1535] Driver version : 610.88, Snippet expects at least : 535.0
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:675ms:155us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1561] Snippet version : 310.9.1, Embedded app Id : E658703 (0)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:675ms:256us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:675ms:378us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1345] Feature deepdvc failed to load (cmsid 141959980) from cache (location: C:\ProgramData\NVIDIA\NGX\models\deepdvc\versions\0\files, name: 160_876232C.bin)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:675ms:512us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:675ms:601us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1345] Feature deepdvc failed to load (cmsid 241534723) from cache (location: C:\ProgramData\NVIDIA\NGX\models\deepdvc\versions\0\files, name: 160_E658703.bin)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:675ms:701us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:675ms:817us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1459] app 876232C feature deepdvc snippet: E:\dev\noxiouse\build\NoxEditor\Release\/nvngx_deepdvc.dll version: 310.9.1
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:675ms:904us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadFeature:1535] Setting telemetry callback for deepdvc [schema 3.0+]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:676ms:008us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadFeature:1540] Setting override status callback for deepdvc
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:676ms:114us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature dlssd, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:718ms:848us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadLibrary:34] Loaded NGXCore from path (E:\dev\noxiouse\build\NoxEditor\Release\/nvngx_dlssd.dll)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:719ms:064us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1490] Validating snippet E:\dev\noxiouse\build\NoxEditor\Release\/nvngx_dlssd.dll
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:719ms:172us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1492] NGX CORE API version : 0x15, Snippet requires at least : 0x13
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:719ms:283us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1494] GPU architecture : 0x170, Snippet expects at least : 0x160
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:719ms:411us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1508] Driver support flags : 0xF(SEAMLESS_OTA|LINUX_EXTENDED_DRIVER_VERSIONS|API_SPECIFIC_POPULATE_PARAMS|REQUIRE_CMSID), Snippet required flags : 0xF(SEAMLESS_OTA|LINUX_EXTENDED_DRIVER_VERSIONS|API_SPECIFIC_POPULATE_PARAMS|REQUIRE_CMSID)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:719ms:568us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1535] Driver version : 610.88, Snippet expects at least : 537.2
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:719ms:653us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXValidateSnippetMetaData:1561] Snippet version : 310.9.1, Embedded app Id : E658703 (0)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:719ms:821us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:719ms:935us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1345] Feature dlssd failed to load (cmsid 141959980) from cache (location: C:\ProgramData\NVIDIA\NGX\models\dlssd\versions\0\files, name: 160_876232C.bin)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:720ms:048us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:720ms:207us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1345] Feature dlssd failed to load (cmsid 241534723) from cache (location: C:\ProgramData\NVIDIA\NGX\models\dlssd\versions\0\files, name: 160_E658703.bin)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:877ms:244us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:877ms:409us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1459] app 876232C feature dlssd snippet: E:\dev\noxiouse\build\NoxEditor\Release\/nvngx_dlssd.dll version: 310.9.1
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:877ms:566us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadFeature:1535] Setting telemetry callback for dlssd [schema 3.0+]
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:877ms:666us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXLoadFeature:1540] Setting override status callback for dlssd
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:877ms:748us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature truehdr, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:877ms:838us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:877ms:945us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:878ms:069us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_truehdr.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:878ms:184us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature latewarp, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:878ms:262us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:878ms:368us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:878ms:462us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_latewarp.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:878ms:558us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature vsr, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:878ms:677us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:878ms:793us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:878ms:907us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_vsr.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:879ms:008us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXContextDenyListData::IsFeatureDenied:666] Feature fgx, denial value 0 for Cms ID 876232c
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:879ms:159us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:879ms:248us]commonEntry.cpp:1368[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [`anonymous-namespace'::SnippetLocationInfo::load:713] NGXLoadFromPath failed: -1160773628
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][2s:879ms:355us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSecureLoadFeature:1247] warning: ModuleName - nvngx_fgx.dll doesn't exist in any of the search paths!
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:019ms:958us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][NGXInitLog:208] App logging hooks successfully initialized
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:020ms:153us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][NGXInitLog:214] Build v310.9.1 CL 38868064
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:020ms:297us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][NGXInitLog:216] Built with APP_NAME = default
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:020ms:418us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][NGXInitLog:226] Loaded from path "E:\dev\noxiouse\build\NoxEditor\Release/nvngx_dlss.dll" by NoxRuntime.exe
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:020ms:529us]commonEntry.cpp:1369[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][NGXLoadLibrary:35] Loaded NGXCore from path (vulkan-1.dll)
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:020ms:644us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][NGXCubinVulkan::Init:204] Enabling texmode_raw
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:020ms:759us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][NGXCubinKernelMap::InitCubins:42] Loading NGXCubin kernels
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:020ms:889us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][NGXCubinGeneric::SetGPUArch:413] SetGPUArch:: Gpu count = 1, luid: 0x131b2
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:021ms:420us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][NGXCubinGeneric::SetGPUArch:473] m_gpuArch = 0x170
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:021ms:784us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][NGXCubinGeneric::genericPostInit:164] Fast UAV clear: supported
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:021ms:943us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][DLSSCubinKernelMap::InitCubins:303] Setting DLAA Cubins
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:022ms:114us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][DLSSCubinKernelMap::InitCubins:303] Setting DLSS Debug Cubins
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:022ms:292us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][DLSSCubinKernelMap::InitCubins:303] Setting DLTSS Engine Cubins
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:022ms:454us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][DLSSCubinKernelMap::InitCubins:303] Setting DLTSS NW Cubins
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:022ms:555us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][DLSSCubinKernelMap::InitCubins:303] Setting DLTSS NW E5M3_SKIP Cubins
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:022ms:675us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][DLSSCubinKernelMap::InitCubins:303] Setting DLTSS NW Cubins
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:032ms:479us]commonEntry.cpp:1369[ngxLog] [SuperSampling] [2026-11-13 21:06:47] [tid:21296][NGXDLAA::Init:207] Device 0x81170ac8
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:032ms:920us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:302] Sending Telemetry Init Data
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:033ms:089us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:303] appExeName = sl.common.dll
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:033ms:211us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:304] drsProfileName = 
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:033ms:330us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:305] drsName = 
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:033ms:557us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:307] AppIdType = RENDERING_ENGINE
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:033ms:724us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:308] ProjectId = 09481010-0ae3-4697-92e9-7ba7e9ee7ead
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:033ms:915us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:309] EngineVersion = 1.0.0
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:034ms:066us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:310] EngineType = custom
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:034ms:225us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:311] cmsId = 0
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:034ms:357us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:312] featureType = SuperSampling
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:034ms:468us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:313] gpuDeviceId = 9348
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:034ms:593us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:314] gpuVendorId = 4318
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:034ms:738us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:315] gpuSubSys = 2277314627
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:034ms:863us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:316] gpuRev = 161
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:035ms:019us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:317] ngxSDKVersion = 1.5
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:035ms:135us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:318] ngxCoreVersion = 1.4.0.0
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:035ms:254us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:319] ngxFeatureVersion = 310.9.1
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:035ms:348us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:320] displayDriverVersion = 610.88
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:035ms:465us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:321] osVersion = 10.0.26100.9974
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:035ms:574us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:322] APIType = 0
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:035ms:691us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:323] FeatureInitResult = NvNGXFeatureInitSuccess
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:035ms:801us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:324] GpuAPI = 3
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:035ms:922us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:326] StreamlineVersion = 2,14,1,0
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:036ms:069us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:327] StreamlineGitSHA = SHA: 98614dad6 v2.14.1-rc0
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:036ms:187us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:328] ExeModuleName = NoxRuntime.exe
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:036ms:296us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:329] OTAEnabled = 1
+
+
+[21:06:47] NOX: [Streamline] [21-06-47][streamline][info][tid:21296][3s:036ms:432us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:47] [NGXSendTelemetryInitializeData:335] -- END telemetry init data --
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:177ms:268us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:302] Sending Telemetry Init Data
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:177ms:443us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:303] appExeName = sl.common.dll
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:177ms:599us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:304] drsProfileName = 
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:177ms:713us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:305] drsName = 
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:177ms:808us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:307] AppIdType = RENDERING_ENGINE
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:177ms:925us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:308] ProjectId = 09481010-0ae3-4697-92e9-7ba7e9ee7ead
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:178ms:071us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:309] EngineVersion = 1.0.0
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:178ms:181us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:310] EngineType = custom
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:178ms:295us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:311] cmsId = 0
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:178ms:409us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:312] featureType = DeepDVC
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:178ms:547us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:313] gpuDeviceId = 9348
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:178ms:673us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:314] gpuVendorId = 4318
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:178ms:800us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:315] gpuSubSys = 2277314627
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:178ms:914us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:316] gpuRev = 161
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:179ms:023us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:317] ngxSDKVersion = 1.5
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:179ms:127us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:318] ngxCoreVersion = 1.4.0.0
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:179ms:255us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:319] ngxFeatureVersion = 310.9.1
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:179ms:377us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:320] displayDriverVersion = 610.88
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:179ms:483us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:321] osVersion = 10.0.26100.9974
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:179ms:586us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:322] APIType = 0
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:179ms:698us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:323] FeatureInitResult = NvNGXFeatureInitSuccess
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:179ms:809us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:324] GpuAPI = 3
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:179ms:921us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:326] StreamlineVersion = 2,14,1,0
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:180ms:130us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:327] StreamlineGitSHA = SHA: 98614dad6 v2.14.1-rc0
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:180ms:293us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:328] ExeModuleName = NoxRuntime.exe
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:180ms:459us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:329] OTAEnabled = 1
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:180ms:602us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:335] -- END telemetry init data --
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:323ms:195us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:48] [tid:21296][NGXInitLog:208] App logging hooks successfully initialized
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:323ms:383us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:48] [tid:21296][NGXInitLog:214] Build v310.9.1 CL 38868064
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:323ms:554us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:48] [tid:21296][NGXInitLog:216] Built with APP_NAME = app_transformer_dlssd
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:323ms:679us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:48] [tid:21296][NGXInitLog:226] Loaded from path "E:\dev\noxiouse\build\NoxEditor\Release/nvngx_dlssd.dll" by NoxRuntime.exe
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:323ms:850us]commonEntry.cpp:1369[ngxLog] [SuperSampling] [2026-11-13 21:06:48] [tid:21296][NGXLoadLibrary:35] Loaded NGXCore from path (vulkan-1.dll)
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:323ms:967us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:48] [tid:21296][NGXCubinVulkan::Init:204] Enabling texmode_raw
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:324ms:109us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:48] [tid:21296][NGXCubinKernelMap::InitCubins:42] Loading NGXCubin kernels
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:324ms:241us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:48] [tid:21296][NGXCubinGeneric::SetGPUArch:413] SetGPUArch:: Gpu count = 1, luid: 0x131b2
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:324ms:508us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:48] [tid:21296][NGXCubinGeneric::SetGPUArch:473] m_gpuArch = 0x170
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:324ms:945us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:48] [tid:21296][NGXCubinGeneric::genericPostInit:164] Fast UAV clear: supported
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:325ms:100us]commonEntry.cpp:1368[ngxLog] [SuperSampling] [2026-11-13 21:06:48] [tid:21296][DLSSCubinKernelMap::InitCubins:208] Setting DLSS Base Cubins for standalone RR
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:326ms:980us]commonEntry.cpp:1369[ngxLog] [SuperSampling] [2026-11-13 21:06:48] [tid:21296][NGXDLSSD::Init:184] Device 0x81a013a8
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:327ms:294us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:302] Sending Telemetry Init Data
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:327ms:433us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:303] appExeName = sl.common.dll
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:327ms:568us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:304] drsProfileName = 
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:327ms:702us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:305] drsName = 
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:327ms:850us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:307] AppIdType = RENDERING_ENGINE
+
+
+[21:06:48] NOX: [Streamline] Vulkan device registered successfully.
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:328ms:025us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:308] ProjectId = 09481010-0ae3-4697-92e9-7ba7e9ee7ead
+
+
+[21:06:48] NOX: [Streamline] Hooked vkQueuePresentKHR from sl.interposer.dll
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:328ms:272us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:309] EngineVersion = 1.0.0
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:328ms:533us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:310] EngineType = custom
+
+
+[21:06:48] NOX: [Streamline] DLSS Super Resolution - Loaded: true, Supported: true (code: 0)
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:328ms:693us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:311] cmsId = 0
+
+
+[21:06:48] NOX: [Streamline] DLSS Ray Reconstruction - Loaded: true, Supported: true (code: 0)
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:329ms:004us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:312] featureType = SuperSamplingDenoising
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:329ms:281us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:313] gpuDeviceId = 9348
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:329ms:417us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:314] gpuVendorId = 4318
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:329ms:544us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:315] gpuSubSys = 2277314627
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:329ms:679us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:316] gpuRev = 161
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:329ms:878us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:317] ngxSDKVersion = 1.5
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:329ms:983us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:318] ngxCoreVersion = 1.4.0.0
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:330ms:127us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:319] ngxFeatureVersion = 310.9.1
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:330ms:242us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:320] displayDriverVersion = 610.88
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:330ms:367us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:321] osVersion = 10.0.26100.9974
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:330ms:486us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:322] APIType = 0
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:330ms:591us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:323] FeatureInitResult = NvNGXFeatureInitSuccess
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:330ms:735us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:324] GpuAPI = 3
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:330ms:900us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:326] StreamlineVersion = 2,14,1,0
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:331ms:031us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:327] StreamlineGitSHA = SHA: 98614dad6 v2.14.1-rc0
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:331ms:175us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:328] ExeModuleName = NoxRuntime.exe
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:331ms:313us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:329] OTAEnabled = 1
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:331ms:454us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:06:48] [NGXSendTelemetryInitializeData:335] -- END telemetry init data --
+
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][info][tid:21296][3s:331ms:596us]commonEntry.cpp:1694[slOnPluginStartup] NGX loaded - app id 231313 - application data path E:\dev\noxiouse\build\NoxEditor\Release\
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][warn][tid:21296][3s:331ms:817us]pluginManager.cpp:1272[processPluginHooks] Hook sl.common:Vulkan:CmdBindPipeline is NOT supported, plugin will not function properly
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][warn][tid:21296][3s:331ms:987us]pluginManager.cpp:1272[processPluginHooks] Hook sl.common:Vulkan:CmdBindDescriptorSets is NOT supported, plugin will not function properly
+
+[21:06:48] NOX: [Streamline] [21-06-48][streamline][warn][tid:21296][3s:332ms:124us]pluginManager.cpp:1272[processPluginHooks] Hook sl.common:Vulkan:BeginCommandBuffer is NOT supported, plugin will not function properly
+
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_MeshTask\Material_PBR_MeshTask.task.taskMain.16428360290074486638.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_MeshTask\Material_PBR_MeshTask.task.taskMain.16428360290074486638.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_MeshTask\Material_PBR_MeshTask.task.taskMain.16428360290074486638.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_MeshTask\Material_PBR_MeshTask.task.taskMain.16428360290074486638.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\present\present.vert.vertMain.10044293794289025784.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Outline\Outline.task.taskMain.10661238778261828189.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\LightShapes\LightShapes.task.taskMain.13268923809066212469.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Skybox\Skybox.task.taskMain.14877117255561638617.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_Mesh\Material_PBR_Mesh.mesh.meshMain.11060784546074221375.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_Mesh\Material_PBR_Mesh.mesh.meshMain.11060784546074221375.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_Mesh\Material_PBR_Mesh.mesh.meshMain.11060784546074221375.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_Mesh\Material_PBR_Mesh.mesh.meshMain.11060784546074221375.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\present\present.frag.fragMain.10044293794289025784.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Outline\Outline.mesh.meshMain.10661238778261828189.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\LightShapes\LightShapes.mesh.meshMain.13268923809066212469.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Skybox\Skybox.mesh.meshMain.14877117255561638617.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_Unlit_Mesh\Material_Unlit_Mesh.frag.fragMain.11461660630007589585.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Outline\Outline.frag.fragMain.10661238778261828189.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_Unlit_Mesh\Material_Unlit_Mesh.frag.fragMainOIT.11461660630007589585.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Skybox\Skybox.frag.fragMain.14877117255561638617.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\LightShapes\LightShapes.frag.fragMain.13268923809066212469.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_MeshTask\Material_PBR_MeshTask.task.taskMain.16428360290074486638.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_TransparentLit_Mesh\Material_TransparentLit_Mesh.frag.fragMain.2493801343584340598.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_TransparentLit_Mesh\Material_TransparentLit_Mesh.frag.fragMainOIT.2493801343584340598.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\EditorStableDepth\EditorStableDepth.mesh.meshMain.2326898350299968152.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_MeshTask\Material_PBR_MeshTask.task.taskMain.16428360290074486638.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\EditorStableDepth\EditorStableDepth.frag.fragMain.2326898350299968152.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\VisibilityBuffer\VisibilityBuffer.mesh.meshMain.5940319163091396796.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ComputeSkinning\ComputeSkinning.comp.compMain.17990799787137105477.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\VisibilityBuffer\VisibilityBuffer.frag.fragMain.5940319163091396796.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\PostProcess\PostProcess.task.taskMain.17752463955083274414.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\GBufferMaterial\GBufferMaterial.task.taskMain.14989279847668230783.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\AutoExposure\AutoExposure.comp.buildMain.17450575605065697884.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\GBufferMaterial\GBufferMaterial.task.taskMain.14989279847668230783.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\AutoExposure\AutoExposure.comp.reduceMain.17450575605065697884.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\PostProcess\PostProcess.mesh.meshMain.17752463955083274414.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\AutoExposure\AutoExposure.comp.adaptMain.17450575605065697884.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\GBufferMaterial\GBufferMaterial.mesh.meshMain.14989279847668230783.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\GBufferMaterial\GBufferMaterial.mesh.meshMain.14989279847668230783.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ColorPyramid\ColorPyramid.comp.copyMain.6307257637378556780.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ColorPyramid\ColorPyramid.comp.downsampleMain.6307257637378556780.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\PostProcess\PostProcess.frag.fragMain.17752463955083274414.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Particles\Particles.mesh.meshMain.14065789735804810249.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Particles\Particles.mesh.meshMain.14065789735804810249.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\GBufferMaterial\GBufferMaterial.frag.fragMain.14989279847668230783.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\GBufferMaterial\GBufferMaterial.frag.fragMainNoVelocity.14989279847668230783.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Particles\Particles.frag.fragMain.14065789735804810249.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Particles\Particles.frag.fragMainOIT.14065789735804810249.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Particles\Particles.mesh.meshMain.14065789735804810249.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Particles\Particles.frag.fragMainMotion.14065789735804810249.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\OITComposite\OITComposite.vert.vertMain.17832826924541081296.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\OITComposite\OITComposite.frag.fragMain.17832826924541081296.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_MeshTask\Material_PBR_MeshTask.task.taskMain.16428360290074486638.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_MeshTask\Material_PBR_MeshTask.task.taskMain.16428360290074486638.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_MeshTask\Material_PBR_MeshTask.task.taskMain.16428360290074486638.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_MeshTask\Material_PBR_MeshTask.task.taskMain.16428360290074486638.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_Mesh\Material_PBR_Mesh.mesh.meshMain.11060784546074221375.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_Mesh\Material_PBR_Mesh.mesh.meshMain.11060784546074221375.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_Mesh\Material_PBR_Mesh.mesh.meshMain.11060784546074221375.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_Mesh\Material_PBR_Mesh.mesh.meshMain.11060784546074221375.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_Unlit_Mesh\Material_Unlit_Mesh.frag.fragMainAVBOITOccupancy.11461660630007589585.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_Unlit_Mesh\Material_Unlit_Mesh.frag.fragMainAVBOITSplat.11461660630007589585.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_TransparentLit_Mesh\Material_TransparentLit_Mesh.frag.fragMainAVBOITOccupancy.2493801343584340598.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_TransparentLit_Mesh\Material_TransparentLit_Mesh.frag.fragMainAVBOITSplat.2493801343584340598.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Particles\Particles.mesh.meshMain.14065789735804810249.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Particles\Particles.mesh.meshMain.14065789735804810249.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Particles\Particles.frag.fragMainAVBOITOccupancy.14065789735804810249.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Particles\Particles.frag.fragMainAVBOITSplat.14065789735804810249.bin
+[21:06:48] NOX: PipelineVK compiling shader: assets/shaders/DDGIProbeSpheres.slang
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\AVBOITBuild\AVBOITBuild.comp.integrateMain.11132861572061318035.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\AVBOITBuild\AVBOITBuild.comp.lutMain.11132861572061318035.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\TextureInspect\TextureInspect.comp.compMain.16423016447376323866.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\InstanceCulling\InstanceCulling.comp.cullMain.8815968918895195179.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\InstanceCulling\InstanceCulling.comp.countMain.8815968918895195179.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\InstanceCulling\InstanceCulling.comp.offsetMain.8815968918895195179.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\InstanceCulling\InstanceCulling.comp.writeMain.8815968918895195179.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\InstanceCulling\InstanceCulling.comp.lateMain.8815968918895195179.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\HiZBuild\HiZBuild.comp.buildMain.2287848818192526879.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\TAA\TAA.comp.computeMain.2018333537326741334.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\RRGuides\RRGuides.comp.guidesMain.12960117466131658156.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\EditorRaycast\EditorRaycast.comp.computeMain.9394815728103113460.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ShadowMask\ShadowMask.task.taskMain.16800397780986244086.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_MeshTask\Material_PBR_MeshTask.task.taskMain.16428360290074486638.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ShadowMask\ShadowMask.mesh.meshMain.16800397780986244086.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\VisibilityBuffer\VisibilityBuffer.mesh.meshMain.5940319163091396796.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ShadowMask\ShadowMask.frag.fragMain.16800397780986244086.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\VisibilityBuffer\VisibilityBuffer.frag.depthFragMain.5940319163091396796.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_MeshTask\Material_PBR_MeshTask.task.taskMain.16428360290074486638.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ShadowMapResolve\ShadowMapResolve.task.taskMain.17432016520747180400.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\VisibilityBuffer\VisibilityBuffer.mesh.meshMain.5940319163091396796.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ShadowMapResolve\ShadowMapResolve.mesh.meshMain.17432016520747180400.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\VisibilityBuffer\VisibilityBuffer.frag.depthMaskFragMain.5940319163091396796.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ShadowMapResolve\ShadowMapResolve.frag.fragMain.17432016520747180400.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSR\SSR.task.taskMain.1545979058055393643.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSR\SSR.mesh.meshMain.1545979058055393643.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSR\SSR.task.taskMain.1545979058055393643.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSR\SSR.frag.fragMain.1545979058055393643.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSGI\SSGI.task.taskMain.10242137448128422968.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSGI\SSGI.task.taskMain.10242137448128422968.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSR\SSR.mesh.meshMain.1545979058055393643.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSGI\SSGI.mesh.meshMain.10242137448128422968.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSGI\SSGI.mesh.meshMain.10242137448128422968.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSR\SSR.frag.filterMain.1545979058055393643.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSGI\SSGI.frag.traceMain.10242137448128422968.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSGI\SSGI.frag.denoiseMain.10242137448128422968.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReflectionProbe\ReflectionProbe.comp.assembleMain.18375661710214417620.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReflectionProbe\ReflectionProbe.comp.downsampleMain.18375661710214417620.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\PrefilterEnv\PrefilterEnv.comp.compMain.12787081811091139176.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_MeshTask\Material_PBR_MeshTask.task.taskMain.16428360290074486638.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\IrradianceProbeSH\IrradianceProbeSH.comp.packMain.4385883262221390583.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\VolumetricFog\VolumetricFog.comp.lightMain.5253102960091891010.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\IrradianceProbeSH\IrradianceProbeSH.comp.relightMain.4385883262221390583.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_PBR_Mesh\Material_PBR_Mesh.mesh.meshMain.11060784546074221375.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\PostEffects\PostEffects.comp.dofMain.10700890743636662262.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\VolumetricFog\VolumetricFog.comp.integrateMain.5253102960091891010.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\PostEffects\PostEffects.comp.motionBlurMain.10700890743636662262.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Material_TransparentLit_Mesh\Material_TransparentLit_Mesh.frag.captureFragMain.2493801343584340598.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\PostEffects\PostEffects.comp.bloomDownsampleMain.10700890743636662262.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\PostEffects\PostEffects.comp.bloomUpsampleMain.10700890743636662262.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\NRDGuides\NRDGuides.task.taskMain.6205863766637018825.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\NRDGuides\NRDGuides.mesh.meshMain.6205863766637018825.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\EnvironmentImportance\EnvironmentImportance.comp.buildMain.18148927570677296421.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Reflection\Reflection.task.taskMain.11145058973219312527.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\NRDGuides\NRDGuides.frag.fragMain.6205863766637018825.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\EnvironmentImportance\EnvironmentImportance.comp.reduceMain.18148927570677296421.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\YCoCgDecodeInPlace\YCoCgDecodeInPlace.comp.compMain.7306558957003630677.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Reflection\Reflection.mesh.meshMain.11145058973219312527.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\PTComposite\PTComposite.comp.compositeMain.6662903515564039988.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\Reflection\Reflection.frag.fragMain.11145058973219312527.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\DDGIRadiance\DDGIRadiance.task.taskMain.2963851249066343641.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\DDGIBlendIrradiance\DDGIBlendIrradiance.comp.computeMain.15864377900878147912.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\DDGIRadiance\DDGIRadiance.mesh.meshMain.2963851249066343641.bin
+[21:06:48] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\DDGIBlendDistance\DDGIBlendDistance.comp.computeMain.2661449398337086723.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\DDGIRadiance\DDGIRadiance.frag.fragMain.2963851249066343641.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\DDGIRelocation\DDGIRelocation.task.taskMain.11755719976995098659.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\DDGIRelocation\DDGIRelocation.mesh.meshMain.11755719976995098659.bin
+[21:06:48] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\DDGIRelocation\DDGIRelocation.frag.fragMain.11755719976995098659.bin
+[21:06:49] NOX: PipelineVK compiling shader: assets/shaders/DDGIProbeSpheres.slang
+[21:06:49] NOX: PipelineVK Saving shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\DDGIProbeSpheres\DDGIProbeSpheres.mesh.meshMain.8848669842583560.bin
+[21:06:49] NOX: PipelineVK Saving shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\DDGIProbeSpheres\DDGIProbeSpheres.frag.fragMain.8848669842583560.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\RTUpsample\RTUpsample.task.taskMain.3871672509870505786.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ScreenProbeFilter\ScreenProbeFilter.comp.computeMain.14989094942363211790.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ScreenProbePlace\ScreenProbePlace.comp.computeMain.7011207876962424297.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\RTUpsample\RTUpsample.task.taskMain.3871672509870505786.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\RTUpsample\RTUpsample.task.taskMain.3871672509870505786.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ScreenProbeIrradiance\ScreenProbeIrradiance.comp.computeMain.1449115695009809013.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ScreenProbeIntegrate\ScreenProbeIntegrate.comp.computeMain.10249777657382257719.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\RTUpsample\RTUpsample.mesh.meshMain.3871672509870505786.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ScreenProbeTrace\ScreenProbeTrace.comp.computeMain.14356334471090446347.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\RTUpsample\RTUpsample.mesh.meshMain.3871672509870505786.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\RTUpsample\RTUpsample.mesh.meshMain.3871672509870505786.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\RTUpsample\RTUpsample.frag.fragMain.3871672509870505786.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\RTUpsample\RTUpsample.frag.fragMain.3871672509870505786.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\RTUpsample\RTUpsample.frag.fragMain.3871672509870505786.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRGITemporal\ReSTIRGITemporal.task.taskMain.15425526975236106659.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDIWriteLightPDF\ReSTIRDIWriteLightPDF.comp.compMain.8728972385762277240.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRGISpatial\ReSTIRGISpatial.task.taskMain.6181952002813997693.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRGIInitial\ReSTIRGIInitial.task.taskMain.405047264477685875.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDIReduceLightPDFMip\ReSTIRDIReduceLightPDFMip.comp.compMain.14033708715964881408.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDIPresample\ReSTIRDIPresample.comp.compMain.15026501155354974251.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRGITemporal\ReSTIRGITemporal.mesh.meshMain.15425526975236106659.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDIPresampleReGIR\ReSTIRDIPresampleReGIR.comp.compMain.12869315955958107526.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRGISpatial\ReSTIRGISpatial.mesh.meshMain.6181952002813997693.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDIInitial\ReSTIRDIInitial.task.taskMain.9098474605982125063.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDITemporal\ReSTIRDITemporal.task.taskMain.1585700412602708634.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDISpatial\ReSTIRDISpatial.task.taskMain.6338808673994635692.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRGIInitial\ReSTIRGIInitial.mesh.meshMain.405047264477685875.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDIFinalShading\ReSTIRDIFinalShading.task.taskMain.9848601252663547459.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRGITemporal\ReSTIRGITemporal.frag.fragMain.15425526975236106659.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRGISpatial\ReSTIRGISpatial.frag.fragMain.6181952002813997693.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDITemporal\ReSTIRDITemporal.mesh.meshMain.1585700412602708634.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRPTInitial\ReSTIRPTInitial.task.taskMain.3551281027681118954.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDISpatial\ReSTIRDISpatial.mesh.meshMain.6338808673994635692.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDIInitial\ReSTIRDIInitial.mesh.meshMain.9098474605982125063.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDIFinalShading\ReSTIRDIFinalShading.mesh.meshMain.9848601252663547459.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRGIInitial\ReSTIRGIInitial.frag.fragMain.405047264477685875.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDITemporal\ReSTIRDITemporal.frag.fragMain.1585700412602708634.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDISpatial\ReSTIRDISpatial.frag.fragMain.6338808673994635692.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDIFinalShading\ReSTIRDIFinalShading.frag.fragMain.9848601252663547459.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRDIInitial\ReSTIRDIInitial.frag.fragMain.9098474605982125063.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRPTFinalShading\ReSTIRPTFinalShading.task.taskMain.16675832872284655170.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRPTInitial\ReSTIRPTInitial.mesh.meshMain.3551281027681118954.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRPTTemporal\ReSTIRPTTemporal.task.taskMain.17839100042016199582.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRPTFinalShading\ReSTIRPTFinalShading.mesh.meshMain.16675832872284655170.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRPTInitial\ReSTIRPTInitial.frag.fragMain.3551281027681118954.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRPTFinalShading\ReSTIRPTFinalShading.frag.fragMain.16675832872284655170.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRPTTemporal\ReSTIRPTTemporal.mesh.meshMain.17839100042016199582.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ReSTIRPTTemporal\ReSTIRPTTemporal.frag.fragMain.17839100042016199582.bin
+[21:06:49] NOX: Pipelines: 93 built in parallel from the cache, 0 compiled in parallel, 0 failed (waited 75 ms for them)
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSAOBlur\SSAOBlur.task.taskMain.12910696757514541416.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSAO\SSAO.task.taskMain.14250356993170644017.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\RTAO\RTAO.task.taskMain.7863304761144176423.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\GTAO\GTAO.task.taskMain.2661405287841090935.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSAO\SSAO.mesh.meshMain.14250356993170644017.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSAOBlur\SSAOBlur.mesh.meshMain.12910696757514541416.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\RTAO\RTAO.mesh.meshMain.7863304761144176423.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\GTAO\GTAO.mesh.meshMain.2661405287841090935.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\DeferredLighting\DeferredLighting.task.taskMain.17189039802856526981.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSAO\SSAO.frag.fragMain.14250356993170644017.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SSAOBlur\SSAOBlur.frag.fragMain.12910696757514541416.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\RTAO\RTAO.frag.fragMain.7863304761144176423.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\GTAO\GTAO.frag.fragMain.2661405287841090935.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\DeferredLighting\DeferredLighting.mesh.meshMain.17189039802856526981.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\DeferredLighting\DeferredLighting.frag.fragMain.17189039802856526981.bin
+[21:06:49] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (640x480)
+[21:06:49] NOX: Renderer start-up: device 3086 ms (Streamline / NGX and Vulkan), pipelines and resources 1203 ms
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\PrefilterEnv\PrefilterEnv.comp.compMain.12787081811091139176.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\IrradianceConvolution\IrradianceConvolution.comp.compMain.15945651605666026712.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SkyAtmosphere\SkyAtmosphere.comp.transmittanceMain.9424469349835923809.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SkyAtmosphere\SkyAtmosphere.comp.multiScatteringMain.9424469349835923809.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SkyAtmosphere\SkyAtmosphere.comp.aerialPerspectiveMain.9424469349835923809.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SkyAtmosphere\SkyAtmosphere.comp.skyCubemapMain.9424469349835923809.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SkyAtmosphere\SkyAtmosphere.comp.downsampleCubeMain.9424469349835923809.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SkyAtmosphere\SkyAtmosphere.comp.cloudShadowMain.9424469349835923809.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SkyAtmosphere\SkyAtmosphere.comp.skyHorizonBandMain.9424469349835923809.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SkyAtmosphere\SkyAtmosphere.comp.cloudShapeNoiseMain.9424469349835923809.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SkyAtmosphere\SkyAtmosphere.comp.cloudDetailNoiseMain.9424469349835923809.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\SkyAtmosphere\SkyAtmosphere.comp.cloudWeatherMain.9424469349835923809.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\EmissiveLightGrid\EmissiveLightGrid.comp.buildMain.5320139283036049226.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\EmissiveLightGrid\EmissiveLightGrid.comp.trianglesMain.5320139283036049226.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\EmissiveLightGrid\EmissiveLightGrid.comp.scanMain.5320139283036049226.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\GeometryStreamingFeedback\GeometryStreamingFeedback.comp.computeMain.3396940996915028054.bin
+[21:06:49] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\ClusterIndices\ClusterIndices.comp.computeMain.18221876443241946319.bin
+[21:06:49] NOX: Renderer2D Start
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\TextMesh\TextMesh.task.taskMain.18030321941820789771.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\QuadMesh\QuadMesh.task.taskMain.11306099216088047868.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\LineMesh\LineMesh.task.taskMain.9176548179032983065.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\CircleMesh\CircleMesh.task.taskMain.10123713808478440844.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\GridMesh\GridMesh.task.taskMain.3997683381201392611.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\QuadMesh\QuadMesh.mesh.meshMain.11306099216088047868.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\LineMesh\LineMesh.mesh.meshMain.9176548179032983065.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\TextMesh\TextMesh.mesh.meshMain.18030321941820789771.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\CircleMesh\CircleMesh.mesh.meshMain.10123713808478440844.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\GridMesh\GridMesh.mesh.meshMain.3997683381201392611.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\QuadMesh\QuadMesh.frag.fragMain.11306099216088047868.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\CircleMesh\CircleMesh.frag.fragMain.10123713808478440844.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\LineMesh\LineMesh.frag.fragMain.9176548179032983065.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\GridMesh\GridMesh.frag.fragMain.3997683381201392611.bin
+[21:06:49] NOX: PipelineVK loading shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\TextMesh\TextMesh.frag.fragMain.18030321941820789771.bin
+[21:06:50] NOX: NoxRuntime: playing 'E:/dev/noxiouse/Facerun/Facerun.nproj'
+[21:06:50] NOX: Scripts: loading E:/dev/noxiouse/build/NoxEditor/Release/Scripts/Facerun/Facerun.dll
+[21:06:50] NOX: [Coral] Added ALC 'NoxGameScripts-1' with ID '-488869039'
+[21:06:50] NOX: [Coral] Loading assembly 'E:\dev\noxiouse\build\NoxEditor\Release\Scripts/Core/Nox.ScriptCore.dll'
+[21:06:50] NOX: [Coral] Loading assembly 'E:\dev\noxiouse\build\NoxEditor\Release\Scripts\Facerun\Facerun.dll'
+[21:06:50] NOX: Loaded 18 C# script types
+[21:06:50] NOX: NoxRuntime: client
+[21:06:50] NOX: Net: connecting to localhost:7777 (GameNetworkingSockets)
+[21:06:50] NOX: Deserializing scene 'Untitled'
+[21:06:50] NOX: PipelineVK loading compute shader binary: E:\dev\noxiouse\build\NoxEditor\Release\shaders\BRDFIntegration\BRDFIntegration.comp.compMain.4574536465911991819.bin
+[21:06:50] NOX: PrefabImporter::ImportPrefab loading prefab from E:\dev\noxiouse\Facerun\assets\Prefabs/NetPlayerAnimated.nprefab
+[21:06:50] NOX: [C#] [NetDemo] spawned the player of the server
+[21:06:50] NOX: PrefabImporter::ImportPrefab loading prefab from E:\dev\noxiouse\Facerun\assets\Prefabs/NetBox.nprefab
+[21:06:50] NOX: PrefabImporter::ImportPrefab loading prefab from E:\dev\noxiouse\Facerun\assets\Prefabs/NetBot.nprefab
+[21:06:50] NOX: [C#] [NetDemo] a field of 400 boxes and 16 bots 120 m north of the start
+[21:06:50] NOX: [C#] [NetDemo] game mode on the standalone game
+[21:06:50] NOX: NodeGraphImporter::ImportNodeGraph loading graph from E:\dev\noxiouse\Facerun\assets\AnimationGraphs/UAL_Locomotion.nanimgraph
+[21:06:50] NOX: AnimationImporter::ImportAnimation loading animation from E:\dev\noxiouse\Facerun\assets\Models/UAL1_Standard/Meshes/UAL1_Standard_A_TPose.nanim
+[21:06:50] NOX: SkeletonImporter::ImportSkeleton loading skeleton from E:\dev\noxiouse\Facerun\assets\Models/UAL1_Standard/Meshes/UAL1_Standard.nskel
+[21:06:50] NOX: [AssetLoad] Models/UAL1_Standard/Meshes/UAL1_Standard_A_TPose.nanim (AssetType::AnimationSequence) streamed in 5.3 ms
+[21:06:50] NOX: [AssetLoad] Models/UAL1_Standard/Meshes/UAL1_Standard.nskel (AssetType::Skeleton) streamed in 2.9 ms
+[21:06:50] NOX: Net: joined 'Facerun server' at localhost:7777 as client 1 (server tick 2421, 60 ticks/s, scene 8932079231333945447)
+[21:06:50] NOX: Net debug: trace on (corrections, animation applied, long frames)
+[21:06:50] NOX: AnimationImporter::ImportAnimation loading animation from E:\dev\noxiouse\Facerun\assets\Models/UAL1_Standard/Meshes/UAL1_Standard_Idle_Loop.nanim
+[21:06:50] NOX: AnimationImporter::ImportAnimation loading animation from E:\dev\noxiouse\Facerun\assets\Models/UAL1_Standard/Meshes/UAL1_Standard_Walk_Loop.nanim
+[21:06:50] NOX: AnimationImporter::ImportAnimation loading animation from E:\dev\noxiouse\Facerun\assets\Models/UAL1_Standard/Meshes/UAL1_Standard_Jog_Fwd_Loop.nanim
+[21:06:50] NOX: AnimationImporter::ImportAnimation loading animation from E:\dev\noxiouse\Facerun\assets\Models/UAL1_Standard/Meshes/UAL1_Standard_Jump_Start.nanim
+[21:06:50] NOX: AnimationImporter::ImportAnimation loading animation from E:\dev\noxiouse\Facerun\assets\Models/UAL1_Standard/Meshes/UAL1_Standard_Jump_Land.nanim
+[21:06:50] NOX: AnimationImporter::ImportAnimation loading animation from E:\dev\noxiouse\Facerun\assets\Models/UAL1_Standard/Meshes/UAL1_Standard_Jump_Loop.nanim
+[21:06:50] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 13.5 cm at input 3, 0 inputs replayed (server: speed 0.00 m/s, in the air)
+[21:06:50] NOX: [AssetLoad] Models/UAL1_Standard/Meshes/UAL1_Standard_Idle_Loop.nanim (AssetType::AnimationSequence) streamed in 34.0 ms
+[21:06:50] NOX: [AssetLoad] Models/UAL1_Standard/Meshes/UAL1_Standard_Walk_Loop.nanim (AssetType::AnimationSequence) streamed in 34.0 ms
+[21:06:50] NOX: [AssetLoad] Models/UAL1_Standard/Meshes/UAL1_Standard_Jog_Fwd_Loop.nanim (AssetType::AnimationSequence) streamed in 34.0 ms
+[21:06:50] NOX: [AssetLoad] Models/UAL1_Standard/Meshes/UAL1_Standard_Jump_Start.nanim (AssetType::AnimationSequence) streamed in 34.0 ms
+[21:06:50] NOX: [AssetLoad] Models/UAL1_Standard/Meshes/UAL1_Standard_Jump_Loop.nanim (AssetType::AnimationSequence) streamed in 34.0 ms
+[21:06:50] NOX: [AssetLoad] Models/UAL1_Standard/Meshes/UAL1_Standard_Jump_Land.nanim (AssetType::AnimationSequence) streamed in 34.0 ms
+[21:06:50] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1920x1080)
+[21:06:51] NOX: [AssetLoad] Models/UAL1_Standard/Meshes/UAL1_Standard.nmesh (AssetType::Mesh) streamed in 128.6 ms
+[21:06:51] NOX: [AssetLoad] Models/UAL1_Standard/Materials/UAL1_Standard_M_Main.nmat (AssetType::Material) streamed in 5.0 ms
+[21:06:51] NOX: [AssetLoad] Models/UAL1_Standard/Materials/UAL1_Standard_M_Joints.nmat (AssetType::Material) streamed in 5.0 ms
+[21:07:00] NOX: Client status: client 1 on 'Facerun server', ping 0 ms, quality 100 % / unknown, out 8.8 KB/s, in 14.1 KB/s, others drawn 83 ms in the past, 1 prediction corrections so far, 36 replicated entities relevant here (snapshots 13.3 KB/s)
+[21:07:06] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1913x1080)
+[21:07:06] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1838x1057)
+[21:07:06] NOX: Net debug: a frame took 134 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:07] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1713x1021)
+[21:07:07] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1672x1008)
+[21:07:07] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1641x997)
+[21:07:07] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1591x983)
+[21:07:07] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1537x969)
+[21:07:07] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1505x961)
+[21:07:07] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1472x951)
+[21:07:07] NOX: Net debug: a frame took 120 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:07] NOX: Net debug: NetPlayerAnimated (client 2's) animation applies VerticalSpeed 0.00 -> -0.86 (tick 1008)
+[21:07:07] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1409x933)
+[21:07:07] NOX: Net debug: a frame took 124 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:08] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1368x923)
+[21:07:08] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1339x917)
+[21:07:08] NOX: Net debug: NetPlayerAnimated (client 2's) animation applies IsGrounded = true (tick 1024)
+[21:07:08] NOX: Net debug: NetPlayerAnimated (client 2's) animation applies VerticalSpeed -0.86 -> 0.00 (tick 1024)
+[21:07:08] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1303x909)
+[21:07:08] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1290x906)
+[21:07:08] NOX: Net debug: a frame took 107 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:08] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1272x903)
+[21:07:08] NOX: Net debug: a frame took 109 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:08] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1258x900)
+[21:07:08] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1249x898)
+[21:07:08] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1229x893)
+[21:07:09] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1225x893)
+[21:07:09] NOX: [NRD] Successfully initialized NRD Denoiser Suite: SIGMA, REBLUR/RELAX Specular, REBLUR/RELAX Diffuse (1225x892)
+[21:07:10] NOX: Client status: client 1 on 'Facerun server', ping 0 ms, quality 100 % / 100 %, out 6.4 KB/s, in 10.3 KB/s, others drawn 83 ms in the past, 1 prediction corrections so far, 37 replicated entities relevant here (snapshots 10.1 KB/s)
+[21:07:18] NOX: [C#] [NetDemo] the player of client 1 jumped (1 jumps)
+[21:07:19] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 7.2 cm at input 1691, 0 inputs replayed (server: speed 3.98 m/s, grounded)
+[21:07:19] NOX: NodeGraphImporter::ImportNodeGraph loading graph from E:\dev\noxiouse\Facerun\assets\Audio/Footsteps.naudiograph
+[21:07:19] NOX: [AssetLoad] Audio/BootsLinoleum_01.wav (AssetType::AudioClip) streamed in 3.6 ms
+[21:07:19] NOX: [AssetLoad] Audio/BootsLinoleum_02.wav (AssetType::AudioClip) streamed in 3.6 ms
+[21:07:19] NOX: [AssetLoad] Audio/BootsLinoleum_03.wav (AssetType::AudioClip) streamed in 3.6 ms
+[21:07:19] NOX: [AssetLoad] Audio/BootsLinoleum_04.wav (AssetType::AudioClip) streamed in 3.6 ms
+[21:07:19] NOX: [AssetLoad] Audio/BootsLinoleum_05.wav (AssetType::AudioClip) streamed in 3.6 ms
+[21:07:20] NOX: Client status: client 1 on 'Facerun server', ping 0 ms, quality 100 % / 100 %, out 10.2 KB/s, in 14.0 KB/s, others drawn 83 ms in the past, 2 prediction corrections so far, 40 replicated entities relevant here (snapshots 13.8 KB/s)
+[21:07:21] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 2.4 cm at input 1845, 0 inputs replayed (server: speed 2.77 m/s, grounded)
+[21:07:30] NOX: Client status: client 1 on 'Facerun server', ping 0 ms, quality 100 % / 100 %, out 8.9 KB/s, in 20.8 KB/s, others drawn 83 ms in the past, 3 prediction corrections so far, 42 replicated entities relevant here (snapshots 19.9 KB/s)
+[21:07:37] NOX: Net debug: a frame took 218 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:37] NOX: Net debug: a frame took 219 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:38] NOX: Net debug: a frame took 218 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:38] NOX: Net debug: a frame took 219 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:38] NOX: Net debug: a frame took 276 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:38] NOX: Net debug: a frame took 220 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:39] NOX: Net debug: a frame took 218 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:39] NOX: Net debug: a frame took 218 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:39] NOX: Net debug: a frame took 245 ms (the window frozen or dragged?): at most 5 ticks are run for it, the rest of the time is skipped
+[21:07:40] NOX: Client status: client 1 on 'Facerun server', ping 0 ms, quality 100 % / 100 %, out 6.5 KB/s, in 18.4 KB/s, others drawn 83 ms in the past, 3 prediction corrections so far, 42 replicated entities relevant here (snapshots 15.4 KB/s)
+[21:07:47] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 2.3 cm at input 3288, 0 inputs replayed (server: speed 0.20 m/s, in the air)
+[21:07:49] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 2.9 cm at input 3452, 0 inputs replayed (server: speed 0.00 m/s, in the air)
+[21:07:50] NOX: Client status: client 1 on 'Facerun server', ping 0 ms, quality 100 % / 100 %, out 10.7 KB/s, in 16.8 KB/s, others drawn 84 ms in the past, 5 prediction corrections so far, 42 replicated entities relevant here (snapshots 18.3 KB/s)
+[21:07:52] NOX: [C#] [NetDemo] the player of client 1 jumped (2 jumps)
+[21:07:52] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 27.1 cm at input 3628, 0 inputs replayed (server: speed 4.73 m/s, grounded)
+[21:07:52] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 9.3 cm at input 3630, 0 inputs replayed (server: speed 4.06 m/s, grounded)
+[21:07:52] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 7.1 cm at input 3632, 0 inputs replayed (server: speed 3.40 m/s, grounded)
+[21:07:52] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 3.9 cm at input 3634, 0 inputs replayed (server: speed 2.73 m/s, grounded)
+[21:07:54] NOX: [C#] [NetDemo] the player of client 1 jumped (3 jumps)
+[21:07:56] NOX: [C#] [NetDemo] the player of client 1 jumped (4 jumps)
+[21:08:00] NOX: Client status: client 1 on 'Facerun server', ping 0 ms, quality 100 % / 100 %, out 9.2 KB/s, in 16.5 KB/s, others drawn 83 ms in the past, 9 prediction corrections so far, 48 replicated entities relevant here (snapshots 19.0 KB/s)
+[21:08:01] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 3.3 cm at input 4126, 0 inputs replayed (server: speed 1.50 m/s, in the air)
+[21:08:01] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 2.5 cm at input 4133, 1 inputs replayed (server: speed 0.00 m/s, grounded)
+[21:08:04] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 3.2 cm at input 4314, 0 inputs replayed (server: speed 4.43 m/s, in the air)
+[21:08:04] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 2.1 cm at input 4354, 0 inputs replayed (server: speed 3.32 m/s, in the air)
+[21:08:05] NOX: [C#] [NetDemo] the player of client 1 jumped (5 jumps)
+[21:08:06] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 2.2 cm at input 4438, 0 inputs replayed (server: speed 2.96 m/s, grounded)
+[21:08:06] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 2.4 cm at input 4474, 0 inputs replayed (server: speed 1.95 m/s, grounded)
+[21:08:10] NOX: Client status: client 1 on 'Facerun server', ping 0 ms, quality 100 % / 100 %, out 9.6 KB/s, in 19.9 KB/s, others drawn 83 ms in the past, 15 prediction corrections so far, 47 replicated entities relevant here (snapshots 19.4 KB/s)
+[21:08:16] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 3.3 cm at input 5071, 1 inputs replayed (server: speed 0.00 m/s, in the air)
+[21:08:17] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 2.4 cm at input 5104, 0 inputs replayed (server: speed 0.00 m/s, grounded)
+[21:08:18] NOX: Loaded 191 glyphs from font assets/fonts/opensans/static/OpenSans-Regular.ttf (out of 224)
+[21:08:18] NOX: Net debug: NetPlayerAnimated (client 1's) corrected by the server: off by 2.7 cm at input 5178, 0 inputs replayed (server: speed 0.00 m/s, grounded)
+[21:08:19] NOX: Application Shutdown
+[21:08:20] NOX: RuntimeLayer Shutdown
+[21:08:20] NOX: Net: left localhost:7777: left (the client left)
+[21:08:20] NOX: Renderer Shutdown
+[21:08:20] NOX: [Streamline] [21-08-20][streamline][info][tid:21296][95s:428ms:762us]commonEntry.cpp:1872[slOnPluginShutdown] Shutting down NGX
+
+[21:08:20] NOX: [Streamline] [21-08-20][streamline][info][tid:21296][95s:428ms:980us]commonEntry.cpp:1369[ngxLog] [Unknown(32765)] [2026-11-13 21:08:20] [NGXSendTelemetryShutdownData:958] Sending Telemetry Shutdown Data
+
+
+[21:08:20] NOX: [Streamline] [21-08-20][streamline][info][tid:21296][95s:429ms:139us]commonEntry.cpp:1369[ngxLog] [SuperSampling] [2026-11-13 21:08:20] [tid:21296][NGXCubinGeneric::Shutdown:281] Delayed destroy resource list count 0
+
+
+[21:08:20] NOX: [Streamline] [21-08-20][streamline][info][tid:21296][95s:449ms:828us]commonEntry.cpp:1369[ngxLog] [SuperSampling] [2026-11-13 21:08:20] [tid:21296][NGXCubinGeneric::Shutdown:281] Delayed destroy resource list count 0
+
+
+[21:08:20] NOX: Renderer2D Shutdown

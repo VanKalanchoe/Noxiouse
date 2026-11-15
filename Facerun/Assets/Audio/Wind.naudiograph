@@ -1,0 +1,134 @@
+Domain: AudioGraph
+OutputNode: 1
+NextNodeId: 10
+Nodes:
+  - Id: 1
+    Type: Output
+    Position: [663, -5]
+    Properties:
+      []
+  - Id: 2
+    Type: Noise
+    Position: [-168, -31]
+    Properties:
+      - Name: Type
+        Value:
+          Int: 1
+      - Name: Seed
+        Value:
+          Int: -1
+  - Id: 3
+    Type: State Variable Filter
+    Position: [198, 113]
+    Properties:
+      - Name: Frequency
+        Value:
+          Float: 1000
+      - Name: Q
+        Value:
+          Float: 10
+  - Id: 4
+    Type: Gain
+    Position: [419, 225]
+    Properties:
+      - Name: Gain
+        Value:
+          Float: 1
+  - Id: 5
+    Type: LFO
+    Position: [-113, 667]
+    Properties:
+      - Name: Max
+        Value:
+          Float: 900
+      - Name: Frequency
+        Value:
+          Float: 0.15
+      - Name: Min
+        Value:
+          Float: 300
+      - Name: Shape
+        Value:
+          Int: 4
+      - Name: Phase Offset
+        Value:
+          Float: 0
+      - Name: Seed
+        Value:
+          Int: -1
+  - Id: 6
+    Type: Map Range
+    Position: [-104, 293]
+    Properties:
+      - Name: Value
+        Value:
+          Float: 0
+      - Name: In Min
+        Value:
+          Float: 0
+      - Name: Clamp
+        Value:
+          Bool: true
+      - Name: In Max
+        Value:
+          Float: 1
+      - Name: Out Min
+        Value:
+          Float: 0.6
+      - Name: Out Max
+        Value:
+          Float: 1.8
+  - Id: 7
+    Type: Multiply
+    Position: [209, 673]
+    Properties:
+      - Name: A
+        Value:
+          Float: 1
+      - Name: B
+        Value:
+          Float: 1
+  - Id: 8
+    Type: Get Float
+    Position: [-414, 289]
+    Properties:
+      - Name: Parameter
+        Value:
+          Str: Wind Strength
+Links:
+  - FromNode: 2
+    FromPin: 0
+    ToNode: 3
+    ToPin: 0
+  - FromNode: 3
+    FromPin: 2
+    ToNode: 4
+    ToPin: 0
+  - FromNode: 4
+    FromPin: 0
+    ToNode: 1
+    ToPin: 0
+  - FromNode: 8
+    FromPin: 0
+    ToNode: 6
+    ToPin: 0
+  - FromNode: 6
+    FromPin: 0
+    ToNode: 7
+    ToPin: 1
+  - FromNode: 7
+    FromPin: 0
+    ToNode: 3
+    ToPin: 1
+  - FromNode: 8
+    FromPin: 0
+    ToNode: 4
+    ToPin: 1
+  - FromNode: 5
+    FromPin: 0
+    ToNode: 7
+    ToPin: 0
+Parameters:
+  - Name: Wind Strength
+    Default:
+      Float: 0.5

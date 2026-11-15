@@ -81,6 +81,8 @@ namespace Nox
         // ImGui
         if (m_Specification.isEditor && m_Specification.UseImGui)
             m_ImGuiLayer = PushLayer<ImGuiLayer>(*renderer);
+        else if (!m_Specification.UseImGui && m_Window && m_Window->getHandle())
+            SDL_StartTextInput(m_Window->getHandle());
 
 #if NOX_PROFILE_STATS
         // Nox Stats (F3) for every app: an ImGui window in the editor, the engine's screen-space text in a game.
@@ -385,6 +387,15 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
 
             return SDL_APP_CONTINUE;
         }
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        {
+            Uint8 sdlButton = currentEvent->button.button;
+
+            Nox::MouseButtonReleasedEvent event(sdlButton);
+            applicationState->app->RaiseEvent(event);
+
+            return SDL_APP_CONTINUE;
+        }
     case SDL_EVENT_KEY_DOWN:
         {
             // Keys are the layers' (the editor's shortcuts skip text fields; the runtime quits on Esc): handled here, before them,
@@ -395,6 +406,15 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
             Nox::KeyPressedEvent event(scan, repeat, currentEvent->key.mod);
             applicationState->app->RaiseEvent(event);
 
+            return SDL_APP_CONTINUE;
+        }
+    case SDL_EVENT_TEXT_INPUT:
+        {
+            if (currentEvent->text.text)
+            {
+                Nox::TextInputEvent event(currentEvent->text.text);
+                applicationState->app->RaiseEvent(event);
+            }
             return SDL_APP_CONTINUE;
         }
     case SDL_EVENT_DROP_FILE:

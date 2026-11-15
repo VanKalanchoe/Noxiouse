@@ -26,7 +26,7 @@ namespace Nox::UI
     {
     }
 
-    void UIElement::AddChild(const IntrusiveRef<UIElement>& child)
+    void UIElement::AddChild(const Ref<UIElement>& child)
     {
         if (!child || child.get() == this)
             return;
@@ -48,7 +48,7 @@ namespace Nox::UI
         m_Children.push_back(child);
     }
 
-    void UIElement::RemoveChild(const IntrusiveRef<UIElement>& child)
+    void UIElement::RemoveChild(const Ref<UIElement>& child)
     {
         if (!child)
             return;

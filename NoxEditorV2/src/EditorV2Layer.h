@@ -25,7 +25,7 @@ namespace Nox
         void BuildUI();
 
         UI::UIContext m_UI;
-        IntrusiveRef<UI::UILabel> m_StatusLabel;
+        Ref<UI::UILabel> m_StatusLabel;
         float m_LastDeltaSeconds = 0.016f;
         int m_ClickCount = 0;
     };

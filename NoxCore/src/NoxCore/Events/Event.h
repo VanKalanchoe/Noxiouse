@@ -10,7 +10,7 @@ namespace Nox {
     {
         None = 0,
         WindowClose, WindowResize,
-        KeyPressed, KeyReleased,
+        KeyPressed, KeyReleased, TextInput,
         MouseButtonPressed, MouseButtonReleased, MouseMoved, MouseScrolled,
         ExternalFileDrop,
     };

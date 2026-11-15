@@ -1,0 +1,122 @@
+Domain: AudioGraph
+OutputNode: 1
+NextNodeId: 6
+Nodes:
+  - Id: 1
+    Type: Output
+    Position: [786, 33]
+    Properties:
+      []
+  - Id: 2
+    Type: On Play
+    Position: [-40, 65]
+    Properties:
+      []
+  - Id: 3
+    Type: Random Wave Player
+    Position: [348, 79]
+    Properties:
+      - Name: Clip 2
+        Value:
+          U64: 3235414157035070573
+      - Name: Pitch Shift
+        Value:
+          Float: 0
+      - Name: Clip 1
+        Value:
+          U64: 11326743626334736882
+      - Name: Clip 3
+        Value:
+          U64: 7721550169096927268
+      - Name: Clip 4
+        Value:
+          U64: 15730891953030608254
+      - Name: Clip 5
+        Value:
+          U64: 12630146478902769933
+      - Name: Clip 6
+        Value:
+          U64: 0
+      - Name: Clip 7
+        Value:
+          U64: 0
+      - Name: Clip 8
+        Value:
+          U64: 0
+      - Name: Weight 1
+        Value:
+          Float: 1
+      - Name: Weight 2
+        Value:
+          Float: 1
+      - Name: Weight 3
+        Value:
+          Float: 1
+      - Name: Weight 4
+        Value:
+          Float: 1
+      - Name: Weight 5
+        Value:
+          Float: 1
+      - Name: Weight 6
+        Value:
+          Float: 1
+      - Name: Weight 7
+        Value:
+          Float: 1
+      - Name: Weight 8
+        Value:
+          Float: 1
+      - Name: No Repeats
+        Value:
+          Int: 2
+      - Name: Seed
+        Value:
+          Int: -1
+  - Id: 4
+    Type: Random Float
+    Position: [96, -111]
+    Properties:
+      - Name: Min
+        Value:
+          Float: -1
+      - Name: Max
+        Value:
+          Float: 1
+      - Name: Seed
+        Value:
+          Int: -1
+  - Id: 5
+    Type: Gain (dB)
+    Position: [611, 203]
+    Properties:
+      - Name: Gain
+        Value:
+          Float: -3
+Links:
+  - FromNode: 2
+    FromPin: 0
+    ToNode: 3
+    ToPin: 0
+  - FromNode: 2
+    FromPin: 0
+    ToNode: 4
+    ToPin: 0
+  - FromNode: 4
+    FromPin: 0
+    ToNode: 3
+    ToPin: 2
+  - FromNode: 3
+    FromPin: 0
+    ToNode: 5
+    ToPin: 0
+  - FromNode: 5
+    FromPin: 0
+    ToNode: 1
+    ToPin: 0
+  - FromNode: 3
+    FromPin: 3
+    ToNode: 1
+    ToPin: 2
+Parameters:
+  []

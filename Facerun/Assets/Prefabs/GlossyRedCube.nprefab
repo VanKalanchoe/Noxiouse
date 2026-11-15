@@ -1,0 +1,17 @@
+Prefab: GlossyRedCube
+Root: 1068416468819500220
+Entities:
+  - Entity: 1068416468819500220
+    TagComponent:
+      Tag: GlossyRedCube
+    TransformComponent:
+      Translation: [0, 100, 300]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 15793823495927804249

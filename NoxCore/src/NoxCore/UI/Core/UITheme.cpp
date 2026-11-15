@@ -171,9 +171,9 @@ namespace Nox::UI
         return out;
     }
 
-    IntrusiveRef<UITheme> UITheme::CreateDefault()
+    Ref<UITheme> UITheme::CreateDefault()
     {
-        auto theme = CreateIntrusive<UITheme>();
+        Ref<UITheme> theme(new UITheme());
 
         theme->SetToken("Background", { 0.070f, 0.078f, 0.102f, 1.0f });
         theme->SetToken("Surface0",   { 0.102f, 0.114f, 0.149f, 0.96f });
@@ -269,7 +269,7 @@ namespace Nox::UI
         }
     }
 
-    void UITheme::WatchFile(Utils::NOXWatcher& watcher, const std::filesystem::path& path)
+    void UITheme::WatchFile(::Utils::NOXWatcher& watcher, const std::filesystem::path& path)
     {
         m_WatchedPath = path;
         watcher.watch(path, [this](const std::filesystem::path&)
@@ -335,10 +335,10 @@ namespace Nox::UI
             applyStateSuffix(":disabled");
         else
         {
-            if (HasState(state, UIState::Hovered))
-                applyStateSuffix(":hover");
             if (HasState(state, UIState::Focused))
                 applyStateSuffix(":focus");
+            if (HasState(state, UIState::Hovered))
+                applyStateSuffix(":hover");
             if (HasState(state, UIState::Pressed))
                 applyStateSuffix(":active");
             if (HasState(state, UIState::Pressed))

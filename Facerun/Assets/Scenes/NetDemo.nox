@@ -1,5 +1,156 @@
-Scene: NetDemo
+Scene: Untitled
 Entities:
+  - Entity: 7021394837113006
+    TagComponent:
+      Tag: Spinner
+    TransformComponent:
+      Translation: [0, 20, -900]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    NetworkIdentityComponent:
+      ReplicateTransform: true
+      ReplicateAnimation: true
+      AlwaysRelevant: false
+      OnlyRelevantToOwner: false
+      CullDistance: 150
+      Priority: 1
+      UpdateRate: 0
+      Dormancy: Awake
+    ScriptComponent:
+      Classes:
+        - Facerun.NetSpinner
+      EntityReferences:
+        []
+      FieldOverrides:
+        []
+    RigidBody3DComponent:
+      BodyType: Kinematic
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [300, 20, 300]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 7021394837113005
+    TagComponent:
+      Tag: Game Mode
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    ScriptComponent:
+      Classes:
+        - Facerun.NetGameMode
+      EntityReferences:
+        []
+      FieldOverrides:
+        - Class: Facerun.NetGameMode
+          Field: AnimatedPlayers
+          Type: Bool
+          Value: true
+  - Entity: 7021394837113004
+    TagComponent:
+      Tag: Ground
+    TransformComponent:
+      Translation: [0, -10, -8000]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    ScriptComponent:
+      Classes:
+        - Facerun.LevelStreamingTestBox
+      EntityReferences:
+        []
+      FieldOverrides:
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Size
+          Type: Vector3
+          Value: [40000, 20, 40000]
+        - Class: Facerun.LevelStreamingTestBox
+          Field: Color
+          Type: Vector3
+          Value: [0.45, 0.45, 0.45]
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [20000, 10, 20000]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 7021394837113003
+    TagComponent:
+      Tag: Sun
+    TransformComponent:
+      Translation: [0, 500, 0]
+      Rotation: [-0.9, 0.5, 0]
+      Scale: [1, 1, 1]
+    DirectionalLightComponent:
+      Color: [1, 1, 1]
+      Intensity: 10
+      AngularDiameter: 0.5357
+      ShadowSamples: 1
+  - Entity: 7021394837113002
+    TagComponent:
+      Tag: Sky
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    EnvironmentLightComponent:
+      Source: ProceduralSky
+      TexturePath: ""
+      RadianceScale: [1, 1, 1]
+      Rotation: 0
+      Enabled: true
+      RayleighScale: 1
+      MieScale: 1
+      OzoneScale: 1
+      MieAnisotropy: 0.8
+      GroundAlbedo: [0.3, 0.3, 0.3]
+      AltitudeKm: 0
+      AerialPerspectiveScale: 1
+      Clouds: true
+      CloudCoverage: 0.35
+      CloudDensity: 1
+      CloudBottomKm: 1.5
+      CloudThicknessKm: 2
+      CloudScaleKm: 8
+      CloudOffsetKm: [0, 0]
+      CloudWind: [0, 0]
+      SunThroughAtmosphere: true
+      Moon: true
+      MoonIntensity: 0.004
+      MoonColor: [0.75, 0.85, 1]
+      MoonAngularDiameter: 0.53
+      MoonOppositeSun: true
+      MoonElevation: 40
+      MoonAzimuth: 200
+      Stars: true
+      StarIntensity: 1
+      HeightFog: false
+      FogDensity: 0.5
+      FogHeightFalloff: 5
+      FogHeight: 0
+      FogStartDistance: 0
+      FogMaxOpacity: 1
+      FogColor: [1, 1, 1]
+      FogFromEnvironment: true
+      FogSunScattering: 0.05
+      FogSunExponent: 8
   - Entity: 7021394837113001
     TagComponent:
       Tag: Camera
@@ -18,82 +169,8 @@ Entities:
         OrthographicFar: 1
       Primary: true
       FixedAspectRatio: false
-  - Entity: 7021394837113002
-    TagComponent:
-      Tag: Sky
-    TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [0, 0, 0]
-      Scale: [1, 1, 1]
-    EnvironmentLightComponent:
-      Source: ProceduralSky
-      Enabled: true
-  - Entity: 7021394837113003
-    TagComponent:
-      Tag: Sun
-    TransformComponent:
-      Translation: [0, 500, 0]
-      Rotation: [-0.9, 0.5, 0]
-      Scale: [1, 1, 1]
-    DirectionalLightComponent:
-      Color: [1, 1, 1]
-      Intensity: 10
-  - Entity: 7021394837113004
-    TagComponent:
-      Tag: Ground
-    TransformComponent:
-      Translation: [0, -10, -8000]
-      Rotation: [0, 0, 0]
-      Scale: [1, 1, 1]
-    RigidBody3DComponent:
-      BodyType: Static
-    BoxCollider3DComponent:
-      HalfExtents: [20000, 10, 20000]
-      Offset: [0, 0, 0]
-    ScriptComponent:
-      Classes: [Facerun.LevelStreamingTestBox]
-      EntityReferences: []
-      FieldOverrides:
-        - Class: Facerun.LevelStreamingTestBox
-          Field: Size
-          Type: Vector3
-          Value: [40000, 20, 40000]
-        - Class: Facerun.LevelStreamingTestBox
-          Field: Color
-          Type: Vector3
-          Value: [0.45, 0.45, 0.45]
-  - Entity: 7021394837113005
-    TagComponent:
-      Tag: Game Mode
-    TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [0, 0, 0]
-      Scale: [1, 1, 1]
-    ScriptComponent:
-      Classes: [Facerun.NetGameMode]
-      EntityReferences: []
-      FieldOverrides: []
-  - Entity: 7021394837113006
-    TagComponent:
-      Tag: Spinner
-    TransformComponent:
-      Translation: [0, 20, -900]
-      Rotation: [0, 0, 0]
-      Scale: [1, 1, 1]
-    NetworkIdentityComponent:
-      ReplicateTransform: true
-      AlwaysRelevant: false
-      OnlyRelevantToOwner: false
-      CullDistance: 150
-      Priority: 1
-      UpdateRate: 0
-      Dormancy: Awake
-    RigidBody3DComponent:
-      BodyType: Kinematic
-    BoxCollider3DComponent:
-      HalfExtents: [300, 20, 300]
-      Offset: [0, 0, 0]
-    ScriptComponent:
-      Classes: [Facerun.NetSpinner]
-      EntityReferences: []
-      FieldOverrides: []
+      AutoExposure: false
+      ManualEV100: 2
+      ExposureCompensation: 0
+      AutoExposureMinEV: -16
+      AutoExposureMaxEV: 16
