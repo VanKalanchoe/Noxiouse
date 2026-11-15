@@ -8,6 +8,8 @@
 
 #include <algorithm>
 
+#include <SDL3/SDL_thread.h>
+
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/NodeGraph/NodeGraphAsset.h"
@@ -18,20 +20,17 @@ namespace Nox
 {
     namespace
     {
-        // A draft: the generated sources' stages compiled without the optimisation passes (the engine's own stages -- the meshlet task
-        // and mesh stages -- stay as they are: cached, optimised).
-        void MarkDraft(NRI::PipelineDesc& desc, bool optimize)
+        // A build thread above the editor's own (its render and job threads run flat out): the user's log had the forward variant compile
+        // in 6 s at the start but 35 s while the editor drew -- the compile thread was starved, not slow.
+        // For the task's duration only (MSVC's std::async runs tasks on pooled threads: the priority must not stay with the thread).
+        struct BuildThreadPriority
         {
-            if (optimize)
-                return;
-            const std::string generated = CustomLitShaders::GeneratedFolder().generic_string();
-            for (NRI::ShaderStageDesc& shader : desc.shaders)
-                if (std::filesystem::path(shader.sourcePath).generic_string().starts_with(generated))
-                    shader.optimize = false;
-        }
+            BuildThreadPriority() { SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH); }
+            ~BuildThreadPriority() { SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_NORMAL); }
+        };
     }
 
-    std::unique_ptr<NRI::Pipeline> Renderer::buildCustomLitDeferredPipeline(bool forceCompile, bool optimize)
+    std::unique_ptr<NRI::Pipeline> Renderer::buildCustomLitDeferredPipeline(bool forceCompile)
     {
         // Built on the calling thread, a compile error thrown at once (NRI::PipelineDesc::buildNow): a Material Shader is the project's
         // code and may not compile, and nothing may bind a pipeline that failed.
@@ -43,11 +42,10 @@ namespace Nox
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = source });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = source });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = source });
-        MarkDraft(desc, optimize);
         return m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
-    std::unique_ptr<NRI::Pipeline> Renderer::buildCustomLitForwardPipeline(bool forceCompile, bool optimize)
+    std::unique_ptr<NRI::Pipeline> Renderer::buildCustomLitForwardPipeline(bool forceCompile)
     {
         // The forward shader's variant: as createTransparentLitPipeline's plain one (the meshlet stages are the same files).
         NRI::PipelineDesc desc{};
@@ -57,20 +55,18 @@ namespace Nox
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Material_PBR_Mesh.slang" });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = CustomLitShaders::ForwardSourcePath().generic_string() });
-        MarkDraft(desc, optimize);
         return m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
-    std::unique_ptr<NRI::Pipeline> Renderer::buildMaterialGraphGBufferPipeline(bool forceCompile, bool writeVelocity, bool optimize)
+    std::unique_ptr<NRI::Pipeline> Renderer::buildMaterialGraphGBufferPipeline(bool forceCompile, bool writeVelocity)
     {
         NRI::PipelineDesc desc = gbufferPipelineDesc(CustomLitShaders::GBufferSourcePath().generic_string(), writeVelocity);
         desc.forceCompile = forceCompile;
         desc.buildNow = true;
-        MarkDraft(desc, optimize);
         return m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
-    std::unique_ptr<NRI::Pipeline> Renderer::buildMaterialGraphVisibilityPipeline(bool forceCompile, bool shadowDepth, bool optimize)
+    std::unique_ptr<NRI::Pipeline> Renderer::buildMaterialGraphVisibilityPipeline(bool forceCompile, bool shadowDepth)
     {
         // As createVisibilityPipeline / createShadowMapPipelines' mask pipeline, from the generated source with the graphs.
         const std::string source = CustomLitShaders::VisibilitySourcePath().generic_string();
@@ -82,11 +78,10 @@ namespace Nox
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = source });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = shadowDepth ? "depthMaskFragMain" : "fragMain", .sourcePath = source });
-        MarkDraft(desc, optimize);
         return m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
-    std::unique_ptr<NRI::Pipeline> Renderer::buildMaterialGraphEditorPipeline(bool selection, bool optimize)
+    std::unique_ptr<NRI::Pipeline> Renderer::buildMaterialGraphEditorPipeline(bool selection)
     {
         // As createStableEntityDepthPipeline / createSelectionMaskPipeline, from the generated sources with the graphs.
         const std::string source = (selection ? CustomLitShaders::SelectionMaskSourcePath() : CustomLitShaders::StableDepthSourcePath()).generic_string();
@@ -96,7 +91,6 @@ namespace Nox
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = source });
         desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = source });
-        MarkDraft(desc, optimize);
         return m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
@@ -250,10 +244,7 @@ namespace Nox
         build->GraphPaths = graphPaths;
         build->GraphPrograms = std::move(programs);
         build->GraphCount = graphCount;
-        // The editor after a change: drafts first (the generated sources without the optimisation passes, several times faster -- the
-        // forward shader is most of a build), handed over at once, then the optimised pipelines, which replace them when done. Within a
-        // phase the forward variant compiles on a thread of its own beside the others.
-        build->DraftFirst = compile && !m_customLitNoDrafts;
+        // The forward variant (the slowest) compiles on a thread of its own beside the others; both above the editor's priority.
         build->Task = std::async(std::launch::async, [this, build, compile, shaderCount, graphCount]()
         {
             // The renderer's shutdown (or a newer request) stops the build between its stages: it waits for one compile, not all of them.
@@ -265,22 +256,24 @@ namespace Nox
                 build->Cancelled = true;
                 return true;
             };
-            auto phase = [&](bool optimize) -> bool
+            const BuildThreadPriority priority;
+            auto phase = [&]() -> bool
             {
-                std::future<std::unique_ptr<NRI::Pipeline>> forwardTask = std::async(std::launch::async, [this, optimize]()
+                std::future<std::unique_ptr<NRI::Pipeline>> forwardTask = std::async(std::launch::async, [this]()
                 {
-                    return buildCustomLitForwardPipeline(false, optimize);
+                    const BuildThreadPriority priority;
+                    return buildCustomLitForwardPipeline(false);
                 });
                 if (graphCount > 0 && !cancelled())
                 {
-                    std::unique_ptr<NRI::Pipeline> gbuffer = buildMaterialGraphGBufferPipeline(false, true, optimize);
-                    std::unique_ptr<NRI::Pipeline> gbufferNoVelocity = buildMaterialGraphGBufferPipeline(false, false, optimize);
+                    std::unique_ptr<NRI::Pipeline> gbuffer = buildMaterialGraphGBufferPipeline(false, true);
+                    std::unique_ptr<NRI::Pipeline> gbufferNoVelocity = buildMaterialGraphGBufferPipeline(false, false);
                     // The Masked pipelines with the graphs' Opacity Mask, swapped in with the G-buffer resolve's (one set of slots).
-                    std::unique_ptr<NRI::Pipeline> visibility = buildMaterialGraphVisibilityPipeline(false, false, optimize);
-                    std::unique_ptr<NRI::Pipeline> shadowDepthMask = buildMaterialGraphVisibilityPipeline(false, true, optimize);
+                    std::unique_ptr<NRI::Pipeline> visibility = buildMaterialGraphVisibilityPipeline(false, false);
+                    std::unique_ptr<NRI::Pipeline> shadowDepthMask = buildMaterialGraphVisibilityPipeline(false, true);
                     // The editor's overlays (entity IDs / depth, selection outline) cut the mask too.
-                    std::unique_ptr<NRI::Pipeline> stableDepth = m_isEditor ? buildMaterialGraphEditorPipeline(false, optimize) : nullptr;
-                    std::unique_ptr<NRI::Pipeline> selectionMask = m_isEditor ? buildMaterialGraphEditorPipeline(true, optimize) : nullptr;
+                    std::unique_ptr<NRI::Pipeline> stableDepth = m_isEditor ? buildMaterialGraphEditorPipeline(false) : nullptr;
+                    std::unique_ptr<NRI::Pipeline> selectionMask = m_isEditor ? buildMaterialGraphEditorPipeline(true) : nullptr;
                     std::lock_guard lock(build->Mutex);
                     build->StableDepth = std::move(stableDepth);
                     build->SelectionMask = std::move(selectionMask);
@@ -292,7 +285,7 @@ namespace Nox
                 }
                 if (shaderCount > 0 && !cancelled())
                 {
-                    std::unique_ptr<NRI::Pipeline> deferred = buildCustomLitDeferredPipeline(false, optimize);
+                    std::unique_ptr<NRI::Pipeline> deferred = buildCustomLitDeferredPipeline(false);
                     std::lock_guard lock(build->Mutex);
                     build->Deferred = std::move(deferred);
                     build->DeferredDone = true;
@@ -307,15 +300,8 @@ namespace Nox
             try
             {
                 if (compile)
-                    m_shaderCompiler->compile(CustomLitShaders::CheckSourcePath().generic_string(), false); // (only its errors count)
-                if (build->DraftFirst)
-                {
-                    if (!phase(false))
-                        return;
-                    std::lock_guard lock(build->Mutex);
-                    build->DraftDone = true;
-                }
-                if (!phase(true))
+                    m_shaderCompiler->compile(CustomLitShaders::CheckSourcePath().generic_string());
+                if (!phase())
                     return;
                 std::lock_guard lock(build->Mutex);
                 build->ForwardDone = true;
@@ -353,15 +339,6 @@ namespace Nox
             failed = build.Failed;
             finished = build.Failed || build.Cancelled || build.ForwardDone;
             error = build.Error;
-            if (build.DraftDone && !build.DraftReported)
-            {
-                // The drafts draw: what the user waits for is there; the optimised pipelines replace them in the background.
-                build.DraftReported = true;
-                m_customLitStatus.Building = false;
-                m_customLitStatus.Optimizing = true;
-                ++m_customLitStatus.Version;
-                NOX_CORE_INFO("Custom Lit / material graphs: drafts ready (unoptimised shaders draw); the optimised build follows in the background");
-            }
         }
         if (deferred || forward || gbuffer)
         {
@@ -446,11 +423,8 @@ namespace Nox
         }
         if (build.Cancelled)
             NOX_CORE_INFO("Custom Lit / material graphs: a build stopped for a newer change (or the shutdown)");
-        else if (!failed && build.DraftFirst)
-            NOX_CORE_INFO("Custom Lit / material graphs: the optimised shaders replace the drafts");
         m_customLitBuild.reset(); // (its task has returned: the future's wait is immediate)
         m_customLitStatus.Building = false;
-        m_customLitStatus.Optimizing = false;
         ++m_customLitStatus.Version;
         if (m_customLitPending)
         {
@@ -527,9 +501,7 @@ namespace Nox
             m_customLitRequestedPaths.clear(); // (a project opened: its own slots)
             m_materialGraphRequestedPaths.clear();
             m_customLitPending.reset();
-            m_customLitNoDrafts = wait; // (a game's start waits: the optimised pipelines only)
             SetCustomLitShaders(sources, graphs);
-            m_customLitNoDrafts = false;
             if (wait)
                 waitForCustomLitBuild();
         }

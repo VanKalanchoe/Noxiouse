@@ -26,8 +26,7 @@ namespace NRI
     public:
         virtual ~ShaderCompiler() = default;
         
-        // `optimize` false: without the optimisation passes (a draft: several times faster to compile, a little slower to run).
-        virtual std::vector<char> compile(const std::string& path, bool optimize = true) = 0;
+        virtual std::vector<char> compile(const std::string& path) = 0;
         // Hash of the shader source and every file it includes, so a cached binary is only reused while all of them match.
         virtual uint64_t sourceHash(const std::string& path) = 0;
         // Whether compile() can run here: false in a packaged game shipped without the compiler (precompiled shaders only).

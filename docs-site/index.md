@@ -113,7 +113,7 @@ file-reference
 
 ## What's New (November 2026)
 
-- **Faster shader builds:** saving a material graph or Material Shader shows the result after a quick unoptimised build, then swaps in the optimised shaders in the background; the editor's first start compiles the slowest shaders first.
+- **Faster shader builds:** saving a material graph or Material Shader builds on high-priority threads (the editor's rendering no longer starves them); the editor's first start always begins with the slowest shader, the forward shader most pipelines share; every compiled shader file logs its time.
 - **Material graph Opacity Mask:** a graph's Opacity Mask cuts a Masked material away per pixel -- leaves, fences, dissolves -- in the view, the shadow maps and translucent drawing (ray-traced use comes with step 4c).
 - **Material graph:** Unreal's material graph -- a `.nmatgraph` (Content Browser > + Add > Material Graph) with 45 nodes (textures, maths, parameters, Panner, Fresnel, Noise) into a Material Output; a material picks it in the Material Editor's Material Graph section and sets its parameters (one graph, many materials). Opaque and translucent surfaces; World Position Offset and ray-traced use come later (see Material Authoring in the user manual and the Renderer page).
 - **Custom Lit materials:** write a material's lighting yourself -- a Material Shader (Content Browser > + Add > Material Shader) is a small Slang file with `light()` per light and `ambient()`, like Godot's `light()`; materials use it with Shading Model > Custom Lit, four parameters and two textures. Shadows, GI, reflections, outlines and TAA / DLSS keep working; saving the file rebuilds it live (see Material Authoring in the user manual and the Renderer page).

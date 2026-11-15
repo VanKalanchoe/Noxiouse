@@ -52,8 +52,8 @@ with them; reference them by handle or path, and say that the files live only on
   outlines + Post Process Volume built and tested; step 3 Custom Lit with hand-written Material Shaders built; step 4a material graph built (`.nmatgraph`, `Renderer/MaterialGraph.h`, `MaterialGraph.slang`; graphs in the generated `MaterialGraphs.slang`
   (Material Shaders in `CustomLitShaders.slang`; pipelines cached by source hash, not force-compiled), the G-buffer resolve's variant `GBufferMaterialGraph.slang` + the forward variant; `GpuMaterial::graphSlot` /
   `graphParameters`; `.nmat` NMA6 `SurfaceGraph` + `GraphParameters`); 4b part 1 Opacity Mask built and tested (`opacity_mask()` per graph, `VisibilityBufferMaterialGraph.slang` for Masked
-  buckets + shadow mask depth, editor overlays' variants; shared `material_graph_mask_cuts`); editor builds of generated variants: drafts
-  (`ShaderStageDesc::optimize` false, `.draft` cache key) then optimised; start-up pool orders by `shaders/compile_times.txt`; 4b part 2 WPO and 4c Custom Lit output / C# / RT (incl. RT alpha tests) open; surface
+  buckets + shadow mask depth, editor overlays' variants; shared `material_graph_mask_cuts`); generated variants build on high-priority
+  threads (drafts and remembered compile times were tried and removed); start-up compiles `Material_TransparentLit_Mesh.slang` first (`Device::precompileShaderModules`); 4b part 2 WPO and 4c Custom Lit output / C# / RT (incl. RT alpha tests) open; surface
   code, Physical / Stylized setting open). Custom Lit: `.slang` assets (`AssetType::MaterialShader`) with `light()` / `ambient()`
   (`CustomLit.slang`), generated into `<exe>/shaders/Generated` (`Renderer/CustomLitShaders.h`), lit by the "Custom Lit" pass after the
   deferred lighting (G-buffer model bits 0xC0) and the forward variant (`forwardLitPipeline()`); push-constant vec4s sit on 16 bytes. Post effects + outlines live in `PostProcessSettings`; a scene's

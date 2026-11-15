@@ -673,6 +673,9 @@ namespace Nox
     {
         createSwapChain();
         createCompiler();
+        // The forward shader is the slowest module by far (~13 s) and many pipelines use it (transparent lit, AVBOIT, probe
+        // captures, extra views): it starts compiling first, so it is done by the time they need it instead of being picked at random.
+        m_device->precompileShaderModules({ "assets/shaders/Material_TransparentLit_Mesh.slang" }, *m_shaderCompiler);
         createUnlitPipeline(false);
         createTransparentLitPipeline(false);
         if (m_isEditor) createWireframePipeline(false);

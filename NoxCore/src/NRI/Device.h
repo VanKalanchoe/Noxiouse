@@ -161,6 +161,9 @@ namespace NRI
         
         virtual std::unique_ptr<Swapchain> createSwapchain(const SwapchainDesc& desc) = 0;
         virtual std::unique_ptr<Pipeline> createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler) = 0;
+        // Compiles these shader sources first, in the background (call before creating the pipelines that use them); a backend
+        // that builds pipelines in place ignores it.
+        virtual void precompileShaderModules(const std::vector<std::string>& sources, ShaderCompiler& compiler) {}
         virtual std::unique_ptr<CommandAllocator> createCommandAllocator(CommandBufferReset resetMode, QueueType queue = QueueType::Graphics) = 0;
         virtual std::unique_ptr<TimelineSemaphore> createTimelineSemaphore(uint64_t initialValue = 0) = 0;
         // Whether Transfer is its own queue family (a copy engine running beside graphics) or the graphics queue.

@@ -524,8 +524,7 @@ namespace Nox
                 else if (renderer && !renderer->GetCustomLitStatus().Message.empty())
                     ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.3f, 1.0f), "%s", renderer->GetCustomLitStatus().Message.c_str());
                 else if (built)
-                    ImGui::TextDisabled("Built: %s computes the surface.%s", graphLabel.c_str(),
-                                        renderer && renderer->GetCustomLitStatus().Optimizing ? " (Optimizing in the background.)" : "");
+                    ImGui::TextDisabled("Built: %s computes the surface.", graphLabel.c_str());
                 else
                     ImGui::TextColored(warning, "Not built yet (the material keeps its own values): save the graph.");
                 // Opacity Mask works as in Unreal: only on a Masked material (its pixels below Opacity Mask Clip Value are not drawn). (Its

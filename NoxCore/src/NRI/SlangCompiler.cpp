@@ -163,7 +163,7 @@ namespace NRI
         return hashSourceAndIncludes(path, visited);
     }
 
-    std::vector<char> SlangCompiler::compile(const std::string& path, bool optimize)
+    std::vector<char> SlangCompiler::compile(const std::string& path)
     {
         if (!std::filesystem::exists(path)) NOX_CORE_ERROR("SlangCompiler::compile file not found: {}", path);
         if (s_ShaderProgress && s_ShaderProgress->OnCompile)
@@ -194,10 +194,6 @@ namespace NRI
 
         std::vector<slang::CompilerOptionEntry> slangOptions;
         slangOptions.push_back({ slang::CompilerOptionName::GLSLForceScalarLayout, { slang::CompilerOptionValueKind::Int, 1 } });
-        // A draft (the editor's first build of a changed material graph / Material Shader variant): no optimisation passes -- most of a big
-        // shader's compile time (the forward shader: about 1.7 s instead of 6.7 s on the test machine); the optimised build follows.
-        if (!optimize)
-            slangOptions.push_back({ slang::CompilerOptionName::Optimization, { slang::CompilerOptionValueKind::Int, SLANG_OPTIMIZATION_LEVEL_NONE } });
         if (m_targetAPI != static_cast<GraphicsAPI>(2))
         {
             slangOptions.push_back({

@@ -30,6 +30,9 @@ namespace NRI
             uint32_t Failed = 0;
         };
         static BuildStats FinishPendingBuilds();
+        // Starts compiling these sources on the pool ahead of every pipeline (those without a binary of their current text): the
+        // module most pipelines share is done by the time they need it, instead of being picked last at random.
+        static void PrecompileModules(const std::vector<std::string>& sources, ShaderCompiler& compiler);
         // Built on the pool (FinishPendingBuilds reports it to the progress as created), or here.
         bool isBuiltOnPool() const;
         

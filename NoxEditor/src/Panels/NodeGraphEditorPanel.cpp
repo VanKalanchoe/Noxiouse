@@ -381,7 +381,7 @@ namespace Nox
         else if (!status.Message.empty())
             ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", status.Message.c_str());
         else if (renderer->GetMaterialGraphSlot(path) != 0xFFFFFFFFu)
-            ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.0f), status.Optimizing ? "Built (optimizing in the background)" : "Built");
+            ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.0f), "Built");
     }
 
     void NodeGraphEditorPanel::Save()

@@ -14,9 +14,6 @@ namespace NRI
         ShaderStage stage;
         std::string entryPoint;
         std::string sourcePath;
-        // false: compiled without the compiler's optimisation passes (several times faster) and cached under its own key -- the editor's
-        // draft of a project shader variant (a material graph, a Material Shader), replaced by the optimised build moments later.
-        bool optimize = true;
     };
 
     struct RayTracingHitGroupDesc

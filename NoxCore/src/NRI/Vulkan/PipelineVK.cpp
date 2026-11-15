@@ -104,9 +104,7 @@ namespace NRI
 
         // The entry point is part of the key: one .slang file can hold several entry points for the same stage
         // (e.g. two mesh entry points), and a shader-object binary contains exactly one of them.
-        // A draft (unoptimised) binary has a key of its own: the optimised one replaces it, never the other way round.
-        return folder / (source.stem().string() + "." + stage + "." + shaderDesc.entryPoint + "." + std::to_string(sourceHash) +
-                         (shaderDesc.optimize ? "" : ".draft") + ".bin");
+        return folder / (source.stem().string() + "." + stage + "." + shaderDesc.entryPoint + "." + std::to_string(sourceHash) + ".bin");
     }
 
     static std::vector<uint8_t> loadShaderBinary(const std::filesystem::path& path)
@@ -174,69 +172,13 @@ namespace NRI
         std::unordered_map<std::string, std::shared_ptr<ModuleCompile>> s_modules;
         uint64_t s_moduleSequence = 0;
 
-        // How long each source took to compile the last time it did (milliseconds), kept in <exe>/shaders/compile_times.txt across runs:
-        // the start-up's build pool takes the slowest first (Unreal's longest-first shader job order), so the big modules -- the forward
-        // shader, the meshlet stages dozens of pipelines share -- are not left to the end with everything that needs them waiting.
-        std::mutex s_costsMutex;
-        std::unordered_map<std::string, double> s_compileCosts;
-        bool s_costsLoaded = false;
-
-        std::filesystem::path compileCostsPath()
-        {
-            return shaderFolder() / "compile_times.txt";
-        }
-
-        void loadCompileCostsLocked()
-        {
-            if (s_costsLoaded)
-                return;
-            s_costsLoaded = true;
-            std::error_code error;
-            std::ifstream file(compileCostsPath());
-            std::string line;
-            while (std::getline(file, line))
-            {
-                const size_t tab = line.rfind('\t');
-                if (tab == std::string::npos)
-                    continue;
-                try
-                {
-                    s_compileCosts[line.substr(0, tab)] = std::stod(line.substr(tab + 1));
-                }
-                catch (...)
-                {
-                }
-            }
-        }
-
-        double compileCost(const std::string& sourcePath)
-        {
-            std::lock_guard lock(s_costsMutex);
-            loadCompileCostsLocked();
-            const auto found = s_compileCosts.find(sourcePath);
-            return found != s_compileCosts.end() ? found->second : 0.0;
-        }
-
-        void recordCompileCost(const std::string& sourcePath, double milliseconds)
-        {
-            std::string text;
-            {
-                std::lock_guard lock(s_costsMutex);
-                loadCompileCostsLocked();
-                s_compileCosts[sourcePath] = milliseconds;
-                for (const auto& [path, cost] : s_compileCosts)
-                    text += path + "\t" + std::to_string(cost) + "\n";
-            }
-            writeFileAtomic(compileCostsPath(), text.data(), text.size());
-        }
-
         // The sources being compiled right now: the pool does not hand a worker a pipeline that would only wait for one of them.
         std::mutex s_compilingMutex;
         std::unordered_set<std::string> s_compiling;
 
-        std::vector<char> compileModuleOnce(const std::string& sourcePath, ShaderCompiler& compiler, bool optimize)
+        std::vector<char> compileModuleOnce(const std::string& sourcePath, ShaderCompiler& compiler)
         {
-            const std::string key = sourcePath + "|" + std::to_string(compiler.sourceHash(sourcePath)) + (optimize ? "" : "|draft");
+            const std::string key = sourcePath + "|" + std::to_string(compiler.sourceHash(sourcePath));
             std::shared_ptr<ModuleCompile> entry;
             bool compileHere = false;
             {
@@ -261,7 +203,7 @@ namespace NRI
                 const auto started = std::chrono::steady_clock::now();
                 try
                 {
-                    spirv = compiler.compile(sourcePath, optimize);
+                    spirv = compiler.compile(sourcePath);
                 }
                 catch (...)
                 {
@@ -271,8 +213,9 @@ namespace NRI
                     std::lock_guard compilingLock(s_compilingMutex);
                     s_compiling.erase(sourcePath);
                 }
-                if (!error && optimize)
-                    recordCompileCost(sourcePath, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+                if (!error)
+                    NOX_CORE_INFO("Shader compiled: {} ({:.0f} ms)", sourcePath,
+                                  std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
                 {
                     std::lock_guard lock(entry->Mutex);
                     entry->Spirv = std::move(spirv);
@@ -323,7 +266,7 @@ namespace NRI
                 return std::vector<char>(cached.begin(), cached.end());
         }
         t_compiledInBuild = true;
-        std::vector<char> spirv = compileModuleOnce(shaderDesc.sourcePath, compiler, shaderDesc.optimize);
+        std::vector<char> spirv = compileModuleOnce(shaderDesc.sourcePath, compiler);
         writeFileAtomic(path, spirv.data(), spirv.size());
         return spirv;
     }
@@ -357,8 +300,8 @@ namespace NRI
                 return pool;
             }
 
-            // `sources`: the job's shader sources; `priority`: the slowest one's last compile time (compile_times.txt).
-            void Submit(std::function<void()> job, std::vector<std::string> sources, double priority)
+            // `sources`: the job's shader sources; `priority`: higher first (PrecompileModules' jobs before the pipelines).
+            void Submit(std::function<void()> job, std::vector<std::string> sources, int priority)
             {
                 {
                     std::lock_guard lock(m_mutex);
@@ -407,11 +350,11 @@ namespace NRI
             {
                 std::function<void()> Run;
                 std::vector<std::string> Sources;
-                double Priority = 0.0;
+                int Priority = 0;
                 uint64_t Order = 0;
             };
 
-            // The next job: the slowest-compiling first (ties: in the order made); one whose source another worker is compiling waits
+            // The next job: the highest priority first (ties: in the order made); one whose source another worker is compiling waits
             // behind the others (it would only block a worker), unless nothing else is left.
             std::vector<Job>::iterator PickLocked()
             {
@@ -486,12 +429,10 @@ namespace NRI
             s_pending.push_back(this);
         }
         std::vector<std::string> sources;
-        double priority = 0.0;
         for (const ShaderStageDesc& shader : desc.shaders)
         {
             if (std::find(sources.begin(), sources.end(), shader.sourcePath) == sources.end())
                 sources.push_back(shader.sourcePath);
-            priority = std::max(priority, compileCost(shader.sourcePath));
         }
         PipelineBuildPool::Get().Submit([this, state = m_async]
         {
@@ -510,7 +451,42 @@ namespace NRI
                 state->Done = true;
             }
             state->Finished.notify_all();
-        }, std::move(sources), priority);
+        }, std::move(sources), 0);
+    }
+
+    void PipelineVK::PrecompileModules(const std::vector<std::string>& sources, ShaderCompiler& compiler)
+    {
+        if (!compiler.canCompile())
+            return;
+        for (const std::string& source : sources)
+        {
+            // Cached: some binary of the source's current text is there (<exe>/shaders/<stem>/<stem>.<stage>.<entry>.<hash>.bin).
+            const std::string hashPart = "." + std::to_string(compiler.sourceHash(source)) + ".";
+            bool cached = false;
+            std::error_code error;
+            for (const auto& file : std::filesystem::directory_iterator(shaderFolder() / std::filesystem::path(source).stem(), error))
+            {
+                if (file.path().filename().string().find(hashPart) != std::string::npos)
+                {
+                    cached = true;
+                    break;
+                }
+            }
+            if (cached)
+                continue;
+            NOX_CORE_INFO("Shader compile started first (most pipelines use it): {}", source);
+            PipelineBuildPool::Get().Submit([source, &compiler]
+            {
+                try
+                {
+                    compileModuleOnce(source, compiler);
+                }
+                catch (...)
+                {
+                    // (a pipeline that uses it compiles it again and reports the error)
+                }
+            }, { source }, 1);
+        }
     }
 
     PipelineVK::~PipelineVK()
