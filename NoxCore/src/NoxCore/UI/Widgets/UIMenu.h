@@ -22,6 +22,8 @@ namespace Nox::UI
     {
     public:
         explicit UIMenuPopup(std::vector<UIMenuItem> items, UIContext* context = nullptr);
+
+        static void ShowContextMenu(UIContext& context, const UIVec2& screenPos, std::vector<UIMenuItem> items);
     };
 
     class UIMenuBar : public UIStackBox

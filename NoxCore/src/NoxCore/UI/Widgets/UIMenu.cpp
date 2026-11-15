@@ -45,6 +45,42 @@ namespace Nox::UI
         }
     }
 
+    void UIMenuPopup::ShowContextMenu(UIContext& context, const UIVec2& screenPos, std::vector<UIMenuItem> items)
+    {
+        if (items.empty())
+            return;
+
+        class UIContextMenuBackdrop : public UIAnchorBox
+        {
+        public:
+            explicit UIContextMenuBackdrop(UIContext* ctx) : m_Ctx(ctx)
+            {
+                HitTestMode = UIHitTestMode::Self;
+            }
+
+            bool OnPointerDown(const UIPointerEvent& e) override
+            {
+                if ((e.Button == 1 || e.Button == 3) && m_Ctx)
+                {
+                    m_Ctx->ClearOverlay();
+                    return true;
+                }
+                return false;
+            }
+
+        private:
+            UIContext* m_Ctx = nullptr;
+        };
+
+        Ref<UIContextMenuBackdrop> backdrop(new UIContextMenuBackdrop(&context));
+        Ref<UIMenuPopup> popup(new UIMenuPopup(std::move(items), &context));
+        popup->AnchorMin = { 0.0f, 0.0f };
+        popup->AnchorMax = { 0.0f, 0.0f };
+        popup->AnchorOffsets = { screenPos.x, screenPos.y, 0.0f, 0.0f };
+        backdrop->AddChild(popup);
+        context.SetOverlay(backdrop);
+    }
+
     UIMenuBar::UIMenuBar()
         : UIStackBox(UIOrientation::Horizontal, 4.0f)
     {

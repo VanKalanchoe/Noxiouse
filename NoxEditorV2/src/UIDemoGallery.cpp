@@ -1,5 +1,6 @@
 #include "UIDemoGallery.h"
 
+#include <cmath>
 #include <cstdio>
 #include <memory>
 
@@ -12,6 +13,8 @@
 #include "NoxCore/UI/Widgets/UIDragScalar.h"
 #include "NoxCore/UI/Widgets/UIDropdown.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
+#include "NoxCore/UI/Widgets/UIMenu.h"
+#include "NoxCore/UI/Widgets/UIPlotGraph.h"
 #include "NoxCore/UI/Widgets/UIProgressBar.h"
 #include "NoxCore/UI/Widgets/UIPropertyGrid.h"
 #include "NoxCore/UI/Widgets/UIRadioGroup.h"
@@ -362,6 +365,60 @@ namespace Nox::UI
         };
         tablePanel->AddChild(table);
         scroll->AddChild(tablePanel);
+
+        // 9. PlotGraph (Line & Histogram) + Right-Click Context Menu
+        auto plotPanel = MakeUI<UIStackBox>(UIOrientation::Vertical, 8.0f);
+        plotPanel->StyleClass = "Panel";
+        plotPanel->DrawBackground = true;
+        plotPanel->Padding = UIThickness::All(12.0f);
+        plotPanel->AddChild(MakeUI<UILabel>("8. UIPlotGraph (Line / Histogram) & Right-Click Context Menu", 14.5f));
+
+        auto plot = MakeUI<UIPlotGraph>("Frame Time / Signal (ms)", UIPlotMode::Line);
+        plot->HeightMode = UISizeMode::Fixed;
+        plot->FixedSize.y = 130.0f;
+        std::vector<float> initialWave;
+        for (int i = 0; i < 48; ++i)
+            initialWave.push_back(16.6f + std::sin(static_cast<float>(i) * 0.32f) * 4.5f + std::cos(static_cast<float>(i) * 0.7f) * 1.8f);
+        plot->SetValues(std::move(initialWave));
+
+        auto phase = std::make_shared<int>(48);
+        auto plotControls = MakeUI<UIStackBox>(UIOrientation::Horizontal, 8.0f);
+        auto pushBtn = MakeUI<UIButton>("Push Sample", [plot, phase, report]()
+        {
+            ++(*phase);
+            const float val = 16.6f + std::sin(static_cast<float>(*phase) * 0.32f) * 5.0f;
+            plot->PushSample(val);
+            report("Pushed plot sample: " + std::to_string(val));
+        });
+        auto modeToggle = MakeUI<UICheckBox>("Histogram Mode", false, [plot](bool hist)
+        {
+            plot->SetMode(hist ? UIPlotMode::Histogram : UIPlotMode::Line);
+        });
+        modeToggle->VAlign = UIAlignment::Center;
+
+        auto ctxArea = MakeUI<UIButton>("Right-Click Me (Context Menu)");
+        ctxArea->Tooltip = "Right-click anywhere on this button to open a context menu";
+        ctxArea->OnMouseDown = [&context, plot, report](const UIPointerEvent& e) -> bool
+        {
+            if (e.Button == 3)
+            {
+                UIMenuPopup::ShowContextMenu(context, e.Position, {
+                    { "Switch to Line", "", [plot, report]() { plot->SetMode(UIPlotMode::Line); report("Context Menu: Line"); } },
+                    { "Switch to Histogram", "", [plot, report]() { plot->SetMode(UIPlotMode::Histogram); report("Context Menu: Histogram"); } },
+                    { "", "", {}, true },
+                    { "Reset Plot", "", [plot, report]() { plot->Clear(); report("Context Menu: Cleared Plot"); } }
+                });
+                return true;
+            }
+            return false;
+        };
+
+        plotControls->AddChild(pushBtn);
+        plotControls->AddChild(modeToggle);
+        plotControls->AddChild(ctxArea);
+        plotPanel->AddChild(plotControls);
+        plotPanel->AddChild(plot);
+        scroll->AddChild(plotPanel);
 
         return scroll;
     }
