@@ -48,6 +48,7 @@ namespace Nox::UI
         std::vector<UINodeLink>& GetLinks() { return m_Links; }
 
         std::function<void(const UINodeLink&)> OnLinkCreated;
+        std::function<void(uint64_t linkId)> OnLinkDeleted;
         std::function<void(uint64_t nodeId)> OnNodeSelected;
 
         bool OnPointerDown(const UIPointerEvent& e) override;
@@ -67,6 +68,8 @@ namespace Nox::UI
         bool TryGetPinPos(uint64_t pinId, UIVec2& outScreenPos, UIColor& outColor, bool& outIsOutput) const;
         uint64_t HitTestPin(const UIVec2& screenPos, bool* outIsOutput = nullptr) const;
         int HitTestNode(const UIVec2& screenPos) const;
+        uint64_t HitTestLink(const UIVec2& screenPos) const;
+        bool TryGetConnectedColor(uint64_t pinId, UIColor& outColor) const;
 
         std::vector<UINode> m_Nodes;
         std::vector<UINodeLink> m_Links;
@@ -76,6 +79,7 @@ namespace Nox::UI
         float m_Zoom = 1.0f;
 
         uint64_t m_SelectedNodeId = 0;
+        uint64_t m_SelectedLinkId = 0;
         bool m_Panning = false;
         bool m_DraggingNode = false;
         uint64_t m_DraggingPinId = 0;
