@@ -183,6 +183,9 @@ namespace Nox
         void ResetMorphWeightOffsets();
         // The instances with bone matrices, by slot: the skinning layout walks these, not every instance.
         const std::set<uint32_t>& GetSkinnedInstances() const { return m_SkinnedInstances; }
+        // The drawn instances whose material graph offsets their vertices (World Position Offset), by slot: the ray tracing scene moves
+        // them too (Renderer::updateAnimatedBLAS). Cheap without such materials.
+        void GetVertexOffsetInstances(std::vector<uint32_t>& outSlots) const;
         RenderBucket GetBucket(uint32_t instanceSlot) const { return m_InstanceStates[instanceSlot].Bucket; }
         // A skinned instance owns a dynamic BLAS while ray tracing is active. A zero override restores its mesh's
         // shared static BLAS; the optional skinned vertex address is used only by hit shading.

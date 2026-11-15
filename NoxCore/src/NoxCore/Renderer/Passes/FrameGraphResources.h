@@ -143,6 +143,8 @@ namespace Nox
         RGBuffer SkinningWorkItems;
         RGBuffer SkinnedVertices;
         RGBuffer PreviousSkinnedVertices;
+        RGBuffer RayTracingOffsetWorkItems; // World Position Offset in the ray tracing scene (the Ray Tracing Offset pass)
+        RGBuffer RayTracingOffsetVertices;
 
         // SSAO
         RGBuffer SSAOKernel; // static, generated once at startup (Renderer::createSSAOKernel)

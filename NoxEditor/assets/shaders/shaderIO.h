@@ -2094,6 +2094,27 @@ struct PushConstantMeshlets
     uint32_t refractionTextureIndex;
 };
 
+// World Position Offset in the ray tracing scene (material graph step 4c part 4; RayTracingOffset.slang through its generated graph
+// variant): an instance whose material graph offsets its vertices gets its moved vertices written here each frame, its own BLAS refit
+// from them (Renderer::updateAnimatedBLAS) and its hits read them (GpuRayTracingInstance::skinnedVertexBufferAddress). One work item per
+// chunk of SKINNING_VERTICES_PER_WORK_ITEM vertices.
+struct RayTracingOffsetWorkItem
+{
+    uint32_t instanceSlot;
+    uint32_t firstVertex;             // of the mesh
+    uint32_t vertexCount;
+    uint32_t destinationVertexOffset; // the instance's first vertex in the output (SkinnedVertex)
+    uint32_t skinnedVertexOffset;     // its skinned vertices this frame (compute skinning's output); NoSkinnedVertices: the mesh's own
+};
+
+struct PushConstantRayTracingOffset
+{
+    uint64_t uniformsReference;       // UniformBufferObject
+    uint64_t workItemsReference;      // RayTracingOffsetWorkItem
+    uint64_t skinnedVerticesReference; // compute skinning's output this frame (0: none)
+    uint64_t outputReference;         // SkinnedVertex
+};
+
 struct PushConstantSkinning
 {
     uint64_t sourceVerticesReference; // PackedVertex

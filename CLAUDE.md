@@ -61,7 +61,8 @@ with them; reference them by handle or path, and say that the files live only on
   its fragMain was 4.7 MB SPIR-V and ~30 s in the GPU driver; "GPU driver compiled ... in N ms" log; modules from `CompileModulesNow` pinned until a pipeline takes them; graph variants compiled in parallel; `CustomLitStatus::GraphsLive` -> "Built on opaque surfaces" status; RT pass pipelines: one description each in `Renderer::rayTracingPassDesc`, built by the build's threads (`buildRayTracingPassPipelines`, buildNow) and swapped in by `installRayTracingPassPipelines` -- a main-thread `createPipeline` builds on the pool and the first bind waits; `CompileMaterialGraph` generates the mask first so `MaskCode` never depends on the surface); 4c part 3 graph surface at ray hits built
   (`SurfaceCode` -> `MaterialGraphSurfaces.slang`, `RayTracingMaskVariant::Surface` on 7 variants, `NOX_MATERIAL_GRAPH_SURFACE` ->
   `material_graph_ray_surface` in shadeRayHit / PathTracerBridge / ScreenProbeTrace / DDGIRadiance / ReSTIR GI + PT; tested; shader cache files never renamed over (`writeFileAtomic` replace only when forced), unreadable binaries compiled again);
-  4c Custom Lit output, WPO in the BLAS open; surface
+  4c part 4 WPO in the ray tracing scene built (`RayTracingOffset.slang` -> `RayTracingOffsetMaterialGraph.slang`, `updateRayTracingOffsetLayout`,
+  "Ray Tracing Offset" pass, dynamic BLAS per WPO instance in `updateAnimatedBLAS`; not yet user-tested); 4c Custom Lit output open; surface
   code, Physical / Stylized setting open). Custom Lit: `.slang` assets (`AssetType::MaterialShader`) with `light()` / `ambient()`
   (`CustomLit.slang`), generated into `<exe>/shaders/Generated` (`Renderer/CustomLitShaders.h`), lit by the "Custom Lit" pass after the
   deferred lighting (G-buffer model bits 0xC0) and the forward variant (`forwardLitPipeline()`); push-constant vec4s sit on 16 bytes. Post effects + outlines live in `PostProcessSettings`; a scene's

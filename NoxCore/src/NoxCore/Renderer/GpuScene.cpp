@@ -662,6 +662,21 @@ namespace Nox
         }
     }
 
+    void GpuScene::GetVertexOffsetInstances(std::vector<uint32_t>& outSlots) const
+    {
+        outSlots.clear();
+        if (m_OffsetMaterials == 0)
+            return;
+        for (uint32_t instanceSlot = 0; instanceSlot < m_InstanceStates.size(); ++instanceSlot)
+        {
+            const InstanceState& state = m_InstanceStates[instanceSlot];
+            if (state.Mesh == InvalidSlot || state.Material == InvalidSlot || state.Bucket == RenderBucket::Count || state.Hidden)
+                continue;
+            if (HasVertexOffset(m_Materials.Get(state.Material)))
+                outSlots.push_back(instanceSlot);
+        }
+    }
+
     bool GpuScene::UpdateDrawList(const glm::vec3& cameraPosition, std::vector<uint32_t>& drawList, std::array<uint32_t, RenderBucketCount + 1>& outBucketStarts)
     {
         const bool rebuild = std::exchange(m_BucketsChanged, false);

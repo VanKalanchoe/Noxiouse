@@ -575,6 +575,7 @@ window.NOX_FILE_DATABASE = [
         ["InstanceCulling.slang", "Two-phase GPU frustum + Reverse-Z Hi-Z occlusion culling and indirect command compaction (bounds grown by a material graph's Max World Position Offset Displacement)."],
         ["HiZBuild.slang", "Builds the Reverse-Z farthest-depth (min) mip pyramid."],
         ["ComputeSkinning.slang", "Evaluates morph target deltas followed by 4-bone Linear Blend Skinning into SkinnedVertex."],
+        ["RayTracingOffset.slang", "World Position Offset in the ray tracing scene: moves the vertices of instances whose material graph offsets them (from their skinned vertices when skinned) into a ray-tracing-only buffer their BLAS is refit from; compiled as its generated graph variant RayTracingOffsetMaterialGraph.slang."],
         ["GeometryStreamingFeedback.slang", "Evaluates screen-space error of cooked Cluster DAG pages and requests missing pages."],
         ["ClusterIndices.slang", "Expands triangles from the finest resident Cluster DAG cut into 32-bit indices for BLAS builds."],
         ["Material_PBR_MeshTask.slang", "Shared task shader for all meshlet pipelines: Cluster LOD cut selection and meshlet culling."],

@@ -65,6 +65,9 @@ namespace Nox
         // The forward shader's mesh stage with the material graphs (Material_PBR_Mesh.slang with NOX_MATERIAL_GRAPH): World Position Offset
         // for translucent surfaces.
         std::filesystem::path ForwardMeshSourcePath(); // ForwardMeshMaterialGraph.slang
+        // The ray tracing scene's World Position Offset (RayTracingOffset.slang with the material graphs): the moved vertices of the
+        // instances whose graph offsets them, which their BLAS is refit from.
+        std::filesystem::path RayTracingOffsetSourcePath(); // RayTracingOffsetMaterialGraph.slang
         // The graphs' Opacity Mask functions alone (MaterialGraphMasks.slang): what the ray tracing passes' variants include, so they compile
         // again only when a mask changes.
         std::filesystem::path GraphMasksSourcePath();

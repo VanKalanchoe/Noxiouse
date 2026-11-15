@@ -4450,9 +4450,84 @@ namespace Nox
         }
     }
 
+    bool Renderer::updateRayTracingOffsetLayout(uint32_t currentImage, bool skinningReady)
+    {
+        m_rayTracingOffsetLayout.clear();
+        m_rayTracingOffsetWorkItems.clear();
+        if (!m_rayTracingOffsetGraphPipeline)
+            return false;
+        m_gpuScene.GetVertexOffsetInstances(m_rayTracingOffsetSlots);
+        uint32_t destinationVertexOffset = 0;
+        for (uint32_t instanceSlot : m_rayTracingOffsetSlots)
+        {
+            const shaderio::GpuInstance& instance = m_gpuScene.GetInstances().Get(instanceSlot);
+            const shaderio::GpuMesh& mesh = m_gpuScene.GetMeshes().Get(instance.meshIndex);
+            if (mesh.vertexCount == 0 || mesh.verticesOffset == shaderio::NoGeometryRange || mesh.indicesOffset == shaderio::NoGeometryRange ||
+                mesh.triangleCount == 0)
+                continue;
+            // A skinned (or morphed) instance moves from this frame's skinned vertices, as the raster passes move it.
+            const uint32_t skinnedVertexOffset = skinningReady ? instance.skinnedVertexOffset : shaderio::NoSkinnedVertices;
+            m_rayTracingOffsetLayout.push_back({ instanceSlot, destinationVertexOffset, mesh.vertexCount,
+                                                 skinnedVertexOffset != shaderio::NoSkinnedVertices });
+            for (uint32_t firstVertex = 0; firstVertex < mesh.vertexCount; firstVertex += shaderio::SKINNING_VERTICES_PER_WORK_ITEM)
+            {
+                m_rayTracingOffsetWorkItems.push_back({ instanceSlot, firstVertex,
+                                                        std::min(shaderio::SKINNING_VERTICES_PER_WORK_ITEM, mesh.vertexCount - firstVertex),
+                                                        destinationVertexOffset, skinnedVertexOffset });
+            }
+            destinationVertexOffset += mesh.vertexCount;
+        }
+        if (m_rayTracingOffsetWorkItems.empty())
+            return false;
+
+        const uint64_t vertexBytes = uint64_t(destinationVertexOffset) * sizeof(shaderio::SkinnedVertex);
+        const uint64_t workBytes = uint64_t(m_rayTracingOffsetWorkItems.size()) * sizeof(shaderio::RayTracingOffsetWorkItem);
+        if (vertexBytes > m_rayTracingOffsetVertexCapacity || workBytes > m_rayTracingOffsetWorkItemCapacity)
+        {
+            {
+                std::scoped_lock lock(m_deferredReleasesMutex);
+                for (std::unique_ptr<NRI::Buffer>& buffer : m_rayTracingOffsetVertexBuffers)
+                    if (buffer)
+                        m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(buffer) });
+                for (std::unique_ptr<NRI::Buffer>& buffer : m_rayTracingOffsetWorkItemBuffers)
+                    if (buffer)
+                        m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(buffer) });
+            }
+            m_rayTracingOffsetVertexCapacity = std::max<uint64_t>(vertexBytes * 2, sizeof(shaderio::SkinnedVertex));
+            m_rayTracingOffsetWorkItemCapacity = std::max<uint64_t>(workBytes * 2, sizeof(shaderio::RayTracingOffsetWorkItem));
+            m_rayTracingOffsetVertexBuffers.clear();
+            m_rayTracingOffsetWorkItemBuffers.clear();
+            m_rayTracingOffsetWorkItemBuffersMapped.clear();
+            for (uint32_t slot = 0; slot < MAX_FRAMES_IN_FLIGHT; ++slot)
+            {
+                // (read as BLAS build input as well: the skinned vertices' usage)
+                m_rayTracingOffsetVertexBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+                    .size = m_rayTracingOffsetVertexCapacity,
+                    .usage = NRI::BufferUsage::StorageStatic
+                }));
+                std::unique_ptr<NRI::Buffer> workItems = m_device->createBuffer(NRI::BufferDesc{
+                    .size = m_rayTracingOffsetWorkItemCapacity,
+                    .usage = NRI::BufferUsage::Storage
+                });
+                m_rayTracingOffsetWorkItemBuffersMapped.push_back(workItems->map(0, m_rayTracingOffsetWorkItemCapacity));
+                m_rayTracingOffsetWorkItemBuffers.emplace_back(std::move(workItems));
+            }
+        }
+        if (currentImage >= m_rayTracingOffsetWorkItemBuffers.size() || !m_rayTracingOffsetWorkItemBuffersMapped[currentImage])
+        {
+            m_rayTracingOffsetLayout.clear();
+            m_rayTracingOffsetWorkItems.clear();
+            return false;
+        }
+        memcpy(m_rayTracingOffsetWorkItemBuffersMapped[currentImage], m_rayTracingOffsetWorkItems.data(), workBytes);
+        return true;
+    }
+
     void Renderer::updateAnimatedBLAS(uint32_t currentImage)
     {
         m_animatedBLASUpdates.clear();
+        m_rayTracingOffsetLayout.clear(); // (filled again below while ray tracing runs: no Ray Tracing Offset pass otherwise)
+        m_rayTracingOffsetWorkItems.clear();
 
         const bool isPathTracing = m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19;
         const bool isDDGI = m_rayTracingEnabled && (m_ddgiEnabled || m_debugMode == 16 || m_debugMode == 17);
@@ -4473,9 +4548,12 @@ namespace Nox
             animated = {};
         };
 
-        const bool buffersReady = m_computeSkinningPipeline && currentImage < m_skinnedVertexBuffers.size() &&
-                                  m_skinnedVertexBuffers[currentImage] && !m_skinningLayout.empty();
-        if (!buffersReady)
+        const bool skinningReady = m_computeSkinningPipeline && currentImage < m_skinnedVertexBuffers.size() &&
+                                   m_skinnedVertexBuffers[currentImage] && !m_skinningLayout.empty();
+        // World Position Offset (material graph step 4c part 4): the instances a graph moves get their vertices moved for ray tracing
+        // (the Ray Tracing Offset pass) and a BLAS of their own refit from them, as skinned instances do.
+        const bool offsetsReady = updateRayTracingOffsetLayout(currentImage, skinningReady);
+        if (!skinningReady && !offsetsReady)
         {
             for (uint32_t instanceSlot = 0; instanceSlot < m_animatedBLASes.size(); ++instanceSlot)
             {
@@ -4485,19 +4563,54 @@ namespace Nox
             return;
         }
 
+        // Each deformed instance with the vertices its BLAS is built from (and its hits read): the moved ones when a graph offsets it,
+        // else its skinned ones.
+        struct DeformedInstance
+        {
+            uint32_t instanceSlot;
+            uint64_t vertexAddress;
+        };
+        std::vector<DeformedInstance> deformed;
+        deformed.reserve(m_skinningLayout.size() + m_rayTracingOffsetLayout.size());
+        const uint64_t offsetVertexBase = offsetsReady ? m_rayTracingOffsetVertexBuffers[currentImage]->getDeviceAddress() : 0;
+        auto offsetAddress = [&](uint32_t instanceSlot) -> uint64_t
+        {
+            const auto found = std::lower_bound(m_rayTracingOffsetLayout.begin(), m_rayTracingOffsetLayout.end(), instanceSlot,
+                                                [](const RayTracingOffsetEntry& entry, uint32_t slot) { return entry.instanceSlot < slot; });
+            return offsetsReady && found != m_rayTracingOffsetLayout.end() && found->instanceSlot == instanceSlot
+                ? offsetVertexBase + uint64_t(found->destinationVertexOffset) * sizeof(shaderio::SkinnedVertex) : 0;
+        };
+        if (skinningReady)
+        {
+            const uint64_t skinnedVertexBase = m_skinnedVertexBuffers[currentImage]->getDeviceAddress();
+            for (const SkinningLayoutEntry& layout : m_skinningLayout)
+            {
+                const uint64_t moved = offsetAddress(layout.instanceSlot);
+                deformed.push_back({ layout.instanceSlot, moved != 0 ? moved
+                                                                     : skinnedVertexBase + uint64_t(layout.destinationVertexOffset) * sizeof(shaderio::SkinnedVertex) });
+            }
+        }
+        if (offsetsReady)
+        {
+            for (const RayTracingOffsetEntry& entry : m_rayTracingOffsetLayout)
+            {
+                if (!entry.skinned) // (a skinned one is above)
+                    deformed.push_back({ entry.instanceSlot, offsetVertexBase + uint64_t(entry.destinationVertexOffset) * sizeof(shaderio::SkinnedVertex) });
+            }
+        }
+
         uint32_t maximumInstanceSlot = 0;
-        for (const SkinningLayoutEntry& layout : m_skinningLayout)
-            maximumInstanceSlot = std::max(maximumInstanceSlot, layout.instanceSlot);
+        for (const DeformedInstance& entry : deformed)
+            maximumInstanceSlot = std::max(maximumInstanceSlot, entry.instanceSlot);
         if (m_animatedBLASes.size() <= maximumInstanceSlot)
             m_animatedBLASes.resize(size_t(maximumInstanceSlot) + 1);
         for (AnimatedBLAS& animated : m_animatedBLASes)
             animated.active = false;
 
-        const uint64_t skinnedVertexBase = m_skinnedVertexBuffers[currentImage]->getDeviceAddress();
         const uint64_t indexBase = m_rtIndexStream.GetDeviceAddress();
         uint64_t requiredScratchSize = 0;
 
-        for (const SkinningLayoutEntry& layout : m_skinningLayout)
+        for (const DeformedInstance& layout : deformed)
         {
             const shaderio::GpuInstance& instance = m_gpuScene.GetInstances().Get(layout.instanceSlot);
             const shaderio::GpuMesh& mesh = m_gpuScene.GetMeshes().Get(instance.meshIndex);
@@ -4506,8 +4619,7 @@ namespace Nox
 
             const shaderio::GpuMaterial& material = m_gpuScene.GetMaterials().Get(instance.materialIndex);
             const bool isOpaque = material.alphaMode == static_cast<uint32_t>(AlphaMode::Opaque);
-            const uint64_t skinnedVertexAddress = skinnedVertexBase +
-                                                  uint64_t(layout.destinationVertexOffset) * sizeof(shaderio::SkinnedVertex);
+            const uint64_t skinnedVertexAddress = layout.vertexAddress;
             NRI::AccelerationStructureBuildDesc buildDesc{
                 .type = NRI::AccelerationStructureType::BottomLevel,
                 .flags = NRI::AccelerationStructureBuildFlags::AllowUpdate | NRI::AccelerationStructureBuildFlags::PreferFastBuild,
@@ -4562,7 +4674,6 @@ namespace Nox
                 animated.built = false;
             }
 
-            animated.destinationVertexOffset = layout.destinationVertexOffset;
             animated.active = true;
             m_gpuScene.SetInstanceRayTracingGeometry(layout.instanceSlot, animated.Resource.as->getDeviceAddress(), skinnedVertexAddress);
             m_animatedBLASUpdates.push_back({ layout.instanceSlot, std::move(buildDesc), !animated.built });
@@ -4890,6 +5001,7 @@ namespace Nox
             addGeometryPagesUpdatePass();
             addGeometryFeedbackPass();
             addComputeSkinningPass();
+            addRayTracingOffsetPass();
             addAnimatedBLASPass();
             addBLASBuildPass();
             addTLASBuildPass();
@@ -5069,6 +5181,7 @@ namespace Nox
             references.refractionTextureIndex = 0xFFFFFFFF;
         }
         frame.skinningWorkCount = static_cast<uint32_t>(m_skinningWorkItems.size());
+        frame.rayTracingOffsetWorkCount = static_cast<uint32_t>(m_rayTracingOffsetWorkItems.size());
         frame.skinnedHistoryValid = frame.skinningWorkCount > 0 && m_skinnedVertexHistoryValid;
 
         // Every hybrid-only feature skips itself while path tracing. ReSTIR DI/GI are the exception when explicitly
@@ -5272,6 +5385,11 @@ namespace Nox
             resources.SkinnedVertices = graph.ImportBuffer("Skinned Vertices", m_skinnedVertexBuffers[frameIndex].get());
             if (previousFrame < m_skinnedVertexBuffers.size())
                 resources.PreviousSkinnedVertices = graph.ImportBuffer("Previous Skinned Vertices", m_skinnedVertexBuffers[previousFrame].get(), RGImportAccess::ReadOnly);
+        }
+        if (frame.rayTracingOffsetWorkCount > 0 && frameIndex < m_rayTracingOffsetVertexBuffers.size() && frameIndex < m_rayTracingOffsetWorkItemBuffers.size())
+        {
+            resources.RayTracingOffsetWorkItems = graph.ImportBuffer("Ray Tracing Offset Work Items", m_rayTracingOffsetWorkItemBuffers[frameIndex].get(), RGImportAccess::ReadOnly);
+            resources.RayTracingOffsetVertices = graph.ImportBuffer("Ray Tracing Offset Vertices", m_rayTracingOffsetVertexBuffers[frameIndex].get());
         }
         if (frameIndex < m_pickerStagingBuffers.size() && m_pickerStagingBuffers[frameIndex])
             resources.PickerStaging = graph.ImportBuffer("Picker Staging", m_pickerStagingBuffers[frameIndex].get());

@@ -85,6 +85,18 @@ namespace Nox
         return m_device->createPipeline(desc, *m_shaderCompiler);
     }
 
+    std::unique_ptr<NRI::Pipeline> Renderer::buildMaterialGraphRayTracingOffsetPipeline(bool forceCompile)
+    {
+        // The ray tracing scene's World Position Offset (RayTracingOffset.slang with the graphs): built now, as the others.
+        NRI::PipelineDesc desc{};
+        desc.type = NRI::PipelineType::Compute;
+        desc.forceCompile = forceCompile;
+        desc.buildNow = true;
+        desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain",
+                                 .sourcePath = CustomLitShaders::RayTracingOffsetSourcePath().generic_string() });
+        return m_device->createPipeline(desc, *m_shaderCompiler);
+    }
+
     std::unique_ptr<NRI::Pipeline> Renderer::buildMaterialGraphEditorPipeline(bool selection)
     {
         // As createStableEntityDepthPipeline / createSelectionMaskPipeline, from the generated sources with the graphs.
@@ -115,6 +127,7 @@ namespace Nox
             std::unique_ptr<NRI::Pipeline> shadowDepthMask = graphs ? buildMaterialGraphVisibilityPipeline(forceCompile, true) : nullptr;
             std::unique_ptr<NRI::Pipeline> stableDepth = graphs && m_isEditor ? buildMaterialGraphEditorPipeline(false) : nullptr;
             std::unique_ptr<NRI::Pipeline> selectionMask = graphs && m_isEditor ? buildMaterialGraphEditorPipeline(true) : nullptr;
+            std::unique_ptr<NRI::Pipeline> rayTracingOffset = graphs ? buildMaterialGraphRayTracingOffsetPipeline(forceCompile) : nullptr;
             std::unique_ptr<NRI::Pipeline> forward = shaders || graphs ? buildCustomLitForwardPipeline(forceCompile, graphs) : nullptr;
             m_customLitPipeline = std::move(deferred);
             m_gbufferGraphPipeline = std::move(gbuffer);
@@ -123,6 +136,7 @@ namespace Nox
             m_shadowDepthMaskGraphPipeline = std::move(shadowDepthMask);
             m_stableEntityDepthGraphPipeline = std::move(stableDepth);
             m_selectionMaskGraphPipeline = std::move(selectionMask);
+            m_rayTracingOffsetGraphPipeline = std::move(rayTracingOffset);
             m_transparentLitCustomPipeline = std::move(forward);
         }
         catch (const std::exception& error)
@@ -138,6 +152,7 @@ namespace Nox
             m_shadowDepthMaskGraphPipeline.reset();
             m_stableEntityDepthGraphPipeline.reset();
             m_selectionMaskGraphPipeline.reset();
+            m_rayTracingOffsetGraphPipeline.reset();
             m_transparentLitCustomPipeline.reset();
             m_customLitStatus.Ready = false;
             m_customLitStatus.GraphsReady = false;
@@ -209,6 +224,7 @@ namespace Nox
                 m_shadowDepthMaskGraphPipeline.reset();
                 m_stableEntityDepthGraphPipeline.reset();
                 m_selectionMaskGraphPipeline.reset();
+                m_rayTracingOffsetGraphPipeline.reset();
             }
             updateRayTracingGraphMasks(false);
             m_customLitPaths = paths;
@@ -290,6 +306,7 @@ namespace Nox
                         graphVariants.push_back(CustomLitShaders::StableDepthSourcePath().generic_string());
                         graphVariants.push_back(CustomLitShaders::SelectionMaskSourcePath().generic_string());
                     }
+                    graphVariants.push_back(CustomLitShaders::RayTracingOffsetSourcePath().generic_string());
                     m_device->compileShaderModules(graphVariants, *m_shaderCompiler); // (an error is thrown again by the pipeline below)
                 }
                 // The ray tracing passes' variants with the graphs' masks: compiled beside the forward variant once the graph variants
@@ -328,7 +345,10 @@ namespace Nox
                     // The editor's overlays (entity IDs / depth, selection outline) cut the mask too.
                     std::unique_ptr<NRI::Pipeline> stableDepth = m_isEditor ? buildMaterialGraphEditorPipeline(false) : nullptr;
                     std::unique_ptr<NRI::Pipeline> selectionMask = m_isEditor ? buildMaterialGraphEditorPipeline(true) : nullptr;
+                    // The ray tracing scene's World Position Offset (its moved vertices), with the same slots.
+                    std::unique_ptr<NRI::Pipeline> rayTracingOffset = buildMaterialGraphRayTracingOffsetPipeline(false);
                     std::lock_guard lock(build->Mutex);
+                    build->RayTracingOffset = std::move(rayTracingOffset);
                     build->StableDepth = std::move(stableDepth);
                     build->SelectionMask = std::move(selectionMask);
                     build->GBuffer = std::move(gbuffer);
@@ -386,7 +406,7 @@ namespace Nox
         if (!m_customLitBuild)
             return;
         CustomLitBuild& build = *m_customLitBuild;
-        std::unique_ptr<NRI::Pipeline> deferred, forward, gbuffer, gbufferNoVelocity, visibility, shadowDepthMask, stableDepth, selectionMask;
+        std::unique_ptr<NRI::Pipeline> deferred, forward, gbuffer, gbufferNoVelocity, visibility, shadowDepthMask, stableDepth, selectionMask, rayTracingOffset;
         bool failed, finished;
         std::string error;
         {
@@ -399,6 +419,7 @@ namespace Nox
             shadowDepthMask = std::move(build.ShadowDepthMask);
             stableDepth = std::move(build.StableDepth);
             selectionMask = std::move(build.SelectionMask);
+            rayTracingOffset = std::move(build.RayTracingOffset);
             failed = build.Failed;
             finished = build.Failed || build.Cancelled || build.ForwardDone;
             error = build.Error;
@@ -416,6 +437,7 @@ namespace Nox
                 m_shadowDepthMaskGraphPipeline = std::move(shadowDepthMask);
                 m_stableEntityDepthGraphPipeline = std::move(stableDepth);
                 m_selectionMaskGraphPipeline = std::move(selectionMask);
+                m_rayTracingOffsetGraphPipeline = std::move(rayTracingOffset);
                 m_materialGraphPaths = build.GraphPaths;
                 m_materialGraphPrograms = build.GraphPrograms;
                 m_customLitStatus.GraphCount = build.GraphCount;
@@ -494,6 +516,7 @@ namespace Nox
                 m_shadowDepthMaskGraphPipeline.reset();
                 m_stableEntityDepthGraphPipeline.reset();
                 m_selectionMaskGraphPipeline.reset();
+                m_rayTracingOffsetGraphPipeline.reset();
                 m_materialGraphPaths = build.GraphPaths;
                 m_materialGraphPrograms.clear();
                 m_customLitStatus.GraphCount = 0;

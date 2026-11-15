@@ -68,10 +68,41 @@ namespace Nox
             });
     }
 
+    void Renderer::addRayTracingOffsetPass()
+    {
+        // World Position Offset in the ray tracing scene (material graph step 4c part 4): the moved vertices of the instances a graph
+        // offsets, after compute skinning (a skinned one moves from its skinned vertices) and before their BLAS is refit from them.
+        const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (!m_rayTracingOffsetGraphPipeline || m_frame.rayTracingOffsetWorkCount == 0 || !resources.RayTracingOffsetWorkItems.IsValid() ||
+            !resources.RayTracingOffsetVertices.IsValid())
+            return;
+        m_renderGraph.AddPass("Ray Tracing Offset", RGPassFlags::None,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.RayTracingOffsetWorkItems);
+                if (resources.SkinnedVertices.IsValid())
+                    builder.Read(resources.SkinnedVertices);
+                builder.Write(resources.RayTracingOffsetVertices);
+            },
+            [this, res = &resources, uniforms = m_uniformBuffers[frameIndex]->getDeviceAddress()](RGPassContext& context)
+            {
+                shaderio::PushConstantRayTracingOffset push{};
+                push.uniformsReference = uniforms;
+                push.workItemsReference = context.Buffer(res->RayTracingOffsetWorkItems).getDeviceAddress();
+                push.skinnedVerticesReference = res->SkinnedVertices.IsValid() ? context.Buffer(res->SkinnedVertices).getDeviceAddress() : 0;
+                push.outputReference = context.Buffer(res->RayTracingOffsetVertices).getDeviceAddress();
+                NRI::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_rayTracingOffsetGraphPipeline);
+                cmd.pushData(&push, sizeof(push));
+                cmd.dispatch(m_frame.rayTracingOffsetWorkCount, 1, 1);
+            });
+    }
+
     void Renderer::addAnimatedBLASPass()
     {
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        if (m_animatedBLASUpdates.empty() || !m_animatedBLASScratch || !resources.SkinnedVertices.IsValid())
+        if (m_animatedBLASUpdates.empty() || !m_animatedBLASScratch ||
+            (!resources.SkinnedVertices.IsValid() && !resources.RayTracingOffsetVertices.IsValid()))
             return;
 
         const bool buildsTLAS = m_tlasNeedBuild && m_hasTLASBuild && m_sceneTLAS && m_tlasScratchBuffer;
@@ -79,9 +110,12 @@ namespace Nox
         m_renderGraph.AddPass("Animated BLAS Update", RGPassFlags::NeverCull,
             [&](RGBuilder& builder)
             {
-                // Compute skinning writes this buffer immediately before the BLAS update. The build-input access gives
-                // the graph the compute-write -> acceleration-structure-read dependency with the correct stages.
-                builder.Read(resources.SkinnedVertices, RGBufferAccess::AccelerationStructureBuildInput);
+                // Compute skinning (and the Ray Tracing Offset pass) write these buffers immediately before the BLAS update. The
+                // build-input access gives the graph the compute-write -> acceleration-structure-read dependency with the correct stages.
+                if (resources.SkinnedVertices.IsValid())
+                    builder.Read(resources.SkinnedVertices, RGBufferAccess::AccelerationStructureBuildInput);
+                if (resources.RayTracingOffsetVertices.IsValid())
+                    builder.Read(resources.RayTracingOffsetVertices, RGBufferAccess::AccelerationStructureBuildInput);
             },
             [this, buildsTLAS](RGPassContext& context)
             {

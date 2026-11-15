@@ -1341,6 +1341,9 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> buildMaterialGraphVisibilityPipeline(bool forceCompile, bool shadowDepth);
         // The editor's stable entity IDs / depth (`selection` false) or selection mask with the graphs' Opacity Mask.
         std::unique_ptr<NRI::Pipeline> buildMaterialGraphEditorPipeline(bool selection);
+        // The ray tracing scene's World Position Offset (CustomLitShaders::RayTracingOffsetSourcePath; any thread; throws when it does not
+        // compile).
+        std::unique_ptr<NRI::Pipeline> buildMaterialGraphRayTracingOffsetPipeline(bool forceCompile);
         void pollCustomLitBuild();    // main thread, each frame: a finished build's pipelines swapped in
         void waitForCustomLitBuild();
         // The forward shader for lit surfaces: its Custom Lit variant while the project has Material Shaders (it shades every other
@@ -1773,6 +1776,7 @@ namespace Nox
             std::unique_ptr<NRI::Pipeline> ShadowDepthMask;
             std::unique_ptr<NRI::Pipeline> StableDepth;
             std::unique_ptr<NRI::Pipeline> SelectionMask;
+            std::unique_ptr<NRI::Pipeline> RayTracingOffset; // (the ray tracing scene's World Position Offset)
             bool GBufferDone = false;
             std::vector<std::string> GraphPaths;
             std::unordered_map<std::string, MaterialGraphProgram> GraphPrograms;
@@ -2031,6 +2035,7 @@ namespace Nox
             bool computeSkinningAdded = false;
             bool skinnedHistoryValid = false;
             uint32_t skinningWorkCount = 0;
+            uint32_t rayTracingOffsetWorkCount = 0; // (World Position Offset in the ray tracing scene: the Ray Tracing Offset pass's groups)
             bool animatedBLASAdded = false;
             bool inspectionProbe = false;
         };
@@ -2369,6 +2374,27 @@ namespace Nox
         void createMorphWeightBuffers(uint64_t size);
         void updateMorphWeightBuffer(uint32_t currentImage);
         void createSkinningBuffers(uint64_t skinnedVertexSize, uint64_t workItemSize);
+        // World Position Offset in the ray tracing scene (material graph step 4c part 4): the instances a graph moves, their work items for
+        // the Ray Tracing Offset pass (RayTracingOffset.slang's graph variant) and the per-frame buffers; false when there is nothing to
+        // move this frame. `skinningReady`: compute skinning runs this frame (a skinned instance starts from its skinned vertices).
+        bool updateRayTracingOffsetLayout(uint32_t currentImage, bool skinningReady);
+        void addRayTracingOffsetPass();
+        struct RayTracingOffsetEntry
+        {
+            uint32_t instanceSlot = 0;
+            uint32_t destinationVertexOffset = 0;
+            uint32_t vertexCount = 0;
+            bool skinned = false;
+        };
+        std::vector<uint32_t> m_rayTracingOffsetSlots;               // (scratch: GpuScene::GetVertexOffsetInstances)
+        std::vector<RayTracingOffsetEntry> m_rayTracingOffsetLayout; // by slot
+        std::vector<shaderio::RayTracingOffsetWorkItem> m_rayTracingOffsetWorkItems;
+        std::vector<std::unique_ptr<NRI::Buffer>> m_rayTracingOffsetVertexBuffers;   // SkinnedVertex, one per frame in flight
+        std::vector<std::unique_ptr<NRI::Buffer>> m_rayTracingOffsetWorkItemBuffers;
+        std::vector<void*> m_rayTracingOffsetWorkItemBuffersMapped;
+        uint64_t m_rayTracingOffsetVertexCapacity = 0;
+        uint64_t m_rayTracingOffsetWorkItemCapacity = 0;
+        std::unique_ptr<NRI::Pipeline> m_rayTracingOffsetGraphPipeline; // (RayTracingOffsetMaterialGraph.slang; swapped with the G-buffer resolve's variant)
 
         // Meshes
         // Buffers, assets and geometry ranges wait here until no frame in flight can reference them (§5.8.4).
@@ -2417,7 +2443,6 @@ namespace Nox
         {
             MeshBLAS Resource;
             uint32_t meshSlot = UINT32_MAX;
-            uint32_t destinationVertexOffset = 0;
             uint32_t vertexCount = 0;
             uint32_t indexOffset = 0;
             uint32_t triangleCount = 0;
