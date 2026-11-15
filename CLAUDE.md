@@ -47,7 +47,7 @@ with them; reference them by handle or path, and say that the files live only on
   `--mcp-port` 8770, `--mcp-access` write by default -- `quit` needs execute). Editor MCP port 8765; multiplayer Play's games with
   "Players' MCP servers" use editor port + 1 (dedicated server) / + n (player n). One token per project in `<Project>/.nox/mcp-token`.
   When the user tests runtime features, remind them to **build NoxRuntime too** (building NoxEditor does not). Offline tests:
-  `Tests/McpTests.inl` + `Tests/ToolsTest.cpp` in NoxToolsTest (226 checks).
+  `Tests/McpTests.inl` + `Tests/ToolsTest.cpp` in NoxToolsTest (228 checks).
 - Stylized rendering / material graph plan: `docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md` (step 1 Toon and step 2
   outlines + Post Process Volume built and tested; step 3 Custom Lit with hand-written Material Shaders built; step 4a material graph built (`.nmatgraph`, `Renderer/MaterialGraph.h`, `MaterialGraph.slang`; graphs in the generated `MaterialGraphs.slang`
   (Material Shaders in `CustomLitShaders.slang`; pipelines cached by source hash, not force-compiled), the G-buffer resolve's variant `GBufferMaterialGraph.slang` + the forward variant; `GpuMaterial::graphSlot` /
@@ -58,7 +58,7 @@ with them; reference them by handle or path, and say that the files live only on
   `graphMaxDisplacement`; tested); 4c part 1 per-object graph parameters built (`MaterialComponent::GraphParameters`, C# `MeshComponent.SetScalarParameter`
   etc., script API 23; tested); 4c part 2 Opacity Mask in ray tracing built (`RayHitAlpha`/`RayHitCoverage` + `NOX_MATERIAL_GRAPH_MASK` ->
   `material_graph_ray_mask`; `MaterialGraphMasks.slang`; `<name>GraphMask.slang` variants, `Renderer::updateRayTracingGraphMasks`; tested; forward shader's secondary-ray functions `[noinline]` --
-  its fragMain was 4.7 MB SPIR-V and ~30 s in the GPU driver; "GPU driver compiled ... in N ms" log; modules from `CompileModulesNow` pinned until a pipeline takes them; graph variants compiled in parallel; `CustomLitStatus::GraphsLive` -> "Built on opaque surfaces" status; RT pass pipelines: one description each in `Renderer::rayTracingPassDesc`, built by the build's threads (`buildRayTracingPassPipelines`, buildNow) and swapped in by `installRayTracingPassPipelines` -- a main-thread `createPipeline` builds on the pool and the first bind waits); 4c Custom Lit output,
+  its fragMain was 4.7 MB SPIR-V and ~30 s in the GPU driver; "GPU driver compiled ... in N ms" log; modules from `CompileModulesNow` pinned until a pipeline takes them; graph variants compiled in parallel; `CustomLitStatus::GraphsLive` -> "Built on opaque surfaces" status; RT pass pipelines: one description each in `Renderer::rayTracingPassDesc`, built by the build's threads (`buildRayTracingPassPipelines`, buildNow) and swapped in by `installRayTracingPassPipelines` -- a main-thread `createPipeline` builds on the pool and the first bind waits; `CompileMaterialGraph` generates the mask first so `MaskCode` never depends on the surface); 4c Custom Lit output,
   graph surface at ray hits, WPO in the BLAS open; surface
   code, Physical / Stylized setting open). Custom Lit: `.slang` assets (`AssetType::MaterialShader`) with `light()` / `ambient()`
   (`CustomLit.slang`), generated into `<exe>/shaders/Generated` (`Renderer/CustomLitShaders.h`), lit by the "Custom Lit" pass after the

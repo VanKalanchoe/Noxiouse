@@ -229,6 +229,7 @@ namespace Nox
             // (they are not in its code, so its layout is the same): the materials packed again with them.
             if (m_materialGraphPaths == graphPaths)
                 m_materialGraphPrograms = std::move(programs);
+            NOX_CORE_INFO("Custom Lit / material graphs: no shader code changed (a parameter's default, or a layout change): nothing to compile");
             updateRayTracingGraphMasks(m_gbufferGraphPipeline && AnyGraphMask(m_materialGraphPrograms));
             ++m_customLitStatus.Version;
             m_gpuMaterialsDirty = true;

@@ -287,8 +287,8 @@ static void TestMaterialGraph()
     const MaterialGraphProgram sharedProgram = CompileMaterialGraph(shared);
     CHECK(sharedProgram.Valid && sharedProgram.ParameterSlots == 1 && sharedProgram.Parameters[0].Default.x == 1.0f,
           "two Scalar Parameters named K share one slot (the first's default)");
-    // Opacity Mask (stylized step 4b): its own function from only the nodes feeding that pin; a parameter it alone reads gets a slot after
-    // the surface's; a graph connecting only the mask still counts as connecting something (it is built).
+    // Opacity Mask (stylized step 4b): its own function from only the nodes feeding that pin; its parameters take the first slots (the
+    // mask is generated first); a graph connecting only the mask still counts as connecting something (it is built).
     NodeGraph masked = CreateEmptyMaterialGraph();
     const uint32_t maskTexture = node(masked, "Texture Sample", { { "Parameter Name", std::string("Leaves") } });
     const uint32_t maskMultiply = node(masked, "Multiply");
@@ -307,6 +307,24 @@ static void TestMaterialGraph()
     const auto density = std::find_if(maskProgram.Parameters.begin(), maskProgram.Parameters.end(), [](const MaterialGraphParameter& p) { return p.Name == "Density"; });
     CHECK(density != maskProgram.Parameters.end() && density->Default.x == 1.5f && maskProgram.TextureSlots == 1,
           "a parameter only the mask reads has a slot (and the texture its slot)");
+    // A surface edit leaves the mask's code alone (every ray tracing pass's variant compiles MaskCode): the same graph with its Base
+    // Color from a Vector Parameter and a texture -- two more parameters, one more texture -- generates the same MaskCode.
+    NodeGraph maskedTinted = masked;
+    maskedTinted.Links.erase(std::remove_if(maskedTinted.Links.begin(), maskedTinted.Links.end(), [&](const GraphLink& l)
+    {
+        return l.ToNode == maskedTinted.OutputNode && l.ToPin == 0;
+    }), maskedTinted.Links.end());
+    const uint32_t tintedColor = node(maskedTinted, "Multiply");
+    link(maskedTinted, node(maskedTinted, "Vector Parameter", { { "Name", std::string("Albedo") }, { "Default", glm::vec4(1.0f) } }), 0, tintedColor, 0);
+    link(maskedTinted, node(maskedTinted, "Texture Sample", { { "Parameter Name", std::string("Bark") } }), 0, tintedColor, 1);
+    link(maskedTinted, tintedColor, 0, maskedTinted.OutputNode, 0);
+    const MaterialGraphProgram maskTintedProgram = CompileMaterialGraph(maskedTinted);
+    CHECK(maskTintedProgram.Valid && maskTintedProgram.ParameterSlots == 2 && maskTintedProgram.TextureSlots == 2 &&
+          maskTintedProgram.MaskCode == maskProgram.MaskCode,
+          "parameters and textures added to the surface leave MaskCode as it was (the mask's slots first): '{}'", maskTintedProgram.Error);
+    CHECK(std::is_sorted(maskTintedProgram.Parameters.begin(), maskTintedProgram.Parameters.end(),
+                         [](const MaterialGraphParameter& a, const MaterialGraphParameter& b) { return a.Name < b.Name; }),
+          "the parameters are listed by name (Albedo, Bark, Density, Leaves)");
     NodeGraph maskOnly = CreateEmptyMaterialGraph();
     link(maskOnly, node(maskOnly, "Constant", { { "Value", 0.25f } }), 0, maskOnly.OutputNode, 7);
     const MaterialGraphProgram maskOnlyProgram = CompileMaterialGraph(maskOnly);

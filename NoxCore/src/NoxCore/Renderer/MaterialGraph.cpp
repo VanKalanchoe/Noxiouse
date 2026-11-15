@@ -1,6 +1,7 @@
 #include "NoxCore/Renderer/MaterialGraph.h"
 
 #include <algorithm>
+#include <cctype>
 #include <format>
 #include <functional>
 #include <unordered_map>
@@ -859,23 +860,32 @@ namespace Nox
         return true;
         };
 
-        if (!generate(context, neededFor(Context::Function::Surface)))
-            return program;
+        // The mask first: its parameters and textures take the first slots, so its code (MaskCode, which every ray tracing pass's variant
+        // compiles: MaterialGraphMasks.slang) depends on the mask's own nodes alone -- a parameter added to or removed from the surface
+        // used to move the mask's slot numbers and rebuild every ray tracing variant for an unchanged mask.
         auto continueFrom = [](Context& next, const Context& previous)
         {
             next.Parameters = previous.Parameters;
             next.ParameterSlots = previous.ParameterSlots;
             next.TextureSlots = previous.TextureSlots;
         };
-        continueFrom(maskContext, context);
         if (!generate(maskContext, neededFor(Context::Function::OpacityMask)))
             return program;
-        continueFrom(offsetContext, maskContext);
+        continueFrom(context, maskContext);
+        if (!generate(context, neededFor(Context::Function::Surface)))
+            return program;
+        continueFrom(offsetContext, context);
         if (!generate(offsetContext, neededFor(Context::Function::WorldPositionOffset)))
             return program;
 
         program.Valid = true;
         program.Parameters = std::move(offsetContext.Parameters);
+        // Listed by name (the Material Editor and the graph editor show them in this order; each keeps its Slot).
+        std::stable_sort(program.Parameters.begin(), program.Parameters.end(), [](const MaterialGraphParameter& a, const MaterialGraphParameter& b)
+        {
+            return std::lexicographical_compare(a.Name.begin(), a.Name.end(), b.Name.begin(), b.Name.end(),
+                                                [](char x, char y) { return std::tolower(static_cast<unsigned char>(x)) < std::tolower(static_cast<unsigned char>(y)); });
+        });
         program.ParameterSlots = offsetContext.ParameterSlots;
         program.TextureSlots = offsetContext.TextureSlots;
         program.Outputs = context.Outputs | maskContext.Outputs | offsetContext.Outputs;
