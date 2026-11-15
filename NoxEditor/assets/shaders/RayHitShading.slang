@@ -41,6 +41,10 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
 // ExcludeFromNEE surfaces (RTXPT's window and lantern glass) through with their color only; glass seen through (and any transmission without an RTXPT material file)
 // tinted by its transmission and base color; blended surfaces by 1 - alpha; alpha-masked ones cut out; anything else 0. Glass used
 // to let light through untouched: a wall lantern's yellow panes lit the wall with its bulb's white.
+// [noinline]: one copy of this secondary-ray code, called where it is needed, instead of being inlined into every caller -- the forward
+// shader inlined it several times over (refraction -> hit shading -> lights -> shadow rays): a single 276,000-line function, 4.7 MB of
+// SPIR-V for fragMain, 20 s in Slang and about 30 s in the GPU driver. With these six: 1.2 MB, 3 s (the main lighting stays inlined).
+[noinline]
 float3 ray_occluder_transmittance(UniformBufferObject* ubo, GpuRayTracingInstance lut, uint primitive, float2 barycentrics)
 {
     if ((lut.pathTracerFlags & PathTracerExcludeFromNEE) != 0)
@@ -85,6 +89,7 @@ float3 ray_transmittance(UniformBufferObject* ubo, float3 origin, float3 directi
 // A ray hit's diffuse albedo, specular F0 and perceptual roughness, as the path tracer reads its material (PathTracerBridge.slang):
 // metallic-roughness from the factors and the metallic-roughness texture (G roughness, B metallic) with the IoR's dielectric F0;
 // specular-glossiness (RGB specular, A glossiness) converted to it (specGlossToMetalRough there, Donut's formula).
+[noinline]
 void hit_material(UniformBufferObject* ubo, GpuRayTracingInstance lut, float3 color, float2 uv, SamplerState textureSampler,
                   out float3 albedo, out float3 specularF0, out float roughness, out float metallic)
 {
@@ -133,6 +138,7 @@ void hit_material(UniformBufferObject* ubo, GpuRayTracingInstance lut, float3 co
 // Diffuse only (the hit's own reflections are not traced). For rays traced from raster passes: RT reflections
 // (Reflection.slang), RT refraction (Material_TransparentLit_Mesh.slang). `emissionWeight` scales the hit's emission: the MIS weight
 // of a ray whose pass also samples the emissive triangles as lights (Reflection.slang), 1 otherwise.
+[noinline]
 float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, float2 barycentrics, float3 rayOrigin, float3 R, float hitT,
                    float emissionWeight = 1.0)
 {

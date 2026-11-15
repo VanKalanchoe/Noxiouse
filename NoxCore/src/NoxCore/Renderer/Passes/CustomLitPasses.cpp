@@ -308,21 +308,28 @@ namespace Nox
             {
                 if (compile)
                     m_shaderCompiler->compile(CustomLitShaders::CheckSourcePath().generic_string());
-                if (!phase())
-                    return;
-                // The ray tracing passes' variants with the graphs' masks: their shaders compiled here (those whose binary is not cached:
-                // only after a mask changed), the main thread then creates the pipelines from them (updateRayTracingGraphMasks).
+                // The ray tracing passes' variants with the graphs' masks: their shaders compiled beside the other variants (those whose
+                // binary is not cached: only after a mask changed -- they used to wait for the forward variant), the main thread then
+                // creates the pipelines from them (updateRayTracingGraphMasks).
+                std::future<bool> rayMaskTask;
+                if (build->RayMasksWanted)
+                    rayMaskTask = std::async(std::launch::async, [this]()
+                    {
+                        const BuildThreadPriority priority;
+                        std::vector<std::string> variants;
+                        for (const CustomLitShaders::RayTracingMaskVariant& variant : CustomLitShaders::RayTracingMaskVariants())
+                            variants.push_back(variant.Variant);
+                        return m_device->compileShaderModules(variants, *m_shaderCompiler);
+                    });
+                const bool phaseDone = phase();
                 bool rayMasks = false;
-                if (build->RayMasksWanted && !cancelled())
+                if (rayMaskTask.valid())
                 {
-                    std::vector<std::string> variants;
-                    for (const CustomLitShaders::RayTracingMaskVariant& variant : CustomLitShaders::RayTracingMaskVariants())
-                        variants.push_back(variant.Variant);
-                    rayMasks = m_device->compileShaderModules(variants, *m_shaderCompiler);
+                    rayMasks = rayMaskTask.get(); // (also when the phase stopped: the task uses this build's compiler)
                     if (!rayMasks)
                         NOX_CORE_ERROR("Material graphs: the ray tracing passes' Opacity Mask variants do not compile (they keep the material's own alpha)");
                 }
-                if (cancelled())
+                if (!phaseDone || cancelled())
                     return;
                 std::lock_guard lock(build->Mutex);
                 build->RayMasks = rayMasks;

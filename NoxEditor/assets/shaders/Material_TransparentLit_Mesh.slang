@@ -62,6 +62,10 @@ static const uint ShadowedLightCount = 4;
 // One shadow ray against the TLAS (ray query). Alpha-masked occluders are cut out like ShadowMask.slang does; blended and
 // transmissive ones let the light through, so glass neither throws a black shadow nor shadows itself. Every candidate is
 // decided here (glass and blended / masked surfaces are non-opaque instances in the TLAS; opaque ones the hardware accepts).
+// [noinline]: one copy of this secondary-ray code, called where it is needed, instead of being inlined into every caller -- the forward
+// shader inlined it several times over (refraction -> hit shading -> lights -> shadow rays): a single 276,000-line function, 4.7 MB of
+// SPIR-V for fragMain, 20 s in Slang and about 30 s in the GPU driver. With these six: 1.2 MB, 3 s (the main lighting stays inlined).
+[noinline]
 bool forwardShadowed(UniformBufferObject* ubo, float3 origin, float3 direction, float maxDistance)
 {
     RayDesc ray;
@@ -103,6 +107,7 @@ static const uint TracedRefractionMaxInternalBounces = 6;
 
 // The closest hit along the ray: surfaces that let light through are passed (blended, transmissive) and alpha-masked ones cut out,
 // as the shadow rays do. With `self` >= 0 (a ray inside that glass instance) its own surface counts too: its far side.
+[noinline]
 bool traceRefractionRay(UniformBufferObject* ubo, float3 origin, float3 direction, float maxDistance, int self, out uint instanceSlot,
                         out uint primitive, out float2 barycentrics, out float hitT)
 {
@@ -175,6 +180,7 @@ float3 rayHitNormal(GpuRayTracingInstance surface, uint primitive, float2 baryce
 // mesh -- the glass's own far side, found with a second ray that only sees this instance (total internal reflection mirrors it
 // back instead); a mesh that is not closed falls back to a slab of the given thickness (out parallel to the way in). The ray
 // then goes on through the scene, past other see-through surfaces; a miss is the environment.
+[noinline]
 float3 tracedRefraction(UniformBufferObject* ubo, InstanceData instance, uint selfSlot, float3 position, float3 n, float3 v, float ior, float modelScale)
 {
     const float bias = 0.002 * ubo->unitsPerMeter;

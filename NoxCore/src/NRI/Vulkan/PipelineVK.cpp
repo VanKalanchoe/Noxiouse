@@ -722,6 +722,9 @@ namespace NRI
                     shaderCreateInfos.push_back(info);
                 }
 
+                // How long the GPU driver takes to turn SPIR-V into GPU code (vkCreateShadersEXT): logged when slow, as the shader
+                // compiler's time is ("Shader compiled"), so a long build shows which part it was.
+                const auto driverStart = std::chrono::steady_clock::now();
                 try
                 {
                     m_shaders = m_deviceVK.getDevice().createShadersEXT(shaderCreateInfos);
@@ -730,6 +733,17 @@ namespace NRI
                 {
                     NOX_CORE_WARN("PipelineVK::PipelineVK Failed to create shaders from binary: {}. Falling back to SPIR-V", e.what());
                     m_shaders.clear();
+                }
+                {
+                    const double driverMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - driverStart).count();
+                    const bool fromSpirv = std::any_of(loadedFromBinary.begin(), loadedFromBinary.end(), [](bool binary) { return !binary; });
+                    if (fromSpirv && driverMs >= 500.0)
+                    {
+                        std::string sources;
+                        for (const ShaderStageDesc& shader : desc.shaders)
+                            sources += (sources.empty() ? "" : ", ") + std::filesystem::path(shader.sourcePath).filename().string() + ":" + shader.entryPoint;
+                        NOX_CORE_INFO("GPU driver compiled {} in {:.0f} ms", sources, driverMs);
+                    }
                 }
                 
                 if (m_shaders.empty())

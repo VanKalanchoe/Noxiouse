@@ -57,7 +57,8 @@ with them; reference them by handle or path, and say that the files live only on
   `MaterialGraph.slang`; WPO materials in the Masked buckets; generated `ForwardMeshMaterialGraph.slang`; `previousTimeSeconds` for motion vectors; bounds by
   `graphMaxDisplacement`; tested); 4c part 1 per-object graph parameters built (`MaterialComponent::GraphParameters`, C# `MeshComponent.SetScalarParameter`
   etc., script API 23; tested); 4c part 2 Opacity Mask in ray tracing built (`RayHitAlpha`/`RayHitCoverage` + `NOX_MATERIAL_GRAPH_MASK` ->
-  `material_graph_ray_mask`; `MaterialGraphMasks.slang`; `<name>GraphMask.slang` variants, `Renderer::updateRayTracingGraphMasks`); 4c Custom Lit output,
+  `material_graph_ray_mask`; `MaterialGraphMasks.slang`; `<name>GraphMask.slang` variants, `Renderer::updateRayTracingGraphMasks`; tested; forward shader's secondary-ray functions `[noinline]` --
+  its fragMain was 4.7 MB SPIR-V and ~30 s in the GPU driver; "GPU driver compiled ... in N ms" log); 4c Custom Lit output,
   graph surface at ray hits, WPO in the BLAS open; surface
   code, Physical / Stylized setting open). Custom Lit: `.slang` assets (`AssetType::MaterialShader`) with `light()` / `ambient()`
   (`CustomLit.slang`), generated into `<exe>/shaders/Generated` (`Renderer/CustomLitShaders.h`), lit by the "Custom Lit" pass after the
