@@ -6,6 +6,7 @@
 
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Layout/UILayout.h"
+#include "NoxCore/UI/Layout/UIWindow.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UICheckBox.h"
 #include "NoxCore/UI/Widgets/UICollapsingHeader.h"
@@ -419,6 +420,48 @@ namespace Nox::UI
         plotPanel->AddChild(plotControls);
         plotPanel->AddChild(plot);
         scroll->AddChild(plotPanel);
+
+        // 10. Draggable/Resizable UIWindow & Toast Notifications
+        auto winPanel = MakeUI<UIStackBox>(UIOrientation::Vertical, 8.0f);
+        winPanel->StyleClass = "Panel";
+        winPanel->DrawBackground = true;
+        winPanel->Padding = UIThickness::All(12.0f);
+        winPanel->AddChild(MakeUI<UILabel>("9. Floating UIWindow (Drag & Resize) & Toast Notifications", 14.5f));
+
+        auto winRow = MakeUI<UIStackBox>(UIOrientation::Horizontal, 8.0f);
+        auto toastCount = std::make_shared<int>(0);
+        auto toastBtn = MakeUI<UIButton>("Push Toast Notification", [&context, toastCount, report]()
+        {
+            ++(*toastCount);
+            context.PushToast("Toast #" + std::to_string(*toastCount) + "  -  Saved & Ready!", 3.0f, { 0.24f, 0.76f, 0.48f, 1.0f });
+            report("Pushed Toast #" + std::to_string(*toastCount));
+        });
+        toastBtn->StyleVariant = "primary";
+
+        auto spawnWinBtn = MakeUI<UIButton>("Open Floating UIWindow", [&context, report]()
+        {
+            auto host = MakeUI<UIAnchorBox>();
+            host->HitTestMode = UIHitTestMode::PassThrough;
+
+            auto win = MakeUI<UIWindow>("Floating Tool Window", [&context, report]()
+            {
+                context.ClearOverlay();
+                report("Closed Floating UIWindow");
+            });
+            win->AddContent(MakeUI<UILabel>("Drag the title bar to move me.", 13.5f));
+            win->AddContent(MakeUI<UILabel>("Drag the bottom-right corner to resize.", 13.5f));
+            win->AddContent(MakeUI<UISlider>(0.5f, 0.0f, 1.0f, [&context](float v)
+            {
+                context.PushToast("Window Slider: " + std::to_string(static_cast<int>(v * 100.0f)) + "%", 1.5f);
+            }));
+            host->AddChild(win);
+            context.SetOverlay(host);
+        });
+
+        winRow->AddChild(toastBtn);
+        winRow->AddChild(spawnWinBtn);
+        winPanel->AddChild(winRow);
+        scroll->AddChild(winPanel);
 
         return scroll;
     }

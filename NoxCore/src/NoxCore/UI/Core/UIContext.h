@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <vector>
+
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Events/Event.h"
 #include "NoxCore/UI/Core/UIElement.h"
@@ -22,6 +25,8 @@ namespace Nox::UI
         void SetOverlay(const Ref<UIElement>& overlay);
         const Ref<UIElement>& GetOverlay() const { return m_Overlay; }
         void ClearOverlay() { SetOverlay(nullptr); }
+
+        void PushToast(std::string message, float durationSeconds = 3.0f, const UIColor& accentColor = { 0.24f, 0.56f, 0.96f, 1.0f });
 
         void SetTheme(const Ref<UITheme>& theme);
         const Ref<UITheme>& GetTheme() const { return m_Theme; }
@@ -52,5 +57,14 @@ namespace Nox::UI
 
         UIVec2 m_LastMousePos{ 0.0f, 0.0f };
         float m_HoverTime = 0.0f;
+
+        struct ToastItem
+        {
+            std::string Message;
+            float Remaining = 3.0f;
+            float Duration = 3.0f;
+            UIColor Accent{ 0.24f, 0.56f, 0.96f, 1.0f };
+        };
+        std::vector<ToastItem> m_Toasts;
     };
 }

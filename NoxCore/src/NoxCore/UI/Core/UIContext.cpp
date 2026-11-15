@@ -31,6 +31,15 @@ namespace Nox::UI
         m_Theme = theme ? theme : UITheme::CreateDefault();
     }
 
+    void UIContext::PushToast(std::string message, float durationSeconds, const UIColor& accentColor)
+    {
+        if (message.empty())
+            return;
+        m_Toasts.push_back({ std::move(message), std::max(0.5f, durationSeconds), std::max(0.5f, durationSeconds), accentColor });
+        if (m_Toasts.size() > 5)
+            m_Toasts.erase(m_Toasts.begin());
+    }
+
     void UIContext::SetFocus(UIElement* element)
     {
         Ref<UIElement> prev = m_Focused;
@@ -288,6 +297,53 @@ namespace Nox::UI
         else
         {
             m_HoverTime = 0.0f;
+        }
+
+        // Render bottom-right stacked toast notifications
+        if (!m_Toasts.empty())
+        {
+            for (auto& toast : m_Toasts)
+                toast.Remaining -= dt;
+            std::erase_if(m_Toasts, [](const ToastItem& t) { return t.Remaining <= 0.0f; });
+
+            float bottomY = viewportSize.y - 18.0f;
+            constexpr float fontSize = 13.0f;
+            const Ref<Font> font = Font::GetDefault();
+            for (int i = static_cast<int>(m_Toasts.size()) - 1; i >= 0; --i)
+            {
+                const ToastItem& t = m_Toasts[i];
+                const float alpha = std::clamp(t.Remaining / 0.4f, 0.0f, 1.0f);
+                const UIVec2 textSize = UILabel::MeasureText(t.Message, font, fontSize);
+                const UIVec2 boxSize{ std::max(180.0f, textSize.x + 32.0f), textSize.y + 18.0f };
+                const UIVec2 boxMin{ viewportSize.x - boxSize.x - 18.0f, bottomY - boxSize.y };
+                const UIVec2 boxMax = boxMin + boxSize;
+
+                drawList.AddRoundedRect(
+                    boxMin,
+                    boxMax,
+                    { 0.10f, 0.11f, 0.15f, 0.95f * alpha },
+                    glm::vec4(6.0f),
+                    1.0f,
+                    { 0.26f, 0.30f, 0.38f, 0.9f * alpha },
+                    { 0.0f, 0.0f, 0.0f, 0.4f * alpha },
+                    { 0.0f, 4.0f },
+                    10.0f
+                );
+                drawList.AddRoundedRect(
+                    { boxMin.x + 2.0f, boxMin.y + 4.0f },
+                    { boxMin.x + 6.0f, boxMax.y - 4.0f },
+                    { t.Accent.r, t.Accent.g, t.Accent.b, t.Accent.a * alpha },
+                    glm::vec4(2.0f)
+                );
+                drawList.AddText(
+                    t.Message,
+                    font,
+                    { boxMin.x + 16.0f, boxMin.y + 9.0f },
+                    fontSize,
+                    { 0.92f, 0.95f, 0.98f, alpha }
+                );
+                bottomY = boxMin.y - 8.0f;
+            }
         }
     }
 }
