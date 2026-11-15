@@ -6,10 +6,14 @@
 #include "NoxCore/UI/Layout/UILayout.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UICheckBox.h"
+#include "NoxCore/UI/Widgets/UICollapsingHeader.h"
 #include "NoxCore/UI/Widgets/UIDragScalar.h"
+#include "NoxCore/UI/Widgets/UIDropdown.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
+#include "NoxCore/UI/Widgets/UIProgressBar.h"
 #include "NoxCore/UI/Widgets/UIPropertyGrid.h"
 #include "NoxCore/UI/Widgets/UIScrollView.h"
+#include "NoxCore/UI/Widgets/UISeparator.h"
 #include "NoxCore/UI/Widgets/UISlider.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
 #include "NoxCore/UI/Widgets/UITreeView.h"
@@ -213,6 +217,46 @@ namespace Nox::UI
         demoTree->OnSelect = [report](uint64_t id) { report("DemoTree selected ID: " + std::to_string(id)); };
         treePanel->AddChild(demoTree);
         scroll->AddChild(treePanel);
+
+        // 6. Dropdown, ProgressBar, Separator & CollapsingHeader
+        auto extraPanel = MakeUI<UIStackBox>(UIOrientation::Vertical, 8.0f);
+        extraPanel->StyleClass = "Panel";
+        extraPanel->DrawBackground = true;
+        extraPanel->Padding = UIThickness::All(12.0f);
+        extraPanel->AddChild(MakeUI<UILabel>("5. Dropdown, ProgressBar, Separator & CollapsingHeader", 14.5f));
+        extraPanel->AddChild(MakeUI<UISeparator>());
+
+        auto dropRow = MakeUI<UIStackBox>(UIOrientation::Horizontal, 10.0f);
+        auto dropLabel = MakeUI<UILabel>("Render Mode:", 13.5f);
+        dropLabel->VAlign = UIAlignment::Center;
+        auto dropdown = MakeUI<UIDropdown>(
+            &context,
+            std::vector<std::string>{ "Deferred VisBuffer", "Forward Lit", "Path Tracer", "Wireframe" },
+            0,
+            [report](int idx) { report("Dropdown selected index: " + std::to_string(idx)); }
+        );
+        dropdown->WidthMode = UISizeMode::Fill;
+        dropRow->AddChild(dropLabel);
+        dropRow->AddChild(dropdown);
+        extraPanel->AddChild(dropRow);
+
+        auto progressBar = MakeUI<UIProgressBar>(0.65f);
+        auto progressSlider = MakeUI<UISlider>(0.65f, 0.0f, 1.0f, [progressBar, report](float v)
+        {
+            progressBar->SetFraction(v);
+            report("ProgressBar: " + std::to_string(static_cast<int>(v * 100.0f)) + "%");
+        });
+        extraPanel->AddChild(progressBar);
+        extraPanel->AddChild(progressSlider);
+
+        extraPanel->AddChild(MakeUI<UISeparator>());
+
+        auto section = MakeUI<UICollapsingHeader>("Collapsible Details Section", true);
+        section->AddContent(MakeUI<UILabel>("This content toggles cleanly via UICollapsingHeader.", 13.0f));
+        section->AddContent(MakeUI<UIButton>("Nested Action", [report]() { report("Collapsed section button clicked"); }));
+        extraPanel->AddChild(section);
+
+        scroll->AddChild(extraPanel);
 
         return scroll;
     }
