@@ -51,5 +51,6 @@ namespace Nox::UI
         Ref<UIElement> m_Focused;
 
         UIVec2 m_LastMousePos{ 0.0f, 0.0f };
+        float m_HoverTime = 0.0f;
     };
 }

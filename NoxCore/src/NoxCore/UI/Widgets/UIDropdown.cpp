@@ -23,7 +23,7 @@ namespace Nox::UI
 
             bool OnPointerDown(const UIPointerEvent& e) override
             {
-                if (e.Button == 0 && m_Context)
+                if (e.Button == 1 && m_Context)
                 {
                     m_Context->ClearOverlay();
                     return true;
@@ -100,7 +100,7 @@ namespace Nox::UI
 
     bool UIDropdown::OnPointerUp(const UIPointerEvent& e)
     {
-        if (e.Button != 0 || !IsEnabled())
+        if (e.Button != 1 || !IsEnabled())
             return false;
         if (GetBounds().Contains(e.Position))
             OpenPopup();

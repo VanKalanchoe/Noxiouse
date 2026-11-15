@@ -7,6 +7,7 @@
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UICheckBox.h"
 #include "NoxCore/UI/Widgets/UICollapsingHeader.h"
+#include "NoxCore/UI/Widgets/UIColorPicker.h"
 #include "NoxCore/UI/Widgets/UIDragScalar.h"
 #include "NoxCore/UI/Widgets/UIDropdown.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
@@ -257,6 +258,37 @@ namespace Nox::UI
         extraPanel->AddChild(section);
 
         scroll->AddChild(extraPanel);
+
+        // 7. Color Edit, Inline Color Picker & Tooltips
+        auto colorPanel = MakeUI<UIStackBox>(UIOrientation::Vertical, 8.0f);
+        colorPanel->StyleClass = "Panel";
+        colorPanel->DrawBackground = true;
+        colorPanel->Padding = UIThickness::All(12.0f);
+        colorPanel->AddChild(MakeUI<UILabel>("6. Color Edit, HSVA Color Picker & Hover Tooltips", 14.5f));
+
+        auto colorRow = MakeUI<UIStackBox>(UIOrientation::Horizontal, 12.0f);
+        auto inlinePicker = MakeUI<UIColorPicker>(UIColor{ 0.24f, 0.56f, 0.96f, 1.0f });
+        inlinePicker->Tooltip = "Drag SV square, Hue bar, or Alpha bar";
+
+        auto colorEdit = MakeUI<UIColorEdit>(&context, UIColor{ 0.24f, 0.56f, 0.96f, 1.0f }, [inlinePicker, report](const UIColor& c)
+        {
+            inlinePicker->SetColor(c, false);
+            report("ColorEdit: " + inlinePicker->GetHexString());
+        });
+        colorEdit->Tooltip = "Click to open floating HSVA Color Picker popover";
+        colorEdit->VAlign = UIAlignment::Start;
+
+        inlinePicker->OnColorChanged = [colorEdit, progressBar, report](const UIColor& c)
+        {
+            colorEdit->SetColor(c, false);
+            progressBar->FillColor = c;
+            report("Color updated (synced to ProgressBar fill)");
+        };
+
+        colorRow->AddChild(inlinePicker);
+        colorRow->AddChild(colorEdit);
+        colorPanel->AddChild(colorRow);
+        scroll->AddChild(colorPanel);
 
         return scroll;
     }

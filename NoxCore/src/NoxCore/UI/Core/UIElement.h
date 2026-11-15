@@ -53,6 +53,7 @@ namespace Nox::UI
         std::string Name;
         std::string StyleClass = "Panel";
         std::string StyleVariant;
+        std::string Tooltip;
 
         bool Visible = true;
         bool ClipChildren = false;

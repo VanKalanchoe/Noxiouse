@@ -1,7 +1,9 @@
 #include "UIContext.h"
 
 #include "NoxCore/Events/InputEvents.h"
+#include "NoxCore/Renderer/Font.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
+#include "NoxCore/UI/Widgets/UILabel.h"
 
 namespace Nox::UI
 {
@@ -55,6 +57,8 @@ namespace Nox::UI
         Ref<UIElement> prevHover = m_Hovered;
         if (prevHover.get() == nextHover)
             return;
+
+        m_HoverTime = 0.0f;
 
         UIPointerEvent ev{};
         ev.Position = pos;
@@ -238,6 +242,52 @@ namespace Nox::UI
             m_Overlay->Arrange({ { 0.0f, 0.0f }, viewportSize });
             m_Overlay->UpdateStylesRecursive(*m_Theme, dt);
             m_Overlay->PaintRecursive(drawList, *m_Theme);
+        }
+
+        if (m_Hovered && !m_Captured)
+        {
+            m_HoverTime += dt;
+            if (m_HoverTime >= 0.45f)
+            {
+                std::string_view tip;
+                for (UIElement* cur = m_Hovered.get(); cur != nullptr; cur = cur->GetParent())
+                {
+                    if (!cur->Tooltip.empty())
+                    {
+                        tip = cur->Tooltip;
+                        break;
+                    }
+                }
+                if (!tip.empty())
+                {
+                    constexpr float fontSize = 12.5f;
+                    const UIVec2 textSize = UILabel::MeasureText(tip, nullptr, fontSize);
+                    const UIVec2 pad{ 10.0f, 6.0f };
+                    const UIVec2 boxSize{ textSize.x + pad.x * 2.0f, textSize.y + pad.y * 2.0f };
+                    UIVec2 pos{ m_LastMousePos.x + 14.0f, m_LastMousePos.y + 18.0f };
+                    if (pos.x + boxSize.x > viewportSize.x - 6.0f)
+                        pos.x = std::max(6.0f, viewportSize.x - boxSize.x - 6.0f);
+                    if (pos.y + boxSize.y > viewportSize.y - 6.0f)
+                        pos.y = std::max(6.0f, m_LastMousePos.y - boxSize.y - 8.0f);
+
+                    drawList.AddRoundedRect(
+                        pos,
+                        pos + boxSize,
+                        { 0.09f, 0.10f, 0.13f, 0.96f },
+                        glm::vec4(6.0f),
+                        1.0f,
+                        { 0.28f, 0.32f, 0.40f, 0.95f },
+                        { 0.0f, 0.0f, 0.0f, 0.45f },
+                        { 0.0f, 4.0f },
+                        10.0f
+                    );
+                    drawList.AddText(tip, nullptr, pos + pad, fontSize, { 0.92f, 0.94f, 0.98f, 1.0f });
+                }
+            }
+        }
+        else
+        {
+            m_HoverTime = 0.0f;
         }
     }
 }
