@@ -12,6 +12,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <stb_image_write.h>
 
+#include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Audio/AudioMixer.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Input.h"
