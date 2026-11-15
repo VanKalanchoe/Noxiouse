@@ -64,8 +64,10 @@ with them; reference them by handle or path, and say that the files live only on
   4c part 4 WPO in the ray tracing scene built (`RayTracingOffset.slang` -> `RayTracingOffsetMaterialGraph.slang`, `updateRayTracingOffsetLayout`,
   "Ray Tracing Offset" pass, dynamic BLAS per WPO instance in `updateAnimatedBLAS`; tested); 4c part 5 graph Custom Lit output built (Material
   Output pins 9/10 Custom Light / Custom Ambient -> `MaterialGraphProgram::LightCode`, Lit Surface / Light / Ambient Light nodes, graph as a
-  `CustomLitSource{Graph}` slot in the Material Shaders' dispatcher, `material_graph_lit_inputs`; not yet user-tested); a Local Position
-  node open (UAL1 mannequin: all UVs one point, so UV dissolves vanish at once); surface
+  `CustomLitSource{Graph}` slot in the Material Shaders' dispatcher, `material_graph_lit_inputs`; not yet user-tested); next steps split by
+  shader stage (plan §9d): 4d stage labels, 4e vertex inputs (Local Position first -- UAL1 mannequin: all UVs one point, so UV
+  dissolves vanish at once), 4f vertex outputs, 4g pixel outputs (lobe pins), 4h pixel inputs; R1 subsurface / R2 pixel depth
+  offset need renderer work first; surface
   code, Physical / Stylized setting open). Custom Lit: `.slang` assets (`AssetType::MaterialShader`) with `light()` / `ambient()`
   (`CustomLit.slang`), generated into `<exe>/shaders/Generated` (`Renderer/CustomLitShaders.h`), lit by the "Custom Lit" pass after the
   deferred lighting (G-buffer model bits 0xC0) and the forward variant (`forwardLitPipeline()`); push-constant vec4s sit on 16 bytes. Post effects + outlines live in `PostProcessSettings`; a scene's
