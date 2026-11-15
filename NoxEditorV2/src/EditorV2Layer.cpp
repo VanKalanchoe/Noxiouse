@@ -2,21 +2,34 @@
 
 #include <algorithm>
 #include <cmath>
+#include <system_error>
 
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_video.h>
+#include <glm/gtc/quaternion.hpp>
+#include <stb_image_write.h>
 
 #include "NoxCore/Audio/AudioMixer.h"
 #include "NoxCore/Core/Application.h"
+#include "NoxCore/Core/Input.h"
 #include "NoxCore/Core/Window.h"
+#include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Renderer.h"
+#include "NoxCore/Scene/Components.h"
+#include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneSerializer.h"
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UILayer.h"
 #include "NoxCore/UI/Layout/UIDockSpace.h"
 #include "NoxCore/UI/Widgets/UIImage.h"
+#include "NoxCore/Utils/Utils.h"
+#include "ProjectManager/ProcessLauncher.h"
 #include "ProjectManager/ProjectLibrary.h"
 
 namespace Nox
@@ -26,12 +39,25 @@ namespace Nox
         constexpr const char* kLayoutPath = "assets/layouts/EditorV2.nlayout";
     }
 
-    EditorV2Layer::EditorV2Layer(std::filesystem::path projectFile)
+    EditorV2Layer::EditorV2Layer(std::filesystem::path projectFile, bool createBasicScene)
         : Layer("EditorV2Layer")
-        , m_EditorCamera(45.0f, 1.778f, 0.1f, 1000.0f)
+        , m_EditorCamera(30.0f, 1.778f, 0.01f, 1000.0f)
+        , m_CreateBasicScene(createBasicScene)
     {
         m_ActiveScene = CreateRef<Scene>();
-        OpenProject(projectFile);
+
+        if (!projectFile.empty())
+            NOX_CORE_INFO("Loading project {}", projectFile.generic_string());
+        if ((projectFile.empty() || !OpenProject(projectFile)) && !OpenStartupProject(projectFile))
+        {
+            SDL_Event event{};
+            event.type = SDL_EVENT_QUIT;
+            SDL_PushEvent(&event);
+        }
+
+        if (m_ApplyBasicSceneView)
+            ApplyBasicSceneView();
+
         BuildUI(true);
     }
 
@@ -46,20 +72,52 @@ namespace Nox
             Project::GetActive()->GetEditorAssetManager()->Shutdown();
     }
 
-    void EditorV2Layer::OpenProject(const std::filesystem::path& path)
+    bool EditorV2Layer::NewProject()
     {
-        Renderer* renderer = Application::Get().GetRenderer();
-        const bool loaded = !path.empty() && Project::Load(path) != nullptr;
-        if (!loaded)
-            Project::New();
-
-        Ref<Project> project = Project::GetActive();
-        if (loaded)
+        std::filesystem::path path = Utility::SaveFile("Nox Project\0nproj\0");
+        if (path.empty())
+            return false;
+        ProjectLibrary::NewProjectSettings settings;
+        settings.Name = path.stem().string();
+        settings.Location = path.parent_path();
+        std::string error;
+        const std::filesystem::path projectFile = ProjectLibrary::CreateProject(settings, error);
+        if (projectFile.empty())
         {
-            ProjectLibrary::RememberRecentProject(path);
-            if (auto win = Application::Get().getWindow(); win && win->getHandle() && project)
-                SDL_SetWindowTitle(win->getHandle(), ("Nox Editor - " + project->GetConfig().Name).c_str());
+            NOX_CORE_ERROR("New Project: {}", error);
+            return false;
         }
+        m_CreateBasicScene = true;
+        return OpenProject(projectFile);
+    }
+
+    bool EditorV2Layer::OpenProject()
+    {
+        const std::string filepath = Utility::OpenFile("Nox Project\0nproj\0");
+        if (filepath.empty())
+            return false;
+        return OpenProject(filepath);
+    }
+
+    bool EditorV2Layer::OpenProject(const std::filesystem::path& path)
+    {
+        if (path.empty())
+            return false;
+
+        const bool hadProject = Project::GetActive() != nullptr;
+        if (!Project::Load(path))
+        {
+            NOX_CORE_ERROR("Could not open the project '{}'", path.string());
+            return false;
+        }
+
+        Renderer* renderer = Application::Get().GetRenderer();
+        Ref<Project> project = Project::GetActive();
+
+        ProjectLibrary::RememberRecentProject(path);
+        if (auto win = Application::Get().getWindow(); win && win->getHandle() && project)
+            SDL_SetWindowTitle(win->getHandle(), ("Nox Editor - " + project->GetConfig().Name).c_str());
+
         m_EditorCamera.ApplyWorldUnitDefaults();
         if (renderer && project)
         {
@@ -68,26 +126,296 @@ namespace Nox
         }
         if (project && project->GetEditorAssetManager())
             project->GetEditorAssetManager()->Init();
-        if (loaded)
-            AudioMixer::LoadProjectMixer(true);
+        AudioMixer::LoadProjectMixer(true);
         if (renderer)
             renderer->InitializeCustomLitShaders();
 
-        if (loaded && project && project->GetConfig().StartScene)
+        const AssetHandle startScene = project ? project->GetConfig().StartScene : AssetHandle(0);
+        if (startScene != 0)
         {
-            const std::filesystem::path scenePath =
-                Project::GetActiveAssetDirectory() /
-                project->GetEditorAssetManager()->GetFilePath(project->GetConfig().StartScene);
+            const std::filesystem::path relative = project->GetEditorAssetManager()->GetFilePath(startScene);
+            const std::filesystem::path scenePath = Project::GetActiveAssetDirectory() / relative;
             Ref<Scene> loadedScene = CreateRef<Scene>();
             SceneSerializer serializer(loadedScene);
             if (serializer.Deserialize(scenePath))
+            {
                 m_ActiveScene = loadedScene;
+                m_ActiveScenePath = relative;
+            }
         }
+        else if (hadProject)
+        {
+            NewScene();
+        }
+
+        if (m_CreateBasicScene && project && project->GetConfig().StartScene == 0)
+            CreateBasicScene();
+        m_CreateBasicScene = false;
+
+        {
+            std::error_code error;
+            m_ThumbnailPending = !std::filesystem::exists(ProjectLibrary::ThumbnailPath(Project::GetActiveProjectDirectory()), error);
+            m_ThumbnailTimer = 0.0f;
+        }
+        return true;
+    }
+
+    bool EditorV2Layer::OpenStartupProject(const std::filesystem::path& failed)
+    {
+        const std::string message = failed.empty()
+            ? std::string("No project is open. Open an existing project (.nproj) or make a new one.")
+            : "The project " + failed.generic_string() + " could not be opened (the log says why).\n"
+              "Open another project (.nproj) or make a new one.";
+        while (true)
+        {
+            const SDL_MessageBoxButtonData buttons[] = {
+                { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 0, "Open Project..." },
+                { 0, 1, "New Project..." },
+                { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 2, "Quit" },
+            };
+            SDL_MessageBoxData box{};
+            box.flags = SDL_MESSAGEBOX_INFORMATION | SDL_MESSAGEBOX_BUTTONS_LEFT_TO_RIGHT;
+            box.window = Application::Get().getWindow()->getHandle();
+            box.title = "Nox Editor";
+            box.message = message.c_str();
+            box.numbuttons = SDL_arraysize(buttons);
+            box.buttons = buttons;
+            int choice = 2;
+            if (!SDL_ShowMessageBox(&box, &choice) || choice == 2)
+                return false;
+            if (choice == 0 ? OpenProject() : NewProject())
+                return true;
+        }
+    }
+
+    void EditorV2Layer::OpenProjectManager()
+    {
+        const char* base = SDL_GetBasePath();
+        const ApplicationCommandLineArgs& args = Application::Get().GetSpecification().CommandLineArgs;
+        std::filesystem::path fileName = args.Count > 0 && args.Args[0]
+            ? std::filesystem::path(args.Args[0]).filename()
+            : std::filesystem::path("NoxEditorV2");
+#ifdef _WIN32
+        if (!fileName.has_extension())
+            fileName += ".exe";
+#endif
+        const std::filesystem::path executable = std::filesystem::path(base ? base : "") / fileName;
+        std::vector<std::string> arguments{ "--project-manager" };
+        for (int index = 1; index < args.Count; ++index)
+        {
+            if (ApplicationCommandLineArgs::IsSwitch(args.Args[index]) &&
+                std::string_view(args.Args[index]) != "--project-manager")
+                arguments.emplace_back(args.Args[index]);
+        }
+        std::string error;
+        if (!LaunchDetachedProcess(executable, arguments, error))
+        {
+            NOX_CORE_ERROR("Project Manager: cannot start {}: {}", executable.generic_string(), error);
+            return;
+        }
+        NOX_CORE_INFO("Project Manager: started {} --project-manager; this editor closes", executable.generic_string());
+        Application::Get().Shutdown();
+    }
+
+    void EditorV2Layer::NewScene()
+    {
+        m_ActiveScene = CreateRef<Scene>();
+        m_ActiveScenePath.clear();
+    }
+
+    AssetHandle EditorV2Layer::GetShapeAsset(PrimitiveShape shape)
+    {
+        Ref<Project> project = Project::GetActive();
+        if (!project)
+            return 0;
+
+        auto assetManager = project->GetEditorAssetManager();
+        const std::string name = PrimitiveShapes::GetName(shape);
+        const std::filesystem::path meshPath = std::filesystem::path("Shapes") / (name + ".nsmesh");
+        if (const AssetHandle existing = assetManager->FindHandleByPath(meshPath, AssetType::StaticMesh); existing != 0)
+            return existing;
+
+        const std::filesystem::path sourcePath = std::filesystem::path("Shapes") / (name + ".gltf");
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        if (!std::filesystem::exists(assetDirectory / sourcePath) && PrimitiveShapes::WriteGltf(shape, assetDirectory / "Shapes").empty())
+        {
+            NOX_CORE_ERROR("Could not write the {} shape into {}", name, (assetDirectory / "Shapes").generic_string());
+            return 0;
+        }
+
+        MeshImportSettings settings;
+        settings.ImportSkeletalMeshes = false;
+        settings.ImportAnimations = false;
+        settings.StaticCombine = MeshCombineMode::CombineAll;
+        settings.ImportScale = WorldUnits::PerSourceUnit(WorldUnits::SourceUnit::Meters);
+        if (!assetManager->ImportModel(sourcePath, meshPath, settings))
+            return 0;
+        return assetManager->FindHandleByPath(meshPath, AssetType::StaticMesh);
+    }
+
+    AssetHandle EditorV2Layer::RegisterSceneAsset(const std::filesystem::path& scenePath)
+    {
+        Ref<Project> project = Project::GetActive();
+        if (!project || scenePath.empty())
+            return 0;
+        auto assets = project->GetEditorAssetManager();
+        std::error_code error;
+        const std::filesystem::path relative = std::filesystem::relative(scenePath, Project::GetActiveAssetDirectory(), error);
+        if (error || relative.empty() || relative.native().starts_with(std::filesystem::path("..").native()))
+            return 0;
+        AssetHandle handle = assets->FindHandleByPath(relative, AssetType::Scene);
+        if (handle == 0)
+        {
+            assets->ImportAsset(relative, relative, AssetType::Scene);
+            handle = assets->FindHandleByPath(relative, AssetType::Scene);
+        }
+        return handle;
+    }
+
+    void EditorV2Layer::AdoptStartSceneIfNone(const std::filesystem::path& scenePath)
+    {
+        Ref<Project> project = Project::GetActive();
+        if (!project || project->GetConfig().StartScene != 0)
+            return;
+        if (const AssetHandle handle = RegisterSceneAsset(scenePath); handle != 0)
+        {
+            project->GetConfig().StartScene = handle;
+            Project::SaveActive();
+            NOX_CORE_INFO("Start Scene: {} (the project opens with it; Settings > Start Scene changes it)", scenePath.filename().string());
+        }
+    }
+
+    void EditorV2Layer::CreateBasicScene()
+    {
+        NewScene();
+        Scene& scene = *m_ActiveScene;
+
+        const std::string lighting = "Lighting";
+        scene.AddFolder(lighting);
+
+        Entity sky = scene.CreateEntity("Sky");
+        sky.AddComponent<EnvironmentLightComponent>().Source = EnvironmentSource::ProceduralSky;
+        sky.AddComponent<FolderComponent>(lighting);
+
+        Entity sun = scene.CreateEntity("Sun");
+        sun.AddComponent<FolderComponent>(lighting);
+        sun.AddComponent<DirectionalLightComponent>().Intensity = DefaultSkySunIntensity;
+        sun.GetComponent<TransformComponent>().Rotation = glm::eulerAngles(DefaultSkySunRotation());
+        sun.MarkTransformDirty();
+
+        if (const AssetHandle plane = GetShapeAsset(PrimitiveShape::Plane); plane != 0)
+        {
+            Entity floor = scene.CreateEntity("Floor");
+            auto& instance = floor.AddComponent<ModelInstanceComponent>();
+            instance.Model = plane;
+            instance.AtFileLayout = true;
+            floor.GetComponent<TransformComponent>().Scale = glm::vec3(50.0f, 1.0f, 50.0f);
+            floor.MarkTransformDirty();
+            floor.AddComponent<RigidBody3DComponent>().Type = RigidBody3DComponent::BodyType::Static;
+            auto& box = floor.AddComponent<BoxCollider3DComponent>();
+            box.HalfExtents = glm::vec3(WorldUnits::FromMeters(0.5f), WorldUnits::FromMeters(0.05f), WorldUnits::FromMeters(0.5f));
+            box.Offset = glm::vec3(0.0f, -WorldUnits::FromMeters(0.05f), 0.0f);
+            AssetManager::RequestAsset(plane);
+        }
+
+        Entity camera = scene.CreateEntity("Camera");
+        camera.AddComponent<CameraComponent>().Primary = true;
+        auto& cameraTransform = camera.GetComponent<TransformComponent>();
+        cameraTransform.Translation = glm::dvec3(0.0, WorldUnits::FromMeters(2.0f), WorldUnits::FromMeters(8.0f));
+        cameraTransform.Rotation = glm::vec3(glm::radians(-12.0f), 0.0f, 0.0f);
+        camera.MarkTransformDirty();
+
+        const std::filesystem::path path = Project::GetActiveAssetDirectory() / "Scenes" / "Main.nox";
+        std::error_code error;
+        std::filesystem::create_directories(path.parent_path(), error);
+        {
+            SceneSerializer serializer(m_ActiveScene);
+            serializer.Serialize(path);
+        }
+        m_ActiveScenePath = "Scenes/Main.nox";
+        AdoptStartSceneIfNone(path);
+        m_ApplyBasicSceneView = true;
+        ApplyBasicSceneView();
+    }
+
+    void EditorV2Layer::ApplyBasicSceneView()
+    {
+        m_EditorCamera.SetFocalPoint(glm::dvec3(0.0));
+        m_EditorCamera.SetDistance(WorldUnits::FromMeters(15.0f));
+        m_EditorCamera.SetOrientation(glm::radians(25.0f), glm::radians(35.0f));
+    }
+
+    void EditorV2Layer::CaptureProjectThumbnail()
+    {
+        Renderer* renderer = Application::Get().GetRenderer();
+        Ref<Project> project = Project::GetActive();
+        Ref<Texture2D> image = renderer ? renderer->GetSceneResourceRef() : nullptr;
+        if (!project || !image || image->GetWidth() < 16 || image->GetHeight() < 16)
+            return;
+        const std::filesystem::path file = ProjectLibrary::ThumbnailPath(Project::GetActiveProjectDirectory());
+        const bool bgra = renderer->IsSurfaceFormatBGRA();
+        renderer->ReadbackTexture(std::move(image), [file, bgra](std::vector<uint8_t> pixels, uint32_t width, uint32_t height)
+        {
+            if (pixels.size() != static_cast<size_t>(width) * height * 4 || width == 0 || height == 0)
+                return;
+            constexpr uint32_t outWidth = 384, outHeight = 216;
+            uint32_t cropWidth = width, cropHeight = static_cast<uint32_t>(width * 9ull / 16ull);
+            if (cropHeight > height)
+            {
+                cropHeight = height;
+                cropWidth = static_cast<uint32_t>(height * 16ull / 9ull);
+            }
+            const uint32_t x0 = (width - cropWidth) / 2, y0 = (height - cropHeight) / 2;
+            std::vector<uint8_t> out(static_cast<size_t>(outWidth) * outHeight * 4);
+            for (uint32_t y = 0; y < outHeight; ++y)
+            {
+                for (uint32_t x = 0; x < outWidth; ++x)
+                {
+                    const uint32_t sx0 = x0 + x * cropWidth / outWidth, sx1 = std::max(sx0 + 1, x0 + (x + 1) * cropWidth / outWidth);
+                    const uint32_t sy0 = y0 + y * cropHeight / outHeight, sy1 = std::max(sy0 + 1, y0 + (y + 1) * cropHeight / outHeight);
+                    uint32_t sum[3] = { 0, 0, 0 }, count = 0;
+                    for (uint32_t sy = sy0; sy < sy1 && sy < height; ++sy)
+                    {
+                        for (uint32_t sx = sx0; sx < sx1 && sx < width; ++sx)
+                        {
+                            const uint8_t* texel = &pixels[(static_cast<size_t>(sy) * width + sx) * 4];
+                            sum[0] += texel[0];
+                            sum[1] += texel[1];
+                            sum[2] += texel[2];
+                            ++count;
+                        }
+                    }
+                    uint8_t* target = &out[(static_cast<size_t>(y) * outWidth + x) * 4];
+                    count = std::max(count, 1u);
+                    target[0] = static_cast<uint8_t>(sum[bgra ? 2 : 0] / count);
+                    target[1] = static_cast<uint8_t>(sum[1] / count);
+                    target[2] = static_cast<uint8_t>(sum[bgra ? 0 : 2] / count);
+                    target[3] = 255;
+                }
+            }
+            std::error_code error;
+            std::filesystem::create_directories(file.parent_path(), error);
+            if (!stbi_write_png(file.string().c_str(), outWidth, outHeight, 4, out.data(), outWidth * 4))
+                NOX_CORE_WARN("Project thumbnail: cannot write {}", file.generic_string());
+        });
     }
 
     void EditorV2Layer::OnUpdate(Timestep ts)
     {
-        if (Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
+        if (!Project::GetActive())
+            return;
+
+        if (m_ThumbnailPending)
+        {
+            m_ThumbnailTimer += ts;
+            if (m_ThumbnailTimer > 4.0f)
+            {
+                m_ThumbnailPending = false;
+                CaptureProjectThumbnail();
+            }
+        }
+
+        if (Project::GetActive()->GetEditorAssetManager())
             Project::GetActive()->GetEditorAssetManager()->Update();
 
         Renderer* renderer = Application::Get().GetRenderer();
@@ -121,6 +449,20 @@ namespace Nox
 
     void EditorV2Layer::OnEvent(Event& event)
     {
+        if (event.GetEventType() == EventType::KeyPressed)
+        {
+            const auto& key = static_cast<const KeyPressedEvent&>(event);
+            const bool control = (key.GetModifiers() & SDL_KMOD_CTRL) != 0 ||
+                                 Input::IsKeyPressed(SDL_SCANCODE_LCTRL) ||
+                                 Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
+            if (control && !key.IsRepeat() && key.GetKeyCode() == SDL_SCANCODE_O)
+            {
+                OpenProject();
+                event.Handled = true;
+                return;
+            }
+        }
+
         if (!m_ViewportImage)
             return;
 
@@ -182,6 +524,10 @@ namespace Nox
                            UI::MenuBar({
                                {
                                    "File", {
+                                       {"New Project...", "", [this]() { NewProject(); }},
+                                       {"Open Project...", "Ctrl+O", [this]() { OpenProject(); }},
+                                       {"Project Manager...", "", [this]() { OpenProjectManager(); }},
+                                       {"", "", {}, true},
                                        {
                                            "Save Layout", "", [uiLayer]()
                                            {

@@ -10,15 +10,11 @@ file(GLOB_RECURSE NOXEDITORV2_FILES
 
 target_sources(${PROJECT_NAME} PRIVATE
     ${NOXEDITORV2_FILES}
-    "${CMAKE_SOURCE_DIR}/NoxEditor/src/ProjectManager/ProjectLibrary.cpp"
-    "${CMAKE_SOURCE_DIR}/NoxEditor/src/ProjectManager/ProjectLibrary.h"
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE NoxCore)
 target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/NoxCore/src/NoxPCH.h")
 
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/NoxEditor")
-target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/NoxEditor/src")
 
 if(WIN32)
     if(MSVC OR ${CMAKE_GENERATOR} MATCHES "Visual Studio.*")
@@ -31,6 +27,13 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/NoxCore/vendors/slang/bin/slang.dll"
             $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/Templates"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/NoxEditor/assets/Templates/CSharpBehaviour.cs.template"
+            "${CMAKE_SOURCE_DIR}/NoxEditor/assets/Templates/Basic.png"
+            "${CMAKE_SOURCE_DIR}/NoxEditor/assets/Templates/Blank.png"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/Templates"
     )
 
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
