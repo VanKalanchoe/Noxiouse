@@ -22,6 +22,7 @@
 #include "NoxCore/UI/Widgets/UICheckBox.h"
 #include "NoxCore/UI/Widgets/UICollapsingHeader.h"
 #include "NoxCore/UI/Widgets/UIColorPicker.h"
+#include "NoxCore/UI/Widgets/UICommandPalette.h"
 #include "NoxCore/UI/Widgets/UIDragScalar.h"
 #include "NoxCore/UI/Widgets/UIDropdown.h"
 #include "NoxCore/UI/Widgets/UIGizmo.h"

@@ -14,6 +14,7 @@
 #include "NoxCore/UI/Widgets/UICheckBox.h"
 #include "NoxCore/UI/Widgets/UICollapsingHeader.h"
 #include "NoxCore/UI/Widgets/UIColorPicker.h"
+#include "NoxCore/UI/Widgets/UICommandPalette.h"
 #include "NoxCore/UI/Widgets/UIDragScalar.h"
 #include "NoxCore/UI/Widgets/UIDropdown.h"
 #include "NoxCore/UI/Widgets/UIImage.h"
@@ -102,6 +103,19 @@ namespace Nox::UI
             context.SetOverlay(backdrop);
         });
         modalBtn->StyleVariant = "primary";
+
+        auto paletteBtn = MakeUI<UIButton>("Command Palette", [&context, report]()
+        {
+            UICommandPalette::Open(context, {
+                { "Toggle Wireframe Mode", "Renderer", "F3", [&context, report]() { context.PushToast("Command: Toggle Wireframe Mode"); report("Executed: Toggle Wireframe"); } },
+                { "Reload .nstyle Theme", "UI", "Ctrl+R", [&context, report]() { context.PushToast("Command: Reloaded .nstyle Theme"); report("Executed: Reload Theme"); } },
+                { "Reset Camera Origin", "Viewport", "Home", [&context, report]() { context.PushToast("Command: Reset Camera Origin"); report("Executed: Reset Camera"); } },
+                { "Switch to Path Tracer", "Renderer", "F4", [&context, report]() { context.PushToast("Command: Switched to Path Tracer"); report("Executed: Path Tracer"); } },
+                { "Dump UI Tree Stats", "Debug", "", [&context, report]() { context.PushToast("Command: Dumped UI Tree Stats"); report("Executed: Dump UI Tree"); } }
+            });
+        });
+
+        headerCard->AddChild(paletteBtn);
         headerCard->AddChild(modalBtn);
         scroll->AddChild(headerCard);
 
