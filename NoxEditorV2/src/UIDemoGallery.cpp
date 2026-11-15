@@ -38,6 +38,7 @@
 #include "NoxCore/UI/Widgets/UITextInput.h"
 #include "NoxCore/UI/Widgets/UIToggleSwitch.h"
 #include "NoxCore/UI/Widgets/UITreeView.h"
+#include "NoxCore/UI/Widgets/UIVectorEdit.h"
 
 namespace Nox::UI
 {
@@ -789,6 +790,22 @@ namespace Nox::UI
         hudBtn->StyleVariant = "primary";
         hudBox->AddContent(hudBtn);
         scroll->AddChild(hudBox);
+
+        // 19. UIVectorEdit (Vec2 / Vec3 / Vec4)
+        auto vecBox = MakeUI<UIGroupBox>("18. UIVectorEdit (Vec2 / Vec3 / Vec4)");
+        vecBox->AddContent(MakeUI<UIVectorEdit>(2, glm::vec4{ 1.0f, 1.0f, 0.0f, 0.0f }, 0.02f, [report](const glm::vec4& v)
+        {
+            report("Vec2: (" + std::to_string(v.x) + ", " + std::to_string(v.y) + ")");
+        }));
+        vecBox->AddContent(MakeUI<UIVectorEdit>(3, glm::vec4{ 0.0f, 2.5f, -5.0f, 0.0f }, 0.05f, [report](const glm::vec4& v)
+        {
+            report("Vec3: (" + std::to_string(v.x) + ", " + std::to_string(v.y) + ", " + std::to_string(v.z) + ")");
+        }));
+        vecBox->AddContent(MakeUI<UIVectorEdit>(4, glm::vec4{ 0.0f, 0.0f, 0.0f, 1.0f }, 0.01f, [report](const glm::vec4& v)
+        {
+            report("Vec4: (" + std::to_string(v.x) + ", " + std::to_string(v.y) + ", " + std::to_string(v.z) + ", " + std::to_string(v.w) + ")");
+        }));
+        scroll->AddChild(vecBox);
 
         return scroll;
     }

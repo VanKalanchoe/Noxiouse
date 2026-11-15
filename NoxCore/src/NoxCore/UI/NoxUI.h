@@ -48,4 +48,5 @@
 #include "NoxCore/UI/Widgets/UITextInput.h"
 #include "NoxCore/UI/Widgets/UIToggleSwitch.h"
 #include "NoxCore/UI/Widgets/UITreeView.h"
+#include "NoxCore/UI/Widgets/UIVectorEdit.h"
 #include "NoxCore/UI/Widgets/UIViewportSlot.h"
