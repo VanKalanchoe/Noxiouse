@@ -244,6 +244,9 @@ namespace Nox
             if (const Renderer* renderer = Application::Get().GetRenderer(); renderer)
             {
                 const Renderer::CustomLitStatus& status = renderer->GetCustomLitStatus();
+                if (status.Building || status.Optimizing)
+                    report.Warnings.push_back("The project's Material Shaders / material graphs are still compiling (the optimised shaders): "
+                                              "package again once the editor says Built without 'optimizing', or the game may lack them");
                 if (status.GraphCount > 0 && !status.GraphsReady)
                     report.Warnings.push_back("The project's material graphs are not built (" + (status.Building ? std::string("still building") : status.Message) +
                                               "): their materials show their own values in the game until they are and it is packaged again");

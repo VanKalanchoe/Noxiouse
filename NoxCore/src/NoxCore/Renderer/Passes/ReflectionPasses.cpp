@@ -600,10 +600,13 @@ namespace Nox
                         cmd.setColorWriteMask(1, NRI::ColorComponent::All);
 
                         cursor.taskFlags = taskFlags | shaderio::MESHLET_SHADE_OPAQUE;
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_transparentLitPipeline, NRI::CullMode::Back, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_transparentLitPipeline, NRI::CullMode::Back, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_transparentLitPipeline, NRI::CullMode::None, true, false);
+                        // The forward shader with the project's Material Shaders and material graphs (their surface and Opacity Mask) once
+                        // built, as the editor's other viewports draw: a probe used to capture a dissolved graph surface whole.
+                        NRI::Pipeline& lit = *forwardLitPipeline();
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, lit, NRI::CullMode::Back, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, lit, NRI::CullMode::None, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, lit, NRI::CullMode::Back, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, lit, NRI::CullMode::None, true, false);
                         cursor.taskFlags = taskFlags;
                         drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *m_unlitPipeline, NRI::CullMode::Back, true, false);
                         drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, true, false);

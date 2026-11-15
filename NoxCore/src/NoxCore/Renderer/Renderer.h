@@ -728,6 +728,8 @@ namespace Nox
             uint64_t Version = 0;     // counts rebuilds (the Material Editor shows the latest)
             size_t GraphCount = 0;    // material graphs that compile (to Slang: CompileMaterialGraph)
             bool GraphsReady = false; // the G-buffer resolve's material graph variant is built
+            // The editor's drafts (unoptimised) draw; the optimised pipelines are compiling in the background and replace them when done.
+            bool Optimizing = false;
             std::map<std::string, std::string> GraphErrors; // a graph that does not compile: its path -> why (which node)
         };
         const CustomLitStatus& GetCustomLitStatus() const { return m_customLitStatus; }
@@ -1302,14 +1304,18 @@ namespace Nox
         void createSceneOutlinePipeline(bool forceCompile = false);
         // The Custom Lit pass's and the forward variant's pipelines from the generated sources (CustomLitShaders.h); false when they fail.
         bool createCustomLitPipelines(bool forceCompile);
-        std::unique_ptr<NRI::Pipeline> buildCustomLitDeferredPipeline(bool forceCompile); // (any thread; throws when it does not compile)
-        std::unique_ptr<NRI::Pipeline> buildCustomLitForwardPipeline(bool forceCompile);
+        // (any thread; throws when it does not compile). `optimize` false: the editor's draft (the generated sources compiled without the
+        // optimisation passes, several times faster); the optimised build replaces it.
+        std::unique_ptr<NRI::Pipeline> buildCustomLitDeferredPipeline(bool forceCompile, bool optimize = true);
+        std::unique_ptr<NRI::Pipeline> buildCustomLitForwardPipeline(bool forceCompile, bool optimize = true);
         void startCustomLitBuild(const std::vector<CustomLitSource>& sources, const std::vector<ProjectMaterialGraph>& graphs);
         // The G-buffer resolve compiled with the material graphs (CustomLitShaders::GBufferSourcePath; any thread; throws when it does
         // not compile).
-        std::unique_ptr<NRI::Pipeline> buildMaterialGraphGBufferPipeline(bool forceCompile, bool writeVelocity);
+        std::unique_ptr<NRI::Pipeline> buildMaterialGraphGBufferPipeline(bool forceCompile, bool writeVelocity, bool optimize = true);
         // The visibility buffer's and the shadow maps' Masked pipelines with the graphs' Opacity Mask (CustomLitShaders::VisibilitySourcePath).
-        std::unique_ptr<NRI::Pipeline> buildMaterialGraphVisibilityPipeline(bool forceCompile, bool shadowDepth);
+        std::unique_ptr<NRI::Pipeline> buildMaterialGraphVisibilityPipeline(bool forceCompile, bool shadowDepth, bool optimize = true);
+        // The editor's stable entity IDs / depth (`selection` false) or selection mask with the graphs' Opacity Mask.
+        std::unique_ptr<NRI::Pipeline> buildMaterialGraphEditorPipeline(bool selection, bool optimize = true);
         void pollCustomLitBuild();    // main thread, each frame: a finished build's pipelines swapped in
         void waitForCustomLitBuild();
         // The forward shader for lit surfaces: its Custom Lit variant while the project has Material Shaders (it shades every other
@@ -1320,6 +1326,15 @@ namespace Nox
         NRI::Pipeline* visibilityMaskPipeline() const
         {
             return m_visibilityGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0 ? m_visibilityGraphPipeline.get() : m_visibilityPipeline.get();
+        }
+        NRI::Pipeline* stableEntityDepthPipeline() const
+        {
+            return m_stableEntityDepthGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0 ? m_stableEntityDepthGraphPipeline.get()
+                                                                                               : m_stableEntityDepthPipeline.get();
+        }
+        NRI::Pipeline* selectionMaskPipeline() const
+        {
+            return m_selectionMaskGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0 ? m_selectionMaskGraphPipeline.get() : m_selectionMaskPipeline.get();
         }
         NRI::Pipeline* shadowDepthMaskPipeline() const
         {
@@ -1731,11 +1746,17 @@ namespace Nox
             std::unique_ptr<NRI::Pipeline> GBufferNoVelocity;
             std::unique_ptr<NRI::Pipeline> Visibility;
             std::unique_ptr<NRI::Pipeline> ShadowDepthMask;
+            std::unique_ptr<NRI::Pipeline> StableDepth;
+            std::unique_ptr<NRI::Pipeline> SelectionMask;
             bool GBufferDone = false;
             std::vector<std::string> GraphPaths;
             std::unordered_map<std::string, MaterialGraphProgram> GraphPrograms;
             size_t GraphCount = 0;
-            std::atomic<bool> Cancel{ false }; // set by the renderer's shutdown: the build stops before its next stage
+            std::atomic<bool> Cancel{ false }; // set by the renderer's shutdown or a newer request: the build stops before its next stage
+            bool Cancelled = false;            // it stopped so (not an error)
+            bool DraftFirst = false;           // compile drafts first, then the optimised pipelines (the editor after a change)
+            bool DraftDone = false;            // the drafts are handed over; the optimised build runs
+            bool DraftReported = false;
         };
         std::shared_ptr<CustomLitBuild> m_customLitBuild;
         struct CustomLitRequest
@@ -1744,12 +1765,15 @@ namespace Nox
             std::vector<ProjectMaterialGraph> Graphs;
         };
         std::optional<CustomLitRequest> m_customLitPending; // the newest request while a build runs
+        bool m_customLitNoDrafts = false; // a game's start (it waits for the build): the optimised pipelines only
         // Material graphs (MaterialGraph.h): the G-buffer resolve's variant with them, its slots and the programs (parameter layouts)
         // materials are packed with -- all three as the variant in use has them.
         std::unique_ptr<NRI::Pipeline> m_gbufferGraphPipeline;
         std::unique_ptr<NRI::Pipeline> m_gbufferGraphPipelineNoVelocity;
         std::unique_ptr<NRI::Pipeline> m_visibilityGraphPipeline;        // (Masked buckets of the visibility pass)
         std::unique_ptr<NRI::Pipeline> m_shadowDepthMaskGraphPipeline;   // (Masked / unlit buckets of the shadow maps)
+        std::unique_ptr<NRI::Pipeline> m_stableEntityDepthGraphPipeline; // (the editor's stable entity IDs / depth)
+        std::unique_ptr<NRI::Pipeline> m_selectionMaskGraphPipeline;     // (the editor's selection outline)
         std::vector<std::string> m_materialGraphPaths;          // slot -> graph path ("": none)
         std::vector<std::string> m_materialGraphRequestedPaths; // as the latest build request gave them (the next one keeps these slots)
         std::unordered_map<std::string, MaterialGraphProgram> m_materialGraphPrograms;

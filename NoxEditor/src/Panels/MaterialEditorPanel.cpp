@@ -524,12 +524,15 @@ namespace Nox
                 else if (renderer && !renderer->GetCustomLitStatus().Message.empty())
                     ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.3f, 1.0f), "%s", renderer->GetCustomLitStatus().Message.c_str());
                 else if (built)
-                    ImGui::TextDisabled("Built: %s computes the surface.", graphLabel.c_str());
-                // Opacity Mask works as in Unreal: only on a Masked material (its pixels below Opacity Mask Clip Value are not drawn).
-                if (program.Valid && (program.Outputs & MaterialGraphOutputOpacityMask) != 0 && data.Mode != AlphaMode::Mask)
-                    ImGui::TextColored(warning, "The graph connects Opacity Mask: set Blend Mode to Masked (above) for it to cut the surface.");
+                    ImGui::TextDisabled("Built: %s computes the surface.%s", graphLabel.c_str(),
+                                        renderer && renderer->GetCustomLitStatus().Optimizing ? " (Optimizing in the background.)" : "");
                 else
                     ImGui::TextColored(warning, "Not built yet (the material keeps its own values): save the graph.");
+                // Opacity Mask works as in Unreal: only on a Masked material (its pixels below Opacity Mask Clip Value are not drawn). (Its
+                // own line after the build state: inserted between them, it took the build state's last `else` and showed "Not built yet"
+                // under a built graph -- the user's test.)
+                if (program.Valid && (program.Outputs & MaterialGraphOutputOpacityMask) != 0 && data.Mode != AlphaMode::Mask)
+                    ImGui::TextColored(warning, "The graph connects Opacity Mask: set Blend Mode to Masked (above) for it to cut the surface.");
                 ImGui::PopTextWrapPos();
 
                 // Its parameters: ticked ones take this material's value, the others the graph's default.

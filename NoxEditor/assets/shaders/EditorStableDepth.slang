@@ -12,6 +12,11 @@ struct VSOutput
     float2 uv0;
     float2 uv1;
     float vertexAlpha; // vertex color alpha: part of the mask's alpha (VisibilityBuffer.slang)
+#ifdef NOX_MATERIAL_GRAPH
+    float3 worldPos;    // (a material graph's Opacity Mask: MaterialGraph.slang's material_graph_mask_cuts)
+    float3 normal;
+    float4 vertexColor;
+#endif
     nointerpolation uint drawID;
     nointerpolation int entityID;
 };
@@ -78,6 +83,11 @@ void meshMain
         vertices[i].uv0 = vert.uv0;
         vertices[i].uv1 = vert.uv1;
         vertices[i].vertexAlpha = instance.alphaMode == 1 ? loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors).a : 1.0;
+#ifdef NOX_MATERIAL_GRAPH
+        vertices[i].worldPos = worldPos.xyz;
+        vertices[i].normal = material_graph_vertex_normal(instance, vert, localVertexIndex, pushConstant);
+        vertices[i].vertexColor = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors);
+#endif
         vertices[i].drawID = sharedPayload.drawID;
         vertices[i].entityID = instance.entityID;
     }
@@ -97,12 +107,24 @@ struct StableOutput
 };
 
 [shader("fragment")]
-StableOutput fragMain(VSOutput inVert, uniform PushConstantMeshlets pushConstant)
+StableOutput fragMain(VSOutput inVert, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
 {
     // Alpha-masked surfaces (foliage cards) cut out like in the visibility pass.
     UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
     SceneInstances instances = SceneInstances(ubo);
     InstanceData instance = instances[inVert.drawID];
+#ifdef NOX_MATERIAL_GRAPH
+
+    bool graphMask;
+
+    if (material_graph_mask_cuts(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace, mul(ubo->nonJitteredProj, ubo->view),
+
+                                 ubo, instances.material(inVert.drawID), instance, graphMask))
+
+        discard;
+
+    if (!graphMask)
+#endif
 
     if (instance.alphaMode == 1 && (instance.baseColorTextureIndex != 0xFFFFFFFF || instance.vertexColors != 0))
     {

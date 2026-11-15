@@ -303,7 +303,7 @@ namespace Nox
                 cmd.setColorBlendEnable(0, false);
                 cmd.setColorWriteMask(0, NRI::ColorComponent::All);
 
-                NRI::Pipeline& pipeline = *m_stableEntityDepthPipeline;
+                NRI::Pipeline& pipeline = *stableEntityDepthPipeline(); // (with the material graphs' Opacity Mask while a material has a graph)
                 struct BucketDraw
                 {
                     RenderBucket Bucket;

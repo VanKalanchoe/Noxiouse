@@ -57,6 +57,9 @@ namespace Nox
         // The visibility buffer and the shadow maps' depth with the material graphs (VisibilityBuffer.slang with NOX_MATERIAL_GRAPH):
         // a Masked material's Opacity Mask.
         std::filesystem::path VisibilitySourcePath(); // VisibilityBufferMaterialGraph.slang
+        // The editor's stable entity IDs / depth and selection mask with the material graphs (their Opacity Mask).
+        std::filesystem::path StableDepthSourcePath();   // EditorStableDepthMaterialGraph.slang
+        std::filesystem::path SelectionMaskSourcePath(); // SelectionMaskMaterialGraph.slang
 
         // The generated file's text for these Material Shaders, `paths[slot]` naming each one's slot (a path with no source here: its
         // case left out, it lights nothing): CustomLitShaders.slang.

@@ -265,7 +265,7 @@ namespace Nox
                 cmd.setDepthWriteEnable(false);
                 cmd.setColorBlendEnable(0, false);
                 cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
-                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_selectionMaskPipeline);
+                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *selectionMaskPipeline()); // (graphs' Opacity Mask included)
 
                 // One direct draw per instance: SV_DrawIndex is 0, so instanceBaseIndex picks the slot in the selection list.
                 shaderio::PushConstantMeshlets references = m_frame.meshletReferences;

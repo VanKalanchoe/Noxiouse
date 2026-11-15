@@ -90,23 +90,10 @@
 
             float4 worldPos = mul(modelMatrix, localPos);
 #ifdef NOX_MATERIAL_GRAPH
-            {
-                // A graph's World Position, Vertex Normal and Vertex Color (the normal skinned as the position is).
-                float3 localNormal = vert.normal;
-                if (instance.skinnedVertexOffset != NoSkinnedVertices && pushConstant.skinnedVertexReference != 0)
-                    localNormal = ((SkinnedVertex*)pushConstant.skinnedVertexReference)[instance.skinnedVertexOffset + localVertexIndex].normal.xyz;
-                else if (instance.boneMatrixOffset != 0xFFFFFFFF && pushConstant.boneMatrixReference != 0)
-                {
-                    float4x4* boneMatrices = (float4x4*)pushConstant.boneMatrixReference;
-                    const uint baseOffset = instance.boneMatrixOffset;
-                    const float4x4 skinTransform = boneMatrices[baseOffset + vert.boneIDs.x] * vert.boneWeights.x + boneMatrices[baseOffset + vert.boneIDs.y] * vert.boneWeights.y +
-                                                   boneMatrices[baseOffset + vert.boneIDs.z] * vert.boneWeights.z + boneMatrices[baseOffset + vert.boneIDs.w] * vert.boneWeights.w;
-                    localNormal = mul((float3x3)skinTransform, localNormal);
-                }
-                vertices[i].worldPos = worldPos.xyz;
-                vertices[i].normal = mul((float3x3)instance.normalMatrix, localNormal);
-                vertices[i].vertexColor = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors);
-            }
+            // A graph's World Position, Vertex Normal (skinned as the position is) and Vertex Color.
+            vertices[i].worldPos = worldPos.xyz;
+            vertices[i].normal = material_graph_vertex_normal(instance, vert, localVertexIndex, pushConstant);
+            vertices[i].vertexColor = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors);
 #endif
             // The material's depth bias (depth_bias_clip): decals and overlays over the surface they lie on.
             float4 clipPos = depth_bias_clip(mul(viewProj, worldPos), worldPos.xyz, ubo->cameraWorldPos.xyz, instance.depthBias);
@@ -136,39 +123,6 @@
         }
     }
 
-#ifdef NOX_MATERIAL_GRAPH
-    // A Masked material's graph Opacity Mask at this pixel (the graph's inputs from the vertices, with their screen derivatives); 1 for
-    // a material without one. `isFrontFace`: a double-sided surface's back shows its normal turned.
-    float visibility_graph_opacity_mask(VSOutput v, bool isFrontFace, UniformBufferObject* ubo, GpuMaterial* material, InstanceData instance)
-    {
-        MaterialGraphInputs i;
-        i.uv0 = v.uv0;
-        i.uv0Dx = ddx(v.uv0);
-        i.uv0Dy = ddy(v.uv0);
-        i.uv1 = v.uv1;
-        i.uv1Dx = ddx(v.uv1);
-        i.uv1Dy = ddy(v.uv1);
-        i.position = v.worldPos + ubo->renderOrigin;
-        i.positionDx = ddx(v.worldPos);
-        i.positionDy = ddy(v.worldPos);
-        const float3 n = normalize(v.normal);
-        i.normal = instance.doubleSided != 0 && !isFrontFace ? -n : n;
-        i.vertexColor = v.vertexColor;
-        i.view = normalize(ubo->cameraWorldPos.xyz - v.worldPos);
-        const float4 clip = mul(ubo->proj, mul(ubo->view, float4(v.worldPos, 1.0)));
-        i.screenUV = clip.w > 1e-6 ? float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5) : float2(0.5);
-        i.screenUVDx = ddx(i.screenUV);
-        i.screenUVDy = ddy(i.screenUV);
-        i.time = ubo->timeSeconds;
-        i.cameraPosition = ubo->cameraWorldPos.xyz + ubo->renderOrigin;
-        i.material = material;
-        i.mipFeedback = false; // (the G-buffer resolve reports the textures' mips; the mask's own reads add none of their own here)
-        i.ubo = ubo;
-        if (material.graphSlot == 0xFFFFFFFFu || (material.graphOutputs & MaterialGraphOutputOpacityMask) == 0u)
-            return 1.0;
-        return material_graph_opacity_mask(material.graphSlot, i);
-    }
-#endif
 
     // =========================================================================
     // FRAGMENT SHADER (writes InstanceID + PrimitiveID, with alpha test for Mask)
@@ -192,15 +146,11 @@
         InstanceData instance = instances[inVert.drawID];
 
 #ifdef NOX_MATERIAL_GRAPH
-        GpuMaterial* graphMaterial = instances.material(inVert.drawID);
-        const bool graphMask = instance.alphaMode == 1 && graphMaterial.graphSlot != 0xFFFFFFFFu &&
-                               (graphMaterial.graphOutputs & MaterialGraphOutputOpacityMask) != 0u;
-        if (graphMask)
-        {
-            if (visibility_graph_opacity_mask(inVert, isFrontFace, ubo, graphMaterial, instance) < instance.alphaMaskCutoff)
-                discard;
-        }
-        else
+        bool graphMask;
+        if (material_graph_mask_cuts(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace, mul(ubo->proj, ubo->view), ubo,
+                                     instances.material(inVert.drawID), instance, graphMask))
+            discard;
+        if (!graphMask)
 #endif
         if (instance.alphaMode == 1 && (instance.baseColorTextureIndex != 0xFFFFFFFF || instance.vertexColors != 0))
         {
@@ -243,13 +193,11 @@
 
 #ifdef NOX_MATERIAL_GRAPH
         // (the graph's view inputs -- Camera Vector, Screen Position -- are the shadow view's here, as in Unreal's shadow depths)
-        GpuMaterial* graphMaterial = instances.material(inVert.drawID);
-        if (instance.alphaMode == 1 && graphMaterial.graphSlot != 0xFFFFFFFFu && (graphMaterial.graphOutputs & MaterialGraphOutputOpacityMask) != 0u)
-        {
-            if (visibility_graph_opacity_mask(inVert, isFrontFace, ubo, graphMaterial, instance) < instance.alphaMaskCutoff)
-                discard;
-        }
-        else
+        bool graphMask;
+        if (material_graph_mask_cuts(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace, mul(ubo->proj, ubo->view), ubo,
+                                     instances.material(inVert.drawID), instance, graphMask))
+            discard;
+        if (!graphMask)
 #endif
         if (instance.alphaMode == 1 && (instance.baseColorTextureIndex != 0xFFFFFFFF || instance.vertexColors != 0))
         {

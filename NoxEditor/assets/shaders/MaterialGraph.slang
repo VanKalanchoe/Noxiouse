@@ -84,6 +84,63 @@ float3 material_graph_world_normal(float3 tangentNormal, float3 N, float3 tangen
     return normalize(n.x * T + n.y * B + n.z * N);
 }
 
+// --- Opacity Mask in the geometry passes (VisibilityBuffer.slang, EditorStableDepth.slang, SelectionMask.slang; their material graph
+// variants): what their vertices add for a graph's inputs, and the alpha test with the graph's mask. One implementation, so the view,
+// the shadows and the editor's overlays cut a dissolving surface the same way.
+
+// A vertex's world normal for a graph (Vertex Normal), skinned as its position is: the compute-skinned cache, else the bone matrices.
+float3 material_graph_vertex_normal(InstanceData instance, Vertex vert, uint localVertexIndex, PushConstantMeshlets pushConstant)
+{
+    float3 localNormal = vert.normal;
+    if (instance.skinnedVertexOffset != NoSkinnedVertices && pushConstant.skinnedVertexReference != 0)
+        localNormal = ((SkinnedVertex*)pushConstant.skinnedVertexReference)[instance.skinnedVertexOffset + localVertexIndex].normal.xyz;
+    else if (instance.boneMatrixOffset != 0xFFFFFFFF && pushConstant.boneMatrixReference != 0)
+    {
+        float4x4* boneMatrices = (float4x4*)pushConstant.boneMatrixReference;
+        const uint baseOffset = instance.boneMatrixOffset;
+        const float4x4 skinTransform = boneMatrices[baseOffset + vert.boneIDs.x] * vert.boneWeights.x + boneMatrices[baseOffset + vert.boneIDs.y] * vert.boneWeights.y +
+                                       boneMatrices[baseOffset + vert.boneIDs.z] * vert.boneWeights.z + boneMatrices[baseOffset + vert.boneIDs.w] * vert.boneWeights.w;
+        localNormal = mul((float3x3)skinTransform, localNormal);
+    }
+    return mul((float3x3)instance.normalMatrix, localNormal);
+}
+
+// Whether a Masked material whose graph connects Opacity Mask has this pixel cut away (its mask below its Opacity Mask Clip Value);
+// `handled` false: the material has no graph mask (the pass tests its base colour's alpha as before). The graph's inputs from the
+// interpolated vertex values (render-space `worldPos`), their derivatives from this pixel's quad; `viewProj`: the pass's projection
+// (Screen Position). Called where every pixel of a quad runs (the derivatives), with a draw's material: the same for the whole quad.
+bool material_graph_mask_cuts(float2 uv0, float2 uv1, float3 worldPos, float3 normal, float4 vertexColor, bool isFrontFace, float4x4 viewProj,
+                              UniformBufferObject* ubo, GpuMaterial* material, InstanceData instance, out bool handled)
+{
+    handled = instance.alphaMode == 1 && material.graphSlot != 0xFFFFFFFFu && (material.graphOutputs & MaterialGraphOutputOpacityMask) != 0u;
+    MaterialGraphInputs i;
+    i.uv0 = uv0;
+    i.uv0Dx = ddx(uv0);
+    i.uv0Dy = ddy(uv0);
+    i.uv1 = uv1;
+    i.uv1Dx = ddx(uv1);
+    i.uv1Dy = ddy(uv1);
+    i.position = worldPos + ubo->renderOrigin;
+    i.positionDx = ddx(worldPos);
+    i.positionDy = ddy(worldPos);
+    const float3 n = normalize(normal);
+    i.normal = instance.doubleSided != 0 && !isFrontFace ? -n : n;
+    i.vertexColor = vertexColor;
+    i.view = normalize(ubo->cameraWorldPos.xyz - worldPos);
+    const float4 clip = mul(viewProj, float4(worldPos, 1.0));
+    i.screenUV = clip.w > 1e-6 ? float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5) : float2(0.5);
+    i.screenUVDx = ddx(i.screenUV);
+    i.screenUVDy = ddy(i.screenUV);
+    i.time = ubo->timeSeconds;
+    i.cameraPosition = ubo->cameraWorldPos.xyz + ubo->renderOrigin;
+    i.material = material;
+    i.mipFeedback = false; // (the G-buffer resolve reports the textures' mips)
+    i.ubo = ubo;
+    if (!handled)
+        return false;
+    return material_graph_opacity_mask(material.graphSlot, i) < instance.alphaMaskCutoff;
+}
+
 // Smooth value noise in [0, 1] (Noise node).
 float material_graph_hash(float3 p)
 {
