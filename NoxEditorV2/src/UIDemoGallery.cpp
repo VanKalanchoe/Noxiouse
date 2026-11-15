@@ -14,6 +14,7 @@
 #include "NoxCore/UI/Widgets/UIDragScalar.h"
 #include "NoxCore/UI/Widgets/UIDropdown.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
+#include "NoxCore/UI/Widgets/UILogView.h"
 #include "NoxCore/UI/Widgets/UIMenu.h"
 #include "NoxCore/UI/Widgets/UIPlotGraph.h"
 #include "NoxCore/UI/Widgets/UIProgressBar.h"
@@ -462,6 +463,29 @@ namespace Nox::UI
         winRow->AddChild(spawnWinBtn);
         winPanel->AddChild(winRow);
         scroll->AddChild(winPanel);
+
+        // 11. Filterable UILogView & Keyboard Tab/Escape Focus
+        auto logPanel = MakeUI<UIStackBox>(UIOrientation::Vertical, 8.0f);
+        logPanel->StyleClass = "Panel";
+        logPanel->DrawBackground = true;
+        logPanel->Padding = UIThickness::All(12.0f);
+        logPanel->AddChild(MakeUI<UILabel>("10. Filterable UILogView & Tab / Shift+Tab / Esc Navigation", 14.5f));
+
+        auto logView = MakeUI<UILogView>();
+        logView->HeightMode = UISizeMode::Fixed;
+        logView->FixedSize.y = 180.0f;
+        logView->AddLog(UILogLevel::Info, "Nox::UI initialized (Tab / Shift+Tab cycles focus, Esc closes overlays)");
+        logView->AddLog(UILogLevel::Warning, "Sample warning: shader permutation cache miss");
+        logView->AddLog(UILogLevel::Error, "Sample error: failed to load optional asset");
+
+        auto logBtns = MakeUI<UIStackBox>(UIOrientation::Horizontal, 8.0f);
+        logBtns->AddChild(MakeUI<UIButton>("+ Info", [logView]() { logView->AddLog(UILogLevel::Info, "User triggered Info log entry"); }));
+        logBtns->AddChild(MakeUI<UIButton>("+ Warn", [logView]() { logView->AddLog(UILogLevel::Warning, "User triggered Warning log entry"); }));
+        logBtns->AddChild(MakeUI<UIButton>("+ Error", [logView]() { logView->AddLog(UILogLevel::Error, "User triggered Error log entry"); }));
+
+        logPanel->AddChild(logBtns);
+        logPanel->AddChild(logView);
+        scroll->AddChild(logPanel);
 
         return scroll;
     }

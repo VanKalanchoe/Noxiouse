@@ -1,5 +1,8 @@
 #include "UIContext.h"
 
+#include <SDL3/SDL_keycode.h>
+#include <SDL3/SDL_scancode.h>
+
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
@@ -175,6 +178,53 @@ namespace Nox::UI
 
     bool UIContext::DispatchKeyDown(int keyCode, uint16_t mods, bool repeat)
     {
+        if (keyCode == SDL_SCANCODE_ESCAPE && m_Overlay)
+        {
+            ClearOverlay();
+            return true;
+        }
+
+        if (keyCode == SDL_SCANCODE_TAB)
+        {
+            std::vector<UIElement*> focusables;
+            auto collect = [&](auto& self, UIElement* node) -> void
+            {
+                if (!node || !node->Visible || !node->IsEnabled())
+                    return;
+                if (node->Focusable)
+                    focusables.push_back(node);
+                for (const auto& child : node->GetChildren())
+                    self(self, child.get());
+            };
+            collect(collect, m_Overlay ? m_Overlay.get() : m_Root.get());
+
+            if (!focusables.empty())
+            {
+                const bool reverse = (mods & SDL_KMOD_SHIFT) != 0;
+                int currentIdx = -1;
+                for (int i = 0; i < static_cast<int>(focusables.size()); ++i)
+                {
+                    if (focusables[i] == m_Focused.get())
+                    {
+                        currentIdx = i;
+                        break;
+                    }
+                }
+                int nextIdx = 0;
+                if (currentIdx >= 0)
+                {
+                    const int count = static_cast<int>(focusables.size());
+                    nextIdx = (currentIdx + (reverse ? -1 : 1) + count) % count;
+                }
+                else if (reverse)
+                {
+                    nextIdx = static_cast<int>(focusables.size()) - 1;
+                }
+                SetFocus(focusables[nextIdx]);
+                return true;
+            }
+        }
+
         Ref<UIElement> focused = m_Focused;
         if (!focused)
             return false;
