@@ -1,6 +1,6 @@
 #pragma once
 
-#include "NoxCore/UI/Core/UIElement.h"
+#include "NoxCore/UI/Layout/UILayout.h"
 
 namespace Nox::UI
 {

@@ -224,3 +224,10 @@ styles:
     border_color: "$Border"
     border_thickness: 1.0
     corner_radius: 6
+
+  NodeGraph:
+    fill: "#0D1016"
+    border_color: "$Border"
+    border_thickness: 1.0
+    corner_radius: 6
+    text_color: "$Text"

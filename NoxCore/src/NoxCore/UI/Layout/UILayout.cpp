@@ -135,11 +135,11 @@ namespace Nox::UI
             rect.Min = contentRect.Min + aMin * parentSize + UIVec2(child->AnchorOffsets.Left, child->AnchorOffsets.Top);
             rect.Max = contentRect.Min + aMax * parentSize - UIVec2(child->AnchorOffsets.Right, child->AnchorOffsets.Bottom);
 
-            // If anchored to a single point on an axis, fall back to desired size.
+            // If anchored to a single point on an axis, size to desired size from that anchor point.
             const UIVec2 desired = child->GetDesiredSize();
-            if (aMin.x == aMax.x && child->AnchorOffsets.Left == 0.0f && child->AnchorOffsets.Right == 0.0f)
+            if (aMin.x == aMax.x)
                 rect.Max.x = rect.Min.x + desired.x;
-            if (aMin.y == aMax.y && child->AnchorOffsets.Top == 0.0f && child->AnchorOffsets.Bottom == 0.0f)
+            if (aMin.y == aMax.y)
                 rect.Max.y = rect.Min.y + desired.y;
 
             rect.Max = glm::max(rect.Max, rect.Min);

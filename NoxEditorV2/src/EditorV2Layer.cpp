@@ -9,6 +9,7 @@
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 #include "NoxCore/UI/Widgets/UIMenu.h"
+#include "NoxCore/UI/Widgets/UINodeGraph.h"
 #include "NoxCore/UI/Widgets/UIPropertyGrid.h"
 #include "NoxCore/UI/Widgets/UITreeView.h"
 #include "NoxCore/UI/Widgets/UIViewportSlot.h"
@@ -129,10 +130,46 @@ namespace Nox
         leftTabs->AddTab("Hierarchy", tree);
         leftTabs->AddTab("Layers", MakeUI<UI::UILabel>("Render & Collision Layers", 14.0f));
 
-        // Center-Top: Viewport Tabs
+        // Center-Top: Viewport & Node Graph Tabs
         auto centerTabs = MakeUI<UI::UITabPanel>();
         auto viewportSlot = MakeUI<UI::UIViewportSlot>();
         centerTabs->AddTab("Scene Viewport", viewportSlot);
+
+        auto nodeGraph = MakeUI<UI::UINodeGraph>();
+        const uint64_t texOut = 101;
+        const uint64_t colOut = 102;
+        const uint64_t mulInA = 201;
+        const uint64_t mulInB = 202;
+        const uint64_t mulOut = 203;
+        const uint64_t pbrBase = 301;
+        const uint64_t pbrRough = 302;
+        const uint64_t pbrMetal = 303;
+
+        nodeGraph->AddNode({ 1, "TextureSample", { 0.20f, 0.52f, 0.38f, 1.0f }, { 40.0f, 60.0f },
+            { { 100, "UV", false, { 0.35f, 0.85f, 0.55f, 1.0f } } },
+            { { texOut, "RGBA", true, { 0.95f, 0.72f, 0.24f, 1.0f } } } });
+        nodeGraph->AddNode({ 2, "ColorTint", { 0.55f, 0.32f, 0.72f, 1.0f }, { 40.0f, 200.0f },
+            {},
+            { { colOut, "Color", true, { 0.95f, 0.45f, 0.55f, 1.0f } } } });
+        nodeGraph->AddNode({ 3, "Multiply", { 0.25f, 0.48f, 0.78f, 1.0f }, { 300.0f, 110.0f },
+            { { mulInA, "A", false, { 0.95f, 0.72f, 0.24f, 1.0f } }, { mulInB, "B", false, { 0.95f, 0.45f, 0.55f, 1.0f } } },
+            { { mulOut, "Result", true, { 0.35f, 0.72f, 0.98f, 1.0f } } } });
+        nodeGraph->AddNode({ 4, "PBR Material Output", { 0.78f, 0.32f, 0.28f, 1.0f }, { 570.0f, 95.0f },
+            { { pbrBase, "BaseColor", false, { 0.35f, 0.72f, 0.98f, 1.0f } },
+              { pbrRough, "Roughness", false, { 0.65f, 0.65f, 0.75f, 1.0f } },
+              { pbrMetal, "Metallic", false, { 0.65f, 0.65f, 0.75f, 1.0f } } },
+            {} });
+
+        nodeGraph->AddLink(texOut, mulInA);
+        nodeGraph->AddLink(colOut, mulInB);
+        nodeGraph->AddLink(mulOut, pbrBase);
+        nodeGraph->OnLinkCreated = [this](const UI::UINodeLink& l)
+        {
+            if (m_StatusLabel)
+                m_StatusLabel->Text = "NodeGraph: Connected pin " + std::to_string(l.OutputPinId) + " -> " + std::to_string(l.InputPinId);
+        };
+
+        centerTabs->AddTab("Material Graph", nodeGraph);
         centerTabs->AddTab("Game View", MakeUI<UI::UILabel>("Game Camera Output", 14.0f));
 
         // Center-Bottom: Content Browser & Console Tabs
