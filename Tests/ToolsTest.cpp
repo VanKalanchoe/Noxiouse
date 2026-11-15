@@ -4,6 +4,7 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Renderer/CustomLitShaders.h"
 #include "NoxCore/Renderer/MaterialGraph.h"
+#include "NoxCore/Scene/Components.h"
 #include "NoxCore/NodeGraph/NodeType.h"
 #include <algorithm>
 #include <fstream>
@@ -403,12 +404,45 @@ static void TestMaterialGraph()
     }
 }
 
+// An entity's material graph parameters (MaterialComponent::GraphParameters; stylized step 4c part 1, the C# MeshComponent.Set*Parameter
+// API): applied by name over the slot material's own values, per slot or every slot, later entries winning.
+static void TestEntityGraphParameters()
+{
+    MaterialData material;
+    material.GraphParameters.push_back({ "Dissolve", false, glm::vec4(0.3f), {} });
+    MaterialComponent component;
+    CHECK(!component.HasParameters(), "an empty Material component sets no parameters");
+    component.GraphParameters.push_back({ "Dissolve", false, glm::vec4(0.8f), {}, UINT32_MAX });
+    component.GraphParameters.push_back({ "Tint", false, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f), {}, 2 });
+    component.GraphParameters.push_back({ "Albedo", true, glm::vec4(0.0f), "Textures/Rust.png", UINT32_MAX });
+    CHECK(component.HasParameters(), "graph parameters make the entity draw with records of its own");
+    MaterialData slot0 = material;
+    component.ApplyParameters(slot0, 0);
+    CHECK(slot0.GraphParameters.size() == 2 && slot0.GraphParameters[0].Value.x == 0.8f, "the entity's value replaces the material's own of that name");
+    CHECK(slot0.GraphParameters[1].IsTexture && slot0.GraphParameters[1].Texture == "Textures/Rust.png", "a texture parameter is added by name and path");
+    const auto hasTint = [](const MaterialData& data)
+    {
+        return std::any_of(data.GraphParameters.begin(), data.GraphParameters.end(), [](const MaterialGraphParameterValue& v) { return v.Name == "Tint"; });
+    };
+    MaterialData slot2 = material;
+    component.ApplyParameters(slot2, 2);
+    CHECK(hasTint(slot2) && !hasTint(slot0), "a value for slot 2 applies to slot 2 only");
+    component.GraphParameters.push_back({ "Dissolve", false, glm::vec4(0.1f), {}, 0 });
+    MaterialData later = material;
+    component.ApplyParameters(later, 0);
+    CHECK(later.GraphParameters[0].Value.x == 0.1f, "a later entry wins over an earlier one");
+    const MaterialComponent::GraphParameter* found = component.FindGraphParameter("Dissolve", false, 0);
+    CHECK(found && found->Value.x == 0.1f && !component.FindGraphParameter("Dissolve", true, 0) && !component.FindGraphParameter("Dissolve", false, 5),
+          "FindGraphParameter matches name, kind and slot");
+}
+
 int main()
 {
     Log::Init("NoxToolsTest.log");
     TestConsole();
     TestCustomLitShaders();
     TestMaterialGraph();
+    TestEntityGraphParameters();
 #ifdef NOX_TOOLS_TEST_MCP
     TestMcp();
     TestMcpValidation();

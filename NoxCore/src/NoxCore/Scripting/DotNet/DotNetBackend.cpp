@@ -7,6 +7,8 @@
 #include <SDL3/SDL_scancode.h>
 
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Asset/Material.h"
+#include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Core/Input.h"
@@ -786,6 +788,114 @@ namespace Nox
             }
         }
 
+        // Nox.MeshComponent's material graph parameters (MaterialComponent::GraphParameters: Unreal's SetScalarParameterValue and friends on
+        // a dynamic material instance). `slot` < 0: every slot of the entity's mesh. The entity draws with material records of its own from
+        // the next frame (Scene step 7), its slot materials' other values unchanged.
+        uint32_t ScriptSlot(int32_t slot)
+        {
+            return slot < 0 ? UINT32_MAX : static_cast<uint32_t>(slot);
+        }
+
+        MaterialComponent* FindOrAddMaterials(uint64_t entityID)
+        {
+            if (!s_Scene) return nullptr;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!entity || !entity.HasComponent<MeshComponent>())
+                return nullptr; // (nothing drawn to set it on)
+            return entity.HasComponent<MaterialComponent>() ? &entity.GetComponent<MaterialComponent>() : &entity.AddComponent<MaterialComponent>();
+        }
+
+        void MeshSetGraphParameter(uint64_t entityID, Coral::String name, float x, float y, float z, float w, int32_t slot)
+        {
+            MaterialComponent* materials = FindOrAddMaterials(entityID);
+            const std::string parameterName(name);
+            if (!materials || parameterName.empty())
+                return;
+            MaterialComponent::GraphParameter* parameter = materials->FindGraphParameter(parameterName, false, ScriptSlot(slot));
+            if (!parameter)
+                parameter = &materials->GraphParameters.emplace_back(MaterialComponent::GraphParameter{ parameterName, false, glm::vec4(0.0f), {}, ScriptSlot(slot) });
+            parameter->Value = glm::vec4(x, y, z, w);
+        }
+
+        void MeshSetGraphTexture(uint64_t entityID, Coral::String name, Coral::String texture, int32_t slot)
+        {
+            MaterialComponent* materials = FindOrAddMaterials(entityID);
+            const std::string parameterName(name);
+            if (!materials || parameterName.empty())
+                return;
+            MaterialComponent::GraphParameter* parameter = materials->FindGraphParameter(parameterName, true, ScriptSlot(slot));
+            if (!parameter)
+                parameter = &materials->GraphParameters.emplace_back(MaterialComponent::GraphParameter{ parameterName, true, glm::vec4(0.0f), {}, ScriptSlot(slot) });
+            parameter->Texture = std::filesystem::path(std::string(texture)).generic_string();
+        }
+
+        // The value a scalar / vector graph parameter has on the entity now (4 floats, a scalar's in [0]): its own (the last entry for that
+        // slot or every slot), else the slot material's (.nmat override, else the graph's default -- once the graph is built). False when
+        // nothing has that name.
+        Coral::Bool32 MeshGetGraphParameter(uint64_t entityID, Coral::String name, int32_t slot, float* outValue)
+        {
+            if (!s_Scene || !outValue) return false;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!entity || !entity.HasComponent<MeshComponent>())
+                return false;
+            const std::string parameterName(name);
+            const MeshComponent& mesh = entity.GetComponent<MeshComponent>();
+            const uint32_t drawnSlot = slot < 0 ? mesh.SubmeshIndex : static_cast<uint32_t>(slot);
+            auto write = [&](const glm::vec4& value)
+            {
+                for (int i = 0; i < 4; ++i)
+                    outValue[i] = value[i];
+                return true;
+            };
+            const MaterialComponent* materials = entity.HasComponent<MaterialComponent>() ? &entity.GetComponent<MaterialComponent>() : nullptr;
+            if (materials)
+                for (auto parameter = materials->GraphParameters.rbegin(); parameter != materials->GraphParameters.rend(); ++parameter)
+                    if (!parameter->IsTexture && parameter->Name == parameterName && (parameter->Slot == UINT32_MAX || parameter->Slot == drawnSlot))
+                        return write(parameter->Value);
+            // The slot's material: the entity's override, else the mesh's own .nmat.
+            AssetHandle material = materials && drawnSlot < materials->MaterialAssets.size() ? materials->MaterialAssets[drawnSlot] : AssetHandle(0);
+            if (material == 0 && mesh.Mesh != 0)
+            {
+                const AssetType type = AssetManager::GetAssetType(mesh.Mesh);
+                const std::vector<AssetHandle>* meshMaterials = nullptr;
+                if (const StaticMesh* staticMesh = type == AssetType::StaticMesh ? AssetManager::FindLoadedAsset<StaticMesh>(mesh.Mesh) : nullptr)
+                    meshMaterials = &staticMesh->GetMaterialAssets();
+                else if (const Mesh* skinned = type == AssetType::Mesh ? AssetManager::FindLoadedAsset<Mesh>(mesh.Mesh) : nullptr)
+                    meshMaterials = &skinned->GetMaterialAssets();
+                if (meshMaterials && drawnSlot < meshMaterials->size())
+                    material = (*meshMaterials)[drawnSlot];
+            }
+            const Material* loaded = material != 0 && AssetManager::IsAssetHandleValid(material) ? AssetManager::FindLoadedAsset<Material>(material) : nullptr;
+            if (!loaded)
+                return false;
+            const MaterialData& data = loaded->GetData();
+            for (const MaterialGraphParameterValue& value : data.GraphParameters)
+                if (!value.IsTexture && value.Name == parameterName)
+                    return write(value.Value);
+            const MaterialGraphProgram* program = nullptr;
+            if (data.SurfaceGraph.empty() || Renderer::FindMaterialGraph(data.SurfaceGraph, &program) == 0xFFFFFFFFu || !program)
+                return false;
+            for (const MaterialGraphParameter& parameter : program->Parameters)
+                if (parameter.Type != MaterialGraphParameter::Kind::Texture && parameter.Name == parameterName)
+                    return write(parameter.Default);
+            return false;
+        }
+
+        // Gives the parameter (scalar, vector and texture of that name) back to the slot material; an empty name: every one.
+        void MeshClearGraphParameter(uint64_t entityID, Coral::String name, int32_t slot)
+        {
+            if (!s_Scene) return;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            if (!entity || !entity.HasComponent<MaterialComponent>())
+                return;
+            const std::string parameterName(name);
+            std::vector<MaterialComponent::GraphParameter>& parameters = entity.GetComponent<MaterialComponent>().GraphParameters;
+            std::erase_if(parameters, [&](const MaterialComponent::GraphParameter& parameter)
+            {
+                return (parameterName.empty() || parameter.Name == parameterName) && (slot < 0 || parameter.Slot == static_cast<uint32_t>(slot));
+            });
+        }
+
         // Nox.Entity's metadata (MetadataComponent). A value comes back as UTF-8 into the caller's buffer: its length in bytes (what
         // to allocate when it is more than `capacity`), -1 when the entity has no such key.
         int32_t EntityGetMetadata(uint64_t entityID, Coral::String key, uint8_t* buffer, int32_t capacity)
@@ -1492,6 +1602,10 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetMorphWeight", reinterpret_cast<void*>(&MeshSetMorphWeight));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_GetMorphWeight", reinterpret_cast<void*>(&MeshGetMorphWeight));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_ClearMorphWeight", reinterpret_cast<void*>(&MeshClearMorphWeight));
+        assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetGraphParameter", reinterpret_cast<void*>(&MeshSetGraphParameter));
+        assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetGraphTexture", reinterpret_cast<void*>(&MeshSetGraphTexture));
+        assembly.AddInternalCall("Nox.InternalCalls", "Mesh_GetGraphParameter", reinterpret_cast<void*>(&MeshGetGraphParameter));
+        assembly.AddInternalCall("Nox.InternalCalls", "Mesh_ClearGraphParameter", reinterpret_cast<void*>(&MeshClearGraphParameter));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_GetMetadata", reinterpret_cast<void*>(&EntityGetMetadata));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_SetMetadata", reinterpret_cast<void*>(&EntitySetMetadata));
         assembly.AddInternalCall("Nox.InternalCalls", "Entity_RemoveMetadata", reinterpret_cast<void*>(&EntityRemoveMetadata));

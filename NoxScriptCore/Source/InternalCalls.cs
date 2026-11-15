@@ -75,6 +75,10 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, NativeString, float, void> Mesh_SetMorphWeight;
     private static delegate*<ulong, NativeString, float> Mesh_GetMorphWeight;
     private static delegate*<ulong, NativeString, void> Mesh_ClearMorphWeight;
+    private static delegate*<ulong, NativeString, float, float, float, float, int, void> Mesh_SetGraphParameter;
+    private static delegate*<ulong, NativeString, NativeString, int, void> Mesh_SetGraphTexture;
+    private static delegate*<ulong, NativeString, int, float*, uint> Mesh_GetGraphParameter;
+    private static delegate*<ulong, NativeString, int, void> Mesh_ClearGraphParameter;
     private static delegate*<ulong, NativeString, byte*, int, int> Entity_GetMetadata;
     private static delegate*<ulong, NativeString, NativeString, void> Entity_SetMetadata;
     private static delegate*<ulong, NativeString, uint> Entity_RemoveMetadata;
@@ -363,6 +367,37 @@ internal static unsafe class InternalCalls
     {
         using NativeString nativeTarget = new(target);
         Mesh_ClearMorphWeight(entityID, nativeTarget);
+    }
+
+    // A material graph parameter on the entity (MaterialComponent::GraphParameters); slot < 0: every slot.
+    internal static void SetGraphParameter(ulong entityID, string name, float x, float y, float z, float w, int slot)
+    {
+        using NativeString nativeName = new(name);
+        Mesh_SetGraphParameter(entityID, nativeName, x, y, z, w, slot);
+    }
+
+    internal static void SetGraphTexture(ulong entityID, string name, string texturePath, int slot)
+    {
+        using NativeString nativeName = new(name);
+        using NativeString nativeTexture = new(texturePath ?? string.Empty);
+        Mesh_SetGraphTexture(entityID, nativeName, nativeTexture, slot);
+    }
+
+    // False when neither the entity nor its slot material has the parameter (or the graph is not built yet).
+    internal static bool GetGraphParameter(ulong entityID, string name, int slot, out float x, out float y, out float z, out float w)
+    {
+        using NativeString nativeName = new(name);
+        float* value = stackalloc float[4];
+        bool found = Mesh_GetGraphParameter(entityID, nativeName, slot, value) != 0;
+        x = value[0]; y = value[1]; z = value[2]; w = value[3];
+        return found;
+    }
+
+    // An empty name clears them all.
+    internal static void ClearGraphParameter(ulong entityID, string name, int slot)
+    {
+        using NativeString nativeName = new(name);
+        Mesh_ClearGraphParameter(entityID, nativeName, slot);
     }
 
     // The engine writes the value as UTF-8 into a buffer of ours (no string crosses back): its length first, then the bytes.

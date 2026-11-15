@@ -366,7 +366,7 @@ window.NOX_FILE_DATABASE = [
     { path: "NoxScriptCore/Source/RigidBody3DComponent.cs", category: "NoxScriptCore C#", type: "C# Source", desc: "Controls 3D Jolt rigid bodies: LinearVelocity, AddForce, AddImpulse." },
     { path: "NoxScriptCore/Source/CharacterControllerComponent.cs", category: "NoxScriptCore C#", type: "C# Source", desc: "Controls Jolt CharacterVirtual: SetMoveVelocity, Jump, IsGrounded, Velocity." },
     { path: "NoxScriptCore/Source/AnimatorComponent.cs", category: "NoxScriptCore C#", type: "C# Source", desc: "Controls Animation Graph parameters (SetFloat/Bool) and Montages (PlayMontage)." },
-    { path: "NoxScriptCore/Source/MeshComponent.cs", category: "NoxScriptCore C#", type: "C# Source", desc: "Controls per-entity morph target weights (SetMorphWeight, ClearMorphWeights)." },
+    { path: "NoxScriptCore/Source/MeshComponent.cs", category: "NoxScriptCore C#", type: "C# Source", desc: "Per-entity morph target weights (SetMorphWeight, ClearMorphWeights) and material graph parameters (SetScalarParameter, SetVectorParameter, SetTextureParameter, GetScalarParameter, ClearParameter)." },
     { path: "NoxScriptCore/Source/ParticleEmitterComponent.cs", category: "NoxScriptCore C#", type: "C# Source", desc: "Controls particle emitters: Play, Stop, Emit, ParticleCount." },
     { path: "NoxScriptCore/Source/TimelinePlayerComponent.cs", category: "NoxScriptCore C#", type: "C# Source", desc: "Controls Sequencer timelines: Play, Stop, Time, Speed." },
     { path: "NoxScriptCore/Source/AudioSourceComponent.cs", category: "NoxScriptCore C#", type: "C# Source", desc: "Controls an Audio Source: Play, Stop(fadeOut), IsPlaying, Volume, Pitch, Loop, SetSound, and audio graph parameters SetFloat / SetInt / SetBool / Trigger." },

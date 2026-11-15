@@ -113,6 +113,7 @@ file-reference
 
 ## What's New (November 2026)
 
+- **Per-object material graph parameters:** give one object its own value of a graph parameter -- one enemy dissolving, one lamp glowing -- in the Properties panel (Material > Parameters) or from C# (`MeshComponent.SetScalarParameter("Dissolve", t)`, `SetVectorParameter`, `SetTextureParameter`), Unreal's dynamic material instance; the material asset stays shared.
 - **Material graph World Position Offset:** a graph can move its surface's vertices -- wind, waves, breathing -- in the view, the shadow maps, the motion vectors and the editor's outline and picking; a Max World Position Offset Displacement keeps the moving surface from being culled (ray-traced use comes with step 4c).
 - **Faster shader builds:** saving a material graph or Material Shader builds on high-priority threads (the editor's rendering no longer starves them); the editor's first start always begins with the slowest shader, the forward shader most pipelines share; every compiled shader file logs its time.
 - **Material graph Opacity Mask:** a graph's Opacity Mask cuts a Masked material away per pixel -- leaves, fences, dissolves -- in the view, the shadow maps and translucent drawing (ray-traced use comes with step 4c).

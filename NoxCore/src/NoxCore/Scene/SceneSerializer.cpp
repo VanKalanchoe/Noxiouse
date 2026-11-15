@@ -609,6 +609,24 @@ namespace Nox
                 }
                 out << YAML::EndSeq;
             }
+            if (!mc.GraphParameters.empty())
+            {
+                // A material graph's parameters by name (Scalar / Vector Parameter, a Texture Sample's Parameter Name).
+                out << YAML::Key << "GraphParameters" << YAML::Value << YAML::BeginSeq;
+                for (const MaterialComponent::GraphParameter& parameter : mc.GraphParameters)
+                {
+                    out << YAML::Flow << YAML::BeginMap;
+                    out << YAML::Key << "Name" << YAML::Value << parameter.Name;
+                    if (parameter.IsTexture)
+                        out << YAML::Key << "Texture" << YAML::Value << parameter.Texture;
+                    else
+                        out << YAML::Key << "Value" << YAML::Value << parameter.Value;
+                    if (parameter.Slot != UINT32_MAX)
+                        out << YAML::Key << "Slot" << YAML::Value << parameter.Slot;
+                    out << YAML::EndMap;
+                }
+                out << YAML::EndSeq;
+            }
 
             out << YAML::EndMap; // MaterialComponent
         }
@@ -2258,6 +2276,23 @@ namespace Nox
                     parameter.Value = node["Value"].as<glm::vec4>(glm::vec4(1.0f));
                     parameter.Slot = node["Slot"].as<uint32_t>(UINT32_MAX);
                     mc.Parameters.push_back(parameter);
+                }
+            }
+            if (auto graphParameters = materialComponent["GraphParameters"]; graphParameters && graphParameters.IsSequence())
+            {
+                for (const YAML::Node& node : graphParameters)
+                {
+                    MaterialComponent::GraphParameter parameter;
+                    parameter.Name = node["Name"].as<std::string>(std::string());
+                    if (parameter.Name.empty())
+                        continue;
+                    parameter.IsTexture = static_cast<bool>(node["Texture"]);
+                    if (parameter.IsTexture)
+                        parameter.Texture = node["Texture"].as<std::string>(std::string());
+                    else
+                        parameter.Value = node["Value"].as<glm::vec4>(glm::vec4(0.0f));
+                    parameter.Slot = node["Slot"].as<uint32_t>(UINT32_MAX);
+                    mc.GraphParameters.push_back(parameter);
                 }
             }
         }

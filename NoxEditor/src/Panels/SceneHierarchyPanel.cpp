@@ -16,6 +16,8 @@
 #include "NoxCore/Animation/Skeleton.h"
 #include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/MaterialSerializer.h"
+#include "NoxCore/Renderer/MaterialGraph.h"
+#include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Scene/EntityBounds.h"
@@ -1893,10 +1895,51 @@ namespace Nox
 
             // Values this entity sets over its materials (Unreal's dynamic material instance parameters): no material asset of its
             // own, nothing else changes. A timeline's Material Parameter tracks set them too, over these.
-            if (ImGui::TreeNodeEx("Parameters", component.Parameters.empty() ? 0 : ImGuiTreeNodeFlags_DefaultOpen))
+            if (ImGui::TreeNodeEx("Parameters", component.Parameters.empty() && component.GraphParameters.empty() ? 0 : ImGuiTreeNodeFlags_DefaultOpen))
             {
                 bool changed = false;
                 int removed = -1;
+                // The material graph parameters the shown slots' materials have (their graphs, once built): what the Add list offers and
+                // how a value is edited (a number, a colour, a texture). A slot material's own value is the starting value.
+                struct AvailableGraphParameter
+                {
+                    std::string Name;
+                    MaterialGraphParameter::Kind Type = MaterialGraphParameter::Kind::Scalar;
+                    glm::vec4 Value{ 0.0f };
+                    std::string Texture;
+                };
+                std::vector<AvailableGraphParameter> graphParameters;
+                for (size_t slot = firstSlot; slot < slotEnd; ++slot)
+                {
+                    AssetHandle materialHandle = slot < component.MaterialAssets.size() ? component.MaterialAssets[slot] : AssetHandle(0);
+                    if (materialHandle == 0 && meshMaterials && slot < meshMaterials->size())
+                        materialHandle = (*meshMaterials)[slot];
+                    const Material* slotMaterial = materialHandle != 0 && AssetManager::IsAssetHandleValid(materialHandle)
+                                                       ? AssetManager::FindLoadedAsset<Material>(materialHandle) : nullptr;
+                    const MaterialGraphProgram* program = nullptr;
+                    if (!slotMaterial || slotMaterial->GetData().SurfaceGraph.empty() ||
+                        Renderer::FindMaterialGraph(slotMaterial->GetData().SurfaceGraph, &program) == 0xFFFFFFFFu || !program)
+                        continue;
+                    for (const MaterialGraphParameter& parameter : program->Parameters)
+                    {
+                        if (parameter.Name.starts_with('#') ||
+                            std::any_of(graphParameters.begin(), graphParameters.end(), [&](const AvailableGraphParameter& known)
+                            {
+                                return known.Name == parameter.Name && known.Type == parameter.Type;
+                            }))
+                            continue;
+                        AvailableGraphParameter available{ parameter.Name, parameter.Type, parameter.Default, {} };
+                        if (parameter.DefaultTexture != 0 && AssetManager::IsAssetHandleValid(parameter.DefaultTexture))
+                            available.Texture = AssetManager::GetMetadata(parameter.DefaultTexture).FilePath.generic_string();
+                        for (const MaterialGraphParameterValue& value : slotMaterial->GetData().GraphParameters)
+                            if (value.Name == parameter.Name && value.IsTexture == (parameter.Type == MaterialGraphParameter::Kind::Texture))
+                            {
+                                available.Value = value.Value;
+                                available.Texture = value.Texture;
+                            }
+                        graphParameters.push_back(std::move(available));
+                    }
+                }
                 for (int i = 0; i < static_cast<int>(component.Parameters.size()); ++i)
                 {
                     MaterialComponent::Parameter& parameter = component.Parameters[i];
@@ -1919,9 +1962,67 @@ namespace Nox
                         removed = i;
                     ImGui::PopID();
                 }
+                // A material graph's parameters (by name: Unreal's dynamic material instance parameters), after the built-in ones.
+                int removedGraph = -1;
+                for (int i = 0; i < static_cast<int>(component.GraphParameters.size()); ++i)
+                {
+                    MaterialComponent::GraphParameter& parameter = component.GraphParameters[i];
+                    ImGui::PushID(1000 + i);
+                    const auto known = std::find_if(graphParameters.begin(), graphParameters.end(), [&](const AvailableGraphParameter& available)
+                    {
+                        return available.Name == parameter.Name && (available.Type == MaterialGraphParameter::Kind::Texture) == parameter.IsTexture;
+                    });
+                    if (parameter.IsTexture)
+                    {
+                        const std::string shown = parameter.Texture.empty() ? std::string("None") : std::filesystem::path(parameter.Texture).filename().string();
+                        ImGui::Button((shown + "##texture").c_str(), ImVec2(160.0f, 0.0f));
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Drop a texture from the Content Browser here. Right-click: none.");
+                        if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                        {
+                            parameter.Texture.clear();
+                            changed = true;
+                        }
+                        if (ImGui::BeginDragDropTarget())
+                        {
+                            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                            {
+                                const AssetHandle handle = *static_cast<const AssetHandle*>(payload->Data);
+                                if (AssetManager::IsAssetHandleValid(handle) && AssetManager::GetAssetType(handle) == AssetType::Texture2D)
+                                {
+                                    parameter.Texture = AssetManager::GetMetadata(handle).FilePath.generic_string();
+                                    changed = true;
+                                }
+                            }
+                            ImGui::EndDragDropTarget();
+                        }
+                        ImGui::SameLine();
+                        ImGui::TextUnformatted(parameter.Name.c_str());
+                    }
+                    else if (known != graphParameters.end() && known->Type == MaterialGraphParameter::Kind::Vector)
+                        changed |= ImGui::ColorEdit4(parameter.Name.c_str(), glm::value_ptr(parameter.Value), ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+                    else
+                        changed |= ImGui::DragFloat(parameter.Name.c_str(), &parameter.Value.x, 0.01f);
+                    if (known == graphParameters.end() && ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Not in the graph of any shown slot's material (or the graph is not built yet): it changes nothing now.");
+                    ImGui::SameLine();
+                    int slot = parameter.Slot == UINT32_MAX ? -1 : static_cast<int>(parameter.Slot);
+                    ImGui::SetNextItemWidth(60.0f);
+                    if (ImGui::DragInt("Slot", &slot, 0.1f, -1, 1024, slot < 0 ? "all" : "%d"))
+                    {
+                        parameter.Slot = slot < 0 ? UINT32_MAX : static_cast<uint32_t>(slot);
+                        changed = true;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("X"))
+                        removedGraph = i;
+                    ImGui::PopID();
+                }
                 bool added = false;
                 if (removed >= 0)
                     component.Parameters.erase(component.Parameters.begin() + removed);
+                if (removedGraph >= 0)
+                    component.GraphParameters.erase(component.GraphParameters.begin() + removedGraph);
                 if (ImGui::BeginCombo("##AddParameter", "Add Parameter"))
                 {
                     for (uint8_t index = 0; index < static_cast<uint8_t>(MaterialParameter::Count); ++index)
@@ -1938,12 +2039,35 @@ namespace Nox
                             added = true;
                         }
                     }
+                    // The slots' material graph parameters not set here yet, starting from the material's value.
+                    bool separated = false;
+                    for (const AvailableGraphParameter& available : graphParameters)
+                    {
+                        const bool isTexture = available.Type == MaterialGraphParameter::Kind::Texture;
+                        if (std::any_of(component.GraphParameters.begin(), component.GraphParameters.end(), [&](const MaterialComponent::GraphParameter& set)
+                            {
+                                return set.Name == available.Name && set.IsTexture == isTexture && set.Slot == UINT32_MAX;
+                            }))
+                            continue;
+                        if (!separated)
+                        {
+                            ImGui::SeparatorText("Material Graph");
+                            separated = true;
+                        }
+                        const char* kind = available.Type == MaterialGraphParameter::Kind::Scalar ? "number"
+                                         : available.Type == MaterialGraphParameter::Kind::Vector ? "colour" : "texture";
+                        if (ImGui::Selectable((available.Name + " (" + kind + ")").c_str()))
+                        {
+                            component.GraphParameters.push_back(MaterialComponent::GraphParameter{ available.Name, isTexture, available.Value, available.Texture, UINT32_MAX });
+                            added = true;
+                        }
+                    }
                     ImGui::EndCombo();
                 }
                 // Gaining or losing parameters registers the entity anew (Scene's step 7 sees it too); changed values are picked up
                 // every frame, so a drag needs nothing.
                 (void)changed;
-                if (added || removed >= 0)
+                if (added || removed >= 0 || removedGraph >= 0)
                     Entity(entity).PatchComponent<MaterialComponent>();
                 ImGui::TreePop();
             }

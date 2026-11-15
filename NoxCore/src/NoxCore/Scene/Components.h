@@ -5,6 +5,7 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 
+#include <algorithm>
 #include <array>
 #include <map>
 #include <optional>
@@ -151,7 +152,21 @@ namespace Nox
         // Runtime only: what a sequencer's Material Parameter tracks set (over Parameters), kept after the timeline as it left them.
         std::vector<Parameter> SequencerParameters;
 
-        bool HasParameters() const { return !Parameters.empty() || !SequencerParameters.empty(); }
+        // A material graph's parameter this entity sets (Unreal's SetScalarParameterValue / SetVectorParameterValue /
+        // SetTextureParameterValue on a dynamic material instance): by its name in the graph -- a Scalar / Vector Parameter node's Name, a
+        // Texture Sample's Parameter Name --, over the slot's material's value (its .nmat override, else the graph's default). A slot whose
+        // material has no graph, or a graph without that name, is unchanged. Slot UINT32_MAX: every slot; later entries win.
+        struct GraphParameter
+        {
+            std::string Name;
+            bool IsTexture = false;
+            glm::vec4 Value{ 0.0f }; // a scalar's in x
+            std::string Texture;     // a texture's path in the project's Assets (generic separators); empty: none (white / flat)
+            uint32_t Slot = UINT32_MAX;
+        };
+        std::vector<GraphParameter> GraphParameters;
+
+        bool HasParameters() const { return !Parameters.empty() || !SequencerParameters.empty() || !GraphParameters.empty(); }
         // The slot's material with this entity's parameters applied.
         void ApplyParameters(MaterialData& material, uint32_t slot) const
         {
@@ -159,6 +174,26 @@ namespace Nox
                 for (const Parameter& parameter : *list)
                     if (parameter.Slot == UINT32_MAX || parameter.Slot == slot)
                         MaterialParameters::Apply(material, parameter.Name, parameter.Value);
+            for (const GraphParameter& parameter : GraphParameters)
+            {
+                if (parameter.Slot != UINT32_MAX && parameter.Slot != slot)
+                    continue;
+                // (the material's own override of the name, if any, is replaced: the renderer packs the first match by name and kind)
+                auto found = std::find_if(material.GraphParameters.begin(), material.GraphParameters.end(),
+                                          [&](const MaterialGraphParameterValue& value) { return value.Name == parameter.Name && value.IsTexture == parameter.IsTexture; });
+                if (found == material.GraphParameters.end())
+                    found = material.GraphParameters.insert(material.GraphParameters.end(), MaterialGraphParameterValue{ parameter.Name, parameter.IsTexture });
+                found->Value = parameter.Value;
+                found->Texture = parameter.Texture;
+            }
+        }
+        // This entity's value for a graph parameter (null: it sets none; slot UINT32_MAX: the every-slot one).
+        GraphParameter* FindGraphParameter(const std::string& name, bool isTexture, uint32_t slot)
+        {
+            for (GraphParameter& parameter : GraphParameters)
+                if (parameter.Name == name && parameter.IsTexture == isTexture && parameter.Slot == slot)
+                    return &parameter;
+            return nullptr;
         }
 
         MaterialComponent() = default;
