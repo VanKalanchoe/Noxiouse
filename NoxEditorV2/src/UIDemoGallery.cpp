@@ -7,13 +7,16 @@
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Layout/UILayout.h"
 #include "NoxCore/UI/Layout/UIWindow.h"
+#include "NoxCore/UI/Layout/UIWrapBox.h"
 #include "NoxCore/UI/Widgets/UIBadge.h"
+#include "NoxCore/UI/Widgets/UIBreadcrumb.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UICheckBox.h"
 #include "NoxCore/UI/Widgets/UICollapsingHeader.h"
 #include "NoxCore/UI/Widgets/UIColorPicker.h"
 #include "NoxCore/UI/Widgets/UIDragScalar.h"
 #include "NoxCore/UI/Widgets/UIDropdown.h"
+#include "NoxCore/UI/Widgets/UIImage.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 #include "NoxCore/UI/Widgets/UILogView.h"
 #include "NoxCore/UI/Widgets/UIMenu.h"
@@ -515,6 +518,50 @@ namespace Nox::UI
         switchRow->AddChild(badge3);
         switchPanel->AddChild(switchRow);
         scroll->AddChild(switchPanel);
+
+        // 13. UIBreadcrumb & Responsive UIWrapBox
+        auto flowPanel = MakeUI<UIStackBox>(UIOrientation::Vertical, 8.0f);
+        flowPanel->StyleClass = "Panel";
+        flowPanel->DrawBackground = true;
+        flowPanel->Padding = UIThickness::All(12.0f);
+        flowPanel->AddChild(MakeUI<UILabel>("12. UIBreadcrumb & Responsive UIWrapBox", 14.5f));
+
+        auto crumb = MakeUI<UIBreadcrumb>(
+            std::vector<std::string>{ "Engine", "Nox::UI", "Widgets", "Gallery" },
+            [&context, report](int idx)
+            {
+                context.PushToast("Breadcrumb segment #" + std::to_string(idx) + " clicked", 1.8f);
+                report("Breadcrumb navigated to index " + std::to_string(idx));
+            }
+        );
+        flowPanel->AddChild(crumb);
+
+        auto wrap = MakeUI<UIWrapBox>(6.0f, 6.0f);
+        static const char* kTags[] = {
+            "Bindless SDF", "Retained Mode", "Tab Navigation", "Toast Alerts",
+            "HSVA Picker", "Sortable Table", "Live Plot", "Node Graph",
+            "3D Gizmo", "Hot-Reload .nstyle", "Virtual Tree", "Floating Window"
+        };
+        for (const char* tag : kTags)
+        {
+            wrap->AddChild(MakeUI<UIButton>(tag, [tag, report]()
+            {
+                report(std::string("WrapBox tag clicked: ") + tag);
+            }));
+        }
+        flowPanel->AddChild(wrap);
+
+        auto imgRow = MakeUI<UIStackBox>(UIOrientation::Horizontal, 10.0f);
+        auto imgPreview = MakeUI<UIImage>(~0u, UIVec2{ 56.0f, 56.0f });
+        imgPreview->CornerRadius = UICornerRadius::All(8.0f);
+        imgPreview->Tooltip = "UIImage widget (displays any bindless texture descriptor slot, or fallback card when ~0u)";
+        auto imgLabel = MakeUI<UILabel>("UIImage (Bindless Texture Slot / Rounded Fallback Card)", 13.0f);
+        imgLabel->VAlign = UIAlignment::Center;
+        imgRow->AddChild(imgPreview);
+        imgRow->AddChild(imgLabel);
+        flowPanel->AddChild(imgRow);
+
+        scroll->AddChild(flowPanel);
 
         return scroll;
     }

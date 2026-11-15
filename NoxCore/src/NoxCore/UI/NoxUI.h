@@ -11,11 +11,13 @@
 #include "NoxCore/UI/Layout/UISplitter.h"
 #include "NoxCore/UI/Layout/UITabPanel.h"
 #include "NoxCore/UI/Layout/UIWindow.h"
+#include "NoxCore/UI/Layout/UIWrapBox.h"
 
 #include "NoxCore/UI/Rendering/UIDrawList.h"
 #include "NoxCore/UI/Rendering/UIRenderer.h"
 
 #include "NoxCore/UI/Widgets/UIBadge.h"
+#include "NoxCore/UI/Widgets/UIBreadcrumb.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UICheckBox.h"
 #include "NoxCore/UI/Widgets/UICollapsingHeader.h"
@@ -23,6 +25,7 @@
 #include "NoxCore/UI/Widgets/UIDragScalar.h"
 #include "NoxCore/UI/Widgets/UIDropdown.h"
 #include "NoxCore/UI/Widgets/UIGizmo.h"
+#include "NoxCore/UI/Widgets/UIImage.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 #include "NoxCore/UI/Widgets/UILogView.h"
 #include "NoxCore/UI/Widgets/UIMenu.h"
