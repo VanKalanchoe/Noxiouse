@@ -102,7 +102,7 @@ namespace Nox
                 cmd.setColorWriteMask(0, colorWriteMask);
                 cmd.setLogicOpEnable(false);
 
-                if (hasScene && m_presentPipeline)
+                if (!m_isEditor && hasScene && m_presentPipeline)
                 {
                     cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_presentPipeline);
 
@@ -123,6 +123,12 @@ namespace Nox
     
 
     
+                }
+
+                if (m_isEditor && !m_useImGui && m_sceneResource && m_sceneResource->GetDescriptorIndexSlot() == 0)
+                {
+                    m_resourceHeap->registerTexture(*m_sceneResource);
+                    uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
                 }
 
                 if (m_uiRenderer)

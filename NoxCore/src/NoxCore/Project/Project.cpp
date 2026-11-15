@@ -14,6 +14,8 @@ namespace Nox
     Ref<Project> Project::New()
     {
         s_ActiveProject = CreateRef<Project>();
+        s_ActiveProject->m_ProjectDirectory = std::filesystem::current_path();
+        s_ActiveProject->m_AssetManager = std::make_shared<EditorAssetManager>();
         return s_ActiveProject;
     }
 

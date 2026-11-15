@@ -1321,7 +1321,7 @@ namespace Nox
 
         m_device->waitIdle();
         // The game's final image is in the bindless heap: the old one leaves it before the new one is registered.
-        if (!m_isEditor && m_sceneResource)
+        if ((!m_isEditor || !m_useImGui) && m_sceneResource)
             m_resourceHeap->unregisterTexture(m_sceneResource->GetDescriptorIndexSlot());
         createSceneResources();
 

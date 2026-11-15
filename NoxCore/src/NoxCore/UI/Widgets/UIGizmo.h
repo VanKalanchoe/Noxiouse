@@ -15,7 +15,8 @@ namespace Nox::UI
         Scale
     };
 
-    // Screen-space 3D Transform Gizmo rendered via UIDrawList SDF primitives.
+    // Screen-space 3D Transform Gizmo rendered via UIDrawList SDF primitives
+    // with ray-plane 3D dragging (ImGuizmo-style 1:1 cursor tracking).
     class UIGizmo : public UIElement
     {
     public:
@@ -30,8 +31,6 @@ namespace Nox::UI
         void SetCameraMatrices(const glm::mat4& view, const glm::mat4& viewProj, const glm::vec3& camPos);
 
         std::function<void(const glm::vec3& pos, const glm::vec3& rot, const glm::vec3& scale)> OnTransformChanged;
-        std::function<void(const UIPointerEvent&)> OnViewportOrbitDrag;
-        std::function<void(const UIPointerEvent&)> OnViewportZoom;
 
         bool IsUsing() const { return m_ActiveAxis >= 0; }
 
@@ -45,15 +44,23 @@ namespace Nox::UI
 
     private:
         bool ProjectPoint(const glm::vec3& world, UIVec2& outScreen) const;
-        int HitTestAxis(const UIVec2& screenPos) const;
+        bool ScreenToRay(const UIVec2& screenPos, glm::vec3& outOrigin, glm::vec3& outDir) const;
+        bool IntersectAxisPlane(const UIVec2& screenPos, int axis, const glm::vec3& origin, float& outT) const;
+        bool IntersectRotationPlane(const UIVec2& screenPos, int axis, const glm::vec3& origin, float& outAngle) const;
+        int HitTestGizmo(const UIVec2& screenPos) const;
         float AxisScreenScale() const;
 
         glm::mat4 m_View{ 1.0f };
         glm::mat4 m_ViewProj{ 1.0f };
+        glm::mat4 m_InvViewProj{ 1.0f };
         glm::vec3 m_CameraPos{ 0.0f, 0.0f, 10.0f };
 
         int m_HoveredAxis = -1;
         int m_ActiveAxis = -1;
-        bool m_Orbiting = false;
+
+        glm::vec3 m_DragStartPos{ 0.0f };
+        glm::vec3 m_DragStartRot{ 0.0f };
+        glm::vec3 m_DragStartScale{ 1.0f };
+        float m_DragStartParam = 0.0f;
     };
 }

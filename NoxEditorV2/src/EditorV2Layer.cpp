@@ -5,6 +5,7 @@
 
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Events/InputEvents.h"
+#include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Scene/Components.h"
 #include "NoxCore/Scene/Entity.h"
@@ -45,6 +46,9 @@ namespace Nox
 
     void EditorV2Layer::InitBasicScene()
     {
+        if (!Project::GetActive())
+            Project::New();
+
         m_ActiveScene = Ref<Scene>(new Scene());
 
         Entity sky = m_ActiveScene->CreateEntity("Sky");
