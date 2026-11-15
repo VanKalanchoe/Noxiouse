@@ -85,9 +85,9 @@ namespace Nox::UI
         const float ndcX = ((screenPos.x - b.Min.x) / b.Width()) * 2.0f - 1.0f;
         const float ndcY = 1.0f - ((screenPos.y - b.Min.y) / b.Height()) * 2.0f;
 
-        // Reverse-Z: z=1.0 is near plane, z=0.5 is mid-depth (works for finite & infinite far).
-        const glm::vec4 nearClip = m_InvViewProj * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
-        const glm::vec4 midClip = m_InvViewProj * glm::vec4(ndcX, ndcY, 0.5f, 1.0f);
+        // Standard OpenGL/ImGuizmo clip space (GetGizmoProjection): z=-1 is near, z=0 is mid.
+        const glm::vec4 nearClip = m_InvViewProj * glm::vec4(ndcX, ndcY, -1.0f, 1.0f);
+        const glm::vec4 midClip = m_InvViewProj * glm::vec4(ndcX, ndcY, 0.0f, 1.0f);
         if (std::abs(nearClip.w) < 1e-6f || std::abs(midClip.w) < 1e-6f)
             return false;
 

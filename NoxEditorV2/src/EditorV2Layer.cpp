@@ -1,4 +1,5 @@
 #include "EditorV2Layer.h"
+#include "UIDemoGallery.h"
 
 #include <cmath>
 #include <SDL3/SDL_scancode.h>
@@ -222,7 +223,7 @@ namespace Nox
         topBar->FixedSize.y = 44.0f;
         topBar->Padding = UI::UIThickness::Symmetric(14.0f, 6.0f);
 
-        auto title = MakeUI<UI::UILabel>("NoxEditorV2  |  Phase 5: Live 3D Scene, Viewport & UIGizmo", 16.0f);
+        auto title = MakeUI<UI::UILabel>("NoxEditorV2  |  Nox::UI Showcase & Sandbox", 16.0f);
         title->VAlign = UI::UIAlignment::Center;
         title->WidthMode = UI::UISizeMode::Fill;
         topBar->AddChild(title);
@@ -302,6 +303,11 @@ namespace Nox
         nodeGraph->AddLink(colOut, mulInB);
         nodeGraph->AddLink(mulOut, pbrBase);
         centerTabs->AddTab("Material Graph", nodeGraph);
+        centerTabs->AddTab("UI Demo Gallery", UI::CreateUIDemoGallery(m_UI, [this](const std::string& msg)
+        {
+            if (m_StatusLabel)
+                m_StatusLabel->Text = msg;
+        }));
 
         // Center-Bottom: Console & Content Browser
         auto bottomTabs = MakeUI<UI::UITabPanel>();
@@ -408,9 +414,10 @@ namespace Nox
         if (m_Gizmo && m_ActiveScene)
         {
             const glm::dvec3 origin = renderer->GetRenderOrigin();
+            const glm::mat4 gizmoView = m_EditorCamera.GetGizmoView(origin);
             m_Gizmo->SetCameraMatrices(
-                m_EditorCamera.GetViewMatrix(origin),
-                m_EditorCamera.GetViewProjection(origin),
+                gizmoView,
+                m_EditorCamera.GetGizmoProjection() * gizmoView,
                 glm::vec3(m_EditorCamera.GetPosition() - origin)
             );
 
