@@ -108,12 +108,25 @@ namespace NRI
         return folder / (source.stem().string() + "." + stage + "." + shaderDesc.entryPoint + "." + std::to_string(sourceHash) + ".bin");
     }
 
+    // A cached stage's bytes; empty when the file cannot be read (the caller compiles the stage instead). Retried for a moment: on
+    // Windows a file being renamed over is briefly unopenable (the user's start-up log: "a pipeline failed to build: Failed to open
+    // shader binary" while 94 pipelines compiled in parallel and shared stages).
     static std::vector<uint8_t> loadShaderBinary(const std::filesystem::path& path)
     {
-        std::ifstream file(path, std::ios::binary | std::ios::ate);
-
+        std::ifstream file;
+        for (int attempt = 0; attempt < 20; ++attempt)
+        {
+            file.open(path, std::ios::binary | std::ios::ate);
+            if (file)
+                break;
+            file.clear();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
         if (!file)
-            throw std::runtime_error("Failed to open shader binary");
+        {
+            NOX_CORE_WARN("PipelineVK: cannot read the shader binary {} (compiled again)", path.string());
+            return {};
+        }
 
         size_t size = file.tellg();
         file.seekg(0);
@@ -130,8 +143,13 @@ namespace NRI
     
     // A cache file written whole or not at all: pipelines build on several threads, and two of them may write the same stage's file
     // (Material_PBR_MeshTask's taskMain is in dozens of pipelines) while a third reads it. Written next to it, then renamed over it.
-    static void writeFileAtomic(const std::filesystem::path& path, const void* data, size_t size)
+    // An existing file is kept unless `replace` (a forced compile): its name holds the source's hash, so its bytes are the same, and
+    // renaming over a file another thread is opening made that open fail on Windows.
+    static void writeFileAtomic(const std::filesystem::path& path, const void* data, size_t size, bool replace)
     {
+        std::error_code existsError;
+        if (!replace && std::filesystem::exists(path, existsError))
+            return;
         static std::atomic<uint64_t> s_tempCounter{ 0 };
         std::filesystem::path temporary = path;
         temporary += ".tmp" + std::to_string(s_tempCounter.fetch_add(1, std::memory_order_relaxed));
@@ -283,7 +301,7 @@ namespace NRI
         }
         t_compiledInBuild = true;
         std::vector<char> spirv = compileModuleOnce(shaderDesc.sourcePath, compiler);
-        writeFileAtomic(path, spirv.data(), spirv.size());
+        writeFileAtomic(path, spirv.data(), spirv.size(), forceCompile);
         return spirv;
     }
 
@@ -643,11 +661,14 @@ namespace NRI
                     auto binaryPath = shaderBinaryPath(shaderDesc, compiler);
                     std::string stageKey = shaderDesc.sourcePath + "." + shaderDesc.entryPoint;
 
+                    std::vector<uint8_t> binary;
                     if (std::filesystem::exists(binaryPath) && (!desc.forceCompile || !compiler.canCompile()))
                     {
                         NOX_CORE_INFO("PipelineVK loading shader binary: {}", binaryPath);
-                        
-                        auto binary = loadShaderBinary(binaryPath);
+                        binary = loadShaderBinary(binaryPath);
+                    }
+                    if (!binary.empty())
+                    {
                         {
                             std::lock_guard lock(s_lastWorkingBinariesMutex);
                             s_lastWorkingBinaries[stageKey] = binary;
@@ -820,7 +841,7 @@ namespace NRI
                             std::lock_guard lock(s_lastWorkingBinariesMutex);
                             s_lastWorkingBinaries[stageKey] = data;
                         }
-                        writeFileAtomic(path, data.data(), data.size());
+                        writeFileAtomic(path, data.data(), data.size(), desc.forceCompile);
                     }
                 }
             }
@@ -1014,9 +1035,9 @@ namespace NRI
                 {
                     NOX_CORE_INFO("PipelineVK loading compute shader binary: {}", binaryPath);
                     binaryStorage = loadShaderBinary(binaryPath);
-                    loadedFromBinary = true;
+                    loadedFromBinary = !binaryStorage.empty();
                 }
-                else
+                if (!loadedFromBinary)
                 {
                     NOX_CORE_INFO("PipelineVK compiling compute shader: {}", shaderDesc.sourcePath);
                     spirvStorage = compileShader(shaderDesc, compiler, desc.forceCompile);
@@ -1059,7 +1080,7 @@ namespace NRI
                 if (!loadedFromBinary)
                 {
                     auto data = m_shaders[0].getBinaryData();
-                    writeFileAtomic(binaryPath, data.data(), data.size());
+                    writeFileAtomic(binaryPath, data.data(), data.size(), desc.forceCompile);
                 }
             }
     else
