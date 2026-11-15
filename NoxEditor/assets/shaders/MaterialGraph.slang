@@ -23,6 +23,12 @@ struct MaterialGraphInputs
     float3 positionDx;
     float3 positionDy;
     float3 normal;        // the vertex normal (world), facing the viewer's side
+    // The vertex in the mesh's own space before skinning and morph targets (Unreal's Pre-Skinned Local Position): a pattern on it stays on
+    // an animated character. The mesh's units (its import scale applied).
+    float3 localPosition;
+    float3 localPositionDx;
+    float3 localPositionDy;
+    float4 tangent;       // the vertex tangent (world, skinned as the normal is; 0 where the mesh has none), w the bitangent's handedness
     float4 vertexColor;
     float3 view;          // towards the camera
     float2 screenUV;      // 0..1 across the view
@@ -105,6 +111,24 @@ float3 material_graph_vertex_normal(InstanceData instance, Vertex vert, uint loc
     return mul((float3x3)instance.normalMatrix, localNormal);
 }
 
+// A vertex's world tangent for a graph (Vertex Tangent / Bitangent), skinned as its normal is; w the bitangent's handedness. Along the
+// surface: through the model matrix itself, not the normal matrix (as GBufferMaterial.slang).
+float4 material_graph_vertex_tangent(InstanceData instance, Vertex vert, uint localVertexIndex, PushConstantMeshlets pushConstant)
+{
+    float3 localTangent = vert.tangent.xyz;
+    if (instance.skinnedVertexOffset != NoSkinnedVertices && pushConstant.skinnedVertexReference != 0)
+        localTangent = ((SkinnedVertex*)pushConstant.skinnedVertexReference)[instance.skinnedVertexOffset + localVertexIndex].tangent.xyz;
+    else if (instance.boneMatrixOffset != 0xFFFFFFFF && pushConstant.boneMatrixReference != 0)
+    {
+        float4x4* boneMatrices = (float4x4*)pushConstant.boneMatrixReference;
+        const uint baseOffset = instance.boneMatrixOffset;
+        const float4x4 skinTransform = boneMatrices[baseOffset + vert.boneIDs.x] * vert.boneWeights.x + boneMatrices[baseOffset + vert.boneIDs.y] * vert.boneWeights.y +
+                                       boneMatrices[baseOffset + vert.boneIDs.z] * vert.boneWeights.z + boneMatrices[baseOffset + vert.boneIDs.w] * vert.boneWeights.w;
+        localTangent = mul((float3x3)skinTransform, localTangent);
+    }
+    return float4(mul((float3x3)instance.modelMatrix, localTangent), vert.tangent.w);
+}
+
 // The raster passes' helpers (World Position Offset, the Opacity Mask's pixel test): not in the ray tracing variants, whose generated file
 // (MaterialGraphMasks.slang) has the graphs' masks alone (NOX_MATERIAL_GRAPH_MASK_ONLY).
 #ifndef NOX_MATERIAL_GRAPH_MASK_ONLY
@@ -124,7 +148,7 @@ bool material_graph_has_offset(GpuMaterial* material)
 // samples level 0 in vertex shaders too); Camera Vector and Camera Position are the main camera's in every pass (the shadow views use
 // the same offset as the view). Clamped to the graph's Max World Position Offset Displacement when it has one (Unreal's).
 float3 material_graph_offset(GpuMaterial* material, float3 renderPos, float3 worldNormal, float2 uv0, float2 uv1, float4 vertexColor, float time,
-                             UniformBufferObject* ubo)
+                             UniformBufferObject* ubo, float3 localPosition, float4 worldTangent)
 {
     if (!material_graph_has_offset(material))
         return float3(0.0);
@@ -133,6 +157,8 @@ float3 material_graph_offset(GpuMaterial* material, float3 renderPos, float3 wor
     i.uv1 = uv1;
     i.position = renderPos + ubo->renderOrigin;
     i.normal = dot(worldNormal, worldNormal) > 1e-12 ? normalize(worldNormal) : float3(0.0, 0.0, 1.0);
+    i.localPosition = localPosition;
+    i.tangent = worldTangent;
     i.vertexColor = vertexColor;
     const float3 toCamera = ubo->cameraWorldPos.xyz - renderPos;
     i.view = dot(toCamera, toCamera) > 1e-12 ? normalize(toCamera) : float3(0.0, 0.0, 1.0);
@@ -160,7 +186,8 @@ float3 material_graph_vertex_offset(GpuMaterial* material, InstanceData instance
     if (!material_graph_has_offset(material))
         return float3(0.0);
     return material_graph_offset(material, renderPos, material_graph_vertex_normal(instance, vert, localVertexIndex, pushConstant), vert.uv0, vert.uv1,
-                                 loadMeshVertexColor(ubo, globalVertexIndex, instance.vertexColors), ubo->timeSeconds, ubo);
+                                 loadMeshVertexColor(ubo, globalVertexIndex, instance.vertexColors), ubo->timeSeconds, ubo, vert.pos,
+                                 material_graph_vertex_tangent(instance, vert, localVertexIndex, pushConstant));
 }
 
 // Whether a Masked material whose graph connects Opacity Mask has this pixel cut away (its mask below its Opacity Mask Clip Value);
@@ -168,7 +195,8 @@ float3 material_graph_vertex_offset(GpuMaterial* material, InstanceData instance
 // interpolated vertex values (render-space `worldPos`), their derivatives from this pixel's quad; `viewProj`: the pass's projection
 // (Screen Position). Called where every pixel of a quad runs (the derivatives), with a draw's material: the same for the whole quad.
 bool material_graph_mask_cuts(float2 uv0, float2 uv1, float3 worldPos, float3 normal, float4 vertexColor, bool isFrontFace, float4x4 viewProj,
-                              UniformBufferObject* ubo, GpuMaterial* material, InstanceData instance, out bool handled)
+                              UniformBufferObject* ubo, GpuMaterial* material, InstanceData instance, out bool handled, float3 localPosition,
+                              float4 tangent)
 {
     handled = instance.alphaMode == 1 && material.graphSlot != 0xFFFFFFFFu && (material.graphOutputs & MaterialGraphOutputOpacityMask) != 0u;
     MaterialGraphInputs i;
@@ -183,6 +211,10 @@ bool material_graph_mask_cuts(float2 uv0, float2 uv1, float3 worldPos, float3 no
     i.positionDy = ddy(worldPos);
     const float3 n = normalize(normal);
     i.normal = instance.doubleSided != 0 && !isFrontFace ? -n : n;
+    i.localPosition = localPosition;
+    i.localPositionDx = ddx(localPosition);
+    i.localPositionDy = ddy(localPosition);
+    i.tangent = tangent;
     i.vertexColor = vertexColor;
     i.view = normalize(ubo->cameraWorldPos.xyz - worldPos);
     const float4 clip = mul(viewProj, float4(worldPos, 1.0));
@@ -225,6 +257,19 @@ MaterialGraphInputs material_graph_ray_inputs(UniformBufferObject* ubo, GpuRayTr
     i.uv1 = v0.uv1 * w.x + v1.uv1 * w.y + v2.uv1 * w.z;
     i.position = position + ubo->renderOrigin;
     i.normal = dot(normal, normal) > 1e-12 ? normalize(normal) : float3(0.0, 0.0, 1.0);
+    // Local Position: the mesh's own vertices (before skinning, morphs and World Position Offset), not the ray tracing scene's.
+    PackedVertex* meshVertices = (PackedVertex*)instance.vertexBufferAddress;
+    i.localPosition = unpackVertex(meshVertices[corners.x]).pos * w.x + unpackVertex(meshVertices[corners.y]).pos * w.y +
+                      unpackVertex(meshVertices[corners.z]).pos * w.z;
+    // The tangent as the hit's vertices have it (a skinned or moved instance's from its deformed vertices), through the instance's
+    // transform (a tangent runs along the surface: the model matrix, not the normal matrix).
+    float3 localTangent = v0.tangent.xyz * w.x + v1.tangent.xyz * w.y + v2.tangent.xyz * w.z;
+    if (instance.skinnedVertexBufferAddress != 0)
+    {
+        SkinnedVertex* deformed = (SkinnedVertex*)instance.skinnedVertexBufferAddress;
+        localTangent = deformed[corners.x].tangent.xyz * w.x + deformed[corners.y].tangent.xyz * w.y + deformed[corners.z].tangent.xyz * w.z;
+    }
+    i.tangent = float4(mul((float3x3)world, localTangent), v0.tangent.w);
     i.vertexColor = RayTracingVertexColor(instance, corners, barycentrics);
     const float3 toCamera = ubo->cameraWorldPos.xyz - position;
     i.view = dot(toCamera, toCamera) > 1e-12 ? normalize(toCamera) : float3(0.0, 0.0, 1.0);

@@ -16,6 +16,8 @@ struct VSOutput
     float3 worldPos;    // (a material graph's Opacity Mask: MaterialGraph.slang's material_graph_mask_cuts)
     float3 normal;
     float4 vertexColor;
+    float3 localPos;    // (Local Position: before skinning and morphs)
+    float4 tangent;     // (Vertex Tangent / Bitangent: world, w the handedness)
 #endif
     nointerpolation uint drawID;
     nointerpolation int entityID;
@@ -92,6 +94,8 @@ void meshMain
         vertices[i].worldPos = worldPos.xyz;
         vertices[i].normal = material_graph_vertex_normal(instance, vert, localVertexIndex, pushConstant);
         vertices[i].vertexColor = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors);
+        vertices[i].localPos = vert.pos;
+        vertices[i].tangent = material_graph_vertex_tangent(instance, vert, localVertexIndex, pushConstant);
 #endif
         vertices[i].drawID = sharedPayload.drawID;
         vertices[i].entityID = instance.entityID;
@@ -124,7 +128,7 @@ StableOutput fragMain(VSOutput inVert, bool isFrontFace : SV_IsFrontFace, unifor
 
     if (material_graph_mask_cuts(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace, mul(ubo->nonJitteredProj, ubo->view),
 
-                                 ubo, instances.material(inVert.drawID), instance, graphMask))
+                                 ubo, instances.material(inVert.drawID), instance, graphMask, inVert.localPos, inVert.tangent))
 
         discard;
 

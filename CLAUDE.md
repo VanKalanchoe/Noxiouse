@@ -47,7 +47,7 @@ with them; reference them by handle or path, and say that the files live only on
   `--mcp-port` 8770, `--mcp-access` write by default -- `quit` needs execute). Editor MCP port 8765; multiplayer Play's games with
   "Players' MCP servers" use editor port + 1 (dedicated server) / + n (player n). One token per project in `<Project>/.nox/mcp-token`.
   When the user tests runtime features, remind them to **build NoxRuntime too** (building NoxEditor does not). Offline tests:
-  `Tests/McpTests.inl` + `Tests/ToolsTest.cpp` in NoxToolsTest (235 checks).
+  `Tests/McpTests.inl` + `Tests/ToolsTest.cpp` in NoxToolsTest (238 checks).
 - Stylized rendering / material graph plan: `docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md` (step 1 Toon and step 2
   outlines + Post Process Volume built and tested; step 3 Custom Lit with hand-written Material Shaders built; step 4a material graph built (`.nmatgraph`, `Renderer/MaterialGraph.h`, `MaterialGraph.slang`; graphs in the generated `MaterialGraphs.slang`
   (Material Shaders in `CustomLitShaders.slang`; pipelines cached by source hash, not force-compiled), the G-buffer resolve's variant `GBufferMaterialGraph.slang` + the forward variant; `GpuMaterial::graphSlot` /
@@ -64,9 +64,10 @@ with them; reference them by handle or path, and say that the files live only on
   4c part 4 WPO in the ray tracing scene built (`RayTracingOffset.slang` -> `RayTracingOffsetMaterialGraph.slang`, `updateRayTracingOffsetLayout`,
   "Ray Tracing Offset" pass, dynamic BLAS per WPO instance in `updateAnimatedBLAS`; tested); 4c part 5 graph Custom Lit output built (Material
   Output pins 9/10 Custom Light / Custom Ambient -> `MaterialGraphProgram::LightCode`, Lit Surface / Light / Ambient Light nodes, graph as a
-  `CustomLitSource{Graph}` slot in the Material Shaders' dispatcher, `material_graph_lit_inputs`; not yet user-tested); next steps split by
-  shader stage (plan §9d): 4d stage labels, 4e vertex inputs (Local Position first -- UAL1 mannequin: all UVs one point, so UV
-  dissolves vanish at once), 4f vertex outputs, 4g pixel outputs (lobe pins), 4h pixel inputs; R1 subsurface / R2 pixel depth
+  `CustomLitSource{Graph}` slot in the Material Shaders' dispatcher, `material_graph_lit_inputs`; not yet user-tested); steps split by shader
+  stage (plan §9d): 4d stage tooltips built (`NodePinDesc::Tooltip`), 4e part 1 built (`MaterialGraphInputs::localPosition` / `tangent`,
+  Local Position / Vertex Tangent / Vertex Bitangent; the UAL1 mannequin's UVs are all one point, so dissolves need Local Position);
+  4e part 2 (object position / bounds, Transform, matrices), 4f vertex outputs, 4g pixel outputs (lobe pins), 4h pixel inputs; R1 subsurface / R2 pixel depth
   offset need renderer work first; surface
   code, Physical / Stylized setting open). Custom Lit: `.slang` assets (`AssetType::MaterialShader`) with `light()` / `ambient()`
   (`CustomLit.slang`), generated into `<exe>/shaders/Generated` (`Renderer/CustomLitShaders.h`), lit by the "Custom Lit" pass after the

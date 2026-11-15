@@ -12,6 +12,8 @@ struct VSOutput
 
     nointerpolation int entityID;
     float4 tangent; // world tangent, w the bitangent handedness (normal_from_map)
+    float3 localPos; // the vertex before skinning and morphs, in the mesh's space (a material graph's Local Position; last: a fragment stage
+                     // without it reads the same locations)
 };
 
 [shader("mesh")]
@@ -86,7 +88,8 @@ void meshMain
 #ifdef NOX_MATERIAL_GRAPH
         // The forward variant's mesh stage (ForwardMeshMaterialGraph.slang): a graph's World Position Offset for translucent surfaces.
         worldPos.xyz += material_graph_offset(instances.material(sharedPayload.drawID), worldPos.xyz, worldNormal, v.uv0, v.uv1,
-                                              loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors), ubo->timeSeconds, ubo);
+                                              loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors), ubo->timeSeconds, ubo,
+                                              v.pos, float4(mul((float3x3)modelMatrix, localTangent), v.tangent.w));
 #endif
         float4 clipPos = depth_bias_clip(mul(viewProj, worldPos), worldPos.xyz, ubo->cameraWorldPos.xyz, instance.depthBias); // as the visibility pass
 
@@ -100,6 +103,7 @@ void meshMain
         vertices[i].drawID = sharedPayload.drawID;
         // Along the surface: with the model matrix itself, not the normal matrix (as GBufferMaterial.slang).
         vertices[i].tangent = float4(mul((float3x3)modelMatrix, localTangent), v.tangent.w);
+        vertices[i].localPos = v.pos;
     }
 
     // Process triangles

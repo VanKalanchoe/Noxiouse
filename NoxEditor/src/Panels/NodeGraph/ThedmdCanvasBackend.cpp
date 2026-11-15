@@ -388,7 +388,12 @@ namespace Nox
             ImGui::SameLine();
             ImGui::TextUnformatted(pin.Name.c_str());
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", pin.Type.c_str());
+            {
+                if (pin.Tooltip.empty())
+                    ImGui::SetTooltip("%s", pin.Type.c_str());
+                else
+                    ImGui::SetTooltip("%s\n(%s)", pin.Tooltip.c_str(), pin.Type.c_str());
+            }
             ed::EndPin();
         }
         // Unreal's Add Pin: one more of the type's variable input group (its literals seeded), or the last group away (its links
@@ -540,7 +545,12 @@ namespace Nox
             ed::BeginPin(pinId, ed::PinKind::Output);
             ImGui::TextUnformatted(pins.Outputs[p].Name.c_str());
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", pins.Outputs[p].Type.c_str());
+            {
+                if (pins.Outputs[p].Tooltip.empty())
+                    ImGui::SetTooltip("%s", pins.Outputs[p].Type.c_str());
+                else
+                    ImGui::SetTooltip("%s\n(%s)", pins.Outputs[p].Tooltip.c_str(), pins.Outputs[p].Type.c_str());
+            }
             ImGui::SameLine();
             DrawPinIcon(kPinIconSize, PinShapeOf(pins.Outputs[p].Type), connected, PinColor(pins.Outputs[p].Type));
             m_PinIcons[pinId.Get()] = { ImGui::GetItemRectMin(), ImGui::GetItemRectMax() };

@@ -50,6 +50,9 @@ struct VSOutput
     nointerpolation uint drawID;
     nointerpolation int entityID;
     float4 tangent; // world tangent, w the bitangent handedness (Material_PBR_Mesh.slang)
+#ifdef NOX_MATERIAL_GRAPH
+    float3 localPos; // the vertex before skinning and morphs (a graph's Local Position; Material_PBR_Mesh.slang writes it last)
+#endif
 };
 
 static const float PBR_WORKFLOW_METALLIC_ROUGHNESS = 0.0;
@@ -384,6 +387,10 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         graphIn.positionDy = ddy(vertIn.worldPos);
         const float3 vertexNormal = normalize(vertIn.normal);
         graphIn.normal = instance.doubleSided != 0 && !isFrontFace ? -vertexNormal : vertexNormal;
+        graphIn.localPosition = vertIn.localPos;
+        graphIn.localPositionDx = ddx(vertIn.localPos);
+        graphIn.localPositionDy = ddy(vertIn.localPos);
+        graphIn.tangent = vertIn.tangent;
         graphIn.vertexColor = vertIn.color;
         graphIn.view = normalize(ubo->cameraWorldPos.xyz - vertIn.worldPos);
         const float4 graphClip = mul(ubo->proj, mul(ubo->view, float4(vertIn.worldPos, 1.0)));
