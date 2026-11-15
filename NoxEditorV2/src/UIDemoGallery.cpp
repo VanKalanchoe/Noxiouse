@@ -8,6 +8,7 @@
 #include <SDL3/SDL_scancode.h>
 
 #include "NoxCore/UI/Core/UIContext.h"
+#include "NoxCore/UI/Layout/UIAccordion.h"
 #include "NoxCore/UI/Layout/UIGroupBox.h"
 #include "NoxCore/UI/Layout/UILayout.h"
 #include "NoxCore/UI/Layout/UIWindow.h"
@@ -32,6 +33,7 @@
 #include "NoxCore/UI/Widgets/UIProgressBar.h"
 #include "NoxCore/UI/Widgets/UIPropertyGrid.h"
 #include "NoxCore/UI/Widgets/UIRadioGroup.h"
+#include "NoxCore/UI/Widgets/UIRadialMenu.h"
 #include "NoxCore/UI/Widgets/UIRangeSlider.h"
 #include "NoxCore/UI/Widgets/UIScrollView.h"
 #include "NoxCore/UI/Widgets/UISearchBar.h"
@@ -43,6 +45,7 @@
 #include "NoxCore/UI/Widgets/UIStatCard.h"
 #include "NoxCore/UI/Widgets/UITableView.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
+#include "NoxCore/UI/Widgets/UITimeline.h"
 #include "NoxCore/UI/Widgets/UIToggleSwitch.h"
 #include "NoxCore/UI/Widgets/UITreeView.h"
 #include "NoxCore/UI/Widgets/UIVectorEdit.h"
@@ -859,6 +862,40 @@ namespace Nox::UI
         toolRow->AddChild(keybind);
         dashBox->AddContent(toolRow);
         scroll->AddChild(dashBox);
+
+        // 22. UIAccordion (Single-Open Sections)
+        auto accBox = MakeUI<UIGroupBox>("21. UIAccordion (Single-Open Mutual Exclusion)");
+        auto acc = MakeUI<UIAccordion>(false);
+        acc->AddSection("Rendering Settings", MakeUI<UILabel>("Shadows, GI,Reflections & Post-Processing controls.", 13.0f), true);
+        acc->AddSection("Physics & Collision", MakeUI<UILabel>("Jolt Physics substeps, gravity, and broadphase layers.", 13.0f), false);
+        acc->AddSection("Audio & Spatialization", MakeUI<UILabel>("Steam Audio HRTF & occlusion settings.", 13.0f), false);
+        accBox->AddContent(acc);
+        scroll->AddChild(accBox);
+
+        // 23. UITimeline Scrubber & UIRadialMenu
+        auto timeBox = MakeUI<UIGroupBox>("22. UITimeline Scrubber & UIRadialMenu (Pie Menu)");
+        auto timeline = MakeUI<UITimeline>(6.0f, 1.5f);
+        timeline->OnScrub = [report](float t)
+        {
+            report("Timeline scrubbed to " + std::to_string(t) + "s");
+        };
+        timeBox->AddContent(timeline);
+
+        auto radialBtn = MakeUI<UIButton>("Open Radial Pie Menu");
+        radialBtn->StyleVariant = "primary";
+        UIButton* radialPtr = radialBtn.get();
+        radialBtn->OnClick = [&context, radialPtr, report]()
+        {
+            UIRadialMenu::Open(context, radialPtr->GetBounds().Center(), {
+                { "Translate", { 0.24f, 0.56f, 0.96f, 1.0f }, [&context, report]() { context.PushToast("Radial: Translate"); report("Radial: Translate"); } },
+                { "Rotate",    { 0.24f, 0.76f, 0.48f, 1.0f }, [&context, report]() { context.PushToast("Radial: Rotate"); report("Radial: Rotate"); } },
+                { "Scale",     { 0.92f, 0.62f, 0.16f, 1.0f }, [&context, report]() { context.PushToast("Radial: Scale"); report("Radial: Scale"); } },
+                { "Duplicate", { 0.68f, 0.42f, 0.88f, 1.0f }, [&context, report]() { context.PushToast("Radial: Duplicate"); report("Radial: Duplicate"); } },
+                { "Delete",    { 0.88f, 0.28f, 0.30f, 1.0f }, [&context, report]() { context.PushToast("Radial: Delete"); report("Radial: Delete"); } }
+            });
+        };
+        timeBox->AddContent(radialBtn);
+        scroll->AddChild(timeBox);
 
         return scroll;
     }
