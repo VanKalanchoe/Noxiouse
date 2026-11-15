@@ -519,6 +519,8 @@ namespace Nox
                 else if (!program.Valid)
                     ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.3f, 1.0f), "The graph does not compile: %s %s", program.Error.c_str(),
                                        built ? "(its last build draws until it does)" : "(the material keeps its own values)");
+                else if (renderer && renderer->GetCustomLitStatus().Building && renderer->GetCustomLitStatus().GraphsLive)
+                    ImGui::TextColored(ImVec4(0.65f, 0.85f, 0.4f, 1.0f), "Built on opaque surfaces (translucent, previews and ray tracing still compiling...)");
                 else if (renderer && renderer->GetCustomLitStatus().Building)
                     ImGui::TextColored(warning, "Building the material graphs... (the last build draws meanwhile)");
                 else if (renderer && !renderer->GetCustomLitStatus().Message.empty())

@@ -168,6 +168,10 @@ namespace NRI
             std::vector<char> Spirv;
             std::exception_ptr Error;
             uint64_t Sequence = 0;
+            // Compiled ahead for pipelines created later (CompileModulesNow): kept by trimModuleCache until a pipeline takes it -- the
+            // trim kept only the newest eight, so of twelve ray tracing variants compiled in the background some were compiled again
+            // when the main thread created their pipelines (the user's log).
+            bool Pinned = false;
         };
         std::mutex s_modulesMutex;
         std::unordered_map<std::string, std::shared_ptr<ModuleCompile>> s_modules;
@@ -190,6 +194,8 @@ namespace NRI
                     slot = std::make_shared<ModuleCompile>(); // (a failed compile is tried again: the file may have been fixed)
                     compileHere = true;
                 }
+                else
+                    slot->Pinned = false; // (taken by a pipeline: trimmed as any other from now on)
                 slot->Sequence = ++s_moduleSequence;
                 entry = slot;
             }
@@ -236,12 +242,21 @@ namespace NRI
         void trimModuleCache(size_t keep)
         {
             std::lock_guard lock(s_modulesMutex);
-            std::vector<std::pair<uint64_t, std::string>> finished;
+            std::vector<std::pair<uint64_t, std::string>> finished, pinned;
             for (const auto& [key, entry] : s_modules)
             {
                 std::lock_guard entryLock(entry->Mutex);
                 if (entry->Finished)
-                    finished.emplace_back(entry->Sequence, key);
+                    (entry->Pinned ? pinned : finished).emplace_back(entry->Sequence, key);
+            }
+            // Pinned modules whose pipeline never came (a build cancelled by the next save) do not pile up: beyond two builds' worth
+            // (four graph + twelve ray tracing variants each) the oldest go as well.
+            constexpr size_t MaxPinned = 32;
+            if (pinned.size() > MaxPinned)
+            {
+                std::sort(pinned.begin(), pinned.end());
+                for (size_t i = 0; i + MaxPinned < pinned.size(); ++i)
+                    s_modules.erase(pinned[i].second);
             }
             if (finished.size() <= keep)
                 return;
@@ -480,6 +495,11 @@ namespace NRI
                 try
                 {
                     compileModuleOnce(source, compiler);
+                    // Kept until the pipeline that needs it takes it (trimModuleCache skips it meanwhile).
+                    const std::string key = source + "|" + std::to_string(compiler.sourceHash(source));
+                    std::lock_guard lock(s_modulesMutex);
+                    if (const auto found = s_modules.find(key); found != s_modules.end())
+                        found->second->Pinned = true;
                     return true;
                 }
                 catch (const std::exception& error)

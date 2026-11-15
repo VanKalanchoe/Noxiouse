@@ -381,6 +381,8 @@ namespace Nox
         ImGui::SameLine();
         if (m_Dirty)
             ImGui::TextDisabled("(save with Ctrl+S to see it in the viewport)");
+        else if (status.Building && status.GraphsLive)
+            ImGui::TextColored(ImVec4(0.65f, 0.85f, 0.4f, 1.0f), "Built on opaque surfaces (translucent, previews and ray tracing still compiling...)");
         else if (status.Building)
             ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Building the shaders...");
         else if (!status.Message.empty())

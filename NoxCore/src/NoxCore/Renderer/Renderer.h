@@ -728,6 +728,9 @@ namespace Nox
             uint64_t Version = 0;     // counts rebuilds (the Material Editor shows the latest)
             size_t GraphCount = 0;    // material graphs that compile (to Slang: CompileMaterialGraph)
             bool GraphsReady = false; // the G-buffer resolve's material graph variant is built
+            // The running build's graphs already draw on opaque and Masked surfaces (its G-buffer resolve and visibility variants are
+            // swapped in) while the translucent / preview shader and the ray tracing variants finish (the editor's status lines).
+            bool GraphsLive = false;
             std::map<std::string, std::string> GraphErrors; // a graph that does not compile: its path -> why (which node)
         };
         const CustomLitStatus& GetCustomLitStatus() const { return m_customLitStatus; }

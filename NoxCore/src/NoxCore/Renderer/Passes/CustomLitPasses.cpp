@@ -264,6 +264,7 @@ namespace Nox
                 return true;
             };
             const BuildThreadPriority priority;
+            std::future<bool> rayMaskTask;
             auto phase = [&]() -> bool
             {
                 std::future<std::unique_ptr<NRI::Pipeline>> forwardTask = std::async(std::launch::async, [this, graphCount]()
@@ -271,6 +272,31 @@ namespace Nox
                     const BuildThreadPriority priority;
                     return buildCustomLitForwardPipeline(false, graphCount > 0);
                 });
+                // The graph variants' shaders at once, one thread each (they were compiled one after another as their pipelines were
+                // built: ~4 s before the G-buffer resolve's could be swapped in); the pipelines below then come from them.
+                if (graphCount > 0 && !cancelled())
+                {
+                    std::vector<std::string> graphVariants = { CustomLitShaders::GBufferSourcePath().generic_string(),
+                                                               CustomLitShaders::VisibilitySourcePath().generic_string() };
+                    if (m_isEditor)
+                    {
+                        graphVariants.push_back(CustomLitShaders::StableDepthSourcePath().generic_string());
+                        graphVariants.push_back(CustomLitShaders::SelectionMaskSourcePath().generic_string());
+                    }
+                    m_device->compileShaderModules(graphVariants, *m_shaderCompiler); // (an error is thrown again by the pipeline below)
+                }
+                // The ray tracing passes' variants with the graphs' masks: compiled beside the forward variant once the graph variants
+                // (what makes the graph visible) are done (those whose binary is not cached: only after a mask changed), the main thread
+                // then creates their pipelines from them (updateRayTracingGraphMasks).
+                if (build->RayMasksWanted && !cancelled())
+                    rayMaskTask = std::async(std::launch::async, [this]()
+                    {
+                        const BuildThreadPriority priority;
+                        std::vector<std::string> variants;
+                        for (const CustomLitShaders::RayTracingMaskVariant& variant : CustomLitShaders::RayTracingMaskVariants())
+                            variants.push_back(variant.Variant);
+                        return m_device->compileShaderModules(variants, *m_shaderCompiler);
+                    });
                 if (graphCount > 0 && !cancelled())
                 {
                     std::unique_ptr<NRI::Pipeline> gbuffer = buildMaterialGraphGBufferPipeline(false, true);
@@ -308,19 +334,6 @@ namespace Nox
             {
                 if (compile)
                     m_shaderCompiler->compile(CustomLitShaders::CheckSourcePath().generic_string());
-                // The ray tracing passes' variants with the graphs' masks: their shaders compiled beside the other variants (those whose
-                // binary is not cached: only after a mask changed -- they used to wait for the forward variant), the main thread then
-                // creates the pipelines from them (updateRayTracingGraphMasks).
-                std::future<bool> rayMaskTask;
-                if (build->RayMasksWanted)
-                    rayMaskTask = std::async(std::launch::async, [this]()
-                    {
-                        const BuildThreadPriority priority;
-                        std::vector<std::string> variants;
-                        for (const CustomLitShaders::RayTracingMaskVariant& variant : CustomLitShaders::RayTracingMaskVariants())
-                            variants.push_back(variant.Variant);
-                        return m_device->compileShaderModules(variants, *m_shaderCompiler);
-                    });
                 const bool phaseDone = phase();
                 bool rayMasks = false;
                 if (rayMaskTask.valid())
@@ -344,6 +357,7 @@ namespace Nox
         });
         m_customLitBuild = std::move(build);
         m_customLitStatus.Building = true;
+        m_customLitStatus.GraphsLive = false;
         ++m_customLitStatus.Version;
     }
 
@@ -386,6 +400,7 @@ namespace Nox
                 m_materialGraphPrograms = build.GraphPrograms;
                 m_customLitStatus.GraphCount = build.GraphCount;
                 m_customLitStatus.GraphsReady = true;
+                m_customLitStatus.GraphsLive = true;
                 m_customLitStatus.Message.clear();
                 m_gpuMaterialsDirty = true;
                 NOX_CORE_INFO("Material graphs: {} graph(s), the G-buffer resolve is ready (the forward variant follows)", build.GraphCount);
