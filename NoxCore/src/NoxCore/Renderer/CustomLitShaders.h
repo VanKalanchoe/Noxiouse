@@ -38,6 +38,7 @@ namespace Nox
     {
         std::string Path;
         std::string Code;
+        std::string MaskCode; // MaterialGraphProgram::MaskCode (empty: no Opacity Mask)
     };
 
     namespace CustomLitShaders
@@ -63,6 +64,19 @@ namespace Nox
         // The forward shader's mesh stage with the material graphs (Material_PBR_Mesh.slang with NOX_MATERIAL_GRAPH): World Position Offset
         // for translucent surfaces.
         std::filesystem::path ForwardMeshSourcePath(); // ForwardMeshMaterialGraph.slang
+        // The graphs' Opacity Mask functions alone (MaterialGraphMasks.slang): what the ray tracing passes' variants include, so they compile
+        // again only when a mask changes.
+        std::filesystem::path GraphMasksSourcePath();
+        // The ray tracing passes whose alpha tests read the graphs' masks (shaderIO.h RayHitAlpha with NOX_MATERIAL_GRAPH_MASK): each engine
+        // shader and its generated variant (<name>GraphMask.slang beside the other generated files).
+        struct RayTracingMaskVariant
+        {
+            std::string Source;  // as the pipelines name it, "assets/shaders/ShadowMask.slang"
+            std::string Variant; // the generated file (generic separators)
+        };
+        const std::vector<RayTracingMaskVariant>& RayTracingMaskVariants();
+        // The generated text of MaterialGraphMasks.slang (the graphs with a mask, in their slots).
+        std::string GenerateGraphMaskDispatcher(const std::vector<std::string>& graphPaths, const std::vector<MaterialGraphSource>& graphs);
 
         // The generated file's text for these Material Shaders, `paths[slot]` naming each one's slot (a path with no source here: its
         // case left out, it lights nothing): CustomLitShaders.slang.

@@ -136,6 +136,7 @@ namespace NRI
         std::unique_ptr<Swapchain> createSwapchain(const SwapchainDesc& desc) override;
         std::unique_ptr<Pipeline> createPipeline(const PipelineDesc& desc, ShaderCompiler& compiler) override;
         void precompileShaderModules(const std::vector<std::string>& sources, ShaderCompiler& compiler) override;
+        bool compileShaderModules(const std::vector<std::string>& sources, ShaderCompiler& compiler) override;
         std::unique_ptr<CommandAllocator> createCommandAllocator(CommandBufferReset resetMode, QueueType queue) override;
         std::unique_ptr<TimelineSemaphore> createTimelineSemaphore(uint64_t initialValue) override;
         Nox::Ref<Texture2D> createTexture(const TextureDesc& desc) override;

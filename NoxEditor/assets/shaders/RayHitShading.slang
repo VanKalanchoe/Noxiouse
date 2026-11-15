@@ -50,8 +50,8 @@ float3 ray_occluder_transmittance(UniformBufferObject* ubo, GpuRayTracingInstanc
         return saturate(lut.transmissionFactor) * saturate(lut.baseColorFactor.rgb) * 0.92;
     if (lut.alphaMode == 0)
         return float3(0.0);
-    const float alpha = lut.baseColorFactor.a * RayHitAlpha(ubo, lut, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)),
-                                                         intersection_uv(lut, primitive, barycentrics), RayAlphaTestLod, primitive, barycentrics);
+    const float alpha = RayHitCoverage(ubo, lut, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)),
+                                       intersection_uv(lut, primitive, barycentrics), RayAlphaTestLod, primitive, barycentrics);
     if (lut.alphaMode == 2)
         return float3(1.0 - saturate(alpha));
     return alpha >= lut.alphaCutoff ? float3(0.0) : float3(1.0);

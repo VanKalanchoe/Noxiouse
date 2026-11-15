@@ -86,7 +86,7 @@ bool forwardShadowed(UniformBufferObject* ubo, float3 origin, float3 direction, 
             uint primitive = query.CandidatePrimitiveIndex();
             float2 barycentrics = query.CandidateTriangleBarycentrics();
             const float2 uv = intersection_uv(occluder, primitive, barycentrics);
-            if (RayHitAlpha(ubo, occluder, samp, uv, RayAlphaTestLod, primitive, barycentrics) * occluder.baseColorFactor.a < occluder.alphaCutoff)
+            if (RayHitCoverage(ubo, occluder, samp, uv, RayAlphaTestLod, primitive, barycentrics) < occluder.alphaCutoff)
                 continue;
         }
         query.CommitNonOpaqueTriangleHit();
@@ -139,8 +139,8 @@ bool traceRefractionRay(UniformBufferObject* ubo, float3 origin, float3 directio
         if (surface.alphaMode == 1 && RayHitAlphaTested(surface))
         {
             const float2 uv = intersection_uv(surface, query.CandidatePrimitiveIndex(), query.CandidateTriangleBarycentrics());
-            if (RayHitAlpha(ubo, surface, samp, uv, RayAlphaTestLod, query.CandidatePrimitiveIndex(), query.CandidateTriangleBarycentrics()) *
-                    surface.baseColorFactor.a < surface.alphaCutoff)
+            if (RayHitCoverage(ubo, surface, samp, uv, RayAlphaTestLod, query.CandidatePrimitiveIndex(), query.CandidateTriangleBarycentrics()) <
+                surface.alphaCutoff)
                 continue;
         }
         query.CommitNonOpaqueTriangleHit();

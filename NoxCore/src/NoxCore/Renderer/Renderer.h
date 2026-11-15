@@ -1305,6 +1305,14 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> buildCustomLitDeferredPipeline(bool forceCompile); // (any thread; throws when it does not compile)
         // `withGraphs`: its mesh stage with the material graphs too (a graph's World Position Offset: CustomLitShaders::ForwardMeshSourcePath).
         std::unique_ptr<NRI::Pipeline> buildCustomLitForwardPipeline(bool forceCompile, bool withGraphs);
+        // The ray tracing passes with the material graphs' Opacity Mask in their alpha tests (material graph step 4c part 2): `wanted`
+        // while a graph connects Opacity Mask and the variants are ready; their pipelines are created again whenever it or the graphs'
+        // masks (MaterialGraphMasks.slang) changed. Main thread.
+        void updateRayTracingGraphMasks(bool wanted);
+        // A ray tracing pass's shader: its graph variant while the graphs' masks are on (CustomLitShaders::RayTracingMaskVariants), else itself.
+        std::string rayTracingShader(const std::string& source) const;
+        // Whether a graph of these connects Opacity Mask.
+        static bool AnyGraphMask(const std::unordered_map<std::string, MaterialGraphProgram>& programs);
         void startCustomLitBuild(const std::vector<CustomLitSource>& sources, const std::vector<ProjectMaterialGraph>& graphs);
         // The G-buffer resolve compiled with the material graphs (CustomLitShaders::GBufferSourcePath; any thread; throws when it does
         // not compile).
@@ -1750,6 +1758,10 @@ namespace Nox
             std::vector<std::string> GraphPaths;
             std::unordered_map<std::string, MaterialGraphProgram> GraphPrograms;
             size_t GraphCount = 0;
+            // The ray tracing passes' graph variants (CustomLitShaders::RayTracingMaskVariants) compiled for the main thread to create:
+            // while a graph connects Opacity Mask (RayMasksWanted), RayMasks once their shaders compiled.
+            bool RayMasksWanted = false;
+            bool RayMasks = false;
             std::atomic<bool> Cancel{ false }; // set by the renderer's shutdown or a newer request: the build stops before its next stage
             bool Cancelled = false;            // it stopped so (not an error)
         };
@@ -2503,7 +2515,9 @@ namespace Nox
         // Cluster LOD (§5.7), and what the visibility passes drew with it: cleared each frame, read back per frame slot.
         float m_lodErrorPixels = 1.0f;
         bool m_lodFullDetail = false;
-        float m_previousTimeSeconds = -1.0f; // UniformBufferObject::previousTimeSeconds (a World Position Offset's motion vectors)
+        float m_previousTimeSeconds = -1.0f;
+        bool m_rayTracingGraphMasks = false;       // updateRayTracingGraphMasks: the ray tracing passes run their graph variants
+        uint64_t m_rayTracingGraphMasksHash = 0;   // of MaterialGraphMasks.slang when they were created // UniformBufferObject::previousTimeSeconds (a World Position Offset's motion vectors)
         std::unique_ptr<NRI::Buffer> m_clusterStatsBuffer;
         std::vector<std::unique_ptr<NRI::Buffer>> m_clusterStatsReadback;
         std::array<bool, MAX_FRAMES_IN_FLIGHT> m_clusterStatsPending{};

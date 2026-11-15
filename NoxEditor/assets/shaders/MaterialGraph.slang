@@ -105,6 +105,9 @@ float3 material_graph_vertex_normal(InstanceData instance, Vertex vert, uint loc
     return mul((float3x3)instance.normalMatrix, localNormal);
 }
 
+// The raster passes' helpers (World Position Offset, the Opacity Mask's pixel test): not in the ray tracing variants, whose generated file
+// (MaterialGraphMasks.slang) has the graphs' masks alone (NOX_MATERIAL_GRAPH_MASK_ONLY).
+#ifndef NOX_MATERIAL_GRAPH_MASK_ONLY
 // --- World Position Offset (MaterialGraphOutputWorldPositionOffset): one implementation for every pass that draws the geometry --
 // the visibility buffer and the shadow maps (VisibilityBuffer.slang), the G-buffer resolve (GBufferMaterial.slang: the triangle it
 // rebuilds must be the one rasterized, and last frame's for the motion vectors), the forward mesh stage (Material_PBR_Mesh.slang) and
@@ -195,6 +198,50 @@ bool material_graph_mask_cuts(float2 uv0, float2 uv1, float3 worldPos, float3 no
         return false;
     return material_graph_opacity_mask(material.graphSlot, i) < instance.alphaMaskCutoff;
 }
+
+#endif // NOX_MATERIAL_GRAPH_MASK_ONLY
+
+// --- Opacity Mask at a ray hit (NOX_MATERIAL_GRAPH_MASK: shaderIO.h's RayHitAlpha / RayHitCoverage in the ray tracing passes' graph
+// variants, and the forward shader's ray-traced shadows): the graph's inputs rebuilt from the hit triangle -- its corners as the ray
+// tracing scene holds them (LoadRayTracingVertex: skinned, unmoved by World Position Offset), the UVs, the vertex normal (world), the
+// vertex colour, the world position through the instance's transform. No screen derivatives (a Texture Sample reads the finest mip),
+// Camera Vector towards the main camera, Screen Position the view's centre.
+#ifdef NOX_MATERIAL_GRAPH_MASK
+float material_graph_ray_mask(UniformBufferObject* ubo, GpuRayTracingInstance instance, uint primitive, float2 barycentrics, out bool handled)
+{
+    handled = false;
+    if (instance.alphaMode != 1)
+        return 1.0;
+    GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
+    if (material.graphSlot == 0xFFFFFFFFu || (material.graphOutputs & MaterialGraphOutputOpacityMask) == 0u)
+        return 1.0;
+    handled = true;
+    const uint3 corners = RayTracingTriangle(instance, primitive);
+    const Vertex v0 = LoadRayTracingVertex(instance, corners.x);
+    const Vertex v1 = LoadRayTracingVertex(instance, corners.y);
+    const Vertex v2 = LoadRayTracingVertex(instance, corners.z);
+    const float3 w = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
+    const float3 localPosition = v0.pos * w.x + v1.pos * w.y + v2.pos * w.z;
+    const float4x4 world = ((GpuTransform*)ubo->sceneTransformsReference)[instance.instanceSlot].world;
+    const float3 position = mul(world, float4(localPosition, 1.0)).xyz; // (render space)
+    const float3 normal = mul((float3x3)instance.normalMatrix, v0.normal * w.x + v1.normal * w.y + v2.normal * w.z);
+    MaterialGraphInputs i = (MaterialGraphInputs)0;
+    i.uv0 = v0.uv0 * w.x + v1.uv0 * w.y + v2.uv0 * w.z;
+    i.uv1 = v0.uv1 * w.x + v1.uv1 * w.y + v2.uv1 * w.z;
+    i.position = position + ubo->renderOrigin;
+    i.normal = dot(normal, normal) > 1e-12 ? normalize(normal) : float3(0.0, 0.0, 1.0);
+    i.vertexColor = RayTracingVertexColor(instance, corners, barycentrics);
+    const float3 toCamera = ubo->cameraWorldPos.xyz - position;
+    i.view = dot(toCamera, toCamera) > 1e-12 ? normalize(toCamera) : float3(0.0, 0.0, 1.0);
+    i.screenUV = float2(0.5);
+    i.time = ubo->timeSeconds;
+    i.cameraPosition = ubo->cameraWorldPos.xyz + ubo->renderOrigin;
+    i.material = material;
+    i.mipFeedback = false;
+    i.ubo = ubo;
+    return material_graph_opacity_mask(material.graphSlot, i);
+}
+#endif
 
 // Smooth value noise in [0, 1] (Noise node).
 float material_graph_hash(float3 p)

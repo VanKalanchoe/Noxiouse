@@ -882,6 +882,8 @@ namespace Nox
         if (const NodeGraphValue* displacement = Property(outputNode, "Max World Position Offset Displacement"))
             if (const float* value = std::get_if<float>(displacement))
                 program.MaxDisplacement = std::max(*value, 0.0f);
+        if ((maskContext.Outputs & MaterialGraphOutputOpacityMask) != 0)
+            program.MaskCode = std::format("float opacity_mask(MaterialGraphInputs i)\n{{\n{}}}\n", maskContext.Body);
         program.Code = std::format("static const uint Outputs = {}u;\n\nvoid surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)\n{{\n{}}}\n\n"
                                    "float opacity_mask(MaterialGraphInputs i)\n{{\n{}}}\n\n"
                                    "float3 world_position_offset(MaterialGraphInputs i)\n{{\n{}}}\n",

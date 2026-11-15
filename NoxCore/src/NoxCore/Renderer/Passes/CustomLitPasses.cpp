@@ -182,7 +182,7 @@ namespace Nox
                 continue;
             if (graph.Program.Valid)
             {
-                graphSources.push_back({ graph.Path, graph.Program.Code });
+                graphSources.push_back({ graph.Path, graph.Program.Code, graph.Program.MaskCode });
                 programs.emplace(graph.Path, graph.Program);
             }
             else
@@ -210,6 +210,7 @@ namespace Nox
                 m_stableEntityDepthGraphPipeline.reset();
                 m_selectionMaskGraphPipeline.reset();
             }
+            updateRayTracingGraphMasks(false);
             m_customLitPaths = paths;
             m_materialGraphPaths = graphPaths;
             m_materialGraphPrograms.clear();
@@ -228,6 +229,7 @@ namespace Nox
             // (they are not in its code, so its layout is the same): the materials packed again with them.
             if (m_materialGraphPaths == graphPaths)
                 m_materialGraphPrograms = std::move(programs);
+            updateRayTracingGraphMasks(m_gbufferGraphPipeline && AnyGraphMask(m_materialGraphPrograms));
             ++m_customLitStatus.Version;
             m_gpuMaterialsDirty = true;
             return;
@@ -248,6 +250,7 @@ namespace Nox
         build->GraphPaths = graphPaths;
         build->GraphPrograms = std::move(programs);
         build->GraphCount = graphCount;
+        build->RayMasksWanted = AnyGraphMask(build->GraphPrograms);
         // The forward variant (the slowest) compiles on a thread of its own beside the others; both above the editor's priority.
         build->Task = std::async(std::launch::async, [this, build, compile, shaderCount, graphCount]()
         {
@@ -307,7 +310,22 @@ namespace Nox
                     m_shaderCompiler->compile(CustomLitShaders::CheckSourcePath().generic_string());
                 if (!phase())
                     return;
+                // The ray tracing passes' variants with the graphs' masks: their shaders compiled here (those whose binary is not cached:
+                // only after a mask changed), the main thread then creates the pipelines from them (updateRayTracingGraphMasks).
+                bool rayMasks = false;
+                if (build->RayMasksWanted && !cancelled())
+                {
+                    std::vector<std::string> variants;
+                    for (const CustomLitShaders::RayTracingMaskVariant& variant : CustomLitShaders::RayTracingMaskVariants())
+                        variants.push_back(variant.Variant);
+                    rayMasks = m_device->compileShaderModules(variants, *m_shaderCompiler);
+                    if (!rayMasks)
+                        NOX_CORE_ERROR("Material graphs: the ray tracing passes' Opacity Mask variants do not compile (they keep the material's own alpha)");
+                }
+                if (cancelled())
+                    return;
                 std::lock_guard lock(build->Mutex);
+                build->RayMasks = rayMasks;
                 build->ForwardDone = true;
             }
             catch (const std::exception& error)
@@ -398,6 +416,8 @@ namespace Nox
                 m_customLitStatus.Ready = false;
                 m_gpuMaterialsDirty = true;
             }
+            // The ray tracing passes: their graph variants while a graph connects Opacity Mask (created again when a mask changed).
+            updateRayTracingGraphMasks(build.RayMasks);
             if (build.GraphCount == 0 && m_gbufferGraphPipeline)
             {
                 m_device->waitIdle();
@@ -436,6 +456,44 @@ namespace Nox
             m_customLitPending.reset();
             startCustomLitBuild(pending.Sources, pending.Graphs);
         }
+    }
+
+    bool Renderer::AnyGraphMask(const std::unordered_map<std::string, MaterialGraphProgram>& programs)
+    {
+        return std::any_of(programs.begin(), programs.end(), [](const auto& entry) { return !entry.second.MaskCode.empty(); });
+    }
+
+    std::string Renderer::rayTracingShader(const std::string& source) const
+    {
+        if (m_rayTracingGraphMasks)
+            for (const CustomLitShaders::RayTracingMaskVariant& variant : CustomLitShaders::RayTracingMaskVariants())
+                if (variant.Source == source)
+                    return variant.Variant;
+        return source;
+    }
+
+    void Renderer::updateRayTracingGraphMasks(bool wanted)
+    {
+        // Created again only when something they compile from changed: whether the masks are on, or the masks' text.
+        const uint64_t hash = wanted ? m_shaderCompiler->sourceHash(CustomLitShaders::GraphMasksSourcePath().generic_string()) : 0;
+        if (wanted == m_rayTracingGraphMasks && hash == m_rayTracingGraphMasksHash)
+            return;
+        m_device->waitIdle(); // (the pipelines replaced may still be in flight)
+        m_rayTracingGraphMasks = wanted;
+        m_rayTracingGraphMasksHash = hash;
+        // Every pass that alpha tests ray hits (their shaders compiled on the build's thread, or cached: built on the pool from them).
+        createShadowMaskPipeline(false);
+        createDeferredLightingPipeline(false);
+        createRTAOPipeline(false);
+        createReflectionPipeline(false);
+        createScreenProbePipelines(false);
+        createDDGIPipelines(false);
+        createReSTIRDIPipelines(false);
+        createReSTIRGIPipelines(false);
+        createReSTIRPTPipelines(false);
+        createPathTracerPipeline(false);
+        NOX_CORE_INFO(wanted ? "Material graphs: ray-traced shadows, reflections, GI, AO and the path tracer cut the graphs' Opacity Mask"
+                             : "Material graphs: the ray tracing passes test the materials' own alpha again (no graph connects Opacity Mask)");
     }
 
     void Renderer::waitForCustomLitBuild()
@@ -484,6 +542,10 @@ namespace Nox
         {
             m_device->waitIdle();
             createCustomLitPipelines(false);
+            // (the ray tracing passes' mask variants shipped with their binaries when the editor had built them)
+            const bool variantsShipped = std::all_of(CustomLitShaders::RayTracingMaskVariants().begin(), CustomLitShaders::RayTracingMaskVariants().end(),
+                                                     [](const CustomLitShaders::RayTracingMaskVariant& variant) { return std::filesystem::exists(variant.Variant); });
+            updateRayTracingGraphMasks(m_gbufferGraphPipeline && variantsShipped && AnyGraphMask(m_materialGraphPrograms));
         }
         ++m_customLitStatus.Version;
         m_gpuMaterialsDirty = true;

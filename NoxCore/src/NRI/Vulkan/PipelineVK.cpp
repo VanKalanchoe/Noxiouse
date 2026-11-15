@@ -18,6 +18,7 @@
 #include "NoxCore/Core/core.h"
 #include "NoxCore/Core/Hash.h"
 #include "NoxCore/Core/Log.h"
+#include <future>
 
 namespace NRI
 {
@@ -454,25 +455,53 @@ namespace NRI
         }, std::move(sources), 0);
     }
 
+    // Some binary of the source's current text is in the cache (<exe>/shaders/<stem>/<stem>.<stage>.<entry>.<hash>.bin).
+    static bool HasCachedBinary(const std::string& source, ShaderCompiler& compiler)
+    {
+        const std::string hashPart = "." + std::to_string(compiler.sourceHash(source)) + ".";
+        std::error_code error;
+        for (const auto& file : std::filesystem::directory_iterator(shaderFolder() / std::filesystem::path(source).stem(), error))
+            if (file.path().filename().string().find(hashPart) != std::string::npos)
+                return true;
+        return false;
+    }
+
+    bool PipelineVK::CompileModulesNow(const std::vector<std::string>& sources, ShaderCompiler& compiler)
+    {
+        if (!compiler.canCompile())
+            return true; // (a packaged game: its binaries came with it)
+        std::vector<std::future<bool>> compiles;
+        for (const std::string& source : sources)
+        {
+            if (HasCachedBinary(source, compiler))
+                continue;
+            compiles.push_back(std::async(std::launch::async, [&compiler, source]
+            {
+                try
+                {
+                    compileModuleOnce(source, compiler);
+                    return true;
+                }
+                catch (const std::exception& error)
+                {
+                    NOX_CORE_ERROR("Shader {} does not compile: {}", source, error.what());
+                    return false;
+                }
+            }));
+        }
+        bool compiled = true;
+        for (std::future<bool>& compile : compiles)
+            compiled &= compile.get();
+        return compiled;
+    }
+
     void PipelineVK::PrecompileModules(const std::vector<std::string>& sources, ShaderCompiler& compiler)
     {
         if (!compiler.canCompile())
             return;
         for (const std::string& source : sources)
         {
-            // Cached: some binary of the source's current text is there (<exe>/shaders/<stem>/<stem>.<stage>.<entry>.<hash>.bin).
-            const std::string hashPart = "." + std::to_string(compiler.sourceHash(source)) + ".";
-            bool cached = false;
-            std::error_code error;
-            for (const auto& file : std::filesystem::directory_iterator(shaderFolder() / std::filesystem::path(source).stem(), error))
-            {
-                if (file.path().filename().string().find(hashPart) != std::string::npos)
-                {
-                    cached = true;
-                    break;
-                }
-            }
-            if (cached)
+            if (HasCachedBinary(source, compiler))
                 continue;
             NOX_CORE_INFO("Shader compile started first (most pipelines use it): {}", source);
             PipelineBuildPool::Get().Submit([source, &compiler]

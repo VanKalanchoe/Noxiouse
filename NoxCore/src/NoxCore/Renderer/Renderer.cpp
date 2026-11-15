@@ -1356,17 +1356,17 @@ namespace Nox
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
             .entryPoint = "taskMain",
-            .sourcePath = "assets/shaders/ShadowMask.slang"
+            .sourcePath = rayTracingShader("assets/shaders/ShadowMask.slang")
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Mesh,
             .entryPoint = "meshMain",
-            .sourcePath = "assets/shaders/ShadowMask.slang"
+            .sourcePath = rayTracingShader("assets/shaders/ShadowMask.slang")
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Fragment,
             .entryPoint = "fragMain",
-            .sourcePath = "assets/shaders/ShadowMask.slang"
+            .sourcePath = rayTracingShader("assets/shaders/ShadowMask.slang")
         });
 
         m_shadowMaskPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
@@ -1394,17 +1394,17 @@ namespace Nox
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
             .entryPoint = "taskMain",
-            .sourcePath = "assets/shaders/Reflection.slang"
+            .sourcePath = rayTracingShader("assets/shaders/Reflection.slang")
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Mesh,
             .entryPoint = "meshMain",
-            .sourcePath = "assets/shaders/Reflection.slang"
+            .sourcePath = rayTracingShader("assets/shaders/Reflection.slang")
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Fragment,
             .entryPoint = "fragMain",
-            .sourcePath = "assets/shaders/Reflection.slang"
+            .sourcePath = rayTracingShader("assets/shaders/Reflection.slang")
         });
 
         m_reflectionPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
@@ -1435,14 +1435,14 @@ namespace Nox
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::ClosestHit,
             .entryPoint = "closestHitMain",
-            .sourcePath = "assets/shaders/PathTracer/PathTracerHit.slang"
+            .sourcePath = rayTracingShader("assets/shaders/PathTracer/PathTracerHit.slang")
         });
 
         // Stage 3: AnyHit
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::AnyHit,
             .entryPoint = "anyHitMain",
-            .sourcePath = "assets/shaders/PathTracer/PathTracerAnyHit.slang"
+            .sourcePath = rayTracingShader("assets/shaders/PathTracer/PathTracerAnyHit.slang")
         });
 
         // HitGroup 0: Opaque (no anyhit)
@@ -1726,17 +1726,17 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
                 .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang"
+                .sourcePath = rayTracingShader("assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang")
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Mesh,
                 .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang"
+                .sourcePath = rayTracingShader("assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang")
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Fragment,
                 .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang"
+                .sourcePath = rayTracingShader("assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang")
             });
             m_restirPTInitialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1774,17 +1774,17 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
                 .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang"
+                .sourcePath = rayTracingShader("assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang")
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Mesh,
                 .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang"
+                .sourcePath = rayTracingShader("assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang")
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Fragment,
                 .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang"
+                .sourcePath = rayTracingShader("assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang")
             });
             m_restirPTTemporalPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1800,17 +1800,17 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
                 .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/DDGIRadiance.slang"
+                .sourcePath = rayTracingShader("assets/shaders/DDGIRadiance.slang")
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Mesh,
                 .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/DDGIRadiance.slang"
+                .sourcePath = rayTracingShader("assets/shaders/DDGIRadiance.slang")
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Fragment,
                 .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/DDGIRadiance.slang"
+                .sourcePath = rayTracingShader("assets/shaders/DDGIRadiance.slang")
             });
             m_ddgiRadiancePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -1869,7 +1869,7 @@ namespace Nox
     void Renderer::createScreenProbePipelines(bool forceCompile)
     {
         // Compute dispatches over their own targets (ScreenProbeCommon.slang), so they can run on the async compute queue.
-        auto create = [&](const char* source)
+        auto create = [&](const std::string& source)
         {
             NRI::PipelineDesc desc{};
             desc.type = NRI::PipelineType::Compute;
@@ -1878,7 +1878,7 @@ namespace Nox
             return m_device->createPipeline(desc, *m_shaderCompiler);
         };
         m_screenProbePlacePipeline = create("assets/shaders/ScreenProbePlace.slang");
-        m_screenProbeTracePipeline = create("assets/shaders/ScreenProbeTrace.slang");
+        m_screenProbeTracePipeline = create(rayTracingShader("assets/shaders/ScreenProbeTrace.slang"));
         m_screenProbeIrradiancePipeline = create("assets/shaders/ScreenProbeIrradiance.slang");
         m_screenProbeFilterPipeline = create("assets/shaders/ScreenProbeFilter.slang");
         m_screenProbeIntegratePipeline = create("assets/shaders/ScreenProbeIntegrate.slang");
@@ -1915,17 +1915,17 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
                 .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang"
+                .sourcePath = rayTracingShader("assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang")
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Mesh,
                 .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang"
+                .sourcePath = rayTracingShader("assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang")
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Fragment,
                 .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang"
+                .sourcePath = rayTracingShader("assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang")
             });
             m_restirGIInitialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -2108,17 +2108,17 @@ namespace Nox
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Task,
                 .entryPoint = "taskMain",
-                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang"
+                .sourcePath = rayTracingShader("assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang")
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Mesh,
                 .entryPoint = "meshMain",
-                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang"
+                .sourcePath = rayTracingShader("assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang")
             });
             desc.shaders.push_back({
                 .stage = NRI::ShaderStage::Fragment,
                 .entryPoint = "fragMain",
-                .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang"
+                .sourcePath = rayTracingShader("assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang")
             });
             m_restirDIFinalShadingPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
         }
@@ -2458,17 +2458,17 @@ namespace Nox
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
             .entryPoint = "taskMain",
-            .sourcePath = "assets/shaders/DeferredLighting.slang"
+            .sourcePath = rayTracingShader("assets/shaders/DeferredLighting.slang")
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Mesh,
             .entryPoint = "meshMain",
-            .sourcePath = "assets/shaders/DeferredLighting.slang"
+            .sourcePath = rayTracingShader("assets/shaders/DeferredLighting.slang")
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Fragment,
             .entryPoint = "fragMain",
-            .sourcePath = "assets/shaders/DeferredLighting.slang"
+            .sourcePath = rayTracingShader("assets/shaders/DeferredLighting.slang")
         });
 
         m_deferredLightingPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
@@ -2538,17 +2538,17 @@ namespace Nox
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Task,
             .entryPoint = "taskMain",
-            .sourcePath = "assets/shaders/RTAO.slang"
+            .sourcePath = rayTracingShader("assets/shaders/RTAO.slang")
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Mesh,
             .entryPoint = "meshMain",
-            .sourcePath = "assets/shaders/RTAO.slang"
+            .sourcePath = rayTracingShader("assets/shaders/RTAO.slang")
         });
         desc.shaders.push_back({
             .stage = NRI::ShaderStage::Fragment,
             .entryPoint = "fragMain",
-            .sourcePath = "assets/shaders/RTAO.slang"
+            .sourcePath = rayTracingShader("assets/shaders/RTAO.slang")
         });
 
         m_rtaoPipeline = m_device->createPipeline(desc, *m_shaderCompiler);

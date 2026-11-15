@@ -64,6 +64,9 @@ namespace Nox
         // `float opacity_mask(MaterialGraphInputs i)` (only the nodes feeding the Opacity Mask pin; 1 when it is not connected) and
         // `float3 world_position_offset(MaterialGraphInputs i)` (only the nodes feeding World Position Offset; 0 when not connected).
         std::string Code;
+        // `float opacity_mask(MaterialGraphInputs i)` alone (the ray tracing passes' variants get the graphs' masks only: MaterialGraphMasks.slang,
+        // which changes only when a mask does). Empty when the graph does not connect Opacity Mask.
+        std::string MaskCode;
         std::vector<MaterialGraphParameter> Parameters;
         uint32_t ParameterSlots = 0;
         uint32_t TextureSlots = 0;

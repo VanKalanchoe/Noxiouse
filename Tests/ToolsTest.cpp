@@ -353,6 +353,24 @@ static void TestMaterialGraph()
           waveProgram.TextureSlots);
     CHECK(program.Code.find("    return float3(0.0);") != std::string::npos && program.MaxDisplacement == 0.0f,
           "a graph without the offset returns 0 from world_position_offset() and has no Max Displacement");
+    // Ray tracing (step 4c part 2): the mask alone for MaterialGraphMasks.slang -- only graphs with a mask get a case, and no surface or
+    // offset code is in it (a surface edit leaves the ray tracing variants' binaries alone).
+    CHECK(!maskProgram.MaskCode.empty() && maskProgram.MaskCode.find("float opacity_mask(MaterialGraphInputs i)") == 0 &&
+          maskProgram.MaskCode.find("surface(") == std::string::npos && waveProgram.MaskCode.empty() && program.MaskCode.empty(),
+          "MaskCode: the mask function alone, empty without a mask");
+    const std::string masksFile = CustomLitShaders::GenerateGraphMaskDispatcher(
+        { "Graphs/Panned.nmatgraph", "Graphs/Leaves.nmatgraph", "Graphs/Waving.nmatgraph" },
+        { { "Graphs/Panned.nmatgraph", program.Code, program.MaskCode }, { "Graphs/Leaves.nmatgraph", maskProgram.Code, maskProgram.MaskCode },
+          { "Graphs/Waving.nmatgraph", waveProgram.Code, waveProgram.MaskCode } });
+    CHECK(masksFile.find("case 1u: return MaterialGraph1::opacity_mask(i);") != std::string::npos && masksFile.find("case 0u") == std::string::npos &&
+          masksFile.find("case 2u") == std::string::npos && masksFile.find("surface(") == std::string::npos &&
+          masksFile.find("world_position_offset") == std::string::npos && masksFile.find("#define NOX_MATERIAL_GRAPH_MASK_ONLY 1") != std::string::npos,
+          "MaterialGraphMasks.slang: a case for the masked graph only, no surface or offset code, the raster helpers left out");
+    const auto& rayVariants = CustomLitShaders::RayTracingMaskVariants();
+    CHECK(rayVariants.size() == 12 && std::any_of(rayVariants.begin(), rayVariants.end(), [](const CustomLitShaders::RayTracingMaskVariant& v)
+          {
+              return v.Source == "assets/shaders/ShadowMask.slang" && v.Variant.ends_with("/ShadowMaskGraphMask.slang");
+          }), "twelve ray tracing passes get a mask variant (the sun's ray-traced shadows among them): {}", rayVariants.size());
     NodeGraph screenOffset = CreateEmptyMaterialGraph();
     link(screenOffset, node(screenOffset, "Screen Position"), 0, screenOffset.OutputNode, 8);
     const MaterialGraphProgram screenOffsetProgram = CompileMaterialGraph(screenOffset);
@@ -397,6 +415,11 @@ static void TestMaterialGraph()
         std::ofstream maskFile(std::string(dump) + "/MaterialGraphsMask.slang");
         maskFile << CustomLitShaders::GenerateGraphDispatcher({ "Graphs/Leaves.nmatgraph" }, { { "Graphs/Leaves.nmatgraph", maskProgram.Code } });
         // Every function in use: a surface graph, a masked one and a waving one (compile every graph variant with it).
+        std::ofstream masksOut(std::string(dump) + "/MaterialGraphMasks.slang");
+        masksOut << CustomLitShaders::GenerateGraphMaskDispatcher({ "Graphs/Panned.nmatgraph", "Graphs/Leaves.nmatgraph", "Graphs/Waving.nmatgraph" },
+                                                                  { { "Graphs/Panned.nmatgraph", program.Code, program.MaskCode },
+                                                                    { "Graphs/Leaves.nmatgraph", maskProgram.Code, maskProgram.MaskCode },
+                                                                    { "Graphs/Waving.nmatgraph", waveProgram.Code, waveProgram.MaskCode } });
         std::ofstream allFile(std::string(dump) + "/MaterialGraphsAll.slang");
         allFile << CustomLitShaders::GenerateGraphDispatcher({ "Graphs/Panned.nmatgraph", "Graphs/Leaves.nmatgraph", "Graphs/Waving.nmatgraph" },
                                                              { { "Graphs/Panned.nmatgraph", program.Code }, { "Graphs/Leaves.nmatgraph", maskProgram.Code },

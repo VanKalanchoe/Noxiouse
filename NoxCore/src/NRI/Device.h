@@ -164,6 +164,9 @@ namespace NRI
         // Compiles these shader sources first, in the background (call before creating the pipelines that use them); a backend
         // that builds pipelines in place ignores it.
         virtual void precompileShaderModules(const std::vector<std::string>& sources, ShaderCompiler& compiler) {}
+        // Compiles these shader sources now, on this thread and helpers, those without a binary of their current text (any thread: a
+        // background build readies a pipeline's shaders before the main thread creates it). False when one does not compile.
+        virtual bool compileShaderModules(const std::vector<std::string>& sources, ShaderCompiler& compiler) { return true; }
         virtual std::unique_ptr<CommandAllocator> createCommandAllocator(CommandBufferReset resetMode, QueueType queue = QueueType::Graphics) = 0;
         virtual std::unique_ptr<TimelineSemaphore> createTimelineSemaphore(uint64_t initialValue = 0) = 0;
         // Whether Transfer is its own queue family (a copy engine running beside graphics) or the graphics queue.

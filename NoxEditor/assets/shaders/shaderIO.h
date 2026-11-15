@@ -573,7 +573,8 @@ struct GpuRayTracingInstance
     vec3 uvRow0;                    // UV channel 0's transform (ray_hit_uv: hits read every texture through channel 0)
     vec3 uvRow1;
     float normalScale;              // GpuMaterial::normalScale
-    uint32_t padding;               // (the record stays a multiple of 8 bytes: its addresses)
+    uint32_t instanceSlot;          // the GPU scene's instance slot (its transform: a material graph's Opacity Mask at a ray hit reads
+                                    // World Position); also keeps the record a multiple of 8 bytes (its addresses)
 };
 
 struct GpuMesh
@@ -1270,19 +1271,52 @@ float RayTracingVertexAlpha(GpuRayTracingInstance instance, uint primitive, floa
 {
     return instance.colorBufferAddress == 0 ? 1.0 : RayTracingVertexColor(instance, RayTracingTriangle(instance, primitive), barycentrics).a;
 }
-// Whether a hit's base color has an alpha to test: a base color texture or vertex colors (else an alpha-masked surface is solid).
+// Ray tracing with the material graphs' Opacity Mask (NOX_MATERIAL_GRAPH_MASK: the ray tracing passes' graph variants, generated with
+// MaterialGraphMasks.slang -- Renderer/CustomLitShaders.h): a Masked material whose graph connects Opacity Mask is tested with the
+// graph's mask at the hit instead of its base colour's alpha, as the visibility buffer and the shadow maps test it. Defined in
+// MaterialGraph.slang (material_graph_ray_mask); `handled` false: the material has no graph mask.
+#ifdef NOX_MATERIAL_GRAPH_MASK
+float material_graph_ray_mask(UniformBufferObject* ubo, GpuRayTracingInstance instance, uint primitive, float2 barycentrics, out bool handled);
+#endif
+
+// Whether a hit's base color has an alpha to test: a base color texture or vertex colors (else an alpha-masked surface is solid). With
+// the graphs' masks any Masked hit may have one (RayHitAlpha tells: 1 without).
 bool RayHitAlphaTested(GpuRayTracingInstance instance)
 {
+#ifdef NOX_MATERIAL_GRAPH_MASK
+    if (instance.alphaMode == 1)
+        return true;
+#endif
     return instance.baseColorTextureIndex != 0xFFFFFFFF || instance.colorBufferAddress != 0;
 }
-// That alpha at a hit: the texture's (at uv) times the vertex color's (the ray alpha tests' rule; the factor's is the caller's).
+// That alpha at a hit: the texture's (at uv) times the vertex color's (the ray alpha tests' rule; the factor's is the caller's). With
+// the graphs' masks: a graph-masked hit's mask (what is compared with the cutoff; see RayHitCoverage for the factor).
 float RayHitAlpha(UniformBufferObject* ubo, GpuRayTracingInstance instance, SamplerState samplerState, float2 uv, float lod, uint primitive,
                   float2 barycentrics)
 {
+#ifdef NOX_MATERIAL_GRAPH_MASK
+    bool graphMask;
+    const float mask = material_graph_ray_mask(ubo, instance, primitive, barycentrics, graphMask);
+    if (graphMask)
+        return mask;
+#endif
     float alpha = RayTracingVertexAlpha(instance, primitive, barycentrics);
     if (instance.baseColorTextureIndex != 0xFFFFFFFF)
         alpha *= SampleMaterialTextureLevel(ubo, instance.baseColorTextureIndex, samplerState, uv, lod).a;
     return alpha;
+}
+// A hit's coverage with its base colour factor: factor x RayHitAlpha; a graph-masked hit's mask alone (the raster's rule: the graph's
+// Opacity Mask is the whole coverage, compared with the Opacity Mask Clip Value).
+float RayHitCoverage(UniformBufferObject* ubo, GpuRayTracingInstance instance, SamplerState samplerState, float2 uv, float lod, uint primitive,
+                     float2 barycentrics)
+{
+#ifdef NOX_MATERIAL_GRAPH_MASK
+    bool graphMask;
+    const float mask = material_graph_ray_mask(ubo, instance, primitive, barycentrics, graphMask);
+    if (graphMask)
+        return mask;
+#endif
+    return instance.baseColorFactor.a * RayHitAlpha(ubo, instance, samplerState, uv, lod, primitive, barycentrics);
 }
 
 // Ray traversal can use compact deformed positions while hit shading retains the base vertex's UVs and material data.

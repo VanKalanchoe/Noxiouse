@@ -467,12 +467,9 @@ namespace Bridge
         float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
         float2 uv = ray_hit_uv(lut, v0.uv0 * bary.x + v1.uv0 * bary.y + v2.uv0 * bary.z); // the material's UV channel 0
 
+        // (factor x vertex colour x texture alpha; a material graph's Opacity Mask in the graph variants: RayHitCoverage)
         SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-        float alpha = lut.baseColorFactor.a * RayTracingVertexColor(lut, idx, barycentrics).a;
-        if (lut.baseColorTextureIndex != 0xFFFFFFFF)
-        {
-            alpha *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uv, 0.0).a;
-        }
+        const float alpha = RayHitCoverage(ubo, lut, textureSampler, uv, 0.0, primitiveIndex, barycentrics);
 
         return lut.alphaMode == 2 ? opacitySample < saturate(alpha) : alpha >= lut.alphaCutoff;
     }
@@ -512,11 +509,7 @@ namespace Bridge
         float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
         float2 uv = ray_hit_uv(lut, v0.uv0 * bary.x + v1.uv0 * bary.y + v2.uv0 * bary.z); // the material's UV channel 0
         SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-        float alpha = lut.baseColorFactor.a * RayTracingVertexColor(lut, idx, barycentrics).a;
-        if (lut.baseColorTextureIndex != 0xFFFFFFFF)
-        {
-            alpha *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, uv, 0.0).a;
-        }
+        const float alpha = RayHitCoverage(ubo, lut, textureSampler, uv, 0.0, primitiveIndex, barycentrics);
         if (lut.alphaMode == 2)
             return float3(1.0 - saturate(alpha));
         return alpha >= lut.alphaCutoff ? float3(0.0) : float3(1.0);

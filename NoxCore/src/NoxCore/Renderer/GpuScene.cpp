@@ -986,6 +986,7 @@ namespace Nox
         record.uvRow0 = material.uvRow0[channel];
         record.uvRow1 = material.uvRow1[channel];
         record.normalScale = material.normalScale;
+        record.instanceSlot = instanceSlot; // (a material graph's Opacity Mask at a ray hit: World Position through the instance's transform)
     }
 
     void GpuScene::ReleaseMaterial(uint32_t materialSlot)

@@ -33,6 +33,9 @@ namespace NRI
         // Starts compiling these sources on the pool ahead of every pipeline (those without a binary of their current text): the
         // module most pipelines share is done by the time they need it, instead of being picked last at random.
         static void PrecompileModules(const std::vector<std::string>& sources, ShaderCompiler& compiler);
+        // The same, waiting for them (one thread each): the module cache then holds them for the pipelines created next. False when one
+        // does not compile.
+        static bool CompileModulesNow(const std::vector<std::string>& sources, ShaderCompiler& compiler);
         // Built on the pool (FinishPendingBuilds reports it to the progress as created), or here.
         bool isBuiltOnPool() const;
         

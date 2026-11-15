@@ -270,7 +270,7 @@
             else
             {
                 const float2 uv = intersection_uv(lut, primIndex, sq.CandidateTriangleBarycentrics());
-                const float alpha = lut.baseColorFactor.a * RayHitAlpha(ubo, lut, textureSampler, uv, 0, primIndex, sq.CandidateTriangleBarycentrics());
+                const float alpha = RayHitCoverage(ubo, lut, textureSampler, uv, 0, primIndex, sq.CandidateTriangleBarycentrics());
                 if (lut.alphaMode == 2)
                     transmittance *= 1.0 - saturate(alpha);
                 else if (alpha >= lut.alphaCutoff)

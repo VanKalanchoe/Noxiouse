@@ -159,6 +159,11 @@ namespace NRI
             PipelineVK::PrecompileModules(sources, compiler);
     }
 
+    bool DeviceVK::compileShaderModules(const std::vector<std::string>& sources, ShaderCompiler& compiler)
+    {
+        return PipelineVK::CompileModulesNow(sources, compiler);
+    }
+
     std::unique_ptr<CommandAllocator> DeviceVK::createCommandAllocator(CommandBufferReset resetMode, QueueType queue)
     {
         return std::make_unique<CommandAllocatorVK>(*this, resetMode, getQueueFamily(queue));
