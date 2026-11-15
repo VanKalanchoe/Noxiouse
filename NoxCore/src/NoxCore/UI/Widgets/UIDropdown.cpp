@@ -52,7 +52,7 @@ namespace Nox::UI
         Padding = UIThickness::Symmetric(10.0f, 6.0f);
         MinSize = { 120.0f, 28.0f };
 
-        m_Label = Ref<UILabel>(new UILabel("", 13.5f));
+        m_Label = Ref<UILabel>(new UILabel(""));
         m_Label->HitTestMode = UIHitTestMode::None;
         m_Label->VAlign = UIAlignment::Center;
         AddChild(m_Label);
@@ -129,26 +129,27 @@ namespace Nox::UI
     {
         UIElement::OnPaint(drawList, theme);
 
+        const UIStyleBox& style = GetResolvedStyle();
         const UIRect& b = GetBounds();
-        const float cx = b.Max.x - Padding.Right - 6.0f;
+        const float halfW = std::max(3.0f, style.FontSize * 0.28f);
+        const float halfH = std::max(1.5f, style.FontSize * 0.14f);
+        const float cx = b.Max.x - Padding.Right - halfW - 2.0f;
         const float cy = (b.Min.y + b.Max.y) * 0.5f;
-        const UIColor arrowColor = !IsEnabled()
-            ? UIColor{ 0.45f, 0.48f, 0.54f, 0.7f }
-            : UIColor{ 0.78f, 0.82f, 0.88f, 0.95f };
+        const UIColor arrowColor = style.TextColor;
 
         drawList.AddBezier(
-            { cx - 4.0f, cy - 2.0f },
-            { cx - 2.0f, cy },
-            { cx - 1.0f, cy + 1.0f },
-            { cx, cy + 2.0f },
+            { cx - halfW, cy - halfH },
+            { cx - halfW * 0.5f, cy },
+            { cx - halfW * 0.25f, cy + halfH * 0.5f },
+            { cx, cy + halfH },
             1.6f,
             arrowColor
         );
         drawList.AddBezier(
-            { cx, cy + 2.0f },
-            { cx + 1.0f, cy + 1.0f },
-            { cx + 2.0f, cy },
-            { cx + 4.0f, cy - 2.0f },
+            { cx, cy + halfH },
+            { cx + halfW * 0.25f, cy + halfH * 0.5f },
+            { cx + halfW * 0.5f, cy },
+            { cx + halfW, cy - halfH },
             1.6f,
             arrowColor
         );
@@ -173,12 +174,11 @@ namespace Nox::UI
         popup->StyleClass = "MenuPopup";
         popup->DrawBackground = true;
         popup->HitTestMode = UIHitTestMode::Self;
-        popup->WidthMode = UISizeMode::Fixed;
+        popup->WidthMode = UISizeMode::Auto;
         popup->Padding = UIThickness::All(4.0f);
 
         const UIRect& b = GetBounds();
-        const float popupWidth = std::max(b.Width(), 150.0f);
-        popup->FixedSize.x = popupWidth;
+        popup->MinSize.x = b.Width();
         popup->AnchorMin = { 0.0f, 0.0f };
         popup->AnchorMax = { 0.0f, 0.0f };
         popup->AnchorOffsets = { b.Min.x, b.Max.y + 3.0f, 0.0f, 0.0f };
@@ -196,8 +196,7 @@ namespace Nox::UI
             if (isSelected)
                 itemBtn->StyleVariant = "primary";
             itemBtn->WidthMode = UISizeMode::Fill;
-            itemBtn->HeightMode = UISizeMode::Fixed;
-            itemBtn->FixedSize.y = 26.0f;
+            itemBtn->HeightMode = UISizeMode::Auto;
             popup->AddChild(itemBtn);
         }
 

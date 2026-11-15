@@ -35,6 +35,7 @@ namespace NRI
 
     private:
         DeviceVK& m_deviceVK;
+        vk::raii::SurfaceKHR m_ownedSurface = nullptr; // Destroyed after m_swapChain
         vk::raii::SwapchainKHR m_swapChain = nullptr;
         std::vector<vk::Image> m_swapChainImages;
         vk::SurfaceFormatKHR m_swapChainSurfaceFormat;

@@ -13,8 +13,13 @@ namespace Nox::UI
         float HSpacing = 6.0f;
         float VSpacing = 6.0f;
 
+        float ComputeHeightForWidth(float width) override;
+
     protected:
         UIVec2 ComputeDesiredSize() override;
         void ArrangeChildren(const UIRect& contentRect) override;
+
+    private:
+        UIVec2 ComputeWrappedSize(float wrapWidth, bool measureChildren);
     };
 }

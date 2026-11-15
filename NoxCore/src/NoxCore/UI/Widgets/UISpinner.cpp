@@ -30,14 +30,15 @@ namespace Nox::UI
     {
         const UIRect& b = GetBounds();
         const UIVec2 center = b.Center();
-        const float radius = std::min(b.Width(), b.Height()) * 0.36f;
+        const float extent = std::min(b.Width(), b.Height());
+        const float radius = extent * 0.36f;
         constexpr int kDots = 8;
 
         for (int i = 0; i < kDots; ++i)
         {
             const float angle = m_Phase + (static_cast<float>(i) / static_cast<float>(kDots)) * 6.2831853f;
             const float alpha = 0.20f + 0.80f * (static_cast<float>(i) / static_cast<float>(kDots - 1));
-            const float dotR = std::max(1.5f, Size * 0.085f * (0.65f + 0.35f * alpha));
+            const float dotR = std::max(1.5f, extent * 0.085f * (0.65f + 0.35f * alpha));
             const UIVec2 p{
                 center.x + std::cos(angle) * radius,
                 center.y + std::sin(angle) * radius

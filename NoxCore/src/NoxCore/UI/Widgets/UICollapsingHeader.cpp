@@ -17,8 +17,7 @@ namespace Nox::UI
         }));
         m_HeaderBtn->StyleClass = "TreeRow";
         m_HeaderBtn->WidthMode = UISizeMode::Fill;
-        m_HeaderBtn->HeightMode = UISizeMode::Fixed;
-        m_HeaderBtn->FixedSize.y = 26.0f;
+        m_HeaderBtn->HeightMode = UISizeMode::Auto;
         AddChild(m_HeaderBtn);
 
         m_Content = Ref<UIStackBox>(new UIStackBox(UIOrientation::Vertical, 6.0f));

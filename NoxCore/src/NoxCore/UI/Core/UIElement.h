@@ -4,6 +4,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "NoxCore/Core/Ref.h"
@@ -18,7 +19,7 @@ namespace Nox::UI
     {
     public:
         UIElement();
-        ~UIElement() override = default;
+        ~UIElement() override;
 
         uint64_t GetId() const { return m_Id; }
 
@@ -32,6 +33,7 @@ namespace Nox::UI
 
         // Layout pass (Pass 1: bottom-up Measure, Pass 2: top-down Arrange)
         UIVec2 Measure();
+        virtual float ComputeHeightForWidth(float /*width*/) { return m_DesiredSize.y; }
         void Arrange(const UIRect& allottedRect);
 
         const UIRect& GetBounds() const { return m_Bounds; }
@@ -117,4 +119,10 @@ namespace Nox::UI
         UIStyleBox m_CurrentStyle{};
         bool m_HasResolvedStyle = false;
     };
+
+    template <typename T, typename... Args>
+    Ref<T> MakeUI(Args&&... args)
+    {
+        return Ref<T>(new T(std::forward<Args>(args)...));
+    }
 }

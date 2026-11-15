@@ -1,5 +1,6 @@
 #include "Window.h"
 
+#include <algorithm>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_log.h>
 
@@ -12,20 +13,37 @@ namespace Nox
             SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
         }
         
-        float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-        SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+        float main_scale = m_Specification.ScaleByDisplay ? SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay()) : 1.0f;
+        SDL_WindowFlags flags = SDL_WINDOW_HIGH_PIXEL_DENSITY;
+        if (m_Specification.IsResizeable)
+            flags |= SDL_WINDOW_RESIZABLE;
+        if (m_Specification.Borderless)
+            flags |= SDL_WINDOW_BORDERLESS;
         if (m_Specification.IsVulkan)
             flags |= SDL_WINDOW_VULKAN;
-        m_window = SDL_CreateWindow(m_Specification.Ttile.empty() ? "Nox" : m_Specification.Ttile.c_str(), m_Specification.Width * main_scale, m_Specification.Height * main_scale, flags);
+        const int initialW = std::max(1, static_cast<int>(m_Specification.Width * main_scale));
+        const int initialH = std::max(1, static_cast<int>(m_Specification.Height * main_scale));
+        m_window = SDL_CreateWindow(m_Specification.Ttile.empty() ? "Nox" : m_Specification.Ttile.c_str(), initialW, initialH, flags);
         if (!m_window)
         {
             SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
         }
-        
-        SDL_SetWindowMinimumSize(m_window, 640, 480);
+        else
+        {
+            SDL_SetWindowMinimumSize(m_window, m_Specification.MinWidth, m_Specification.MinHeight);
+            if (m_Specification.HasPosition)
+                SDL_SetWindowPosition(m_window, m_Specification.PosX, m_Specification.PosY);
+        }
     }
 
-    Window::~Window() = default;
+    Window::~Window()
+    {
+        if (m_Specification.DestroyOnDestruct && m_window)
+        {
+            SDL_DestroyWindow(m_window);
+            m_window = nullptr;
+        }
+    }
 
     WindowMode ParseWindowMode(const std::string& name, WindowMode fallback)
     {
@@ -78,6 +96,59 @@ namespace Nox
     
     void Window::getSizeInPixels(int& width, int& height)
     {
-        SDL_GetWindowSizeInPixels(m_window, &width, &height);
+        if (m_window)
+            SDL_GetWindowSizeInPixels(m_window, &width, &height);
+        else
+            width = height = 0;
+    }
+
+    void Window::GetSize(int& width, int& height) const
+    {
+        if (m_window)
+            SDL_GetWindowSize(m_window, &width, &height);
+        else
+            width = height = 0;
+    }
+
+    void Window::GetPosition(int& x, int& y) const
+    {
+        if (m_window)
+            SDL_GetWindowPosition(m_window, &x, &y);
+        else
+            x = y = 0;
+    }
+
+    void Window::SetPosition(int x, int y)
+    {
+        if (m_window)
+            SDL_SetWindowPosition(m_window, x, y);
+    }
+
+    void Window::SetSize(int width, int height)
+    {
+        if (m_window)
+            SDL_SetWindowSize(m_window, std::max(width, 1), std::max(height, 1));
+    }
+
+    void Window::SetTitle(const std::string& title)
+    {
+        if (m_window)
+            SDL_SetWindowTitle(m_window, title.c_str());
+    }
+
+    void Window::Focus()
+    {
+        if (m_window)
+            SDL_RaiseWindow(m_window);
+    }
+
+    uint32_t Window::GetWindowID() const
+    {
+        return m_window ? SDL_GetWindowID(m_window) : 0;
+    }
+
+    float Window::GetContentScale() const
+    {
+        return m_window ? SDL_GetWindowDisplayScale(m_window) : 1.0f;
     }
 }

@@ -25,12 +25,24 @@ namespace Nox::UI
         bool OnPointerDown(const UIPointerEvent& e) override;
         bool OnPointerMove(const UIPointerEvent& e) override;
         bool OnPointerUp(const UIPointerEvent& e) override;
+        bool OnKeyDown(const UIKeyEvent& e) override;
+        bool OnTextInput(std::string_view text) override;
 
     protected:
+        void OnUpdate(float dt) override;
         UIVec2 ComputeDesiredSize() override;
         void OnPaint(UIDrawList& drawList, const UITheme& theme) override;
 
     private:
+        void BeginEdit();
+        void CommitEdit();
+
         bool m_Dragging = false;
+        bool m_Editing = false;
+        bool m_SelectAll = false;
+        std::string m_EditText;
+        size_t m_Cursor = 0;
+        float m_BlinkTimer = 0.0f;
+        uint64_t m_LastClickTicks = 0;
     };
 }

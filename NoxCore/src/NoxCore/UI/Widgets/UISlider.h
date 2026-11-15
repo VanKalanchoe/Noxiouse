@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <string>
+#include <string_view>
 
 #include "NoxCore/UI/Core/UIElement.h"
 
@@ -24,6 +25,9 @@ namespace Nox::UI
         bool OnPointerDown(const UIPointerEvent& e) override;
         bool OnPointerMove(const UIPointerEvent& e) override;
         bool OnPointerUp(const UIPointerEvent& e) override;
+        bool OnKeyDown(const UIKeyEvent& e) override;
+        bool OnTextInput(std::string_view text) override;
+        void OnUpdate(float deltaTime) override;
 
     protected:
         UIVec2 ComputeDesiredSize() override;
@@ -31,6 +35,15 @@ namespace Nox::UI
 
     private:
         void UpdateFromPointerX(float x);
+        void BeginEdit();
+        void CommitEdit(bool apply);
+
         bool m_Dragging = false;
+        bool m_Editing = false;
+        bool m_SelectAll = false;
+        std::string m_EditText;
+        size_t m_Cursor = 0;
+        float m_BlinkTimer = 0.0f;
+        uint64_t m_LastClickTicks = 0;
     };
 }

@@ -11,6 +11,27 @@ namespace Nox::UI
     {
     }
 
+    float UIStackBox::ComputeHeightForWidth(float width)
+    {
+        if (Orientation == UIOrientation::Horizontal)
+            return GetDesiredSize().y;
+
+        const float innerW = std::max(0.0f, width - Padding.Horizontal());
+        float totalH = 0.0f;
+        size_t visibleCount = 0;
+        for (const auto& child : GetChildren())
+        {
+            if (!child->Visible)
+                continue;
+            const float cw = std::max(0.0f, innerW - child->Margin.Horizontal());
+            totalH += child->ComputeHeightForWidth(cw) + child->Margin.Vertical();
+            ++visibleCount;
+        }
+        if (visibleCount > 1)
+            totalH += Spacing * static_cast<float>(visibleCount - 1);
+        return totalH + Padding.Vertical();
+    }
+
     UIVec2 UIStackBox::ComputeDesiredSize()
     {
         const bool horiz = (Orientation == UIOrientation::Horizontal);
@@ -59,6 +80,9 @@ namespace Nox::UI
         const float totalSpacing = visibleCount > 1 ? Spacing * static_cast<float>(visibleCount - 1) : 0.0f;
         const float availableMain = horiz ? contentRect.Width() : contentRect.Height();
         const float flexSpace = std::max(0.0f, availableMain - fixedMain - totalSpacing);
+        const float shrinkScale = (fixedMain > 0.0f && availableMain < fixedMain + totalSpacing)
+            ? std::max(0.0f, availableMain - totalSpacing) / fixedMain
+            : 1.0f;
 
         float cursor = horiz ? contentRect.Min.x : contentRect.Min.y;
         for (const auto& child : children)
@@ -68,7 +92,7 @@ namespace Nox::UI
 
             const UISizeMode mainMode = horiz ? child->WidthMode : child->HeightMode;
             const UIVec2 desired = child->GetDesiredSize();
-            float childMain = horiz ? desired.x : desired.y;
+            float childMain = (horiz ? desired.x : desired.y) * shrinkScale;
             if (mainMode == UISizeMode::Fill && totalFlex > 0.0f)
                 childMain = flexSpace * (std::max(0.0f, child->FlexWeight) / totalFlex);
 
@@ -150,11 +174,57 @@ namespace Nox::UI
     UIGridBox::UIGridBox(uint32_t columns, float colSpacing, float rowSpacing)
         : Columns(std::max(1u, columns)), ColumnSpacing(colSpacing), RowSpacing(rowSpacing)
     {
+        ClipChildren = true;
+    }
+
+    uint32_t UIGridBox::ResolveColumnCount(float availWidth) const
+    {
+        const uint32_t maxCols = std::max(1u, Columns);
+        if (MinColumnWidth <= 0.0f || availWidth <= 0.0f)
+            return maxCols;
+        const uint32_t fit = static_cast<uint32_t>((availWidth + ColumnSpacing) / (MinColumnWidth + ColumnSpacing));
+        return std::clamp(fit, 1u, maxCols);
+    }
+
+    float UIGridBox::ComputeHeightForWidth(float width)
+    {
+        const float contentW = std::max(0.0f, width - Padding.Horizontal());
+        const uint32_t cols = ResolveColumnCount(contentW);
+        const float totalColSpacing = cols > 1 ? ColumnSpacing * static_cast<float>(cols - 1) : 0.0f;
+        const float cellW = std::max(1.0f, (contentW - totalColSpacing) / static_cast<float>(cols));
+
+        std::vector<float> rowHeights;
+        uint32_t idx = 0;
+        for (const auto& child : GetChildren())
+        {
+            if (!child->Visible)
+                continue;
+            const uint32_t row = idx / cols;
+            if (row >= rowHeights.size())
+                rowHeights.resize(row + 1, 0.0f);
+            rowHeights[row] = std::max(rowHeights[row], child->ComputeHeightForWidth(cellW));
+            ++idx;
+        }
+        const float totalH = std::accumulate(rowHeights.begin(), rowHeights.end(), 0.0f)
+            + (rowHeights.size() > 1 ? RowSpacing * static_cast<float>(rowHeights.size() - 1) : 0.0f);
+        return totalH + Padding.Vertical();
     }
 
     UIVec2 UIGridBox::ComputeDesiredSize()
     {
-        const uint32_t cols = std::max(1u, Columns);
+        float availW = GetBounds().Width() > 1.0f ? std::max(1.0f, GetBounds().Width() - Padding.Horizontal()) : 0.0f;
+        if (availW <= 0.0f)
+        {
+            for (const UIElement* p = GetParent(); p; p = p->GetParent())
+            {
+                if (p->GetBounds().Width() > 1.0f)
+                {
+                    availW = std::max(1.0f, p->GetBounds().Width() - p->Padding.Horizontal() - Padding.Horizontal());
+                    break;
+                }
+            }
+        }
+        const uint32_t cols = ResolveColumnCount(availW);
         std::vector<float> colWidths(cols, 0.0f);
         std::vector<float> rowHeights;
 
@@ -183,22 +253,65 @@ namespace Nox::UI
 
     void UIGridBox::ArrangeChildren(const UIRect& contentRect)
     {
-        const uint32_t cols = std::max(1u, Columns);
+        const uint32_t cols = ResolveColumnCount(contentRect.Width());
         const float totalColSpacing = cols > 1 ? ColumnSpacing * static_cast<float>(cols - 1) : 0.0f;
-        const float cellW = std::max(0.0f, (contentRect.Width() - totalColSpacing) / static_cast<float>(cols));
+        const float availW = std::max(0.0f, contentRect.Width() - totalColSpacing);
 
+        std::vector<float> colWidths(cols, 0.0f);
         std::vector<float> rowHeights;
         uint32_t idx = 0;
         for (const auto& child : GetChildren())
         {
             if (!child->Visible)
                 continue;
+            const uint32_t col = idx % cols;
             const uint32_t row = idx / cols;
             if (row >= rowHeights.size())
                 rowHeights.resize(row + 1, 0.0f);
-            rowHeights[row] = std::max(rowHeights[row], child->GetDesiredSize().y);
+            const UIVec2 d = child->GetDesiredSize();
+            colWidths[col] = std::max(colWidths[col], d.x);
+            rowHeights[row] = std::max(rowHeights[row], d.y);
             ++idx;
         }
+
+        const float desiredTotalW = std::accumulate(colWidths.begin(), colWidths.end(), 0.0f);
+        if (desiredTotalW <= 0.0f || MinColumnWidth > 0.0f)
+        {
+            const float equalW = availW / static_cast<float>(cols);
+            std::fill(colWidths.begin(), colWidths.end(), equalW);
+        }
+        else if (availW >= desiredTotalW)
+        {
+            const float extraPerCol = (availW - desiredTotalW) / static_cast<float>(cols);
+            for (float& w : colWidths)
+                w += extraPerCol;
+        }
+        else
+        {
+            const float scale = availW / desiredTotalW;
+            for (float& w : colWidths)
+                w *= scale;
+        }
+
+        // Recompute row heights using actual column widths when responsive
+        if (MinColumnWidth > 0.0f)
+        {
+            std::fill(rowHeights.begin(), rowHeights.end(), 0.0f);
+            idx = 0;
+            for (const auto& child : GetChildren())
+            {
+                if (!child->Visible)
+                    continue;
+                const uint32_t col = idx % cols;
+                const uint32_t row = idx / cols;
+                rowHeights[row] = std::max(rowHeights[row], child->ComputeHeightForWidth(colWidths[col]));
+                ++idx;
+            }
+        }
+
+        std::vector<float> colX(cols, contentRect.Min.x);
+        for (uint32_t c = 1; c < cols; ++c)
+            colX[c] = colX[c - 1] + colWidths[c - 1] + ColumnSpacing;
 
         std::vector<float> rowY(rowHeights.size(), contentRect.Min.y);
         for (size_t r = 1; r < rowHeights.size(); ++r)
@@ -211,9 +324,7 @@ namespace Nox::UI
                 continue;
             const uint32_t col = idx % cols;
             const uint32_t row = idx / cols;
-            const float x = contentRect.Min.x + static_cast<float>(col) * (cellW + ColumnSpacing);
-            const float y = rowY[row];
-            child->Arrange({ { x, y }, { x + cellW, y + rowHeights[row] } });
+            child->Arrange({ { colX[col], rowY[row] }, { colX[col] + colWidths[col], rowY[row] + rowHeights[row] } });
             ++idx;
         }
     }

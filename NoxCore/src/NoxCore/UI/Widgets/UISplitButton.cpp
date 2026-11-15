@@ -17,13 +17,11 @@ namespace Nox::UI
 
         auto dropBtn = Ref<UIButton>(new UIButton("v"));
         dropBtn->StyleVariant = "primary";
-        dropBtn->WidthMode = UISizeMode::Fixed;
-        dropBtn->FixedSize.x = 28.0f;
-        UIButton* dropPtr = dropBtn.get();
-        dropBtn->OnClick = [&context, dropPtr, items = std::move(secondaryItems)]()
+        UIButton* mainPtr = mainBtn.get();
+        dropBtn->OnClick = [&context, mainPtr, items = std::move(secondaryItems)]()
         {
-            const UIRect& b = dropPtr->GetBounds();
-            UIMenuPopup::ShowContextMenu(context, { b.Min.x - 120.0f, b.Max.y + 3.0f }, items);
+            const UIRect& b = mainPtr->GetBounds();
+            UIMenuPopup::ShowContextMenu(context, { b.Min.x, b.Max.y + 3.0f }, items);
         };
 
         AddChild(mainBtn);

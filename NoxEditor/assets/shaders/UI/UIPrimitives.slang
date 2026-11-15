@@ -135,6 +135,14 @@ float screenPxRange(Texture2D atlas, float2 uv)
     return max(0.5 * dot(unitRange, screenTexSize), 1.0);
 }
 
+float3 srgbToLinear(float3 c)
+{
+    c = max(c, 0.0);
+    float3 low = c / 12.92;
+    float3 high = pow((c + 0.055) / 1.055, 2.4);
+    return lerp(high, low, step(c, 0.04045));
+}
+
 float4 blendOver(float4 fg, float4 bg)
 {
     float outA = fg.a + bg.a * (1.0 - fg.a);
@@ -237,6 +245,9 @@ float4 fragMain(UIVSOutput input, uniform UIPushConstants pc) : SV_TARGET0
     outColor.a *= clipAlpha;
     if (outColor.a <= 0.001)
         discard;
+
+    if (prim.type != uint(UIPrimitiveType.UI_PRIM_TEXTURED_QUAD))
+        outColor.rgb = srgbToLinear(outColor.rgb);
 
     return outColor;
 }

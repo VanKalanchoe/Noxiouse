@@ -23,8 +23,6 @@ namespace Nox::UI
         {
             SetValue(GetValue() - Step, true);
         }));
-        decBtn->WidthMode = UISizeMode::Fixed;
-        decBtn->FixedSize.x = 28.0f;
 
         m_Scalar = Ref<UIDragScalar>(new UIDragScalar(std::clamp(initialValue, MinValue, MaxValue), step * 0.25f));
         m_Scalar->Min = MinValue;
@@ -40,8 +38,6 @@ namespace Nox::UI
         {
             SetValue(GetValue() + Step, true);
         }));
-        incBtn->WidthMode = UISizeMode::Fixed;
-        incBtn->FixedSize.x = 28.0f;
 
         AddChild(decBtn);
         AddChild(m_Scalar);

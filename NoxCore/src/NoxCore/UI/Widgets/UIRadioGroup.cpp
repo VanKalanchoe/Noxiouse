@@ -21,9 +21,8 @@ namespace Nox::UI
                 HitTestMode = UIHitTestMode::Self;
                 Focusable = true;
                 Padding = UIThickness::Symmetric(4.0f, 3.0f);
-                MinSize = { 60.0f, 24.0f };
 
-                m_Label = Ref<UILabel>(new UILabel(std::move(label), 13.5f));
+                m_Label = Ref<UILabel>(new UILabel(std::move(label)));
                 m_Label->HitTestMode = UIHitTestMode::None;
                 m_Label->VAlign = UIAlignment::Center;
                 AddChild(m_Label);
@@ -45,10 +44,13 @@ namespace Nox::UI
         protected:
             UIVec2 ComputeDesiredSize() override
             {
-                UIVec2 labelSize = m_Label ? m_Label->Measure() : UIVec2{ 40.0f, 18.0f };
+                const UIStyleBox& style = GetResolvedStyle();
+                const float rOuter = std::max(5.5f, style.FontSize * 0.52f);
+                const float gap = style.FontSize * 0.55f;
+                const UIVec2 labelSize = m_Label ? m_Label->Measure() : UIVec2{ 0.0f, style.FontSize };
                 return {
-                    std::max(MinSize.x, labelSize.x + Padding.Horizontal() + 24.0f),
-                    std::max(MinSize.y, labelSize.y + Padding.Vertical())
+                    std::max(MinSize.x, labelSize.x + Padding.Horizontal() + rOuter * 2.0f + gap),
+                    std::max(MinSize.y, std::max(rOuter * 2.0f, labelSize.y) + Padding.Vertical())
                 };
             }
 
@@ -56,8 +58,11 @@ namespace Nox::UI
             {
                 if (!m_Label)
                     return;
+                const UIStyleBox& style = GetResolvedStyle();
+                const float rOuter = std::max(5.5f, style.FontSize * 0.52f);
+                const float gap = style.FontSize * 0.55f;
                 UIRect r = contentRect;
-                r.Min.x = std::min(r.Max.x, r.Min.x + 22.0f);
+                r.Min.x = std::min(r.Max.x, r.Min.x + rOuter * 2.0f + gap);
                 m_Label->Arrange(r);
             }
 
@@ -65,17 +70,19 @@ namespace Nox::UI
             {
                 UIElement::OnPaint(drawList, theme);
 
+                const UIStyleBox& style = GetResolvedStyle();
                 const UIRect& b = GetBounds();
-                const float rOuter = 7.5f;
+                const float rOuter = std::max(5.5f, style.FontSize * 0.52f);
                 const UIVec2 center{ b.Min.x + Padding.Left + rOuter, (b.Min.y + b.Max.y) * 0.5f };
                 const bool hovered = HasState(GetState(), UIState::Hovered);
+                const UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
 
                 const UIColor borderColor = m_Selected
-                    ? UIColor{ 0.24f, 0.56f, 0.96f, 1.0f }
-                    : (hovered ? UIColor{ 0.50f, 0.56f, 0.66f, 1.0f } : UIColor{ 0.34f, 0.38f, 0.46f, 1.0f });
+                    ? accent
+                    : (hovered ? theme.GetToken("AccentHover", accent) : style.BorderColor);
                 const UIColor fillBg = hovered
-                    ? UIColor{ 0.16f, 0.18f, 0.23f, 1.0f }
-                    : UIColor{ 0.11f, 0.13f, 0.17f, 1.0f };
+                    ? theme.GetToken("Surface1", style.FillColor)
+                    : style.FillColor;
 
                 drawList.AddRoundedRect(
                     center - UIVec2{ rOuter, rOuter },
@@ -88,11 +95,11 @@ namespace Nox::UI
 
                 if (m_Selected)
                 {
-                    const float rInner = 3.8f;
+                    const float rInner = rOuter * 0.5f;
                     drawList.AddRoundedRect(
                         center - UIVec2{ rInner, rInner },
                         center + UIVec2{ rInner, rInner },
-                        { 0.24f, 0.56f, 0.96f, 1.0f },
+                        accent,
                         glm::vec4(rInner)
                     );
                 }

@@ -92,25 +92,35 @@ namespace Nox::UI
     void UIScrollView::ArrangeChildren(const UIRect& contentRect)
     {
         m_ViewportHeight = std::max(0.0f, contentRect.Height());
+        const float rawAvailW = std::max(0.0f, contentRect.Width());
 
-        float totalH = 0.0f;
-        int visibleCount = 0;
-        for (const auto& child : GetChildren())
+        auto computeTotalH = [&](float width)
         {
-            if (!child->Visible)
-                continue;
-            totalH += child->GetDesiredSize().y + child->Margin.Vertical();
-            ++visibleCount;
-        }
-        if (visibleCount > 1)
-            totalH += ChildSpacing * static_cast<float>(visibleCount - 1);
+            float sum = 0.0f;
+            int count = 0;
+            for (const auto& child : GetChildren())
+            {
+                if (!child->Visible)
+                    continue;
+                const float cw = std::max(0.0f, width - child->Margin.Horizontal());
+                sum += child->ComputeHeightForWidth(cw) + child->Margin.Vertical();
+                ++count;
+            }
+            if (count > 1)
+                sum += ChildSpacing * static_cast<float>(count - 1);
+            return sum;
+        };
 
-        m_ContentHeight = totalH;
-        const float maxScroll = std::max(0.0f, m_ContentHeight - m_ViewportHeight);
-        ScrollOffsetY = std::clamp(ScrollOffsetY, 0.0f, maxScroll);
-
+        m_ContentHeight = computeTotalH(rawAvailW);
+        float maxScroll = std::max(0.0f, m_ContentHeight - m_ViewportHeight);
         const float scrollbarReserve = maxScroll > 0.0f ? 10.0f : 0.0f;
-        const float availW = std::max(0.0f, contentRect.Width() - scrollbarReserve);
+        const float availW = std::max(0.0f, rawAvailW - scrollbarReserve);
+        if (scrollbarReserve > 0.0f)
+        {
+            m_ContentHeight = computeTotalH(availW);
+            maxScroll = std::max(0.0f, m_ContentHeight - m_ViewportHeight);
+        }
+        ScrollOffsetY = std::clamp(ScrollOffsetY, 0.0f, maxScroll);
 
         float cursorY = contentRect.Min.y - ScrollOffsetY;
         for (const auto& child : GetChildren())
@@ -118,7 +128,8 @@ namespace Nox::UI
             if (!child->Visible)
                 continue;
 
-            const float ch = child->GetDesiredSize().y;
+            const float cw = std::max(0.0f, availW - child->Margin.Horizontal());
+            const float ch = child->ComputeHeightForWidth(cw);
             const UIRect slot{
                 { contentRect.Min.x + child->Margin.Left, cursorY + child->Margin.Top },
                 { contentRect.Min.x + availW - child->Margin.Right, cursorY + child->Margin.Top + ch }

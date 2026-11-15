@@ -13,15 +13,12 @@ namespace Nox::UI
         StyleClass = "Label";
         DrawBackground = false;
         HitTestMode = UIHitTestMode::None;
-        Padding = UIThickness::Symmetric(9.0f, 3.0f);
-        MinSize = { 32.0f, 20.0f };
+        Padding = UIThickness::Symmetric(8.0f, 3.0f);
 
-        m_Label = Ref<UILabel>(new UILabel(std::move(text), 11.5f));
+        m_Label = Ref<UILabel>(new UILabel(std::move(text)));
         m_Label->HitTestMode = UIHitTestMode::None;
         m_Label->HAlign = UIAlignment::Center;
         m_Label->VAlign = UIAlignment::Center;
-        m_Label->UseColorOverride = true;
-        m_Label->ColorOverride = { 0.96f, 0.98f, 1.0f, 1.0f };
         AddChild(m_Label);
     }
 
@@ -33,7 +30,10 @@ namespace Nox::UI
 
     UIVec2 UIBadge::ComputeDesiredSize()
     {
-        const UIVec2 labelSize = m_Label ? m_Label->Measure() : UIVec2{ 20.0f, 14.0f };
+        const UIStyleBox& style = GetResolvedStyle();
+        if (m_Label && m_Label->FontSizeOverride <= 0.0f)
+            m_Label->FontSizeOverride = std::max(10.0f, style.FontSize * 0.85f);
+        const UIVec2 labelSize = m_Label ? m_Label->Measure() : UIVec2{ style.FontSize * 1.4f, style.FontSize };
         return {
             std::max(MinSize.x, labelSize.x + Padding.Horizontal()),
             std::max(MinSize.y, labelSize.y + Padding.Vertical())

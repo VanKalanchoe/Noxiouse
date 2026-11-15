@@ -10,21 +10,22 @@ namespace Nox::UI
     {
         StyleClass = "Panel";
         DrawBackground = true;
+        ClipChildren = true;
         Padding = UIThickness::All(12.0f);
         WidthMode = UISizeMode::Fill;
 
         auto header = Ref<UIStackBox>(new UIStackBox(UIOrientation::Horizontal, 8.0f));
         auto dot = Ref<UIElement>(new UIElement());
         dot->WidthMode = UISizeMode::Fixed;
-        dot->HeightMode = UISizeMode::Fixed;
-        dot->FixedSize = { 4.0f, 16.0f };
-        dot->VAlign = UIAlignment::Center;
+        dot->FixedSize.x = 3.0f;
+        dot->HeightMode = UISizeMode::Auto;
+        dot->VAlign = UIAlignment::Stretch;
         dot->StyleClass = "Button";
         dot->StyleVariant = "primary";
         dot->DrawBackground = true;
         (void)accentColor;
 
-        m_TitleLabel = Ref<UILabel>(new UILabel(std::move(title), 14.5f));
+        m_TitleLabel = Ref<UILabel>(new UILabel(std::move(title)));
         m_TitleLabel->VAlign = UIAlignment::Center;
 
         header->AddChild(dot);
@@ -34,6 +35,7 @@ namespace Nox::UI
 
         m_Content = Ref<UIStackBox>(new UIStackBox(UIOrientation::Vertical, 6.0f));
         m_Content->WidthMode = UISizeMode::Fill;
+        m_Content->ClipChildren = true;
         AddChild(m_Content);
     }
 

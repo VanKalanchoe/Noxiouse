@@ -19,6 +19,8 @@ namespace Nox::UI
     public:
         UIContext();
 
+        static UIContext* GetCurrent() { return s_Current; }
+
         void SetRoot(const Ref<UIElement>& root);
         const Ref<UIElement>& GetRoot() const { return m_Root; }
 
@@ -37,6 +39,9 @@ namespace Nox::UI
         UIElement* GetHovered() const { return m_Hovered.get(); }
         UIElement* GetFocused() const { return m_Focused.get(); }
         void SetFocus(UIElement* element);
+        void SetPointerCapture(const Ref<UIElement>& element);
+        void ReleasePointerCapture();
+        const UIVec2& GetLastMousePos() const { return m_LastMousePos; }
 
     private:
         void UpdateHover(const UIVec2& pos);
@@ -50,6 +55,8 @@ namespace Nox::UI
         Ref<UIElement> m_Root;
         Ref<UIElement> m_Overlay;
         Ref<UITheme> m_Theme;
+
+        inline static UIContext* s_Current = nullptr;
 
         Ref<UIElement> m_Hovered;
         Ref<UIElement> m_Captured;

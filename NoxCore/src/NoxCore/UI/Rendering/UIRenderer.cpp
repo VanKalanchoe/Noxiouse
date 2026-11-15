@@ -25,6 +25,10 @@ namespace Nox::UI
 
     void UIRenderer::BeginFrame()
     {
+        m_PrimWriteOffset = 0;
+        m_ClipWriteOffset = 0;
+        m_MainBatch = {};
+
         if (m_ReloadShader.exchange(false))
         {
             try
@@ -88,26 +92,42 @@ namespace Nox::UI
         }
     }
 
-    void UIRenderer::Upload(uint32_t frameIndex)
+    UIBatch UIRenderer::UploadDrawList(const UIDrawList& drawList, uint32_t frameIndex)
     {
-        const auto& prims = m_DrawList.GetPrimitives();
-        const auto& clips = m_DrawList.GetClipRects();
+        const auto& prims = drawList.GetPrimitives();
+        const auto& clips = drawList.GetClipRects();
 
         const uint32_t slot = frameIndex % kMaxFramesInFlight;
-        const size_t primCount = std::min(prims.size(), kMaxPrimitives);
-        const size_t clipCount = std::min(clips.size(), kMaxClipRects);
+        const size_t availPrims = kMaxPrimitives > m_PrimWriteOffset ? (kMaxPrimitives - m_PrimWriteOffset) : 0;
+        const size_t availClips = kMaxClipRects > m_ClipWriteOffset ? (kMaxClipRects - m_ClipWriteOffset) : 0;
+        const size_t primCount = std::min(prims.size(), availPrims);
+        const size_t clipCount = std::min(clips.size(), availClips);
+
+        UIBatch batch{};
+        batch.PrimOffset = m_PrimWriteOffset;
+        batch.PrimCount = static_cast<uint32_t>(primCount);
+        batch.ClipOffset = m_ClipWriteOffset;
+        batch.ClipCount = static_cast<uint32_t>(clipCount);
 
         if (primCount > 0)
-            std::memcpy(m_PrimitiveBuffersMapped[slot], prims.data(), primCount * sizeof(shaderio::UIPrimitive));
+        {
+            auto* dst = static_cast<shaderio::UIPrimitive*>(m_PrimitiveBuffersMapped[slot]) + m_PrimWriteOffset;
+            std::memcpy(dst, prims.data(), primCount * sizeof(shaderio::UIPrimitive));
+            m_PrimWriteOffset += static_cast<uint32_t>(primCount);
+        }
         if (clipCount > 0)
-            std::memcpy(m_ClipBuffersMapped[slot], clips.data(), clipCount * sizeof(shaderio::UIClipRect));
+        {
+            auto* dst = static_cast<shaderio::UIClipRect*>(m_ClipBuffersMapped[slot]) + m_ClipWriteOffset;
+            std::memcpy(dst, clips.data(), clipCount * sizeof(shaderio::UIClipRect));
+            m_ClipWriteOffset += static_cast<uint32_t>(clipCount);
+        }
 
-        m_UploadedPrimCount = static_cast<uint32_t>(primCount);
+        return batch;
     }
 
-    void UIRenderer::Render(NRI::CommandBuffer& cmd, const glm::vec2& viewportSize, uint32_t imageHeapOffset, uint32_t frameIndex)
+    void UIRenderer::RenderBatch(NRI::CommandBuffer& cmd, const UIBatch& batch, const glm::vec2& viewportSize, uint32_t imageHeapOffset, uint32_t frameIndex)
     {
-        if (!m_Pipeline || m_UploadedPrimCount == 0)
+        if (!m_Pipeline || batch.PrimCount == 0)
             return;
 
         const uint32_t slot = frameIndex % kMaxFramesInFlight;
@@ -156,13 +176,23 @@ namespace Nox::UI
         cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_Pipeline);
 
         shaderio::UIPushConstants pc{};
-        pc.primitiveReference = m_PrimitiveBuffers[slot]->getDeviceAddress();
-        pc.clipRectReference = m_ClipBuffers[slot]->getDeviceAddress();
+        pc.primitiveReference = m_PrimitiveBuffers[slot]->getDeviceAddress() + static_cast<uint64_t>(batch.PrimOffset) * sizeof(shaderio::UIPrimitive);
+        pc.clipRectReference = m_ClipBuffers[slot]->getDeviceAddress() + static_cast<uint64_t>(batch.ClipOffset) * sizeof(shaderio::UIClipRect);
         pc.screenSize = glm::vec2(w, h);
         pc.imageHeapIndexOffset = imageHeapOffset;
-        pc.primitiveCount = m_UploadedPrimCount;
+        pc.primitiveCount = batch.PrimCount;
 
         cmd.pushData(&pc, sizeof(shaderio::UIPushConstants));
         cmd.drawMeshTasks(1, 1, 1);
+    }
+
+    void UIRenderer::Upload(uint32_t frameIndex)
+    {
+        m_MainBatch = UploadDrawList(m_DrawList, frameIndex);
+    }
+
+    void UIRenderer::Render(NRI::CommandBuffer& cmd, const glm::vec2& viewportSize, uint32_t imageHeapOffset, uint32_t frameIndex)
+    {
+        RenderBatch(cmd, m_MainBatch, viewportSize, imageHeapOffset, frameIndex);
     }
 }

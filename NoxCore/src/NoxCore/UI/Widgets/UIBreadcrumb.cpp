@@ -8,12 +8,14 @@ namespace Nox::UI
     UIBreadcrumb::UIBreadcrumb(
         std::vector<std::string> segments,
         std::function<void(int)> onNavigate)
-        : UIStackBox(UIOrientation::Horizontal, 4.0f)
+        : UIWrapBox(4.0f, 4.0f)
         , OnNavigate(std::move(onNavigate))
         , m_Segments(std::move(segments))
     {
         StyleClass = "TextInput";
         DrawBackground = true;
+        ClipChildren = true;
+        WidthMode = UISizeMode::Fill;
         Padding = UIThickness::Symmetric(8.0f, 4.0f);
         Rebuild();
     }
@@ -31,10 +33,8 @@ namespace Nox::UI
         {
             if (i > 0)
             {
-                auto sep = Ref<UILabel>(new UILabel(Separator, 13.0f));
+                auto sep = Ref<UILabel>(new UILabel(Separator));
                 sep->VAlign = UIAlignment::Center;
-                sep->UseColorOverride = true;
-                sep->ColorOverride = { 0.50f, 0.55f, 0.65f, 1.0f };
                 AddChild(sep);
             }
 

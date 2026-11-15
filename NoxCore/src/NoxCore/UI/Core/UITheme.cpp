@@ -175,49 +175,299 @@ namespace Nox::UI
     {
         Ref<UITheme> theme(new UITheme());
 
-        theme->SetToken("Background", { 0.070f, 0.078f, 0.102f, 1.0f });
-        theme->SetToken("Surface0",   { 0.102f, 0.114f, 0.149f, 0.96f });
-        theme->SetToken("Surface1",   { 0.133f, 0.149f, 0.196f, 0.96f });
-        theme->SetToken("Border",     { 0.220f, 0.250f, 0.330f, 0.90f });
-        theme->SetToken("Accent",     { 0.240f, 0.560f, 0.960f, 1.00f });
-        theme->SetToken("Text",       { 0.920f, 0.940f, 0.980f, 1.00f });
-        theme->SetToken("TextMuted",  { 0.620f, 0.670f, 0.760f, 1.00f });
+        theme->SetToken("Background",  { 0.082f, 0.086f, 0.102f, 1.00f });
+        theme->SetToken("Surface0",    { 0.114f, 0.120f, 0.141f, 0.98f });
+        theme->SetToken("Surface1",    { 0.145f, 0.153f, 0.180f, 0.98f });
+        theme->SetToken("Surface2",    { 0.184f, 0.194f, 0.227f, 0.98f });
+        theme->SetToken("Border",      { 0.235f, 0.251f, 0.298f, 0.85f });
+        theme->SetToken("Accent",      { 0.259f, 0.529f, 0.961f, 1.00f });
+        theme->SetToken("AccentHover", { 0.349f, 0.592f, 0.976f, 1.00f });
+        theme->SetToken("Success",     { 0.235f, 0.678f, 0.482f, 1.00f });
+        theme->SetToken("Warning",     { 0.851f, 0.616f, 0.224f, 1.00f });
+        theme->SetToken("Danger",      { 0.835f, 0.310f, 0.333f, 1.00f });
+        theme->SetToken("Text",        { 0.918f, 0.929f, 0.953f, 1.00f });
+        theme->SetToken("TextMuted",   { 0.580f, 0.616f, 0.686f, 1.00f });
+
+        UIStyleBox background{};
+        background.FillColor = theme->GetToken("Background");
+        background.FillColorBottom = background.FillColor;
+        background.BorderThickness = 0.0f;
+        background.ShadowBlur = 0.0f;
+        background.CornerRadius = UICornerRadius::All(0.0f);
+        background.Padding = UIThickness::All(0.0f);
+        background.TextColor = theme->GetToken("Text");
+        background.FontSize = 18.0f;
+        theme->SetStyle("Background", background);
 
         UIStyleBox panel{};
         panel.FillColor = theme->GetToken("Surface0");
         panel.FillColorBottom = panel.FillColor;
         panel.BorderColor = theme->GetToken("Border");
         panel.BorderThickness = 1.0f;
-        panel.ShadowColor = { 0.0f, 0.0f, 0.0f, 0.45f };
-        panel.ShadowOffset = { 0.0f, 6.0f };
-        panel.ShadowBlur = 14.0f;
-        panel.CornerRadius = UICornerRadius::All(10.0f);
-        panel.Padding = UIThickness::All(12.0f);
+        panel.ShadowColor = { 0.0f, 0.0f, 0.0f, 0.25f };
+        panel.ShadowOffset = { 0.0f, 3.0f };
+        panel.ShadowBlur = 8.0f;
+        panel.CornerRadius = UICornerRadius::All(4.0f);
+        panel.Padding = UIThickness::All(10.0f);
+        panel.TextColor = theme->GetToken("Text");
+        panel.FontSize = 18.0f;
         theme->SetStyle("Panel", panel);
+
+        UIStyleBox topBar = panel;
+        topBar.FillColor = theme->GetToken("Surface1");
+        topBar.FillColorBottom = topBar.FillColor;
+        topBar.CornerRadius = UICornerRadius::All(4.0f);
+        topBar.ShadowBlur = 0.0f;
+        topBar.Padding = UIThickness::Symmetric(14.0f, 10.0f);
+        theme->SetStyle("TopBar", topBar);
+
+        UIStyleBox label{};
+        label.TextColor = theme->GetToken("Text");
+        label.FontSize = 18.0f;
+        theme->SetStyle("Label", label);
 
         UIStyleBox button{};
         button.FillColor = theme->GetToken("Surface1");
-        button.FillColorBottom = { 0.105f, 0.118f, 0.156f, 1.0f };
-        button.UseGradient = true;
+        button.FillColorBottom = button.FillColor;
+        button.UseGradient = false;
         button.BorderColor = theme->GetToken("Border");
         button.BorderThickness = 1.0f;
-        button.CornerRadius = UICornerRadius::All(7.0f);
-        button.Padding = UIThickness::Symmetric(14.0f, 8.0f);
+        button.CornerRadius = UICornerRadius::All(3.0f);
+        button.Padding = UIThickness::Symmetric(10.0f, 5.0f);
         button.TextColor = theme->GetToken("Text");
-        button.FontSize = 15.0f;
+        button.FontSize = 18.0f;
+        button.TransitionSeconds = 0.06f;
         theme->SetStyle("Button", button);
 
         UIStyleBox buttonHover = button;
-        buttonHover.FillColor = { 0.18f, 0.21f, 0.28f, 1.0f };
-        buttonHover.FillColorBottom = { 0.14f, 0.16f, 0.22f, 1.0f };
+        buttonHover.FillColor = theme->GetToken("Surface2");
+        buttonHover.FillColorBottom = buttonHover.FillColor;
         buttonHover.BorderColor = theme->GetToken("Accent");
         theme->SetStyle("Button:hover", buttonHover);
 
         UIStyleBox buttonPressed = button;
-        buttonPressed.FillColor = { 0.16f, 0.40f, 0.72f, 1.0f };
-        buttonPressed.FillColorBottom = { 0.12f, 0.30f, 0.56f, 1.0f };
-        buttonPressed.BorderColor = theme->GetToken("Accent");
+        buttonPressed.FillColor = { 0.196f, 0.392f, 0.710f, 1.0f };
+        buttonPressed.FillColorBottom = buttonPressed.FillColor;
+        buttonPressed.BorderColor = theme->GetToken("AccentHover");
         theme->SetStyle("Button:pressed", buttonPressed);
+
+        UIStyleBox buttonPrimary = button;
+        buttonPrimary.FillColor = theme->GetToken("Accent");
+        buttonPrimary.FillColorBottom = buttonPrimary.FillColor;
+        buttonPrimary.BorderColor = theme->GetToken("AccentHover");
+        buttonPrimary.TextColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+        theme->SetStyle("Button.primary", buttonPrimary);
+
+        UIStyleBox buttonPrimaryHover = buttonPrimary;
+        buttonPrimaryHover.FillColor = theme->GetToken("AccentHover");
+        buttonPrimaryHover.FillColorBottom = buttonPrimaryHover.FillColor;
+        theme->SetStyle("Button.primary:hover", buttonPrimaryHover);
+
+        // Inputs & Controls (ImGui-style crisp 3px corners)
+        UIStyleBox textInput{};
+        textInput.FillColor = { 0.075f, 0.080f, 0.098f, 1.0f };
+        textInput.FillColorBottom = textInput.FillColor;
+        textInput.BorderColor = theme->GetToken("Border");
+        textInput.BorderThickness = 1.0f;
+        textInput.CornerRadius = UICornerRadius::All(3.0f);
+        textInput.Padding = UIThickness::Symmetric(8.0f, 5.0f);
+        textInput.TextColor = theme->GetToken("Text");
+        textInput.FontSize = 18.0f;
+        theme->SetStyle("TextInput", textInput);
+
+        UIStyleBox textInputHover = textInput;
+        textInputHover.BorderColor = theme->GetToken("AccentHover");
+        theme->SetStyle("TextInput:hover", textInputHover);
+
+        UIStyleBox textInputFocus = textInput;
+        textInputFocus.BorderColor = theme->GetToken("Accent");
+        theme->SetStyle("TextInput:focus", textInputFocus);
+
+        UIStyleBox checkBox = textInput;
+        checkBox.Padding = UIThickness::All(0.0f);
+        theme->SetStyle("CheckBox", checkBox);
+
+        UIStyleBox checkBoxHover = checkBox;
+        checkBoxHover.BorderColor = theme->GetToken("Accent");
+        theme->SetStyle("CheckBox:hover", checkBoxHover);
+
+        UIStyleBox slider = textInput;
+        slider.TextColor = theme->GetToken("TextMuted");
+        slider.FontSize = 18.0f;
+        theme->SetStyle("Slider", slider);
+
+        UIStyleBox dragScalar = textInput;
+        dragScalar.Padding = UIThickness::Symmetric(6.0f, 4.0f);
+        dragScalar.FontSize = 18.0f;
+        theme->SetStyle("DragScalar", dragScalar);
+
+        UIStyleBox dragScalarHover = dragScalar;
+        dragScalarHover.BorderColor = theme->GetToken("Accent");
+        theme->SetStyle("DragScalar:hover", dragScalarHover);
+
+        UIStyleBox dragScalarFocus = dragScalar;
+        dragScalarFocus.BorderColor = theme->GetToken("AccentHover");
+        theme->SetStyle("DragScalar:focus", dragScalarFocus);
+
+        UIStyleBox sectionHeader = button;
+        sectionHeader.FillColor = theme->GetToken("Surface1");
+        sectionHeader.FillColorBottom = sectionHeader.FillColor;
+        sectionHeader.Padding = UIThickness::Symmetric(10.0f, 5.0f);
+        theme->SetStyle("SectionHeader", sectionHeader);
+
+        UIStyleBox sectionHeaderHover = sectionHeader;
+        sectionHeaderHover.FillColor = theme->GetToken("Surface2");
+        sectionHeaderHover.BorderColor = theme->GetToken("Accent");
+        theme->SetStyle("SectionHeader:hover", sectionHeaderHover);
+
+        UIStyleBox treeView = textInput;
+        treeView.CornerRadius = UICornerRadius::All(3.0f);
+        theme->SetStyle("TreeView", treeView);
+
+        UIStyleBox treeRow = button;
+        treeRow.FillColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+        treeRow.FillColorBottom = treeRow.FillColor;
+        treeRow.BorderThickness = 0.0f;
+        treeRow.CornerRadius = UICornerRadius::All(2.0f);
+        theme->SetStyle("TreeRow", treeRow);
+
+        UIStyleBox treeRowHover = treeRow;
+        treeRowHover.FillColor = theme->GetToken("Surface2");
+        treeRowHover.FillColorBottom = treeRowHover.FillColor;
+        theme->SetStyle("TreeRow:hover", treeRowHover);
+
+        // ImGui-style Tabs (flat bottom, subtle top corners, unmistakable active tab)
+        UIStyleBox tabBar{};
+        tabBar.FillColor = theme->GetToken("Surface1");
+        tabBar.FillColorBottom = tabBar.FillColor;
+        tabBar.BorderColor = theme->GetToken("Border");
+        tabBar.BorderThickness = 1.0f;
+        tabBar.CornerRadius = UICornerRadius::All(0.0f);
+        tabBar.Padding = { 6.0f, 4.0f, 6.0f, 0.0f };
+        theme->SetStyle("TabBar", tabBar);
+
+        UIStyleBox tab{};
+        tab.FillColor = { 0.118f, 0.125f, 0.150f, 1.0f };
+        tab.FillColorBottom = tab.FillColor;
+        tab.BorderColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+        tab.BorderThickness = 1.0f;
+        tab.CornerRadius = { 3.0f, 3.0f, 0.0f, 0.0f };
+        tab.Padding = UIThickness::Symmetric(12.0f, 5.0f);
+        tab.TextColor = theme->GetToken("TextMuted");
+        tab.FontSize = 18.0f;
+        tab.TransitionSeconds = 0.05f;
+        theme->SetStyle("Tab", tab);
+
+        UIStyleBox tabHover = tab;
+        tabHover.FillColor = theme->GetToken("Surface2");
+        tabHover.FillColorBottom = tabHover.FillColor;
+        tabHover.TextColor = theme->GetToken("Text");
+        theme->SetStyle("Tab:hover", tabHover);
+
+        UIStyleBox tabActive = tab;
+        tabActive.FillColor = { 0.165f, 0.285f, 0.460f, 1.0f };
+        tabActive.FillColorBottom = tabActive.FillColor;
+        tabActive.BorderColor = theme->GetToken("Accent");
+        tabActive.TextColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+        theme->SetStyle("Tab.active", tabActive);
+
+        // ImGui-style MenuBar & Dropdown Popups
+        UIStyleBox menuBar{};
+        menuBar.FillColor = { 0.094f, 0.100f, 0.118f, 1.0f };
+        menuBar.FillColorBottom = menuBar.FillColor;
+        menuBar.BorderColor = theme->GetToken("Border");
+        menuBar.BorderThickness = 1.0f;
+        menuBar.CornerRadius = UICornerRadius::All(0.0f);
+        menuBar.Padding = UIThickness::Symmetric(6.0f, 2.0f);
+        theme->SetStyle("MenuBar", menuBar);
+
+        UIStyleBox menuTrigger{};
+        menuTrigger.FillColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+        menuTrigger.FillColorBottom = menuTrigger.FillColor;
+        menuTrigger.BorderThickness = 0.0f;
+        menuTrigger.CornerRadius = UICornerRadius::All(2.0f);
+        menuTrigger.Padding = UIThickness::Symmetric(10.0f, 4.0f);
+        menuTrigger.TextColor = theme->GetToken("Text");
+        menuTrigger.FontSize = 18.0f;
+        menuTrigger.TransitionSeconds = 0.04f;
+        theme->SetStyle("MenuTrigger", menuTrigger);
+
+        UIStyleBox menuTriggerHover = menuTrigger;
+        menuTriggerHover.FillColor = theme->GetToken("Surface2");
+        menuTriggerHover.FillColorBottom = menuTriggerHover.FillColor;
+        menuTriggerHover.TextColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+        theme->SetStyle("MenuTrigger:hover", menuTriggerHover);
+
+        UIStyleBox menuPopup{};
+        menuPopup.FillColor = { 0.133f, 0.141f, 0.169f, 0.99f };
+        menuPopup.FillColorBottom = menuPopup.FillColor;
+        menuPopup.BorderColor = { 0.300f, 0.325f, 0.390f, 1.0f };
+        menuPopup.BorderThickness = 1.0f;
+        menuPopup.ShadowColor = { 0.0f, 0.0f, 0.0f, 0.55f };
+        menuPopup.ShadowOffset = { 0.0f, 6.0f };
+        menuPopup.ShadowBlur = 14.0f;
+        menuPopup.CornerRadius = UICornerRadius::All(3.0f);
+        menuPopup.Padding = UIThickness::All(4.0f);
+        menuPopup.TextColor = theme->GetToken("Text");
+        menuPopup.FontSize = 18.0f;
+        theme->SetStyle("MenuPopup", menuPopup);
+
+        UIStyleBox menuItem{};
+        menuItem.FillColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+        menuItem.FillColorBottom = menuItem.FillColor;
+        menuItem.BorderThickness = 0.0f;
+        menuItem.CornerRadius = UICornerRadius::All(2.0f);
+        menuItem.Padding = UIThickness::Symmetric(10.0f, 5.0f);
+        menuItem.TextColor = theme->GetToken("Text");
+        menuItem.FontSize = 18.0f;
+        menuItem.TransitionSeconds = 0.03f;
+        theme->SetStyle("MenuItem", menuItem);
+
+        UIStyleBox menuItemHover = menuItem;
+        menuItemHover.FillColor = theme->GetToken("Accent");
+        menuItemHover.FillColorBottom = menuItemHover.FillColor;
+        menuItemHover.TextColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+        theme->SetStyle("MenuItem:hover", menuItemHover);
+
+        UIStyleBox menuItemPrimary = menuItem;
+        menuItemPrimary.FillColor = { 0.180f, 0.340f, 0.580f, 1.0f };
+        menuItemPrimary.FillColorBottom = menuItemPrimary.FillColor;
+        menuItemPrimary.TextColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+        theme->SetStyle("MenuItem.primary", menuItemPrimary);
+
+        UIStyleBox separator{};
+        separator.FillColor = theme->GetToken("Border");
+        separator.FillColorBottom = separator.FillColor;
+        separator.BorderThickness = 0.0f;
+        separator.CornerRadius = UICornerRadius::All(0.0f);
+        theme->SetStyle("Separator", separator);
+
+        UIStyleBox tooltip = menuPopup;
+        tooltip.Padding = UIThickness::Symmetric(10.0f, 6.0f);
+        tooltip.FontSize = 18.0f;
+        theme->SetStyle("Tooltip", tooltip);
+
+        UIStyleBox titleClose{};
+        titleClose.FillColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+        titleClose.FillColorBottom = titleClose.FillColor;
+        titleClose.BorderThickness = 0.0f;
+        titleClose.CornerRadius = UICornerRadius::All(0.0f);
+        titleClose.Padding = UIThickness::All(0.0f);
+        titleClose.TextColor = theme->GetToken("TextMuted");
+        titleClose.FontSize = 16.0f;
+        titleClose.TransitionSeconds = 0.05f;
+        theme->SetStyle("TitleClose", titleClose);
+
+        UIStyleBox titleCloseHover = titleClose;
+        titleCloseHover.FillColor = theme->GetToken("Danger");
+        titleCloseHover.FillColorBottom = titleCloseHover.FillColor;
+        titleCloseHover.TextColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+        theme->SetStyle("TitleClose:hover", titleCloseHover);
+
+        UIStyleBox titleClosePressed = titleCloseHover;
+        titleClosePressed.FillColor = { 0.68f, 0.22f, 0.25f, 1.0f };
+        titleClosePressed.FillColorBottom = titleClosePressed.FillColor;
+        theme->SetStyle("TitleClose:pressed", titleClosePressed);
 
         return theme;
     }
@@ -253,7 +503,29 @@ namespace Nox::UI
                 for (const auto& kv : styles)
                 {
                     const std::string key = kv.first.as<std::string>();
-                    UIStyleBox box = m_Styles.contains(key) ? m_Styles[key] : UIStyleBox{};
+                    UIStyleBox box{};
+                    if (const size_t colonPos = key.find(':'); colonPos != std::string::npos)
+                    {
+                        const std::string baseKey = key.substr(0, colonPos);
+                        if (m_Styles.contains(baseKey))
+                            box = m_Styles[baseKey];
+                        else if (const size_t dotPos = baseKey.find('.'); dotPos != std::string::npos && m_Styles.contains(baseKey.substr(0, dotPos)))
+                            box = m_Styles[baseKey.substr(0, dotPos)];
+                        else if (m_Styles.contains(key))
+                            box = m_Styles[key];
+                    }
+                    else if (const size_t dotPos = key.find('.'); dotPos != std::string::npos)
+                    {
+                        const std::string baseKey = key.substr(0, dotPos);
+                        if (m_Styles.contains(baseKey))
+                            box = m_Styles[baseKey];
+                        else if (m_Styles.contains(key))
+                            box = m_Styles[key];
+                    }
+                    else if (m_Styles.contains(key))
+                    {
+                        box = m_Styles[key];
+                    }
                     ApplyStyleNode(kv.second, *this, box);
                     m_Styles[key] = box;
                 }
@@ -331,6 +603,9 @@ namespace Nox::UI
                 applyIfFound(base + std::string(suffix));
         };
 
+        const UIThickness basePadding = result.Padding;
+        const float baseFontSize = result.FontSize;
+
         if (HasState(state, UIState::Disabled))
             applyStateSuffix(":disabled");
         else
@@ -344,6 +619,10 @@ namespace Nox::UI
             if (HasState(state, UIState::Pressed))
                 applyStateSuffix(":pressed");
         }
+
+        // Keep layout metrics stable across hover/focus/pressed/disabled states.
+        result.Padding = basePadding;
+        result.FontSize = baseFontSize;
 
         return result;
     }

@@ -1,5 +1,7 @@
 #include "SwapchainVK.h"
 #include "DeviceVK.h"
+#include "NoxCore/Core/Window.h"
+#include <SDL3/SDL_vulkan.h>
 
 namespace NRI
 {
@@ -14,14 +16,19 @@ namespace NRI
     {
         auto& physicalDevice = m_deviceVK.getPhysicalDevice();
         auto& device = m_deviceVK.getDevice();
-        auto& surface = m_deviceVK.getSurface();
+        if (desc.Window && desc.Window->getHandle())
+        {
+            VkSurfaceKHR rawSurface = VK_NULL_HANDLE;
+            if (!SDL_Vulkan_CreateSurface(desc.Window->getHandle(), *m_deviceVK.getInstance(), nullptr, &rawSurface))
+                throw std::runtime_error("Failed to create Vulkan surface for secondary window!");
+            m_ownedSurface = vk::raii::SurfaceKHR(m_deviceVK.getInstance(), rawSurface);
+        }
+        auto& surface = (*m_ownedSurface != vk::SurfaceKHR{}) ? m_ownedSurface : m_deviceVK.getSurface();
 
         vk::SurfaceCapabilitiesKHR surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(*surface);
         m_swapChainExtent = chooseSwapExtent(surfaceCapabilities, desc.Width, desc.Height);
         uint32_t minImageCount = chooseSwapMinImageCount(surfaceCapabilities);
 
-        /*std::vector<vk::SurfaceFormatKHR> availableFormats = physicalDevice.getSurfaceFormatsKHR(*surface);*/
-        /*m_swapChainSurfaceFormat = chooseSwapSurfaceFormat(availableFormats);*/
         m_swapChainSurfaceFormat = m_deviceVK.getSurfaceFormat();
 
         std::vector<vk::PresentModeKHR> availablePresentModes = physicalDevice.getSurfacePresentModesKHR(*surface);
@@ -67,9 +74,7 @@ namespace NRI
             return vk::PresentModeKHR::eFifo; 
         }
         
-        // Prefer Immediate mode for uncapped framerate (800+ FPS), bypassing G-Sync refresh caps
-        if (std::ranges::any_of(availablePresentModes, [](const vk::PresentModeKHR mode) { return vk::PresentModeKHR::eImmediate ==
-mode; }))
+        if (std::ranges::any_of(availablePresentModes, [](const vk::PresentModeKHR mode) { return vk::PresentModeKHR::eImmediate == mode; }))
         {
             return vk::PresentModeKHR::eImmediate;
         }
@@ -133,8 +138,6 @@ mode; }))
     {
         auto& device = m_deviceVK.getDevice();
 
-        // Note: inFlightFences, presentCompleteSemaphores, and commandBuffers are indexed by frameIndex,
-        //       while renderFinishedSemaphores is indexed by imageIndex
         auto fenceResult = device.waitForFences(*m_inFlightFences[frameIndex], vk::True, UINT64_MAX);
         if (fenceResult != vk::Result::eSuccess)
         {
@@ -143,14 +146,10 @@ mode; }))
 
         auto [result, imageIndex] = m_swapChain.acquireNextImage(UINT64_MAX, *m_presentCompleteSemaphores[frameIndex], nullptr);
 
-        // Due to VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS being defined, eErrorOutOfDateKHR can be checked as a result
-        // here and does not need to be caught by an exception.
         if (result == vk::Result::eErrorOutOfDateKHR)
         {
             return FrameResult::ResizeRequired;
         }
-        // On other success codes than eSuccess and eSuboptimalKHR we just throw an exception.
-        // On any error code, aquireNextImage already threw an exception.
         if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR)
         {
             assert(result == vk::Result::eTimeout || result == vk::Result::eNotReady);
@@ -159,7 +158,6 @@ mode; }))
 
         outImageIndex = imageIndex;
 
-        // Only reset the fence if we are submitting work
         device.resetFences(*m_inFlightFences[frameIndex]);
         return FrameResult::Success;
     }
@@ -178,7 +176,7 @@ mode; }))
         };
         
         vk::Result result = vk::Result::eSuccess;
-        if (auto slPresent = m_deviceVK.getStreamlinePresentFn())
+        if (auto slPresent = (*m_ownedSurface != vk::SurfaceKHR{}) ? nullptr : m_deviceVK.getStreamlinePresentFn())
         {
             result = static_cast<vk::Result>(slPresent(
                 static_cast<VkQueue>(*queue),
@@ -190,14 +188,11 @@ mode; }))
             result = queue.presentKHR(presentInfoKHR);
         }
         
-        // Due to VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS being defined, eErrorOutOfDateKHR can be checked as a result
-        // here and does not need to be caught by an exception.
         if ((result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR))
         {
             return FrameResult::ResizeRequired;
         }
 
-        // There are no other success codes than eSuccess; on any error code, presentKHR already threw an exception.
         assert(result == vk::Result::eSuccess);
         return FrameResult::Success;
     }

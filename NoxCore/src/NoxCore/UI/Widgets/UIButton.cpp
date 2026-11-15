@@ -9,6 +9,7 @@ namespace Nox::UI
     {
         StyleClass = "Button";
         DrawBackground = true;
+        ClipChildren = true;
         HitTestMode = UIHitTestMode::Self;
         Focusable = true;
 
@@ -57,6 +58,9 @@ namespace Nox::UI
         m_Label->UseColorOverride = true;
         m_Label->ColorOverride = style.TextColor;
         m_Label->FontSizeOverride = style.FontSize;
+        m_Label->HAlign = (StyleClass == "MenuItem" || StyleClass == "TreeRow" || StyleClass == "SectionHeader")
+            ? UIAlignment::Start
+            : UIAlignment::Center;
         const UIRect inner = contentRect.Inset(style.Padding);
         m_Label->Arrange(inner);
     }

@@ -2,15 +2,19 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 #include <glm/glm.hpp>
 
+#include "NoxCore/Reflection/TypeMeta.h"
 #include "NoxCore/UI/Layout/UILayout.h"
 #include "NoxCore/UI/Widgets/UIScrollView.h"
 
 namespace Nox::UI
 {
-    // Collapsible 2-column inspector grid with convenience builders for common property types.
+    class UIContext;
+
+    // Collapsible 2-column inspector grid with convenience builders and reflection-driven auto-generation.
     class UIPropertyGrid : public UIScrollView
     {
     public:
@@ -30,8 +34,41 @@ namespace Nox::UI
         void AddString(const std::string& label, const std::string& value, const std::string& placeholder,
                        std::function<void(const std::string&)> onChanged, const Ref<UIStackBox>& section = nullptr);
 
+        // Auto-generates rows from TypeMeta with 2-way sync and optional validity guard.
+        Ref<UIStackBox> AddReflected(
+            UIContext* context,
+            void* instance,
+            const TypeMeta& meta,
+            std::function<bool()> isValid = {},
+            const std::string& sectionOverride = {});
+
+        template <typename T>
+        Ref<UIStackBox> Inspect(
+            UIContext* context,
+            T& instance,
+            std::function<bool()> isValid = {},
+            const std::string& sectionOverride = {})
+        {
+            const TypeMeta* meta = TypeRegistry::Get().Find<T>();
+            if (!meta)
+                return nullptr;
+            return AddReflected(context, &instance, *meta, std::move(isValid), sectionOverride);
+        }
+
         void ClearProperties();
 
         float LabelRatio = 0.38f;
+
+    protected:
+        void OnUpdate(float dt) override;
+
+    private:
+        struct SyncEntry
+        {
+            std::function<bool()> IsValid;
+            std::function<void()> SyncFromModel;
+            Ref<UIElement> SectionContainer;
+        };
+        std::vector<SyncEntry> m_SyncEntries;
     };
 }

@@ -17,12 +17,14 @@
 #include "NoxCore/Events/WindowEvents.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/ImGui/ImGuiLayer.h"
+#include "NoxCore/UI/Core/UILayer.h"
 #include "NoxCore/Tasks/JobSystem.h"
 #include "NoxCore/Animation/AnimationGraphNodes.h"
 #include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Audio/AudioGraph.h"
 #include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/Audio/AudioMixer.h"
+#include "NoxCore/UI/Core/UIViewportManager.h"
 
 #ifdef _WIN32
 // Last: its macros (near, far, min, max...) must not reach the engine's headers.
@@ -82,7 +84,7 @@ namespace Nox
         if (m_Specification.isEditor && m_Specification.UseImGui)
             m_ImGuiLayer = PushLayer<ImGuiLayer>(*renderer);
         else if (!m_Specification.UseImGui && m_Window && m_Window->getHandle())
-            SDL_StartTextInput(m_Window->getHandle());
+            m_UILayer = PushLayer<UILayer>(*m_Window, *renderer);
 
 #if NOX_PROFILE_STATS
         // Nox Stats (F3) for every app: an ImGui window in the editor, the engine's screen-space text in a game.
@@ -97,6 +99,7 @@ namespace Nox
         IsEngineShuttingDown = true;
 
         PopLayer<ImGuiLayer>();
+        PopLayer<UILayer>();
         AudioMixer::Shutdown();
         AudioEngine::Shutdown(); // (what the layers stop on their way out after this finds no voices: a no-op)
 
@@ -157,6 +160,9 @@ namespace Nox
 
             if (renderer)
                 renderer->drawFrame();
+
+            if (auto* vpMgr = UI::UIViewportManager::GetActive())
+                vpMgr->UpdateAndRender(timestep.GetSeconds());
 
             // Frame sync point (§5.3): no frame graph task runs past this.
             m_JobSystem->ResetFrameArenas();
@@ -315,6 +321,12 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
 
     if (applicationState->app->GetSpecification().isEditor && applicationState->app->GetSpecification().UseImGui && ImGuiTakesEvent(*currentEvent))
         ImGui_ImplSDL3_ProcessEvent(currentEvent);
+
+    if (auto* vpMgr = Nox::UI::UIViewportManager::GetActive())
+    {
+        if (vpMgr->ProcessSDLEvent(*currentEvent))
+            return SDL_APP_CONTINUE;
+    }
 
     switch (currentEvent->type)
     {

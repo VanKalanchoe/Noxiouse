@@ -1,14 +1,17 @@
 # Nox::UI Theme (.nstyle) - Live hot-reloaded by NOXWatcher
 tokens:
-  Background: "#12141A"
-  Surface0: "#1A1D26F5"
-  Surface1: "#222632F5"
-  Border: "#384054E6"
-  Accent: "#3D8FF5"
-  AccentHover: "#5ca3ff"
-  Success: "#2FA870"
-  Text: "#EBF0FA"
-  TextMuted: "#9BA8C2"
+  Background: "#15161A"
+  Surface0: "#1D1F24FA"
+  Surface1: "#25272EFA"
+  Surface2: "#2F313AFA"
+  Border: "#3C404CD9"
+  Accent: "#4287F5"
+  AccentHover: "#5997F9"
+  Success: "#3CAD7B"
+  Warning: "#D99D39"
+  Danger: "#D54F55"
+  Text: "#EAEDF3"
+  TextMuted: "#949DAF"
 
 styles:
   Background:
@@ -20,65 +23,60 @@ styles:
 
   Label:
     text_color: "$Text"
-    font_size: 15
+    font_size: 18
 
   Panel:
     fill: "$Surface0"
     border_color: "$Border"
     border_thickness: 1.0
-    shadow_color: "#00000073"
-    shadow_offset: [0, 6]
-    shadow_blur: 14
-    corner_radius: 10
-    padding: 12
-
-  TopBar:
-    fill: "#202430"
-    fill_bottom: "#191D26"
-    border_color: "$Border"
-    border_thickness: 1.0
-    shadow_color: "#00000073"
+    shadow_color: "#00000052"
     shadow_offset: [0, 4]
     shadow_blur: 10
     corner_radius: 8
-    padding: [14, 8]
+    padding: 12
+    text_color: "$Text"
+    font_size: 18
+
+  TopBar:
+    fill: "$Surface0"
+    border_color: "$Border"
+    border_thickness: 1.0
+    shadow_color: "#00000040"
+    shadow_offset: [0, 2]
+    shadow_blur: 6
+    corner_radius: 6
+    padding: [12, 6]
 
   Button:
     fill: "$Surface1"
-    fill_bottom: "#1B1E28"
     border_color: "$Border"
     border_thickness: 1.0
-    corner_radius: 7
-    padding: [14, 8]
+    corner_radius: 6
+    padding: [12, 6]
     text_color: "$Text"
-    font_size: 14
-    transition_ms: 90
+    font_size: 18
+    transition_ms: 80
 
   "Button:hover":
-    fill: "#2C3344"
-    fill_bottom: "#232836"
+    fill: "$Surface2"
     border_color: "$Accent"
     text_color: "#FFFFFF"
 
   "Button:pressed":
-    fill: "#2864B8"
-    fill_bottom: "#1E4C8C"
+    fill: "#3264B5"
     border_color: "$AccentHover"
 
   "Button.primary":
     fill: "$Accent"
-    fill_bottom: "#2A6EC9"
     border_color: "$AccentHover"
     text_color: "#FFFFFF"
 
   "Button.primary:hover":
     fill: "$AccentHover"
-    fill_bottom: "$Accent"
-    border_color: "#FFFFFF80"
+    border_color: "#FFFFFF55"
 
   "Button.primary:pressed":
-    fill: "#235CA8"
-    fill_bottom: "#1A4785"
+    fill: "#2F66BD"
 
   CheckBox:
     fill: "#141720"
@@ -86,7 +84,7 @@ styles:
     border_thickness: 1.2
     corner_radius: 4
     text_color: "$Text"
-    font_size: 13.5
+    font_size: 18
 
   "CheckBox:hover":
     border_color: "$Accent"
@@ -95,7 +93,7 @@ styles:
     fill: "#141720"
     border_color: "$Border"
     text_color: "$TextMuted"
-    font_size: 12.5
+    font_size: 18
 
   DragScalar:
     fill: "#141720"
@@ -104,7 +102,7 @@ styles:
     corner_radius: 5
     padding: [6, 4]
     text_color: "$Text"
-    font_size: 13
+    font_size: 18
 
   "DragScalar:hover":
     border_color: "$Accent"
@@ -119,7 +117,7 @@ styles:
     corner_radius: 5
     padding: [8, 5]
     text_color: "$Text"
-    font_size: 13.5
+    font_size: 18
 
   "TextInput:hover":
     border_color: "#526080"
@@ -134,7 +132,7 @@ styles:
     border_thickness: 1.0
     corner_radius: 6
     text_color: "$Text"
-    font_size: 13.5
+    font_size: 18
 
   SectionHeader:
     fill: "#1E222E"
@@ -144,72 +142,73 @@ styles:
     corner_radius: 5
     padding: [10, 4]
     text_color: "$Text"
-    font_size: 13
+    font_size: 18
 
   "SectionHeader:hover":
     fill: "#262C3B"
     border_color: "$Accent"
 
   TabBar:
-    fill: "#14171F"
+    fill: "$Surface1"
     border_color: "$Border"
-    border_thickness: 0.0
-    corner_radius: [10, 10, 0, 0]
-    padding: [8, 4]
+    border_thickness: 1.0
+    corner_radius: 0
+    padding: [6, 4, 6, 0]
 
   Tab:
-    fill: "#1A1E29"
+    fill: "#1E2026"
     border_color: "#00000000"
     border_thickness: 1.0
-    corner_radius: 5
-    padding: [12, 4]
+    corner_radius: [3, 3, 0, 0]
+    padding: [12, 5]
     text_color: "$TextMuted"
-    font_size: 13
+    font_size: 18
 
   "Tab:hover":
-    fill: "#242A38"
+    fill: "$Surface2"
     text_color: "$Text"
 
   "Tab.active":
-    fill: "#262E40"
+    fill: "#2A4975"
     border_color: "$Accent"
     text_color: "#FFFFFF"
 
   MenuBar:
-    fill: "#161922"
+    fill: "#181A20"
     border_color: "$Border"
     border_thickness: 1.0
-    corner_radius: 6
-    padding: [8, 3]
+    corner_radius: 0
+    padding: [6, 2]
 
   MenuTrigger:
     fill: "#00000000"
     border_thickness: 0
-    corner_radius: 4
+    corner_radius: 2
     padding: [10, 4]
     text_color: "$Text"
-    font_size: 13
+    font_size: 18
 
   "MenuTrigger:hover":
-    fill: "#262D3D"
+    fill: "$Surface2"
+    text_color: "#FFFFFF"
 
   MenuPopup:
-    fill: "#1C202B"
-    border_color: "$Border"
+    fill: "#22242BFC"
+    border_color: "#4D5364"
     border_thickness: 1.0
-    shadow_color: "#00000099"
-    shadow_offset: [0, 8]
-    shadow_blur: 18
-    corner_radius: 8
-    padding: 6
+    shadow_color: "#0000008C"
+    shadow_offset: [0, 6]
+    shadow_blur: 14
+    corner_radius: 3
+    padding: 4
 
   MenuItem:
     fill: "#00000000"
     border_thickness: 0
-    corner_radius: 4
-    padding: [10, 4]
+    corner_radius: 2
+    padding: [10, 5]
     text_color: "$Text"
-    font_size: 13
+    font_size: 18
 
   "MenuItem:hover":
     fill: "$Accent"
@@ -229,5 +228,22 @@ styles:
     fill: "#0D1016"
     border_color: "$Border"
     border_thickness: 1.0
+
+  TitleClose:
+    fill: "#00000000"
+    border_thickness: 0
+    corner_radius: 0
+    padding: 0
+    text_color: "$TextMuted"
+    font_size: 16
+    transition_ms: 50
+
+  "TitleClose:hover":
+    fill: "$Danger"
+    text_color: "#FFFFFF"
+
+  "TitleClose:pressed":
+    fill: "#AE3840"
+    text_color: "#FFFFFF"
     corner_radius: 6
     text_color: "$Text"

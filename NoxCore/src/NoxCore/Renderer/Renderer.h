@@ -217,6 +217,19 @@ namespace Nox
         UI::UIDrawList* GetUIDrawList() { return m_uiRenderer ? &m_uiRenderer->GetDrawList() : nullptr; }
         Utils::NOXWatcher& GetFileWatcher() { return m_fileWatcher; }
 
+        std::unique_ptr<NRI::Swapchain> CreateWindowSwapchain(Nox::Window& window, uint32_t width, uint32_t height, bool vSync = true);
+        std::unique_ptr<NRI::CommandAllocator> CreateUICommandAllocator();
+        void WaitDeviceIdle();
+        uint32_t GetCurrentFrameIndex() const { return frameIndex; }
+        bool RenderSecondaryUIViewport(
+            NRI::Swapchain& swapchain,
+            NRI::CommandAllocator& allocator,
+            NRI::CommandBuffer& cmd,
+            const UI::UIDrawList& drawList,
+            const glm::vec2& viewportSize,
+            const glm::vec4& clearColor = { 0.08f, 0.09f, 0.11f, 1.0f }
+        );
+
         // Call this from EditorLayer during mouse hover/click
         // Single click (1x1)
         void setPickRequest(int32_t x, int32_t y, bool active = true)

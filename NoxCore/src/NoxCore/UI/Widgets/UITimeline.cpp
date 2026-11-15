@@ -5,6 +5,7 @@
 
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
+#include "NoxCore/UI/Widgets/UILabel.h"
 
 namespace Nox::UI
 {
@@ -80,11 +81,19 @@ namespace Nox::UI
     {
         UIElement::OnPaint(drawList, theme);
 
+        const UIStyleBox& style = GetResolvedStyle();
         const UIRect& b = GetBounds();
         const float pad = 10.0f;
         const float x0 = b.Min.x + pad;
         const float w = std::max(1.0f, b.Width() - pad * 2.0f);
         const Ref<Font> font = Font::GetDefault();
+        const float fontSize = std::max(10.0f, style.FontSize * 0.82f);
+
+        const UIColor tickCol = theme.GetToken("Border", { 0.35f, 0.40f, 0.50f, 0.7f });
+        const UIColor trackCol = theme.GetToken("Surface2", { 0.184f, 0.194f, 0.227f, 1.0f });
+        const UIColor kfCol = theme.GetToken("Warning", { 0.851f, 0.616f, 0.224f, 1.0f });
+        const UIColor playheadCol = theme.GetToken("Danger", { 0.835f, 0.310f, 0.333f, 1.0f });
+        const UIColor textCol = theme.GetToken("TextMuted", { 0.580f, 0.616f, 0.686f, 1.0f });
 
         // Ruler ticks
         constexpr int kTicks = 10;
@@ -95,13 +104,13 @@ namespace Nox::UI
             drawList.AddRoundedRect(
                 { tx, b.Min.y + 4.0f },
                 { tx + 1.0f, b.Min.y + (major ? 14.0f : 9.0f) },
-                { 0.45f, 0.50f, 0.60f, 0.7f }
+                tickCol
             );
         }
 
         // Keyframe track line
-        const float trackY = b.Min.y + 30.0f;
-        drawList.AddRoundedRect({ x0, trackY - 1.0f }, { x0 + w, trackY + 1.0f }, { 0.25f, 0.29f, 0.36f, 1.0f });
+        const float trackY = b.Min.y + b.Height() * 0.62f;
+        drawList.AddRoundedRect({ x0, trackY - 1.0f }, { x0 + w, trackY + 1.0f }, trackCol);
 
         // Keyframe markers
         for (float kf : m_Keyframes)
@@ -110,18 +119,19 @@ namespace Nox::UI
             drawList.AddRoundedRect(
                 { kx - 4.0f, trackY - 4.0f },
                 { kx + 4.0f, trackY + 4.0f },
-                { 0.95f, 0.72f, 0.22f, 1.0f },
+                kfCol,
                 glm::vec4(2.0f)
             );
         }
 
         // Playhead scrubber
         const float px = x0 + (m_CurrentTime / m_Duration) * w;
-        drawList.AddRoundedRect({ px - 1.0f, b.Min.y + 2.0f }, { px + 1.0f, b.Max.y - 2.0f }, { 0.94f, 0.30f, 0.32f, 1.0f });
-        drawList.AddRoundedRect({ px - 5.0f, b.Min.y + 2.0f }, { px + 5.0f, b.Min.y + 11.0f }, { 0.94f, 0.30f, 0.32f, 1.0f }, glm::vec4(2.0f));
+        drawList.AddRoundedRect({ px - 1.0f, b.Min.y + 2.0f }, { px + 1.0f, b.Max.y - 2.0f }, playheadCol);
+        drawList.AddRoundedRect({ px - 5.0f, b.Min.y + 2.0f }, { px + 5.0f, b.Min.y + 11.0f }, playheadCol, glm::vec4(2.0f));
 
         char buf[32]{};
         std::snprintf(buf, sizeof(buf), "%.2fs / %.2fs", m_CurrentTime, m_Duration);
-        drawList.AddText(buf, font, { b.Max.x - 95.0f, b.Min.y + 4.0f }, 11.5f, { 0.78f, 0.84f, 0.92f, 0.9f });
+        const UIVec2 tSz = UILabel::MeasureText(buf, font, fontSize);
+        drawList.AddText(buf, font, { b.Max.x - pad - tSz.x, b.Min.y + 4.0f }, fontSize, textCol);
     }
 }

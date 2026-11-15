@@ -32,7 +32,7 @@ namespace Nox::UI
         UIThickness Padding = UIThickness::All(8.0f);
 
         UIColor TextColor{ 0.92f, 0.94f, 0.98f, 1.0f };
-        float FontSize = 15.0f;
+        float FontSize = 18.0f;
 
         float TransitionSeconds = 0.10f;
 

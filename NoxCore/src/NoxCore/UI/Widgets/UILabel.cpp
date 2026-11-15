@@ -87,6 +87,23 @@ namespace Nox::UI
         const float fontSize = FontSizeOverride > 0.0f ? FontSizeOverride : style.FontSize;
         const UIColor color = UseColorOverride ? ColorOverride : style.TextColor;
 
-        drawList.AddText(Text, FontAsset, GetBounds().Min, fontSize, color);
+        const UIRect& b = GetBounds();
+        UIVec2 pos = b.Min;
+        if (HAlign == UIAlignment::Center || HAlign == UIAlignment::End ||
+            VAlign == UIAlignment::Center || VAlign == UIAlignment::End)
+        {
+            const UIVec2 textSize = MeasureText(Text, FontAsset, fontSize);
+            if (HAlign == UIAlignment::Center)
+                pos.x = b.Min.x + (b.Width() - textSize.x) * 0.5f;
+            else if (HAlign == UIAlignment::End)
+                pos.x = b.Max.x - textSize.x;
+
+            if (VAlign == UIAlignment::Center)
+                pos.y = b.Min.y + (b.Height() - textSize.y) * 0.5f;
+            else if (VAlign == UIAlignment::End)
+                pos.y = b.Max.y - textSize.y;
+        }
+
+        drawList.AddText(Text, FontAsset, pos, fontSize, color);
     }
 }

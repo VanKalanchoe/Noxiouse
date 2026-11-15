@@ -13,6 +13,14 @@ namespace Nox
         bool IsResizeable = true;
         bool VSync = true;
         bool IsVulkan = true;
+        bool Borderless = false;
+        bool DestroyOnDestruct = false;
+        bool HasPosition = false;
+        int PosX = 0;
+        int PosY = 0;
+        int MinWidth = 640;
+        int MinHeight = 480;
+        bool ScaleByDisplay = true;
     };
     
     // Windowed; Borderless: covering the display at the desktop's resolution (no mode change, alt-tab is instant); Fullscreen:
@@ -28,6 +36,14 @@ namespace Nox
         ~Window();
         
         void getSizeInPixels(int& width, int& height);
+        void GetSize(int& width, int& height) const;
+        void GetPosition(int& x, int& y) const;
+        void SetPosition(int x, int y);
+        void SetSize(int width, int height);
+        void SetTitle(const std::string& title);
+        void Focus();
+        uint32_t GetWindowID() const;
+        float GetContentScale() const;
 
         void SetMode(WindowMode mode);
         WindowMode GetMode() const { return m_Mode; }

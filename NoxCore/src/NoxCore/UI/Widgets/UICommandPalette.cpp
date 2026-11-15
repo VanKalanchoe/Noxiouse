@@ -148,7 +148,7 @@ namespace Nox::UI
 
         if (m_Filtered.empty())
         {
-            m_ResultsBox->AddChild(Ref<UILabel>(new UILabel("No matching commands", 13.0f)));
+            m_ResultsBox->AddChild(Ref<UILabel>(new UILabel("No matching commands")));
             return;
         }
 
@@ -170,8 +170,7 @@ namespace Nox::UI
             if (i == m_SelectedIndex)
                 btn->StyleVariant = "primary";
             btn->WidthMode = UISizeMode::Fill;
-            btn->HeightMode = UISizeMode::Fixed;
-            btn->FixedSize.y = 28.0f;
+            btn->HeightMode = UISizeMode::Auto;
             m_ResultsBox->AddChild(btn);
         }
     }

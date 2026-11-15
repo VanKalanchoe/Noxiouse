@@ -9,14 +9,11 @@ namespace Nox::UI
         , VSpacing(vSpacing)
     {
         WidthMode = UISizeMode::Fill;
+        ClipChildren = true;
     }
 
-    UIVec2 UIWrapBox::ComputeDesiredSize()
+    UIVec2 UIWrapBox::ComputeWrappedSize(float wrapWidth, bool measureChildren)
     {
-        const float wrapWidth = GetBounds().Width() > 1.0f
-            ? std::max(1.0f, GetBounds().Width() - Padding.Horizontal())
-            : std::max(240.0f, MinSize.x);
-
         float x = 0.0f;
         float y = 0.0f;
         float rowH = 0.0f;
@@ -27,7 +24,7 @@ namespace Nox::UI
             if (!child || !child->Visible)
                 continue;
 
-            const UIVec2 sz = child->Measure();
+            const UIVec2 sz = measureChildren ? child->Measure() : child->GetDesiredSize();
             if (x > 0.0f && x + sz.x > wrapWidth)
             {
                 maxW = std::max(maxW, x - HSpacing);
@@ -47,6 +44,32 @@ namespace Nox::UI
             maxW + Padding.Horizontal(),
             y + rowH + Padding.Vertical()
         };
+    }
+
+    float UIWrapBox::ComputeHeightForWidth(float width)
+    {
+        const float wrapWidth = std::max(1.0f, width - Padding.Horizontal());
+        return ComputeWrappedSize(wrapWidth, false).y;
+    }
+
+    UIVec2 UIWrapBox::ComputeDesiredSize()
+    {
+        float availWidth = GetBounds().Width() > 1.0f
+            ? std::max(1.0f, GetBounds().Width() - Padding.Horizontal())
+            : 0.0f;
+        if (availWidth <= 0.0f)
+        {
+            for (const UIElement* p = GetParent(); p; p = p->GetParent())
+            {
+                if (p->GetBounds().Width() > 1.0f)
+                {
+                    availWidth = std::max(1.0f, p->GetBounds().Width() - p->Padding.Horizontal() - Padding.Horizontal());
+                    break;
+                }
+            }
+        }
+        const float wrapWidth = availWidth > 0.0f ? availWidth : (MinSize.x > 0.0f ? MinSize.x : 1e6f);
+        return ComputeWrappedSize(wrapWidth, true);
     }
 
     void UIWrapBox::ArrangeChildren(const UIRect& contentRect)

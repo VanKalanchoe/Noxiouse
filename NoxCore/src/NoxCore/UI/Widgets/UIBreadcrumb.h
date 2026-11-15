@@ -4,12 +4,12 @@
 #include <string>
 #include <vector>
 
-#include "NoxCore/UI/Layout/UILayout.h"
+#include "NoxCore/UI/Layout/UIWrapBox.h"
 
 namespace Nox::UI
 {
     // Clickable path/hierarchy navigation bar (e.g., Root > Folder > Asset).
-    class UIBreadcrumb : public UIStackBox
+    class UIBreadcrumb : public UIWrapBox
     {
     public:
         explicit UIBreadcrumb(

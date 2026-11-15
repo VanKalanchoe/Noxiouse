@@ -24,10 +24,14 @@ namespace Nox::UI
         bool OnTextInput(std::string_view text) override;
 
     protected:
+        void OnUpdate(float dt) override;
         UIVec2 ComputeDesiredSize() override;
         void OnPaint(UIDrawList& drawList, const UITheme& theme) override;
 
     private:
         size_t m_Cursor = 0;
+        bool m_SelectAll = false;
+        float m_BlinkTimer = 0.0f;
+        uint64_t m_LastClickTicks = 0;
     };
 }

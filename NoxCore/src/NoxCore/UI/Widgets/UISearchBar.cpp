@@ -31,8 +31,6 @@ namespace Nox::UI
         {
             SetQuery("", true);
         }));
-        m_ClearBtn->WidthMode = UISizeMode::Fixed;
-        m_ClearBtn->FixedSize.x = 28.0f;
         m_ClearBtn->Visible = false;
 
         AddChild(m_Input);

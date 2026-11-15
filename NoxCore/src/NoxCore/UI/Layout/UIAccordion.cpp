@@ -30,8 +30,7 @@ namespace Nox::UI
         }));
         btn->StyleClass = "TreeRow";
         btn->WidthMode = UISizeMode::Fill;
-        btn->HeightMode = UISizeMode::Fixed;
-        btn->FixedSize.y = 28.0f;
+        btn->HeightMode = UISizeMode::Auto;
 
         if (content)
             content->Visible = expanded;

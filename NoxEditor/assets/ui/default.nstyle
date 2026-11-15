@@ -1,0 +1,60 @@
+tokens:
+  bg: "#12141A"
+  panel: "#191C24"
+  topbar: "#1D212B"
+  border: "#2E3444"
+  accent: "#3D8FF5"
+  accent_hover: "#529FF8"
+  text: "#EBF0FA"
+
+styles:
+  Background:
+    fill: $bg
+    corner_radius: 0
+
+  Panel:
+    fill: $panel
+    border_color: $border
+    border_thickness: 1.0
+    corner_radius: 6
+
+  TopBar:
+    fill: $topbar
+    border_color: $border
+    border_thickness: 1.0
+    corner_radius: 6
+
+  Button:
+    fill: "#242936"
+    border_color: $border
+    border_thickness: 1.0
+    corner_radius: 6
+    text_color: $text
+    font_size: 18.0
+    padding: [12, 7]
+
+  "Button:hover":
+    fill: "#2E3545"
+    border_color: "#4B5670"
+
+  "Button.primary":
+    fill: $accent
+    border_color: $accent_hover
+    border_thickness: 1.0
+    corner_radius: 6
+    text_color: "#FFFFFF"
+
+  "Button.primary:hover":
+    fill: $accent_hover
+
+  TextInput:
+    fill: "#111319"
+    border_color: $border
+    border_thickness: 1.0
+    corner_radius: 5
+    text_color: $text
+    padding: [8, 6]
+
+  "TextInput:focus":
+    border_color: $accent
+    border_thickness: 1.5

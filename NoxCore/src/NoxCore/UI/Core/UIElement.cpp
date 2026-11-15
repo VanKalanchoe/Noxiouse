@@ -26,6 +26,15 @@ namespace Nox::UI
     {
     }
 
+    UIElement::~UIElement()
+    {
+        for (const auto& child : m_Children)
+        {
+            if (child && child->m_Parent == this)
+                child->m_Parent = nullptr;
+        }
+    }
+
     void UIElement::AddChild(const Ref<UIElement>& child)
     {
         if (!child || child.get() == this)

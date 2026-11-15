@@ -41,18 +41,18 @@ namespace Nox::UI
             std::function<void()> m_OnDismiss;
         };
 
-        Ref<UIStackBox> CreateModalCard(float width, float height)
+        Ref<UIStackBox> CreateModalCard(float minWidth, float minHeight)
         {
             Ref<UIStackBox> card(new UIStackBox(UIOrientation::Vertical, 12.0f));
             card->StyleClass = "MenuPopup";
             card->DrawBackground = true;
             card->HitTestMode = UIHitTestMode::Self;
-            card->WidthMode = UISizeMode::Fixed;
-            card->HeightMode = UISizeMode::Fixed;
-            card->FixedSize = { width, height };
+            card->WidthMode = UISizeMode::Auto;
+            card->HeightMode = UISizeMode::Auto;
+            card->MinSize = { minWidth, minHeight };
             card->AnchorMin = { 0.5f, 0.5f };
             card->AnchorMax = { 0.5f, 0.5f };
-            card->AnchorOffsets = { -width * 0.5f, -height * 0.5f, 0.0f, 0.0f };
+            card->AnchorOffsets = { -minWidth * 0.5f, -minHeight * 0.5f, 0.0f, 0.0f };
             card->Padding = UIThickness::All(18.0f);
             return card;
         }

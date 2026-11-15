@@ -10,6 +10,17 @@
 
 namespace Nox::UI
 {
+    namespace
+    {
+        struct ScopedCurrentContext
+        {
+            UIContext*& Slot;
+            UIContext* Prev;
+            ScopedCurrentContext(UIContext*& slot, UIContext* next) : Slot(slot), Prev(slot) { Slot = next; }
+            ~ScopedCurrentContext() { Slot = Prev; }
+        };
+    }
+
     UIContext::UIContext()
     {
         m_Theme = UITheme::CreateDefault();
@@ -136,6 +147,20 @@ namespace Nox::UI
             }
         }
         return false;
+    }
+
+    void UIContext::SetPointerCapture(const Ref<UIElement>& element)
+    {
+        if (m_Captured && m_Captured != element)
+            m_Captured->SetStateFlag(UIState::Pressed, false);
+        m_Captured = element;
+    }
+
+    void UIContext::ReleasePointerCapture()
+    {
+        if (m_Captured)
+            m_Captured->SetStateFlag(UIState::Pressed, false);
+        m_Captured = nullptr;
     }
 
     bool UIContext::DispatchPointerDown(const UIVec2& pos, int button)
@@ -309,6 +334,7 @@ namespace Nox::UI
 
     void UIContext::OnEvent(Event& event)
     {
+        ScopedCurrentContext currentGuard(s_Current, this);
         EventDispatcher dispatcher(event);
         dispatcher.Dispatch<MouseMovedEvent>([this](MouseMovedEvent& e)
         {
@@ -338,6 +364,7 @@ namespace Nox::UI
 
     void UIContext::UpdateAndRender(UIDrawList& drawList, const UIVec2& viewportSize, float dt)
     {
+        ScopedCurrentContext currentGuard(s_Current, this);
         if (m_Theme)
             m_Theme->PollHotReload();
 
@@ -374,11 +401,13 @@ namespace Nox::UI
                 }
                 if (!tip.empty())
                 {
-                    constexpr float fontSize = 12.5f;
+                    const UIStyleBox tipStyle = m_Theme ? m_Theme->Resolve("Tooltip", "", UIState::Normal) : UIStyleBox{};
+                    const float fontSize = tipStyle.FontSize > 0.0f ? tipStyle.FontSize : 18.0f;
                     const UIVec2 textSize = UILabel::MeasureText(tip, nullptr, fontSize);
-                    const UIVec2 pad{ 10.0f, 6.0f };
+                    const UIVec2 pad{ tipStyle.Padding.Left > 0.0f ? tipStyle.Padding.Left : fontSize * 0.75f,
+                                      tipStyle.Padding.Top > 0.0f ? tipStyle.Padding.Top : fontSize * 0.45f };
                     const UIVec2 boxSize{ textSize.x + pad.x * 2.0f, textSize.y + pad.y * 2.0f };
-                    UIVec2 pos{ m_LastMousePos.x + 14.0f, m_LastMousePos.y + 18.0f };
+                    UIVec2 pos{ m_LastMousePos.x + fontSize * 1.1f, m_LastMousePos.y + fontSize * 1.4f };
                     if (pos.x + boxSize.x > viewportSize.x - 6.0f)
                         pos.x = std::max(6.0f, viewportSize.x - boxSize.x - 6.0f);
                     if (pos.y + boxSize.y > viewportSize.y - 6.0f)
@@ -387,15 +416,15 @@ namespace Nox::UI
                     drawList.AddRoundedRect(
                         pos,
                         pos + boxSize,
-                        { 0.09f, 0.10f, 0.13f, 0.96f },
-                        glm::vec4(6.0f),
-                        1.0f,
-                        { 0.28f, 0.32f, 0.40f, 0.95f },
-                        { 0.0f, 0.0f, 0.0f, 0.45f },
-                        { 0.0f, 4.0f },
-                        10.0f
+                        tipStyle.FillColor,
+                        { tipStyle.CornerRadius.TopLeft, tipStyle.CornerRadius.TopRight, tipStyle.CornerRadius.BottomRight, tipStyle.CornerRadius.BottomLeft },
+                        tipStyle.BorderThickness > 0.0f ? tipStyle.BorderThickness : 1.0f,
+                        tipStyle.BorderColor,
+                        tipStyle.ShadowColor,
+                        tipStyle.ShadowOffset,
+                        tipStyle.ShadowBlur
                     );
-                    drawList.AddText(tip, nullptr, pos + pad, fontSize, { 0.92f, 0.94f, 0.98f, 1.0f });
+                    drawList.AddText(tip, nullptr, pos + pad, fontSize, tipStyle.TextColor);
                 }
             }
         }
@@ -406,6 +435,8 @@ namespace Nox::UI
 
         if (m_DragActive)
         {
+            const UIStyleBox tipStyle = m_Theme ? m_Theme->Resolve("Tooltip", "", UIState::Normal) : UIStyleBox{};
+            const UIColor accent = m_Theme ? m_Theme->GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f }) : UIColor{ 0.259f, 0.529f, 0.961f, 1.0f };
             UIElement* target = m_Overlay ? m_Overlay->HitTest(m_LastMousePos) : nullptr;
             if (!target && m_Root)
                 target = m_Root->HitTest(m_LastMousePos);
@@ -417,10 +448,10 @@ namespace Nox::UI
                     drawList.AddRoundedRect(
                         tb.Min,
                         tb.Max,
-                        { 0.24f, 0.56f, 0.96f, 0.14f },
-                        glm::vec4(6.0f),
+                        { accent.r, accent.g, accent.b, 0.14f },
+                        glm::vec4(tipStyle.CornerRadius.TopLeft),
                         2.0f,
-                        { 0.30f, 0.68f, 1.0f, 0.95f }
+                        accent
                     );
                     break;
                 }
@@ -428,18 +459,20 @@ namespace Nox::UI
 
             const std::string label = m_ActivePayload.Text.empty() ? m_ActivePayload.Type : m_ActivePayload.Text;
             const Ref<Font> font = Font::GetDefault();
-            const UIVec2 textSize = UILabel::MeasureText(label, font, 12.5f);
-            const UIVec2 boxPos = m_LastMousePos + UIVec2{ 14.0f, 14.0f };
-            const UIVec2 boxSize{ textSize.x + 20.0f, textSize.y + 12.0f };
+            const float fontSize = tipStyle.FontSize > 0.0f ? tipStyle.FontSize : 18.0f;
+            const UIVec2 pad{ fontSize * 0.75f, fontSize * 0.45f };
+            const UIVec2 textSize = UILabel::MeasureText(label, font, fontSize);
+            const UIVec2 boxPos = m_LastMousePos + UIVec2{ fontSize * 1.1f, fontSize * 1.1f };
+            const UIVec2 boxSize{ textSize.x + pad.x * 2.0f, textSize.y + pad.y * 2.0f };
             drawList.AddRoundedRect(
                 boxPos,
                 boxPos + boxSize,
-                { 0.12f, 0.16f, 0.24f, 0.94f },
-                glm::vec4(6.0f),
+                tipStyle.FillColor,
+                glm::vec4(tipStyle.CornerRadius.TopLeft),
                 1.5f,
-                { 0.30f, 0.64f, 1.0f, 0.95f }
+                accent
             );
-            drawList.AddText(label, font, boxPos + UIVec2{ 10.0f, 6.0f }, 12.5f, { 0.94f, 0.97f, 1.0f, 1.0f });
+            drawList.AddText(label, font, boxPos + pad, fontSize, tipStyle.TextColor);
         }
 
         // Render bottom-right stacked toast notifications
@@ -449,43 +482,47 @@ namespace Nox::UI
                 toast.Remaining -= dt;
             std::erase_if(m_Toasts, [](const ToastItem& t) { return t.Remaining <= 0.0f; });
 
-            float bottomY = viewportSize.y - 18.0f;
-            constexpr float fontSize = 13.0f;
+            const UIStyleBox toastStyle = m_Theme ? m_Theme->Resolve("Tooltip", "", UIState::Normal) : UIStyleBox{};
+            const float fontSize = toastStyle.FontSize > 0.0f ? toastStyle.FontSize : 18.0f;
+            const float margin = fontSize * 1.3f;
+            float bottomY = viewportSize.y - margin;
             const Ref<Font> font = Font::GetDefault();
             for (int i = static_cast<int>(m_Toasts.size()) - 1; i >= 0; --i)
             {
                 const ToastItem& t = m_Toasts[i];
                 const float alpha = std::clamp(t.Remaining / 0.4f, 0.0f, 1.0f);
                 const UIVec2 textSize = UILabel::MeasureText(t.Message, font, fontSize);
-                const UIVec2 boxSize{ std::max(180.0f, textSize.x + 32.0f), textSize.y + 18.0f };
-                const UIVec2 boxMin{ viewportSize.x - boxSize.x - 18.0f, bottomY - boxSize.y };
+                const float padX = fontSize * 1.1f;
+                const float padY = fontSize * 0.65f;
+                const UIVec2 boxSize{ textSize.x + padX * 2.0f + 6.0f, textSize.y + padY * 2.0f };
+                const UIVec2 boxMin{ viewportSize.x - boxSize.x - margin, bottomY - boxSize.y };
                 const UIVec2 boxMax = boxMin + boxSize;
 
                 drawList.AddRoundedRect(
                     boxMin,
                     boxMax,
-                    { 0.10f, 0.11f, 0.15f, 0.95f * alpha },
-                    glm::vec4(6.0f),
+                    { toastStyle.FillColor.r, toastStyle.FillColor.g, toastStyle.FillColor.b, toastStyle.FillColor.a * alpha },
+                    glm::vec4(toastStyle.CornerRadius.TopLeft),
                     1.0f,
-                    { 0.26f, 0.30f, 0.38f, 0.9f * alpha },
-                    { 0.0f, 0.0f, 0.0f, 0.4f * alpha },
-                    { 0.0f, 4.0f },
-                    10.0f
+                    { toastStyle.BorderColor.r, toastStyle.BorderColor.g, toastStyle.BorderColor.b, toastStyle.BorderColor.a * alpha },
+                    { toastStyle.ShadowColor.r, toastStyle.ShadowColor.g, toastStyle.ShadowColor.b, toastStyle.ShadowColor.a * alpha },
+                    toastStyle.ShadowOffset,
+                    toastStyle.ShadowBlur
                 );
                 drawList.AddRoundedRect(
                     { boxMin.x + 2.0f, boxMin.y + 4.0f },
-                    { boxMin.x + 6.0f, boxMax.y - 4.0f },
+                    { boxMin.x + 5.5f, boxMax.y - 4.0f },
                     { t.Accent.r, t.Accent.g, t.Accent.b, t.Accent.a * alpha },
                     glm::vec4(2.0f)
                 );
                 drawList.AddText(
                     t.Message,
                     font,
-                    { boxMin.x + 16.0f, boxMin.y + 9.0f },
+                    { boxMin.x + padX + 4.0f, boxMin.y + padY },
                     fontSize,
-                    { 0.92f, 0.95f, 0.98f, alpha }
+                    { toastStyle.TextColor.r, toastStyle.TextColor.g, toastStyle.TextColor.b, toastStyle.TextColor.a * alpha }
                 );
-                bottomY = boxMin.y - 8.0f;
+                bottomY = boxMin.y - (fontSize * 0.6f);
             }
         }
     }

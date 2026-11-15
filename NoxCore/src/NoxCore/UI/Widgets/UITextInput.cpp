@@ -1,7 +1,10 @@
 #include "UITextInput.h"
 
 #include <algorithm>
+#include <cmath>
+#include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_scancode.h>
+#include <SDL3/SDL_timer.h>
 
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
@@ -19,10 +22,32 @@ namespace Nox::UI
         ClipChildren = true;
     }
 
+    void UITextInput::OnUpdate(float dt)
+    {
+        if (HasState(GetState(), UIState::Focused))
+            m_BlinkTimer += dt;
+        else
+            m_SelectAll = false;
+    }
+
     bool UITextInput::OnPointerDown(const UIPointerEvent& e)
     {
         if (e.Button == 1 && IsEnabled())
         {
+            m_BlinkTimer = 0.0f;
+            const uint64_t now = SDL_GetTicks();
+            const bool doubleClick = (now - m_LastClickTicks) < 350;
+            m_LastClickTicks = now;
+            const bool modClick = (SDL_GetModState() & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0;
+
+            if ((doubleClick || modClick) && !Text.empty())
+            {
+                m_SelectAll = true;
+                m_Cursor = Text.size();
+                return true;
+            }
+
+            m_SelectAll = false;
             const UIStyleBox& style = GetResolvedStyle();
             const float localX = e.Position.x - (GetBounds().Min.x + style.Padding.Left);
             m_Cursor = Text.size();
@@ -46,34 +71,66 @@ namespace Nox::UI
             return false;
 
         m_Cursor = std::min(m_Cursor, Text.size());
+        m_BlinkTimer = 0.0f;
+
+        if (e.KeyCode == SDL_SCANCODE_A && (SDL_GetModState() & SDL_KMOD_CTRL) != 0)
+        {
+            m_SelectAll = !Text.empty();
+            m_Cursor = Text.size();
+            return true;
+        }
 
         switch (e.KeyCode)
         {
         case SDL_SCANCODE_LEFT:
-            if (m_Cursor > 0) --m_Cursor;
+            if (m_SelectAll) { m_Cursor = 0; m_SelectAll = false; }
+            else if (m_Cursor > 0) --m_Cursor;
             return true;
         case SDL_SCANCODE_RIGHT:
-            if (m_Cursor < Text.size()) ++m_Cursor;
+            if (m_SelectAll) { m_Cursor = Text.size(); m_SelectAll = false; }
+            else if (m_Cursor < Text.size()) ++m_Cursor;
             return true;
         case SDL_SCANCODE_HOME:
+            m_SelectAll = false;
             m_Cursor = 0;
             return true;
         case SDL_SCANCODE_END:
+            m_SelectAll = false;
             m_Cursor = Text.size();
             return true;
         case SDL_SCANCODE_BACKSPACE:
-            if (!ReadOnly && m_Cursor > 0)
+            if (!ReadOnly)
             {
-                Text.erase(m_Cursor - 1, 1);
-                --m_Cursor;
-                if (OnChanged) OnChanged(Text);
+                if (m_SelectAll)
+                {
+                    Text.clear();
+                    m_Cursor = 0;
+                    m_SelectAll = false;
+                    if (OnChanged) OnChanged(Text);
+                }
+                else if (m_Cursor > 0)
+                {
+                    Text.erase(m_Cursor - 1, 1);
+                    --m_Cursor;
+                    if (OnChanged) OnChanged(Text);
+                }
             }
             return true;
         case SDL_SCANCODE_DELETE:
-            if (!ReadOnly && m_Cursor < Text.size())
+            if (!ReadOnly)
             {
-                Text.erase(m_Cursor, 1);
-                if (OnChanged) OnChanged(Text);
+                if (m_SelectAll)
+                {
+                    Text.clear();
+                    m_Cursor = 0;
+                    m_SelectAll = false;
+                    if (OnChanged) OnChanged(Text);
+                }
+                else if (m_Cursor < Text.size())
+                {
+                    Text.erase(m_Cursor, 1);
+                    if (OnChanged) OnChanged(Text);
+                }
             }
             return true;
         case SDL_SCANCODE_RETURN:
@@ -90,9 +147,16 @@ namespace Nox::UI
         if (!IsEnabled() || ReadOnly || text.empty())
             return false;
 
+        if (m_SelectAll)
+        {
+            Text.clear();
+            m_Cursor = 0;
+            m_SelectAll = false;
+        }
         m_Cursor = std::min(m_Cursor, Text.size());
         Text.insert(m_Cursor, text);
         m_Cursor += text.size();
+        m_BlinkTimer = 0.0f;
         if (OnChanged)
             OnChanged(Text);
         return true;
@@ -125,10 +189,20 @@ namespace Nox::UI
         {
             const UIVec2 size = UILabel::MeasureText(Text, nullptr, style.FontSize);
             const float y = b.Min.y + (b.Height() - size.y) * 0.5f;
+            if (m_SelectAll && HasState(GetState(), UIState::Focused))
+            {
+                const UIColor accent = theme.GetToken("Accent", { 0.24f, 0.56f, 0.96f, 1.0f });
+                drawList.AddRoundedRect(
+                    { textX - 2.0f, b.Min.y + 4.0f },
+                    { textX + size.x + 2.0f, b.Max.y - 4.0f },
+                    { accent.r, accent.g, accent.b, 0.35f },
+                    glm::vec4(2.0f)
+                );
+            }
             drawList.AddText(Text, nullptr, { textX, y }, style.FontSize, style.TextColor);
         }
 
-        if (HasState(GetState(), UIState::Focused) && !ReadOnly)
+        if (HasState(GetState(), UIState::Focused) && !ReadOnly && std::fmod(m_BlinkTimer, 1.0f) < 0.55f)
         {
             const size_t clampedCursor = std::min(m_Cursor, Text.size());
             const float caretOffset = UILabel::MeasureText(std::string_view(Text).substr(0, clampedCursor), nullptr, style.FontSize).x;

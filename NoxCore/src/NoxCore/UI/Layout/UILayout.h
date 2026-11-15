@@ -19,6 +19,8 @@ namespace Nox::UI
         UIOrientation Orientation = UIOrientation::Vertical;
         float Spacing = 6.0f;
 
+        float ComputeHeightForWidth(float width) override;
+
     protected:
         UIVec2 ComputeDesiredSize() override;
         void ArrangeChildren(const UIRect& contentRect) override;
@@ -35,7 +37,7 @@ namespace Nox::UI
         void ArrangeChildren(const UIRect& contentRect) override;
     };
 
-    // Fixed-column grid container.
+    // Responsive grid container (collapses columns when MinColumnWidth > 0).
     class UIGridBox : public UIElement
     {
     public:
@@ -44,9 +46,15 @@ namespace Nox::UI
         uint32_t Columns = 2;
         float ColumnSpacing = 6.0f;
         float RowSpacing = 6.0f;
+        float MinColumnWidth = 0.0f;
+
+        float ComputeHeightForWidth(float width) override;
 
     protected:
         UIVec2 ComputeDesiredSize() override;
         void ArrangeChildren(const UIRect& contentRect) override;
+
+    private:
+        uint32_t ResolveColumnCount(float availWidth) const;
     };
 }

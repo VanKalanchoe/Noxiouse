@@ -6,6 +6,7 @@
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
+#include "NoxCore/UI/Widgets/UILabel.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
 
 namespace Nox::UI
@@ -84,26 +85,34 @@ namespace Nox::UI
                     static_cast<int>((m_ScrollOffset + viewH) / kRowHeight) + 1
                 );
 
+                const UIStyleBox& style = GetResolvedStyle();
+                const float fontSize = std::max(11.0f, style.FontSize * 0.9f);
+                const float tagColW = UILabel::MeasureText("[WARN]", font, fontSize).x + 12.0f;
+                const UIColor textCol = theme.GetToken("Text", style.TextColor);
+                const UIColor infoCol = theme.GetToken("TextMuted", { 0.580f, 0.616f, 0.686f, 1.0f });
+                const UIColor warnCol = theme.GetToken("Warning", { 0.851f, 0.616f, 0.224f, 1.0f });
+                const UIColor errCol = theme.GetToken("Danger", { 0.835f, 0.310f, 0.333f, 1.0f });
+
                 for (int i = first; i <= last; ++i)
                 {
                     const float y = b.Min.y + static_cast<float>(i) * kRowHeight - m_ScrollOffset;
                     const auto& entry = m_Filtered[i];
 
-                    UIColor color{ 0.82f, 0.86f, 0.92f, 1.0f };
+                    UIColor color = infoCol;
                     const char* tag = "[INFO]";
                     if (entry.Level == UILogLevel::Warning)
                     {
-                        color = { 0.96f, 0.78f, 0.28f, 1.0f };
+                        color = warnCol;
                         tag = "[WARN]";
                     }
                     else if (entry.Level == UILogLevel::Error)
                     {
-                        color = { 0.96f, 0.36f, 0.36f, 1.0f };
+                        color = errCol;
                         tag = "[ERR ]";
                     }
 
-                    drawList.AddText(tag, font, { b.Min.x + 8.0f, y + 3.0f }, 12.5f, color);
-                    drawList.AddText(entry.Message, font, { b.Min.x + 58.0f, y + 3.0f }, 12.5f, { 0.88f, 0.91f, 0.96f, 1.0f });
+                    drawList.AddText(tag, font, { b.Min.x + 8.0f, y + 3.0f }, fontSize, color);
+                    drawList.AddText(entry.Message, font, { b.Min.x + 8.0f + tagColW, y + 3.0f }, fontSize, textCol);
                 }
 
                 if (maxScroll > 0.0f && viewH > 12.0f)
@@ -113,7 +122,7 @@ namespace Nox::UI
                     drawList.AddRoundedRect(
                         { b.Max.x - 6.0f, thumbY + 2.0f },
                         { b.Max.x - 2.0f, thumbY + thumbH - 2.0f },
-                        { 0.42f, 0.47f, 0.56f, 0.75f },
+                        theme.GetToken("Border", { 0.35f, 0.40f, 0.52f, 0.8f }),
                         glm::vec4(2.0f)
                     );
                 }

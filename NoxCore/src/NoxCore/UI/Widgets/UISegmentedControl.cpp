@@ -17,6 +17,8 @@ namespace Nox::UI
     {
         StyleClass = "TextInput";
         DrawBackground = true;
+        ClipChildren = true;
+        WidthMode = UISizeMode::Fill;
         Padding = UIThickness::All(3.0f);
         Rebuild();
     }

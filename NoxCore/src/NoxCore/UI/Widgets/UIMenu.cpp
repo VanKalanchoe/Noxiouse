@@ -12,8 +12,8 @@ namespace Nox::UI
         StyleClass = "MenuPopup";
         DrawBackground = true;
         HitTestMode = UIHitTestMode::Self;
-        WidthMode = UISizeMode::Fixed;
-        FixedSize.x = 210.0f;
+        WidthMode = UISizeMode::Auto;
+        MinSize.x = 160.0f;
         Padding = UIThickness::All(6.0f);
 
         for (auto& item : items)
@@ -39,8 +39,7 @@ namespace Nox::UI
             }));
             btn->StyleClass = "MenuItem";
             btn->WidthMode = UISizeMode::Fill;
-            btn->HeightMode = UISizeMode::Fixed;
-            btn->FixedSize.y = 26.0f;
+            btn->HeightMode = UISizeMode::Auto;
             AddChild(btn);
         }
     }
@@ -86,31 +85,103 @@ namespace Nox::UI
     {
         StyleClass = "MenuBar";
         DrawBackground = true;
-        HeightMode = UISizeMode::Fixed;
-        FixedSize.y = 30.0f;
+        HeightMode = UISizeMode::Auto;
         Padding = UIThickness::Symmetric(8.0f, 3.0f);
     }
 
-    void UIMenuBar::AddMenu(const std::string& title, std::vector<UIMenuItem> items, UIContext& context)
+    void UIMenuBar::AddMenu(const std::string& title, std::vector<UIMenuItem> items)
     {
-        Ref<UIButton> trigger(new UIButton(title));
+        class UIMenuTriggerButton final : public UIButton
+        {
+        public:
+            using UIButton::UIButton;
+            std::function<void()> OnHoverEnter;
+
+            bool OnPointerEnter(const UIPointerEvent& e) override
+            {
+                if (OnHoverEnter)
+                    OnHoverEnter();
+                return UIButton::OnPointerEnter(e);
+            }
+        };
+
+        class UIMenuOverlayHost final : public UIAnchorBox
+        {
+        public:
+            UIMenuOverlayHost(UIContext* ctx, UIMenuBar* bar)
+                : m_Ctx(ctx), m_Bar(bar)
+            {
+                HitTestMode = UIHitTestMode::Self;
+            }
+
+            UIElement* HitTest(const UIVec2& pos) override
+            {
+                for (auto it = GetChildren().rbegin(); it != GetChildren().rend(); ++it)
+                {
+                    if (UIElement* hit = (*it)->HitTest(pos))
+                        return hit;
+                }
+                if (m_Bar && m_Bar->GetBounds().Contains(pos))
+                    return nullptr;
+                return this;
+            }
+
+            bool OnPointerDown(const UIPointerEvent& e) override
+            {
+                if ((e.Button == 1 || e.Button == 3) && m_Ctx)
+                {
+                    m_Ctx->ClearOverlay();
+                    return true;
+                }
+                return false;
+            }
+
+        private:
+            UIContext* m_Ctx = nullptr;
+            UIMenuBar* m_Bar = nullptr;
+        };
+
+        Ref<UIMenuTriggerButton> trigger(new UIMenuTriggerButton(title));
         trigger->StyleClass = "MenuTrigger";
         trigger->VAlign = UIAlignment::Center;
-        UIButton* triggerPtr = trigger.get();
+        UIMenuTriggerButton* triggerPtr = trigger.get();
 
-        trigger->OnClick = [triggerPtr, items = std::move(items), &context]()
+        auto openMenu = [this, triggerPtr, items = std::move(items)]()
         {
-            Ref<UIAnchorBox> overlayHost(new UIAnchorBox());
-            overlayHost->HitTestMode = UIHitTestMode::PassThrough;
-
-            Ref<UIMenuPopup> popup(new UIMenuPopup(items, &context));
+            UIContext* ctx = UIContext::GetCurrent();
+            if (!ctx)
+                return;
+            Ref<UIMenuOverlayHost> overlayHost(new UIMenuOverlayHost(ctx, this));
+            Ref<UIMenuPopup> popup(new UIMenuPopup(items, ctx));
             const UIRect& btnBounds = triggerPtr->GetBounds();
             popup->AnchorMin = { 0.0f, 0.0f };
             popup->AnchorMax = { 0.0f, 0.0f };
             popup->AnchorOffsets = { btnBounds.Min.x, btnBounds.Max.y + 2.0f, 0.0f, 0.0f };
 
             overlayHost->AddChild(popup);
-            context.SetOverlay(overlayHost);
+            m_ActiveOverlay = overlayHost;
+            m_OpenTrigger = triggerPtr;
+            ctx->SetOverlay(overlayHost);
+        };
+
+        trigger->OnClick = [this, triggerPtr, openMenu]()
+        {
+            UIContext* ctx = UIContext::GetCurrent();
+            if (ctx && m_ActiveOverlay && ctx->GetOverlay() == m_ActiveOverlay && m_OpenTrigger == triggerPtr)
+            {
+                ctx->ClearOverlay();
+                m_ActiveOverlay = nullptr;
+                m_OpenTrigger = nullptr;
+                return;
+            }
+            openMenu();
+        };
+
+        trigger->OnHoverEnter = [this, triggerPtr, openMenu]()
+        {
+            UIContext* ctx = UIContext::GetCurrent();
+            if (ctx && m_ActiveOverlay && ctx->GetOverlay() == m_ActiveOverlay && m_OpenTrigger != triggerPtr)
+                openMenu();
         };
 
         AddChild(trigger);

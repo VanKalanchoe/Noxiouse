@@ -18,10 +18,16 @@ namespace Nox::UI
         explicit UIWindow(std::string title = "Window", std::function<void()> onClose = {});
 
         void SetTitle(const std::string& title);
+        const std::string& GetTitle() const;
         void AddContent(const Ref<UIElement>& child);
         const Ref<UIStackBox>& GetContentBox() const { return m_Content; }
 
+        void BeginProgrammaticDrag();
+        bool IsDraggingMove() const { return m_DraggingMove; }
+
         std::function<void()> OnClose;
+        std::function<void(UIVec2 pointerPos)> OnDragMove;
+        std::function<void(UIVec2 pointerPos)> OnDragEnd;
 
         bool OnPointerDown(const UIPointerEvent& e) override;
         bool OnPointerMove(const UIPointerEvent& e) override;
@@ -35,6 +41,7 @@ namespace Nox::UI
     private:
         static constexpr float kTitleBarHeight = 30.0f;
         static constexpr float kResizeGripSize = 14.0f;
+        float m_TitleBarHeight = kTitleBarHeight;
 
         bool m_DraggingMove = false;
         bool m_DraggingResize = false;

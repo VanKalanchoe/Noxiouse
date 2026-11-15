@@ -15,7 +15,10 @@ namespace Nox
         spec.UseImGui = false;
 
         auto* application = new Application(spec);
-        application->PushLayer<EditorV2Layer>();
+        std::filesystem::path project;
+        if (const char* projectFile = args.ProjectFile())
+            project = projectFile;
+        application->PushLayer<EditorV2Layer>(project);
         return application;
     }
 }

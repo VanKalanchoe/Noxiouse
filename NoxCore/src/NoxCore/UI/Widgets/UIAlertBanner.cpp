@@ -27,7 +27,7 @@ namespace Nox::UI
         WidthMode = UISizeMode::Fill;
         Padding = UIThickness{ 16.0f, 8.0f, 10.0f, 8.0f };
 
-        auto msg = Ref<UILabel>(new UILabel(std::move(message), 13.5f));
+        auto msg = Ref<UILabel>(new UILabel(std::move(message)));
         msg->WidthMode = UISizeMode::Fill;
         msg->VAlign = UIAlignment::Center;
         AddChild(msg);
@@ -42,8 +42,6 @@ namespace Nox::UI
         if (dismissible)
         {
             auto closeBtn = Ref<UIButton>(new UIButton("X", [this]() { Visible = false; }));
-            closeBtn->WidthMode = UISizeMode::Fixed;
-            closeBtn->FixedSize.x = 26.0f;
             closeBtn->VAlign = UIAlignment::Center;
             AddChild(closeBtn);
         }

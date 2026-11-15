@@ -21,11 +21,10 @@ namespace Nox::UI
         HitTestMode = UIHitTestMode::Self;
         Focusable = true;
         Padding = UIThickness::Symmetric(2.0f, 2.0f);
-        MinSize = { 44.0f, 24.0f };
 
         if (!label.empty())
         {
-            m_Label = Ref<UILabel>(new UILabel(std::move(label), 13.5f));
+            m_Label = Ref<UILabel>(new UILabel(std::move(label)));
             m_Label->HitTestMode = UIHitTestMode::None;
             m_Label->VAlign = UIAlignment::Center;
             AddChild(m_Label);
@@ -62,14 +61,16 @@ namespace Nox::UI
 
     UIVec2 UIToggleSwitch::ComputeDesiredSize()
     {
-        const float trackW = 40.0f;
-        const float trackH = 20.0f;
+        const UIStyleBox& style = GetResolvedStyle();
+        const float trackH = std::max(16.0f, style.FontSize * 1.4f);
+        const float trackW = trackH * 1.9f;
+        const float gap = style.FontSize * 0.55f;
         if (!m_Label)
             return { trackW + Padding.Horizontal(), std::max(MinSize.y, trackH + Padding.Vertical()) };
 
         const UIVec2 labelSize = m_Label->Measure();
         return {
-            trackW + 8.0f + labelSize.x + Padding.Horizontal(),
+            trackW + gap + labelSize.x + Padding.Horizontal(),
             std::max({ MinSize.y, trackH + Padding.Vertical(), labelSize.y + Padding.Vertical() })
         };
     }
@@ -78,8 +79,12 @@ namespace Nox::UI
     {
         if (!m_Label)
             return;
+        const UIStyleBox& style = GetResolvedStyle();
+        const float trackH = std::max(16.0f, style.FontSize * 1.4f);
+        const float trackW = trackH * 1.9f;
+        const float gap = style.FontSize * 0.55f;
         UIRect textRect = contentRect;
-        textRect.Min.x = std::min(textRect.Max.x, textRect.Min.x + 48.0f);
+        textRect.Min.x = std::min(textRect.Max.x, textRect.Min.x + trackW + gap);
         m_Label->Arrange(textRect);
     }
 
@@ -87,34 +92,37 @@ namespace Nox::UI
     {
         UIElement::OnPaint(drawList, theme);
 
+        const UIStyleBox& style = GetResolvedStyle();
         const UIRect& b = GetBounds();
-        const float trackW = 40.0f;
-        const float trackH = 20.0f;
+        const float trackH = std::max(16.0f, style.FontSize * 1.4f);
+        const float trackW = trackH * 1.9f;
         const UIVec2 tMin{ b.Min.x + Padding.Left, b.Min.y + (b.Height() - trackH) * 0.5f };
         const UIVec2 tMax{ tMin.x + trackW, tMin.y + trackH };
 
-        const UIColor offBg{ 0.18f, 0.20f, 0.26f, 1.0f };
+        const UIColor offBg = theme.GetToken("Surface2", { 0.184f, 0.194f, 0.227f, 1.0f });
+        const UIColor onBg = theme.GetToken("Accent", OnColor);
         const UIColor trackBg{
-            offBg.r + (OnColor.r - offBg.r) * m_AnimT,
-            offBg.g + (OnColor.g - offBg.g) * m_AnimT,
-            offBg.b + (OnColor.b - offBg.b) * m_AnimT,
+            offBg.r + (onBg.r - offBg.r) * m_AnimT,
+            offBg.g + (onBg.g - offBg.g) * m_AnimT,
+            offBg.b + (onBg.b - offBg.b) * m_AnimT,
             1.0f
         };
 
         const bool hovered = HasState(GetState(), UIState::Hovered);
         const UIColor borderColor = hovered
-            ? UIColor{ 0.55f, 0.62f, 0.74f, 1.0f }
-            : UIColor{ 0.28f, 0.32f, 0.40f, 0.9f };
+            ? theme.GetToken("AccentHover", onBg)
+            : style.BorderColor;
 
         drawList.AddRoundedRect(tMin, tMax, trackBg, glm::vec4(trackH * 0.5f), 1.0f, borderColor);
 
-        const float knobR = 7.5f;
-        const float knobX = tMin.x + 10.0f + m_AnimT * (trackW - 20.0f);
+        const float knobR = trackH * 0.375f;
+        const float knobPad = trackH * 0.5f;
+        const float knobX = tMin.x + knobPad + m_AnimT * (trackW - knobPad * 2.0f);
         const float knobY = tMin.y + trackH * 0.5f;
         drawList.AddRoundedRect(
             { knobX - knobR, knobY - knobR },
             { knobX + knobR, knobY + knobR },
-            { 0.95f, 0.97f, 1.0f, 1.0f },
+            theme.GetToken("Text", { 0.95f, 0.97f, 1.0f, 1.0f }),
             glm::vec4(knobR)
         );
     }

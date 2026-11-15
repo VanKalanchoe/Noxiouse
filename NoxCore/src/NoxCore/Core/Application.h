@@ -14,6 +14,7 @@ namespace Nox
 {
     class Renderer;
     class ImGuiLayer;
+    class UILayer;
     class JobSystem;
     class Application;
 
@@ -218,6 +219,7 @@ namespace Nox
         const ApplicationSpecification& GetSpecification() const { return m_Specification; }
         std::shared_ptr<Window> getWindow() { return m_Window; }
         ImGuiLayer* GetImGuiLayer() { return m_ImGuiLayer; }
+        UILayer* GetUILayer() { return m_UILayer; }
 
         static double GetTime();
         static std::string GetExecutableRootPath();
@@ -231,6 +233,7 @@ namespace Nox
         bool m_BlockEvents = false;
         std::shared_ptr<Window> m_Window;
         ImGuiLayer* m_ImGuiLayer = nullptr;
+        UILayer* m_UILayer = nullptr;
         /* We will use this renderer to draw into this window every frame. */
         std::unique_ptr<Renderer> renderer;
         // has to be last otherwise renderer cant free resoruces

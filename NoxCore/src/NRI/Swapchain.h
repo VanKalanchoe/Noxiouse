@@ -2,6 +2,11 @@
 
 #include "NRITypes.h"
 
+namespace Nox
+{
+    class Window;
+}
+
 namespace NRI
 {
     class Texture; // Forward declaration
@@ -11,6 +16,7 @@ namespace NRI
         uint32_t Width;
         uint32_t Height;
         bool VSync = true;
+        Nox::Window* Window = nullptr; // nullptr = primary application window surface
     };
     
     enum class FrameResult { Success, ResizeRequired };

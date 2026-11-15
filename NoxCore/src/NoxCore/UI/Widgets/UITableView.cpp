@@ -4,6 +4,7 @@
 
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
+#include "NoxCore/UI/Widgets/UILabel.h"
 
 namespace Nox::UI
 {
@@ -158,23 +159,33 @@ namespace Nox::UI
 
     UIVec2 UITableView::ComputeDesiredSize()
     {
-        return { MinSize.x, MinSize.y };
+        const float contentH = HeaderHeight + static_cast<float>(m_Rows.size()) * RowHeight;
+        return { std::max(MinSize.x, 160.0f), std::max(MinSize.y, contentH) };
     }
 
     void UITableView::OnPaint(UIDrawList& drawList, const UITheme& theme)
     {
         UIElement::OnPaint(drawList, theme);
 
+        const UIStyleBox& style = GetResolvedStyle();
         const UIRect& b = GetBounds();
         const float bodyW = std::max(1.0f, b.Width() - 8.0f);
         const auto widths = ComputeColumnWidths(bodyW);
         const Ref<Font> font = Font::GetDefault();
+        const float headerFontSize = std::max(11.0f, style.FontSize * 0.92f);
+        const float rowFontSize = std::max(10.5f, style.FontSize * 0.90f);
+
+        const UIColor headerBg = theme.GetToken("Surface1", { 0.145f, 0.153f, 0.180f, 1.0f });
+        const UIColor borderCol = theme.GetToken("Border", { 0.235f, 0.251f, 0.298f, 0.85f });
+        const UIColor accentCol = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
+        const UIColor textCol = theme.GetToken("Text", style.TextColor);
+        const UIColor mutedCol = theme.GetToken("TextMuted", { 0.580f, 0.616f, 0.686f, 1.0f });
 
         // Header bar
         drawList.AddRoundedRect(
             b.Min,
             { b.Max.x, b.Min.y + HeaderHeight },
-            { 0.14f, 0.16f, 0.21f, 1.0f }
+            headerBg
         );
 
         float colX = b.Min.x;
@@ -185,7 +196,8 @@ namespace Nox::UI
                 title += (m_SortAscending ? " ^" : " v");
 
             drawList.PushClipRect({ colX, b.Min.y }, { colX + widths[c], b.Min.y + HeaderHeight });
-            drawList.AddText(title, font, { colX + 8.0f, b.Min.y + 6.0f }, 13.0f, { 0.86f, 0.90f, 0.96f, 1.0f });
+            const UIVec2 hSz = UILabel::MeasureText(title, font, headerFontSize);
+            drawList.AddText(title, font, { colX + 8.0f, b.Min.y + (HeaderHeight - hSz.y) * 0.5f }, headerFontSize, textCol);
             drawList.PopClipRect();
 
             if (c > 0)
@@ -193,7 +205,7 @@ namespace Nox::UI
                 drawList.AddRoundedRect(
                     { colX, b.Min.y + 4.0f },
                     { colX + 1.0f, b.Min.y + HeaderHeight - 4.0f },
-                    { 0.24f, 0.28f, 0.35f, 0.8f }
+                    borderCol
                 );
             }
             colX += widths[c];
@@ -222,11 +234,11 @@ namespace Nox::UI
             const bool hovered = (r == m_HoveredRow);
 
             if (selected)
-                drawList.AddRoundedRect({ b.Min.x, y0 }, { b.Max.x, y1 }, { 0.22f, 0.44f, 0.78f, 0.55f });
+                drawList.AddRoundedRect({ b.Min.x, y0 }, { b.Max.x, y1 }, { accentCol.r, accentCol.g, accentCol.b, 0.28f });
             else if (hovered)
-                drawList.AddRoundedRect({ b.Min.x, y0 }, { b.Max.x, y1 }, { 0.22f, 0.25f, 0.32f, 0.55f });
+                drawList.AddRoundedRect({ b.Min.x, y0 }, { b.Max.x, y1 }, { 1.0f, 1.0f, 1.0f, 0.05f });
             else if ((r % 2) == 1)
-                drawList.AddRoundedRect({ b.Min.x, y0 }, { b.Max.x, y1 }, { 0.10f, 0.11f, 0.15f, 0.45f });
+                drawList.AddRoundedRect({ b.Min.x, y0 }, { b.Max.x, y1 }, { 0.0f, 0.0f, 0.0f, 0.14f });
 
             float cx = b.Min.x;
             for (int c = 0; c < static_cast<int>(m_Columns.size()); ++c)
@@ -234,12 +246,13 @@ namespace Nox::UI
                 if (c < static_cast<int>(m_Rows[r].Cells.size()))
                 {
                     drawList.PushClipRect({ cx, y0 }, { cx + widths[c], y1 });
+                    const UIVec2 cSz = UILabel::MeasureText(m_Rows[r].Cells[c], font, rowFontSize);
                     drawList.AddText(
                         m_Rows[r].Cells[c],
                         font,
-                        { cx + 8.0f, y0 + 4.0f },
-                        12.5f,
-                        selected ? UIColor{ 0.96f, 0.98f, 1.0f, 1.0f } : UIColor{ 0.78f, 0.82f, 0.88f, 1.0f }
+                        { cx + 8.0f, y0 + (RowHeight - cSz.y) * 0.5f },
+                        rowFontSize,
+                        selected ? textCol : mutedCol
                     );
                     drawList.PopClipRect();
                 }
@@ -255,7 +268,7 @@ namespace Nox::UI
             drawList.AddRoundedRect(
                 { b.Max.x - 6.0f, thumbY + 2.0f },
                 { b.Max.x - 2.0f, thumbY + thumbH - 2.0f },
-                { 0.42f, 0.47f, 0.56f, 0.75f },
+                borderCol,
                 glm::vec4(2.0f)
             );
         }

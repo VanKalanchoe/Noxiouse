@@ -6,6 +6,7 @@
 
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
+#include "NoxCore/UI/Widgets/UILabel.h"
 
 namespace Nox::UI
 {
@@ -24,8 +25,7 @@ namespace Nox::UI
         HitTestMode = UIHitTestMode::Self;
         Focusable = true;
         WidthMode = UISizeMode::Fill;
-        HeightMode = UISizeMode::Fixed;
-        FixedSize.y = 26.0f;
+        HeightMode = UISizeMode::Auto;
         SetRange(lowValue, highValue, false);
     }
 
@@ -43,9 +43,15 @@ namespace Nox::UI
 
     float UIRangeSlider::ValueFromX(float x) const
     {
+        const UIStyleBox& style = GetResolvedStyle();
+        const float fontSize = std::max(10.0f, style.FontSize * 0.9f);
+        char buf[48]{};
+        std::snprintf(buf, sizeof(buf), "%.2f - %.2f", m_Low, m_High);
+        const float textW = UILabel::MeasureText(buf, Font::GetDefault(), fontSize).x + 12.0f;
+
         const UIRect& b = GetBounds();
         const float pad = 8.0f;
-        const float w = std::max(1.0f, b.Width() - pad * 2.0f);
+        const float w = std::max(1.0f, b.Width() - pad * 2.0f - textW);
         const float t = std::clamp((x - (b.Min.x + pad)) / w, 0.0f, 1.0f);
         return MinLimit + t * (MaxLimit - MinLimit);
     }
@@ -90,56 +96,70 @@ namespace Nox::UI
 
     UIVec2 UIRangeSlider::ComputeDesiredSize()
     {
-        return { 160.0f, FixedSize.y > 0.0f ? FixedSize.y : 26.0f };
+        const UIStyleBox& style = GetResolvedStyle();
+        return { std::max(MinSize.x, 120.0f), std::max(22.0f, style.FontSize * 1.9f) };
     }
 
-    void UIRangeSlider::OnPaint(UIDrawList& drawList, const UITheme&)
+    void UIRangeSlider::OnPaint(UIDrawList& drawList, const UITheme& theme)
     {
+        const UIStyleBox& style = GetResolvedStyle();
+        const float fontSize = std::max(10.0f, style.FontSize * 0.9f);
+        char buf[48]{};
+        std::snprintf(buf, sizeof(buf), "%.2f - %.2f", m_Low, m_High);
+        const UIVec2 textSize = UILabel::MeasureText(buf, Font::GetDefault(), fontSize);
+
         const UIRect& b = GetBounds();
         const float pad = 8.0f;
-        const float trackW = std::max(1.0f, b.Width() - pad * 2.0f);
+        const float trackW = std::max(1.0f, b.Width() - pad * 2.0f - textSize.x - 12.0f);
         const float cy = (b.Min.y + b.Max.y) * 0.5f;
-        const float trackH = 6.0f;
+        const float trackH = std::max(4.0f, style.FontSize * 0.42f);
         const float invRange = 1.0f / std::max(1e-5f, MaxLimit - MinLimit);
 
         const float x0 = b.Min.x + pad;
         const float xLow = x0 + ((m_Low - MinLimit) * invRange) * trackW;
         const float xHigh = x0 + ((m_High - MinLimit) * invRange) * trackW;
 
+        const UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
+        const UIColor trackBg = style.FillColor;
+
         // Track
         drawList.AddRoundedRect(
             { x0, cy - trackH * 0.5f },
             { x0 + trackW, cy + trackH * 0.5f },
-            { 0.14f, 0.16f, 0.21f, 1.0f },
-            glm::vec4(3.0f)
+            trackBg,
+            glm::vec4(trackH * 0.5f)
         );
 
         // Selected span
         drawList.AddRoundedRect(
             { xLow, cy - trackH * 0.5f },
             { std::max(xLow + 2.0f, xHigh), cy + trackH * 0.5f },
-            { 0.24f, 0.56f, 0.96f, 1.0f },
-            glm::vec4(3.0f)
+            accent,
+            glm::vec4(trackH * 0.5f)
         );
 
         // Handles
-        const float handleR = 7.0f;
+        const float handleR = std::max(5.0f, style.FontSize * 0.5f);
         auto drawHandle = [&](float hx, bool active)
         {
             drawList.AddRoundedRect(
                 { hx - handleR, cy - handleR },
                 { hx + handleR, cy + handleR },
-                active ? UIColor{ 0.98f, 0.99f, 1.0f, 1.0f } : UIColor{ 0.88f, 0.92f, 0.98f, 1.0f },
+                active ? UIColor{ 1.0f, 1.0f, 1.0f, 1.0f } : theme.GetToken("Text", { 0.918f, 0.929f, 0.953f, 1.0f }),
                 glm::vec4(handleR),
                 1.5f,
-                { 0.24f, 0.56f, 0.96f, 1.0f }
+                accent
             );
         };
         drawHandle(xLow, m_Dragging == DragHandle::Low);
         drawHandle(xHigh, m_Dragging == DragHandle::High);
 
-        char buf[48]{};
-        std::snprintf(buf, sizeof(buf), "%.2f - %.2f", m_Low, m_High);
-        drawList.AddText(buf, Font::GetDefault(), { b.Min.x + 12.0f, b.Min.y - 2.0f }, 11.5f, { 0.72f, 0.78f, 0.86f, 0.9f });
+        drawList.AddText(
+            buf,
+            Font::GetDefault(),
+            { x0 + trackW + 10.0f, cy - textSize.y * 0.5f },
+            fontSize,
+            style.TextColor
+        );
     }
 }

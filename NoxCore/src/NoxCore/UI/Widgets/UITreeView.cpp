@@ -148,7 +148,8 @@ namespace Nox::UI
 
     UIVec2 UITreeView::ComputeDesiredSize()
     {
-        return { 220.0f, 180.0f };
+        const float contentH = static_cast<float>(m_FlatRows.size()) * RowHeight;
+        return { std::max(MinSize.x, 180.0f), std::max({ MinSize.y, RowHeight * 3.0f, contentH }) };
     }
 
     void UITreeView::OnPaint(UIDrawList& drawList, const UITheme& theme)
@@ -202,8 +203,9 @@ namespace Nox::UI
             if (!row.Node->Children.empty())
             {
                 const char* arrow = row.Node->Expanded ? "v" : ">";
-                const UIVec2 aSize = UILabel::MeasureText(arrow, nullptr, 12.0f);
-                drawList.AddText(arrow, nullptr, { xBase, cy - aSize.y * 0.5f }, 12.0f, textMuted);
+                const float arrowSize = std::max(10.0f, style.FontSize * 0.85f);
+                const UIVec2 aSize = UILabel::MeasureText(arrow, nullptr, arrowSize);
+                drawList.AddText(arrow, nullptr, { xBase, cy - aSize.y * 0.5f }, arrowSize, textMuted);
             }
 
             // Small color tag dot

@@ -31,6 +31,10 @@ namespace Nox::UI
     public:
         UIMenuBar();
 
-        void AddMenu(const std::string& title, std::vector<UIMenuItem> items, UIContext& context);
+        void AddMenu(const std::string& title, std::vector<UIMenuItem> items);
+
+    private:
+        Ref<UIElement> m_ActiveOverlay;
+        UIElement* m_OpenTrigger = nullptr;
     };
 }

@@ -16,10 +16,9 @@ namespace Nox::UI
         DrawBackground = true;
         HitTestMode = UIHitTestMode::None;
         WidthMode = UISizeMode::Fill;
-        HeightMode = UISizeMode::Fixed;
-        FixedSize.y = 22.0f;
+        HeightMode = UISizeMode::Auto;
 
-        m_Label = Ref<UILabel>(new UILabel("", 12.0f));
+        m_Label = Ref<UILabel>(new UILabel(""));
         m_Label->HitTestMode = UIHitTestMode::None;
         m_Label->HAlign = UIAlignment::Center;
         m_Label->VAlign = UIAlignment::Center;
@@ -45,7 +44,12 @@ namespace Nox::UI
 
     UIVec2 UIProgressBar::ComputeDesiredSize()
     {
-        return { 160.0f, FixedSize.y > 0.0f ? FixedSize.y : 22.0f };
+        const UIStyleBox& style = GetResolvedStyle();
+        if (m_Label && m_Label->FontSizeOverride <= 0.0f)
+            m_Label->FontSizeOverride = std::max(10.0f, style.FontSize * 0.85f);
+        const UIVec2 labelSz = m_Label ? m_Label->Measure() : UIVec2{ 0.0f, style.FontSize };
+        const float h = std::max(style.FontSize * 1.5f, labelSz.y + style.Padding.Vertical());
+        return { std::max(MinSize.x, labelSz.x + style.Padding.Horizontal() + 24.0f), h };
     }
 
     void UIProgressBar::ArrangeChildren(const UIRect& contentRect)
@@ -68,10 +72,11 @@ namespace Nox::UI
             return;
 
         const float r = std::max(0.0f, GetResolvedStyle().CornerRadius.TopLeft - 1.0f);
+        const UIColor barCol = theme.GetToken("Accent", FillColor);
         drawList.AddRoundedRect(
             { b.Min.x + inset, b.Min.y + inset },
             { b.Min.x + inset + innerW, b.Max.y - inset },
-            { FillColor.r, FillColor.g, FillColor.b, FillColor.a },
+            barCol,
             glm::vec4(r)
         );
     }
