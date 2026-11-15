@@ -1349,27 +1349,7 @@ namespace Nox
 
     void Renderer::createShadowMaskPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::R16G16_SFLOAT };
-
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
-            .entryPoint = "taskMain",
-            .sourcePath = rayTracingShader("assets/shaders/ShadowMask.slang")
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
-            .entryPoint = "meshMain",
-            .sourcePath = rayTracingShader("assets/shaders/ShadowMask.slang")
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
-            .entryPoint = "fragMain",
-            .sourcePath = rayTracingShader("assets/shaders/ShadowMask.slang")
-        });
-
-        m_shadowMaskPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_shadowMaskPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::ShadowMask, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
     }
 
     void Renderer::createNRDGuidesPipeline(bool forceCompile)
@@ -1385,83 +1365,13 @@ namespace Nox
 
     void Renderer::createReflectionPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.forceCompile = forceCompile;
-        desc.colorFormats = {
-            NRI::ImageFormat::R16G16B16A16_SFLOAT // Raw Reflection (Radiance RGB + HitDist A)
-        };
-
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
-            .entryPoint = "taskMain",
-            .sourcePath = rayTracingShader("assets/shaders/Reflection.slang")
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
-            .entryPoint = "meshMain",
-            .sourcePath = rayTracingShader("assets/shaders/Reflection.slang")
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
-            .entryPoint = "fragMain",
-            .sourcePath = rayTracingShader("assets/shaders/Reflection.slang")
-        });
-
-        m_reflectionPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_reflectionPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::Reflection, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
     }
 
-    void Renderer::createPathTracerPipeline(bool forceCompile)
+    void Renderer::bakePathTracerShaderTable()
     {
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::RayTracing;
-        desc.forceCompile = forceCompile;
-        desc.maxRecursionDepth = 1;
-
-        // Stage 0: RayGen
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::RayGen,
-            .entryPoint = "rayGenMain",
-            .sourcePath = "assets/shaders/PathTracer/PathTracerRayGen.slang"
-        });
-
-        // Stage 1: Miss
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Miss,
-            .entryPoint = "missMain",
-            .sourcePath = "assets/shaders/PathTracer/PathTracerMiss.slang"
-        });
-
-        // Stage 2: ClosestHit
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::ClosestHit,
-            .entryPoint = "closestHitMain",
-            .sourcePath = rayTracingShader("assets/shaders/PathTracer/PathTracerHit.slang")
-        });
-
-        // Stage 3: AnyHit
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::AnyHit,
-            .entryPoint = "anyHitMain",
-            .sourcePath = rayTracingShader("assets/shaders/PathTracer/PathTracerAnyHit.slang")
-        });
-
-        // HitGroup 0: Opaque (no anyhit)
-        desc.hitGroups.push_back({
-            .closestHitShaderIndex = 2,
-            .anyHitShaderIndex = ~0u,
-            .intersectionShaderIndex = ~0u
-        });
-
-        // HitGroup 1: Alpha-Tested (closestHit + anyHit)
-        desc.hitGroups.push_back({
-            .closestHitShaderIndex = 2,
-            .anyHitShaderIndex = 3,
-            .intersectionShaderIndex = ~0u
-        });
-
-        m_pathTracerPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-
-        // Bake Shader Binding Table using RTXPT / NVRHI ShaderTable::bake replication
+        // Bake Shader Binding Table using RTXPT / NVRHI ShaderTable::bake replication (for the pipeline in use: created here, or swapped
+        // in by installRayTracingPassPipelines).
         uint32_t handleSize = m_pathTracerPipeline->getShaderGroupHandleSize();
         if (handleSize == 0) handleSize = m_device->getShaderGroupHandleSize();
         uint32_t baseAlignment = m_pathTracerPipeline->getShaderGroupBaseAlignment();
@@ -1498,6 +1408,12 @@ namespace Nox
         );
 
         m_pathTracerSBTBuffer->unmap();
+    }
+
+    void Renderer::createPathTracerPipeline(bool forceCompile)
+    {
+        m_pathTracerPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::PathTracer, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
+        bakePathTracerShaderTable();
 
         NRI::PipelineDesc environmentDesc{};
         environmentDesc.type = NRI::PipelineType::Compute;
@@ -1715,31 +1631,9 @@ namespace Nox
 
     void Renderer::createReSTIRPTPipelines(bool forceCompile)
     {
-        // 1. Initial Sampling Pipeline (ResamplingMode::None -- generates + RIS-combines
-        // numInitialSamples full paths per pixel, no temporal/spatial reuse yet)
-        {
-            NRI::PipelineDesc desc{};
-            desc.forceCompile = forceCompile;
-            // 2 targets: SV_Target0 is the debug-only combined-radiance preview, SV_Target1 is the
-            // primary-surface direct lighting consumed by the Final Shading pass (the ReSTIR PT Primary Direct graph texture).
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT};
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
-                .entryPoint = "taskMain",
-                .sourcePath = rayTracingShader("assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang")
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
-                .entryPoint = "meshMain",
-                .sourcePath = rayTracingShader("assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang")
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
-                .entryPoint = "fragMain",
-                .sourcePath = rayTracingShader("assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang")
-            });
-            m_restirPTInitialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-        }
+        // 1. Initial Sampling Pipeline (ResamplingMode::None -- generates + RIS-combines numInitialSamples full paths per pixel, no
+        // temporal/spatial reuse yet)
+        m_restirPTInitialPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::ReSTIRPTInitial, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
 
         // 2. Final Shading Pipeline
         {
@@ -1767,53 +1661,13 @@ namespace Nox
         // 3. Temporal Resampling Pipeline (RandomReplay/hybrid-shift reconnection against last frame's
         // finalized reservoir) -- runs between Initial Sampling and Final Shading whenever the context's
         // resampling mode is Temporal (or TemporalAndSpatial once Spatial exists).
-        {
-            NRI::PipelineDesc desc{};
-            desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
-                .entryPoint = "taskMain",
-                .sourcePath = rayTracingShader("assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang")
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
-                .entryPoint = "meshMain",
-                .sourcePath = rayTracingShader("assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang")
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
-                .entryPoint = "fragMain",
-                .sourcePath = rayTracingShader("assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang")
-            });
-            m_restirPTTemporalPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-        }
+        m_restirPTTemporalPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::ReSTIRPTTemporal, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
     }
 
     void Renderer::createDDGIPipelines(bool forceCompile)
     {
         // 1. Radiance Pipeline
-        {
-            NRI::PipelineDesc desc{};
-            desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
-                .entryPoint = "taskMain",
-                .sourcePath = rayTracingShader("assets/shaders/DDGIRadiance.slang")
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
-                .entryPoint = "meshMain",
-                .sourcePath = rayTracingShader("assets/shaders/DDGIRadiance.slang")
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
-                .entryPoint = "fragMain",
-                .sourcePath = rayTracingShader("assets/shaders/DDGIRadiance.slang")
-            });
-            m_ddgiRadiancePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-        }
+        m_ddgiRadiancePipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::DDGIRadiance, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
 
         // 2. Blend Irradiance Pipeline (compute: one workgroup per probe)
         {
@@ -1878,7 +1732,7 @@ namespace Nox
             return m_device->createPipeline(desc, *m_shaderCompiler);
         };
         m_screenProbePlacePipeline = create("assets/shaders/ScreenProbePlace.slang");
-        m_screenProbeTracePipeline = create(rayTracingShader("assets/shaders/ScreenProbeTrace.slang"));
+        m_screenProbeTracePipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::ScreenProbeTrace, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
         m_screenProbeIrradiancePipeline = create("assets/shaders/ScreenProbeIrradiance.slang");
         m_screenProbeFilterPipeline = create("assets/shaders/ScreenProbeFilter.slang");
         m_screenProbeIntegratePipeline = create("assets/shaders/ScreenProbeIntegrate.slang");
@@ -1908,27 +1762,7 @@ namespace Nox
     void Renderer::createReSTIRGIPipelines(bool forceCompile)
     {
         // 1. Initial Candidate Generation Pipeline
-        {
-            NRI::PipelineDesc desc{};
-            desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
-                .entryPoint = "taskMain",
-                .sourcePath = rayTracingShader("assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang")
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
-                .entryPoint = "meshMain",
-                .sourcePath = rayTracingShader("assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang")
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
-                .entryPoint = "fragMain",
-                .sourcePath = rayTracingShader("assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang")
-            });
-            m_restirGIInitialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-        }
+        m_restirGIInitialPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::ReSTIRGIInitial, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
 
         // 2. Temporal Resampling Pipeline
         {
@@ -2101,27 +1935,7 @@ namespace Nox
         }
 
         // 4. Final Shading Pipeline
-        {
-            NRI::PipelineDesc desc{};
-            desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT}; // diffuse, specular
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
-                .entryPoint = "taskMain",
-                .sourcePath = rayTracingShader("assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang")
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
-                .entryPoint = "meshMain",
-                .sourcePath = rayTracingShader("assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang")
-            });
-            desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
-                .entryPoint = "fragMain",
-                .sourcePath = rayTracingShader("assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang")
-            });
-            m_restirDIFinalShadingPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-        }
+        m_restirDIFinalShadingPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::ReSTIRDIFinalShading, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
     }
 
     void Renderer::createCompiler()
@@ -2451,27 +2265,7 @@ namespace Nox
 
     void Renderer::createDeferredLightingPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.forceCompile = forceCompile;
-        desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
-
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
-            .entryPoint = "taskMain",
-            .sourcePath = rayTracingShader("assets/shaders/DeferredLighting.slang")
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
-            .entryPoint = "meshMain",
-            .sourcePath = rayTracingShader("assets/shaders/DeferredLighting.slang")
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
-            .entryPoint = "fragMain",
-            .sourcePath = rayTracingShader("assets/shaders/DeferredLighting.slang")
-        });
-
-        m_deferredLightingPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_deferredLightingPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::DeferredLighting, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
     }
 
     void Renderer::createSSAOPipeline(bool forceCompile)
@@ -2531,27 +2325,7 @@ namespace Nox
 
     void Renderer::createRTAOPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.forceCompile = forceCompile;
-        desc.colorFormats = {NRI::ImageFormat::R16_SFLOAT};
-
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
-            .entryPoint = "taskMain",
-            .sourcePath = rayTracingShader("assets/shaders/RTAO.slang")
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
-            .entryPoint = "meshMain",
-            .sourcePath = rayTracingShader("assets/shaders/RTAO.slang")
-        });
-        desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
-            .entryPoint = "fragMain",
-            .sourcePath = rayTracingShader("assets/shaders/RTAO.slang")
-        });
-
-        m_rtaoPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_rtaoPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::RTAO, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
     }
 
     void Renderer::createTextureInspectPipeline(bool forceCompile)

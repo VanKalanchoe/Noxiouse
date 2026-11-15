@@ -250,7 +250,13 @@ namespace Nox
         build->GraphPaths = graphPaths;
         build->GraphPrograms = std::move(programs);
         build->GraphCount = graphCount;
-        build->RayMasksWanted = AnyGraphMask(build->GraphPrograms);
+        build->RayMasksOn = AnyGraphMask(build->GraphPrograms);
+        if (build->RayMasksOn)
+        {
+            // (the generated files are written: the masks' text this build compiles)
+            build->RayMasksHash = m_shaderCompiler->sourceHash(CustomLitShaders::GraphMasksSourcePath().generic_string());
+            build->RayPipelinesNeeded = !m_rayTracingGraphMasks || build->RayMasksHash != m_rayTracingGraphMasksHash;
+        }
         // The forward variant (the slowest) compiles on a thread of its own beside the others; both above the editor's priority.
         build->Task = std::async(std::launch::async, [this, build, compile, shaderCount, graphCount]()
         {
@@ -286,16 +292,30 @@ namespace Nox
                     m_device->compileShaderModules(graphVariants, *m_shaderCompiler); // (an error is thrown again by the pipeline below)
                 }
                 // The ray tracing passes' variants with the graphs' masks: compiled beside the forward variant once the graph variants
-                // (what makes the graph visible) are done (those whose binary is not cached: only after a mask changed), the main thread
-                // then creates their pipelines from them (updateRayTracingGraphMasks).
-                if (build->RayMasksWanted && !cancelled())
-                    rayMaskTask = std::async(std::launch::async, [this]()
+                // (what makes the graph visible) are done (those whose binary is not cached: only after a mask changed), then their
+                // pipelines built here, GPU driver compile included, and handed over ready (pollCustomLitBuild swaps them in).
+                if (build->RayPipelinesNeeded && !cancelled())
+                    rayMaskTask = std::async(std::launch::async, [this, build]()
                     {
                         const BuildThreadPriority priority;
                         std::vector<std::string> variants;
                         for (const CustomLitShaders::RayTracingMaskVariant& variant : CustomLitShaders::RayTracingMaskVariants())
                             variants.push_back(variant.Variant);
-                        return m_device->compileShaderModules(variants, *m_shaderCompiler);
+                        if (!m_device->compileShaderModules(variants, *m_shaderCompiler))
+                            return false;
+                        try
+                        {
+                            RayTracingPassPipelines pipelines = buildRayTracingPassPipelines(true);
+                            std::lock_guard lock(build->Mutex);
+                            build->RayPipelines = std::move(pipelines);
+                            build->RayPipelinesDone = true;
+                            return true;
+                        }
+                        catch (const std::exception& error)
+                        {
+                            NOX_CORE_ERROR("Material graphs: a ray tracing pass's Opacity Mask variant does not build: {}", error.what());
+                            return false;
+                        }
                     });
                 if (graphCount > 0 && !cancelled())
                 {
@@ -340,12 +360,11 @@ namespace Nox
                 {
                     rayMasks = rayMaskTask.get(); // (also when the phase stopped: the task uses this build's compiler)
                     if (!rayMasks)
-                        NOX_CORE_ERROR("Material graphs: the ray tracing passes' Opacity Mask variants do not compile (they keep the material's own alpha)");
+                        NOX_CORE_ERROR("Material graphs: the ray tracing passes' Opacity Mask variants do not build (they test the material's own alpha)");
                 }
                 if (!phaseDone || cancelled())
                     return;
                 std::lock_guard lock(build->Mutex);
-                build->RayMasks = rayMasks;
                 build->ForwardDone = true;
             }
             catch (const std::exception& error)
@@ -403,6 +422,7 @@ namespace Nox
                 m_customLitStatus.GraphsLive = true;
                 m_customLitStatus.Message.clear();
                 m_gpuMaterialsDirty = true;
+                build.GBufferSwapped = true;
                 NOX_CORE_INFO("Material graphs: {} graph(s), the G-buffer resolve is ready (the forward variant follows)", build.GraphCount);
             }
             if (deferred)
@@ -424,6 +444,27 @@ namespace Nox
             }
             ++m_customLitStatus.Version;
         }
+        // The ray tracing passes' graph variants, as soon as they are ready (not after the forward variant), after the G-buffer
+        // resolve's variant: the masks index the graphs by its slots.
+        if (build.GBufferSwapped && !build.RayPipelinesInstalled && !build.Cancelled)
+        {
+            RayTracingPassPipelines rayPipelines;
+            bool ready = false;
+            {
+                std::lock_guard lock(build.Mutex);
+                if (build.RayPipelinesDone)
+                {
+                    rayPipelines = std::move(build.RayPipelines);
+                    ready = true;
+                }
+            }
+            if (ready)
+            {
+                installRayTracingPassPipelines(std::move(rayPipelines), true, build.RayMasksHash);
+                build.RayPipelinesInstalled = true;
+                ++m_customLitStatus.Version;
+            }
+        }
         if (!finished)
             return;
         if (!failed && !build.Cancelled)
@@ -438,8 +479,11 @@ namespace Nox
                 m_customLitStatus.Ready = false;
                 m_gpuMaterialsDirty = true;
             }
-            // The ray tracing passes: their graph variants while a graph connects Opacity Mask (created again when a mask changed).
-            updateRayTracingGraphMasks(build.RayMasks);
+            // The ray tracing passes: their graph variants while a graph connects Opacity Mask (swapped in above when a mask changed);
+            // the material's own alpha again when no graph has one, or when the variants did not build (the masks they had index the
+            // previous slots).
+            if (!build.RayMasksOn || (build.RayPipelinesNeeded && !build.RayPipelinesInstalled))
+                updateRayTracingGraphMasks(false);
             if (build.GraphCount == 0 && m_gbufferGraphPipeline)
             {
                 m_device->waitIdle();
@@ -485,13 +529,142 @@ namespace Nox
         return std::any_of(programs.begin(), programs.end(), [](const auto& entry) { return !entry.second.MaskCode.empty(); });
     }
 
-    std::string Renderer::rayTracingShader(const std::string& source) const
+    NRI::PipelineDesc Renderer::rayTracingPassDesc(RayTracingPass pass, bool graphMasks, bool forceCompile)
     {
-        if (m_rayTracingGraphMasks)
-            for (const CustomLitShaders::RayTracingMaskVariant& variant : CustomLitShaders::RayTracingMaskVariants())
-                if (variant.Source == source)
-                    return variant.Variant;
-        return source;
+        auto shader = [graphMasks](const char* source) -> std::string
+        {
+            if (graphMasks)
+                for (const CustomLitShaders::RayTracingMaskVariant& variant : CustomLitShaders::RayTracingMaskVariants())
+                    if (variant.Source == source)
+                        return variant.Variant;
+            return source;
+        };
+        NRI::PipelineDesc desc{};
+        desc.forceCompile = forceCompile;
+        // A full-screen pass: task, mesh and fragment stages of one file, its targets' formats.
+        auto screenPass = [&](const char* source, std::initializer_list<NRI::ImageFormat> formats)
+        {
+            desc.colorFormats = formats;
+            const std::string path = shader(source);
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = path });
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = path });
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = path });
+        };
+        constexpr NRI::ImageFormat RGBA16F = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        switch (pass)
+        {
+        case RayTracingPass::ShadowMask:
+            screenPass("assets/shaders/ShadowMask.slang", { NRI::ImageFormat::R16G16_SFLOAT });
+            break;
+        case RayTracingPass::DeferredLighting:
+            screenPass("assets/shaders/DeferredLighting.slang", { RGBA16F });
+            break;
+        case RayTracingPass::RTAO:
+            screenPass("assets/shaders/RTAO.slang", { NRI::ImageFormat::R16_SFLOAT });
+            break;
+        case RayTracingPass::Reflection:
+            screenPass("assets/shaders/Reflection.slang", { RGBA16F }); // raw reflection: radiance RGB + hit distance A
+            break;
+        case RayTracingPass::ScreenProbeTrace:
+            // (compute over its own targets: ScreenProbeCommon.slang, so it can run on the async compute queue)
+            desc.type = NRI::PipelineType::Compute;
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain", .sourcePath = shader("assets/shaders/ScreenProbeTrace.slang") });
+            break;
+        case RayTracingPass::DDGIRadiance:
+            screenPass("assets/shaders/DDGIRadiance.slang", { RGBA16F });
+            break;
+        case RayTracingPass::ReSTIRDIFinalShading:
+            screenPass("assets/shaders/RTXDI/DI/ReSTIRDIFinalShading.slang", { RGBA16F, RGBA16F }); // diffuse, specular
+            break;
+        case RayTracingPass::ReSTIRGIInitial:
+            screenPass("assets/shaders/RTXDI/GI/ReSTIRGIInitial.slang", { RGBA16F });
+            break;
+        case RayTracingPass::ReSTIRPTInitial:
+            // SV_Target0 the debug-only combined radiance preview, SV_Target1 the primary surface's direct lighting for the Final Shading
+            // pass (the ReSTIR PT Primary Direct graph texture).
+            screenPass("assets/shaders/RTXDI/PT/ReSTIRPTInitial.slang", { RGBA16F, RGBA16F });
+            break;
+        case RayTracingPass::ReSTIRPTTemporal:
+            screenPass("assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang", { RGBA16F });
+            break;
+        case RayTracingPass::PathTracer:
+            desc.type = NRI::PipelineType::RayTracing;
+            desc.maxRecursionDepth = 1;
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::RayGen, .entryPoint = "rayGenMain", .sourcePath = "assets/shaders/PathTracer/PathTracerRayGen.slang" });   // 0
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::Miss, .entryPoint = "missMain", .sourcePath = "assets/shaders/PathTracer/PathTracerMiss.slang" });         // 1
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::ClosestHit, .entryPoint = "closestHitMain", .sourcePath = shader("assets/shaders/PathTracer/PathTracerHit.slang") }); // 2
+            desc.shaders.push_back({ .stage = NRI::ShaderStage::AnyHit, .entryPoint = "anyHitMain", .sourcePath = shader("assets/shaders/PathTracer/PathTracerAnyHit.slang") });     // 3
+            desc.hitGroups.push_back({ .closestHitShaderIndex = 2, .anyHitShaderIndex = ~0u, .intersectionShaderIndex = ~0u }); // hit group 0: opaque
+            desc.hitGroups.push_back({ .closestHitShaderIndex = 2, .anyHitShaderIndex = 3, .intersectionShaderIndex = ~0u });   // hit group 1: alpha tested
+            break;
+        case RayTracingPass::Count:
+            break;
+        }
+        return desc;
+    }
+
+    std::unique_ptr<NRI::Pipeline>& Renderer::rayTracingPassPipeline(RayTracingPass pass)
+    {
+        switch (pass)
+        {
+        case RayTracingPass::ShadowMask: return m_shadowMaskPipeline;
+        case RayTracingPass::DeferredLighting: return m_deferredLightingPipeline;
+        case RayTracingPass::RTAO: return m_rtaoPipeline;
+        case RayTracingPass::Reflection: return m_reflectionPipeline;
+        case RayTracingPass::ScreenProbeTrace: return m_screenProbeTracePipeline;
+        case RayTracingPass::DDGIRadiance: return m_ddgiRadiancePipeline;
+        case RayTracingPass::ReSTIRDIFinalShading: return m_restirDIFinalShadingPipeline;
+        case RayTracingPass::ReSTIRGIInitial: return m_restirGIInitialPipeline;
+        case RayTracingPass::ReSTIRPTInitial: return m_restirPTInitialPipeline;
+        case RayTracingPass::ReSTIRPTTemporal: return m_restirPTTemporalPipeline;
+        case RayTracingPass::PathTracer:
+        case RayTracingPass::Count: break;
+        }
+        return m_pathTracerPipeline;
+    }
+
+    Renderer::RayTracingPassPipelines Renderer::buildRayTracingPassPipelines(bool graphMasks)
+    {
+        // One thread each (the GPU driver compiles each variant for 0.5 - 2.5 s: the user's log), built now (NRI::PipelineDesc::buildNow:
+        // a pipeline built later on the pool would make the first frame that binds it wait).
+        std::array<std::future<std::unique_ptr<NRI::Pipeline>>, static_cast<size_t>(RayTracingPass::Count)> builds;
+        for (size_t i = 0; i < builds.size(); ++i)
+            builds[i] = std::async(std::launch::async, [this, i, graphMasks]()
+            {
+                const BuildThreadPriority priority;
+                NRI::PipelineDesc desc = rayTracingPassDesc(static_cast<RayTracingPass>(i), graphMasks, false);
+                desc.buildNow = true;
+                return m_device->createPipeline(desc, *m_shaderCompiler);
+            });
+        RayTracingPassPipelines pipelines;
+        std::exception_ptr error;
+        for (size_t i = 0; i < builds.size(); ++i)
+        {
+            try
+            {
+                pipelines[i] = builds[i].get();
+            }
+            catch (...)
+            {
+                if (!error)
+                    error = std::current_exception();
+            }
+        }
+        if (error)
+            std::rethrow_exception(error);
+        return pipelines;
+    }
+
+    void Renderer::installRayTracingPassPipelines(RayTracingPassPipelines pipelines, bool graphMasks, uint64_t masksHash)
+    {
+        m_device->waitIdle(); // (the pipelines replaced may still be in flight)
+        for (size_t i = 0; i < pipelines.size(); ++i)
+            rayTracingPassPipeline(static_cast<RayTracingPass>(i)) = std::move(pipelines[i]);
+        bakePathTracerShaderTable();
+        m_rayTracingGraphMasks = graphMasks;
+        m_rayTracingGraphMasksHash = masksHash;
+        NOX_CORE_INFO(graphMasks ? "Material graphs: ray-traced shadows, reflections, GI, AO and the path tracer cut the graphs' Opacity Mask"
+                                 : "Material graphs: the ray tracing passes test the materials' own alpha again (no graph connects Opacity Mask)");
     }
 
     void Renderer::updateRayTracingGraphMasks(bool wanted)
@@ -500,22 +673,7 @@ namespace Nox
         const uint64_t hash = wanted ? m_shaderCompiler->sourceHash(CustomLitShaders::GraphMasksSourcePath().generic_string()) : 0;
         if (wanted == m_rayTracingGraphMasks && hash == m_rayTracingGraphMasksHash)
             return;
-        m_device->waitIdle(); // (the pipelines replaced may still be in flight)
-        m_rayTracingGraphMasks = wanted;
-        m_rayTracingGraphMasksHash = hash;
-        // Every pass that alpha tests ray hits (their shaders compiled on the build's thread, or cached: built on the pool from them).
-        createShadowMaskPipeline(false);
-        createDeferredLightingPipeline(false);
-        createRTAOPipeline(false);
-        createReflectionPipeline(false);
-        createScreenProbePipelines(false);
-        createDDGIPipelines(false);
-        createReSTIRDIPipelines(false);
-        createReSTIRGIPipelines(false);
-        createReSTIRPTPipelines(false);
-        createPathTracerPipeline(false);
-        NOX_CORE_INFO(wanted ? "Material graphs: ray-traced shadows, reflections, GI, AO and the path tracer cut the graphs' Opacity Mask"
-                             : "Material graphs: the ray tracing passes test the materials' own alpha again (no graph connects Opacity Mask)");
+        installRayTracingPassPipelines(buildRayTracingPassPipelines(wanted), wanted, hash);
     }
 
     void Renderer::waitForCustomLitBuild()

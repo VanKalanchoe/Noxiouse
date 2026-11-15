@@ -328,7 +328,7 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
         bool changed = WriteIfChanged(folder / "CustomLitShaders.slang", GenerateDispatcher(paths, sources), failed);
         changed |= WriteIfChanged(folder / "MaterialGraphs.slang", GenerateGraphDispatcher(graphPaths, graphs), failed);
         changed |= WriteIfChanged(GraphMasksSourcePath(), GenerateGraphMaskDispatcher(graphPaths, graphs), failed);
-        // The ray tracing passes with the graphs' masks (built while a graph connects Opacity Mask: Renderer::rayTracingShader).
+        // The ray tracing passes with the graphs' masks (built while a graph connects Opacity Mask: Renderer::rayTracingPassDesc).
         for (const RayTracingMaskVariant& variant : RayTracingMaskVariants())
         {
             const std::string engineRelative = variant.Source.substr(std::string("assets/shaders/").size());

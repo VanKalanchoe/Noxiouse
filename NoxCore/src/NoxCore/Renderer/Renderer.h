@@ -1310,10 +1310,24 @@ namespace Nox
         std::unique_ptr<NRI::Pipeline> buildCustomLitForwardPipeline(bool forceCompile, bool withGraphs);
         // The ray tracing passes with the material graphs' Opacity Mask in their alpha tests (material graph step 4c part 2): `wanted`
         // while a graph connects Opacity Mask and the variants are ready; their pipelines are created again whenever it or the graphs'
-        // masks (MaterialGraphMasks.slang) changed. Main thread.
+        // masks (MaterialGraphMasks.slang) changed. Main thread, waits for them (a graph build hands them over ready instead:
+        // CustomLitBuild::RayPipelines).
         void updateRayTracingGraphMasks(bool wanted);
-        // A ray tracing pass's shader: its graph variant while the graphs' masks are on (CustomLitShaders::RayTracingMaskVariants), else itself.
-        std::string rayTracingShader(const std::string& source) const;
+        // The passes whose shaders alpha test ray hits: each in its graph variant (CustomLitShaders::RayTracingMaskVariants) or not.
+        enum class RayTracingPass : uint8_t
+        {
+            ShadowMask, DeferredLighting, RTAO, Reflection, ScreenProbeTrace, DDGIRadiance, ReSTIRDIFinalShading, ReSTIRGIInitial,
+            ReSTIRPTInitial, ReSTIRPTTemporal, PathTracer, Count
+        };
+        using RayTracingPassPipelines = std::array<std::unique_ptr<NRI::Pipeline>, static_cast<size_t>(RayTracingPass::Count)>;
+        // Its pipeline's description, with the graph variant of its shaders when `graphMasks` (the create functions and the build share it).
+        static NRI::PipelineDesc rayTracingPassDesc(RayTracingPass pass, bool graphMasks, bool forceCompile);
+        std::unique_ptr<NRI::Pipeline>& rayTracingPassPipeline(RayTracingPass pass);
+        // All of them built and ready to bind (in parallel; any thread; throws when one does not build).
+        RayTracingPassPipelines buildRayTracingPassPipelines(bool graphMasks);
+        // Swapped in (main thread): what the GPU may still run waited for, the path tracer's shader table baked for its new pipeline.
+        void installRayTracingPassPipelines(RayTracingPassPipelines pipelines, bool graphMasks, uint64_t masksHash);
+        void bakePathTracerShaderTable();
         // Whether a graph of these connects Opacity Mask.
         static bool AnyGraphMask(const std::unordered_map<std::string, MaterialGraphProgram>& programs);
         void startCustomLitBuild(const std::vector<CustomLitSource>& sources, const std::vector<ProjectMaterialGraph>& graphs);
@@ -1761,10 +1775,17 @@ namespace Nox
             std::vector<std::string> GraphPaths;
             std::unordered_map<std::string, MaterialGraphProgram> GraphPrograms;
             size_t GraphCount = 0;
-            // The ray tracing passes' graph variants (CustomLitShaders::RayTracingMaskVariants) compiled for the main thread to create:
-            // while a graph connects Opacity Mask (RayMasksWanted), RayMasks once their shaders compiled.
-            bool RayMasksWanted = false;
-            bool RayMasks = false;
+            // The ray tracing passes' graph variants (CustomLitShaders::RayTracingMaskVariants): on while a graph connects Opacity Mask
+            // (RayMasksOn); built here only when the masks' text (RayMasksHash) or their state changed (RayPipelinesNeeded), handed over
+            // ready (RayPipelines once RayPipelinesDone) and swapped in by the main thread after the G-buffer resolve's variant (its
+            // slots: GBufferSwapped) -- the main thread used to create them itself and the next frame waited for the GPU driver.
+            bool RayMasksOn = false;
+            uint64_t RayMasksHash = 0;
+            bool RayPipelinesNeeded = false;
+            RayTracingPassPipelines RayPipelines;
+            bool RayPipelinesDone = false;
+            bool RayPipelinesInstalled = false; // (main thread)
+            bool GBufferSwapped = false;        // (main thread)
             std::atomic<bool> Cancel{ false }; // set by the renderer's shutdown or a newer request: the build stops before its next stage
             bool Cancelled = false;            // it stopped so (not an error)
         };
