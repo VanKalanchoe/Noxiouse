@@ -125,7 +125,7 @@ namespace Nox
     
                 }
 
-                if (m_isEditor && !m_useImGui && m_sceneResource && m_sceneResource->GetDescriptorIndexSlot() == 0)
+                if (m_isEditor && !m_useImGui && m_sceneResource && m_sceneResource->GetDescriptorIndexSlot() == ~0u)
                 {
                     m_resourceHeap->registerTexture(*m_sceneResource);
                     uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();

@@ -32,7 +32,7 @@ namespace Nox::UI
         UIElement::OnPaint(drawList, theme);
 
         const UIRect& b = GetBounds();
-        if (TextureSlot != 0 && b.Width() > 2.0f && b.Height() > 2.0f)
+        if (TextureSlot != ~0u && b.Width() > 2.0f && b.Height() > 2.0f)
         {
             drawList.AddTexturedQuad(
                 b.Min, b.Max, TextureSlot, UVMin, UVMax,

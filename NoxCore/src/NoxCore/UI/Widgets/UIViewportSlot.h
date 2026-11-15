@@ -13,7 +13,7 @@ namespace Nox::UI
     public:
         UIViewportSlot();
 
-        uint32_t TextureSlot = 0;
+        uint32_t TextureSlot = ~0u;
         UIVec2 UVMin{ 0.0f, 0.0f };
         UIVec2 UVMax{ 1.0f, 1.0f };
         std::string BadgeText = "Perspective  |  Lit";
