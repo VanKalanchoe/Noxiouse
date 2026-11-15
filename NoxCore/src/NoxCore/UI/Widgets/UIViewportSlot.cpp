@@ -18,14 +18,32 @@ namespace Nox::UI
         return { 320.0f, 200.0f };
     }
 
+    void UIViewportSlot::ArrangeChildren(const UIRect& contentRect)
+    {
+        for (const auto& child : GetChildren())
+        {
+            if (child->Visible)
+                child->Arrange(contentRect);
+        }
+    }
+
     void UIViewportSlot::OnPaint(UIDrawList& drawList, const UITheme& theme)
     {
         UIElement::OnPaint(drawList, theme);
 
+        const UIRect& b = GetBounds();
+        if (TextureSlot != 0 && b.Width() > 2.0f && b.Height() > 2.0f)
+        {
+            drawList.AddTexturedQuad(
+                b.Min, b.Max, TextureSlot, UVMin, UVMax,
+                { 1.0f, 1.0f, 1.0f, 1.0f },
+                GetResolvedStyle().CornerRadius.ToVec4()
+            );
+        }
+
         if (BadgeText.empty())
             return;
 
-        const UIRect& b = GetBounds();
         const UIVec2 textSize = UILabel::MeasureText(BadgeText, nullptr, 12.5f);
         const UIVec2 pillMin{ b.Min.x + 10.0f, b.Min.y + 10.0f };
         const UIVec2 pillMax{ pillMin.x + textSize.x + 18.0f, pillMin.y + textSize.y + 10.0f };
