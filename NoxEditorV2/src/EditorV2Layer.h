@@ -11,11 +11,14 @@
 #include "Panels/SceneHierarchyV2Panel.h"
 #include "ScriptBuilder.h"
 #include "StreamingTestWorld.h"
+#include "Viewport/ViewportOverlayV2.h"
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Asset/PrimitiveShapes.h"
 #include "NoxCore/Core/Layer.h"
 #include "NoxCore/Core/Ref.h"
+#include "NRI/Texture.h"
 #include "NoxCore/Renderer/EditorCamera.h"
+#include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneLoader.h"
 
@@ -27,8 +30,10 @@ namespace Nox
 
     namespace UI
     {
+        class UIElement;
         class UIImage;
         class UILabel;
+        class UIStackBox;
     }
 
     class EditorV2Layer : public Layer
@@ -63,7 +68,10 @@ namespace Nox
 
         void CreateBasicScene();
         void CreateShape(PrimitiveShape shape, const std::string& folder = {});
+        void PlaceAssets(const std::vector<AssetHandle>& handles, const glm::dvec3& point, const std::string& folder);
         void FocusOnEntity(Entity entity);
+        void SnapSelectionToFloor();
+        void SnapSelectionToGrid();
         AssetHandle GetShapeAsset(PrimitiveShape shape);
         AssetHandle RegisterSceneAsset(const std::filesystem::path& scenePath);
         void AdoptStartSceneIfNone(const std::filesystem::path& scenePath);
@@ -93,7 +101,11 @@ namespace Nox
         void SyncOrthoRenderSettings(bool wasOrthographic);
         void OnOverlayRender();
         void DrawWorldGrid();
+        void DrawReferenceFigure(const glm::dvec3& worldPosition);
+        void DrawPhysicsColliders3D();
         void RefreshStatusBar();
+        void RefreshToolBar();
+        void RefreshSceneLoadOverlay();
 
         void BuildUI(bool loadSavedLayout = true);
 
@@ -142,10 +154,43 @@ namespace Nox
         uint32_t m_FpsFrames = 0;
 
         Ref<UI::UIImage> m_ViewportImage;
+        Ref<ViewportCanvas> m_ViewportCanvas;
+        ViewportToolState m_ViewportTools;
+        ViewportOverlayToolbar m_ViewportToolbar;
+        Entity m_HoveredEntity;
+
+        Ref<Texture2D> m_IconPlay;
+        Ref<Texture2D> m_IconStop;
+        Ref<Texture2D> m_IconPause;
+        Ref<Texture2D> m_IconSimulate;
+        Ref<Texture2D> m_IconStep;
+
+        Ref<UI::UIStackBox> m_ToolBar;
+        Ref<UI::UIElement> m_PlayBtnWrap;
+        Ref<UI::UIElement> m_SimulateBtnWrap;
+        Ref<UI::UIElement> m_PauseBtnWrap;
+        Ref<UI::UIElement> m_StepBtnWrap;
+        Ref<UI::UIImage> m_PlayBtnIcon;
+        Ref<UI::UIImage> m_SimulateBtnIcon;
+
+        Ref<UI::UIElement> m_SceneLoadBanner;
+        Ref<UI::UILabel> m_SceneLoadTitleLabel;
+        Ref<UI::UILabel> m_SceneLoadStageLabel;
+        Ref<UI::UIElement> m_SceneLoadProgressFill;
+
         Ref<UI::UILabel> m_FpsLabel;
         Ref<UI::UILabel> m_StatusLabel;
         SceneHierarchyV2Panel m_SceneHierarchyPanel;
         bool m_ShowSceneHierarchy = true;
         bool m_ViewportMouseCaptured = false;
+        bool m_CursorHidden = false;
+
+        // Tracked features intentionally deferred until their corresponding V2 panels exist:
+        // - Properties / Inspector panel (`DrawComponents`, component UIs, AssetPreviewRenderer)
+        // - Content Browser panel (drag-drop sources CONTENT_BROWSER_ITEM/ITEMS, CreatePrefab/Variant, ReplaceInScenes)
+        // - Settings & Stats windows (render quality / RT / NRD / post-process / physics collider toggle UI)
+        // - Output Log, Profiler, Render Graph, World Partition (HLOD), Levels, Audio Mixer panels
+        // - Node Graph / Material / Animation Clip / Timeline panels (`OpenAsset` dispatchers)
+        // - Modal dialogs (Package Game/Server, Streaming Test World) & Multi-Viewport dockspace
     };
 }

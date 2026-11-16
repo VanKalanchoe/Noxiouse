@@ -14,14 +14,19 @@
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_keycode.h>
 #include <SDL3/SDL_messagebox.h>
+#include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_video.h>
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/quaternion.hpp>
 #include <stb_image_write.h>
 #include "json.hpp"
 
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/SceneImporter.h"
+#include "NoxCore/Asset/TextureImporter.h"
 #include "NoxCore/Audio/AudioMixer.h"
 #include "NoxCore/Console/Console.h"
 #include "NoxCore/Core/Application.h"
@@ -31,6 +36,7 @@
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Network/NetReplication.h"
 #include "NoxCore/Network/NetSession.h"
+#include "NoxCore/Physics/MeshColliderGeometry.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/CustomLitShaders.h"
@@ -46,6 +52,7 @@
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UILayer.h"
 #include "NoxCore/UI/Layout/UIDockSpace.h"
+#include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UIImage.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
 #include "NoxCore/Utils/Utils.h"
@@ -85,6 +92,12 @@ namespace Nox
         m_Renderer = app.GetRenderer();
         m_Renderer2D = m_Renderer ? m_Renderer->getRenderer2D() : nullptr;
 
+        m_IconPlay = TextureImporter::LoadTexture2D("assets/Icons/PlayButton.ktx2", { .flip = true, .generateMips = false });
+        m_IconStop = TextureImporter::LoadTexture2D("assets/Icons/StopButton.ktx2", { .flip = true, .generateMips = false });
+        m_IconPause = TextureImporter::LoadTexture2D("assets/Icons/PauseButton.ktx2", { .flip = true, .generateMips = false });
+        m_IconSimulate = TextureImporter::LoadTexture2D("assets/Icons/SimulateButton.ktx2", { .flip = true, .generateMips = false });
+        m_IconStep = TextureImporter::LoadTexture2D("assets/Icons/StepButton.ktx2", { .flip = true, .generateMips = false });
+
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
         m_SceneHierarchyPanel.SetFocusEntityCallback([this](Entity entity) { FocusOnEntity(entity); });
@@ -117,6 +130,11 @@ namespace Nox
 
     EditorV2Layer::~EditorV2Layer()
     {
+        if (m_CursorHidden)
+        {
+            SDL_ShowCursor();
+            m_CursorHidden = false;
+        }
         SaveEditorCameras();
         ScriptEngine::Shutdown();
 
@@ -285,6 +303,7 @@ namespace Nox
         if (m_SceneState != SceneState::Edit)
             OnSceneStop();
         SaveEditorCameras();
+        m_HoveredEntity = Entity();
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
@@ -329,10 +348,12 @@ namespace Nox
         }
 
         SaveEditorCameras();
+        m_HoveredEntity = Entity();
         m_EditorScene = newScene;
         m_ActiveScene = m_EditorScene;
         m_EditorScenePath = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        RefreshSceneLoadOverlay();
 
         const bool cameraRestored = RestoreEditorCameras();
         if (!cameraRestored && !m_FocusOnOpen && m_EditorScene->IsWorldPartitioned() && !m_EditorScene->GetWorldPartition().Cells.empty())
@@ -417,6 +438,53 @@ namespace Nox
         SceneImporter::SaveScene(scene, path);
     }
 
+    void EditorV2Layer::PlaceAssets(const std::vector<AssetHandle>& handles, const glm::dvec3& point, const std::string& folder)
+    {
+        if (!m_ActiveScene || !Project::GetActive())
+            return;
+        m_SceneHierarchyPanel.ClearSelection();
+        Entity lastCreated;
+        for (AssetHandle handle : handles)
+        {
+            const AssetType type = AssetManager::GetAssetType(handle);
+            if (type == AssetType::Prefab)
+            {
+                const AssetMetadata& prefabMetadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+                std::string prefabName = prefabMetadata.FilePath.filename().stem().string();
+                Entity prefabRoot = m_ActiveScene->CreateEntity(prefabName.empty() ? "Prefab" : prefabName);
+                auto& prefabInstance = prefabRoot.AddComponent<PrefabInstanceComponent>();
+                prefabInstance.Prefab = handle;
+                prefabInstance.InitTransform = true;
+                prefabRoot.GetComponent<TransformComponent>().Translation = point;
+                if (!folder.empty())
+                    prefabRoot.AddComponent<FolderComponent>(folder);
+                prefabRoot.MarkTransformDirty();
+                AssetManager::RequestAsset(handle);
+                lastCreated = prefabRoot;
+                continue;
+            }
+            if (type != AssetType::Mesh && type != AssetType::StaticMesh)
+                continue;
+
+            const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+            std::string entityName = metadata.FilePath.filename().stem().string();
+            Entity root = m_ActiveScene->CreateEntity(entityName.empty() ? "Model" : entityName);
+            auto& instance = root.AddComponent<ModelInstanceComponent>();
+            instance.Model = handle;
+            instance.AtFileLayout = true;
+            root.GetComponent<TransformComponent>().Translation = point;
+            if (!folder.empty())
+                root.AddComponent<FolderComponent>(folder);
+            root.MarkTransformDirty();
+            AssetManager::RequestAsset(handle);
+            lastCreated = root;
+        }
+        if (lastCreated)
+            m_SceneHierarchyPanel.SetSelectedEntity(lastCreated);
+        m_SceneHierarchyPanel.MarkDirty();
+        m_HistoryCheckRequested = true;
+    }
+
     void EditorV2Layer::CreateShape(PrimitiveShape shape, const std::string& folder)
     {
         if (!m_ActiveScene)
@@ -424,19 +492,7 @@ namespace Nox
         const AssetHandle mesh = GetShapeAsset(shape);
         if (mesh == 0)
             return;
-        Entity entity = m_ActiveScene->CreateEntity(PrimitiveShapes::GetName(shape));
-        if (!folder.empty())
-            entity.AddComponent<FolderComponent>(folder);
-        auto& instance = entity.AddComponent<ModelInstanceComponent>();
-        instance.Model = mesh;
-        instance.AtFileLayout = true;
-        entity.GetComponent<TransformComponent>().Translation =
-            m_EditorCamera.GetPosition() + glm::dvec3(m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance());
-        entity.MarkTransformDirty();
-        AssetManager::RequestAsset(mesh);
-        m_SceneHierarchyPanel.SetSelectedEntity(entity);
-        m_SceneHierarchyPanel.MarkDirty();
-        m_HistoryCheckRequested = true;
+        PlaceAssets({ mesh }, m_EditorCamera.GetPosition() + glm::dvec3(m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance()), folder);
     }
 
     void EditorV2Layer::FocusOnEntity(Entity entity)
@@ -445,24 +501,319 @@ namespace Nox
             return;
 
         glm::dvec3 centre;
-        float radius;
+        glm::vec3 boxSize{ 0.0f };
         const WorldBounds bounds = ComputeWorldBounds(*m_ActiveScene, entity);
         if (bounds.Valid)
         {
             centre = bounds.Center();
-            radius = glm::length(bounds.Size()) * 0.5f;
+            boxSize = bounds.Size();
         }
         else if (entity.HasComponent<WorldTransformComponent>())
         {
             centre = entity.GetComponent<WorldTransformComponent>().GetPosition();
-            radius = 0.0f;
         }
         else
         {
             return;
         }
 
-        m_EditorCamera.Focus(centre, radius);
+        m_ViewportTools.ViewTurn.Active = false;
+
+        if (m_EditorCamera.IsOrthographic())
+        {
+            const float orthoRadius = bounds.Valid
+                ? std::max({ boxSize.x, boxSize.y, boxSize.z }) * 0.5f
+                : 0.0f;
+            m_EditorCamera.Focus(centre, orthoRadius);
+            return;
+        }
+
+        const float tanHalfFov = std::max(std::tan(glm::radians(m_EditorCamera.GetFOV()) * 0.5f), 0.01f);
+        const float aspect = std::max(m_EditorCamera.GetAspectRatio(), 0.25f);
+        float focusDist = WorldUnits::FromMeters(2.2f);
+        if (bounds.Valid)
+        {
+            const float distV = (0.5f * boxSize.y * 1.18f) / tanHalfFov;
+            const float distH = (0.5f * std::max(boxSize.x, boxSize.z) * 1.18f) / (tanHalfFov * aspect);
+            focusDist = std::max({ distV, distH, WorldUnits::FromCentimeters(45.0f) });
+        }
+        const double entityRadius = bounds.Valid ? 0.5 * static_cast<double>(glm::length(boxSize)) : 0.0;
+
+        // Avoid placing the camera behind an occluding mesh (e.g. looking sideways through a nearby ramp/wall).
+        std::unordered_set<UUID> excluded;
+        std::function<void(Entity)> excludeSubtree = [&](Entity e)
+        {
+            excluded.insert(e.GetUUID());
+            if (!e.HasComponent<RelationshipComponent>())
+                return;
+            for (UUID cid : e.GetComponent<RelationshipComponent>().Children)
+            {
+                if (Entity c = m_ActiveScene->GetEntityByUUID(cid))
+                    excludeSubtree(c);
+            }
+        };
+        excludeSubtree(entity);
+
+        struct Occluder
+        {
+            glm::dmat4 InvWorld;
+            glm::vec3 LocalMin;
+            glm::vec3 LocalMax;
+        };
+        std::vector<Occluder> occluders;
+        auto meshView = m_ActiveScene->GetAllEntitiesWith<MeshComponent, WorldTransformComponent>();
+        for (auto handle : meshView)
+        {
+            Entity cand(handle, m_ActiveScene.get());
+            if (!cand || excluded.contains(cand.GetUUID()) || !m_ActiveScene->IsActiveInHierarchy(cand))
+                continue;
+            const WorldBounds wb = ComputeWorldBounds(*m_ActiveScene, cand, false);
+            if (!wb.Valid)
+                continue;
+            if (wb.Max.y <= (bounds.Valid ? bounds.Min.y + boxSize.y * 0.15 : centre.y))
+                continue;
+            glm::vec3 lMin, lMax;
+            if (!ComputeLocalMeshBounds(cand, lMin, lMax))
+                continue;
+            const glm::dmat4& w = cand.GetComponent<WorldTransformComponent>().WorldMatrix;
+            if (std::abs(glm::determinant(w)) < 1e-12)
+                continue;
+            occluders.push_back({ glm::inverse(w), lMin, lMax });
+        }
+
+        auto clearFraction = [&](float pitch, float yaw, float dist) -> double
+        {
+            const glm::quat q(glm::vec3(-pitch, -yaw, 0.0f));
+            const glm::vec3 fwd = glm::rotate(q, glm::vec3(0.0f, 0.0f, -1.0f));
+            const glm::dvec3 camPos = centre - glm::dvec3(fwd) * static_cast<double>(dist);
+            const double startT = (dist > 1e-3f) ? std::clamp((entityRadius * 0.55) / static_cast<double>(dist), 0.02, 0.5) : 0.02;
+
+            double bestT = 1.0;
+            for (const Occluder& occ : occluders)
+            {
+                const glm::dvec3 oA = glm::dvec3(occ.InvWorld * glm::dvec4(centre, 1.0));
+                const glm::dvec3 oB = glm::dvec3(occ.InvWorld * glm::dvec4(camPos, 1.0));
+                const glm::dvec3 oD = oB - oA;
+
+                double tMin = startT;
+                double tMax = bestT;
+                bool hit = true;
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    const double b0 = static_cast<double>(occ.LocalMin[axis]);
+                    const double b1 = static_cast<double>(occ.LocalMax[axis]);
+                    if (std::abs(oD[axis]) < 1e-9)
+                    {
+                        if (oA[axis] < b0 || oA[axis] > b1) { hit = false; break; }
+                    }
+                    else
+                    {
+                        double t1 = (b0 - oA[axis]) / oD[axis];
+                        double t2 = (b1 - oA[axis]) / oD[axis];
+                        if (t1 > t2) std::swap(t1, t2);
+                        tMin = std::max(tMin, t1);
+                        tMax = std::min(tMax, t2);
+                        if (tMin > tMax) { hit = false; break; }
+                    }
+                }
+                if (hit && tMin < bestT)
+                    bestT = tMin;
+            }
+            return bestT;
+        };
+
+        float targetPitch = m_EditorCamera.GetPitch();
+        float targetYaw = m_EditorCamera.GetYaw();
+        double bestFrac = clearFraction(targetPitch, targetYaw, focusDist);
+        if (bestFrac < 0.999)
+        {
+            float frontYaw = targetYaw;
+            if (entity.HasComponent<WorldTransformComponent>())
+            {
+                const glm::mat4 w = m_Renderer
+                    ? m_Renderer->ToRenderSpace(entity.GetComponent<WorldTransformComponent>().WorldMatrix)
+                    : glm::mat4(entity.GetComponent<WorldTransformComponent>().WorldMatrix);
+                const glm::vec3 entFwd = glm::vec3(w[2]);
+                if (glm::length(glm::vec2(entFwd.x, entFwd.z)) > 1e-4f)
+                    frontYaw = -std::atan2(entFwd.x, entFwd.z);
+            }
+
+            const float candidatePitches[] = { std::clamp(targetPitch, 0.08f, 0.45f), 0.22f, 0.45f };
+            const float yawOffsets[] = { 0.0f, 0.55f, -0.55f, 1.1f, -1.1f, 1.57f, -1.57f, 2.2f, -2.2f, 3.14159f };
+            float bestCandidatePitch = targetPitch;
+            float bestCandidateYaw = targetYaw;
+            double bestCandidateFrac = bestFrac;
+
+            auto tryCandidates = [&](float baseYaw)
+            {
+                for (float p : candidatePitches)
+                {
+                    for (float dy : yawOffsets)
+                    {
+                        const float y = baseYaw + dy;
+                        const double f = clearFraction(p, y, focusDist);
+                        if (f > bestCandidateFrac)
+                        {
+                            bestCandidateFrac = f;
+                            bestCandidatePitch = p;
+                            bestCandidateYaw = y;
+                            if (bestCandidateFrac >= 0.999)
+                                return true;
+                        }
+                    }
+                }
+                return false;
+            };
+
+            if (!tryCandidates(targetYaw))
+                tryCandidates(frontYaw);
+
+            if (bestCandidateFrac > bestFrac + 0.05)
+            {
+                targetPitch = bestCandidatePitch;
+                targetYaw = bestCandidateYaw;
+                bestFrac = bestCandidateFrac;
+                m_EditorCamera.SetOrientation(targetPitch, targetYaw);
+            }
+            if (bestFrac < 0.999)
+                focusDist = std::max(focusDist * static_cast<float>(bestFrac) * 0.88f, WorldUnits::FromCentimeters(40.0f));
+        }
+
+        m_EditorCamera.SetFocalPoint(centre);
+        m_EditorCamera.SetDistance(focusDist);
+    }
+
+    void EditorV2Layer::SnapSelectionToFloor()
+    {
+        if (!m_ActiveScene || !m_Renderer)
+            return;
+        const auto& selection = m_SceneHierarchyPanel.GetSelectedEntities();
+        if (selection.empty())
+            return;
+
+        std::vector<Entity> tops;
+        for (Entity entity : selection)
+        {
+            if (!entity)
+                continue;
+            const bool parentSelected = entity.HasComponent<RelationshipComponent>() &&
+                                        entity.GetComponent<RelationshipComponent>().Parent != 0 &&
+                                        m_SceneHierarchyPanel.IsSelected(m_ActiveScene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent));
+            if (!parentSelected)
+                tops.push_back(entity);
+        }
+
+        std::unordered_set<UUID> excluded;
+        std::function<void(Entity)> exclude = [&](Entity entity)
+        {
+            excluded.insert(entity.GetUUID());
+            if (!entity.HasComponent<RelationshipComponent>())
+                return;
+            for (UUID childID : entity.GetComponent<RelationshipComponent>().Children)
+            {
+                if (Entity child = m_ActiveScene->GetEntityByUUID(childID))
+                    exclude(child);
+            }
+        };
+        for (Entity top : tops)
+            exclude(top);
+
+        for (Entity top : tops)
+        {
+            const WorldBounds mover = ComputeWorldBounds(*m_ActiveScene, top);
+            if (!mover.Valid)
+                continue;
+            const double centreY = 0.5 * (mover.Min.y + mover.Max.y);
+
+            double floorY = 0.0;
+            bool found = false;
+            for (auto handle : m_ActiveScene->GetAllEntitiesWith<MeshComponent, WorldTransformComponent>())
+            {
+                Entity candidate(handle, m_ActiveScene.get());
+                if (excluded.contains(candidate.GetUUID()))
+                    continue;
+                const WorldBounds bounds = ComputeWorldBounds(*m_ActiveScene, candidate, false);
+                if (!bounds.Valid)
+                    continue;
+                const bool overlapsX = bounds.Min.x < mover.Max.x && bounds.Max.x > mover.Min.x;
+                const bool overlapsZ = bounds.Min.z < mover.Max.z && bounds.Max.z > mover.Min.z;
+                if (!overlapsX || !overlapsZ || bounds.Max.y > centreY)
+                    continue;
+                if (!found || bounds.Max.y > floorY)
+                {
+                    floorY = bounds.Max.y;
+                    found = true;
+                }
+            }
+
+            struct SnapRays
+            {
+                UUID Entity = 0;
+                double BoundsFloor = 0.0;
+                double OriginY = 0.0;
+                int Pending = 0;
+                bool Hit = false;
+                float NearestDistance = 0.0f;
+            };
+            auto snap = std::make_shared<SnapRays>();
+            snap->Entity = top.GetUUID();
+            snap->BoundsFloor = floorY;
+            snap->OriginY = mover.Min.y - WorldUnits::FromMeters(0.01f);
+            const glm::dvec3 centre = mover.Center();
+            const glm::dvec3 halfInset = 0.25 * (mover.Max - mover.Min);
+            const glm::vec2 offsets[5] = { { 0.0f, 0.0f }, { -1.0f, -1.0f }, { 1.0f, -1.0f }, { -1.0f, 1.0f }, { 1.0f, 1.0f } };
+            snap->Pending = 5;
+            for (const glm::vec2& offset : offsets)
+            {
+                const glm::dvec3 origin(centre.x + offset.x * halfInset.x, snap->OriginY, centre.z + offset.y * halfInset.z);
+                m_Renderer->RequestRaycast(origin, glm::vec3(0.0f, -1.0f, 0.0f), WorldUnits::FromMeters(1000.0f), [this, snap](bool hit, float distance)
+                {
+                    if (hit && (!snap->Hit || distance < snap->NearestDistance))
+                    {
+                        snap->Hit = true;
+                        snap->NearestDistance = distance;
+                    }
+                    if (--snap->Pending > 0)
+                        return;
+                    Entity entity = m_ActiveScene ? m_ActiveScene->GetEntityByUUID(snap->Entity) : Entity{};
+                    if (!entity || !entity.HasComponent<WorldTransformComponent>())
+                        return;
+                    const WorldBounds now = ComputeWorldBounds(*m_ActiveScene, entity);
+                    if (!now.Valid)
+                        return;
+                    const double floor = snap->Hit ? snap->OriginY - snap->NearestDistance : snap->BoundsFloor;
+                    const double drop = floor - now.Min.y;
+                    entity.SetWorldTransform(glm::translate(glm::dmat4(1.0), glm::dvec3(0.0, drop, 0.0)) *
+                                             entity.GetComponent<WorldTransformComponent>().WorldMatrix);
+                    m_HistoryCheckRequested = true;
+                });
+            }
+        }
+    }
+
+    void EditorV2Layer::SnapSelectionToGrid()
+    {
+        if (!m_ActiveScene)
+            return;
+        const float step = m_ViewportTools.LocationSnapWorldUnits();
+        if (step <= 0.0f)
+            return;
+        for (Entity entity : m_SceneHierarchyPanel.GetSelectedEntities())
+        {
+            if (!entity || !entity.HasComponent<WorldTransformComponent>())
+                continue;
+            const bool parentSelected = entity.HasComponent<RelationshipComponent>() &&
+                                        entity.GetComponent<RelationshipComponent>().Parent != 0 &&
+                                        m_SceneHierarchyPanel.IsSelected(m_ActiveScene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent));
+            if (parentSelected)
+                continue;
+            glm::dmat4 world = entity.GetComponent<WorldTransformComponent>().WorldMatrix;
+            const glm::dvec3 position(world[3]);
+            const double gridStep = step;
+            world[3] = glm::dvec4(glm::round(position / gridStep) * gridStep, 1.0);
+            entity.SetWorldTransform(world);
+        }
+        m_HistoryCheckRequested = true;
     }
 
     AssetHandle EditorV2Layer::GetShapeAsset(PrimitiveShape shape)
@@ -646,7 +997,7 @@ namespace Nox
             return;
         const std::string scene = m_EditorScenePath.generic_string();
         std::vector<std::string> lines = ReadEditorCameraLines();
-        std::erase_if(lines, [&](const std::string& line) { return line.rfind(scene + "|", 0) == 0; });
+        std::erase_if(lines, [&](const std::string& line) { return line.rfind(scene + "|0|", 0) == 0; });
         const glm::dvec3 focal = m_EditorCamera.GetFocalPoint();
         char line[512];
         std::snprintf(line, sizeof(line), "%s|0|%.17g %.17g %.17g %.6g %.6g %.6g %d %.6g",
@@ -767,7 +1118,9 @@ namespace Nox
         if (m_SceneState != SceneState::Edit || !m_ActiveScene || !Project::GetActive())
             return;
         EditorHistory::FrameInfo frame;
-        frame.InteractionEnded = m_HistoryCheckRequested;
+        frame.InteractionActive = m_ViewportTools.GizmoUsing;
+        frame.InteractionEnded = m_HistoryCheckRequested || (m_ViewportTools.GizmoWasUsing && !m_ViewportTools.GizmoUsing);
+        m_ViewportTools.GizmoWasUsing = m_ViewportTools.GizmoUsing;
         m_HistoryCheckRequested = false;
         frame.AssetsLoading = Project::GetActive()->GetEditorAssetManager()->GetLoadingCount() > 0;
         if (Entity watched = m_SceneHierarchyPanel.GetSelectedEntity())
@@ -819,6 +1172,7 @@ namespace Nox
                 selection.push_back(selected.GetUUID());
         }
 
+        m_HoveredEntity = Entity();
         restored->AdoptWorldState(*m_EditorScene);
         m_EditorScene = restored;
         m_ActiveScene = restored;
@@ -864,6 +1218,7 @@ namespace Nox
         if (m_SceneState == SceneState::Simulate)
             OnSceneStop();
         m_SceneState = SceneState::Play;
+        m_HoveredEntity = Entity();
         m_ActiveScene = Scene::Copy(m_EditorScene);
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
         m_ActiveScene->SetRenderer(m_Renderer);
@@ -877,6 +1232,7 @@ namespace Nox
                 m_ActiveScene->OnViewportResize(w, h);
         }
         m_ActiveScene->OnRuntimeStart();
+        RefreshToolBar();
     }
 
     void EditorV2Layer::OnSceneSimulate()
@@ -885,10 +1241,14 @@ namespace Nox
         if (m_SceneState == SceneState::Play)
             OnSceneStop();
         m_SceneState = SceneState::Simulate;
+        m_HoveredEntity = Entity();
         m_ActiveScene = Scene::Copy(m_EditorScene);
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        m_ActiveScene->SetRenderer(m_Renderer);
+        m_ActiveScene->SetRenderer2D(m_Renderer2D);
         const glm::dvec3 streamingSource = m_EditorCamera.GetPosition();
         m_ActiveScene->OnSimulationStart(&streamingSource);
+        RefreshToolBar();
     }
 
     void EditorV2Layer::OnSceneStop()
@@ -902,9 +1262,11 @@ namespace Nox
         if (Input::IsRelativeMouseMode())
             Input::SetRelativeMouseMode(false);
         Input::ClearInjected();
+        m_HoveredEntity = Entity();
         m_ActiveScene = m_EditorScene;
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
         m_UnloadUnusedAssetsRequested = true;
+        RefreshToolBar();
     }
 
     void EditorV2Layer::OnScenePause()
@@ -957,11 +1319,328 @@ namespace Nox
     {
         if (!m_Renderer2D || !m_Renderer)
             return;
-        const float cell = WorldUnits::FromMeters(1.0f);
+        const float cell = std::max(m_ViewportTools.LocationSnapWorldUnits(), WorldUnits::FromMeters(1.0f));
         if (m_EditorCamera.IsOrthographic())
             m_Renderer2D->DrawGrid(m_EditorCamera.GetFocalPoint(), m_Renderer->GetRenderOrigin(), cell, GridPlaneAxis(), m_EditorCamera.GetOrthoHalfHeight());
         else
             m_Renderer2D->DrawGrid(m_EditorCamera.GetPosition(), m_Renderer->GetRenderOrigin(), cell, 1, m_EditorCamera.GetDistance());
+    }
+
+    void EditorV2Layer::DrawReferenceFigure(const glm::dvec3& worldPosition)
+    {
+        if (!m_Renderer2D || !m_Renderer)
+            return;
+        const glm::vec3 position = m_Renderer->ToRenderSpace(worldPosition);
+        auto cm = [](float centimeters) { return WorldUnits::FromCentimeters(centimeters); };
+        const glm::vec4 color(1.0f, 0.62f, 0.2f, 0.9f);
+
+        auto box = [&](float minX, float maxX, float minY, float maxY, float minZ, float maxZ)
+        {
+            const glm::vec3 low = position + glm::vec3(cm(minX), cm(minY), cm(minZ));
+            const glm::vec3 high = position + glm::vec3(cm(maxX), cm(maxY), cm(maxZ));
+            const glm::vec3 corners[8] = {
+                { low.x, low.y, low.z }, { high.x, low.y, low.z }, { high.x, low.y, high.z }, { low.x, low.y, high.z },
+                { low.x, high.y, low.z }, { high.x, high.y, low.z }, { high.x, high.y, high.z }, { low.x, high.y, high.z }
+            };
+            constexpr int edges[12][2] = { {0,1},{1,2},{2,3},{3,0}, {4,5},{5,6},{6,7},{7,4}, {0,4},{1,5},{2,6},{3,7} };
+            for (const auto& edge : edges)
+                m_Renderer2D->DrawThinLine(corners[edge[0]], corners[edge[1]], color);
+        };
+
+        box(-18.0f, -1.0f, 0.0f, 88.0f, -10.0f, 10.0f);
+        box(1.0f, 18.0f, 0.0f, 88.0f, -10.0f, 10.0f);
+        box(-22.0f, 22.0f, 88.0f, 143.0f, -11.0f, 11.0f);
+        box(-31.0f, -22.0f, 83.0f, 143.0f, -5.0f, 5.0f);
+        box(22.0f, 31.0f, 83.0f, 143.0f, -5.0f, 5.0f);
+        box(-4.0f, 4.0f, 143.0f, 151.0f, -4.0f, 4.0f);
+        box(-10.0f, 10.0f, 151.0f, 180.0f, -12.0f, 12.0f);
+    }
+
+    namespace
+    {
+        glm::vec3 DecomposeWorldScale(const glm::mat4& worldMatrix)
+        {
+            return glm::vec3(
+                glm::length(glm::vec3(worldMatrix[0])),
+                glm::length(glm::vec3(worldMatrix[1])),
+                glm::length(glm::vec3(worldMatrix[2])));
+        }
+
+        glm::mat4 RigidPart(const glm::mat4& worldMatrix)
+        {
+            glm::mat4 result = worldMatrix;
+            for (int c = 0; c < 3; ++c)
+            {
+                const float l = glm::length(glm::vec3(worldMatrix[c]));
+                if (l > 1e-6f)
+                    result[c] = glm::vec4(glm::vec3(worldMatrix[c]) / l, 0.0f);
+            }
+            return result;
+        }
+    }
+
+    void EditorV2Layer::DrawPhysicsColliders3D()
+    {
+        if (!m_ActiveScene || !m_Renderer || !m_Renderer2D)
+            return;
+
+        constexpr glm::vec4 kActiveColor(0.2f, 1.0f, 0.3f, 0.9f);
+        constexpr glm::vec4 kInactiveColor(1.0f, 0.3f, 0.25f, 0.9f);
+        constexpr glm::vec4 kCharacterColor(0.3f, 0.75f, 1.0f, 0.9f);
+        constexpr int kCircleSegments = 32;
+
+        auto colorOf = [this, kActiveColor, kInactiveColor](entt::entity handle)
+        {
+            for (Entity entity(handle, m_ActiveScene.get()); entity; entity = entity.GetParent())
+            {
+                if (entity.HasComponent<RigidBody3DComponent>())
+                    return kActiveColor;
+            }
+            return kInactiveColor;
+        };
+        auto line = [this](const glm::vec3& a, const glm::vec3& b, const glm::vec4& color) { m_Renderer2D->DrawXRayLine(a, b, color); };
+
+        auto drawCircle = [&](const glm::mat4& transform, const glm::vec3& centre, float radius, int axis, const glm::vec4& color)
+        {
+            const int a = (axis + 1) % 3, b = (axis + 2) % 3;
+            glm::vec3 previous(0.0f);
+            for (int i = 0; i <= kCircleSegments; ++i)
+            {
+                const float t = glm::two_pi<float>() * static_cast<float>(i) / kCircleSegments;
+                glm::vec3 local = centre;
+                local[a] += std::cos(t) * radius;
+                local[b] += std::sin(t) * radius;
+                const glm::vec3 point = glm::vec3(transform * glm::vec4(local, 1.0f));
+                if (i > 0)
+                    line(previous, point, color);
+                previous = point;
+            }
+        };
+
+        auto drawCapsule = [&](const glm::mat4& transform, const glm::vec3& centre, float halfHeight, float top, float bottom, const glm::vec4& color)
+        {
+            const float sine = halfHeight > 1e-6f ? std::clamp((bottom - top) / (2.0f * halfHeight), -1.0f, 1.0f) : 0.0f;
+            const float tangent = std::asin(sine);
+            const glm::vec3 topCentre = centre + glm::vec3(0.0f, halfHeight, 0.0f);
+            const glm::vec3 bottomCentre = centre - glm::vec3(0.0f, halfHeight, 0.0f);
+            auto at = [&](const glm::vec3& c, float radius, const glm::vec3& across, float angle)
+            {
+                return glm::vec3(transform * glm::vec4(c + radius * (std::cos(angle) * across + std::sin(angle) * glm::vec3(0.0f, 1.0f, 0.0f)), 1.0f));
+            };
+            auto arc = [&](const glm::vec3& c, float radius, const glm::vec3& across, float from, float to)
+            {
+                constexpr int kSegments = 16;
+                glm::vec3 previous = at(c, radius, across, from);
+                for (int i = 1; i <= kSegments; ++i)
+                {
+                    const glm::vec3 point = at(c, radius, across, from + (to - from) * static_cast<float>(i) / kSegments);
+                    line(previous, point, color);
+                    previous = point;
+                }
+            };
+            for (const glm::vec3& across : { glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) })
+            {
+                arc(topCentre, top, across, tangent, glm::pi<float>() - tangent);
+                arc(bottomCentre, bottom, across, glm::pi<float>() - tangent, glm::two_pi<float>() + tangent);
+                line(at(topCentre, top, across, tangent), at(bottomCentre, bottom, across, tangent), color);
+                line(at(topCentre, top, across, glm::pi<float>() - tangent), at(bottomCentre, bottom, across, glm::pi<float>() - tangent), color);
+            }
+            drawCircle(transform, topCentre + glm::vec3(0.0f, top * sine, 0.0f), top * std::cos(tangent), 1, color);
+            drawCircle(transform, bottomCentre + glm::vec3(0.0f, bottom * sine, 0.0f), bottom * std::cos(tangent), 1, color);
+        };
+
+        auto boxView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, BoxCollider3DComponent>();
+        for (auto entity : boxView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, box] = boxView.get<WorldTransformComponent, BoxCollider3DComponent>(entity);
+            const glm::vec4 color = colorOf(entity);
+            const glm::vec3 halfExtents = box.HalfExtents * DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            glm::vec3 corners[8];
+            for (int i = 0; i < 8; ++i)
+            {
+                const glm::vec3 sign((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
+                corners[i] = glm::vec3(transform * glm::vec4(box.Offset + sign * halfExtents, 1.0f));
+            }
+            constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
+            for (const auto& edge : edges)
+                line(corners[edge[0]], corners[edge[1]], color);
+        }
+
+        auto sphereView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, SphereCollider3DComponent>();
+        for (auto entity : sphereView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, sphere] = sphereView.get<WorldTransformComponent, SphereCollider3DComponent>(entity);
+            const glm::vec4 color = colorOf(entity);
+            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const float radius = sphere.Radius * std::max({ worldScale.x, worldScale.y, worldScale.z });
+            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            for (int axis = 0; axis < 3; ++axis)
+                drawCircle(transform, sphere.Offset, radius, axis, color);
+        }
+
+        auto capsuleView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CapsuleCollider3DComponent>();
+        for (auto entity : capsuleView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, capsule] = capsuleView.get<WorldTransformComponent, CapsuleCollider3DComponent>(entity);
+            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const float horizontal = std::max(worldScale.x, worldScale.z);
+            const float top = capsule.Radius * horizontal;
+            const float bottom = capsule.BottomRadius > 0.0f ? capsule.BottomRadius * horizontal : top;
+            drawCapsule(RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix)), capsule.Offset, capsule.HalfHeight * worldScale.y, top, bottom, colorOf(entity));
+        }
+
+        auto characterView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CharacterController3DComponent>();
+        for (auto entity : characterView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, controller] = characterView.get<WorldTransformComponent, CharacterController3DComponent>(entity);
+            const float radius = std::max(controller.Radius, WorldUnits::FromCentimeters(1.0f));
+            const float halfHeight = 0.5f * std::max(controller.Height, 0.0f);
+            const glm::mat4 transform = glm::translate(glm::mat4(1.0f), m_Renderer->ToRenderSpace(wtc.GetPosition()));
+            drawCapsule(transform, glm::vec3(0.0f, halfHeight + radius, 0.0f), halfHeight, radius, radius, kCharacterColor);
+        }
+
+        auto cylinderView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CylinderCollider3DComponent>();
+        for (auto entity : cylinderView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, cylinder] = cylinderView.get<WorldTransformComponent, CylinderCollider3DComponent>(entity);
+            const glm::vec4 color = colorOf(entity);
+            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const float halfHeight = cylinder.HalfHeight * worldScale.y;
+            const float horizontal = std::max(worldScale.x, worldScale.z);
+            const float top = cylinder.Radius * horizontal;
+            const float bottom = (cylinder.BottomRadius > 0.0f ? cylinder.BottomRadius : cylinder.Radius) * horizontal;
+            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const glm::vec3 topCentre = cylinder.Offset + glm::vec3(0.0f, halfHeight, 0.0f);
+            const glm::vec3 bottomCentre = cylinder.Offset - glm::vec3(0.0f, halfHeight, 0.0f);
+            if (top > 0.0f)
+                drawCircle(transform, topCentre, top, 1, color);
+            drawCircle(transform, bottomCentre, bottom, 1, color);
+            for (int i = 0; i < 8; ++i)
+            {
+                const float t = glm::quarter_pi<float>() * static_cast<float>(i);
+                const glm::vec3 direction(std::cos(t), 0.0f, std::sin(t));
+                line(glm::vec3(transform * glm::vec4(topCentre + direction * top, 1.0f)),
+                     glm::vec3(transform * glm::vec4(bottomCentre + direction * bottom, 1.0f)), color);
+            }
+        }
+
+        glm::dvec3 viewPosition = m_EditorCamera.GetPosition();
+        if (m_SceneState == SceneState::Play)
+        {
+            if (Entity camera = m_ActiveScene->GetPrimaryCameraEntity())
+                viewPosition = camera.GetComponent<WorldTransformComponent>().GetPosition();
+        }
+        const glm::vec3 eye = m_Renderer->ToRenderSpace(viewPosition);
+        auto planeView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, PlaneCollider3DComponent>();
+        for (auto entity : planeView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, plane] = planeView.get<WorldTransformComponent, PlaneCollider3DComponent>(entity);
+            const glm::vec4 color = colorOf(entity);
+            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            auto point = [&](float x, float y, float z) { return glm::vec3(transform * glm::vec4(plane.Offset + glm::vec3(x, y, z), 1.0f)); };
+            if (plane.HalfSize.x > 0.0f && plane.HalfSize.y > 0.0f)
+            {
+                const float x = plane.HalfSize.x * worldScale.x, z = plane.HalfSize.y * worldScale.z;
+                line(point(-x, 0, -z), point(x, 0, -z), color);
+                line(point(x, 0, -z), point(x, 0, z), color);
+                line(point(x, 0, z), point(-x, 0, z), color);
+                line(point(-x, 0, z), point(-x, 0, -z), color);
+                line(point(0, 0, 0), point(0, WorldUnits::FromMeters(1.0f), 0), color);
+                continue;
+            }
+            glm::vec4 endlessColor = color;
+            for (Entity owner(entity, m_ActiveScene.get()); owner; owner = owner.GetParent())
+            {
+                if (owner.HasComponent<RigidBody3DComponent>())
+                {
+                    if (owner.GetComponent<RigidBody3DComponent>().Type == RigidBody3DComponent::BodyType::Dynamic)
+                        endlessColor = kInactiveColor;
+                    break;
+                }
+            }
+            const glm::vec3 origin = point(0, 0, 0);
+            const glm::vec3 alongX = glm::vec3(transform[0]), alongZ = glm::vec3(transform[2]);
+            const float step = WorldUnits::FromMeters(5.0f);
+            const float reach = WorldUnits::FromMeters(50.0f);
+            const float nearX = std::round(glm::dot(eye - origin, alongX) / step) * step;
+            const float nearZ = std::round(glm::dot(eye - origin, alongZ) / step) * step;
+            for (float offset = -reach; offset <= reach + 0.5f * step; offset += step)
+            {
+                line(point(nearX - reach, 0, nearZ + offset), point(nearX + reach, 0, nearZ + offset), endlessColor);
+                line(point(nearX + offset, 0, nearZ - reach), point(nearX + offset, 0, nearZ + reach), endlessColor);
+            }
+            line(origin, point(0, WorldUnits::FromMeters(1.0f), 0), endlessColor);
+        }
+
+        auto animatorView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, AnimatorComponent>();
+        for (auto entity : animatorView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, animator] = animatorView.get<WorldTransformComponent, AnimatorComponent>(entity);
+            const AnimationGraphInstance& graph = animator.GraphInstance;
+            if (graph.FootProbes.empty())
+                continue;
+            const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+            const float meter = WorldUnits::FromMeters(1.0f);
+            for (const AnimFootProbe& probe : graph.FootProbes)
+            {
+                const glm::vec3 foot = glm::vec3(world * glm::vec4(probe.Position, 1.0f));
+                const glm::vec3 start = foot + glm::vec3(0.0f, probe.Up * meter, 0.0f);
+                const glm::vec3 end = foot - glm::vec3(0.0f, probe.Down * meter, 0.0f);
+                const auto ground = graph.FootGround.find(probe.Bone);
+                if (ground == graph.FootGround.end() || !ground->second.Hit)
+                {
+                    line(start, end, glm::vec4(1.0f, 0.25f, 0.2f, 1.0f));
+                    continue;
+                }
+                const glm::vec3 hit = glm::vec3(world * glm::vec4(ground->second.Point, 1.0f));
+                const glm::vec4 green(0.2f, 1.0f, 0.3f, 1.0f);
+                line(start, hit, green);
+                const float c = WorldUnits::FromCentimeters(4.0f);
+                line(hit - glm::vec3(c, 0, 0), hit + glm::vec3(c, 0, 0), green);
+                line(hit - glm::vec3(0, 0, c), hit + glm::vec3(0, 0, c), green);
+                line(hit, hit + glm::vec3(world * glm::vec4(ground->second.Normal, 0.0f)) * (3.0f * c), green);
+            }
+        }
+
+        auto meshView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, MeshCollider3DComponent>();
+        for (auto entity : meshView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, mesh] = meshView.get<WorldTransformComponent, MeshCollider3DComponent>(entity);
+            if (mesh.Mesh == 0)
+                continue;
+            bool dynamic = false;
+            for (Entity owner(entity, m_ActiveScene.get()); owner; owner = owner.GetParent())
+            {
+                if (owner.HasComponent<RigidBody3DComponent>())
+                {
+                    dynamic = owner.GetComponent<RigidBody3DComponent>().Type == RigidBody3DComponent::BodyType::Dynamic;
+                    break;
+                }
+            }
+            const std::vector<glm::vec3>& lines = MeshColliderWireframe(mesh, mesh.Convex || dynamic);
+            const glm::vec4 color = colorOf(entity);
+            const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+            for (size_t i = 0; i + 1 < lines.size(); i += 2)
+                line(glm::vec3(world * glm::vec4(lines[i], 1.0f)), glm::vec3(world * glm::vec4(lines[i + 1], 1.0f)), color);
+        }
     }
 
     void EditorV2Layer::OnOverlayRender()
@@ -979,10 +1658,261 @@ namespace Nox
         else
         {
             m_Renderer->BeginScene(m_EditorCamera);
+        }
+
+        if (m_SceneState != SceneState::Play && m_ViewportTools.ShowGrid)
             DrawWorldGrid();
+
+        if (m_SceneState != SceneState::Play && m_ViewportTools.ShowReferenceFigure)
+        {
+            glm::dvec3 underCursor;
+            const bool vpHovered = m_ViewportCanvas && UI::HasState(m_ViewportCanvas->GetState(), UI::UIState::Hovered);
+            if (m_ViewportTools.ReferenceFigureAtCursor && vpHovered && m_ViewportCanvas->PickWorldPoint(underCursor))
+                m_ViewportTools.ReferenceFigurePosition = underCursor;
+            DrawReferenceFigure(m_ViewportTools.ReferenceFigureAtCursor ? m_ViewportTools.ReferenceFigurePosition : glm::dvec3(0.0));
+        }
+
+        if (m_SceneState != SceneState::Play)
+        {
+            auto rectLights = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, RectLightComponent>();
+            for (auto entity : rectLights)
+            {
+                auto [wtc, light] = rectLights.get<WorldTransformComponent, RectLightComponent>(entity);
+                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+                const glm::vec3 centre = glm::vec3(world[3]);
+                const glm::vec3 halfX = glm::vec3(world[0]) * (0.5f * light.Width);
+                const glm::vec3 halfY = glm::vec3(world[1]) * (0.5f * light.Height);
+                const glm::vec3 corners[4] = { centre - halfX - halfY, centre + halfX - halfY, centre + halfX + halfY, centre - halfX + halfY };
+                const glm::vec4 colour(glm::mix(light.Color, glm::vec3(1.0f, 0.9f, 0.4f), 0.5f), 1.0f);
+                for (int i = 0; i < 4; ++i)
+                    m_Renderer2D->DrawXRayLine(corners[i], corners[(i + 1) % 4], colour);
+                const glm::vec3 forward = -glm::vec3(world[2]);
+                if (glm::length(forward) > 1e-6f)
+                    m_Renderer2D->DrawXRayLine(centre, centre + glm::normalize(forward) * 0.5f * (glm::length(halfX) + glm::length(halfY)), colour);
+            }
+
+            auto probes = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, ReflectionProbeComponent>();
+            for (auto entity : probes)
+            {
+                auto [wtc, probe] = probes.get<WorldTransformComponent, ReflectionProbeComponent>(entity);
+                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+                glm::vec3 corners[8];
+                for (int i = 0; i < 8; ++i)
+                    corners[i] = glm::vec3(world * glm::vec4((i & 1) ? probe.Extents.x : -probe.Extents.x, (i & 2) ? probe.Extents.y : -probe.Extents.y,
+                                                             (i & 4) ? probe.Extents.z : -probe.Extents.z, 1.0f));
+                const glm::vec4 colour(0.4f, 0.8f, 1.0f, 1.0f);
+                for (int i = 0; i < 8; ++i)
+                    for (int axis = 1; axis < 8; axis <<= 1)
+                        if (!(i & axis))
+                            m_Renderer2D->DrawXRayLine(corners[i], corners[i | axis], colour);
+            }
+
+            auto volumes = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, IrradianceVolumeComponent>();
+            for (auto entity : volumes)
+            {
+                auto [wtc, volume] = volumes.get<WorldTransformComponent, IrradianceVolumeComponent>(entity);
+                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+                glm::vec3 corners[8];
+                for (int i = 0; i < 8; ++i)
+                    corners[i] = glm::vec3(world * glm::vec4((i & 1) ? volume.Extents.x : -volume.Extents.x, (i & 2) ? volume.Extents.y : -volume.Extents.y,
+                                                             (i & 4) ? volume.Extents.z : -volume.Extents.z, 1.0f));
+                const glm::vec4 colour(1.0f, 0.75f, 0.3f, 1.0f);
+                for (int i = 0; i < 8; ++i)
+                    for (int axis = 1; axis < 8; axis <<= 1)
+                        if (!(i & axis))
+                            m_Renderer2D->DrawXRayLine(corners[i], corners[i | axis], colour);
+            }
+
+            auto discLights = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, DiscLightComponent>();
+            for (auto entity : discLights)
+            {
+                auto [wtc, light] = discLights.get<WorldTransformComponent, DiscLightComponent>(entity);
+                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+                const glm::vec3 centre = glm::vec3(world[3]);
+                const float scale = glm::max(glm::length(glm::vec3(world[0])), glm::length(glm::vec3(world[1])));
+                const glm::vec3 axisX = glm::length(glm::vec3(world[0])) > 1e-6f ? glm::normalize(glm::vec3(world[0])) * light.Radius * scale : glm::vec3(0.0f);
+                const glm::vec3 axisY = glm::length(glm::vec3(world[1])) > 1e-6f ? glm::normalize(glm::vec3(world[1])) * light.Radius * scale : glm::vec3(0.0f);
+                const glm::vec4 colour(glm::mix(light.Color, glm::vec3(1.0f, 0.9f, 0.4f), 0.5f), 1.0f);
+                constexpr int Segments = 32;
+                for (int i = 0; i < Segments; ++i)
+                {
+                    const float a0 = glm::two_pi<float>() * static_cast<float>(i) / Segments;
+                    const float a1 = glm::two_pi<float>() * static_cast<float>(i + 1) / Segments;
+                    m_Renderer2D->DrawXRayLine(centre + axisX * std::cos(a0) + axisY * std::sin(a0), centre + axisX * std::cos(a1) + axisY * std::sin(a1), colour);
+                }
+                const glm::vec3 forward = -glm::vec3(world[2]);
+                if (glm::length(forward) > 1e-6f)
+                    m_Renderer2D->DrawXRayLine(centre, centre + glm::normalize(forward) * light.Radius * scale, colour);
+            }
+
+            Entity selected = m_SceneHierarchyPanel.GetSelectedEntity();
+            if (selected && selected.HasComponent<AudioSourceComponent>() && selected.HasComponent<WorldTransformComponent>() &&
+                selected.GetComponent<AudioSourceComponent>().Spatial && !selected.HasComponent<InactiveInHierarchyComponent>())
+            {
+                const auto& source = selected.GetComponent<AudioSourceComponent>();
+                const glm::vec3 centre = glm::vec3(m_Renderer->ToRenderSpace(selected.GetComponent<WorldTransformComponent>().WorldMatrix)[3]);
+                auto sphere = [&](float meters, const glm::vec4& colour)
+                {
+                    const float radius = WorldUnits::FromMeters(meters);
+                    constexpr int Segments = 48;
+                    for (int axis = 0; axis < 3; ++axis)
+                    {
+                        const int a = (axis + 1) % 3, b = (axis + 2) % 3;
+                        for (int i = 0; i < Segments; ++i)
+                        {
+                            const float t0 = glm::two_pi<float>() * static_cast<float>(i) / Segments;
+                            const float t1 = glm::two_pi<float>() * static_cast<float>(i + 1) / Segments;
+                            glm::vec3 p0 = centre, p1 = centre;
+                            p0[a] += std::cos(t0) * radius; p0[b] += std::sin(t0) * radius;
+                            p1[a] += std::cos(t1) * radius; p1[b] += std::sin(t1) * radius;
+                            m_Renderer2D->DrawXRayLine(p0, p1, colour);
+                        }
+                    }
+                };
+                sphere(source.Spatialization.MinDistance, glm::vec4(0.55f, 0.85f, 1.0f, 0.9f));
+                sphere(source.Spatialization.MaxDistance, glm::vec4(0.2f, 0.4f, 1.0f, 0.7f));
+            }
+
+            constexpr glm::vec4 kVolumeColor(1.0f, 0.55f, 0.1f, 0.9f);
+            constexpr glm::vec4 kAudioVolumeColor(0.3f, 0.6f, 1.0f, 0.9f);
+            constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
+            auto drawBox = [&](const WorldTransformComponent& wtc, const glm::vec3& halfExtents, const glm::vec4& color)
+            {
+                glm::vec3 corners[8];
+                for (int i = 0; i < 8; ++i)
+                {
+                    const glm::vec3 sign((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
+                    corners[i] = glm::vec3(m_Renderer->ToRenderSpace(wtc.WorldMatrix) * glm::vec4(sign * halfExtents, 1.0f));
+                }
+                for (const auto& edge : edges)
+                    m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], color);
+            };
+            auto streamView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, LevelStreamingVolumeComponent>();
+            for (auto entity : streamView)
+            {
+                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
+                    continue;
+                auto [wtc, volume] = streamView.get<WorldTransformComponent, LevelStreamingVolumeComponent>(entity);
+                drawBox(wtc, volume.HalfExtents, kVolumeColor);
+            }
+            constexpr glm::vec4 kPostProcessVolumeColor(0.75f, 0.45f, 1.0f, 0.9f);
+            auto postView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, PostProcessVolumeComponent>();
+            for (auto entity : postView)
+            {
+                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
+                    continue;
+                auto [wtc, volume] = postView.get<WorldTransformComponent, PostProcessVolumeComponent>(entity);
+                if (!volume.Unbound)
+                    drawBox(wtc, volume.HalfExtents, kPostProcessVolumeColor);
+            }
+            auto audioView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, AudioVolumeComponent>();
+            for (auto entity : audioView)
+            {
+                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
+                    continue;
+                auto [wtc, volume] = audioView.get<WorldTransformComponent, AudioVolumeComponent>(entity);
+                drawBox(wtc, volume.HalfExtents, kAudioVolumeColor);
+            }
+            constexpr glm::vec4 kProbeVolumeColor(0.35f, 0.9f, 0.55f, 0.9f);
+            auto probeView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, AcousticProbeVolumeComponent>();
+            for (auto entity : probeView)
+            {
+                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
+                    continue;
+                auto [wtc, volume] = probeView.get<WorldTransformComponent, AcousticProbeVolumeComponent>(entity);
+                drawBox(wtc, volume.HalfExtents, kProbeVolumeColor);
+                if (selected != Entity(entity, m_ActiveScene.get()) || volume.BakedData == 0 || AssetManager::RequestAsset(volume.BakedData) != AssetState::Ready)
+                    continue;
+                const Ref<AcousticData> data = AssetManager::GetAsset<AcousticData>(volume.BakedData);
+                const float arm = WorldUnits::FromMeters(0.15f);
+                for (const glm::vec3& probe : data->ProbePositions)
+                {
+                    const glm::vec3 p = glm::vec3(m_Renderer->ToRenderSpace(data->Origin + glm::dvec3(probe)));
+                    m_Renderer2D->DrawXRayLine(p - glm::vec3(arm, 0, 0), p + glm::vec3(arm, 0, 0), kProbeVolumeColor);
+                    m_Renderer2D->DrawXRayLine(p - glm::vec3(0, arm, 0), p + glm::vec3(0, arm, 0), kProbeVolumeColor);
+                    m_Renderer2D->DrawXRayLine(p - glm::vec3(0, 0, arm), p + glm::vec3(0, 0, arm), kProbeVolumeColor);
+                }
+            }
+        }
+
+        if (m_ViewportTools.ShowPhysicsColliders)
+        {
+            {
+                auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, BoxCollider2DComponent>();
+                for (auto entity : view)
+                {
+                    auto [wtc, bc2d] = view.get<WorldTransformComponent, BoxCollider2DComponent>(entity);
+                    glm::mat4 transform = m_Renderer->ToRenderSpace(wtc.WorldMatrix) *
+                                          glm::translate(glm::mat4(1.0f), glm::vec3(bc2d.Offset, 0.001f)) *
+                                          glm::scale(glm::mat4(1.0f), glm::vec3(bc2d.Size * 2.0f, 1.0f));
+                    m_Renderer2D->DrawRect(transform, glm::vec4(0, 1, 0, 1));
+                }
+            }
+            {
+                auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CircleCollider2DComponent>();
+                for (auto entity : view)
+                {
+                    auto [wtc, cc2d] = view.get<WorldTransformComponent, CircleCollider2DComponent>(entity);
+                    glm::mat4 transform = m_Renderer->ToRenderSpace(wtc.WorldMatrix) *
+                                          glm::translate(glm::mat4(1.0f), glm::vec3(cc2d.Offset, 0.001f)) *
+                                          glm::scale(glm::mat4(1.0f), glm::vec3(cc2d.Radius * 2.0f));
+                    m_Renderer2D->DrawCircle(transform, glm::vec4(0, 1, 0, 1), 0.01f);
+                }
+            }
+            DrawPhysicsColliders3D();
         }
 
         m_Renderer->EndScene();
+    }
+
+    void EditorV2Layer::RefreshToolBar()
+    {
+        const bool isPlay = m_SceneState == SceneState::Play;
+        const bool isSim = m_SceneState == SceneState::Simulate;
+        const bool isEdit = m_SceneState == SceneState::Edit;
+        const bool isPaused = !isEdit && m_ActiveScene && m_ActiveScene->IsPaused();
+
+        if (m_PlayBtnWrap)
+            m_PlayBtnWrap->Visible = isEdit || isPlay;
+        if (m_SimulateBtnWrap)
+            m_SimulateBtnWrap->Visible = isEdit || isSim;
+        if (m_PauseBtnWrap)
+            m_PauseBtnWrap->Visible = !isEdit;
+        if (m_StepBtnWrap)
+            m_StepBtnWrap->Visible = !isEdit && isPaused;
+
+        if (m_PlayBtnIcon)
+        {
+            const Ref<Texture2D>& tex = isPlay ? m_IconStop : m_IconPlay;
+            m_PlayBtnIcon->TextureDescriptorSlot = tex ? tex->GetDescriptorIndexSlot() : ~0u;
+        }
+        if (m_SimulateBtnIcon)
+        {
+            const Ref<Texture2D>& tex = isSim ? m_IconStop : m_IconSimulate;
+            m_SimulateBtnIcon->TextureDescriptorSlot = tex ? tex->GetDescriptorIndexSlot() : ~0u;
+        }
+    }
+
+    void EditorV2Layer::RefreshSceneLoadOverlay()
+    {
+        if (!m_SceneLoadBanner)
+            return;
+        if (!m_SceneLoad)
+        {
+            m_SceneLoadBanner->Visible = false;
+            return;
+        }
+        m_SceneLoadBanner->Visible = true;
+        if (m_SceneLoadTitleLabel)
+            m_SceneLoadTitleLabel->Text = "Opening " + m_SceneLoad->GetPath().filename().string();
+        if (m_SceneLoadStageLabel)
+        {
+            char pct[128];
+            std::snprintf(pct, sizeof(pct), "%s (%.0f%%)", m_SceneLoad->GetStage().c_str(), m_SceneLoad->GetProgress() * 100.0f);
+            m_SceneLoadStageLabel->Text = pct;
+        }
+        if (m_SceneLoadProgressFill)
+            m_SceneLoadProgressFill->FixedSize.x = std::clamp(m_SceneLoad->GetProgress(), 0.0f, 1.0f) * 300.0f;
     }
 
     void EditorV2Layer::RefreshStatusBar()
@@ -1080,14 +2010,32 @@ namespace Nox
             for (const ModelInstance::LevelDescription& level : assetManager->ConsumeLevelImports())
             {
                 if (m_EditorScene)
-                    ModelInstance::SpawnLevel(*m_EditorScene, level);
+                {
+                    if (Entity imported = ModelInstance::SpawnLevel(*m_EditorScene, level))
+                    {
+                        m_SceneHierarchyPanel.SetSelectedEntity(imported);
+                        m_SceneHierarchyPanel.MarkDirty();
+                    }
+                }
             }
 
             assetManager->Update();
         }
 
+        RefreshSceneLoadOverlay();
+
         if (!m_Renderer || !m_ActiveScene || !m_ViewportImage)
             return;
+
+        const bool wantHideCursor = m_EditorCamera.ShouldHideCursor() || (m_SceneState != SceneState::Edit && Input::IsRelativeMouseMode());
+        if (wantHideCursor != m_CursorHidden)
+        {
+            if (wantHideCursor)
+                SDL_HideCursor();
+            else
+                SDL_ShowCursor();
+            m_CursorHidden = wantHideCursor;
+        }
 
         const UI::UIRect& bounds = m_ViewportImage->GetBounds();
         const uint32_t wantW = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Width())));
@@ -1103,8 +2051,10 @@ namespace Nox
             }
         }
 
-        const bool hovered = UI::HasState(m_ViewportImage->GetState(), UI::UIState::Hovered);
-        const bool focused = UI::HasState(m_ViewportImage->GetState(), UI::UIState::Focused);
+        const UI::UIElement* targetEl = m_ViewportCanvas ? static_cast<const UI::UIElement*>(m_ViewportCanvas.get())
+                                                         : static_cast<const UI::UIElement*>(m_ViewportImage.get());
+        const bool hovered = targetEl && UI::HasState(targetEl->GetState(), UI::UIState::Hovered);
+        const bool focused = targetEl && UI::HasState(targetEl->GetState(), UI::UIState::Focused);
         Input::SetGameInputEnabled(focused || hovered, hovered);
 
         m_ActiveScene->SetRenderer(m_Renderer);
@@ -1125,6 +2075,46 @@ namespace Nox
             break;
         }
 
+        if (m_ViewportCanvas)
+        {
+            const UI::UIRect& vpBounds = m_ViewportCanvas->GetBounds();
+            glm::vec2 mouse = Input::GetMousePosition();
+            if (UILayer* uiLayer = Application::Get().GetUILayer())
+                mouse = uiLayer->GetContext().GetLastMousePos();
+
+            const int mouseX = static_cast<int>(mouse.x - vpBounds.Min.x);
+            const int mouseY = static_cast<int>(mouse.y - vpBounds.Min.y);
+            const int vpW = static_cast<int>(vpBounds.Width());
+            const int vpH = static_cast<int>(vpBounds.Height());
+            if (mouseX >= 0 && mouseY >= 0 && mouseX < vpW && mouseY < vpH)
+            {
+                const int32_t pixelData = m_Renderer->getPickedEntityID();
+                m_HoveredEntity = pixelData == -1 ? Entity() : Entity(static_cast<entt::entity>(pixelData), m_ActiveScene.get());
+
+                if (!m_ViewportTools.IsBoxSelecting)
+                {
+                    if (hovered)
+                        m_Renderer->setPickRequest(mouseX, mouseY, true);
+                }
+                else
+                {
+                    const glm::vec2 boxMin = {
+                        std::min(m_ViewportTools.BoxSelectStart.x, m_ViewportTools.BoxSelectEnd.x) - vpBounds.Min.x,
+                        std::min(m_ViewportTools.BoxSelectStart.y, m_ViewportTools.BoxSelectEnd.y) - vpBounds.Min.y
+                    };
+                    const glm::vec2 boxMax = {
+                        std::max(m_ViewportTools.BoxSelectStart.x, m_ViewportTools.BoxSelectEnd.x) - vpBounds.Min.x,
+                        std::max(m_ViewportTools.BoxSelectStart.y, m_ViewportTools.BoxSelectEnd.y) - vpBounds.Min.y
+                    };
+                    const int startX = std::max(0, static_cast<int>(boxMin.x));
+                    const int startY = std::max(0, static_cast<int>(boxMin.y));
+                    const int width = std::max(1, static_cast<int>(boxMax.x - boxMin.x));
+                    const int height = std::max(1, static_cast<int>(boxMax.y - boxMin.y));
+                    m_Renderer->setBoxPickRequest(startX, startY, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+                }
+            }
+        }
+
         if (m_ShowSceneHierarchy)
             m_SceneHierarchyPanel.Update();
 
@@ -1138,6 +2128,8 @@ namespace Nox
 
         OnOverlayRender();
         UpdateHistory();
+        RefreshToolBar();
+        m_ViewportToolbar.Sync();
 
         m_StatusRefreshTimer += ts;
         if (m_StatusRefreshTimer >= 1.0f)
@@ -1197,7 +2189,9 @@ namespace Nox
                 if (layoutKey >= SDLK_A && layoutKey <= SDLK_Z)
                     keyCode = SDL_SCANCODE_A + static_cast<int>(layoutKey - SDLK_A);
 
-                const bool viewportHovered = m_ViewportImage && UI::HasState(m_ViewportImage->GetState(), UI::UIState::Hovered);
+                const UI::UIElement* vpEl = m_ViewportCanvas ? static_cast<const UI::UIElement*>(m_ViewportCanvas.get())
+                                                             : static_cast<const UI::UIElement*>(m_ViewportImage.get());
+                const bool viewportHovered = vpEl && UI::HasState(vpEl->GetState(), UI::UIState::Hovered);
 
                 switch (keyCode)
                 {
@@ -1235,6 +2229,25 @@ namespace Nox
                         return;
                     }
                     break;
+                case SDL_SCANCODE_M:
+                    if (viewportHovered && !control && m_SceneState == SceneState::Edit)
+                    {
+                        m_ViewportTools.MeasureTool = !m_ViewportTools.MeasureTool;
+                        if (!m_ViewportTools.MeasureTool)
+                            m_ViewportTools.MeasureStage = 0;
+                        m_ViewportToolbar.Sync();
+                        event.Handled = true;
+                        return;
+                    }
+                    break;
+                case SDL_SCANCODE_END:
+                    if (m_SceneState == SceneState::Edit)
+                    {
+                        SnapSelectionToFloor();
+                        event.Handled = true;
+                        return;
+                    }
+                    break;
                 case SDL_SCANCODE_B:
                     if (control) { m_ScriptBuilder.RequestBuild(); event.Handled = true; return; }
                     break;
@@ -1262,6 +2275,16 @@ namespace Nox
                     if (viewportHovered) { SetViewMode(EditorViewMode::Perspective); event.Handled = true; return; }
                     break;
                 case SDL_SCANCODE_ESCAPE:
+                    if (m_ViewportTools.MeasureTool)
+                    {
+                        if (m_ViewportTools.MeasureStage != 0)
+                            m_ViewportTools.MeasureStage = 0;
+                        else
+                            m_ViewportTools.MeasureTool = false;
+                        m_ViewportToolbar.Sync();
+                        event.Handled = true;
+                        return;
+                    }
                     if (m_SceneState != SceneState::Edit) { OnSceneStop(); event.Handled = true; return; }
                     break;
                 default:
@@ -1270,17 +2293,28 @@ namespace Nox
             }
         }
 
-        if (!m_ViewportImage)
+        const UI::UIElement* scrollEl = m_ViewportCanvas ? static_cast<const UI::UIElement*>(m_ViewportCanvas.get())
+                                                         : static_cast<const UI::UIElement*>(m_ViewportImage.get());
+        if (!scrollEl)
             return;
 
         if (event.GetEventType() == EventType::MouseScrolled &&
-            UI::HasState(m_ViewportImage->GetState(), UI::UIState::Hovered))
+            UI::HasState(scrollEl->GetState(), UI::UIState::Hovered))
         {
+            const UI::UIRect& b = scrollEl->GetBounds();
+            glm::vec2 mouse = Input::GetMousePosition();
+            if (UILayer* uiLayer = Application::Get().GetUILayer())
+                mouse = uiLayer->GetContext().GetLastMousePos();
+            m_EditorCamera.SetCursorPosition({ mouse.x - b.Min.x, mouse.y - b.Min.y });
             m_EditorCamera.OnEvent(event);
         }
         else if (event.GetEventType() == EventType::MouseButtonReleased)
         {
-            m_ViewportMouseCaptured = false;
+            const bool anyDown = Input::IsMouseButtonPressed(SDL_BUTTON_LEFT) ||
+                                 Input::IsMouseButtonPressed(SDL_BUTTON_RIGHT) ||
+                                 Input::IsMouseButtonPressed(SDL_BUTTON_MIDDLE);
+            if (!anyDown)
+                m_ViewportMouseCaptured = false;
         }
     }
 
@@ -1294,24 +2328,83 @@ namespace Nox
             dock->ClearPanels();
 
         m_ViewportImage = UI::MakeUI<UI::UIImage>();
-        m_ViewportImage->WidthMode = UI::UISizeMode::Fill;
-        m_ViewportImage->HeightMode = UI::UISizeMode::Fill;
-        m_ViewportImage->HitTestMode = UI::UIHitTestMode::Self;
-        m_ViewportImage->Focusable = true;
-        m_ViewportImage->OnMouseDown = [this](const UI::UIPointerEvent&)
-        {
-            m_ViewportMouseCaptured = true;
-            return true;
-        };
-        m_ViewportImage->OnMouseUp = [this](const UI::UIPointerEvent&)
-        {
-            m_ViewportMouseCaptured = false;
-            return false;
-        };
+        m_ViewportImage->AnchorMin = { 0.0f, 0.0f };
+        m_ViewportImage->AnchorMax = { 1.0f, 1.0f };
+        m_ViewportImage->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
+        m_ViewportImage->HitTestMode = UI::UIHitTestMode::None;
+
+        m_ViewportCanvas = UI::MakeUI<ViewportCanvas>();
+        m_ViewportCanvas->AnchorMin = { 0.0f, 0.0f };
+        m_ViewportCanvas->AnchorMax = { 1.0f, 1.0f };
+        m_ViewportCanvas->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
+        m_ViewportCanvas->HitTestMode = UI::UIHitTestMode::Self;
+        m_ViewportCanvas->Focusable = true;
+        m_ViewportCanvas->Bind({
+            .Render = m_Renderer,
+            .Camera = &m_EditorCamera,
+            .ActiveScene = &m_ActiveScene,
+            .Hierarchy = &m_SceneHierarchyPanel,
+            .HoveredEntity = &m_HoveredEntity,
+            .Tools = &m_ViewportTools,
+            .IsPlayModeFn = [this]() { return m_SceneState == SceneState::Play; },
+            .IsEditModeFn = [this]() { return m_SceneState == SceneState::Edit; },
+            .GridPlaneAxisFn = [this]() { return GridPlaneAxis(); },
+            .OnSceneMutated = [this]() { m_HistoryCheckRequested = true; },
+            .OnCaptureChanged = [this](bool captured, int) { m_ViewportMouseCaptured = captured; }
+        });
+
+        Ref<UI::UIElement> overlayToolbar = m_ViewportToolbar.Build(m_Renderer, &m_EditorCamera, &m_ViewportTools, {
+            .SetViewMode = [this](EditorViewMode mode) { SetViewMode(mode); },
+            .SnapToFloor = [this]() { SnapSelectionToFloor(); },
+            .SnapToGrid = [this]() { SnapSelectionToGrid(); }
+        });
+
+        // Floating scene load progress banner inside the bottom center of the viewport
+        m_SceneLoadTitleLabel = UI::Label("Opening scene...").Get();
+        m_SceneLoadStageLabel = UI::Label("").Get();
+        m_SceneLoadStageLabel->UseColorOverride = true;
+        m_SceneLoadStageLabel->ColorOverride = { 0.72f, 0.76f, 0.82f, 1.0f };
+
+        auto progressTrack = UI::MakeUI<UI::UIElement>();
+        progressTrack->WidthMode = UI::UISizeMode::Fixed;
+        progressTrack->HeightMode = UI::UISizeMode::Fixed;
+        progressTrack->FixedSize = { 300.0f, 6.0f };
+        progressTrack->DrawBackground = true;
+        progressTrack->StyleClass = "Surface";
+        progressTrack->ClipChildren = true;
+
+        m_SceneLoadProgressFill = UI::MakeUI<UI::UIElement>();
+        m_SceneLoadProgressFill->WidthMode = UI::UISizeMode::Fixed;
+        m_SceneLoadProgressFill->HeightMode = UI::UISizeMode::Fill;
+        m_SceneLoadProgressFill->FixedSize = { 0.0f, 6.0f };
+        m_SceneLoadProgressFill->DrawBackground = true;
+        m_SceneLoadProgressFill->StyleClass = "Button";
+        m_SceneLoadProgressFill->StyleVariant = "primary";
+        progressTrack->AddChild(m_SceneLoadProgressFill);
+
+        m_SceneLoadBanner = UI::VStack(4.0f, { m_SceneLoadTitleLabel, m_SceneLoadStageLabel, progressTrack })
+            .Padding(10.0f, 8.0f)
+            .Style("Surface")
+            .Background(true)
+            .Get();
+        m_SceneLoadBanner->WidthMode = UI::UISizeMode::Auto;
+        m_SceneLoadBanner->HeightMode = UI::UISizeMode::Auto;
+        m_SceneLoadBanner->AnchorMin = { 0.5f, 1.0f };
+        m_SceneLoadBanner->AnchorMax = { 0.5f, 1.0f };
+        m_SceneLoadBanner->AnchorOffsets = { -160.0f, -96.0f, 160.0f, -20.0f };
+        m_SceneLoadBanner->Visible = false;
+
+        auto viewportHost = UI::MakeUI<UI::UIAnchorBox>();
+        viewportHost->WidthMode = UI::UISizeMode::Fill;
+        viewportHost->HeightMode = UI::UISizeMode::Fill;
+        viewportHost->AddChild(m_ViewportImage);
+        viewportHost->AddChild(m_ViewportCanvas);
+        viewportHost->AddChild(overlayToolbar);
+        viewportHost->AddChild(m_SceneLoadBanner);
 
         uiLayer->AddPanel(
             "Viewport",
-            m_ViewportImage,
+            viewportHost,
             UI::UIDockDropZone::Center,
             {},
             0.5f,
@@ -1325,7 +2418,7 @@ namespace Nox
                 m_SceneHierarchyPanel.BuildUI(),
                 UI::UIDockDropZone::Left,
                 "Viewport",
-                0.22f
+                0.155f
             );
         }
 
@@ -1517,9 +2610,89 @@ namespace Nox
         m_FpsLabel->ColorOverride = { 0.72f, 0.76f, 0.82f, 1.0f };
         menuBar->AddChild(m_FpsLabel);
 
+        auto makeToolbarIconBtn = [](const Ref<Texture2D>& icon, const std::string& tip,
+                                     std::function<void()> onClick, Ref<UI::UIImage>& outImg) -> Ref<UI::UIElement>
+        {
+            auto img = UI::MakeUI<UI::UIImage>(icon ? icon->GetDescriptorIndexSlot() : ~0u, UI::UIVec2{ 20.0f, 20.0f });
+            img->WidthMode = UI::UISizeMode::Fixed;
+            img->HeightMode = UI::UISizeMode::Fixed;
+            img->FixedSize = { 20.0f, 20.0f };
+            img->HitTestMode = UI::UIHitTestMode::None;
+            outImg = img;
+
+            auto box = UI::HStack(0.0f, { img })
+                .Padding(6.0f, 4.0f)
+                .Style("Button")
+                .Background(true)
+                .Tooltip(tip)
+                .Get();
+            box->HitTestMode = UI::UIHitTestMode::Self;
+            box->Focusable = true;
+            UI::UIStackBox* boxPtr = box.get();
+            box->OnMouseUp = [onClick = std::move(onClick), boxPtr](const UI::UIPointerEvent& e)
+            {
+                if (e.Button == 1 && boxPtr->GetBounds().Contains(e.Position) && onClick)
+                {
+                    onClick();
+                    return true;
+                }
+                return false;
+            };
+            return box;
+        };
+
+        m_PlayBtnWrap = makeToolbarIconBtn(m_IconPlay, "Play / Stop (Esc)", [this]()
+        {
+            if (m_SceneState == SceneState::Play)
+                OnSceneStop();
+            else
+                OnScenePlay();
+        }, m_PlayBtnIcon);
+
+        m_SimulateBtnWrap = makeToolbarIconBtn(m_IconSimulate, "Simulate / Stop", [this]()
+        {
+            if (m_SceneState == SceneState::Simulate)
+                OnSceneStop();
+            else
+                OnSceneSimulate();
+        }, m_SimulateBtnIcon);
+
+        Ref<UI::UIImage> pauseImg;
+        m_PauseBtnWrap = makeToolbarIconBtn(m_IconPause, "Pause / Resume", [this]()
+        {
+            if (m_SceneState != SceneState::Edit && m_ActiveScene)
+                m_ActiveScene->SetPaused(!m_ActiveScene->IsPaused());
+            RefreshToolBar();
+        }, pauseImg);
+
+        Ref<UI::UIImage> stepImg;
+        m_StepBtnWrap = makeToolbarIconBtn(m_IconStep, "Step one frame", [this]()
+        {
+            if (m_SceneState != SceneState::Edit && m_ActiveScene)
+                m_ActiveScene->Step();
+        }, stepImg);
+
+        auto tbLeftSpacer = UI::MakeUI<UI::UIElement>();
+        tbLeftSpacer->WidthMode = UI::UISizeMode::Fill;
+        auto tbRightSpacer = UI::MakeUI<UI::UIElement>();
+        tbRightSpacer->WidthMode = UI::UISizeMode::Fill;
+
+        m_ToolBar = UI::HStack(6.0f, {
+            tbLeftSpacer,
+            m_PlayBtnWrap,
+            m_SimulateBtnWrap,
+            m_PauseBtnWrap,
+            m_StepBtnWrap,
+            tbRightSpacer
+        }).Padding(8.0f, 4.0f).Style("Surface").Background(true).Get();
+        m_ToolBar->WidthMode = UI::UISizeMode::Fill;
+        m_ToolBar->HeightMode = UI::UISizeMode::Auto;
+        RefreshToolBar();
+
         uiLayer->SetRoot(
             UI::VStack(0.0f, {
                            menuBar,
+                           m_ToolBar,
                            uiLayer->GetDockSpaceRef(),
                            m_StatusLabel
                        })

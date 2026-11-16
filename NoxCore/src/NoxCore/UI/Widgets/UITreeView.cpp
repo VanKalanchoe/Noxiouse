@@ -19,6 +19,50 @@ namespace Nox::UI
     {
         constexpr float kScrollbarHitW = 14.0f;
         constexpr float kEyeHitW = 24.0f;
+
+        void AddQuadBezier(UIDrawList& drawList, const glm::vec2& p0, const glm::vec2& q, const glm::vec2& p2,
+                           float thickness, const glm::vec4& color)
+        {
+            const glm::vec2 c1 = p0 + (2.0f / 3.0f) * (q - p0);
+            const glm::vec2 c2 = p2 + (2.0f / 3.0f) * (q - p2);
+            drawList.AddBezier(p0, c1, c2, p2, thickness, color);
+        }
+
+        void AddLineSegment(UIDrawList& drawList, const glm::vec2& a, const glm::vec2& b,
+                            float thickness, const glm::vec4& color)
+        {
+            drawList.AddBezier(a, glm::mix(a, b, 1.0f / 3.0f), glm::mix(a, b, 2.0f / 3.0f), b, thickness, color);
+        }
+
+        // Godot's / Unreal's eye matching the ImGui implementation (SceneHierarchyPanel.cpp:382-404).
+        void DrawEyeIcon(UIDrawList& drawList, const glm::vec2& centre, float size, bool open, const glm::vec4& color)
+        {
+            const float r = size * 0.42f;
+            const glm::vec2 left(centre.x - r, centre.y);
+            const glm::vec2 right(centre.x + r, centre.y);
+            if (open)
+            {
+                AddQuadBezier(drawList, left, { centre.x, centre.y - r * 1.25f }, right, 1.5f, color);
+                AddQuadBezier(drawList, left, { centre.x, centre.y + r * 1.25f }, right, 1.5f, color);
+                const float pupilR = r * 0.38f;
+                drawList.AddRoundedRect(
+                    { centre.x - pupilR, centre.y - pupilR },
+                    { centre.x + pupilR, centre.y + pupilR },
+                    color,
+                    glm::vec4(pupilR)
+                );
+            }
+            else
+            {
+                // A closed lid with three lashes.
+                AddQuadBezier(drawList, left, { centre.x, centre.y + r * 1.1f }, right, 1.5f, color);
+                for (float t : { -0.55f, 0.0f, 0.55f })
+                {
+                    const glm::vec2 base(centre.x + t * r, centre.y + r * 0.55f * (1.0f - t * t * 0.6f));
+                    AddLineSegment(drawList, base, { base.x + t * r * 0.35f, base.y + r * 0.45f }, 1.2f, color);
+                }
+            }
+        }
     }
 
     UITreeView::UITreeView()
@@ -225,12 +269,25 @@ namespace Nox::UI
             return true;
         }
         m_HoveredRow = RowIndexAt(e.Position.y);
+        m_HoveredEyeRow = (m_HoveredRow >= 0 && HitTestEyeButton(m_FlatRows[m_HoveredRow], e.Position)) ? m_HoveredRow : -1;
+        if (m_HoveredEyeRow >= 0 && m_FlatRows[m_HoveredEyeRow].Node)
+        {
+            Tooltip = m_FlatRows[m_HoveredEyeRow].Node->IsVisible
+                ? "Visible. Click to hide: switches it and everything under it off (not drawn, no physics,\nno animation, scripts not updated) -- the Inspector's Active box."
+                : "Hidden (switched off). Click to show it again.";
+        }
+        else
+        {
+            Tooltip.clear();
+        }
         return true;
     }
 
     bool UITreeView::OnPointerLeave(const UIPointerEvent&)
     {
         m_HoveredRow = -1;
+        m_HoveredEyeRow = -1;
+        Tooltip.clear();
         return false;
     }
 
@@ -604,37 +661,13 @@ namespace Nox::UI
             if (row.Node->HasVisibilityToggle)
             {
                 const float eyeCx = rightContentEnd - kEyeHitW * 0.5f;
-                const bool eyeHover = (i == m_HoveredRow);
-                const float eyeAlpha = row.Node->IsVisible
-                    ? (row.Node->IsVisibleInHierarchy ? (eyeHover ? 0.95f : 0.72f) : 0.35f)
-                    : (eyeHover ? 0.85f : 0.40f);
-                const UIColor eyeColor = eyeHover ? style.TextColor : textMuted;
-                if (row.Node->IsVisible)
-                {
-                    drawList.AddRoundedRect(
-                        { eyeCx - 6.0f, cy - 3.5f },
-                        { eyeCx + 6.0f, cy + 3.5f },
-                        { 0.0f, 0.0f, 0.0f, 0.0f },
-                        glm::vec4(4.0f),
-                        1.4f,
-                        { eyeColor.r, eyeColor.g, eyeColor.b, eyeAlpha }
-                    );
-                    drawList.AddRoundedRect(
-                        { eyeCx - 2.0f, cy - 2.0f },
-                        { eyeCx + 2.0f, cy + 2.0f },
-                        { eyeColor.r, eyeColor.g, eyeColor.b, eyeAlpha },
-                        glm::vec4(2.0f)
-                    );
-                }
-                else
-                {
-                    drawList.AddRoundedRect(
-                        { eyeCx - 5.5f, cy - 1.0f },
-                        { eyeCx + 5.5f, cy + 1.0f },
-                        { eyeColor.r, eyeColor.g, eyeColor.b, eyeAlpha },
-                        glm::vec4(1.0f)
-                    );
-                }
+                const bool eyeHover = (i == m_HoveredEyeRow);
+                const bool faint = row.Node->IsVisible && !row.Node->IsVisibleInHierarchy;
+                UIColor eyeColor = eyeHover ? style.TextColor : textMuted;
+                if (faint)
+                    eyeColor.a *= 0.5f;
+                const float iconSize = std::max(14.0f, RowHeight * 0.68f);
+                DrawEyeIcon(drawList, { eyeCx, cy }, iconSize, row.Node->IsVisible, eyeColor);
                 labelRightLimit -= kEyeHitW;
             }
 

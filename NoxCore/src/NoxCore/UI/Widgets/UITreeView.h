@@ -103,6 +103,7 @@ namespace Nox::UI
         uint64_t m_PrimarySelectedId = 0;
 
         int m_HoveredRow = -1;
+        int m_HoveredEyeRow = -1;
         float m_ScrollY = 0.0f;
         bool m_DraggingScrollbar = false;
 
