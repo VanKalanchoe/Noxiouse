@@ -1,10 +1,10 @@
 # Nox::UI Theme (.nstyle) - Live hot-reloaded by NOXWatcher
 tokens:
-  Background: "#15161A"
-  Surface0: "#1D1F24FA"
-  Surface1: "#25272EFA"
-  Surface2: "#2F313AFA"
-  Border: "#3C404CD9"
+  Background: "#10131B"
+  Surface0: "#181C26FF"
+  Surface1: "#202533FF"
+  Surface2: "#2A3144FF"
+  Border: "#333C52FF"
   Accent: "#4287F5"
   AccentHover: "#5997F9"
   Success: "#3CAD7B"
@@ -21,6 +21,15 @@ styles:
     corner_radius: 0
     padding: 0
 
+  Surface:
+    fill: "$Surface0"
+    border_thickness: 0
+    shadow_blur: 0
+    corner_radius: 0
+    padding: 0
+    text_color: "$Text"
+    font_size: 18
+
   Label:
     text_color: "$Text"
     font_size: 18
@@ -29,11 +38,20 @@ styles:
     fill: "$Surface0"
     border_color: "$Border"
     border_thickness: 1.0
-    shadow_color: "#00000052"
-    shadow_offset: [0, 4]
-    shadow_blur: 10
-    corner_radius: 8
-    padding: 12
+    shadow_color: "#00000040"
+    shadow_offset: [0, 3]
+    shadow_blur: 8
+    corner_radius: 3
+    padding: 10
+    text_color: "$Text"
+    font_size: 18
+
+  Card:
+    fill: "$Surface1"
+    border_color: "$Border"
+    border_thickness: 1.0
+    corner_radius: 4
+    padding: 8
     text_color: "$Text"
     font_size: 18
 
@@ -44,15 +62,15 @@ styles:
     shadow_color: "#00000040"
     shadow_offset: [0, 2]
     shadow_blur: 6
-    corner_radius: 6
+    corner_radius: 4
     padding: [12, 6]
 
   Button:
     fill: "$Surface1"
     border_color: "$Border"
     border_thickness: 1.0
-    corner_radius: 6
-    padding: [12, 6]
+    corner_radius: 4
+    padding: [10, 5]
     text_color: "$Text"
     font_size: 18
     transition_ms: 80
@@ -63,8 +81,13 @@ styles:
     text_color: "#FFFFFF"
 
   "Button:pressed":
-    fill: "#3264B5"
+    fill: "#2A4E8C"
     border_color: "$AccentHover"
+
+  "Button:disabled":
+    fill: "#161A24"
+    border_color: "#272D3D"
+    text_color: "$TextMuted"
 
   "Button.primary":
     fill: "$Accent"
@@ -78,11 +101,16 @@ styles:
   "Button.primary:pressed":
     fill: "#2F66BD"
 
+  "Button.primary:disabled":
+    fill: "#233554"
+    border_color: "#2F456E"
+    text_color: "#9AA8C2"
+
   CheckBox:
-    fill: "#141720"
+    fill: "#131620"
     border_color: "$Border"
-    border_thickness: 1.2
-    corner_radius: 4
+    border_thickness: 1.0
+    corner_radius: 3
     text_color: "$Text"
     font_size: 18
 
@@ -90,16 +118,16 @@ styles:
     border_color: "$Accent"
 
   Slider:
-    fill: "#141720"
+    fill: "#131620"
     border_color: "$Border"
     text_color: "$TextMuted"
     font_size: 18
 
   DragScalar:
-    fill: "#141720"
+    fill: "#131620"
     border_color: "$Border"
     border_thickness: 1.0
-    corner_radius: 5
+    corner_radius: 3
     padding: [6, 4]
     text_color: "$Text"
     font_size: 18
@@ -111,52 +139,51 @@ styles:
     border_color: "$AccentHover"
 
   TextInput:
-    fill: "#141720"
+    fill: "#131620"
     border_color: "$Border"
     border_thickness: 1.0
-    corner_radius: 5
+    corner_radius: 3
     padding: [8, 5]
     text_color: "$Text"
     font_size: 18
 
   "TextInput:hover":
-    border_color: "#526080"
+    border_color: "#4B5878"
 
   "TextInput:focus":
-    fill: "#161B26"
+    fill: "#151A28"
     border_color: "$Accent"
 
   TreeView:
-    fill: "#13161E"
+    fill: "$Surface0"
     border_color: "$Border"
     border_thickness: 1.0
-    corner_radius: 6
+    corner_radius: 3
     text_color: "$Text"
     font_size: 18
 
   SectionHeader:
-    fill: "#1E222E"
-    fill_bottom: "#191C26"
+    fill: "$Surface1"
     border_color: "$Border"
     border_thickness: 1.0
-    corner_radius: 5
+    corner_radius: 3
     padding: [10, 4]
     text_color: "$Text"
     font_size: 18
 
   "SectionHeader:hover":
-    fill: "#262C3B"
+    fill: "$Surface2"
     border_color: "$Accent"
 
   TabBar:
-    fill: "$Surface1"
+    fill: "$Surface0"
     border_color: "$Border"
     border_thickness: 1.0
     corner_radius: 0
     padding: [6, 4, 6, 0]
 
   Tab:
-    fill: "#1E2026"
+    fill: "#151923"
     border_color: "#00000000"
     border_thickness: 1.0
     corner_radius: [3, 3, 0, 0]
@@ -165,7 +192,7 @@ styles:
     font_size: 18
 
   "Tab:hover":
-    fill: "$Surface2"
+    fill: "$Surface1"
     text_color: "$Text"
 
   "Tab.active":
@@ -174,7 +201,7 @@ styles:
     text_color: "#FFFFFF"
 
   MenuBar:
-    fill: "#181A20"
+    fill: "$Surface0"
     border_color: "$Border"
     border_thickness: 1.0
     corner_radius: 0
@@ -193,8 +220,8 @@ styles:
     text_color: "#FFFFFF"
 
   MenuPopup:
-    fill: "#22242BFC"
-    border_color: "#4D5364"
+    fill: "$Surface1"
+    border_color: "$Border"
     border_thickness: 1.0
     shadow_color: "#0000008C"
     shadow_offset: [0, 6]
@@ -216,6 +243,18 @@ styles:
 
   "MenuItem:disabled":
     text_color: "$TextMuted"
+
+  Tooltip:
+    fill: "$Surface1"
+    border_color: "$Border"
+    border_thickness: 1.0
+    shadow_color: "#0000008C"
+    shadow_offset: [0, 6]
+    shadow_blur: 14
+    corner_radius: 3
+    padding: [10, 6]
+    text_color: "$Text"
+    font_size: 18
 
   TemplateCard:
     fill: "$Surface1"
@@ -245,13 +284,13 @@ styles:
     corner_radius: 0
 
   ViewportSlot:
-    fill: "#0E1117"
+    fill: "$Background"
     border_color: "$Border"
     border_thickness: 1.0
-    corner_radius: 6
+    corner_radius: 4
 
   NodeGraph:
-    fill: "#0D1016"
+    fill: "$Background"
     border_color: "$Border"
     border_thickness: 1.0
 
@@ -271,5 +310,3 @@ styles:
   "TitleClose:pressed":
     fill: "#AE3840"
     text_color: "#FFFFFF"
-    corner_radius: 6
-    text_color: "$Text"

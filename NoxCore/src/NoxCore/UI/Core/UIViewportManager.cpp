@@ -59,6 +59,32 @@ namespace Nox::UI
                 viewport.ContentHost = m_ContentHost;
             }
 
+            UIElement* HitTest(const UIVec2& pos) override
+            {
+                if (!Visible || HitTestMode == UIHitTestMode::None)
+                    return nullptr;
+                const UIRect& b = GetBounds();
+                if (!b.Contains(pos))
+                    return nullptr;
+                const UIRect resizeRect{
+                    { b.Max.x - kResizeGripSize, b.Max.y - kResizeGripSize },
+                    b.Max
+                };
+                if (resizeRect.Contains(pos))
+                    return this;
+                return UIElement::HitTest(pos);
+            }
+
+            UICursorShape GetCursorShape(const UIVec2& pos) const override
+            {
+                const UIRect& b = GetBounds();
+                const UIRect resizeRect{
+                    { b.Max.x - kResizeGripSize, b.Max.y - kResizeGripSize },
+                    b.Max
+                };
+                return resizeRect.Contains(pos) ? UICursorShape::ResizeNWSE : UICursorShape::Default;
+            }
+
             bool OnPointerDown(const UIPointerEvent& e) override
             {
                 if (e.Button != 1)
@@ -130,15 +156,17 @@ namespace Nox::UI
             {
                 UIElement::OnPaint(drawList, theme);
                 const UIRect& b = GetBounds();
+                const UIColor border = theme.GetToken("Border", { 0.204f, 0.216f, 0.255f, 1.0f });
+                const UIColor muted = theme.GetToken("TextMuted", { 0.580f, 0.616f, 0.686f, 1.0f });
                 drawList.AddRoundedRect(
                     b.Min,
                     { b.Max.x, b.Min.y + m_TitleBarHeight },
-                    theme.GetToken("Surface1", { 0.145f, 0.153f, 0.180f, 1.0f })
+                    theme.GetToken("Surface1", { 0.141f, 0.149f, 0.173f, 1.0f })
                 );
                 drawList.AddRoundedRect(
                     { b.Min.x, b.Min.y + m_TitleBarHeight - 1.0f },
                     { b.Max.x, b.Min.y + m_TitleBarHeight },
-                    { 0.26f, 0.30f, 0.38f, 0.9f }
+                    border
                 );
                 drawList.AddBezier(
                     { b.Max.x - 10.0f, b.Max.y - 3.0f },
@@ -146,7 +174,7 @@ namespace Nox::UI
                     { b.Max.x - 6.5f, b.Max.y - 6.5f },
                     { b.Max.x - 3.0f, b.Max.y - 10.0f },
                     1.5f,
-                    { 0.55f, 0.60f, 0.70f, 0.9f }
+                    { muted.r, muted.g, muted.b, 0.7f }
                 );
             }
 
@@ -273,7 +301,7 @@ namespace Nox::UI
         vp->PixelWidth = static_cast<uint32_t>(std::max(pw, 1));
         vp->PixelHeight = static_cast<uint32_t>(std::max(ph, 1));
 
-        vp->Swapchain = m_Renderer.CreateWindowSwapchain(*vp->Window, vp->PixelWidth, vp->PixelHeight, true);
+        vp->Swapchain = m_Renderer.CreateWindowSwapchain(*vp->Window, vp->PixelWidth, vp->PixelHeight, false);
         for (uint32_t i = 0; i < 2; ++i)
         {
             vp->Allocators[i] = m_Renderer.CreateUICommandAllocator();
@@ -328,6 +356,7 @@ namespace Nox::UI
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             vp->NeedsSwapchainResize = true;
+            vp->LastResizeRequestTime = std::chrono::steady_clock::now();
             return true;
         case SDL_EVENT_MOUSE_MOTION:
         {
@@ -373,39 +402,49 @@ namespace Nox::UI
         }
     }
 
+    void UIViewportManager::UpdateActiveDrag()
+    {
+        if (!m_ActiveDragViewport || !m_ActiveDragViewport->Window)
+            return;
+
+        float gx = 0.0f;
+        float gy = 0.0f;
+        SDL_GetGlobalMouseState(&gx, &gy);
+        m_ActiveDragViewport->Window->SetPosition(
+            static_cast<int>(gx - m_DragGrabOffset.x),
+            static_cast<int>(gy - m_DragGrabOffset.y)
+        );
+
+        if (m_DockSpace)
+        {
+            int mainX = 0, mainY = 0, mainW = 0, mainH = 0;
+            m_MainWindow.GetPosition(mainX, mainY);
+            m_MainWindow.GetSize(mainW, mainH);
+            const bool overMain = (gx >= mainX && gx <= mainX + mainW && gy >= mainY && gy <= mainY + mainH);
+            if (overMain)
+            {
+                const float scale = m_MainWindow.GetContentScale();
+                const UIVec2 localPos{
+                    (gx - static_cast<float>(mainX)) * scale,
+                    (gy - static_cast<float>(mainY)) * scale
+                };
+                m_DockSpace->UpdateDockPreview(localPos);
+            }
+            else
+            {
+                m_DockSpace->ClearDockPreview();
+            }
+        }
+    }
+
     void UIViewportManager::UpdateAndRender(float dt)
     {
         if (m_ActiveDragViewport && m_ActiveDragViewport->Window)
         {
+            UpdateActiveDrag();
             float gx = 0.0f;
             float gy = 0.0f;
             const SDL_MouseButtonFlags btns = SDL_GetGlobalMouseState(&gx, &gy);
-            m_ActiveDragViewport->Window->SetPosition(
-                static_cast<int>(gx - m_DragGrabOffset.x),
-                static_cast<int>(gy - m_DragGrabOffset.y)
-            );
-
-            if (m_DockSpace)
-            {
-                int mainX = 0, mainY = 0, mainW = 0, mainH = 0;
-                m_MainWindow.GetPosition(mainX, mainY);
-                m_MainWindow.GetSize(mainW, mainH);
-                const bool overMain = (gx >= mainX && gx <= mainX + mainW && gy >= mainY && gy <= mainY + mainH);
-                if (overMain)
-                {
-                    const float scale = m_MainWindow.GetContentScale();
-                    const UIVec2 localPos{
-                        (gx - static_cast<float>(mainX)) * scale,
-                        (gy - static_cast<float>(mainY)) * scale
-                    };
-                    m_DockSpace->UpdateDockPreview(localPos);
-                }
-                else
-                {
-                    m_DockSpace->ClearDockPreview();
-                }
-            }
-
             if ((btns & SDL_BUTTON_LMASK) == 0)
             {
                 if (m_DockSpace && m_DockSpace->HasActiveDropZone())
@@ -435,6 +474,7 @@ namespace Nox::UI
             const int newH = std::max(140, static_cast<int>(gy) - wy);
             m_ActiveResizeViewport->Window->SetSize(newW, newH);
             m_ActiveResizeViewport->NeedsSwapchainResize = true;
+            m_ActiveResizeViewport->LastResizeRequestTime = std::chrono::steady_clock::now();
 
             if ((btns & SDL_BUTTON_LMASK) == 0)
                 m_ActiveResizeViewport = nullptr;
@@ -464,6 +504,7 @@ namespace Nox::UI
             });
         }
 
+        const auto now = std::chrono::steady_clock::now();
         const uint32_t slot = m_Renderer.GetCurrentFrameIndex() % 2;
         for (const auto& vp : m_Viewports)
         {
@@ -478,11 +519,14 @@ namespace Nox::UI
 
             const uint32_t uW = static_cast<uint32_t>(pw);
             const uint32_t uH = static_cast<uint32_t>(ph);
-            if (!vp->Swapchain || vp->NeedsSwapchainResize || uW != vp->PixelWidth || uH != vp->PixelHeight)
+            const bool sizeChanged = (uW != vp->PixelWidth || uH != vp->PixelHeight);
+            const bool resizeSettled = (m_ActiveResizeViewport != vp.get()) ||
+                                       (now - vp->LastResizeRequestTime >= std::chrono::milliseconds(60));
+            if (!vp->Swapchain || ((vp->NeedsSwapchainResize || sizeChanged) && resizeSettled))
             {
                 m_Renderer.WaitDeviceIdle();
                 vp->Swapchain.reset();
-                vp->Swapchain = m_Renderer.CreateWindowSwapchain(*vp->Window, uW, uH, true);
+                vp->Swapchain = m_Renderer.CreateWindowSwapchain(*vp->Window, uW, uH, false);
                 vp->PixelWidth = uW;
                 vp->PixelHeight = uH;
                 vp->NeedsSwapchainResize = false;

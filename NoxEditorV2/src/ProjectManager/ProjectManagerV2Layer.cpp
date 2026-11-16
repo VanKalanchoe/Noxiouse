@@ -207,7 +207,11 @@ namespace Nox
             else
             {
                 const std::string initial(1, entry.Name.empty() ? '?' : static_cast<char>(std::toupper(static_cast<unsigned char>(entry.Name.front()))));
-                auto initialLabel = UI::Label(initial).Align(UI::UIAlignment::Center, UI::UIAlignment::Center);
+                auto initialLabel = UI::Label(initial, 38.0f)
+                    .Fill()
+                    .Align(UI::UIAlignment::Center, UI::UIAlignment::Center);
+                initialLabel->UseColorOverride = true;
+                initialLabel->ColorOverride = { 0.78f, 0.84f, 0.94f, 1.0f };
                 auto placeholder = UI::VStack(0.0f, { initialLabel })
                     .FixedSize(128.0f, 72.0f)
                     .Style("Card")
@@ -425,11 +429,31 @@ namespace Nox
         for (int i = 0; i < 2; ++i)
         {
             const uint32_t picSlot = m_TemplatePictures[i] ? m_TemplatePictures[i]->GetDescriptorIndexSlot() : ~0u;
-            auto pic = UI::MakeUI<UI::UIImage>(picSlot, UI::UIVec2{ 160.0f, 90.0f });
-            pic->WidthMode = UI::UISizeMode::Fill;
-            pic->HeightMode = UI::UISizeMode::Auto;
-            pic->AspectRatio = 16.0f / 9.0f;
-            pic->CornerRadius = UI::UICornerRadius::All(4.0f);
+            Ref<UI::UIElement> pic;
+            if (picSlot != ~0u)
+            {
+                auto img = UI::MakeUI<UI::UIImage>(picSlot, UI::UIVec2{ 160.0f, 90.0f });
+                img->WidthMode = UI::UISizeMode::Fill;
+                img->HeightMode = UI::UISizeMode::Auto;
+                img->AspectRatio = 16.0f / 9.0f;
+                img->CornerRadius = UI::UICornerRadius::All(4.0f);
+                pic = img;
+            }
+            else
+            {
+                auto fallbackLabel = UI::Label(kTemplates[i].Name, 22.0f)
+                    .Fill()
+                    .Align(UI::UIAlignment::Center, UI::UIAlignment::Center);
+                fallbackLabel->UseColorOverride = true;
+                fallbackLabel->ColorOverride = { 0.78f, 0.84f, 0.94f, 1.0f };
+                auto fallbackBox = UI::VStack(0.0f, { fallbackLabel })
+                    .Style("Card")
+                    .Background(true)
+                    .FillWidth();
+                fallbackBox->HeightMode = UI::UISizeMode::Fixed;
+                fallbackBox->FixedSize.y = 90.0f;
+                pic = fallbackBox;
+            }
 
             auto nameLabel = UI::Label(kTemplates[i].Name);
             auto descLabel = UI::Label(kTemplates[i].Summary).FillWidth();
@@ -440,6 +464,7 @@ namespace Nox
             auto tile = UI::VStack(6.0f, { pic, nameLabel, descLabel })
                 .Style("TemplateCard", m_TemplateIndex == i ? "selected" : "")
                 .Background(true)
+                .Padding(8.0f)
                 .Tooltip(kTemplates[i].Tooltip)
                 .FillWidth();
             tile->HeightMode = UI::UISizeMode::Auto;

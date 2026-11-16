@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -45,6 +46,7 @@ namespace Nox::UI
         uint32_t PixelHeight = 0;
         bool PendingClose = false;
         bool NeedsSwapchainResize = false;
+        std::chrono::steady_clock::time_point LastResizeRequestTime{};
     };
 
     // Manages secondary OS windows (SDL3 Window + NRI Swapchain + UIContext)
@@ -71,6 +73,9 @@ namespace Nox::UI
 
         // Routes SDL3 events belonging to secondary OS windows; returns true if consumed.
         bool ProcessSDLEvent(const SDL_Event& e);
+
+        // Syncs active OS-window drag position before frame rendering for responsive cursor tracking.
+        void UpdateActiveDrag();
 
         // Updates active OS-window drags/resizes, updates UIContexts, and renders secondary swapchains.
         void UpdateAndRender(float dt);

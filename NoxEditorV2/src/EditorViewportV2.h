@@ -55,6 +55,7 @@ namespace Nox
 
         EditorIconKind Icon = EditorIconKind::SelectArrow;
         bool Active = false;
+        float IconScale = 1.0f;
         std::function<void()> OnClick;
 
         bool OnPointerUp(const UI::UIPointerEvent& e) override;
@@ -204,6 +205,7 @@ namespace Nox
             int* ResolutionIndex = nullptr;
             bool* Realtime = nullptr;
             std::function<bool()> IsPlayModeFn;
+            std::function<bool()> HasImageFn;
             std::function<void(int)> OnActivate;
         };
 

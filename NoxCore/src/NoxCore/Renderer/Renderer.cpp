@@ -4202,6 +4202,18 @@ namespace Nox
         m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(asset) });
     }
 
+    void Renderer::deferTextureRelease(Ref<Texture2D> texture)
+    {
+        if (!texture)
+            return;
+        const uint32_t slot = (!m_useImGui) ? texture->GetDescriptorIndexSlot() : ~0u;
+        std::scoped_lock lock(m_deferredReleasesMutex);
+        if (slot != ~0u)
+            m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, DeferredTextureSlot{ slot, std::move(texture) } });
+        else
+            m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, Ref<Asset>(std::move(texture)) });
+    }
+
     NRI::AccelerationStructureBuildDesc Renderer::blasBuildDesc(const BlasBuild& build) const
     {
         return NRI::AccelerationStructureBuildDesc{
@@ -5119,7 +5131,7 @@ namespace Nox
             if (view.Recorded && view.Shown != view.Output)
             {
                 if (view.Shown)
-                    deferAssetRelease(view.Shown);
+                    deferTextureRelease(view.Shown);
                 view.Shown = view.Output;
             }
         }
@@ -5907,6 +5919,12 @@ namespace Nox
         // asset references are released when `due` goes out of scope.
         for (DeferredRelease& release : due)
         {
+            if (const DeferredTextureSlot* texSlot = std::get_if<DeferredTextureSlot>(&release.payload))
+            {
+                if (texSlot->slot != ~0u && m_resourceHeap)
+                    m_resourceHeap->unregisterTexture(texSlot->slot);
+                continue;
+            }
             const MeshHandle* mesh = std::get_if<MeshHandle>(&release.payload);
             if (!mesh)
                 continue;
@@ -7233,7 +7251,7 @@ namespace Nox
         if (!view.Output || view.Size.width != size.width || view.Size.height != size.height)
         {
             if (view.Output && view.Output != view.Shown)
-                deferAssetRelease(view.Output);
+                deferTextureRelease(view.Output);
             view.Output = m_device->createTexture(NRI::TextureDesc{
                 .width = size.width,
                 .height = size.height,
@@ -7243,6 +7261,8 @@ namespace Nox
                 .format = NRI::ImageFormat::Surface,
                 .directFormat = UINT32_MAX
             });
+            if (!m_useImGui && view.Output && m_resourceHeap)
+                m_resourceHeap->registerTexture(*view.Output);
             view.Size = size;
         }
 
@@ -7266,7 +7286,7 @@ namespace Nox
         ExtraView& view = m_extraViews[index];
         Ref<Texture2D> image = view.Shown;
         if (view.Output && view.Output != view.Shown)
-            deferAssetRelease(view.Output);
+            deferTextureRelease(view.Output);
         view.Output = nullptr;
         view.Shown = nullptr;
         view.Size = { 0, 0 };
@@ -7281,9 +7301,9 @@ namespace Nox
             return;
         ExtraView& view = m_extraViews[index];
         if (view.Output)
-            deferAssetRelease(view.Output);
+            deferTextureRelease(view.Output);
         if (view.Shown && view.Shown != view.Output)
-            deferAssetRelease(view.Shown);
+            deferTextureRelease(view.Shown);
         view.Output = nullptr;
         view.Shown = nullptr;
         view.Size = { 0, 0 };

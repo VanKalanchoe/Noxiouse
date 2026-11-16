@@ -1,6 +1,7 @@
 #include "UIContext.h"
 
 #include <SDL3/SDL_keycode.h>
+#include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_scancode.h>
 
 #include "NoxCore/Events/InputEvents.h"
@@ -19,6 +20,43 @@ namespace Nox::UI
             ScopedCurrentContext(UIContext*& slot, UIContext* next) : Slot(slot), Prev(slot) { Slot = next; }
             ~ScopedCurrentContext() { Slot = Prev; }
         };
+
+        void ApplySystemCursor(UICursorShape shape)
+        {
+            if (!SDL_CursorVisible())
+                return;
+
+            static SDL_Cursor* s_Cursors[5] = {};
+            static UICursorShape s_LastApplied = UICursorShape::Default;
+            static bool s_Initialized = false;
+            if (s_Initialized && s_LastApplied == shape)
+                return;
+
+            const size_t idx = static_cast<size_t>(shape);
+            if (idx >= 5)
+                return;
+
+            if (!s_Cursors[idx])
+            {
+                SDL_SystemCursor sys = SDL_SYSTEM_CURSOR_DEFAULT;
+                switch (shape)
+                {
+                case UICursorShape::Default:    sys = SDL_SYSTEM_CURSOR_DEFAULT; break;
+                case UICursorShape::ResizeEW:   sys = SDL_SYSTEM_CURSOR_EW_RESIZE; break;
+                case UICursorShape::ResizeNS:   sys = SDL_SYSTEM_CURSOR_NS_RESIZE; break;
+                case UICursorShape::ResizeNWSE: sys = SDL_SYSTEM_CURSOR_NWSE_RESIZE; break;
+                case UICursorShape::ResizeNESW: sys = SDL_SYSTEM_CURSOR_NESW_RESIZE; break;
+                }
+                s_Cursors[idx] = SDL_CreateSystemCursor(sys);
+            }
+
+            if (s_Cursors[idx])
+            {
+                SDL_SetCursor(s_Cursors[idx]);
+                s_LastApplied = shape;
+                s_Initialized = true;
+            }
+        }
     }
 
     UIContext::UIContext()
@@ -102,6 +140,25 @@ namespace Nox::UI
         }
     }
 
+    void UIContext::UpdateSystemCursor(const UIVec2& pos) const
+    {
+        UICursorShape shape = UICursorShape::Default;
+        if (!m_DragActive)
+        {
+            UIElement* target = m_Captured ? m_Captured.get() : m_Hovered.get();
+            for (UIElement* cur = target; cur != nullptr; cur = cur->GetParent())
+            {
+                const UICursorShape s = cur->GetCursorShape(pos);
+                if (s != UICursorShape::Default)
+                {
+                    shape = s;
+                    break;
+                }
+            }
+        }
+        ApplySystemCursor(shape);
+    }
+
     bool UIContext::DispatchPointerMove(const UIVec2& pos)
     {
         const UIVec2 delta = pos - m_LastMousePos;
@@ -130,23 +187,33 @@ namespace Nox::UI
                 }
             }
             if (m_DragActive)
+            {
+                UpdateSystemCursor(pos);
                 return true;
+            }
 
             UIPointerEvent ev{ pos, delta, {}, 0, false };
-            return m_Captured->OnPointerMove(ev);
+            const bool handled = m_Captured->OnPointerMove(ev);
+            UpdateSystemCursor(pos);
+            return handled;
         }
 
         UpdateHover(pos);
+        bool handled = false;
         if (m_Hovered)
         {
             UIPointerEvent ev{ pos, delta, {}, 0, false };
             for (UIElement* cur = m_Hovered.get(); cur != nullptr; cur = cur->GetParent())
             {
                 if (cur->OnPointerMove(ev))
-                    return true;
+                {
+                    handled = true;
+                    break;
+                }
             }
         }
-        return false;
+        UpdateSystemCursor(pos);
+        return handled;
     }
 
     void UIContext::SetPointerCapture(const Ref<UIElement>& element)
@@ -161,6 +228,7 @@ namespace Nox::UI
         if (m_Captured)
             m_Captured->SetStateFlag(UIState::Pressed, false);
         m_Captured = nullptr;
+        UpdateSystemCursor(m_LastMousePos);
     }
 
     bool UIContext::DispatchPointerDown(const UIVec2& pos, int button)
@@ -175,6 +243,7 @@ namespace Nox::UI
         if (!hovered || !hovered->IsEnabled())
         {
             SetFocus(nullptr);
+            UpdateSystemCursor(pos);
             return false;
         }
 
@@ -192,8 +261,12 @@ namespace Nox::UI
         for (UIElement* cur = hovered.get(); cur != nullptr; cur = cur->GetParent())
         {
             if (cur->OnPointerDown(ev))
+            {
+                UpdateSystemCursor(pos);
                 return true;
+            }
         }
+        UpdateSystemCursor(pos);
         return true;
     }
 
@@ -226,6 +299,7 @@ namespace Nox::UI
             if (captured)
                 captured->SetStateFlag(UIState::Pressed, false);
             UpdateHover(pos);
+            UpdateSystemCursor(pos);
             return handled;
         }
         m_DragPending = false;
@@ -238,6 +312,7 @@ namespace Nox::UI
         }
 
         UpdateHover(pos);
+        UpdateSystemCursor(pos);
         return handled;
     }
 

@@ -68,9 +68,10 @@ namespace Nox
     namespace
     {
         constexpr const char* kLayoutPath = "assets/layouts/EditorV2.nlayout";
+        constexpr const char* kViewportDockLayoutPath = "assets/layouts/EditorV2ViewportDock.nlayout";
         constexpr const char* kViewportPrefsPath = "assets/layouts/EditorV2Viewports.txt";
         constexpr const char* kViewportTitles[4] = { "Viewport", "Viewport 2", "Viewport 3", "Viewport 4" };
-        constexpr int kDefaultSlotViewModes[4] = { 0, 1, 3, 6 };
+        constexpr int kDefaultSlotViewModes[4] = { 0, 0, 0, 0 };
 
         std::filesystem::path EditorCamerasFile()
         {
@@ -1836,18 +1837,15 @@ namespace Nox
                 m_ViewportSlotRoots[index]->ClearChildren();
                 m_ViewportSlotRoots[index]->AddChild(m_ExtraViewportHosts[index]);
             }
-            if (UILayer* uiLayer = Application::Get().GetUILayer())
+            if (m_ViewportDockSpace && !m_ViewportDockSpace->FindNodeByPanelTitle(slot.Title))
             {
-                if (const auto& dock = uiLayer->GetDockSpaceRef())
-                {
-                    if (!dock->FindNodeByPanelTitle(slot.Title))
-                    {
-                        const UI::UIDockDropZone zone = (index == 2) ? UI::UIDockDropZone::Bottom : UI::UIDockDropZone::Right;
-                        dock->AddPanel(slot.Title, m_ViewportSlotRoots[index], zone, "Viewport", 0.5f);
-                    }
-                }
+                const UI::UIDockDropZone zone = (index == 2) ? UI::UIDockDropZone::Bottom : UI::UIDockDropZone::Right;
+                const std::string target = (index == 3 && m_Viewports[1].Open) ? std::string(m_Viewports[1].Title) : std::string("Viewport");
+                const UI::UIDockDropZone useZone = (index == 3 && m_Viewports[1].Open) ? UI::UIDockDropZone::Bottom : zone;
+                m_ViewportDockSpace->AddPanel(slot.Title, m_ViewportSlotRoots[index], useZone, target, 0.5f);
             }
         }
+        SyncViewportTabBars();
     }
 
     void EditorV2Layer::CloseViewport(int index)
@@ -1867,11 +1865,9 @@ namespace Nox
         if (m_ExtraViewportImages[index])
             m_ExtraViewportImages[index]->TextureDescriptorSlot = ~0u;
 
-        if (UILayer* uiLayer = Application::Get().GetUILayer())
-        {
-            if (const auto& dock = uiLayer->GetDockSpaceRef())
-                dock->RemovePanel(slot.Title);
-        }
+        if (m_ViewportDockSpace)
+            m_ViewportDockSpace->RemovePanel(slot.Title);
+        SyncViewportTabBars();
     }
 
     void EditorV2Layer::ActivateViewport(int index)
@@ -1923,11 +1919,10 @@ namespace Nox
 
     void EditorV2Layer::ApplyViewportLayout(ViewportLayout layout)
     {
-        UILayer* uiLayer = Application::Get().GetUILayer();
-        if (!uiLayer || !uiLayer->GetDockSpaceRef())
+        if (!m_ViewportDockSpace)
             return;
 
-        const auto& dock = uiLayer->GetDockSpaceRef();
+        const auto& dock = m_ViewportDockSpace;
         int count = 1;
         switch (layout)
         {
@@ -1955,7 +1950,12 @@ namespace Nox
         }
 
         if (!dock->FindNodeByPanelTitle("Viewport") && m_ViewportSlotRoots[0])
-            dock->AddPanel("Viewport", m_ViewportSlotRoots[0], UI::UIDockDropZone::Center, {}, 0.5f, UI::UIDockNodeFlags::CentralNode);
+        {
+            const UI::UIDockNodeFlags vpFlags = (count > 1)
+                ? UI::UIDockNodeFlags::NoUndocking
+                : (UI::UIDockNodeFlags::NoUndocking | UI::UIDockNodeFlags::NoTabBar);
+            dock->AddPanel("Viewport", m_ViewportSlotRoots[0], UI::UIDockDropZone::Center, {}, 0.5f, vpFlags);
+        }
 
         auto prepareSlot = [this](int index)
         {
@@ -1998,6 +1998,18 @@ namespace Nox
             dock->AddPanel(m_Viewports[3].Title, m_ViewportSlotRoots[3], UI::UIDockDropZone::Bottom, m_Viewports[1].Title, 0.5f);
             break;
         }
+        SyncViewportTabBars();
+    }
+
+    void EditorV2Layer::SyncViewportTabBars()
+    {
+        if (!m_ViewportDockSpace)
+            return;
+        const bool multi = (OpenViewportCount() > 1);
+        const UI::UIDockNodeFlags vpFlags = multi
+            ? UI::UIDockNodeFlags::NoUndocking
+            : (UI::UIDockNodeFlags::NoUndocking | UI::UIDockNodeFlags::NoTabBar);
+        m_ViewportDockSpace->SetPanelFlags("Viewport", vpFlags);
     }
 
     int EditorV2Layer::HoveredViewport() const
@@ -2914,7 +2926,10 @@ namespace Nox
         {
             m_ActiveScene->OnViewportResize(wantW, wantH);
             const NRI::Extent2D currentSize = m_Renderer->getViewPortSize();
-            if (wantW != currentSize.width || wantH != currentSize.height)
+            UILayer* uiLayer = Application::Get().GetUILayer();
+            const bool dockDragging = (uiLayer && uiLayer->GetDockSpace() && uiLayer->GetDockSpace()->IsDragging()) ||
+                                      (m_ViewportDockSpace && m_ViewportDockSpace->IsDragging());
+            if (!dockDragging && (wantW != currentSize.width || wantH != currentSize.height))
             {
                 m_Renderer->onViewportSizeChange({wantW, wantH});
                 m_EditorCamera.SetViewportSize(static_cast<float>(wantW), static_cast<float>(wantH));
@@ -3371,6 +3386,7 @@ namespace Nox
                 .ResolutionIndex = &m_Viewports[index].ResolutionIndex,
                 .Realtime = &m_Viewports[index].Realtime,
                 .IsPlayModeFn = [this]() { return m_SceneState == SceneState::Play; },
+                .HasImageFn = [this, index]() { return m_ExtraViewportImages[index] && m_ExtraViewportImages[index]->TextureDescriptorSlot != ~0u; },
                 .OnActivate = [this](int idx) { ActivateViewport(idx); }
             });
             m_ExtraViewportCanvases[index] = extraCanvas;
@@ -3392,117 +3408,83 @@ namespace Nox
             m_ViewportSlotRoots[index] = root;
         }
 
-        // Sleek Godot-style Play / Simulate / Pause / Step Toolbar (dockable without tab header via NoTabBar)
-        class ToolbarDragHandle final : public UI::UIElement
+        // Sleek Godot-style Play / Simulate / Pause / Step Toolbar (icon-only buttons matching viewport tools)
+        class UIToolbarIconButton final : public UI::UIElement
         {
         public:
-            ToolbarDragHandle(UI::UIDockSpace* dock, bool drawDots)
-                : m_Dock(dock), m_DrawDots(drawDots)
+            UIToolbarIconButton(const Ref<Texture2D>& icon, std::string tooltip, std::function<void()> onClick, Ref<UI::UIImage>& outImg)
+                : OnClick(std::move(onClick))
             {
+                DrawBackground = false;
                 HitTestMode = UI::UIHitTestMode::Self;
-                if (drawDots)
-                {
-                    WidthMode = UI::UISizeMode::Fixed;
-                    HeightMode = UI::UISizeMode::Fixed;
-                    FixedSize = { 14.0f, 22.0f };
-                    VAlign = UI::UIAlignment::Center;
-                    Tooltip = "Drag to move / dock Toolbar";
-                }
-                else
-                {
-                    WidthMode = UI::UISizeMode::Fill;
-                    HeightMode = UI::UISizeMode::Fill;
-                }
+                Focusable = true;
+                Tooltip = std::move(tooltip);
+                WidthMode = UI::UISizeMode::Fixed;
+                HeightMode = UI::UISizeMode::Fixed;
+                FixedSize = { 30.0f, 30.0f };
+                VAlign = UI::UIAlignment::Center;
+                Padding = UI::UIThickness::All(1.0f);
+
+                m_Image = UI::MakeUI<UI::UIImage>(icon ? icon->GetDescriptorIndexSlot() : ~0u, UI::UIVec2{ 28.0f, 28.0f });
+                m_Image->WidthMode = UI::UISizeMode::Fill;
+                m_Image->HeightMode = UI::UISizeMode::Fill;
+                m_Image->HitTestMode = UI::UIHitTestMode::None;
+                AddChild(m_Image);
+                outImg = m_Image;
             }
 
-            bool OnPointerDown(const UI::UIPointerEvent& e) override
-            {
-                if (e.Button != 1)
-                    return false;
-                m_Pressed = true;
-                m_PressPos = e.Position;
-                return true;
-            }
-
-            bool OnPointerMove(const UI::UIPointerEvent& e) override
-            {
-                if (m_Pressed && m_Dock)
-                {
-                    const UI::UIVec2 d = e.Position - m_PressPos;
-                    if (d.x * d.x + d.y * d.y > 36.0f)
-                    {
-                        m_Pressed = false;
-                        m_Dock->BeginPanelDrag("Toolbar", e.Position);
-                        return true;
-                    }
-                }
-                return false;
-            }
+            bool Active = false;
+            std::function<void()> OnClick;
 
             bool OnPointerUp(const UI::UIPointerEvent& e) override
             {
-                if (e.Button == 1)
-                    m_Pressed = false;
-                return false;
+                if (e.Button == 1 && IsEnabled() && GetBounds().Contains(e.Position))
+                {
+                    if (OnClick)
+                        OnClick();
+                    return true;
+                }
+                return UIElement::OnPointerUp(e);
             }
 
         protected:
-            void OnPaint(UI::UIDrawList& drawList, const UI::UITheme&) override
+            UI::UIVec2 ComputeDesiredSize() override { return FixedSize; }
+
+            void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override
             {
-                if (!m_DrawDots)
-                    return;
                 const UI::UIRect& b = GetBounds();
-                const float cx = (b.Min.x + b.Max.x) * 0.5f;
-                const float cy = (b.Min.y + b.Max.y) * 0.5f;
-                const UI::UIColor dotCol = UI::HasState(GetState(), UI::UIState::Hovered)
-                    ? UI::UIColor{ 0.78f, 0.84f, 0.94f, 0.90f }
-                    : UI::UIColor{ 0.45f, 0.50f, 0.58f, 0.55f };
-                for (int r = -1; r <= 1; ++r)
+                const UI::UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
+                const bool hovered = UI::HasState(GetState(), UI::UIState::Hovered);
+                const bool pressed = UI::HasState(GetState(), UI::UIState::Pressed);
+
+                if (Active)
                 {
-                    for (int c = 0; c <= 1; ++c)
-                    {
-                        const glm::vec2 p(cx + (c == 0 ? -2.0f : 2.0f), cy + static_cast<float>(r) * 4.0f);
-                        drawList.AddRoundedRect(p - glm::vec2(1.1f), p + glm::vec2(1.1f), dotCol, glm::vec4(1.1f));
-                    }
+                    drawList.AddRoundedRect(
+                        b.Min, b.Max,
+                        { accent.r, accent.g, accent.b, hovered ? 0.36f : 0.26f },
+                        glm::vec4(4.0f),
+                        1.0f,
+                        { accent.r, accent.g, accent.b, 0.85f }
+                    );
+                }
+                else if (hovered || pressed)
+                {
+                    drawList.AddRoundedRect(
+                        b.Min, b.Max,
+                        { 1.0f, 1.0f, 1.0f, pressed ? 0.16f : 0.10f },
+                        glm::vec4(4.0f)
+                    );
                 }
             }
 
         private:
-            UI::UIDockSpace* m_Dock = nullptr;
-            bool m_DrawDots = false;
-            bool m_Pressed = false;
-            UI::UIVec2 m_PressPos{ 0.0f, 0.0f };
+            Ref<UI::UIImage> m_Image;
         };
+
         auto makeToolbarIconBtn = [](const Ref<Texture2D>& icon, const std::string& tip,
                                      std::function<void()> onClick, Ref<UI::UIImage>& outImg) -> Ref<UI::UIElement>
         {
-            auto img = UI::MakeUI<UI::UIImage>(icon ? icon->GetDescriptorIndexSlot() : ~0u, UI::UIVec2{ 18.0f, 18.0f });
-            img->WidthMode = UI::UISizeMode::Fixed;
-            img->HeightMode = UI::UISizeMode::Fixed;
-            img->FixedSize = { 18.0f, 18.0f };
-            img->HitTestMode = UI::UIHitTestMode::None;
-            outImg = img;
-
-            auto box = UI::HStack(0.0f, { img })
-                .Padding(6.0f, 3.0f)
-                .VAlign(UI::UIAlignment::Center)
-                .Style("Button")
-                .Background(true)
-                .Tooltip(tip)
-                .Get();
-            box->HitTestMode = UI::UIHitTestMode::Self;
-            box->Focusable = true;
-            UI::UIStackBox* boxPtr = box.get();
-            box->OnMouseUp = [onClick = std::move(onClick), boxPtr](const UI::UIPointerEvent& e)
-            {
-                if (e.Button == 1 && boxPtr->GetBounds().Contains(e.Position) && onClick)
-                {
-                    onClick();
-                    return true;
-                }
-                return false;
-            };
-            return box;
+            return Ref<UI::UIElement>(new UIToolbarIconButton(icon, tip, std::move(onClick), outImg));
         };
 
         m_PlayBtnWrap = makeToolbarIconBtn(m_IconPlay, "Play / Stop (Esc)", [this]()
@@ -3540,6 +3522,8 @@ namespace Nox
             EditorIconKind::Cogwheel,
             "Play Settings (Multiplayer: Net Mode, Players, Emulation)",
             [this]() { ShowPlaySettingsOverlay(m_PlaySettingsCogBtn.get()); });
+        m_PlaySettingsCogBtn->FixedSize = { 30.0f, 30.0f };
+        m_PlaySettingsCogBtn->IconScale = 1.35f;
         m_PlaySettingsCogBtn->VAlign = UI::UIAlignment::Center;
 
         m_PlayNetStatusLabel = UI::Label("").VAlign(UI::UIAlignment::Center).Margin(6.0f, 0.0f);
@@ -3547,13 +3531,14 @@ namespace Nox
         m_PlayNetStatusLabel->ColorOverride = { 0.72f, 0.78f, 0.86f, 1.0f };
         m_PlayNetStatusLabel->Visible = false;
 
-        auto dockPtr = uiLayer->GetDockSpace();
-        auto tbGrip = UI::MakeUI<ToolbarDragHandle>(dockPtr, true);
-        auto tbLeftSpacer = UI::MakeUI<ToolbarDragHandle>(dockPtr, false);
-        auto tbRightSpacer = UI::MakeUI<ToolbarDragHandle>(dockPtr, false);
+        auto tbLeftSpacer = UI::MakeUI<UI::UIElement>();
+        tbLeftSpacer->WidthMode = UI::UISizeMode::Fill;
+        tbLeftSpacer->HeightMode = UI::UISizeMode::Fill;
+        auto tbRightSpacer = UI::MakeUI<UI::UIElement>();
+        tbRightSpacer->WidthMode = UI::UISizeMode::Fill;
+        tbRightSpacer->HeightMode = UI::UISizeMode::Fill;
 
         m_ToolBar = UI::HStack(4.0f, {
-            tbGrip,
             tbLeftSpacer,
             m_PlayBtnWrap,
             m_SimulateBtnWrap,
@@ -3562,15 +3547,43 @@ namespace Nox
             m_PlaySettingsCogBtn,
             m_PlayNetStatusLabel,
             tbRightSpacer
-        }).Padding(6.0f, 3.0f).Style("Surface").Background(true).Get();
+        }).Padding(6.0f, 2.0f).Style("Surface").Background(true).Get();
         m_ToolBar->WidthMode = UI::UISizeMode::Fill;
         m_ToolBar->HeightMode = UI::UISizeMode::Fill;
         RefreshToolBar();
 
-        // Dock panels: Viewport Center -> Scene Hierarchy Left (full height) -> Toolbar Top of Viewport (no tab strip)
-        uiLayer->AddPanel(
+        // Inner dock space inside "Viewports" holds Viewport 1..4 (matching ImGui NoxViewportDockSpace),
+        // so Toolbar / Scene Hierarchy can dock across the full width/height of all 4 viewports cleanly.
+        m_ViewportDockSpace = UI::MakeUI<UI::UIDockSpace>();
+        m_ViewportDockSpace->WidthMode = UI::UISizeMode::Fill;
+        m_ViewportDockSpace->HeightMode = UI::UISizeMode::Fill;
+        m_ViewportDockSpace->SetContext(&uiLayer->GetContext());
+        m_ViewportDockSpace->AddPanel(
             "Viewport",
             m_ViewportSlotRoots[0],
+            UI::UIDockDropZone::Center,
+            {},
+            0.5f,
+            (OpenViewportCount() > 1)
+                ? UI::UIDockNodeFlags::NoUndocking
+                : (UI::UIDockNodeFlags::NoUndocking | UI::UIDockNodeFlags::NoTabBar)
+        );
+
+        for (int index = 1; index < kMaxViewports; ++index)
+        {
+            if (m_Viewports[index].Open)
+            {
+                const UI::UIDockDropZone zone = (index == 2) ? UI::UIDockDropZone::Bottom : UI::UIDockDropZone::Right;
+                const std::string target = (index == 3 && m_Viewports[1].Open) ? std::string(m_Viewports[1].Title) : std::string("Viewport");
+                const UI::UIDockDropZone useZone = (index == 3 && m_Viewports[1].Open) ? UI::UIDockDropZone::Bottom : zone;
+                m_ViewportDockSpace->AddPanel(m_Viewports[index].Title, m_ViewportSlotRoots[index], useZone, target, 0.5f);
+            }
+        }
+
+        // Dock outer panels: Viewports Center -> Scene Hierarchy Left -> Toolbar Top of Viewports (no tab strip)
+        uiLayer->AddPanel(
+            "Viewports",
+            m_ViewportDockSpace,
             UI::UIDockDropZone::Center,
             {},
             0.5f,
@@ -3583,7 +3596,7 @@ namespace Nox
                 "Scene Hierarchy",
                 m_SceneHierarchyPanel.BuildUI(),
                 UI::UIDockDropZone::Left,
-                "Viewport",
+                "Viewports",
                 0.155f
             );
         }
@@ -3594,19 +3607,10 @@ namespace Nox
                 "Toolbar",
                 m_ToolBar,
                 UI::UIDockDropZone::Top,
-                "Viewport",
+                "Viewports",
                 0.038f,
                 UI::UIDockNodeFlags::NoTabBar | UI::UIDockNodeFlags::NoDockingOver
             );
-        }
-
-        for (int index = 1; index < kMaxViewports; ++index)
-        {
-            if (m_Viewports[index].Open)
-            {
-                const UI::UIDockDropZone zone = (index == 2) ? UI::UIDockDropZone::Bottom : UI::UIDockDropZone::Right;
-                uiLayer->AddPanel(m_Viewports[index].Title, m_ViewportSlotRoots[index], zone, "Viewport", 0.5f);
-            }
         }
 
         m_StatusLabel = UI::Label("Ready").Margin(10.0f, 4.0f);
@@ -3620,7 +3624,8 @@ namespace Nox
                 std::stringstream ss;
                 ss << layoutFile.rdbuf();
                 const std::string saved = ss.str();
-                if ((m_ShowSceneHierarchy && saved.find("Scene Hierarchy") == std::string::npos) ||
+                if (saved.find("Viewports") == std::string::npos ||
+                    (m_ShowSceneHierarchy && saved.find("Scene Hierarchy") == std::string::npos) ||
                     (m_ShowToolBar && (saved.find("Toolbar") == std::string::npos || saved.find("flags: 6") == std::string::npos)))
                     shouldLoad = false;
             }
@@ -3628,8 +3633,11 @@ namespace Nox
             {
                 if (const auto& dock = uiLayer->GetDockSpaceRef())
                     dock->LoadLayout(kLayoutPath);
+                if (m_ViewportDockSpace && std::filesystem::exists(kViewportDockLayoutPath))
+                    m_ViewportDockSpace->LoadLayout(kViewportDockLayoutPath);
             }
         }
+        SyncViewportTabBars();
 
         auto menuBar = UI::MakeUI<UI::UIMenuBar>();
         menuBar->AddDynamicMenu("File", [this, uiLayer]() -> std::vector<UI::UIMenuItem>
@@ -3651,6 +3659,8 @@ namespace Nox
                 {
                     if (const auto& dock = uiLayer->GetDockSpaceRef())
                         dock->SaveLayout(kLayoutPath);
+                    if (m_ViewportDockSpace)
+                        m_ViewportDockSpace->SaveLayout(kViewportDockLayoutPath);
                     SaveViewportPrefs();
                 }},
                 {"Exit", "Alt+F4", []() { Application::Get().Shutdown(); }}
@@ -3771,7 +3781,7 @@ namespace Nox
                     if (const auto& dock = uiLayer->GetDockSpaceRef())
                     {
                         if (m_ShowSceneHierarchy)
-                            dock->AddPanel("Scene Hierarchy", m_SceneHierarchyPanel.BuildUI(), UI::UIDockDropZone::Left, "Viewport", 0.155f);
+                            dock->AddPanel("Scene Hierarchy", m_SceneHierarchyPanel.BuildUI(), UI::UIDockDropZone::Left, "Viewports", 0.155f);
                         else
                             dock->RemovePanel("Scene Hierarchy");
                     }
@@ -3782,7 +3792,7 @@ namespace Nox
                     if (const auto& dock = uiLayer->GetDockSpaceRef())
                     {
                         if (m_ShowToolBar)
-                            dock->AddPanel("Toolbar", m_ToolBar, UI::UIDockDropZone::Top, "Viewport", 0.038f,
+                            dock->AddPanel("Toolbar", m_ToolBar, UI::UIDockDropZone::Top, "Viewports", 0.038f,
                                            UI::UIDockNodeFlags::NoTabBar | UI::UIDockNodeFlags::NoDockingOver);
                         else
                             dock->RemovePanel("Toolbar");
@@ -3799,8 +3809,12 @@ namespace Nox
                 {"", "", {}, true},
                 {"Reset Layout", "", [this]()
                 {
-                    for (int i = 1; i < kMaxViewports; ++i)
-                        m_Viewports[i].Open = false;
+                    for (int i = 0; i < kMaxViewports; ++i)
+                    {
+                        m_Viewports[i].Open = (i == 0);
+                        m_Viewports[i].Camera.SetViewMode(static_cast<EditorViewMode>(kDefaultSlotViewModes[i]));
+                    }
+                    m_EditorCamera.SetViewMode(static_cast<EditorViewMode>(kDefaultSlotViewModes[0]));
                     m_ActiveViewport = 0;
                     m_ShowSceneHierarchy = true;
                     m_ShowToolBar = true;

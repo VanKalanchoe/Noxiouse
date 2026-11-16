@@ -82,6 +82,15 @@ namespace Nox::UI
         None         // Ignored by hit-testing (and children too)
     };
 
+    enum class UICursorShape : uint8_t
+    {
+        Default = 0,
+        ResizeEW,
+        ResizeNS,
+        ResizeNWSE,
+        ResizeNESW
+    };
+
     enum class UIState : uint8_t
     {
         Normal   = 0,

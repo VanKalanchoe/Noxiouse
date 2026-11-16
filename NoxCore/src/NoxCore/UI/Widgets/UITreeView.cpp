@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_keycode.h>
@@ -154,6 +155,11 @@ namespace Nox::UI
         return -1;
     }
 
+    float UITreeView::TotalContentHeight() const
+    {
+        return TopPadding * 2.0f + static_cast<float>(m_FlatRows.size()) * RowHeight;
+    }
+
     void UITreeView::EnsureVisible(uint64_t id)
     {
         const int idx = FindFlatIndex(id);
@@ -162,12 +168,12 @@ namespace Nox::UI
         const float viewH = GetBounds().Height();
         if (viewH <= 1.0f)
             return;
-        const float rowTop = static_cast<float>(idx) * RowHeight;
+        const float rowTop = TopPadding + static_cast<float>(idx) * RowHeight;
         const float rowBottom = rowTop + RowHeight;
-        if (rowTop < m_ScrollY)
-            m_ScrollY = rowTop;
-        else if (rowBottom > m_ScrollY + viewH)
-            m_ScrollY = rowBottom - viewH;
+        if (rowTop < m_ScrollY + TopPadding)
+            m_ScrollY = std::max(0.0f, rowTop - TopPadding);
+        else if (rowBottom > m_ScrollY + viewH - TopPadding)
+            m_ScrollY = std::max(0.0f, rowBottom + TopPadding - viewH);
     }
 
     void UITreeView::BeginRename(uint64_t id, const std::string& initialText)
@@ -210,7 +216,7 @@ namespace Nox::UI
         for (auto& node : m_Nodes)
             AppendFlatRows(node, 0);
 
-        const float contentH = static_cast<float>(m_FlatRows.size()) * RowHeight;
+        const float contentH = TotalContentHeight();
         const float maxScroll = std::max(0.0f, contentH - GetBounds().Height());
         m_ScrollY = std::clamp(m_ScrollY, 0.0f, maxScroll);
     }
@@ -230,7 +236,8 @@ namespace Nox::UI
         const UIRect& b = GetBounds();
         if (y < b.Min.y || y > b.Max.y)
             return -1;
-        const int idx = static_cast<int>((y - b.Min.y + m_ScrollY) / RowHeight);
+        const float relY = y - b.Min.y - TopPadding + m_ScrollY;
+        const int idx = static_cast<int>(std::floor(relY / RowHeight));
         if (idx < 0 || idx >= static_cast<int>(m_FlatRows.size()))
             return -1;
         return idx;
@@ -248,7 +255,7 @@ namespace Nox::UI
     void UITreeView::ScrollToPointerY(float y)
     {
         const UIRect& b = GetBounds();
-        const float contentH = static_cast<float>(m_FlatRows.size()) * RowHeight;
+        const float contentH = TotalContentHeight();
         const float maxScroll = std::max(0.0f, contentH - b.Height());
         if (maxScroll <= 0.0f)
             return;
@@ -301,7 +308,7 @@ namespace Nox::UI
 
         if (e.Button == 1)
         {
-            const float contentH = static_cast<float>(m_FlatRows.size()) * RowHeight;
+            const float contentH = TotalContentHeight();
             if (contentH > GetBounds().Height() && e.Position.x >= GetBounds().Max.x - kScrollbarHitW)
             {
                 m_DraggingScrollbar = true;
@@ -422,7 +429,7 @@ namespace Nox::UI
 
     bool UITreeView::OnMouseWheel(const UIPointerEvent& e)
     {
-        const float contentH = static_cast<float>(m_FlatRows.size()) * RowHeight;
+        const float contentH = TotalContentHeight();
         const float maxScroll = std::max(0.0f, contentH - GetBounds().Height());
         if (maxScroll <= 0.0f)
             return false;
@@ -524,8 +531,9 @@ namespace Nox::UI
             return;
         }
 
-        const float y0 = contentRect.Min.y + static_cast<float>(idx) * RowHeight - m_ScrollY;
-        const float x0 = contentRect.Min.x + 8.0f + static_cast<float>(m_FlatRows[idx].Depth) * IndentWidth + 28.0f;
+        const float y0 = contentRect.Min.y + TopPadding + static_cast<float>(idx) * RowHeight - m_ScrollY;
+        const float iconPad = m_FlatRows[idx].Node->IsFolder ? 33.0f : (ShowTagDots ? 28.0f : 16.0f);
+        const float x0 = contentRect.Min.x + 8.0f + static_cast<float>(m_FlatRows[idx].Depth) * IndentWidth + iconPad;
         const float x1 = std::max(x0 + 40.0f, contentRect.Max.x - 36.0f);
         m_RenameInput->Measure();
         m_RenameInput->Arrange({ { x0, y0 + 1.0f }, { x1, y0 + RowHeight - 1.0f } });
@@ -571,9 +579,9 @@ namespace Nox::UI
                 dragTargetRow = RowIndexAt(ctx->GetLastMousePos().y);
         }
 
-        const int firstRow = std::max(0, static_cast<int>(m_ScrollY / RowHeight));
+        const int firstRow = std::max(0, static_cast<int>(std::floor((m_ScrollY - TopPadding) / RowHeight)));
         const int lastRow = std::min(static_cast<int>(m_FlatRows.size()),
-                                     static_cast<int>((m_ScrollY + b.Height()) / RowHeight) + 1);
+                                     static_cast<int>(std::ceil((m_ScrollY - TopPadding + b.Height()) / RowHeight)) + 1);
 
         const float rightContentEnd = b.Max.x - 10.0f;
 
@@ -582,7 +590,7 @@ namespace Nox::UI
             const FlatRow& row = m_FlatRows[i];
             if (!row.Node)
                 continue;
-            const float y0 = b.Min.y + static_cast<float>(i) * RowHeight - m_ScrollY;
+            const float y0 = b.Min.y + TopPadding + static_cast<float>(i) * RowHeight - m_ScrollY;
             const float y1 = y0 + RowHeight;
 
             const bool selected = m_SelectedIds.contains(row.Node->Id);
@@ -646,7 +654,7 @@ namespace Nox::UI
                     glm::vec4(2.0f)
                 );
             }
-            else
+            else if (ShowTagDots)
             {
                 drawList.AddRoundedRect(
                     { xBase + 16.0f, cy - 3.5f },
@@ -697,7 +705,7 @@ namespace Nox::UI
 
             if (row.Node->Id != m_RenameId)
             {
-                const float textStartX = xBase + (row.Node->IsFolder ? 33.0f : 30.0f);
+                const float textStartX = xBase + (row.Node->IsFolder ? 33.0f : (ShowTagDots ? 30.0f : 16.0f));
                 if (labelRightLimit > textStartX + 4.0f)
                 {
                     drawList.PushClipRect({ textStartX, y0 }, { labelRightLimit, y1 });
@@ -716,7 +724,7 @@ namespace Nox::UI
             }
         }
 
-        const float contentH = static_cast<float>(m_FlatRows.size()) * RowHeight;
+        const float contentH = TotalContentHeight();
         if (contentH > b.Height())
         {
             const float trackH = b.Height() - 8.0f;
@@ -726,7 +734,7 @@ namespace Nox::UI
             drawList.AddRoundedRect(
                 { b.Max.x - 7.0f, thumbY },
                 { b.Max.x - 2.0f, thumbY + thumbH },
-                theme.GetToken("Border", { 0.35f, 0.40f, 0.52f, 0.8f }),
+                theme.GetToken("Border", { 0.25f, 0.27f, 0.31f, 0.8f }),
                 glm::vec4(2.5f)
             );
         }

@@ -372,12 +372,9 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
     case SDL_EVENT_MOUSE_MOTION:
         {
             SDL_MouseMotionEvent motion = currentEvent->motion;
-
-            int x = motion.x; // X position in **pixels** relative to the window
-            int y = motion.y; // Y position in pixels
             Nox::Input::AddMouseMotion(motion.xrel, motion.yrel); // also in relative mode, where x / y stand still
 
-            Nox::MouseMovedEvent event(x, y);
+            Nox::MouseMovedEvent event(static_cast<double>(motion.x), static_cast<double>(motion.y));
             applicationState->app->RaiseEvent(event);
 
             return SDL_APP_CONTINUE;

@@ -17,18 +17,18 @@ namespace Nox::UI
 {
     struct UIStyleBox
     {
-        UIColor FillColor{ 0.11f, 0.12f, 0.16f, 1.0f };
-        UIColor FillColorBottom{ 0.11f, 0.12f, 0.16f, 1.0f };
+        UIColor FillColor{ 0.094f, 0.110f, 0.149f, 1.0f };
+        UIColor FillColorBottom{ 0.094f, 0.110f, 0.149f, 1.0f };
         bool UseGradient = false;
 
-        UIColor BorderColor{ 0.22f, 0.25f, 0.33f, 0.9f };
+        UIColor BorderColor{ 0.200f, 0.235f, 0.322f, 1.0f };
         float BorderThickness = 0.0f;
 
         UIColor ShadowColor{ 0.0f, 0.0f, 0.0f, 0.0f };
         UIVec2 ShadowOffset{ 0.0f, 4.0f };
         float ShadowBlur = 0.0f;
 
-        UICornerRadius CornerRadius = UICornerRadius::All(6.0f);
+        UICornerRadius CornerRadius = UICornerRadius::All(3.0f);
         UIThickness Padding = UIThickness::All(8.0f);
 
         UIColor TextColor{ 0.92f, 0.94f, 0.98f, 1.0f };

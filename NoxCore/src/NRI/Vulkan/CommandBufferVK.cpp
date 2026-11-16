@@ -648,6 +648,62 @@ namespace NRI
         auto* vkSwapchain = dynamic_cast<SwapchainVK*>(&swapchain);
         vk::Image rawImage = vkSwapchain->getNativeImage(imageIndex);
 
+        if (oldLayout == TextureLayout::Undefined && newLayout == TextureLayout::ColorAttachment)
+        {
+            // DeviceVK::submitCommandBuffers waits on presentCompleteSemaphore at eColorAttachmentOutput;
+            // matching srcStageMask to eColorAttachmentOutput keeps this transition ordered after acquire.
+            vk::ImageMemoryBarrier2 barrier{
+                .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                .srcAccessMask = vk::AccessFlagBits2::eNone,
+                .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                .dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+                .oldLayout = translateLayoutToVk(oldLayout),
+                .newLayout = translateLayoutToVk(newLayout),
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = rawImage,
+                .subresourceRange = {
+                    .aspectMask = vk::ImageAspectFlagBits::eColor,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1
+                }
+            };
+            m_commandBuffers[m_currentFrameIndex].pipelineBarrier2(vk::DependencyInfo{
+                .imageMemoryBarrierCount = 1,
+                .pImageMemoryBarriers = &barrier
+            });
+            return;
+        }
+
+        if (oldLayout == TextureLayout::ColorAttachment && newLayout == TextureLayout::Present)
+        {
+            vk::ImageMemoryBarrier2 barrier{
+                .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+                .dstStageMask = vk::PipelineStageFlagBits2::eNone,
+                .dstAccessMask = vk::AccessFlagBits2::eNone,
+                .oldLayout = translateLayoutToVk(oldLayout),
+                .newLayout = translateLayoutToVk(newLayout),
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = rawImage,
+                .subresourceRange = {
+                    .aspectMask = vk::ImageAspectFlagBits::eColor,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1
+                }
+            };
+            m_commandBuffers[m_currentFrameIndex].pipelineBarrier2(vk::DependencyInfo{
+                .imageMemoryBarrierCount = 1,
+                .pImageMemoryBarriers = &barrier
+            });
+            return;
+        }
+
         submitImageBarrier(rawImage, oldLayout, newLayout, vk::ImageAspectFlagBits::eColor, 1, 1);
     }
     

@@ -47,6 +47,7 @@ namespace Nox::UI
 
     private:
         void UpdateHover(const UIVec2& pos);
+        void UpdateSystemCursor(const UIVec2& pos) const;
         bool DispatchPointerMove(const UIVec2& pos);
         bool DispatchPointerDown(const UIVec2& pos, int button);
         bool DispatchPointerUp(const UIVec2& pos, int button);

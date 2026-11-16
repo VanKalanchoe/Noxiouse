@@ -54,7 +54,9 @@ namespace Nox::UI
 
         float RowHeight = 24.0f;
         float IndentWidth = 16.0f;
+        float TopPadding = 6.0f;
         float ScrollSpeed = 48.0f;
+        bool ShowTagDots = true;
         std::string EmptyText = "No items";
 
         std::function<void(uint64_t)> OnSelect;
@@ -93,6 +95,7 @@ namespace Nox::UI
         void AppendFlatRows(UITreeNode& node, uint32_t depth);
         int RowIndexAt(float y) const;
         int FindFlatIndex(uint64_t id) const;
+        float TotalContentHeight() const;
         void ScrollToPointerY(float y);
         void CommitRename();
         bool HitTestEyeButton(const FlatRow& row, const UIVec2& pos) const;

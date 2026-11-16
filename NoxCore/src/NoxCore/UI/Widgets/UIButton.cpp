@@ -1,9 +1,20 @@
 #include "UIButton.h"
 
+#include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 
 namespace Nox::UI
 {
+    namespace
+    {
+        UIStyleBox ResolveButtonStyle(const UIButton& button, const UIStyleBox& fallback)
+        {
+            if (const UIContext* ctx = UIContext::GetCurrent(); ctx && ctx->GetTheme())
+                return ctx->GetTheme()->Resolve(button.StyleClass, button.StyleVariant, button.GetState());
+            return fallback;
+        }
+    }
+
     UIButton::UIButton(std::string text, std::function<void()> onClick)
         : OnClick(std::move(onClick))
     {
@@ -44,7 +55,8 @@ namespace Nox::UI
 
     UIVec2 UIButton::ComputeDesiredSize()
     {
-        const UIStyleBox& style = GetResolvedStyle();
+        const UIStyleBox style = ResolveButtonStyle(*this, GetResolvedStyle());
+        m_Label->FontSizeOverride = style.FontSize;
         const UIVec2 labelSize = m_Label->Measure();
         return {
             labelSize.x + style.Padding.Horizontal(),
@@ -54,7 +66,7 @@ namespace Nox::UI
 
     void UIButton::ArrangeChildren(const UIRect& contentRect)
     {
-        const UIStyleBox& style = GetResolvedStyle();
+        const UIStyleBox style = ResolveButtonStyle(*this, GetResolvedStyle());
         m_Label->UseColorOverride = true;
         m_Label->ColorOverride = style.TextColor;
         m_Label->FontSizeOverride = style.FontSize;

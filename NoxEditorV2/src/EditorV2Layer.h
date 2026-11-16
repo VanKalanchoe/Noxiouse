@@ -37,6 +37,7 @@ namespace Nox
 
     namespace UI
     {
+        class UIDockSpace;
         class UIElement;
         class UIImage;
         class UILabel;
@@ -127,6 +128,7 @@ namespace Nox
         void OpenViewport(int index);
         void CloseViewport(int index);
         void ActivateViewport(int index);
+        void SyncViewportTabBars();
         int HoveredViewport() const;
         int OpenViewportCount() const;
         void SubmitExtraViewports(Timestep ts);
@@ -226,6 +228,7 @@ namespace Nox
         uint32_t m_FpsFrames = 0;
 
         std::array<Ref<UI::UIElement>, kMaxViewports> m_ViewportSlotRoots;
+        Ref<UI::UIDockSpace> m_ViewportDockSpace;
         Ref<UI::UIElement> m_ActiveViewportHost;
         Ref<UI::UIImage> m_ViewportImage;
         Ref<ViewportCanvas> m_ViewportCanvas;

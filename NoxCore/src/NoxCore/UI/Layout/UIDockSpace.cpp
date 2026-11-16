@@ -33,9 +33,9 @@ namespace Nox::UI
             }
 
         protected:
-            void OnPaint(UIDrawList& drawList, const UITheme& /*theme*/) override
+            void OnPaint(UIDrawList& drawList, const UITheme& theme) override
             {
-                m_Owner.PaintSplittersOverlay(drawList);
+                m_Owner.PaintSplittersOverlay(drawList, theme);
             }
 
         private:
@@ -52,9 +52,9 @@ namespace Nox::UI
             }
 
         protected:
-            void OnPaint(UIDrawList& drawList, const UITheme& /*theme*/) override
+            void OnPaint(UIDrawList& drawList, const UITheme& theme) override
             {
-                m_Owner.PaintOverlay(drawList);
+                m_Owner.PaintOverlay(drawList, theme);
             }
 
         private:
@@ -111,10 +111,22 @@ namespace Nox::UI
             const std::string title = rawPanel->GetTabTitle(tabIdx);
             Ref<UIElement> content = rawPanel->GetTabContent(tabIdx);
             const UIRect panelBounds = rawPanel->GetBounds();
-            const float minH = panelBounds.Height() < 80.0f ? 68.0f : 220.0f;
+            if (panelBounds.Width() > 1.0f && panelBounds.Height() > 1.0f)
+                m_PreferredPanelSizes[title] = { panelBounds.Width(), panelBounds.Height() };
+
+            m_ActiveDragTitle = title;
+            m_ActiveDragDesiredSize = m_PreferredPanelSizes.contains(title)
+                ? m_PreferredPanelSizes.at(title)
+                : UIVec2{ panelBounds.Width(), panelBounds.Height() };
+
+            const bool isCompactBar = panelBounds.Height() > 0.0f && panelBounds.Height() < 80.0f;
+            const float minW = isCompactBar ? 340.0f : 300.0f;
+            const float maxW = isCompactBar ? 540.0f : 680.0f;
+            const float minH = isCompactBar ? 68.0f : 220.0f;
+            const float maxH = isCompactBar ? 88.0f : 520.0f;
             UIVec2 floatSize{
-                std::clamp(panelBounds.Width(), 300.0f, 680.0f),
-                std::clamp(panelBounds.Height(), minH, 520.0f)
+                std::clamp(panelBounds.Width(), minW, maxW),
+                std::clamp(panelBounds.Height(), minH, maxH)
             };
 
             rawPanel->RemoveTab(tabIdx);
@@ -129,16 +141,52 @@ namespace Nox::UI
         };
     }
 
+    void UIDockSpace::BringFloatingWindowToFront(UIWindow* win)
+    {
+        if (!win || !m_FloatHost)
+            return;
+        Ref<UIWindow> target;
+        auto it = std::find_if(m_FloatingWindows.begin(), m_FloatingWindows.end(),
+            [win](const Ref<UIWindow>& w) { return w.get() == win; });
+        if (it == m_FloatingWindows.end() || it + 1 == m_FloatingWindows.end())
+            return;
+        target = *it;
+        m_FloatingWindows.erase(it);
+        m_FloatingWindows.push_back(target);
+        m_FloatHost->RemoveChild(target);
+        m_FloatHost->AddChild(target);
+    }
+
     void UIDockSpace::HookFloatingWindow(const Ref<UIWindow>& win)
     {
         UIWindow* rawWin = win.get();
+        win->OnActivate = [this, rawWin]()
+        {
+            BringFloatingWindowToFront(rawWin);
+        };
         win->OnDragMove = [this, rawWin](UIVec2 pointerPos)
         {
-            const UIRect& dockBounds = GetBounds();
-            // If cursor leaves the dockspace/window bounds and we have a ViewportManager, promote to an OS window!
-            if (m_ViewportManager && !dockBounds.Contains(pointerPos))
+            const std::string& title = rawWin->GetTitle();
+            m_ActiveDragTitle = title;
+            if (auto it = m_PreferredPanelSizes.find(title); it != m_PreferredPanelSizes.end())
+                m_ActiveDragDesiredSize = it->second;
+            else
+                m_ActiveDragDesiredSize = rawWin->FixedSize;
+
+            // Only promote to an external OS viewport once the cursor genuinely leaves the main OS window
+            // (so dragging Toolbar or side panels near the MenuBar or edges stays an instant in-window float).
+            UIRect promoteBounds = GetBounds();
+            if (UIContext* ctx = GetContext(); ctx && ctx->GetRoot())
+                promoteBounds = ctx->GetRoot()->GetBounds();
+            constexpr float kOutMargin = 10.0f;
+            const bool outsideMainWindow =
+                pointerPos.x < promoteBounds.Min.x - kOutMargin ||
+                pointerPos.x > promoteBounds.Max.x + kOutMargin ||
+                pointerPos.y < promoteBounds.Min.y - kOutMargin ||
+                pointerPos.y > promoteBounds.Max.y + kOutMargin;
+
+            if (m_ViewportManager && outsideMainWindow)
             {
-                const std::string title = rawWin->GetTitle();
                 Ref<UIElement> content;
                 if (rawWin->GetContentBox() && !rawWin->GetContentBox()->GetChildren().empty())
                 {
@@ -150,6 +198,7 @@ namespace Nox::UI
                     std::clamp(pointerPos.x - rawWin->GetBounds().Min.x, 20.0f, std::max(40.0f, size.x - 40.0f)),
                     14.0f
                 };
+                const std::string titleCopy = title;
 
                 // Close floating UIWindow first
                 for (auto it = m_FloatingWindows.begin(); it != m_FloatingWindows.end(); ++it)
@@ -166,7 +215,7 @@ namespace Nox::UI
                 if (UIContext* ctx = GetContext())
                     ctx->ReleasePointerCapture();
 
-                m_ViewportManager->PromoteToViewport(title, content, size, grabOffset);
+                m_ViewportManager->PromoteToViewport(titleCopy, content, size, grabOffset);
                 return;
             }
 
@@ -176,10 +225,16 @@ namespace Nox::UI
         win->OnDragEnd = [this, rawWin](UIVec2 pointerPos)
         {
             SDL_CaptureMouse(false);
+            const std::string title = rawWin->GetTitle();
+            m_ActiveDragTitle = title;
+            if (auto it = m_PreferredPanelSizes.find(title); it != m_PreferredPanelSizes.end())
+                m_ActiveDragDesiredSize = it->second;
+            else
+                m_ActiveDragDesiredSize = rawWin->FixedSize;
+
             UpdateDockPreview(pointerPos);
             if (HasActiveDropZone())
             {
-                const std::string title = rawWin->GetTitle();
                 Ref<UIElement> content;
                 if (rawWin->GetContentBox() && !rawWin->GetContentBox()->GetChildren().empty())
                 {
@@ -201,6 +256,8 @@ namespace Nox::UI
             {
                 ClearDockPreview();
             }
+            m_ActiveDragTitle.clear();
+            m_ActiveDragDesiredSize = { 0.0f, 0.0f };
         };
     }
 
@@ -280,10 +337,14 @@ namespace Nox::UI
         if (node && effectiveFlags != UIDockNodeFlags::None)
         {
             node->Flags = node->Flags | effectiveFlags;
-            if (HasFlag(node->Flags, UIDockNodeFlags::NoTabBar) && node->TabPanel)
+            if (node->TabPanel)
             {
-                node->TabPanel->SetTabBarVisible(false);
-                node->TabPanel->GetContentHost()->Padding = UIThickness::All(0.0f);
+                const bool hideBar = HasFlag(node->Flags, UIDockNodeFlags::NoTabBar);
+                const bool allowUndock = !HasFlag(node->Flags, UIDockNodeFlags::NoUndocking);
+                node->TabPanel->SetTabBarVisible(!hideBar);
+                node->TabPanel->SetShowUndockCornerHandle(hideBar && allowUndock);
+                if (hideBar)
+                    node->TabPanel->GetContentHost()->Padding = UIThickness::All(0.0f);
             }
         }
         return node;
@@ -306,10 +367,14 @@ namespace Nox::UI
             if (!leaf || knownFlags == UIDockNodeFlags::None)
                 return;
             leaf->Flags = leaf->Flags | knownFlags;
-            if (HasFlag(leaf->Flags, UIDockNodeFlags::NoTabBar) && leaf->TabPanel)
+            if (leaf->TabPanel)
             {
-                leaf->TabPanel->SetTabBarVisible(false);
-                leaf->TabPanel->GetContentHost()->Padding = UIThickness::All(0.0f);
+                const bool hideBar = HasFlag(leaf->Flags, UIDockNodeFlags::NoTabBar);
+                const bool allowUndock = !HasFlag(leaf->Flags, UIDockNodeFlags::NoUndocking);
+                leaf->TabPanel->SetTabBarVisible(!hideBar);
+                leaf->TabPanel->SetShowUndockCornerHandle(hideBar && allowUndock);
+                if (hideBar)
+                    leaf->TabPanel->GetContentHost()->Padding = UIThickness::All(0.0f);
             }
         };
 
@@ -432,6 +497,25 @@ namespace Nox::UI
         return FindNodeByTitleRecursive(m_RootNode, title);
     }
 
+    bool UIDockSpace::SetPanelFlags(const std::string& title, UIDockNodeFlags flags)
+    {
+        m_PanelFlags[title] = flags;
+        Ref<UIDockNode> node = FindNodeByPanelTitle(title);
+        if (!node)
+            return false;
+
+        node->Flags = flags;
+        if (node->TabPanel)
+        {
+            const bool hideBar = HasFlag(node->Flags, UIDockNodeFlags::NoTabBar);
+            const bool allowUndock = !HasFlag(node->Flags, UIDockNodeFlags::NoUndocking);
+            node->TabPanel->SetTabBarVisible(!hideBar);
+            node->TabPanel->SetShowUndockCornerHandle(hideBar && allowUndock);
+            node->TabPanel->GetContentHost()->Padding = UIThickness::All(hideBar ? 0.0f : 4.0f);
+        }
+        return true;
+    }
+
     bool UIDockSpace::RemovePanel(const std::string& title)
     {
         bool removed = false;
@@ -547,25 +631,29 @@ namespace Nox::UI
         if (CenterBox({ b.Min.x + kOuterInset, bc.y }, kHalfBtn).Contains(localPos))
         {
             hit.Zone = UIDockDropZone::OuterLeft;
-            hit.PreviewRect = { b.Min, { b.Min.x + b.Width() * 0.28f, b.Max.y } };
+            const float r = ComputeDropRatio(hit.Zone, nullptr, m_ActiveDragTitle);
+            hit.PreviewRect = { b.Min, { b.Min.x + b.Width() * r, b.Max.y } };
             return hit;
         }
         if (CenterBox({ b.Max.x - kOuterInset, bc.y }, kHalfBtn).Contains(localPos))
         {
             hit.Zone = UIDockDropZone::OuterRight;
-            hit.PreviewRect = { { b.Max.x - b.Width() * 0.28f, b.Min.y }, b.Max };
+            const float r = ComputeDropRatio(hit.Zone, nullptr, m_ActiveDragTitle);
+            hit.PreviewRect = { { b.Max.x - b.Width() * r, b.Min.y }, b.Max };
             return hit;
         }
         if (CenterBox({ bc.x, b.Min.y + kOuterInset }, kHalfBtn).Contains(localPos))
         {
             hit.Zone = UIDockDropZone::OuterTop;
-            hit.PreviewRect = { b.Min, { b.Max.x, b.Min.y + b.Height() * 0.28f } };
+            const float r = ComputeDropRatio(hit.Zone, nullptr, m_ActiveDragTitle);
+            hit.PreviewRect = { b.Min, { b.Max.x, b.Min.y + b.Height() * r } };
             return hit;
         }
         if (CenterBox({ bc.x, b.Max.y - kOuterInset }, kHalfBtn).Contains(localPos))
         {
             hit.Zone = UIDockDropZone::OuterBottom;
-            hit.PreviewRect = { { b.Min.x, b.Max.y - b.Height() * 0.28f }, b.Max };
+            const float r = ComputeDropRatio(hit.Zone, nullptr, m_ActiveDragTitle);
+            hit.PreviewRect = { { b.Min.x, b.Max.y - b.Height() * r }, b.Max };
             return hit;
         }
 
@@ -595,25 +683,74 @@ namespace Nox::UI
         else if (CenterBox({ c.x - kOffset, c.y }, kHalfBtn).Contains(localPos))
         {
             hit.Zone = UIDockDropZone::Left;
-            hit.PreviewRect = { nb.Min, { c.x, nb.Max.y } };
+            const float r = ComputeDropRatio(hit.Zone, leaf.get(), m_ActiveDragTitle);
+            hit.PreviewRect = { nb.Min, { nb.Min.x + nb.Width() * r, nb.Max.y } };
         }
         else if (CenterBox({ c.x + kOffset, c.y }, kHalfBtn).Contains(localPos))
         {
             hit.Zone = UIDockDropZone::Right;
-            hit.PreviewRect = { { c.x, nb.Min.y }, nb.Max };
+            const float r = ComputeDropRatio(hit.Zone, leaf.get(), m_ActiveDragTitle);
+            hit.PreviewRect = { { nb.Max.x - nb.Width() * r, nb.Min.y }, nb.Max };
         }
         else if (CenterBox({ c.x, c.y - kOffset }, kHalfBtn).Contains(localPos))
         {
             hit.Zone = UIDockDropZone::Top;
-            hit.PreviewRect = { nb.Min, { nb.Max.x, c.y } };
+            const float r = ComputeDropRatio(hit.Zone, leaf.get(), m_ActiveDragTitle);
+            hit.PreviewRect = { nb.Min, { nb.Max.x, nb.Min.y + nb.Height() * r } };
         }
         else if (CenterBox({ c.x, c.y + kOffset }, kHalfBtn).Contains(localPos))
         {
             hit.Zone = UIDockDropZone::Bottom;
-            hit.PreviewRect = { { nb.Min.x, c.y }, nb.Max };
+            const float r = ComputeDropRatio(hit.Zone, leaf.get(), m_ActiveDragTitle);
+            hit.PreviewRect = { { nb.Min.x, nb.Max.y - nb.Height() * r }, nb.Max };
         }
 
         return hit;
+    }
+
+    float UIDockSpace::ComputeDropRatio(UIDockDropZone zone, const UIDockNode* target, const std::string& title, UIElement* content) const
+    {
+        const bool isOuter = (zone == UIDockDropZone::OuterLeft || zone == UIDockDropZone::OuterRight ||
+                              zone == UIDockDropZone::OuterTop || zone == UIDockDropZone::OuterBottom);
+        const UIRect& targetRect = (!isOuter && target && target->Bounds.Width() > 1.0f && target->Bounds.Height() > 1.0f)
+            ? target->Bounds
+            : GetBounds();
+
+        UIVec2 desired{ 0.0f, 0.0f };
+        if (!title.empty())
+        {
+            if (auto it = m_PreferredPanelSizes.find(title); it != m_PreferredPanelSizes.end())
+                desired = it->second;
+        }
+        if (desired.x <= 1.0f && desired.y <= 1.0f)
+            desired = m_ActiveDragDesiredSize;
+        if (desired.x <= 1.0f && desired.y <= 1.0f && content)
+            desired = content->Measure();
+
+        const UIDockNodeFlags flags = (!title.empty() && m_PanelFlags.contains(title))
+            ? m_PanelFlags.at(title)
+            : UIDockNodeFlags::None;
+        const bool isCompactBar = HasFlag(flags, UIDockNodeFlags::NoTabBar) || (desired.y > 1.0f && desired.y < 80.0f);
+
+        if (zone == UIDockDropZone::Left || zone == UIDockDropZone::Right ||
+            zone == UIDockDropZone::OuterLeft || zone == UIDockDropZone::OuterRight)
+        {
+            const float wantW = std::max(desired.x > 1.0f ? desired.x : 250.0f, 160.0f);
+            return std::clamp(wantW / std::max(targetRect.Width(), 1.0f), 0.08f, 0.42f);
+        }
+
+        if (zone == UIDockDropZone::Top || zone == UIDockDropZone::Bottom ||
+            zone == UIDockDropZone::OuterTop || zone == UIDockDropZone::OuterBottom)
+        {
+            float wantH = desired.y > 1.0f ? desired.y : (isCompactBar ? 40.0f : 220.0f);
+            if (isCompactBar)
+                wantH = std::clamp(wantH, 32.0f, 72.0f);
+            else
+                wantH = std::max(wantH, 140.0f);
+            return std::clamp(wantH / std::max(targetRect.Height(), 1.0f), 0.025f, isCompactBar ? 0.14f : 0.42f);
+        }
+
+        return 0.5f;
     }
 
     void UIDockSpace::UpdateDockPreview(UIVec2 localPos)
@@ -649,7 +786,8 @@ namespace Nox::UI
         if (zone == UIDockDropZone::None)
             return false;
 
-        DockPanel(title, content, zone, target, 0.5f, insertTabIdx);
+        const float ratio = ComputeDropRatio(zone, target.get(), title, content.get());
+        DockPanel(title, content, zone, target, ratio, insertTabIdx);
         return true;
     }
 
@@ -658,12 +796,67 @@ namespace Nox::UI
         if (!node || node->IsLeaf())
             return nullptr;
 
-        if (node->SplitterRect.Contains(pos))
+        UIRect hitRect = node->SplitterRect;
+        if (node->SplitDir == UIDockSplitDir::Horizontal)
+        {
+            hitRect.Min.x -= kSplitterHitHalfExtent;
+            hitRect.Max.x += kSplitterHitHalfExtent;
+        }
+        else if (node->SplitDir == UIDockSplitDir::Vertical)
+        {
+            hitRect.Min.y -= kSplitterHitHalfExtent;
+            hitRect.Max.y += kSplitterHitHalfExtent;
+        }
+
+        if (hitRect.Contains(pos))
             return node;
 
         if (auto* f = HitTestSplitter(node->First.get(), pos))
             return f;
         return HitTestSplitter(node->Second.get(), pos);
+    }
+
+    UIElement* UIDockSpace::HitTest(const UIVec2& pos)
+    {
+        if (!Visible || HitTestMode == UIHitTestMode::None)
+            return nullptr;
+        if (!GetBounds().Contains(pos))
+            return nullptr;
+
+        // Floating windows sit above docked splitters and panels.
+        if (m_FloatHost)
+        {
+            if (UIElement* hit = m_FloatHost->HitTest(pos))
+                return hit;
+        }
+
+        // Window-edge splitters straddle adjacent docked panels, so claim them before child content.
+        if (HitTestSplitter(m_RootNode.get(), pos))
+            return this;
+
+        if (m_DockHost)
+        {
+            if (UIElement* hit = m_DockHost->HitTest(pos))
+                return hit;
+        }
+
+        return HitTestMode == UIHitTestMode::Self ? this : nullptr;
+    }
+
+    UICursorShape UIDockSpace::GetCursorShape(const UIVec2& pos) const
+    {
+        const UIDockNode* node = m_DraggingSplitter ? m_DraggingSplitter : HitTestSplitter(m_RootNode.get(), pos);
+        if (!node)
+            return UICursorShape::Default;
+        return (node->SplitDir == UIDockSplitDir::Horizontal)
+            ? UICursorShape::ResizeEW
+            : UICursorShape::ResizeNS;
+    }
+
+    bool UIDockSpace::OnPointerLeave(const UIPointerEvent&)
+    {
+        m_HoveredSplitter = nullptr;
+        return false;
     }
 
     bool UIDockSpace::OnPointerDown(const UIPointerEvent& e)
@@ -674,6 +867,7 @@ namespace Nox::UI
         if (auto* split = HitTestSplitter(m_RootNode.get(), e.Position))
         {
             m_DraggingSplitter = split;
+            m_HoveredSplitter = split;
             return true;
         }
         return false;
@@ -700,7 +894,9 @@ namespace Nox::UI
             }
             return true;
         }
-        return false;
+
+        m_HoveredSplitter = HitTestSplitter(m_RootNode.get(), e.Position);
+        return m_HoveredSplitter != nullptr;
     }
 
     bool UIDockSpace::OnPointerUp(const UIPointerEvent& e)
@@ -708,6 +904,7 @@ namespace Nox::UI
         if (e.Button == 1 && m_DraggingSplitter)
         {
             m_DraggingSplitter = nullptr;
+            m_HoveredSplitter = HitTestSplitter(m_RootNode.get(), e.Position);
             return true;
         }
         return false;
@@ -776,40 +973,63 @@ namespace Nox::UI
             m_OverlayHost->Arrange(contentRect);
     }
 
-    void UIDockSpace::PaintSplitters(UIDrawList& drawList, const UIDockNode* node) const
+    void UIDockSpace::PaintSplitters(UIDrawList& drawList, const UITheme& theme, const UIDockNode* node) const
     {
         if (!node || node->IsLeaf())
             return;
-        drawList.AddRoundedRect(
-            node->SplitterRect.Min,
-            node->SplitterRect.Max,
-            m_DraggingSplitter == node ? UIColor{ 0.35f, 0.58f, 0.96f, 0.95f } : UIColor{ 0.14f, 0.16f, 0.21f, 1.0f }
-        );
-        PaintSplitters(drawList, node->First.get());
-        PaintSplitters(drawList, node->Second.get());
+
+        const bool highlighted = (m_DraggingSplitter == node || m_HoveredSplitter == node);
+        UIVec2 rMin = node->SplitterRect.Min;
+        UIVec2 rMax = node->SplitterRect.Max;
+        if (highlighted)
+        {
+            // Expand 1px seam to a 2px accent highlight on hover/drag for clear ImGui-style feedback.
+            if (node->SplitDir == UIDockSplitDir::Horizontal)
+            {
+                rMin.x -= 0.5f;
+                rMax.x += 0.5f;
+            }
+            else if (node->SplitDir == UIDockSplitDir::Vertical)
+            {
+                rMin.y -= 0.5f;
+                rMax.y += 0.5f;
+            }
+        }
+        const UIColor color = highlighted
+            ? theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 0.95f })
+            : theme.GetToken("Border", { 0.204f, 0.216f, 0.255f, 1.0f });
+        drawList.AddRoundedRect(rMin, rMax, color);
+
+        PaintSplitters(drawList, theme, node->First.get());
+        PaintSplitters(drawList, theme, node->Second.get());
     }
 
-    void UIDockSpace::PaintDockOverlay(UIDrawList& drawList) const
+    void UIDockSpace::PaintDockOverlay(UIDrawList& drawList, const UITheme& theme) const
     {
         if (!m_ExternalDragActive)
             return;
+
+        const UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
+        const UIColor accentHover = theme.GetToken("AccentHover", { 0.349f, 0.592f, 0.976f, 1.0f });
+        const UIColor surface1 = theme.GetToken("Surface1", { 0.141f, 0.149f, 0.173f, 0.96f });
+        const UIColor border = theme.GetToken("Border", { 0.204f, 0.216f, 0.255f, 1.0f });
 
         if (m_HoverDropZone != UIDockDropZone::None && m_HoverPreviewRect.Width() > 1.0f && m_HoverPreviewRect.Height() > 1.0f)
         {
             drawList.AddRoundedRect(
                 m_HoverPreviewRect.Min,
                 m_HoverPreviewRect.Max,
-                { 0.24f, 0.52f, 0.96f, m_HoverIsTabBarDrop ? 0.20f : 0.28f },
+                { accent.r, accent.g, accent.b, m_HoverIsTabBarDrop ? 0.20f : 0.28f },
                 { 4.0f, 4.0f, 4.0f, 4.0f },
                 m_HoverIsTabBarDrop ? 1.5f : 2.0f,
-                { 0.38f, 0.68f, 1.0f, 0.95f }
+                { accentHover.r, accentHover.g, accentHover.b, 0.95f }
             );
             if (m_HoverIsTabBarDrop)
             {
                 drawList.AddRoundedRect(
                     { m_HoverTabInsertX - 1.5f, m_HoverPreviewRect.Min.y + 3.0f },
                     { m_HoverTabInsertX + 1.5f, m_HoverPreviewRect.Max.y - 3.0f },
-                    { 0.45f, 0.78f, 1.0f, 1.0f },
+                    accentHover,
                     { 1.5f, 1.5f, 1.5f, 1.5f }
                 );
             }
@@ -831,14 +1051,14 @@ namespace Nox::UI
             drawList.AddRoundedRect(
                 r.Min,
                 r.Max,
-                active ? UIColor{ 0.28f, 0.56f, 0.98f, 0.95f } : UIColor{ 0.12f, 0.14f, 0.19f, 0.92f },
+                active ? UIColor{ accent.r, accent.g, accent.b, 0.95f } : UIColor{ surface1.r, surface1.g, surface1.b, 0.94f },
                 { 4.0f, 4.0f, 4.0f, 4.0f },
                 1.5f,
-                active ? UIColor{ 0.65f, 0.85f, 1.0f, 1.0f } : UIColor{ 0.35f, 0.42f, 0.55f, 0.90f }
+                active ? UIColor{ 0.70f, 0.85f, 1.0f, 1.0f } : border
             );
 
             // Inner directional glyph so each dock square clearly shows placement
-            const UIColor glyphCol = active ? UIColor{ 1.0f, 1.0f, 1.0f, 0.95f } : UIColor{ 0.65f, 0.72f, 0.85f, 0.75f };
+            const UIColor glyphCol = active ? UIColor{ 1.0f, 1.0f, 1.0f, 0.95f } : theme.GetToken("TextMuted", { 0.60f, 0.63f, 0.68f, 0.80f });
             const UIRect inner = { { r.Min.x + 5.0f, r.Min.y + 5.0f }, { r.Max.x - 5.0f, r.Max.y - 5.0f } };
             UIRect g = inner;
             if (z == UIDockDropZone::Left || z == UIDockDropZone::OuterLeft)
@@ -874,14 +1094,14 @@ namespace Nox::UI
         drawZoneBtn({ bc.x, b.Max.y - kOuterInset }, UIDockDropZone::OuterBottom);
     }
 
-    void UIDockSpace::PaintSplittersOverlay(UIDrawList& drawList) const
+    void UIDockSpace::PaintSplittersOverlay(UIDrawList& drawList, const UITheme& theme) const
     {
-        PaintSplitters(drawList, m_RootNode.get());
+        PaintSplitters(drawList, theme, m_RootNode.get());
     }
 
-    void UIDockSpace::PaintOverlay(UIDrawList& drawList) const
+    void UIDockSpace::PaintOverlay(UIDrawList& drawList, const UITheme& theme) const
     {
-        PaintDockOverlay(drawList);
+        PaintDockOverlay(drawList, theme);
     }
 
     void UIDockSpace::ClearPanels()
@@ -889,6 +1109,7 @@ namespace Nox::UI
         m_RootNode = nullptr;
         m_FloatingWindows.clear();
         m_DraggingSplitter = nullptr;
+        m_HoveredSplitter = nullptr;
         ClearDockPreview();
         if (m_DockHost)
             m_DockHost->ClearChildren();
@@ -1071,6 +1292,7 @@ namespace Nox::UI
                     if (HasFlag(leaf->Flags, UIDockNodeFlags::NoTabBar))
                     {
                         leaf->TabPanel->SetTabBarVisible(false);
+                        leaf->TabPanel->SetShowUndockCornerHandle(!HasFlag(leaf->Flags, UIDockNodeFlags::NoUndocking));
                         leaf->TabPanel->GetContentHost()->Padding = UIThickness::All(0.0f);
                     }
 

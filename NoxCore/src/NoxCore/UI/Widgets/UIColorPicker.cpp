@@ -335,7 +335,14 @@ namespace Nox::UI
         );
 
         // 3. Alpha bar
-        drawList.AddRoundedRect(r.Alpha.Min, r.Alpha.Max, { 0.14f, 0.16f, 0.20f, 1.0f }, glm::vec4(4.0f), 1.0f, { 0.25f, 0.28f, 0.34f, 1.0f });
+        drawList.AddRoundedRect(
+            r.Alpha.Min,
+            r.Alpha.Max,
+            theme.GetToken("Surface0", { 0.114f, 0.122f, 0.141f, 1.0f }),
+            glm::vec4(4.0f),
+            1.0f,
+            theme.GetToken("Border", { 0.204f, 0.216f, 0.255f, 1.0f })
+        );
         const UIColor solidColor = SrgbToLinear(HsvToRgb(m_Hue, m_Sat, m_Val, 1.0f));
         const float alphaW = std::max(0.0f, (r.Alpha.Width() - 2.0f) * m_Alpha);
         if (alphaW > 0.5f)

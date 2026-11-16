@@ -67,7 +67,7 @@ namespace Nox
             }
         }
 
-        void DrawVectorIcon(UI::UIDrawList& drawList, EditorIconKind kind, const glm::vec2& c, const glm::vec4& col)
+        void DrawVectorIcon(UI::UIDrawList& drawList, EditorIconKind kind, const glm::vec2& c, const glm::vec4& col, float scale = 1.0f)
         {
             switch (kind)
             {
@@ -177,12 +177,12 @@ namespace Nox
             }
             case EditorIconKind::Cogwheel:
             {
-                DrawCircleRing(drawList, c, 3.8f, 1.7f, col);
+                DrawCircleRing(drawList, c, 3.8f * scale, 1.7f * scale, col);
                 for (int i = 0; i < 8; ++i)
                 {
                     const float a = glm::two_pi<float>() * static_cast<float>(i) / 8.0f;
                     const glm::vec2 dir(std::cos(a), std::sin(a));
-                    DrawLine(drawList, c + dir * 4.2f, c + dir * 6.4f, 2.1f, col);
+                    DrawLine(drawList, c + dir * (4.2f * scale), c + dir * (6.4f * scale), 2.1f * scale, col);
                 }
                 break;
             }
@@ -303,7 +303,7 @@ namespace Nox
             ? glm::vec4{ 0.62f, 0.82f, 1.0f, 1.0f }
             : (hovered ? glm::vec4{ 0.96f, 0.97f, 0.99f, 1.0f } : glm::vec4{ 0.78f, 0.82f, 0.88f, 1.0f });
         const glm::vec2 center = (b.Min + b.Max) * 0.5f;
-        DrawVectorIcon(drawList, Icon, center, iconColor);
+        DrawVectorIcon(drawList, Icon, center, iconColor, IconScale);
     }
 
     float ViewportToolState::LocationSnapWorldUnits() const
@@ -1431,8 +1431,9 @@ namespace Nox
             }
         }
 
-        // Mini selected entity gizmo axes preview
-        if (m_Ctx.Hierarchy && m_Ctx.GizmoMode && *m_Ctx.GizmoMode != ViewportGizmoMode::Select && !isPlay)
+        // Mini selected entity gizmo axes preview (only once the extra view image has been drawn)
+        const bool hasImage = !m_Ctx.HasImageFn || m_Ctx.HasImageFn();
+        if (hasImage && m_Ctx.Hierarchy && m_Ctx.GizmoMode && *m_Ctx.GizmoMode != ViewportGizmoMode::Select && !isPlay)
         {
             Entity selected = m_Ctx.Hierarchy->GetSelectedEntity();
             if (selected && selected.HasComponent<WorldTransformComponent>())

@@ -112,17 +112,19 @@ namespace Nox::UI
         UIViewportManager* GetViewportManager() const { return m_ViewportManager; }
         void SetContext(UIContext* context) { m_Context = context; }
         UIContext* GetContext() const { return m_Context; }
+        bool IsDragging() const { return m_DraggingSplitter != nullptr || m_ExternalDragActive; }
 
         // External drag integration (used by UIViewportManager when dragging a secondary OS window over the dockspace).
         void UpdateDockPreview(UIVec2 localPos);
         void ClearDockPreview();
         bool HasActiveDropZone() const { return m_HoverDropZone != UIDockDropZone::None; }
         bool CommitDockDrop(const std::string& title, const Ref<UIElement>& content);
-        void PaintSplittersOverlay(UIDrawList& drawList) const;
-        void PaintOverlay(UIDrawList& drawList) const;
+        void PaintSplittersOverlay(UIDrawList& drawList, const UITheme& theme) const;
+        void PaintOverlay(UIDrawList& drawList, const UITheme& theme) const;
 
         const Ref<UIDockNode>& GetRootNode() const { return m_RootNode; }
         Ref<UIDockNode> FindNodeByPanelTitle(const std::string& title) const;
+        bool SetPanelFlags(const std::string& title, UIDockNodeFlags flags);
         bool RemovePanel(const std::string& title);
         bool BeginPanelDrag(const std::string& title, UIVec2 pointerPos);
 
@@ -130,6 +132,9 @@ namespace Nox::UI
         bool SaveLayout(const std::filesystem::path& path) const;
         bool LoadLayout(const std::filesystem::path& path);
 
+        UIElement* HitTest(const UIVec2& pos) override;
+        UICursorShape GetCursorShape(const UIVec2& pos) const override;
+        bool OnPointerLeave(const UIPointerEvent& e) override;
         bool OnPointerDown(const UIPointerEvent& e) override;
         bool OnPointerMove(const UIPointerEvent& e) override;
         bool OnPointerUp(const UIPointerEvent& e) override;
@@ -152,8 +157,8 @@ namespace Nox::UI
         Ref<UIDockNode> FindLeafAt(const Ref<UIDockNode>& node, UIVec2 pos) const;
         Ref<UIDockNode> FindNodeByTitleRecursive(const Ref<UIDockNode>& node, const std::string& title) const;
         Ref<UIDockNode> FindNodeByTabPanel(const Ref<UIDockNode>& node, const UITabPanel* panel) const;
-        void PaintSplitters(UIDrawList& drawList, const UIDockNode* node) const;
-        void PaintDockOverlay(UIDrawList& drawList) const;
+        void PaintSplitters(UIDrawList& drawList, const UITheme& theme, const UIDockNode* node) const;
+        void PaintDockOverlay(UIDrawList& drawList, const UITheme& theme) const;
 
         struct DropZoneHit
         {
@@ -165,8 +170,11 @@ namespace Nox::UI
             float TabInsertX = 0.0f;
         };
         DropZoneHit ComputeDropZone(UIVec2 localPos) const;
+        float ComputeDropRatio(UIDockDropZone zone, const UIDockNode* target, const std::string& title, UIElement* content = nullptr) const;
+        void BringFloatingWindowToFront(UIWindow* win);
 
-        static constexpr float kSplitterThickness = 5.0f;
+        static constexpr float kSplitterThickness = 1.0f;
+        static constexpr float kSplitterHitHalfExtent = 4.0f;
         static constexpr float kMinNodeExtent = 34.0f;
 
         Ref<UIDockNode> m_RootNode;
@@ -176,8 +184,12 @@ namespace Nox::UI
         Ref<UIElement> m_OverlayHost;  // Paints dock drop-zone previews on top
         std::vector<Ref<UIWindow>> m_FloatingWindows;
         std::unordered_map<std::string, UIDockNodeFlags> m_PanelFlags;
+        std::unordered_map<std::string, UIVec2> m_PreferredPanelSizes;
+        std::string m_ActiveDragTitle;
+        UIVec2 m_ActiveDragDesiredSize{ 0.0f, 0.0f };
 
         UIDockNode* m_DraggingSplitter = nullptr;
+        UIDockNode* m_HoveredSplitter = nullptr;
         bool m_ExternalDragActive = false;
         UIDockDropZone m_HoverDropZone = UIDockDropZone::None;
         Ref<UIDockNode> m_HoverTargetNode;

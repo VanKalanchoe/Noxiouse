@@ -127,10 +127,16 @@ namespace Nox
 
     // Everything whose release must wait for the frames that could still reference it (§5.8.4): a GPU buffer to
     // destroy, the last reference to an asset to drop, or a mesh's geometry ranges and BLAS id to return.
+    struct DeferredTextureSlot
+    {
+        uint32_t slot = ~0u;
+        Ref<Asset> asset;
+    };
+
     struct DeferredRelease
     {
         uint32_t framesRemaining = MAX_FRAMES_IN_FLIGHT;
-        std::variant<std::unique_ptr<NRI::Buffer>, Ref<Asset>, MeshHandle, MeshBLAS> payload;
+        std::variant<std::unique_ptr<NRI::Buffer>, Ref<Asset>, MeshHandle, MeshBLAS, DeferredTextureSlot> payload;
     };
 
     struct PickRequest
@@ -2420,6 +2426,7 @@ namespace Nox
         // thread (loader tasks included), while the main thread drains at the frame sync point.
         std::vector<DeferredRelease> m_deferredReleases;
         std::mutex m_deferredReleasesMutex;
+        void deferTextureRelease(Ref<Texture2D> texture);
 
         // Unified geometry streams (§5.8.2): one buffer each, sub-allocated per mesh, addressed by offset.
         GeometryArena m_vertexStream; // shaderio::PackedVertex

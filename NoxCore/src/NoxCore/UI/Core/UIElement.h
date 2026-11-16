@@ -45,6 +45,7 @@ namespace Nox::UI
 
         // Hit-testing (reverse paint order)
         virtual UIElement* HitTest(const UIVec2& pos);
+        virtual UICursorShape GetCursorShape(const UIVec2& /*pos*/) const { return UICursorShape::Default; }
 
         // State helpers (managed by UIContext)
         UIState GetState() const { return m_State; }

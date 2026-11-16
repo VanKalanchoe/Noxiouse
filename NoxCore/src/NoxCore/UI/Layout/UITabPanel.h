@@ -31,10 +31,15 @@ namespace Nox::UI
 
         const Ref<UIStackBox>& GetTabBar() const { return m_TabBar; }
         const Ref<UIStackBox>& GetContentHost() const { return m_ContentHost; }
-        void SetTabBarVisible(bool visible) { if (m_TabBar) m_TabBar->Visible = visible; }
+        void SetTabBarVisible(bool visible);
+        void SetShowUndockCornerHandle(bool show);
+        bool GetShowUndockCornerHandle() const { return m_ShowUndockCornerHandle; }
 
         // Fired when a tab is dragged past the tear-out threshold while pressed.
         std::function<void(size_t index, UIVec2 pointerPos)> OnTabDragOut;
+
+    protected:
+        void ArrangeChildren(const UIRect& contentRect) override;
 
     private:
         struct TabEntry
@@ -46,10 +51,13 @@ namespace Nox::UI
 
         size_t FindTabIndex(const UIButton* btn) const;
         void RefreshTabStyles();
+        void RefreshCornerHandleVisibility();
 
         Ref<UIStackBox> m_TabBar;
         Ref<UIStackBox> m_ContentHost;
+        Ref<UIElement> m_CornerHandle;
         std::vector<TabEntry> m_Tabs;
         size_t m_ActiveIndex = 0;
+        bool m_ShowUndockCornerHandle = false;
     };
 }

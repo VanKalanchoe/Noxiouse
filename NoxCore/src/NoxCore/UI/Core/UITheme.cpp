@@ -175,11 +175,11 @@ namespace Nox::UI
     {
         Ref<UITheme> theme(new UITheme());
 
-        theme->SetToken("Background",  { 0.082f, 0.086f, 0.102f, 1.00f });
-        theme->SetToken("Surface0",    { 0.114f, 0.120f, 0.141f, 0.98f });
-        theme->SetToken("Surface1",    { 0.145f, 0.153f, 0.180f, 0.98f });
-        theme->SetToken("Surface2",    { 0.184f, 0.194f, 0.227f, 0.98f });
-        theme->SetToken("Border",      { 0.235f, 0.251f, 0.298f, 0.85f });
+        theme->SetToken("Background",  { 0.063f, 0.075f, 0.106f, 1.00f });
+        theme->SetToken("Surface0",    { 0.094f, 0.110f, 0.149f, 1.00f });
+        theme->SetToken("Surface1",    { 0.125f, 0.145f, 0.200f, 1.00f });
+        theme->SetToken("Surface2",    { 0.165f, 0.192f, 0.267f, 1.00f });
+        theme->SetToken("Border",      { 0.200f, 0.235f, 0.322f, 1.00f });
         theme->SetToken("Accent",      { 0.259f, 0.529f, 0.961f, 1.00f });
         theme->SetToken("AccentHover", { 0.349f, 0.592f, 0.976f, 1.00f });
         theme->SetToken("Success",     { 0.235f, 0.678f, 0.482f, 1.00f });
@@ -199,6 +199,11 @@ namespace Nox::UI
         background.FontSize = 18.0f;
         theme->SetStyle("Background", background);
 
+        UIStyleBox surface = background;
+        surface.FillColor = theme->GetToken("Surface0");
+        surface.FillColorBottom = surface.FillColor;
+        theme->SetStyle("Surface", surface);
+
         UIStyleBox panel{};
         panel.FillColor = theme->GetToken("Surface0");
         panel.FillColorBottom = panel.FillColor;
@@ -207,14 +212,25 @@ namespace Nox::UI
         panel.ShadowColor = { 0.0f, 0.0f, 0.0f, 0.25f };
         panel.ShadowOffset = { 0.0f, 3.0f };
         panel.ShadowBlur = 8.0f;
-        panel.CornerRadius = UICornerRadius::All(4.0f);
+        panel.CornerRadius = UICornerRadius::All(3.0f);
         panel.Padding = UIThickness::All(10.0f);
         panel.TextColor = theme->GetToken("Text");
         panel.FontSize = 18.0f;
         theme->SetStyle("Panel", panel);
 
+        UIStyleBox card{};
+        card.FillColor = theme->GetToken("Surface1");
+        card.FillColorBottom = card.FillColor;
+        card.BorderColor = theme->GetToken("Border");
+        card.BorderThickness = 1.0f;
+        card.CornerRadius = UICornerRadius::All(4.0f);
+        card.Padding = UIThickness::All(8.0f);
+        card.TextColor = theme->GetToken("Text");
+        card.FontSize = 18.0f;
+        theme->SetStyle("Card", card);
+
         UIStyleBox topBar = panel;
-        topBar.FillColor = theme->GetToken("Surface1");
+        topBar.FillColor = theme->GetToken("Surface0");
         topBar.FillColorBottom = topBar.FillColor;
         topBar.CornerRadius = UICornerRadius::All(4.0f);
         topBar.ShadowBlur = 0.0f;
@@ -246,10 +262,17 @@ namespace Nox::UI
         theme->SetStyle("Button:hover", buttonHover);
 
         UIStyleBox buttonPressed = button;
-        buttonPressed.FillColor = { 0.196f, 0.392f, 0.710f, 1.0f };
+        buttonPressed.FillColor = { 0.165f, 0.306f, 0.549f, 1.0f };
         buttonPressed.FillColorBottom = buttonPressed.FillColor;
         buttonPressed.BorderColor = theme->GetToken("AccentHover");
         theme->SetStyle("Button:pressed", buttonPressed);
+
+        UIStyleBox buttonDisabled = button;
+        buttonDisabled.FillColor = { 0.086f, 0.102f, 0.141f, 1.0f };
+        buttonDisabled.FillColorBottom = buttonDisabled.FillColor;
+        buttonDisabled.BorderColor = { 0.153f, 0.176f, 0.239f, 1.0f };
+        buttonDisabled.TextColor = theme->GetToken("TextMuted");
+        theme->SetStyle("Button:disabled", buttonDisabled);
 
         UIStyleBox buttonPrimary = button;
         buttonPrimary.FillColor = theme->GetToken("Accent");
@@ -263,9 +286,16 @@ namespace Nox::UI
         buttonPrimaryHover.FillColorBottom = buttonPrimaryHover.FillColor;
         theme->SetStyle("Button.primary:hover", buttonPrimaryHover);
 
+        UIStyleBox buttonPrimaryDisabled = buttonPrimary;
+        buttonPrimaryDisabled.FillColor = { 0.137f, 0.208f, 0.329f, 1.0f };
+        buttonPrimaryDisabled.FillColorBottom = buttonPrimaryDisabled.FillColor;
+        buttonPrimaryDisabled.BorderColor = { 0.184f, 0.271f, 0.431f, 1.0f };
+        buttonPrimaryDisabled.TextColor = { 0.604f, 0.659f, 0.761f, 1.0f };
+        theme->SetStyle("Button.primary:disabled", buttonPrimaryDisabled);
+
         // Inputs & Controls (ImGui-style crisp 3px corners)
         UIStyleBox textInput{};
-        textInput.FillColor = { 0.075f, 0.080f, 0.098f, 1.0f };
+        textInput.FillColor = { 0.075f, 0.086f, 0.125f, 1.0f };
         textInput.FillColorBottom = textInput.FillColor;
         textInput.BorderColor = theme->GetToken("Border");
         textInput.BorderThickness = 1.0f;
@@ -320,7 +350,9 @@ namespace Nox::UI
         sectionHeaderHover.BorderColor = theme->GetToken("Accent");
         theme->SetStyle("SectionHeader:hover", sectionHeaderHover);
 
-        UIStyleBox treeView = textInput;
+        UIStyleBox treeView = panel;
+        treeView.ShadowBlur = 0.0f;
+        treeView.Padding = UIThickness::All(0.0f);
         treeView.CornerRadius = UICornerRadius::All(3.0f);
         theme->SetStyle("TreeView", treeView);
 
@@ -336,9 +368,9 @@ namespace Nox::UI
         treeRowHover.FillColorBottom = treeRowHover.FillColor;
         theme->SetStyle("TreeRow:hover", treeRowHover);
 
-        // ImGui-style Tabs (flat bottom, subtle top corners, unmistakable active tab)
+        // ImGui-style Tabs (flat bottom, subtle top corners, clean neutral active tab)
         UIStyleBox tabBar{};
-        tabBar.FillColor = theme->GetToken("Surface1");
+        tabBar.FillColor = theme->GetToken("Surface0");
         tabBar.FillColorBottom = tabBar.FillColor;
         tabBar.BorderColor = theme->GetToken("Border");
         tabBar.BorderThickness = 1.0f;
@@ -347,7 +379,7 @@ namespace Nox::UI
         theme->SetStyle("TabBar", tabBar);
 
         UIStyleBox tab{};
-        tab.FillColor = { 0.118f, 0.125f, 0.150f, 1.0f };
+        tab.FillColor = { 0.082f, 0.098f, 0.137f, 1.0f };
         tab.FillColorBottom = tab.FillColor;
         tab.BorderColor = { 0.0f, 0.0f, 0.0f, 0.0f };
         tab.BorderThickness = 1.0f;
@@ -359,13 +391,13 @@ namespace Nox::UI
         theme->SetStyle("Tab", tab);
 
         UIStyleBox tabHover = tab;
-        tabHover.FillColor = theme->GetToken("Surface2");
+        tabHover.FillColor = theme->GetToken("Surface1");
         tabHover.FillColorBottom = tabHover.FillColor;
         tabHover.TextColor = theme->GetToken("Text");
         theme->SetStyle("Tab:hover", tabHover);
 
         UIStyleBox tabActive = tab;
-        tabActive.FillColor = { 0.165f, 0.285f, 0.460f, 1.0f };
+        tabActive.FillColor = { 0.165f, 0.286f, 0.459f, 1.0f };
         tabActive.FillColorBottom = tabActive.FillColor;
         tabActive.BorderColor = theme->GetToken("Accent");
         tabActive.TextColor = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -373,7 +405,7 @@ namespace Nox::UI
 
         // ImGui-style MenuBar & Dropdown Popups
         UIStyleBox menuBar{};
-        menuBar.FillColor = { 0.094f, 0.100f, 0.118f, 1.0f };
+        menuBar.FillColor = theme->GetToken("Surface0");
         menuBar.FillColorBottom = menuBar.FillColor;
         menuBar.BorderColor = theme->GetToken("Border");
         menuBar.BorderThickness = 1.0f;
@@ -399,9 +431,9 @@ namespace Nox::UI
         theme->SetStyle("MenuTrigger:hover", menuTriggerHover);
 
         UIStyleBox menuPopup{};
-        menuPopup.FillColor = { 0.133f, 0.141f, 0.169f, 0.99f };
+        menuPopup.FillColor = theme->GetToken("Surface1");
         menuPopup.FillColorBottom = menuPopup.FillColor;
-        menuPopup.BorderColor = { 0.300f, 0.325f, 0.390f, 1.0f };
+        menuPopup.BorderColor = theme->GetToken("Border");
         menuPopup.BorderThickness = 1.0f;
         menuPopup.ShadowColor = { 0.0f, 0.0f, 0.0f, 0.55f };
         menuPopup.ShadowOffset = { 0.0f, 6.0f };

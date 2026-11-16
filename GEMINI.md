@@ -3,9 +3,10 @@
 Engine overview, directory map and frame flow: `PROJECT_CONTEXT.md`. Render graph and NRI design: `architecture.md`.
 
 ## 1. Execution Policy (Strict)
-- **NEVER execute terminal commands, scripts (`.bat`, `.ps1`, shell), builds, or background tasks** unless the user explicitly commands you to execute them (e.g. "run this command", "execute the script").
-- When diagnosing, troubleshooting, or fixing scripts and tools: **only inspect, fix the files, and explain the changes**. The user will run the commands/scripts themselves.
-- Never spawn compilers, background tasks, or testing runs autonomously.
+- **Allowed Autonomous Builds (Rider / CMake Pattern)**: After modifying C++ code or build inputs, you **ARE allowed** to run CMake builds using the workspace's existing Rider/Visual Studio build tree (`cmake --build build --target <Target> --config Debug` — or `--config Release` when working on Release) so compilation errors are caught and fixed immediately and the binary is ready to launch.
+  - Reuse the existing `build/` directory configured by `scripts/setup_windows_build.bat` (`Visual Studio 18 2026`, `ClangCL`, `x64`, `vcpkg`); do **not** delete, reconfigure, or create separate build folders unless explicitly requested.
+- **No Unapproved Launches / Scripts / Tests**: **NEVER execute scripts (`.bat`, `.ps1`, shell), launch the editor/runtime executables, or run test/background processes** unless the user explicitly commands you to execute them (e.g. "run this command", "execute the script").
+- When diagnosing, troubleshooting, or fixing non-build scripts and runtime tools: **only inspect, fix the files, and explain the changes**. The user will run them themselves.
 
 ## 2. Architectural Guidelines
 - **Zero Graphics Leak**: Vulkan headers (and `vk_mem_alloc.h`, Streamline, NRD) remain strictly within `NoxCore/src/NRI/Vulkan/`. Engine code uses NRI types only.

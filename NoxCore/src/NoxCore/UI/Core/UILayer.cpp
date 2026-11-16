@@ -124,6 +124,8 @@ namespace Nox
     void UILayer::OnUpdate(Timestep ts)
     {
         m_LastDeltaSeconds = ts.GetSeconds();
+        if (m_ViewportManager)
+            m_ViewportManager->UpdateActiveDrag();
     }
 
     void UILayer::OnRender()

@@ -56,21 +56,21 @@ namespace Nox
             return h;
         }
 
-        UI::UIColor EntityDotColor(Entity entity)
+        UI::UIColor EntityLabelColor(Entity entity)
         {
             if (entity.HasComponent<PrefabInstanceComponent>() || entity.HasComponent<PrefabNodeComponent>())
-                return { 0.45f, 0.70f, 1.0f, 1.0f };
+                return { 0.48f, 0.74f, 1.00f, 1.0f };
             if (entity.HasComponent<CameraComponent>())
-                return { 0.36f, 0.80f, 0.96f, 1.0f };
+                return { 0.42f, 0.85f, 0.98f, 1.0f };
             if (entity.HasComponent<DirectionalLightComponent>() || entity.HasComponent<PointLightComponent>() ||
                 entity.HasComponent<SpotLightComponent>() || entity.HasComponent<RectLightComponent>() ||
                 entity.HasComponent<DiscLightComponent>() || entity.HasComponent<EnvironmentLightComponent>())
-                return { 0.95f, 0.80f, 0.32f, 1.0f };
+                return { 0.96f, 0.82f, 0.36f, 1.0f };
             if (entity.HasComponent<AudioSourceComponent>() || entity.HasComponent<AudioListenerComponent>())
-                return { 0.42f, 0.86f, 0.62f, 1.0f };
+                return { 0.46f, 0.88f, 0.65f, 1.0f };
             if (entity.HasComponent<MeshComponent>() || entity.HasComponent<ModelInstanceComponent>())
-                return { 0.36f, 0.58f, 0.95f, 1.0f };
-            return { 0.56f, 0.62f, 0.72f, 1.0f };
+                return { 0.74f, 0.84f, 0.98f, 1.0f };
+            return { 0.84f, 0.87f, 0.93f, 1.0f };
         }
     }
 
@@ -112,6 +112,7 @@ namespace Nox
         m_TreeView->HeightMode = UI::UISizeMode::Fill;
         m_TreeView->RowHeight = 25.0f;
         m_TreeView->IndentWidth = 16.0f;
+        m_TreeView->ShowTagDots = false;
         m_TreeView->EmptyText = "No matching entities or folders.";
 
         m_TreeView->OnRowClick = [this](uint64_t id, bool ctrl, bool shift)
@@ -719,9 +720,11 @@ namespace Nox
             node.IsVisibleInHierarchy = activeInHierarchy;
             node.IsDimmed = locked || !activeInHierarchy;
             node.Draggable = !prefabNode && !locked;
-            node.TagColor = EntityDotColor(entity);
-            if (prefabRoot || prefabNode)
-                node.LabelColor = prefabRoot ? UI::UIColor{ 0.45f, 0.70f, 1.0f, 1.0f } : UI::UIColor{ 0.45f, 0.70f, 1.0f, 0.65f };
+            UI::UIColor labelCol = EntityLabelColor(entity);
+            if (prefabNode && !prefabRoot)
+                labelCol.a = 0.72f;
+            node.TagColor = labelCol;
+            node.LabelColor = labelCol;
 
             if (hasSubLevels && !entity.GetParent())
             {
