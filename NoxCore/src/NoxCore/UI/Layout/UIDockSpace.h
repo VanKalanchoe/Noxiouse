@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "NoxCore/UI/Core/UIElement.h"
@@ -123,6 +124,7 @@ namespace Nox::UI
         const Ref<UIDockNode>& GetRootNode() const { return m_RootNode; }
         Ref<UIDockNode> FindNodeByPanelTitle(const std::string& title) const;
         bool RemovePanel(const std::string& title);
+        bool BeginPanelDrag(const std::string& title, UIVec2 pointerPos);
 
         void ClearPanels();
         bool SaveLayout(const std::filesystem::path& path) const;
@@ -165,7 +167,7 @@ namespace Nox::UI
         DropZoneHit ComputeDropZone(UIVec2 localPos) const;
 
         static constexpr float kSplitterThickness = 5.0f;
-        static constexpr float kMinNodeExtent = 44.0f;
+        static constexpr float kMinNodeExtent = 34.0f;
 
         Ref<UIDockNode> m_RootNode;
         Ref<UIElement> m_DockHost;     // Hosts all leaf UITabPanels
@@ -173,6 +175,7 @@ namespace Nox::UI
         Ref<UIAnchorBox> m_FloatHost;  // Hosts floating UIWindows above docked panels & splitters
         Ref<UIElement> m_OverlayHost;  // Paints dock drop-zone previews on top
         std::vector<Ref<UIWindow>> m_FloatingWindows;
+        std::unordered_map<std::string, UIDockNodeFlags> m_PanelFlags;
 
         UIDockNode* m_DraggingSplitter = nullptr;
         bool m_ExternalDragActive = false;

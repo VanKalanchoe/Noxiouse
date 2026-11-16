@@ -3337,6 +3337,9 @@ namespace Nox
         auto viewportHost = UI::MakeUI<UI::UIAnchorBox>();
         viewportHost->WidthMode = UI::UISizeMode::Fill;
         viewportHost->HeightMode = UI::UISizeMode::Fill;
+        viewportHost->AnchorMin = { 0.0f, 0.0f };
+        viewportHost->AnchorMax = { 1.0f, 1.0f };
+        viewportHost->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
         viewportHost->AddChild(m_ViewportImage);
         viewportHost->AddChild(m_ViewportCanvas);
         viewportHost->AddChild(overlayToolbar);
@@ -3375,6 +3378,9 @@ namespace Nox
             auto extraHost = UI::MakeUI<UI::UIAnchorBox>();
             extraHost->WidthMode = UI::UISizeMode::Fill;
             extraHost->HeightMode = UI::UISizeMode::Fill;
+            extraHost->AnchorMin = { 0.0f, 0.0f };
+            extraHost->AnchorMax = { 1.0f, 1.0f };
+            extraHost->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
             extraHost->AddChild(extraImg);
             extraHost->AddChild(extraCanvas);
             m_ExtraViewportHosts[index] = extraHost;
@@ -3386,7 +3392,87 @@ namespace Nox
             m_ViewportSlotRoots[index] = root;
         }
 
-        // Sleek Godot-style Play / Simulate / Pause / Step Toolbar (dockable panel inside UIDockSpace)
+        // Sleek Godot-style Play / Simulate / Pause / Step Toolbar (dockable without tab header via NoTabBar)
+        class ToolbarDragHandle final : public UI::UIElement
+        {
+        public:
+            ToolbarDragHandle(UI::UIDockSpace* dock, bool drawDots)
+                : m_Dock(dock), m_DrawDots(drawDots)
+            {
+                HitTestMode = UI::UIHitTestMode::Self;
+                if (drawDots)
+                {
+                    WidthMode = UI::UISizeMode::Fixed;
+                    HeightMode = UI::UISizeMode::Fixed;
+                    FixedSize = { 14.0f, 22.0f };
+                    VAlign = UI::UIAlignment::Center;
+                    Tooltip = "Drag to move / dock Toolbar";
+                }
+                else
+                {
+                    WidthMode = UI::UISizeMode::Fill;
+                    HeightMode = UI::UISizeMode::Fill;
+                }
+            }
+
+            bool OnPointerDown(const UI::UIPointerEvent& e) override
+            {
+                if (e.Button != 1)
+                    return false;
+                m_Pressed = true;
+                m_PressPos = e.Position;
+                return true;
+            }
+
+            bool OnPointerMove(const UI::UIPointerEvent& e) override
+            {
+                if (m_Pressed && m_Dock)
+                {
+                    const UI::UIVec2 d = e.Position - m_PressPos;
+                    if (d.x * d.x + d.y * d.y > 36.0f)
+                    {
+                        m_Pressed = false;
+                        m_Dock->BeginPanelDrag("Toolbar", e.Position);
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            bool OnPointerUp(const UI::UIPointerEvent& e) override
+            {
+                if (e.Button == 1)
+                    m_Pressed = false;
+                return false;
+            }
+
+        protected:
+            void OnPaint(UI::UIDrawList& drawList, const UI::UITheme&) override
+            {
+                if (!m_DrawDots)
+                    return;
+                const UI::UIRect& b = GetBounds();
+                const float cx = (b.Min.x + b.Max.x) * 0.5f;
+                const float cy = (b.Min.y + b.Max.y) * 0.5f;
+                const UI::UIColor dotCol = UI::HasState(GetState(), UI::UIState::Hovered)
+                    ? UI::UIColor{ 0.78f, 0.84f, 0.94f, 0.90f }
+                    : UI::UIColor{ 0.45f, 0.50f, 0.58f, 0.55f };
+                for (int r = -1; r <= 1; ++r)
+                {
+                    for (int c = 0; c <= 1; ++c)
+                    {
+                        const glm::vec2 p(cx + (c == 0 ? -2.0f : 2.0f), cy + static_cast<float>(r) * 4.0f);
+                        drawList.AddRoundedRect(p - glm::vec2(1.1f), p + glm::vec2(1.1f), dotCol, glm::vec4(1.1f));
+                    }
+                }
+            }
+
+        private:
+            UI::UIDockSpace* m_Dock = nullptr;
+            bool m_DrawDots = false;
+            bool m_Pressed = false;
+            UI::UIVec2 m_PressPos{ 0.0f, 0.0f };
+        };
         auto makeToolbarIconBtn = [](const Ref<Texture2D>& icon, const std::string& tip,
                                      std::function<void()> onClick, Ref<UI::UIImage>& outImg) -> Ref<UI::UIElement>
         {
@@ -3399,6 +3485,7 @@ namespace Nox
 
             auto box = UI::HStack(0.0f, { img })
                 .Padding(6.0f, 3.0f)
+                .VAlign(UI::UIAlignment::Center)
                 .Style("Button")
                 .Background(true)
                 .Tooltip(tip)
@@ -3460,12 +3547,13 @@ namespace Nox
         m_PlayNetStatusLabel->ColorOverride = { 0.72f, 0.78f, 0.86f, 1.0f };
         m_PlayNetStatusLabel->Visible = false;
 
-        auto tbLeftSpacer = UI::MakeUI<UI::UIElement>();
-        tbLeftSpacer->WidthMode = UI::UISizeMode::Fill;
-        auto tbRightSpacer = UI::MakeUI<UI::UIElement>();
-        tbRightSpacer->WidthMode = UI::UISizeMode::Fill;
+        auto dockPtr = uiLayer->GetDockSpace();
+        auto tbGrip = UI::MakeUI<ToolbarDragHandle>(dockPtr, true);
+        auto tbLeftSpacer = UI::MakeUI<ToolbarDragHandle>(dockPtr, false);
+        auto tbRightSpacer = UI::MakeUI<ToolbarDragHandle>(dockPtr, false);
 
         m_ToolBar = UI::HStack(4.0f, {
+            tbGrip,
             tbLeftSpacer,
             m_PlayBtnWrap,
             m_SimulateBtnWrap,
@@ -3474,12 +3562,12 @@ namespace Nox
             m_PlaySettingsCogBtn,
             m_PlayNetStatusLabel,
             tbRightSpacer
-        }).Padding(6.0f, 2.0f).Style("Surface").Background(true).Get();
+        }).Padding(6.0f, 3.0f).Style("Surface").Background(true).Get();
         m_ToolBar->WidthMode = UI::UISizeMode::Fill;
-        m_ToolBar->HeightMode = UI::UISizeMode::Auto;
+        m_ToolBar->HeightMode = UI::UISizeMode::Fill;
         RefreshToolBar();
 
-        // Dock panels: Viewport Center -> Scene Hierarchy Left (full height) -> Toolbar Top of Viewport
+        // Dock panels: Viewport Center -> Scene Hierarchy Left (full height) -> Toolbar Top of Viewport (no tab strip)
         uiLayer->AddPanel(
             "Viewport",
             m_ViewportSlotRoots[0],
@@ -3507,7 +3595,8 @@ namespace Nox
                 m_ToolBar,
                 UI::UIDockDropZone::Top,
                 "Viewport",
-                0.065f
+                0.038f,
+                UI::UIDockNodeFlags::NoTabBar | UI::UIDockNodeFlags::NoDockingOver
             );
         }
 
@@ -3532,7 +3621,7 @@ namespace Nox
                 ss << layoutFile.rdbuf();
                 const std::string saved = ss.str();
                 if ((m_ShowSceneHierarchy && saved.find("Scene Hierarchy") == std::string::npos) ||
-                    (m_ShowToolBar && saved.find("Toolbar") == std::string::npos))
+                    (m_ShowToolBar && (saved.find("Toolbar") == std::string::npos || saved.find("flags: 6") == std::string::npos)))
                     shouldLoad = false;
             }
             if (shouldLoad)
@@ -3693,7 +3782,8 @@ namespace Nox
                     if (const auto& dock = uiLayer->GetDockSpaceRef())
                     {
                         if (m_ShowToolBar)
-                            dock->AddPanel("Toolbar", m_ToolBar, UI::UIDockDropZone::Top, "Viewport", 0.065f);
+                            dock->AddPanel("Toolbar", m_ToolBar, UI::UIDockDropZone::Top, "Viewport", 0.038f,
+                                           UI::UIDockNodeFlags::NoTabBar | UI::UIDockNodeFlags::NoDockingOver);
                         else
                             dock->RemovePanel("Toolbar");
                     }

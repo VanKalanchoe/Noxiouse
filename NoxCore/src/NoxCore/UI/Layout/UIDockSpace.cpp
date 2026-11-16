@@ -111,9 +111,10 @@ namespace Nox::UI
             const std::string title = rawPanel->GetTabTitle(tabIdx);
             Ref<UIElement> content = rawPanel->GetTabContent(tabIdx);
             const UIRect panelBounds = rawPanel->GetBounds();
+            const float minH = panelBounds.Height() < 80.0f ? 68.0f : 220.0f;
             UIVec2 floatSize{
                 std::clamp(panelBounds.Width(), 300.0f, 680.0f),
-                std::clamp(panelBounds.Height(), 220.0f, 520.0f)
+                std::clamp(panelBounds.Height(), minH, 520.0f)
             };
 
             rawPanel->RemoveTab(tabIdx);
@@ -265,17 +266,25 @@ namespace Nox::UI
         float ratio,
         UIDockNodeFlags flags)
     {
+        if (flags != UIDockNodeFlags::None)
+            m_PanelFlags[title] = flags;
         Ref<UIDockNode> target;
         if (!targetTitle.empty())
             target = FindNodeByPanelTitle(targetTitle);
         if (!target)
             target = m_RootNode;
         Ref<UIDockNode> node = DockPanel(title, content, zone, target, ratio);
-        if (node && flags != UIDockNodeFlags::None)
+        const UIDockNodeFlags effectiveFlags = (flags != UIDockNodeFlags::None)
+            ? flags
+            : (m_PanelFlags.contains(title) ? m_PanelFlags.at(title) : UIDockNodeFlags::None);
+        if (node && effectiveFlags != UIDockNodeFlags::None)
         {
-            node->Flags = node->Flags | flags;
+            node->Flags = node->Flags | effectiveFlags;
             if (HasFlag(node->Flags, UIDockNodeFlags::NoTabBar) && node->TabPanel)
+            {
                 node->TabPanel->SetTabBarVisible(false);
+                node->TabPanel->GetContentHost()->Padding = UIThickness::All(0.0f);
+            }
         }
         return node;
     }
@@ -291,11 +300,25 @@ namespace Nox::UI
         if (content)
             content->Visible = true;
 
+        const UIDockNodeFlags knownFlags = m_PanelFlags.contains(title) ? m_PanelFlags.at(title) : UIDockNodeFlags::None;
+        auto applyLeafFlags = [knownFlags](const Ref<UIDockNode>& leaf)
+        {
+            if (!leaf || knownFlags == UIDockNodeFlags::None)
+                return;
+            leaf->Flags = leaf->Flags | knownFlags;
+            if (HasFlag(leaf->Flags, UIDockNodeFlags::NoTabBar) && leaf->TabPanel)
+            {
+                leaf->TabPanel->SetTabBarVisible(false);
+                leaf->TabPanel->GetContentHost()->Padding = UIThickness::All(0.0f);
+            }
+        };
+
         if (!m_RootNode)
         {
             Ref<UIDockNode> root(new UIDockNode());
             root->TabPanel = CreateLeafTabPanel();
             root->TabPanel->AddTab(title, content);
+            applyLeafFlags(root);
             m_RootNode = root;
             return root;
         }
@@ -307,12 +330,13 @@ namespace Nox::UI
             Ref<UIDockNode> newLeaf(new UIDockNode());
             newLeaf->TabPanel = CreateLeafTabPanel();
             newLeaf->TabPanel->AddTab(title, content);
+            applyLeafFlags(newLeaf);
 
             Ref<UIDockNode> newRoot(new UIDockNode());
             const bool horizontal = (zone == UIDockDropZone::OuterLeft || zone == UIDockDropZone::OuterRight);
             const bool newIsFirst = (zone == UIDockDropZone::OuterLeft || zone == UIDockDropZone::OuterTop);
             newRoot->SplitDir = horizontal ? UIDockSplitDir::Horizontal : UIDockSplitDir::Vertical;
-            newRoot->SplitRatio = std::clamp(newIsFirst ? ratio : (1.0f - ratio), 0.1f, 0.9f);
+            newRoot->SplitRatio = std::clamp(newIsFirst ? ratio : (1.0f - ratio), 0.025f, 0.975f);
             newRoot->First = newIsFirst ? newLeaf : m_RootNode;
             newRoot->Second = newIsFirst ? m_RootNode : newLeaf;
             m_RootNode = newRoot;
@@ -331,6 +355,7 @@ namespace Nox::UI
                     ? target->TabPanel->InsertTab(insertTabIndex, title, content)
                     : target->TabPanel->AddTab(title, content);
                 target->TabPanel->SetActiveTab(idx);
+                applyLeafFlags(target);
             }
             return target;
         }
@@ -348,13 +373,14 @@ namespace Nox::UI
         Ref<UIDockNode> newLeaf(new UIDockNode());
         newLeaf->TabPanel = CreateLeafTabPanel();
         newLeaf->TabPanel->AddTab(title, content);
+        applyLeafFlags(newLeaf);
 
         const bool horizontal = (zone == UIDockDropZone::Left || zone == UIDockDropZone::Right);
         const bool newIsFirst = (zone == UIDockDropZone::Left || zone == UIDockDropZone::Top);
 
         target->TabPanel = nullptr;
         target->SplitDir = horizontal ? UIDockSplitDir::Horizontal : UIDockSplitDir::Vertical;
-        target->SplitRatio = std::clamp(newIsFirst ? ratio : (1.0f - ratio), 0.03f, 0.97f);
+        target->SplitRatio = std::clamp(newIsFirst ? ratio : (1.0f - ratio), 0.025f, 0.975f);
         target->First = newIsFirst ? newLeaf : existingCopy;
         target->Second = newIsFirst ? existingCopy : newLeaf;
         return newLeaf;
@@ -433,6 +459,23 @@ namespace Nox::UI
             }
         }
         return removed;
+    }
+
+    bool UIDockSpace::BeginPanelDrag(const std::string& title, UIVec2 pointerPos)
+    {
+        Ref<UIDockNode> node = FindNodeByPanelTitle(title);
+        if (!node || !node->TabPanel || HasFlag(node->Flags, UIDockNodeFlags::NoUndocking))
+            return false;
+        for (size_t i = 0; i < node->TabPanel->GetTabCount(); ++i)
+        {
+            if (node->TabPanel->GetTabTitle(i) == title)
+            {
+                if (node->TabPanel->OnTabDragOut)
+                    node->TabPanel->OnTabDragOut(i, pointerPos);
+                return true;
+            }
+        }
+        return false;
     }
 
     Ref<UIDockNode> UIDockSpace::FindNodeByTitleRecursive(const Ref<UIDockNode>& node, const std::string& title) const
@@ -1016,6 +1059,8 @@ namespace Nox::UI
                                 consumed[title] = true;
                                 leaf->TabPanel->AddTab(title, it->second.Content);
                                 leaf->Flags = leaf->Flags | it->second.Flags;
+                                if (auto pit = m_PanelFlags.find(title); pit != m_PanelFlags.end())
+                                    leaf->Flags = leaf->Flags | pit->second;
                             }
                         }
                     }
@@ -1024,7 +1069,10 @@ namespace Nox::UI
                         return nullptr;
 
                     if (HasFlag(leaf->Flags, UIDockNodeFlags::NoTabBar))
+                    {
                         leaf->TabPanel->SetTabBarVisible(false);
+                        leaf->TabPanel->GetContentHost()->Padding = UIThickness::All(0.0f);
+                    }
 
                     const size_t activeTab = yaml["active_tab"].as<size_t>(0);
                     leaf->TabPanel->SetActiveTab(std::min(activeTab, leaf->TabPanel->GetTabCount() - 1));
@@ -1043,7 +1091,7 @@ namespace Nox::UI
                     Ref<UIDockNode> split(new UIDockNode());
                     const std::string dir = yaml["dir"].as<std::string>("horizontal");
                     split->SplitDir = (dir == "vertical") ? UIDockSplitDir::Vertical : UIDockSplitDir::Horizontal;
-                    split->SplitRatio = std::clamp(yaml["ratio"].as<float>(0.5f), 0.03f, 0.97f);
+                    split->SplitRatio = std::clamp(yaml["ratio"].as<float>(0.5f), 0.025f, 0.975f);
                     split->First = first;
                     split->Second = second;
                     return split;
