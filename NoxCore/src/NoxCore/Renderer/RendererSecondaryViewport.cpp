@@ -23,6 +23,11 @@ namespace Nox
         return m_device->createCommandAllocator(NRI::CommandBufferReset::PerCommandBuffer, NRI::QueueType::Graphics);
     }
 
+    std::unique_ptr<UI::UIUploadBuffers> Renderer::CreateUIUploadBuffers()
+    {
+        return m_uiRenderer ? m_uiRenderer->CreateUploadBuffers() : nullptr;
+    }
+
     void Renderer::WaitDeviceIdle()
     {
         if (m_device)
@@ -33,6 +38,7 @@ namespace Nox
         NRI::Swapchain& swapchain,
         NRI::CommandAllocator& /*allocator*/,
         NRI::CommandBuffer& cmd,
+        UI::UIUploadBuffers& uploads,
         const UI::UIDrawList& drawList,
         const glm::vec2& viewportSize,
         const glm::vec4& clearColor)
@@ -49,7 +55,11 @@ namespace Nox
         if (swapchain.acquireNextImage(slot, imageIndex) == NRI::FrameResult::ResizeRequired)
             return false;
 
-        const UI::UIBatch batch = m_uiRenderer->UploadDrawList(drawList, slot);
+        // The window's own buffers: acquireNextImage just waited for this swapchain's previous submission in `slot`, the
+        // last one that read the slot's buffers, so they are written from the start. (The main window's buffers are only
+        // guarded by the main swapchain's fences, which do not cover this window's submissions.)
+        uploads.Reset();
+        const UI::UIBatch batch = m_uiRenderer->UploadDrawList(uploads, drawList, slot);
 
         cmd.begin(0);
         applyCommandBufferBaseline(cmd);
@@ -69,6 +79,7 @@ namespace Nox
         cmd.beginRendering(renderDesc);
         m_uiRenderer->RenderBatch(
             cmd,
+            uploads,
             batch,
             { static_cast<float>(extent.width), static_cast<float>(extent.height) },
             m_resourceHeap->getImageHeapIndexOffset(),

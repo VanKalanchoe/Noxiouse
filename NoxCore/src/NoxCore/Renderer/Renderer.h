@@ -225,12 +225,15 @@ namespace Nox
 
         std::unique_ptr<NRI::Swapchain> CreateWindowSwapchain(Nox::Window& window, uint32_t width, uint32_t height, bool vSync = true);
         std::unique_ptr<NRI::CommandAllocator> CreateUICommandAllocator();
+        // A floating panel window's own UI upload buffers (nullptr without the custom UI renderer).
+        std::unique_ptr<UI::UIUploadBuffers> CreateUIUploadBuffers();
         void WaitDeviceIdle();
         uint32_t GetCurrentFrameIndex() const { return frameIndex; }
         bool RenderSecondaryUIViewport(
             NRI::Swapchain& swapchain,
             NRI::CommandAllocator& allocator,
             NRI::CommandBuffer& cmd,
+            UI::UIUploadBuffers& uploads,
             const UI::UIDrawList& drawList,
             const glm::vec2& viewportSize,
             const glm::vec4& clearColor = { 0.08f, 0.09f, 0.11f, 1.0f }

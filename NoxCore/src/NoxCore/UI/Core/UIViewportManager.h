@@ -8,6 +8,7 @@
 
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
+#include "NoxCore/UI/Rendering/UIRenderer.h"
 
 union SDL_Event;
 
@@ -35,6 +36,7 @@ namespace Nox::UI
         std::unique_ptr<NRI::Swapchain> Swapchain;
         std::array<std::unique_ptr<NRI::CommandAllocator>, 2> Allocators;
         std::array<std::unique_ptr<NRI::CommandBuffer>, 2> CmdBuffers;
+        std::unique_ptr<UIUploadBuffers> Uploads; // this window's UI primitives, per frame slot (never shared with the main window)
 
         UIContext Context;
         UIDrawList DrawList;

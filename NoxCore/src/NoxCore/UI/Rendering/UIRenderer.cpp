@@ -12,7 +12,7 @@ namespace Nox::UI
     {
         NOX_CORE_INFO("Nox::UI::UIRenderer Start");
         CreatePipeline(false);
-        CreateBuffers();
+        m_MainBuffers = std::make_unique<UIUploadBuffers>(m_Device, kMaxPrimitives, kMaxClipRects);
 
         m_FileWatcher.watch(std::filesystem::path("assets/shaders/UI/UIPrimitives.slang"),
             [this](const std::filesystem::path&) { m_ReloadShader.store(true); });
@@ -25,8 +25,7 @@ namespace Nox::UI
 
     void UIRenderer::BeginFrame()
     {
-        m_PrimWriteOffset = 0;
-        m_ClipWriteOffset = 0;
+        m_MainBuffers->Reset();
         m_MainBatch = {};
 
         if (m_ReloadShader.exchange(false))
@@ -68,38 +67,47 @@ namespace Nox::UI
             m_Pipeline = std::move(pipeline);
     }
 
-    void UIRenderer::CreateBuffers()
+    UIUploadBuffers::UIUploadBuffers(NRI::Device& device, size_t maxPrimitives, size_t maxClipRects)
+        : m_MaxPrimitives(maxPrimitives), m_MaxClipRects(maxClipRects)
     {
-        const uint64_t primBytes = kMaxPrimitives * sizeof(shaderio::UIPrimitive);
-        const uint64_t clipBytes = kMaxClipRects * sizeof(shaderio::UIClipRect);
+        const uint64_t primBytes = maxPrimitives * sizeof(shaderio::UIPrimitive);
+        const uint64_t clipBytes = maxClipRects * sizeof(shaderio::UIClipRect);
 
-        m_PrimitiveBuffers.reserve(kMaxFramesInFlight);
-        m_PrimitiveBuffersMapped.reserve(kMaxFramesInFlight);
-        m_ClipBuffers.reserve(kMaxFramesInFlight);
-        m_ClipBuffersMapped.reserve(kMaxFramesInFlight);
+        m_PrimitiveBuffers.reserve(kSlots);
+        m_PrimitiveBuffersMapped.reserve(kSlots);
+        m_ClipBuffers.reserve(kSlots);
+        m_ClipBuffersMapped.reserve(kSlots);
 
-        for (uint32_t i = 0; i < kMaxFramesInFlight; ++i)
+        for (uint32_t i = 0; i < kSlots; ++i)
         {
-            auto primBuf = m_Device.createBuffer(NRI::BufferDesc{ .size = primBytes, .usage = NRI::BufferUsage::Storage });
+            auto primBuf = device.createBuffer(NRI::BufferDesc{ .size = primBytes, .usage = NRI::BufferUsage::Storage });
             void* primMapped = primBuf->map(0, primBytes);
             m_PrimitiveBuffers.emplace_back(std::move(primBuf));
             m_PrimitiveBuffersMapped.emplace_back(primMapped);
 
-            auto clipBuf = m_Device.createBuffer(NRI::BufferDesc{ .size = clipBytes, .usage = NRI::BufferUsage::Storage });
+            auto clipBuf = device.createBuffer(NRI::BufferDesc{ .size = clipBytes, .usage = NRI::BufferUsage::Storage });
             void* clipMapped = clipBuf->map(0, clipBytes);
             m_ClipBuffers.emplace_back(std::move(clipBuf));
             m_ClipBuffersMapped.emplace_back(clipMapped);
         }
     }
 
-    UIBatch UIRenderer::UploadDrawList(const UIDrawList& drawList, uint32_t frameIndex)
+    UIUploadBuffers::~UIUploadBuffers() = default;
+
+    void UIUploadBuffers::Reset()
+    {
+        m_PrimWriteOffset = 0;
+        m_ClipWriteOffset = 0;
+    }
+
+    UIBatch UIUploadBuffers::Upload(const UIDrawList& drawList, uint32_t slot)
     {
         const auto& prims = drawList.GetPrimitives();
         const auto& clips = drawList.GetClipRects();
 
-        const uint32_t slot = frameIndex % kMaxFramesInFlight;
-        const size_t availPrims = kMaxPrimitives > m_PrimWriteOffset ? (kMaxPrimitives - m_PrimWriteOffset) : 0;
-        const size_t availClips = kMaxClipRects > m_ClipWriteOffset ? (kMaxClipRects - m_ClipWriteOffset) : 0;
+        slot %= kSlots;
+        const size_t availPrims = m_MaxPrimitives > m_PrimWriteOffset ? (m_MaxPrimitives - m_PrimWriteOffset) : 0;
+        const size_t availClips = m_MaxClipRects > m_ClipWriteOffset ? (m_MaxClipRects - m_ClipWriteOffset) : 0;
         const size_t primCount = std::min(prims.size(), availPrims);
         const size_t clipCount = std::min(clips.size(), availClips);
 
@@ -125,12 +133,33 @@ namespace Nox::UI
         return batch;
     }
 
-    void UIRenderer::RenderBatch(NRI::CommandBuffer& cmd, const UIBatch& batch, const glm::vec2& viewportSize, uint32_t imageHeapOffset, uint32_t frameIndex)
+    uint64_t UIUploadBuffers::GetPrimitiveAddress(uint32_t slot, uint32_t offset) const
+    {
+        return m_PrimitiveBuffers[slot % kSlots]->getDeviceAddress() + static_cast<uint64_t>(offset) * sizeof(shaderio::UIPrimitive);
+    }
+
+    uint64_t UIUploadBuffers::GetClipRectAddress(uint32_t slot, uint32_t offset) const
+    {
+        return m_ClipBuffers[slot % kSlots]->getDeviceAddress() + static_cast<uint64_t>(offset) * sizeof(shaderio::UIClipRect);
+    }
+
+    std::unique_ptr<UIUploadBuffers> UIRenderer::CreateUploadBuffers(size_t maxPrimitives, size_t maxClipRects) const
+    {
+        return std::make_unique<UIUploadBuffers>(m_Device, maxPrimitives, maxClipRects);
+    }
+
+    UIBatch UIRenderer::UploadDrawList(UIUploadBuffers& buffers, const UIDrawList& drawList, uint32_t frameIndex)
+    {
+        return buffers.Upload(drawList, frameIndex % UIUploadBuffers::kSlots);
+    }
+
+    void UIRenderer::RenderBatch(NRI::CommandBuffer& cmd, const UIUploadBuffers& buffers, const UIBatch& batch, const glm::vec2& viewportSize,
+                                 uint32_t imageHeapOffset, uint32_t frameIndex)
     {
         if (!m_Pipeline || batch.PrimCount == 0)
             return;
 
-        const uint32_t slot = frameIndex % kMaxFramesInFlight;
+        const uint32_t slot = frameIndex % UIUploadBuffers::kSlots;
         const float w = std::max(viewportSize.x, 1.0f);
         const float h = std::max(viewportSize.y, 1.0f);
 
@@ -176,8 +205,8 @@ namespace Nox::UI
         cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_Pipeline);
 
         shaderio::UIPushConstants pc{};
-        pc.primitiveReference = m_PrimitiveBuffers[slot]->getDeviceAddress() + static_cast<uint64_t>(batch.PrimOffset) * sizeof(shaderio::UIPrimitive);
-        pc.clipRectReference = m_ClipBuffers[slot]->getDeviceAddress() + static_cast<uint64_t>(batch.ClipOffset) * sizeof(shaderio::UIClipRect);
+        pc.primitiveReference = buffers.GetPrimitiveAddress(slot, batch.PrimOffset);
+        pc.clipRectReference = buffers.GetClipRectAddress(slot, batch.ClipOffset);
         pc.screenSize = glm::vec2(w, h);
         pc.imageHeapIndexOffset = imageHeapOffset;
         pc.primitiveCount = batch.PrimCount;
@@ -188,11 +217,11 @@ namespace Nox::UI
 
     void UIRenderer::Upload(uint32_t frameIndex)
     {
-        m_MainBatch = UploadDrawList(m_DrawList, frameIndex);
+        m_MainBatch = UploadDrawList(*m_MainBuffers, m_DrawList, frameIndex);
     }
 
     void UIRenderer::Render(NRI::CommandBuffer& cmd, const glm::vec2& viewportSize, uint32_t imageHeapOffset, uint32_t frameIndex)
     {
-        RenderBatch(cmd, m_MainBatch, viewportSize, imageHeapOffset, frameIndex);
+        RenderBatch(cmd, *m_MainBuffers, m_MainBatch, viewportSize, imageHeapOffset, frameIndex);
     }
 }

@@ -308,6 +308,7 @@ namespace Nox::UI
             if (vp->Allocators[i])
                 vp->CmdBuffers[i] = vp->Allocators[i]->allocateCommandBuffer(1);
         }
+        vp->Uploads = m_Renderer.CreateUIUploadBuffers();
 
         if (m_MainContext.GetTheme())
             vp->Context.SetTheme(m_MainContext.GetTheme());
@@ -532,7 +533,7 @@ namespace Nox::UI
                 vp->NeedsSwapchainResize = false;
             }
 
-            if (!vp->Swapchain || !vp->Allocators[slot] || !vp->CmdBuffers[slot])
+            if (!vp->Swapchain || !vp->Allocators[slot] || !vp->CmdBuffers[slot] || !vp->Uploads)
                 continue;
 
             vp->Context.UpdateAndRender(vp->DrawList, { static_cast<float>(uW), static_cast<float>(uH) }, dt);
@@ -540,6 +541,7 @@ namespace Nox::UI
                 *vp->Swapchain,
                 *vp->Allocators[slot],
                 *vp->CmdBuffers[slot],
+                *vp->Uploads,
                 vp->DrawList,
                 { static_cast<float>(uW), static_cast<float>(uH) }))
             {
