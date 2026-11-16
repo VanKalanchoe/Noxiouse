@@ -75,6 +75,37 @@ namespace Nox::UI
 
     void UIContext::SetOverlay(const Ref<UIElement>& overlay)
     {
+        if (m_Overlay == overlay)
+            return;
+
+        // What the old overlay still holds of the input leaves with it, while it is still alive: a field in a popup applies
+        // what was typed (its focus ends), and no element of a closed popup is left focused, hovered or holding the pointer.
+        Ref<UIElement> old = m_Overlay;
+        if (old)
+        {
+            auto inside = [&old](const Ref<UIElement>& element)
+            {
+                for (const UIElement* cur = element.get(); cur != nullptr; cur = cur->GetParent())
+                {
+                    if (cur == old.get())
+                        return true;
+                }
+                return false;
+            };
+            if (m_Focused && inside(m_Focused))
+                SetFocus(nullptr);
+            if (m_Hovered && inside(m_Hovered))
+            {
+                m_Hovered->SetStateFlag(UIState::Hovered, false);
+                m_Hovered = nullptr;
+            }
+            if (m_Captured && inside(m_Captured))
+            {
+                m_Captured->SetStateFlag(UIState::Pressed, false);
+                m_Captured = nullptr;
+                m_DragPending = false;
+            }
+        }
         m_Overlay = overlay;
     }
 
@@ -92,17 +123,52 @@ namespace Nox::UI
             m_Toasts.erase(m_Toasts.begin());
     }
 
+    bool UIContext::IsInTree(const UIElement* element) const
+    {
+        for (const UIElement* cur = element; cur != nullptr; cur = cur->GetParent())
+        {
+            if (cur == m_Root.get() || cur == m_Overlay.get())
+                return true;
+        }
+        return false;
+    }
+
+    void UIContext::DropDetachedInput()
+    {
+        if (m_Focused && !IsInTree(m_Focused.get()))
+        {
+            m_Focused->SetStateFlag(UIState::Focused, false);
+            m_Focused = nullptr;
+        }
+        if (m_Captured && !IsInTree(m_Captured.get()))
+        {
+            m_Captured->SetStateFlag(UIState::Pressed, false);
+            m_Captured = nullptr;
+            m_DragPending = false;
+        }
+        if (m_Hovered && !IsInTree(m_Hovered.get()))
+        {
+            m_Hovered->SetStateFlag(UIState::Hovered, false);
+            m_Hovered = nullptr;
+        }
+    }
+
     void UIContext::SetFocus(UIElement* element)
     {
         Ref<UIElement> prev = m_Focused;
         if (prev.get() == element)
             return;
         if (prev)
+        {
             prev->SetStateFlag(UIState::Focused, false);
+            if (IsInTree(prev.get()))
+                prev->OnFocusChanged(false);
+        }
         if (element && element->Focusable && element->IsEnabled())
         {
             element->SetStateFlag(UIState::Focused, true);
             m_Focused = Ref<UIElement>(element);
+            element->OnFocusChanged(true);
         }
         else
         {
@@ -235,7 +301,7 @@ namespace Nox::UI
     {
         m_LastMousePos = pos;
         if (m_Overlay && !m_Overlay->HitTest(pos))
-            m_Overlay = nullptr;
+            SetOverlay(nullptr);
 
         UpdateHover(pos);
 
@@ -335,6 +401,16 @@ namespace Nox::UI
     {
         if (keyCode == SDL_SCANCODE_ESCAPE && m_Overlay)
         {
+            // A field being typed in inside the popup takes Escape first (it puts its old value back); else the popup closes.
+            if (Ref<UIElement> focused = m_Focused)
+            {
+                bool inOverlay = false;
+                for (const UIElement* cur = focused.get(); cur != nullptr; cur = cur->GetParent())
+                    inOverlay = inOverlay || cur == m_Overlay.get();
+                UIKeyEvent ev{ keyCode, mods, repeat, false };
+                if (inOverlay && focused->OnKeyDown(ev))
+                    return true;
+            }
             ClearOverlay();
             return true;
         }
@@ -410,6 +486,7 @@ namespace Nox::UI
     void UIContext::OnEvent(Event& event)
     {
         ScopedCurrentContext currentGuard(s_Current, this);
+        DropDetachedInput();
         EventDispatcher dispatcher(event);
         dispatcher.Dispatch<MouseMovedEvent>([this](MouseMovedEvent& e)
         {
@@ -444,6 +521,7 @@ namespace Nox::UI
             m_Theme->PollHotReload();
 
         drawList.Clear(viewportSize);
+        m_ViewportSize = viewportSize;
         if (!m_Root || !m_Theme)
             return;
 

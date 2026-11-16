@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "NoxCore/Renderer/Font.h"
+#include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 
@@ -89,6 +90,14 @@ namespace Nox::UI
         if (!b.Contains(e.Position))
             return false;
 
+        SyncScrollBar();
+        if (m_ScrollBar.OnPointerDown(e.Position, m_ScrollOffset))
+        {
+            if (UIContext* ctx = UIContext::GetCurrent())
+                ctx->CancelPendingDrag();
+            return true;
+        }
+
         // Header click -> sort
         if (e.Position.y <= b.Min.y + HeaderHeight)
         {
@@ -128,10 +137,36 @@ namespace Nox::UI
         return true;
     }
 
-    bool UITableView::OnPointerMove(const UIPointerEvent& e)
+    void UITableView::SyncScrollBar()
     {
         const UIRect& b = GetBounds();
-        if (e.Position.y <= b.Min.y + HeaderHeight || !b.Contains(e.Position))
+        const UIRect body{ { b.Min.x, std::min(b.Max.y, b.Min.y + HeaderHeight) }, b.Max };
+        m_ScrollBar.SetGeometry(body, static_cast<float>(m_Rows.size()) * RowHeight, body.Height());
+    }
+
+    void UITableView::OnUpdate(float dt)
+    {
+        SyncScrollBar();
+        bool hovered = false;
+        if (const UIContext* ctx = UIContext::GetCurrent())
+            hovered = ctx->GetHovered() == this && m_ScrollBar.Contains(ctx->GetLastMousePos());
+        m_ScrollBar.Update(dt, hovered);
+    }
+
+    bool UITableView::OnPointerUp(const UIPointerEvent& e)
+    {
+        if (e.Button == 1 && m_ScrollBar.OnPointerUp())
+            return true;
+        return UIElement::OnPointerUp(e);
+    }
+
+    bool UITableView::OnPointerMove(const UIPointerEvent& e)
+    {
+        if (m_ScrollBar.OnPointerMove(e.Position, m_ScrollOffset))
+            return true;
+
+        const UIRect& b = GetBounds();
+        if (e.Position.y <= b.Min.y + HeaderHeight || !b.Contains(e.Position) || m_ScrollBar.Contains(e.Position))
         {
             m_HoveredRow = -1;
             return false;
@@ -154,6 +189,7 @@ namespace Nox::UI
         const float totalH = static_cast<float>(m_Rows.size()) * RowHeight;
         const float maxScroll = std::max(0.0f, totalH - bodyH);
         m_ScrollOffset = std::clamp(m_ScrollOffset - e.ScrollDelta.y * 36.0f, 0.0f, maxScroll);
+        m_ScrollBar.NotifyScrolled();
         return true;
     }
 
@@ -218,7 +254,8 @@ namespace Nox::UI
         const float maxScroll = std::max(0.0f, totalH - bodyH);
         m_ScrollOffset = std::clamp(m_ScrollOffset, 0.0f, maxScroll);
 
-        drawList.PushClipRect({ b.Min.x, bodyTop }, b.Max);
+        SyncScrollBar();
+        drawList.PushClipRect({ b.Min.x, bodyTop }, { b.Max.x - m_ScrollBar.GetReservedWidth(), b.Max.y });
 
         const int firstRow = std::max(0, static_cast<int>(m_ScrollOffset / RowHeight));
         const int lastRow = std::min(
@@ -260,19 +297,7 @@ namespace Nox::UI
             }
         }
 
-        // Scrollbar thumb
-        if (maxScroll > 0.0f && bodyH > 12.0f)
-        {
-            const float thumbH = std::max(20.0f, (bodyH / totalH) * bodyH);
-            const float thumbY = bodyTop + (m_ScrollOffset / maxScroll) * (bodyH - thumbH);
-            drawList.AddRoundedRect(
-                { b.Max.x - 6.0f, thumbY + 2.0f },
-                { b.Max.x - 2.0f, thumbY + thumbH - 2.0f },
-                borderCol,
-                glm::vec4(2.0f)
-            );
-        }
-
         drawList.PopClipRect();
+        m_ScrollBar.Paint(drawList, theme, m_ScrollOffset);
     }
 }

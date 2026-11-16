@@ -7,6 +7,13 @@
 
 namespace Nox::UI
 {
+    // A number field (Unreal's numeric entry box, Godot's spin slider): one widget to scrub and to type.
+    //  - Drag left / right on it: the value follows the pointer's movement (it never jumps to the pointer). Shift: ten times finer.
+    //  - Click without dragging: the text is edited, all of it selected -- type the exact value. Enter / Tab / a click elsewhere
+    //    apply it, Escape puts the old value back. A click in the text places the caret. "," is read as ".".
+    //  - Focused by Tab: typing a digit starts the edit, Enter opens it.
+    //  - ShowFill with Min < Max: the field is also the slider -- its background fills up to the value, and dragging across
+    //    its whole width goes through the whole range.
     class UIDragScalar : public UIElement
     {
     public:
@@ -14,19 +21,29 @@ namespace Nox::UI
                               std::function<void(float)> onChanged = {});
 
         float Value = 0.0f;
-        float Speed = 0.05f;
+        float Speed = 0.05f; // value per pixel dragged (fields without a fill bar)
         float Min = 0.0f;
-        float Max = 0.0f; // Min < Max enables clamping
+        float Max = 0.0f;    // Min < Max enables clamping
+        float Step = 0.0f;   // > 0: the value snaps to multiples of it (1 for whole numbers)
+        bool ShowFill = false;
+        float FontSize = 0.0f;                    // 0: the style's size
+        UIColor Stripe{ 0.0f, 0.0f, 0.0f, 0.0f }; // a thin coloured bar at the left edge (a colour's R / G / B fields)
         std::string Prefix;
         UIColor PrefixColor{ 0.24f, 0.56f, 0.96f, 1.0f };
         std::string Format = "{:.2f}";
         std::function<void(float)> OnChanged;
 
+        bool IsEditing() const { return m_Editing; }
+        // Being dragged or typed in: whoever mirrors a value into the field leaves it alone meanwhile.
+        bool IsInteracting() const { return m_Editing || m_Pressed; }
+
+        UICursorShape GetCursorShape(const UIVec2& pos) const override;
         bool OnPointerDown(const UIPointerEvent& e) override;
         bool OnPointerMove(const UIPointerEvent& e) override;
         bool OnPointerUp(const UIPointerEvent& e) override;
         bool OnKeyDown(const UIKeyEvent& e) override;
         bool OnTextInput(std::string_view text) override;
+        void OnFocusChanged(bool focused) override;
 
     protected:
         void OnUpdate(float dt) override;
@@ -35,14 +52,21 @@ namespace Nox::UI
 
     private:
         void BeginEdit();
-        void CommitEdit();
+        void CommitEdit(bool apply = true);
+        void SetValue(float next);
+        float TextLeft() const;
+        float TextSize() const;
+        bool HasRange() const { return Max > Min; }
 
-        bool m_Dragging = false;
+        bool m_Pressed = false;   // the left button went down on the field (not while editing)
+        bool m_Scrubbing = false; // ... and moved far enough: the value is being dragged
+        float m_PressX = 0.0f;
+        float m_ScrubValue = 0.0f; // the dragged value before clamping and snapping
+
         bool m_Editing = false;
         bool m_SelectAll = false;
         std::string m_EditText;
         size_t m_Cursor = 0;
         float m_BlinkTimer = 0.0f;
-        uint64_t m_LastClickTicks = 0;
     };
 }

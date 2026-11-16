@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "NoxCore/UI/Core/UIElement.h"
+#include "NoxCore/UI/Widgets/UIScrollBar.h"
 
 namespace Nox::UI
 {
@@ -80,6 +81,7 @@ namespace Nox::UI
         bool OnKeyDown(const UIKeyEvent& e) override;
 
     protected:
+        void OnUpdate(float dt) override;
         UIVec2 ComputeDesiredSize() override;
         void ArrangeChildren(const UIRect& contentRect) override;
         void OnPaint(UIDrawList& drawList, const UITheme& theme) override;
@@ -96,7 +98,6 @@ namespace Nox::UI
         int RowIndexAt(float y) const;
         int FindFlatIndex(uint64_t id) const;
         float TotalContentHeight() const;
-        void ScrollToPointerY(float y);
         void CommitRename();
         bool HitTestEyeButton(const FlatRow& row, const UIVec2& pos) const;
 
@@ -108,7 +109,7 @@ namespace Nox::UI
         int m_HoveredRow = -1;
         int m_HoveredEyeRow = -1;
         float m_ScrollY = 0.0f;
-        bool m_DraggingScrollbar = false;
+        UIScrollBar m_ScrollBar;
 
         uint64_t m_PendingSingleSelectId = 0;
         uint64_t m_LastClickId = 0;

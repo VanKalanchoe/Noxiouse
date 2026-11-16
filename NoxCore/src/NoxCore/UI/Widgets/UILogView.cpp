@@ -4,9 +4,11 @@
 #include <cctype>
 
 #include "NoxCore/Renderer/Font.h"
+#include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
+#include "NoxCore/UI/Widgets/UIScrollBar.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
 
 namespace Nox::UI
@@ -57,15 +59,59 @@ namespace Nox::UI
                 const float maxScroll = std::max(0.0f, totalH - viewH);
                 m_ScrollOffset = std::clamp(m_ScrollOffset - e.ScrollDelta.y * 36.0f, 0.0f, maxScroll);
                 m_PinToBottom = (m_ScrollOffset >= maxScroll - 2.0f);
+                m_ScrollBar.NotifyScrolled();
                 return true;
+            }
+
+            bool OnPointerDown(const UIPointerEvent& e) override
+            {
+                if (e.Button == 1)
+                {
+                    SyncScrollBar();
+                    if (m_ScrollBar.OnPointerDown(e.Position, m_ScrollOffset))
+                    {
+                        m_PinToBottom = (m_ScrollOffset >= m_ScrollBar.GetMaxScroll() - 2.0f);
+                        if (UIContext* ctx = UIContext::GetCurrent())
+                            ctx->CancelPendingDrag();
+                        return true;
+                    }
+                }
+                return UIElement::OnPointerDown(e);
+            }
+
+            bool OnPointerMove(const UIPointerEvent& e) override
+            {
+                if (m_ScrollBar.OnPointerMove(e.Position, m_ScrollOffset))
+                {
+                    m_PinToBottom = (m_ScrollOffset >= m_ScrollBar.GetMaxScroll() - 2.0f);
+                    return true;
+                }
+                return UIElement::OnPointerMove(e);
+            }
+
+            bool OnPointerUp(const UIPointerEvent& e) override
+            {
+                if (e.Button == 1 && m_ScrollBar.OnPointerUp())
+                    return true;
+                return UIElement::OnPointerUp(e);
             }
 
         protected:
             UIVec2 ComputeDesiredSize() override { return MinSize; }
 
+            void OnUpdate(float dt) override
+            {
+                SyncScrollBar();
+                bool hovered = false;
+                if (const UIContext* ctx = UIContext::GetCurrent())
+                    hovered = ctx->GetHovered() == this && m_ScrollBar.Contains(ctx->GetLastMousePos());
+                m_ScrollBar.Update(dt, hovered);
+            }
+
             void OnPaint(UIDrawList& drawList, const UITheme& theme) override
             {
                 UIElement::OnPaint(drawList, theme);
+                SyncScrollBar();
 
                 const UIRect& b = GetBounds();
                 const float viewH = std::max(0.0f, b.Height());
@@ -76,7 +122,8 @@ namespace Nox::UI
                 else
                     m_ScrollOffset = std::clamp(m_ScrollOffset, 0.0f, maxScroll);
 
-                drawList.PushClipRect(b.Min, b.Max);
+                // The rows stop at the scroll bar's lane.
+                drawList.PushClipRect(b.Min, { b.Max.x - m_ScrollBar.GetReservedWidth(), b.Max.y });
                 const Ref<Font> font = Font::GetDefault();
 
                 const int first = std::max(0, static_cast<int>(m_ScrollOffset / kRowHeight));
@@ -115,22 +162,18 @@ namespace Nox::UI
                     drawList.AddText(entry.Message, font, { b.Min.x + 8.0f + tagColW, y + 3.0f }, fontSize, textCol);
                 }
 
-                if (maxScroll > 0.0f && viewH > 12.0f)
-                {
-                    const float thumbH = std::max(20.0f, (viewH / totalH) * viewH);
-                    const float thumbY = b.Min.y + (m_ScrollOffset / maxScroll) * (viewH - thumbH);
-                    drawList.AddRoundedRect(
-                        { b.Max.x - 6.0f, thumbY + 2.0f },
-                        { b.Max.x - 2.0f, thumbY + thumbH - 2.0f },
-                        theme.GetToken("Border", { 0.35f, 0.40f, 0.52f, 0.8f }),
-                        glm::vec4(2.0f)
-                    );
-                }
-
                 drawList.PopClipRect();
+                m_ScrollBar.Paint(drawList, theme, m_ScrollOffset);
             }
 
         private:
+            void SyncScrollBar()
+            {
+                const UIRect& b = GetBounds();
+                m_ScrollBar.SetGeometry(b, static_cast<float>(m_Filtered.size()) * kRowHeight, std::max(0.0f, b.Height()));
+            }
+
+            UIScrollBar m_ScrollBar;
             static constexpr float kRowHeight = 20.0f;
             std::vector<UILogEntry> m_Filtered;
             float m_ScrollOffset = 0.0f;

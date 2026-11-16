@@ -17,6 +17,7 @@ namespace Nox
     namespace UI
     {
         class UIContext;
+        class UIDragScalar;
         class UIScrollView;
         class UIStackBox;
     }
@@ -83,7 +84,16 @@ namespace Nox
         std::function<void()> onReset,
         std::function<void()> onRemove);
 
-    // Two-column property row builder with live two-way sync callbacks.
+    // The small chevron that opens what is under a row (a material's properties under its slot), and the three dots that
+    // open a row's menu (onOpen gets the button's bounds, to anchor the menu).
+    Ref<UI::UIElement> CreateExpandToggle(bool expanded, std::function<void()> onToggle, const std::string& tooltip = {});
+    Ref<UI::UIElement> CreateMoreButton(std::function<void(const UI::UIRect&)> onOpen, const std::string& tooltip = "Options");
+
+    // A 0..1 (or min..max) value as one field: its fill bar is the slider (drag across it), a click types the exact value.
+    Ref<UI::UIDragScalar> CreateSliderField(float value, float minV, float maxV, std::function<void(float)> onChanged);
+
+    // Two-column property row builder with live two-way sync callbacks. The editors it makes keep copies of what they call
+    // (OnMutate), never a pointer to the builder: builders are locals of the function that fills a card.
     struct InspectorCardBuilder
     {
         Ref<UI::UIStackBox> Body;

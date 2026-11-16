@@ -738,11 +738,10 @@ namespace Nox
                              {
                                  const auto found = comp.MorphWeights.find(name);
                                  float weight = found != comp.MorphWeights.end() ? found->second : defaultWeight;
-                                 auto slider = UI::MakeUI<UI::UISlider>(weight, 0.0f, 1.0f, [entity, name](float v) mutable
+                                 auto slider = CreateSliderField(weight, 0.0f, 1.0f, [entity, name](float v) mutable
                                  {
                                      entity.GetComponent<MeshComponent>().MorphWeights[name] = v;
                                  });
-                                 slider->WidthMode = UI::UISizeMode::Fill;
                                  c.AddRow("Morph: " + name, slider);
                              }
                              if (!targets.empty() && !comp.MorphWeights.empty())
@@ -879,9 +878,30 @@ namespace Nox
                              if (overridden)
                                  matLabel += " *";
 
+                             // One row per slot:  [>] [ the material's name ] [Edit] [...]
+                             //   [>]    its properties right here, under the row (Godot's and Unity's way: the resource opens in
+                             //          place) -- for a quick change without leaving the entity;
+                             //   name   picks another material;
+                             //   Edit   the Material Editor panel (Unreal's way: the asset in its own editor) -- for real work on it;
+                             //   [...]  Make Unique, Reset to the mesh's material.
+                             Ref<Material> slotMaterial = validMat ? AssetManager::GetAsset<Material>(handle) : nullptr;
+                             const std::string expandKey = "MatInline_" + std::to_string(slot) + "_" + std::to_string(static_cast<uint64_t>(handle));
+                             const bool inlineOpen = slotMaterial && m_ExpandedCards.contains(expandKey) && m_ExpandedCards[expandKey];
+
                              auto slotRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
                              slotRow->WidthMode = UI::UISizeMode::Fill;
                              slotRow->VAlign = UI::UIAlignment::Center;
+
+                             if (slotMaterial)
+                             {
+                                 slotRow->AddChild(CreateExpandToggle(inlineOpen,
+                                     [this, expandKey, inlineOpen]()
+                                     {
+                                         m_ExpandedCards[expandKey] = !inlineOpen;
+                                         m_Dirty = true;
+                                     },
+                                     inlineOpen ? "Hide this material's properties" : "Show this material's properties here"));
+                             }
 
                              auto pickBtn = UI::Button(matLabel).Tooltip(overridden
                                  ? "Material overridden on this entity. Click to change."
@@ -889,9 +909,10 @@ namespace Nox
                              pickBtn->WidthMode = UI::UISizeMode::Fill;
                              pickBtn->FlexWeight = 1.0f;
                              pickBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                             pickBtn->TextElide = UI::UITextElide::Middle; // a long .nmat name keeps its start and its end
                              UI::UIButton* pickPtr = pickBtn.Get().get();
                              const char* emptyText = meshMaterials ? "Use Mesh Material" : "None";
-                             pickBtn->OnClick = [pickPtr, handle, overrideHandle, emptyText, slot, meshMaterials, setOverride]() mutable
+                             pickBtn->OnClick = [pickPtr, handle, overrideHandle, emptyText, slot, setOverride]() mutable
                              {
                                  UI::UIContext* curCtx = UI::UIContext::GetCurrent();
                                  if (!curCtx)
@@ -904,89 +925,89 @@ namespace Nox
                                      CollectAssetPickerOptions({ AssetType::Material }),
                                      [slot, setOverride](AssetHandle picked) mutable { setOverride(slot, picked); },
                                      false);
-                                 (void)meshMaterials;
                              };
                              slotRow->AddChild(pickBtn);
 
                              if (validMat && m_OnOpenAsset)
                              {
                                  auto editBtn = UI::Button("Edit", [this, handle]() { m_OnOpenAsset(handle); })
-                                     .Tooltip("Open in Material Editor");
+                                     .Tooltip("Open in the Material Editor");
                                  editBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
                                  slotRow->AddChild(editBtn);
                              }
 
-                             if (overridden || (!meshMaterials && overrideHandle != 0))
+                             // An independent copy of the material's asset, assigned to this slot.
+                             std::function<void()> makeUnique;
+                             if (slotMaterial)
                              {
-                                 auto clrBtn = UI::Button("x", [slot, setOverride]() mutable { setOverride(slot, AssetHandle(0)); })
-                                     .Tooltip(meshMaterials ? "Reset to mesh material" : "Clear material");
-                                 clrBtn->WidthMode = UI::UISizeMode::Fixed;
-                                 clrBtn->HeightMode = UI::UISizeMode::Fixed;
-                                 clrBtn->FixedSize = { 24.0f, 24.0f };
-                                 clrBtn->Padding = UI::UIThickness::All(0.0f);
-                                 slotRow->AddChild(clrBtn);
+                                 makeUnique = [handle, mat = slotMaterial, slot, setOverride]() mutable
+                                 {
+                                     if (!Project::GetActive() || !Project::GetActive()->GetEditorAssetManager())
+                                         return;
+                                     auto mgr = Project::GetActive()->GetEditorAssetManager();
+                                     const auto& metadata = mgr->GetMetadata(handle);
+                                     std::filesystem::path uniquePath = metadata.FilePath.parent_path() /
+                                         (metadata.FilePath.stem().string() + "_Instance_" +
+                                          std::to_string(static_cast<uint64_t>(AssetHandle())) + ".nmat");
+                                     if (MaterialSerializer::Serialize(Project::GetActiveAssetDirectory() / uniquePath, mat->GetData()))
+                                     {
+                                         mgr->ImportAsset(uniquePath, uniquePath, AssetType::Material);
+                                         for (const auto& [uniqueHandle, uniqueMeta] : mgr->GetAssetRegistry())
+                                         {
+                                             if (uniqueMeta.Type == AssetType::Material && uniqueMeta.FilePath == uniquePath)
+                                             {
+                                                 setOverride(slot, uniqueHandle);
+                                                 break;
+                                             }
+                                         }
+                                     }
+                                 };
+                             }
+                             const bool canReset = overridden || (!meshMaterials && overrideHandle != 0);
+                             const bool hasMeshMaterials = meshMaterials != nullptr;
+                             if (makeUnique || canReset)
+                             {
+                                 slotRow->AddChild(CreateMoreButton(
+                                     [makeUnique, canReset, hasMeshMaterials, slot, setOverride](const UI::UIRect& bounds) mutable
+                                     {
+                                         UI::UIContext* curCtx = UI::UIContext::GetCurrent();
+                                         if (!curCtx)
+                                             return;
+                                         std::vector<UI::UIMenuItem> items;
+                                         if (makeUnique)
+                                         {
+                                             UI::UIMenuItem item;
+                                             item.Label = "Make Unique";
+                                             item.Tooltip = "Create an independent copy of this material asset and assign it to this slot";
+                                             item.OnTrigger = makeUnique;
+                                             items.push_back(std::move(item));
+                                         }
+                                         if (canReset)
+                                         {
+                                             UI::UIMenuItem item;
+                                             item.Label = hasMeshMaterials ? "Reset to Mesh Material" : "Clear Material";
+                                             item.OnTrigger = [slot, setOverride]() mutable { setOverride(slot, AssetHandle(0)); };
+                                             items.push_back(std::move(item));
+                                         }
+                                         UI::UIMenuPopup::ShowPopupMenu(*curCtx, bounds, std::move(items), true);
+                                     },
+                                     "Material options: Make Unique, Reset"));
                              }
 
                              c.AddRow("Slot " + std::to_string(slot), slotRow);
 
-                             if (validMat)
+                             if (inlineOpen)
                              {
-                                 if (Ref<Material> mat = AssetManager::GetAsset<Material>(handle))
-                                 {
-                                     auto actionRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-                                     actionRow->WidthMode = UI::UISizeMode::Fill;
-
-                                     auto uniqueBtn = UI::Button("Make Unique", [handle, mat, slot, setOverride]() mutable
-                                     {
-                                         if (!Project::GetActive() || !Project::GetActive()->GetEditorAssetManager())
-                                             return;
-                                         auto mgr = Project::GetActive()->GetEditorAssetManager();
-                                         const auto& metadata = mgr->GetMetadata(handle);
-                                         std::filesystem::path uniquePath = metadata.FilePath.parent_path() /
-                                             (metadata.FilePath.stem().string() + "_Instance_" +
-                                              std::to_string(static_cast<uint64_t>(AssetHandle())) + ".nmat");
-                                         if (MaterialSerializer::Serialize(Project::GetActiveAssetDirectory() / uniquePath, mat->GetData()))
-                                         {
-                                             mgr->ImportAsset(uniquePath, uniquePath, AssetType::Material);
-                                             for (const auto& [uniqueHandle, uniqueMeta] : mgr->GetAssetRegistry())
-                                             {
-                                                 if (uniqueMeta.Type == AssetType::Material && uniqueMeta.FilePath == uniquePath)
-                                                 {
-                                                     setOverride(slot, uniqueHandle);
-                                                     break;
-                                                 }
-                                             }
-                                         }
-                                     }).Tooltip("Create an independent copy of this material asset and assign it to this slot");
-                                     uniqueBtn->Padding = UI::UIThickness::Symmetric(8.0f, 3.0f);
-                                     actionRow->AddChild(uniqueBtn);
-
-                                     const std::string qeKey = "MatQuickEdit_" + std::to_string(slot) + "_" + std::to_string(static_cast<uint64_t>(handle));
-                                     const bool qeOpen = m_ExpandedCards.contains(qeKey) ? m_ExpandedCards[qeKey] : false;
-                                     auto qeBtn = UI::Button(qeOpen ? "Hide Quick Edit" : "Quick Edit", [this, qeKey]()
-                                     {
-                                         m_ExpandedCards[qeKey] = !(m_ExpandedCards.contains(qeKey) && m_ExpandedCards[qeKey]);
-                                         m_Dirty = true;
-                                     });
-                                     qeBtn->Padding = UI::UIThickness::Symmetric(8.0f, 3.0f);
-                                     if (qeOpen)
-                                         qeBtn->StyleVariant = "primary";
-                                     actionRow->AddChild(qeBtn);
-                                     c.AddRow("", actionRow);
-
-                                     if (qeOpen)
-                                     {
-                                         auto qeCard = CreateCollapsibleCard(
-                                             "Quick Edit: " + AssetDisplayName(handle),
-                                             true,
-                                             [this, qeKey](bool open) { m_ExpandedCards[qeKey] = open; m_Dirty = true; },
-                                             false, {}, {});
-                                         InspectorCardBuilder qeb{ qeCard.Body, c.Syncs, c.OnMutate, c.Context };
-                                         PopulateMaterialPropertiesUI(handle, mat->GetData(), qeb, m_ExpandedCards,
-                                             { m_OnOpenAsset, [this]() { m_Dirty = true; } });
-                                         c.Body->AddChild(qeCard.Card);
-                                     }
-                                 }
+                                 // The material's properties, set in a little so they read as belonging to the slot above.
+                                 auto inlineBody = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
+                                 inlineBody->WidthMode = UI::UISizeMode::Fill;
+                                 inlineBody->StyleClass = "Card";
+                                 inlineBody->DrawBackground = true;
+                                 inlineBody->Padding = UI::UIThickness::All(8.0f);
+                                 InspectorCardBuilder inlineBuilder{ inlineBody, c.Syncs, c.OnMutate, c.Context };
+                                 PopulateMaterialPropertiesUI(handle, slotMaterial->GetData(), inlineBuilder, m_ExpandedCards,
+                                     { m_OnOpenAsset, [this]() { m_Dirty = true; } });
+                                 c.Body->AddChild(inlineBody);
                              }
                          }
 
@@ -1888,7 +1909,7 @@ namespace Nox
                          c.Syncs.push_back([speedDrag, entity]() mutable
                          {
                              if (entity && entity.HasComponent<AnimatorComponent>() &&
-                                 !UI::HasState(speedDrag->GetState(), UI::UIState::Focused | UI::UIState::Pressed))
+                                 !speedDrag->IsInteracting())
                                  speedDrag->Value = entity.GetComponent<AnimatorComponent>().Animator.GetPlaybackSpeed();
                          });
 

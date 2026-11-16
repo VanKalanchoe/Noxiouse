@@ -187,6 +187,9 @@ namespace Nox::UI
 
     void UIDropdown::OpenPopup()
     {
+        // The context of the click (the panel may have been built outside of any, or moved to a floating window since).
+        if (UIContext* current = UIContext::GetCurrent())
+            m_Context = current;
         if (!m_Context || m_Items.empty())
             return;
 

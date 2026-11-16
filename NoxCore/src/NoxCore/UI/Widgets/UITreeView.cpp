@@ -19,7 +19,6 @@ namespace Nox::UI
 {
     namespace
     {
-        constexpr float kScrollbarHitW = 14.0f;
         constexpr float kEyeHitW = 24.0f;
 
         void AddQuadBezier(UIDrawList& drawList, const glm::vec2& p0, const glm::vec2& q, const glm::vec2& p2,
@@ -249,34 +248,25 @@ namespace Nox::UI
         if (!row.Node || !row.Node->HasVisibilityToggle)
             return false;
         const UIRect& b = GetBounds();
-        const float rightEdge = b.Max.x - 10.0f;
+        const float rightEdge = b.Max.x - UIScrollBar::kLaneWidth;
         return pos.x >= rightEdge - kEyeHitW && pos.x <= rightEdge;
     }
 
-    void UITreeView::ScrollToPointerY(float y)
+    void UITreeView::OnUpdate(float dt)
     {
-        const UIRect& b = GetBounds();
-        const float contentH = TotalContentHeight();
-        const float maxScroll = std::max(0.0f, contentH - b.Height());
-        if (maxScroll <= 0.0f)
-            return;
-
-        const float trackTop = b.Min.y + 4.0f;
-        const float trackH = std::max(1.0f, b.Height() - 8.0f);
-        const float thumbH = std::max(20.0f, trackH * (b.Height() / contentH));
-        const float usable = std::max(1.0f, trackH - thumbH);
-        const float t = std::clamp((y - trackTop - thumbH * 0.5f) / usable, 0.0f, 1.0f);
-        m_ScrollY = t * maxScroll;
+        m_ScrollBar.SetGeometry(GetBounds(), TotalContentHeight(), GetBounds().Height());
+        bool hovered = false;
+        if (const UIContext* ctx = UIContext::GetCurrent())
+            hovered = ctx->GetHovered() == this && m_ScrollBar.Contains(ctx->GetLastMousePos());
+        m_ScrollBar.Update(dt, hovered);
     }
 
     bool UITreeView::OnPointerMove(const UIPointerEvent& e)
     {
-        if (m_DraggingScrollbar)
-        {
-            ScrollToPointerY(e.Position.y);
+        if (m_ScrollBar.OnPointerMove(e.Position, m_ScrollY))
             return true;
-        }
-        m_HoveredRow = RowIndexAt(e.Position.y);
+        // Over the scroll bar's lane no row is under the pointer.
+        m_HoveredRow = m_ScrollBar.Contains(e.Position) ? -1 : RowIndexAt(e.Position.y);
         m_HoveredEyeRow = (m_HoveredRow >= 0 && HitTestEyeButton(m_FlatRows[m_HoveredRow], e.Position)) ? m_HoveredRow : -1;
         if (m_HoveredEyeRow >= 0 && m_FlatRows[m_HoveredEyeRow].Node)
         {
@@ -309,11 +299,12 @@ namespace Nox::UI
 
         if (e.Button == 1)
         {
-            const float contentH = TotalContentHeight();
-            if (contentH > GetBounds().Height() && e.Position.x >= GetBounds().Max.x - kScrollbarHitW)
+            m_ScrollBar.SetGeometry(GetBounds(), TotalContentHeight(), GetBounds().Height());
+            if (m_ScrollBar.OnPointerDown(e.Position, m_ScrollY))
             {
-                m_DraggingScrollbar = true;
-                ScrollToPointerY(e.Position.y);
+                // The bar's drag, not a drag of the row under it.
+                if (UIContext* ctx = UIContext::GetCurrent())
+                    ctx->CancelPendingDrag();
                 return true;
             }
         }
@@ -402,11 +393,8 @@ namespace Nox::UI
 
     bool UITreeView::OnPointerUp(const UIPointerEvent& e)
     {
-        if (m_DraggingScrollbar && e.Button == 1)
-        {
-            m_DraggingScrollbar = false;
+        if (e.Button == 1 && m_ScrollBar.OnPointerUp())
             return true;
-        }
         if (e.Button == 1 && m_PendingSingleSelectId != 0)
         {
             const uint64_t pending = m_PendingSingleSelectId;
@@ -436,6 +424,7 @@ namespace Nox::UI
             return false;
 
         m_ScrollY = std::clamp(m_ScrollY - e.ScrollDelta.y * ScrollSpeed, 0.0f, maxScroll);
+        m_ScrollBar.NotifyScrolled();
         return true;
     }
 
@@ -584,7 +573,7 @@ namespace Nox::UI
         const int lastRow = std::min(static_cast<int>(m_FlatRows.size()),
                                      static_cast<int>(std::ceil((m_ScrollY - TopPadding + b.Height()) / RowHeight)) + 1);
 
-        const float rightContentEnd = b.Max.x - 10.0f;
+        const float rightContentEnd = b.Max.x - UIScrollBar::kLaneWidth;
 
         for (int i = firstRow; i < lastRow; ++i)
         {
@@ -722,20 +711,8 @@ namespace Nox::UI
             }
         }
 
-        const float contentH = TotalContentHeight();
-        if (contentH > b.Height())
-        {
-            const float trackH = b.Height() - 8.0f;
-            const float thumbH = std::max(20.0f, trackH * (b.Height() / contentH));
-            const float scrollT = m_ScrollY / std::max(1.0f, contentH - b.Height());
-            const float thumbY = b.Min.y + 4.0f + scrollT * (trackH - thumbH);
-            drawList.AddRoundedRect(
-                { b.Max.x - 7.0f, thumbY },
-                { b.Max.x - 2.0f, thumbY + thumbH },
-                theme.GetToken("Border", { 0.25f, 0.27f, 0.31f, 0.8f }),
-                glm::vec4(2.5f)
-            );
-        }
+        m_ScrollBar.SetGeometry(b, TotalContentHeight(), b.Height());
+        m_ScrollBar.Paint(drawList, theme, m_ScrollY);
 
         drawList.PopClipRect();
     }

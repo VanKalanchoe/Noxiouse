@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "NoxCore/UI/Core/UIElement.h"
+#include "NoxCore/UI/Widgets/UIScrollBar.h"
 
 namespace Nox::UI
 {
@@ -41,16 +42,19 @@ namespace Nox::UI
 
         bool OnPointerDown(const UIPointerEvent& e) override;
         bool OnPointerMove(const UIPointerEvent& e) override;
+        bool OnPointerUp(const UIPointerEvent& e) override;
         bool OnPointerLeave(const UIPointerEvent& e) override;
         bool OnMouseWheel(const UIPointerEvent& e) override;
 
     protected:
+        void OnUpdate(float dt) override;
         UIVec2 ComputeDesiredSize() override;
         void OnPaint(UIDrawList& drawList, const UITheme& theme) override;
 
     private:
         std::vector<float> ComputeColumnWidths(float totalWidth) const;
         void SortByColumn(int colIndex);
+        void SyncScrollBar(); // the body under the header is what scrolls
 
         std::vector<UITableColumn> m_Columns;
         std::vector<UITableRow> m_Rows;
@@ -59,5 +63,6 @@ namespace Nox::UI
         int m_SortColumn = -1;
         bool m_SortAscending = true;
         float m_ScrollOffset = 0.0f;
+        UIScrollBar m_ScrollBar;
     };
 }

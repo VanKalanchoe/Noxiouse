@@ -91,6 +91,8 @@ namespace Nox::UI
         virtual bool OnMouseWheel(const UIPointerEvent&) { return false; }
         virtual bool OnKeyDown(const UIKeyEvent&) { return false; }
         virtual bool OnTextInput(std::string_view) { return false; }
+        // The keyboard focus came to the element or left it (a field applies what was typed when it leaves).
+        virtual void OnFocusChanged(bool /*focused*/) {}
 
         std::function<bool(const UIPointerEvent&)> OnMouseDown;
         std::function<bool(const UIPointerEvent&)> OnMouseUp;
@@ -105,6 +107,10 @@ namespace Nox::UI
         virtual UIVec2 ComputeDesiredSize();
         virtual void ArrangeChildren(const UIRect& contentRect);
         virtual void OnPaint(UIDrawList& drawList, const UITheme& theme);
+        // Painted after the children and outside their clip rect: what must stay on top of the content (a scroll bar).
+        virtual void OnPaintOverlay(UIDrawList& /*drawList*/, const UITheme& /*theme*/) {}
+        // The rect children are clipped to when ClipChildren is set (the bounds; a scroll view leaves out its scroll bar's lane).
+        virtual UIRect GetChildClipRect() const { return m_Bounds; }
 
         const UIStyleBox& GetResolvedStyle() const { return m_CurrentStyle; }
 

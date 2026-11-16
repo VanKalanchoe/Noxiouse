@@ -146,6 +146,54 @@ namespace Nox::UI
         return result;
     }
 
+    std::string UILabel::ElideText(std::string_view text, const Ref<Font>& fontAsset, float fontSize, float maxWidth, UITextElide mode)
+    {
+        if (mode == UITextElide::None || text.empty() || text.find('\n') != std::string_view::npos)
+            return std::string(text);
+        if (MeasureText(text, fontAsset, fontSize).x <= maxWidth + 0.5f)
+            return std::string(text);
+
+        static constexpr std::string_view kDots = "...";
+        if (MeasureText(kDots, fontAsset, fontSize).x > maxWidth)
+            return {}; // not even the dots fit: nothing is better than text outside the bounds
+
+        // The most characters that still fit with the dots, by bisection (the width grows with the count).
+        auto build = [&](size_t kept)
+        {
+            std::string out;
+            out.reserve(kept + kDots.size());
+            if (mode == UITextElide::Middle)
+            {
+                const size_t tail = kept / 2;
+                const size_t head = kept - tail;
+                out.append(text.substr(0, head));
+                out.append(kDots);
+                out.append(text.substr(text.size() - tail));
+            }
+            else
+            {
+                out.append(text.substr(0, kept));
+                // No blank before the dots.
+                while (!out.empty() && out.back() == ' ')
+                    out.pop_back();
+                out.append(kDots);
+            }
+            return out;
+        };
+
+        size_t low = 0;
+        size_t high = text.size() - 1;
+        while (low < high)
+        {
+            const size_t mid = (low + high + 1) / 2;
+            if (MeasureText(build(mid), fontAsset, fontSize).x <= maxWidth + 0.5f)
+                low = mid;
+            else
+                high = mid - 1;
+        }
+        return build(low);
+    }
+
     float UILabel::ComputeHeightForWidth(float width)
     {
         if (HeightMode == UISizeMode::Fixed)
@@ -176,7 +224,23 @@ namespace Nox::UI
 
         const UIRect& b = GetBounds();
         const std::string wrapped = (WordWrap && b.Width() > 1.0f) ? WrapText(Text, FontAsset, fontSize, b.Width()) : std::string();
-        const std::string_view painted = (WordWrap && b.Width() > 1.0f) ? std::string_view(wrapped) : std::string_view(Text);
+        std::string_view painted = (WordWrap && b.Width() > 1.0f) ? std::string_view(wrapped) : std::string_view(Text);
+
+        // A line wider than the label is shortened: text never leaves the space its parent gave it.
+        m_Elided = false;
+        if (!WordWrap && Elide != UITextElide::None && b.Width() > 1.0f)
+        {
+            if (m_ElideSource != Text || m_ElideWidth != b.Width() || m_ElideFontSize != fontSize || m_ElideMode != Elide)
+            {
+                m_ElideSource = Text;
+                m_ElideWidth = b.Width();
+                m_ElideFontSize = fontSize;
+                m_ElideMode = Elide;
+                m_ElideResult = ElideText(Text, FontAsset, fontSize, b.Width(), Elide);
+            }
+            m_Elided = m_ElideResult.size() != Text.size() || m_ElideResult != Text;
+            painted = m_ElideResult;
+        }
 
         UIVec2 pos = b.Min;
         if (HAlign == UIAlignment::Center || HAlign == UIAlignment::End ||

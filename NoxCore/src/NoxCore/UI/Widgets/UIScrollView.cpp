@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
 
 namespace Nox::UI
@@ -13,28 +14,24 @@ namespace Nox::UI
         HitTestMode = UIHitTestMode::Self;
     }
 
-    void UIScrollView::ScrollToPointerY(float y)
+    UIElement* UIScrollView::HitTest(const UIVec2& pos)
     {
-        const float maxScroll = std::max(0.0f, m_ContentHeight - m_ViewportHeight);
-        if (maxScroll <= 0.0f)
-            return;
-
-        const UIRect& b = GetBounds();
-        const float trackTop = b.Min.y + 4.0f;
-        const float trackH = std::max(1.0f, b.Height() - 8.0f);
-        const float ratio = std::clamp(m_ViewportHeight / m_ContentHeight, 0.08f, 1.0f);
-        const float thumbH = std::max(20.0f, trackH * ratio);
-        const float usable = std::max(1.0f, trackH - thumbH);
-        const float t = std::clamp((y - trackTop - thumbH * 0.5f) / usable, 0.0f, 1.0f);
-        ScrollOffsetY = t * maxScroll;
+        // The scroll bar's lane comes before the children: whatever lies under it (a row's background, a card), a press there
+        // is the bar's, and the bar keeps the pointer for the whole drag.
+        if (Visible && HitTestMode != UIHitTestMode::None && m_ScrollBar.Contains(pos))
+            return this;
+        return UIElement::HitTest(pos);
     }
 
     bool UIScrollView::OnPointerDown(const UIPointerEvent& e)
     {
-        if (e.Button == 1 && m_ContentHeight > m_ViewportHeight && e.Position.x >= GetBounds().Max.x - 14.0f)
+        if (e.Button == 1 && m_ScrollBar.OnPointerDown(e.Position, ScrollOffsetY))
         {
-            m_DraggingScrollbar = true;
-            ScrollToPointerY(e.Position.y);
+            if (UIContext* ctx = UIContext::GetCurrent())
+            {
+                ctx->SetPointerCapture(Ref<UIElement>(this));
+                ctx->CancelPendingDrag();
+            }
             return true;
         }
         return UIElement::OnPointerDown(e);
@@ -42,21 +39,15 @@ namespace Nox::UI
 
     bool UIScrollView::OnPointerMove(const UIPointerEvent& e)
     {
-        if (m_DraggingScrollbar)
-        {
-            ScrollToPointerY(e.Position.y);
+        if (m_ScrollBar.OnPointerMove(e.Position, ScrollOffsetY))
             return true;
-        }
         return UIElement::OnPointerMove(e);
     }
 
     bool UIScrollView::OnPointerUp(const UIPointerEvent& e)
     {
-        if (m_DraggingScrollbar && e.Button == 1)
-        {
-            m_DraggingScrollbar = false;
+        if (e.Button == 1 && m_ScrollBar.OnPointerUp())
             return true;
-        }
         return UIElement::OnPointerUp(e);
     }
 
@@ -66,8 +57,20 @@ namespace Nox::UI
         if (maxScroll <= 0.0f)
             return false;
 
-        ScrollOffsetY = std::clamp(ScrollOffsetY - e.ScrollDelta.y * ScrollSpeed, 0.0f, maxScroll);
+        const float next = std::clamp(ScrollOffsetY - e.ScrollDelta.y * ScrollSpeed, 0.0f, maxScroll);
+        if (next == ScrollOffsetY)
+            return false; // at the end: an outer scroll view takes the wheel
+        ScrollOffsetY = next;
+        m_ScrollBar.NotifyScrolled();
         return true;
+    }
+
+    void UIScrollView::OnUpdate(float dt)
+    {
+        bool hovered = false;
+        if (const UIContext* ctx = UIContext::GetCurrent())
+            hovered = ctx->GetHovered() == this && m_ScrollBar.Contains(ctx->GetLastMousePos());
+        m_ScrollBar.Update(dt, hovered);
     }
 
     UIVec2 UIScrollView::ComputeDesiredSize()
@@ -111,16 +114,18 @@ namespace Nox::UI
             return sum;
         };
 
+        // First as if everything fitted; when it does not, the scroll bar's lane leaves the children's width (and the
+        // content, now narrower, may have become taller).
         m_ContentHeight = computeTotalH(rawAvailW);
-        float maxScroll = std::max(0.0f, m_ContentHeight - m_ViewportHeight);
-        const float scrollbarReserve = maxScroll > 0.0f ? 10.0f : 0.0f;
-        const float availW = std::max(0.0f, rawAvailW - scrollbarReserve);
-        if (scrollbarReserve > 0.0f)
+        float availW = rawAvailW;
+        if (m_ContentHeight > m_ViewportHeight + 0.5f)
         {
+            availW = std::max(0.0f, rawAvailW - UIScrollBar::kLaneWidth);
             m_ContentHeight = computeTotalH(availW);
-            maxScroll = std::max(0.0f, m_ContentHeight - m_ViewportHeight);
         }
+        const float maxScroll = std::max(0.0f, m_ContentHeight - m_ViewportHeight);
         ScrollOffsetY = std::clamp(ScrollOffsetY, 0.0f, maxScroll);
+        m_ScrollBar.SetGeometry(GetBounds(), m_ContentHeight, m_ViewportHeight);
 
         float cursorY = contentRect.Min.y - ScrollOffsetY;
         for (const auto& child : GetChildren())
@@ -139,26 +144,15 @@ namespace Nox::UI
         }
     }
 
-    void UIScrollView::OnPaint(UIDrawList& drawList, const UITheme& theme)
+    UIRect UIScrollView::GetChildClipRect() const
     {
-        UIElement::OnPaint(drawList, theme);
+        UIRect clip = GetBounds();
+        clip.Max.x = std::max(clip.Min.x, clip.Max.x - m_ScrollBar.GetReservedWidth());
+        return clip;
+    }
 
-        if (m_ContentHeight <= m_ViewportHeight || m_ViewportHeight <= 1.0f)
-            return;
-
-        const UIRect& b = GetBounds();
-        const float trackH = b.Height() - 8.0f;
-        const float ratio = std::clamp(m_ViewportHeight / m_ContentHeight, 0.08f, 1.0f);
-        const float thumbH = std::max(20.0f, trackH * ratio);
-        const float maxScroll = std::max(1.0f, m_ContentHeight - m_ViewportHeight);
-        const float scrollT = std::clamp(ScrollOffsetY / maxScroll, 0.0f, 1.0f);
-        const float thumbY = b.Min.y + 4.0f + scrollT * (trackH - thumbH);
-
-        drawList.AddRoundedRect(
-            { b.Max.x - 7.0f, thumbY },
-            { b.Max.x - 2.0f, thumbY + thumbH },
-            theme.GetToken("Border", { 0.35f, 0.40f, 0.52f, 0.8f }),
-            glm::vec4(2.5f)
-        );
+    void UIScrollView::OnPaintOverlay(UIDrawList& drawList, const UITheme& theme)
+    {
+        m_ScrollBar.Paint(drawList, theme, ScrollOffsetY);
     }
 }

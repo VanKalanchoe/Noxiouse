@@ -41,11 +41,21 @@ namespace Nox::UI
         void SetFocus(UIElement* element);
         void SetPointerCapture(const Ref<UIElement>& element);
         void ReleasePointerCapture();
+        // The press just dispatched is the element's own drag (a scroll bar's thumb, a number field's scrub): it must not
+        // turn into a drag-and-drop of an ancestor's payload once the pointer moved far enough.
+        void CancelPendingDrag() { m_DragPending = false; }
+        // The size of the viewport the context was last laid out in (popups clamp to it).
+        const UIVec2& GetViewportSize() const { return m_ViewportSize; }
         const UIVec2& GetLastMousePos() const { return m_LastMousePos; }
         bool IsDragging() const { return m_DragActive; }
         const UIDragPayload& GetDragPayload() const { return m_ActivePayload; }
 
     private:
+        // Whether the element is still part of what the context shows (its root or its overlay). A panel that rebuilds itself
+        // drops its old elements while the context may still hold one as focused or pressed: such an element gets no more
+        // input and no callbacks (what it would call back into may be gone with the panel).
+        bool IsInTree(const UIElement* element) const;
+        void DropDetachedInput();
         void UpdateHover(const UIVec2& pos);
         void UpdateSystemCursor(const UIVec2& pos) const;
         bool DispatchPointerMove(const UIVec2& pos);
@@ -66,6 +76,7 @@ namespace Nox::UI
         Ref<UIElement> m_Focused;
 
         UIVec2 m_LastMousePos{ 0.0f, 0.0f };
+        UIVec2 m_ViewportSize{ 0.0f, 0.0f };
         float m_HoverTime = 0.0f;
 
         bool m_DragPending = false;

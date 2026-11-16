@@ -275,9 +275,11 @@ namespace Nox
                     : theme.GetToken("TextMuted", textColor);
                 UI::Icons::DrawChevron(drawList, { b.Min.x + 9.0f, cy }, 8.0f, m_Expanded, chevronColor, 1.7f);
 
+                // The title never leaves the header: a long one ends in "...".
                 const float fontSize = style.FontSize > 0.0f ? style.FontSize : 16.5f;
-                const UI::UIVec2 ts = UI::UILabel::MeasureText(m_Title, nullptr, fontSize);
-                drawList.AddText(m_Title, nullptr, { b.Min.x + 22.0f, cy - ts.y * 0.5f }, fontSize, textColor);
+                const std::string shown = UI::UILabel::ElideText(m_Title, nullptr, fontSize, b.Max.x - (b.Min.x + 22.0f) - 2.0f);
+                const UI::UIVec2 ts = UI::UILabel::MeasureText(shown, nullptr, fontSize);
+                drawList.AddText(shown, nullptr, { b.Min.x + 22.0f, cy - ts.y * 0.5f }, fontSize, textColor);
             }
 
         private:
@@ -288,7 +290,7 @@ namespace Nox
         class CardMoreButton final : public UI::UIElement
         {
         public:
-            explicit CardMoreButton(std::function<void(const UI::UIRect&)> onOpen)
+            explicit CardMoreButton(std::function<void(const UI::UIRect&)> onOpen, std::string tooltip = "Component options")
                 : m_OnOpen(std::move(onOpen))
             {
                 DrawBackground = false;
@@ -296,7 +298,7 @@ namespace Nox
                 WidthMode = UI::UISizeMode::Fixed;
                 HeightMode = UI::UISizeMode::Fixed;
                 FixedSize = { 24.0f, 22.0f };
-                Tooltip = "Component options";
+                Tooltip = std::move(tooltip);
             }
 
             bool OnPointerUp(const UI::UIPointerEvent& e) override
@@ -333,6 +335,58 @@ namespace Nox
 
         private:
             std::function<void(const UI::UIRect&)> m_OnOpen;
+        };
+
+        // A small chevron that opens and closes what is under its row (a material's properties under its slot).
+        class ExpandToggleButton final : public UI::UIElement
+        {
+        public:
+            ExpandToggleButton(bool expanded, std::function<void()> onToggle, std::string tooltip)
+                : m_Expanded(expanded), m_OnToggle(std::move(onToggle))
+            {
+                DrawBackground = false;
+                HitTestMode = UI::UIHitTestMode::Self;
+                WidthMode = UI::UISizeMode::Fixed;
+                HeightMode = UI::UISizeMode::Fixed;
+                FixedSize = { 22.0f, 24.0f };
+                Tooltip = std::move(tooltip);
+            }
+
+            bool OnPointerUp(const UI::UIPointerEvent& e) override
+            {
+                if (e.Button == 1 && IsEnabled() && GetBounds().Contains(e.Position))
+                {
+                    if (m_OnToggle)
+                        m_OnToggle();
+                    return true;
+                }
+                return false;
+            }
+
+        protected:
+            UI::UIVec2 ComputeDesiredSize() override { return FixedSize; }
+
+            void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override
+            {
+                const UI::UIRect& b = GetBounds();
+                const bool hovered = UI::HasState(GetState(), UI::UIState::Hovered);
+                if (hovered || m_Expanded)
+                {
+                    drawList.AddRoundedRect(
+                        b.Min, b.Max,
+                        theme.GetToken("Surface2", { 0.18f, 0.21f, 0.28f, 1.0f }),
+                        glm::vec4(4.0f)
+                    );
+                }
+                const UI::UIColor color = (hovered || m_Expanded)
+                    ? theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f })
+                    : theme.GetToken("TextMuted", { 0.62f, 0.67f, 0.76f, 1.0f });
+                UI::Icons::DrawChevron(drawList, b.Center(), 8.0f, m_Expanded, color, 1.7f);
+            }
+
+        private:
+            bool m_Expanded = false;
+            std::function<void()> m_OnToggle;
         };
 
         std::string TexturePathDisplayName(const std::string& path, const char* emptyText = "None")
@@ -562,6 +616,16 @@ namespace Nox
         return { card, body };
     }
 
+    Ref<UI::UIElement> CreateExpandToggle(bool expanded, std::function<void()> onToggle, const std::string& tooltip)
+    {
+        return Ref<UI::UIElement>(new ExpandToggleButton(expanded, std::move(onToggle), tooltip));
+    }
+
+    Ref<UI::UIElement> CreateMoreButton(std::function<void(const UI::UIRect&)> onOpen, const std::string& tooltip)
+    {
+        return Ref<UI::UIElement>(new CardMoreButton(std::move(onOpen), tooltip));
+    }
+
     void InspectorCardBuilder::AddRow(const std::string& labelText, const Ref<UI::UIElement>& editor, const std::string& tooltip)
     {
         auto row = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 8.0f);
@@ -620,11 +684,11 @@ namespace Nox
 
     void InspectorCardBuilder::AddBool(const std::string& label, bool* target, std::function<void()> onChange, const std::string& tooltip)
     {
-        auto cb = UI::CheckBox("", *target, [this, target, onChange](bool v)
+        auto cb = UI::CheckBox("", *target, [mutate = OnMutate, target, onChange](bool v)
         {
             *target = v;
             if (onChange) onChange();
-            if (OnMutate) OnMutate(false);
+            if (mutate) mutate(false);
         });
         AddRow(label, cb, tooltip);
         Syncs.push_back([cb, target]()
@@ -637,11 +701,11 @@ namespace Nox
     void InspectorCardBuilder::AddFloat(const std::string& label, float* target, float speed, float minV, float maxV,
                                         const char* fmt, std::function<void()> onChange, const std::string& tooltip)
     {
-        auto drag = UI::MakeUI<UI::UIDragScalar>(*target, speed, [this, target, onChange](float v)
+        auto drag = UI::MakeUI<UI::UIDragScalar>(*target, speed, [mutate = OnMutate, target, onChange](float v)
         {
             *target = v;
             if (onChange) onChange();
-            if (OnMutate) OnMutate(false);
+            if (mutate) mutate(false);
         });
         drag->WidthMode = UI::UISizeMode::Fill;
         drag->Min = minV;
@@ -650,25 +714,39 @@ namespace Nox
         AddRow(label, drag, tooltip);
         Syncs.push_back([drag, target]()
         {
-            if (!UI::HasState(drag->GetState(), UI::UIState::Focused | UI::UIState::Pressed))
+            if (!drag->IsInteracting())
                 drag->Value = *target;
         });
+    }
+
+    Ref<UI::UIDragScalar> CreateSliderField(float value, float minV, float maxV, std::function<void(float)> onChanged)
+    {
+        auto field = UI::MakeUI<UI::UIDragScalar>(value, 0.01f, std::move(onChanged));
+        field->WidthMode = UI::UISizeMode::Fill;
+        field->Min = minV;
+        field->Max = maxV;
+        field->ShowFill = true;
+        field->Format = (maxV - minV) > 20.0f ? "{:.1f}" : "{:.3f}";
+        field->Tooltip = "Drag to change, click to type a value";
+        return field;
     }
 
     void InspectorCardBuilder::AddSlider(const std::string& label, float* target, float minV, float maxV,
                                          std::function<void()> onChange, const std::string& tooltip)
     {
-        auto slider = UI::MakeUI<UI::UISlider>(*target, minV, maxV, [this, target, onChange](float v)
+        // A slider you can also type into: the number field with its fill bar (Unreal's numeric entry box).
+        auto slider = CreateSliderField(*target, minV, maxV, [mutate = OnMutate, target, onChange](float v)
         {
             *target = v;
             if (onChange) onChange();
-            if (OnMutate) OnMutate(false);
+            if (mutate) mutate(false);
         });
-        slider->WidthMode = UI::UISizeMode::Fill;
+        if (!tooltip.empty())
+            slider->Tooltip = tooltip;
         AddRow(label, slider, tooltip);
         Syncs.push_back([slider, target]()
         {
-            if (!UI::HasState(slider->GetState(), UI::UIState::Pressed))
+            if (!slider->IsInteracting())
                 slider->Value = *target;
         });
     }
@@ -676,14 +754,14 @@ namespace Nox
     void InspectorCardBuilder::AddUInt32(const std::string& label, uint32_t* target, uint32_t minV, uint32_t maxV,
                                          std::function<void()> onChange, const std::string& tooltip)
     {
-        auto drag = UI::MakeUI<UI::UIDragScalar>(static_cast<float>(*target), 0.25f, [this, target, minV, maxV, onChange](float v)
+        auto drag = UI::MakeUI<UI::UIDragScalar>(static_cast<float>(*target), 0.25f, [mutate = OnMutate, target, minV, maxV, onChange](float v)
         {
             uint32_t next = static_cast<uint32_t>(std::max(0.0f, std::round(v)));
             if (maxV > minV)
                 next = std::clamp(next, minV, maxV);
             *target = next;
             if (onChange) onChange();
-            if (OnMutate) OnMutate(false);
+            if (mutate) mutate(false);
         });
         drag->WidthMode = UI::UISizeMode::Fill;
         drag->Format = "{:.0f}";
@@ -692,7 +770,7 @@ namespace Nox
         AddRow(label, drag, tooltip);
         Syncs.push_back([drag, target]()
         {
-            if (!UI::HasState(drag->GetState(), UI::UIState::Focused | UI::UIState::Pressed))
+            if (!drag->IsInteracting())
                 drag->Value = static_cast<float>(*target);
         });
     }
@@ -700,14 +778,14 @@ namespace Nox
     void InspectorCardBuilder::AddInt32(const std::string& label, int32_t* target, int32_t minV, int32_t maxV,
                                         std::function<void()> onChange, const std::string& tooltip)
     {
-        auto drag = UI::MakeUI<UI::UIDragScalar>(static_cast<float>(*target), 0.25f, [this, target, minV, maxV, onChange](float v)
+        auto drag = UI::MakeUI<UI::UIDragScalar>(static_cast<float>(*target), 0.25f, [mutate = OnMutate, target, minV, maxV, onChange](float v)
         {
             int32_t next = static_cast<int32_t>(std::round(v));
             if (maxV > minV)
                 next = std::clamp(next, minV, maxV);
             *target = next;
             if (onChange) onChange();
-            if (OnMutate) OnMutate(false);
+            if (mutate) mutate(false);
         });
         drag->WidthMode = UI::UISizeMode::Fill;
         drag->Format = "{:.0f}";
@@ -716,7 +794,7 @@ namespace Nox
         AddRow(label, drag, tooltip);
         Syncs.push_back([drag, target]()
         {
-            if (!UI::HasState(drag->GetState(), UI::UIState::Focused | UI::UIState::Pressed))
+            if (!drag->IsInteracting())
                 drag->Value = static_cast<float>(*target);
         });
     }
@@ -727,11 +805,11 @@ namespace Nox
         const LengthUnitInfo unit = GetLengthUnitInfo(*worldValue);
         const float displayVal = *worldValue / unit.Factor;
         const float speed = std::max(unit.Meters ? 0.005f : 0.5f, std::abs(displayVal) * 0.02f);
-        auto drag = UI::MakeUI<UI::UIDragScalar>(displayVal, speed, [this, worldValue, factor = unit.Factor, onChange](float d)
+        auto drag = UI::MakeUI<UI::UIDragScalar>(displayVal, speed, [mutate = OnMutate, worldValue, factor = unit.Factor, onChange](float d)
         {
             *worldValue = d * factor;
             if (onChange) onChange();
-            if (OnMutate) OnMutate(false);
+            if (mutate) mutate(false);
         });
         drag->WidthMode = UI::UISizeMode::Fill;
         drag->Min = minWorld / unit.Factor;
@@ -739,7 +817,7 @@ namespace Nox
         AddRow(label + " (" + unit.Suffix + rateSuffix + ")", drag, tooltip);
         Syncs.push_back([drag, worldValue, factor = unit.Factor]()
         {
-            if (!UI::HasState(drag->GetState(), UI::UIState::Focused | UI::UIState::Pressed))
+            if (!drag->IsInteracting())
                 drag->Value = *worldValue / factor;
         });
     }
@@ -748,12 +826,12 @@ namespace Nox
                                        std::function<void()> onChange, const std::string& tooltip)
     {
         auto vec = UI::MakeUI<UI::UIVectorEdit>(2, glm::vec4(target->x, target->y, 0.0f, 0.0f), speed,
-            [this, target, onChange](const glm::vec4& v)
+            [mutate = OnMutate, target, onChange](const glm::vec4& v)
             {
                 target->x = v.x;
                 target->y = v.y;
                 if (onChange) onChange();
-                if (OnMutate) OnMutate(false);
+                if (mutate) mutate(false);
             });
         AddRow(label, vec, tooltip);
         Syncs.push_back([vec, target]()
@@ -767,13 +845,13 @@ namespace Nox
                                        std::function<void()> onChange, const std::string& tooltip)
     {
         auto vec = UI::MakeUI<UI::UIVectorEdit>(3, glm::vec4(*target, 0.0f), speed,
-            [this, target, onChange](const glm::vec4& v)
+            [mutate = OnMutate, target, onChange](const glm::vec4& v)
             {
                 target->x = v.x;
                 target->y = v.y;
                 target->z = v.z;
                 if (onChange) onChange();
-                if (OnMutate) OnMutate(false);
+                if (mutate) mutate(false);
             });
         AddRow(label, vec, tooltip);
         Syncs.push_back([vec, target]()
@@ -791,11 +869,11 @@ namespace Nox
         const float speed = unit.Meters ? 0.05f : 5.0f;
         const glm::vec3 initial = *worldVec / unit.Factor;
         auto vec = UI::MakeUI<UI::UIVectorEdit>(3, glm::vec4(initial, 0.0f), speed,
-            [this, worldVec, factor = unit.Factor, onChange](const glm::vec4& v)
+            [mutate = OnMutate, worldVec, factor = unit.Factor, onChange](const glm::vec4& v)
             {
                 *worldVec = glm::vec3(v.x, v.y, v.z) * factor;
                 if (onChange) onChange();
-                if (OnMutate) OnMutate(false);
+                if (mutate) mutate(false);
             });
         AddRow(label + " (" + unit.Suffix + ")", vec, tooltip);
         Syncs.push_back([vec, worldVec, factor = unit.Factor]()
@@ -808,14 +886,15 @@ namespace Nox
     void InspectorCardBuilder::AddColor3(const std::string& label, glm::vec3* target, std::function<void()> onChange)
     {
         auto color = UI::MakeUI<UI::UIColorEdit>(Context, UI::UIColor(target->r, target->g, target->b, 1.0f),
-            [this, target, onChange](const UI::UIColor& c)
+            [mutate = OnMutate, target, onChange](const UI::UIColor& c)
             {
                 target->r = c.r;
                 target->g = c.g;
                 target->b = c.b;
                 if (onChange) onChange();
-                if (OnMutate) OnMutate(false);
+                if (mutate) mutate(false);
             });
+        color->ShowAlpha = false;
         color->WidthMode = UI::UISizeMode::Fill;
         AddRow(label, color);
         Syncs.push_back([color, target]()
@@ -829,11 +908,11 @@ namespace Nox
     void InspectorCardBuilder::AddColor4(const std::string& label, glm::vec4* target, std::function<void()> onChange)
     {
         auto color = UI::MakeUI<UI::UIColorEdit>(Context, *target,
-            [this, target, onChange](const UI::UIColor& c)
+            [mutate = OnMutate, target, onChange](const UI::UIColor& c)
             {
                 *target = c;
                 if (onChange) onChange();
-                if (OnMutate) OnMutate(false);
+                if (mutate) mutate(false);
             });
         color->WidthMode = UI::UISizeMode::Fill;
         AddRow(label, color);
@@ -849,11 +928,11 @@ namespace Nox
     {
         auto input = UI::MakeUI<UI::UITextInput>(*target, placeholder);
         input->WidthMode = UI::UISizeMode::Fill;
-        input->OnChanged = [this, target, onChange](const std::string& v)
+        input->OnChanged = [mutate = OnMutate, target, onChange](const std::string& v)
         {
             *target = v;
             if (onChange) onChange();
-            if (OnMutate) OnMutate(false);
+            if (mutate) mutate(false);
         };
         AddRow(label, input, tooltip);
         Syncs.push_back([input, target]()
@@ -876,10 +955,10 @@ namespace Nox
                                        std::function<void(int)> onSelect, const std::string& tooltip)
     {
         auto dd = UI::MakeUI<UI::UIDropdown>(Context, std::move(items), selectedIdx,
-            [this, onSelect](int idx)
+            [mutate = OnMutate, onSelect](int idx)
             {
                 if (onSelect) onSelect(idx);
-                if (OnMutate) OnMutate(true);
+                if (mutate) mutate(true);
             });
         dd->WidthMode = UI::UISizeMode::Fill;
         AddRow(label, dd, tooltip);
@@ -898,9 +977,10 @@ namespace Nox
         pickBtn->WidthMode = UI::UISizeMode::Fill;
         pickBtn->FlexWeight = 1.0f;
         pickBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+        pickBtn->TextElide = UI::UITextElide::Middle; // an asset's name keeps its start and its end
         UI::UIButton* btnPtr = pickBtn.Get().get();
         std::string emptyStr = emptyText ? emptyText : "None";
-        pickBtn->OnClick = [this, btnPtr, current, emptyStr, acceptedTypes = std::move(acceptedTypes), onAssign]()
+        pickBtn->OnClick = [mutate = OnMutate, btnPtr, current, emptyStr, acceptedTypes = std::move(acceptedTypes), onAssign]()
         {
             UI::UIContext* ctx = UI::UIContext::GetCurrent();
             if (!ctx)
@@ -911,10 +991,10 @@ namespace Nox
                 emptyStr,
                 current,
                 CollectAssetPickerOptions(acceptedTypes),
-                [this, onAssign](AssetHandle picked)
+                [mutate, onAssign](AssetHandle picked)
                 {
                     if (onAssign) onAssign(picked);
-                    if (OnMutate) OnMutate(true);
+                    if (mutate) mutate(true);
                 },
                 false);
         };
@@ -922,10 +1002,10 @@ namespace Nox
 
         if (current != 0)
         {
-            auto clearBtn = UI::Button("x", [this, onAssign]()
+            auto clearBtn = UI::Button("x", [mutate = OnMutate, onAssign]()
             {
                 if (onAssign) onAssign(AssetHandle(0));
-                if (OnMutate) OnMutate(true);
+                if (mutate) mutate(true);
             }).Tooltip("Clear asset");
             clearBtn->WidthMode = UI::UISizeMode::Fixed;
             clearBtn->HeightMode = UI::UISizeMode::Fixed;
@@ -959,11 +1039,12 @@ namespace Nox
         const MaterialPropertiesCallbacks& callbacks)
     {
         auto notifySaved = [handle, &data]() { SaveAndNotifyMaterialChanged(handle, data); };
-        auto notifySavedRebuild = [handle, &data, &callbacks]()
+        // By value: the callbacks are a temporary of the caller, and these run long after this function returned.
+        auto notifySavedRebuild = [handle, &data, requestRebuild = callbacks.RequestRebuild]()
         {
             SaveAndNotifyMaterialChanged(handle, data);
-            if (callbacks.RequestRebuild)
-                callbacks.RequestRebuild();
+            if (requestRebuild)
+                requestRebuild();
         };
 
         if (handle != 0 && Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
@@ -1036,6 +1117,8 @@ namespace Nox
             pickBtn->WidthMode = UI::UISizeMode::Fill;
             pickBtn->FlexWeight = 1.0f;
             pickBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+            pickBtn->TextElide = UI::UITextElide::Middle;
+        pickBtn->TextElide = UI::UITextElide::Middle; // an asset's name keeps its start and its end
             UI::UIButton* btnPtr = pickBtn.Get().get();
             pickBtn->OnClick = [btnPtr, currentHandle, &texturePath, notifySavedRebuild]()
             {
@@ -1205,6 +1288,8 @@ namespace Nox
             pickBtn->WidthMode = UI::UISizeMode::Fill;
             pickBtn->FlexWeight = 1.0f;
             pickBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+            pickBtn->TextElide = UI::UITextElide::Middle;
+        pickBtn->TextElide = UI::UITextElide::Middle; // an asset's name keeps its start and its end
             UI::UIButton* shBtnPtr = pickBtn.Get().get();
             pickBtn->OnClick = [shBtnPtr, currentShader, assets, &data, notifySavedRebuild]()
             {
@@ -1256,6 +1341,8 @@ namespace Nox
             pickBtn->WidthMode = UI::UISizeMode::Fill;
             pickBtn->FlexWeight = 1.0f;
             pickBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+            pickBtn->TextElide = UI::UITextElide::Middle;
+        pickBtn->TextElide = UI::UITextElide::Middle; // an asset's name keeps its start and its end
             UI::UIButton* grBtnPtr = pickBtn.Get().get();
             pickBtn->OnClick = [grBtnPtr, currentGraph, assets, &data, notifySavedRebuild]()
             {

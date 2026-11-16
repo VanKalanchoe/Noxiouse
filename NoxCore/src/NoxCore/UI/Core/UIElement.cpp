@@ -188,13 +188,18 @@ namespace Nox::UI
         OnPaint(drawList, theme);
 
         if (ClipChildren)
-            drawList.PushClipRect(m_Bounds.Min, m_Bounds.Max, m_CurrentStyle.CornerRadius.ToVec4());
+        {
+            const UIRect clip = GetChildClipRect();
+            drawList.PushClipRect(clip.Min, clip.Max, m_CurrentStyle.CornerRadius.ToVec4());
+        }
 
         for (const auto& child : m_Children)
             child->PaintRecursive(drawList, theme);
 
         if (ClipChildren)
             drawList.PopClipRect();
+
+        OnPaintOverlay(drawList, theme);
     }
 
     void UIElement::OnPaint(UIDrawList& drawList, const UITheme&)

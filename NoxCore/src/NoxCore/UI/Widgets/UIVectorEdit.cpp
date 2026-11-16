@@ -85,7 +85,7 @@ namespace Nox::UI
     {
         for (int i = 0; i < m_Components; ++i)
         {
-            if (m_Axes[i] && HasState(m_Axes[i]->GetState(), UIState::Focused | UIState::Pressed))
+            if (m_Axes[i] && m_Axes[i]->IsInteracting())
                 return true;
         }
         return false;
