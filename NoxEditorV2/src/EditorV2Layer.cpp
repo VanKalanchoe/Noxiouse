@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <limits>
+#include <sstream>
 #include <system_error>
+#include <unordered_set>
 
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_filesystem.h>
@@ -11,20 +15,29 @@
 #include <SDL3/SDL_keycode.h>
 #include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_video.h>
+#include <glm/gtc/constants.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <stb_image_write.h>
+#include "json.hpp"
 
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Asset/SceneImporter.h"
 #include "NoxCore/Audio/AudioMixer.h"
+#include "NoxCore/Console/Console.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Input.h"
 #include "NoxCore/Core/Window.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Events/InputEvents.h"
+#include "NoxCore/Network/NetReplication.h"
+#include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
+#include "NoxCore/Renderer/CustomLitShaders.h"
+#include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Scene/Components.h"
 #include "NoxCore/Scene/Entity.h"
+#include "NoxCore/Scene/ModelInstance.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneSerializer.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
@@ -41,6 +54,23 @@ namespace Nox
     namespace
     {
         constexpr const char* kLayoutPath = "assets/layouts/EditorV2.nlayout";
+
+        std::filesystem::path EditorCamerasFile()
+        {
+            return Project::GetProjectDirectory() / "Cache" / "EditorCameras.txt";
+        }
+
+        std::vector<std::string> ReadEditorCameraLines()
+        {
+            std::vector<std::string> lines;
+            std::ifstream in(EditorCamerasFile());
+            for (std::string line; std::getline(in, line);)
+            {
+                if (!line.empty())
+                    lines.push_back(line);
+            }
+            return lines;
+        }
     }
 
     EditorV2Layer::EditorV2Layer(std::filesystem::path projectFile, bool createBasicScene)
@@ -48,7 +78,12 @@ namespace Nox
         , m_EditorCamera(30.0f, 1.778f, 0.01f, 1000.0f)
         , m_CreateBasicScene(createBasicScene)
     {
-        m_ActiveScene = CreateRef<Scene>();
+        Application& app = Application::Get();
+        m_Renderer = app.GetRenderer();
+        m_Renderer2D = m_Renderer ? m_Renderer->getRenderer2D() : nullptr;
+
+        m_EditorScene = CreateRef<Scene>();
+        m_ActiveScene = m_EditorScene;
 
         if (!projectFile.empty())
             NOX_CORE_INFO("Loading project {}", projectFile.generic_string());
@@ -62,11 +97,22 @@ namespace Nox
         if (m_ApplyBasicSceneView)
             ApplyBasicSceneView();
 
+        if (!ScriptEngine::Initialize(SDL_GetBasePath(), true) && !ScriptEngine::IsInitialized())
+            NOX_CORE_ERROR("Failed to initialize the .NET scripting backend");
+        BuildScriptsIfNeverBuilt();
+
+        Net::RegisterConsoleVariables();
+        if (const char* exec = app.GetSpecification().CommandLineArgs.Value("--exec"))
+            Console::Get().Execute(exec);
+
         BuildUI(true);
     }
 
     EditorV2Layer::~EditorV2Layer()
     {
+        SaveEditorCameras();
+        ScriptEngine::Shutdown();
+
         if (UILayer* uiLayer = Application::Get().GetUILayer())
         {
             if (const auto& dock = uiLayer->GetDockSpaceRef())
@@ -74,6 +120,15 @@ namespace Nox
         }
         if (Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
             Project::GetActive()->GetEditorAssetManager()->Shutdown();
+    }
+
+    void EditorV2Layer::BuildScriptsIfNeverBuilt()
+    {
+        if (!ScriptEngine::IsInitialized() || !Project::GetActive() || ScriptEngine::GetProjectScriptsProject().empty())
+            return;
+        std::filesystem::path core, game;
+        if (!ScriptEngine::FindAssemblies(core, game))
+            m_ScriptBuilder.RequestBuild();
     }
 
     bool EditorV2Layer::NewProject()
@@ -115,42 +170,39 @@ namespace Nox
             return false;
         }
 
-        Renderer* renderer = Application::Get().GetRenderer();
         Ref<Project> project = Project::GetActive();
-
         ProjectLibrary::RememberRecentProject(path);
         if (auto win = Application::Get().getWindow(); win && win->getHandle() && project)
             SDL_SetWindowTitle(win->getHandle(), ("Nox Editor - " + project->GetConfig().Name).c_str());
 
         m_EditorCamera.ApplyWorldUnitDefaults();
-        if (renderer && project)
+        if (m_Renderer && project)
         {
-            renderer->ApplyQualitySetting(project->GetConfig().RenderQuality);
-            renderer->ApplyProjectRendererSettings(project->GetConfig().Renderer);
+            m_Renderer->ApplyQualitySetting(project->GetConfig().RenderQuality);
+            m_Renderer->ApplyProjectRendererSettings(project->GetConfig().Renderer);
         }
         if (project && project->GetEditorAssetManager())
             project->GetEditorAssetManager()->Init();
         AudioMixer::LoadProjectMixer(true);
-        if (renderer)
-            renderer->InitializeCustomLitShaders();
+        if (m_Renderer)
+            m_Renderer->InitializeCustomLitShaders();
+
+        m_CustomLitSignature = CustomLitSignature();
+        if (!m_CustomLitSignature.empty())
+            WriteMaterialShaderEditorSettings();
+
+        m_ScriptBuilder.SetProject(ScriptEngine::GetProjectScriptsProject());
+        if (ScriptEngine::IsInitialized())
+        {
+            ScriptEngine::LoadProjectAssembly();
+            BuildScriptsIfNeverBuilt();
+        }
 
         const AssetHandle startScene = project ? project->GetConfig().StartScene : AssetHandle(0);
         if (startScene != 0)
-        {
-            const std::filesystem::path relative = project->GetEditorAssetManager()->GetFilePath(startScene);
-            const std::filesystem::path scenePath = Project::GetActiveAssetDirectory() / relative;
-            Ref<Scene> loadedScene = CreateRef<Scene>();
-            SceneSerializer serializer(loadedScene);
-            if (serializer.Deserialize(scenePath))
-            {
-                m_ActiveScene = loadedScene;
-                m_ActiveScenePath = relative;
-            }
-        }
+            OpenScene(startScene);
         else if (hadProject)
-        {
             NewScene();
-        }
 
         if (m_CreateBasicScene && project && project->GetConfig().StartScene == 0)
             CreateBasicScene();
@@ -223,52 +275,137 @@ namespace Nox
 
     void EditorV2Layer::NewScene()
     {
-        m_ActiveScene = CreateRef<Scene>();
-        m_ActiveScenePath.clear();
+        if (m_SceneState != SceneState::Edit)
+            OnSceneStop();
+        SaveEditorCameras();
+        m_EditorScene = CreateRef<Scene>();
+        m_ActiveScene = m_EditorScene;
+        m_EditorScenePath.clear();
+        m_UnloadUnusedAssetsRequested = true;
+#if NOX_PROFILE_STATS
+        Profiler::Get().ResetStats();
+#endif
+    }
+
+    void EditorV2Layer::OpenScene(AssetHandle handle)
+    {
+        if (handle == 0 || !Project::GetActive())
+            return;
+        if (m_SceneState != SceneState::Edit)
+            OnSceneStop();
+        const std::filesystem::path rel = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
+        if (rel.empty())
+            return;
+        m_SceneLoad = CreateScope<SceneLoader>(Project::GetActiveAssetDirectory() / rel);
+        m_SceneLoadHandle = handle;
+    }
+
+    void EditorV2Layer::FinishSceneLoad()
+    {
+        Scope<SceneLoader> load = std::move(m_SceneLoad);
+        const AssetHandle handle = std::exchange(m_SceneLoadHandle, AssetHandle(0));
+        if (!load || load->Failed() || !Project::GetActive())
+            return;
+        if (m_SceneState != SceneState::Edit)
+            OnSceneStop();
+
+        Ref<Scene> newScene = load->GetScene();
+        newScene->LoadSubLevelsForEditing();
+        if (m_ViewportImage)
+        {
+            const UI::UIRect& bounds = m_ViewportImage->GetBounds();
+            const uint32_t w = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Width())));
+            const uint32_t h = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Height())));
+            if (w > 0 && h > 0)
+                newScene->OnViewportResize(w, h);
+        }
+
+        SaveEditorCameras();
+        m_EditorScene = newScene;
+        m_ActiveScene = m_EditorScene;
+        m_EditorScenePath = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
+
+        const bool cameraRestored = RestoreEditorCameras();
+        if (!cameraRestored && !m_FocusOnOpen && m_EditorScene->IsWorldPartitioned() && !m_EditorScene->GetWorldPartition().Cells.empty())
+        {
+            glm::dvec3 lowest(std::numeric_limits<double>::max()), highest(std::numeric_limits<double>::lowest());
+            for (const auto& [coord, cell] : m_EditorScene->GetWorldPartition().Cells)
+            {
+                lowest = glm::min(lowest, cell.BoundsMin);
+                highest = glm::max(highest, cell.BoundsMax);
+            }
+            m_FocusOnOpen = (lowest + highest) * 0.5;
+        }
+        if (m_FocusOnOpen)
+        {
+            m_EditorCamera.SetFocalPoint(*m_FocusOnOpen);
+            m_EditorCamera.SetDistance(WorldUnits::FromMeters(180.0f));
+            m_EditorCamera.SetOrientation(0.45f, 0.0f);
+            m_FocusOnOpen.reset();
+        }
+        if (m_EditorScene->IsWorldPartitioned())
+        {
+            m_EditorScene->LoadWorldCells(
+                m_EditorScene->WorldCellsAround(
+                    m_EditorCamera.GetFocalPoint(),
+                    WorldUnits::FromMeters(m_EditorScene->GetWorldPartition().Settings.LoadingRange)
+                )
+            );
+        }
+        m_UnloadUnusedAssetsRequested = true;
+#if NOX_PROFILE_STATS
+        Profiler::Get().ResetStats();
+#endif
     }
 
     void EditorV2Layer::SaveScene()
     {
         if (!m_ActiveScene || !Project::GetActive())
             return;
-        if (m_ActiveScenePath.empty())
+        if (AudioMixer::IsDirty())
+            AudioMixer::Save();
+        if (m_EditorScenePath.empty())
         {
             SaveSceneAs();
             return;
         }
-        const std::filesystem::path fullPath = m_ActiveScenePath.is_absolute()
-            ? m_ActiveScenePath
-            : Project::GetActiveAssetDirectory() / m_ActiveScenePath;
+        const std::filesystem::path fullPath = m_EditorScenePath.is_absolute()
+            ? m_EditorScenePath
+            : Project::GetActiveAssetDirectory() / m_EditorScenePath;
         std::error_code error;
         std::filesystem::create_directories(fullPath.parent_path(), error);
-        SceneSerializer serializer(m_ActiveScene);
-        serializer.Serialize(fullPath);
+        SerializeScene(m_ActiveScene, fullPath);
         AdoptStartSceneIfNone(fullPath);
-        NOX_CORE_INFO("Saved scene {}", fullPath.generic_string());
+        CaptureProjectThumbnail();
     }
 
     void EditorV2Layer::SaveSceneAs()
     {
         if (!m_ActiveScene || !Project::GetActive())
             return;
-        std::filesystem::path path = Utility::SaveFile("Nox Scene\0nox\0");
+        std::filesystem::path path = Utility::SaveFile("Nox Scene *.nox\0nox\0");
         if (path.empty())
             return;
         if (!path.has_extension())
             path += ".nox";
         std::error_code error;
         std::filesystem::create_directories(path.parent_path(), error);
-        SceneSerializer serializer(m_ActiveScene);
-        serializer.Serialize(path);
+        m_ActiveScene->CopyWorldCellsTo(path);
+        SerializeScene(m_ActiveScene, path);
 
         const std::filesystem::path rel = std::filesystem::relative(path, Project::GetActiveAssetDirectory(), error);
         if (!error && !rel.empty() && !rel.native().starts_with(std::filesystem::path("..").native()))
-            m_ActiveScenePath = rel;
+            m_EditorScenePath = rel;
         else
-            m_ActiveScenePath = path;
+            m_EditorScenePath = path;
 
         AdoptStartSceneIfNone(path);
-        NOX_CORE_INFO("Saved scene {}", path.generic_string());
+        CaptureProjectThumbnail();
+    }
+
+    void EditorV2Layer::SerializeScene(const Ref<Scene>& scene, const std::filesystem::path& path)
+    {
+        SceneImporter::SaveScene(scene, path);
     }
 
     void EditorV2Layer::CreateShape(PrimitiveShape shape)
@@ -286,6 +423,7 @@ namespace Nox
             m_EditorCamera.GetPosition() + glm::dvec3(m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance());
         entity.MarkTransformDirty();
         AssetManager::RequestAsset(mesh);
+        m_HistoryCheckRequested = true;
     }
 
     AssetHandle EditorV2Layer::GetShapeAsset(PrimitiveShape shape)
@@ -353,7 +491,7 @@ namespace Nox
     void EditorV2Layer::CreateBasicScene()
     {
         NewScene();
-        Scene& scene = *m_ActiveScene;
+        Scene& scene = *m_EditorScene;
 
         const std::string lighting = "Lighting";
         scene.AddFolder(lighting);
@@ -393,12 +531,10 @@ namespace Nox
         const std::filesystem::path path = Project::GetActiveAssetDirectory() / "Scenes" / "Main.nox";
         std::error_code error;
         std::filesystem::create_directories(path.parent_path(), error);
-        {
-            SceneSerializer serializer(m_ActiveScene);
-            serializer.Serialize(path);
-        }
-        m_ActiveScenePath = "Scenes/Main.nox";
+        SerializeScene(m_EditorScene, path);
+        m_EditorScenePath = path;
         AdoptStartSceneIfNone(path);
+        m_HistoryCheckRequested = true;
         m_ApplyBasicSceneView = true;
         ApplyBasicSceneView();
     }
@@ -412,14 +548,13 @@ namespace Nox
 
     void EditorV2Layer::CaptureProjectThumbnail()
     {
-        Renderer* renderer = Application::Get().GetRenderer();
         Ref<Project> project = Project::GetActive();
-        Ref<Texture2D> image = renderer ? renderer->GetSceneResourceRef() : nullptr;
+        Ref<Texture2D> image = m_Renderer ? m_Renderer->GetSceneResourceRef() : nullptr;
         if (!project || !image || image->GetWidth() < 16 || image->GetHeight() < 16)
             return;
         const std::filesystem::path file = ProjectLibrary::ThumbnailPath(Project::GetActiveProjectDirectory());
-        const bool bgra = renderer->IsSurfaceFormatBGRA();
-        renderer->ReadbackTexture(std::move(image), [file, bgra](std::vector<uint8_t> pixels, uint32_t width, uint32_t height)
+        const bool bgra = m_Renderer->IsSurfaceFormatBGRA();
+        m_Renderer->ReadbackTexture(std::move(image), [file, bgra](std::vector<uint8_t> pixels, uint32_t width, uint32_t height)
         {
             if (pixels.size() != static_cast<size_t>(width) * height * 4 || width == 0 || height == 0)
                 return;
@@ -465,12 +600,372 @@ namespace Nox
         });
     }
 
+    void EditorV2Layer::SaveEditorCameras()
+    {
+        if (!Project::GetActive() || m_EditorScenePath.empty())
+            return;
+        const std::string scene = m_EditorScenePath.generic_string();
+        std::vector<std::string> lines = ReadEditorCameraLines();
+        std::erase_if(lines, [&](const std::string& line) { return line.rfind(scene + "|", 0) == 0; });
+        const glm::dvec3 focal = m_EditorCamera.GetFocalPoint();
+        char line[512];
+        std::snprintf(line, sizeof(line), "%s|0|%.17g %.17g %.17g %.6g %.6g %.6g %d %.6g",
+                      scene.c_str(), focal.x, focal.y, focal.z,
+                      m_EditorCamera.GetDistance(), m_EditorCamera.GetPitch(), m_EditorCamera.GetYaw(),
+                      static_cast<int>(m_EditorCamera.GetViewMode()), m_EditorCamera.GetOrthoHalfHeight());
+        lines.push_back(line);
+        std::error_code error;
+        std::filesystem::create_directories(EditorCamerasFile().parent_path(), error);
+        std::ofstream out(EditorCamerasFile(), std::ios::trunc);
+        for (const std::string& entry : lines)
+            out << entry << "\n";
+    }
+
+    bool EditorV2Layer::RestoreEditorCameras()
+    {
+        if (!Project::GetActive() || m_EditorScenePath.empty())
+            return false;
+        const std::string prefix = m_EditorScenePath.generic_string() + "|";
+        for (const std::string& line : ReadEditorCameraLines())
+        {
+            if (line.rfind(prefix, 0) != 0)
+                continue;
+            int index = -1, mode = 0;
+            glm::dvec3 focal(0.0);
+            float distance = 0.0f, pitch = 0.0f, yaw = 0.0f, orthoHalfHeight = 10.0f;
+            if (sscanf(line.c_str() + prefix.size(), "%d|%lf %lf %lf %f %f %f %d %f",
+                       &index, &focal.x, &focal.y, &focal.z, &distance, &pitch, &yaw,
+                       &mode, &orthoHalfHeight) != 9 || index != 0 ||
+                mode < 0 || mode > static_cast<int>(EditorViewMode::Right))
+                continue;
+            m_EditorCamera.SetViewMode(static_cast<EditorViewMode>(mode));
+            m_EditorCamera.SetFocalPoint(focal);
+            m_EditorCamera.SetDistance(distance);
+            m_EditorCamera.SetOrientation(pitch, yaw);
+            if (m_EditorCamera.IsOrthographic())
+                m_EditorCamera.SetOrthoHalfHeight(orthoHalfHeight);
+            return true;
+        }
+        return false;
+    }
+
+    void EditorV2Layer::WriteMaterialShaderEditorSettings()
+    {
+        const std::filesystem::path projectDirectory = Project::GetActiveProjectDirectory();
+        const std::filesystem::path shaderFolder = std::filesystem::absolute("assets/shaders").lexically_normal();
+        CustomLitShaders::WriteCodeEditorConfig(projectDirectory, shaderFolder);
+
+        const std::filesystem::path settingsPath = projectDirectory / ".vscode" / "settings.json";
+        const std::string folder = shaderFolder.generic_string();
+        nlohmann::json settings = nlohmann::json::object();
+        std::error_code error;
+        if (std::filesystem::exists(settingsPath, error))
+        {
+            std::ifstream file(settingsPath, std::ios::binary);
+            std::stringstream text;
+            text << file.rdbuf();
+            settings = nlohmann::json::parse(text.str(), nullptr, false);
+            if (settings.is_discarded() || !settings.is_object())
+                return;
+        }
+        nlohmann::json& paths = settings["slang.additionalSearchPaths"];
+        if (!paths.is_array())
+            paths = nlohmann::json::array();
+        for (const nlohmann::json& path : paths)
+        {
+            if (path.is_string() && path.get<std::string>() == folder)
+                return;
+        }
+        paths.push_back(folder);
+        std::filesystem::create_directories(settingsPath.parent_path(), error);
+        std::ofstream out(settingsPath, std::ios::binary | std::ios::trunc);
+        out << settings.dump(4) << "\n";
+    }
+
+    std::string EditorV2Layer::CustomLitSignature() const
+    {
+        std::string signature;
+        const Ref<Project> project = Project::GetActive();
+        if (!project)
+            return signature;
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        for (const auto& [handle, metadata] : project->GetEditorAssetManager()->GetAssetRegistry())
+        {
+            if (metadata.Type != AssetType::MaterialShader && metadata.Type != AssetType::MaterialGraph)
+                continue;
+            std::error_code error;
+            const std::filesystem::path file = assetDirectory / metadata.FilePath;
+            const auto written = std::filesystem::last_write_time(file, error);
+            const auto size = error ? 0 : std::filesystem::file_size(file, error);
+            signature += metadata.FilePath.generic_string() + '|' +
+                         std::to_string(error ? 0 : written.time_since_epoch().count()) + '|' +
+                         std::to_string(size) + '\n';
+        }
+        return signature;
+    }
+
+    void EditorV2Layer::PollCustomLitShaders()
+    {
+        if (!m_Renderer || !Project::GetActive())
+            return;
+        std::string signature = CustomLitSignature();
+        if (signature == m_CustomLitSignature)
+            return;
+        m_CustomLitSignature = std::move(signature);
+        bool complete = true;
+        const std::vector<CustomLitSource> sources = CustomLitShaders::GatherProjectSources(complete);
+        if (!sources.empty())
+            WriteMaterialShaderEditorSettings();
+        bool graphsComplete = true;
+        const std::vector<ProjectMaterialGraph> graphs = GatherProjectMaterialGraphs(graphsComplete);
+        NOX_CORE_INFO("Custom Lit: Material Shaders or material graphs changed, building them again");
+        m_Renderer->SetCustomLitShaders(sources, graphs);
+    }
+
+    void EditorV2Layer::UpdateHistory()
+    {
+        if (m_SceneState != SceneState::Edit || !m_ActiveScene || !Project::GetActive())
+            return;
+        EditorHistory::FrameInfo frame;
+        frame.InteractionEnded = m_HistoryCheckRequested;
+        m_HistoryCheckRequested = false;
+        frame.AssetsLoading = Project::GetActive()->GetEditorAssetManager()->GetLoadingCount() > 0;
+        m_History.Update(m_ActiveScene, frame);
+    }
+
+    void EditorV2Layer::Undo()
+    {
+        if (m_SceneState != SceneState::Edit || !m_History.CanUndo())
+            return;
+        const std::string name = m_History.GetUndoName();
+        RestoreHistoryState(m_History.StepBack());
+        NOX_CORE_INFO("Undo: {}", name);
+    }
+
+    void EditorV2Layer::Redo()
+    {
+        if (m_SceneState != SceneState::Edit || !m_History.CanRedo())
+            return;
+        const std::string name = m_History.GetRedoName();
+        RestoreHistoryState(m_History.StepForward());
+        NOX_CORE_INFO("Redo: {}", name);
+    }
+
+    void EditorV2Layer::RestoreHistoryState(const std::string& text)
+    {
+        NOX_PROFILE_SCOPE("Undo Restore");
+        Ref<Scene> restored = CreateRef<Scene>();
+        SceneSerializer serializer(restored);
+        if (!serializer.DeserializeText(text))
+        {
+            NOX_CORE_ERROR("Undo / redo: the history state could not be read; the scene is left as it is");
+            return;
+        }
+
+        if (m_ViewportImage)
+        {
+            const UI::UIRect& bounds = m_ViewportImage->GetBounds();
+            const uint32_t w = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Width())));
+            const uint32_t h = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Height())));
+            if (w > 0 && h > 0)
+                restored->OnViewportResize(w, h);
+        }
+        restored->AdoptWorldState(*m_EditorScene);
+        m_EditorScene = restored;
+        m_ActiveScene = restored;
+        m_UnloadUnusedAssetsRequested = true;
+        m_History.OnSceneRestored(restored);
+    }
+
+    void EditorV2Layer::UnloadUnusedAssets()
+    {
+        if (!Project::GetActive() || !Project::GetActive()->GetEditorAssetManager())
+            return;
+        std::unordered_set<AssetHandle> referencedAssets;
+        if (m_EditorScene && m_ActiveScene != m_EditorScene)
+        {
+            if (!m_EditorSceneReferencesValid)
+            {
+                m_EditorSceneReferences.clear();
+                m_EditorScene->CollectAssetReferences(m_EditorSceneReferences);
+                m_EditorSceneReferencesValid = true;
+            }
+            referencedAssets = m_EditorSceneReferences;
+        }
+        else if (m_EditorScene)
+        {
+            m_EditorScene->CollectAssetReferences(referencedAssets);
+            m_EditorSceneReferencesValid = false;
+        }
+        if (m_ActiveScene && m_ActiveScene != m_EditorScene)
+            m_ActiveScene->CollectAssetReferences(referencedAssets);
+        Project::GetActive()->GetEditorAssetManager()->UnloadUnusedAssets(referencedAssets);
+    }
+
+    void EditorV2Layer::OnScenePlay()
+    {
+        m_EditorSceneReferencesValid = false;
+        SetViewMode(EditorViewMode::Perspective);
+        if (m_SceneState == SceneState::Simulate)
+            OnSceneStop();
+        m_SceneState = SceneState::Play;
+        m_ActiveScene = Scene::Copy(m_EditorScene);
+        m_ActiveScene->SetRenderer(m_Renderer);
+        m_ActiveScene->SetRenderer2D(m_Renderer2D);
+        if (m_ViewportImage)
+        {
+            const UI::UIRect& bounds = m_ViewportImage->GetBounds();
+            const uint32_t w = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Width())));
+            const uint32_t h = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Height())));
+            if (w > 0 && h > 0)
+                m_ActiveScene->OnViewportResize(w, h);
+        }
+        m_ActiveScene->OnRuntimeStart();
+    }
+
+    void EditorV2Layer::OnSceneSimulate()
+    {
+        m_EditorSceneReferencesValid = false;
+        if (m_SceneState == SceneState::Play)
+            OnSceneStop();
+        m_SceneState = SceneState::Simulate;
+        m_ActiveScene = Scene::Copy(m_EditorScene);
+        const glm::dvec3 streamingSource = m_EditorCamera.GetPosition();
+        m_ActiveScene->OnSimulationStart(&streamingSource);
+    }
+
+    void EditorV2Layer::OnSceneStop()
+    {
+        if (m_SceneState == SceneState::Play)
+            m_ActiveScene->OnRuntimeStop();
+        else if (m_SceneState == SceneState::Simulate)
+            m_ActiveScene->OnSimulationStop();
+
+        m_SceneState = SceneState::Edit;
+        if (Input::IsRelativeMouseMode())
+            Input::SetRelativeMouseMode(false);
+        Input::ClearInjected();
+        m_ActiveScene = m_EditorScene;
+        m_UnloadUnusedAssetsRequested = true;
+    }
+
+    void EditorV2Layer::OnScenePause()
+    {
+        if (m_SceneState != SceneState::Edit && m_ActiveScene)
+            m_ActiveScene->SetPaused(true);
+    }
+
+    int EditorV2Layer::GridPlaneAxis() const
+    {
+        switch (m_EditorCamera.GetViewMode())
+        {
+        case EditorViewMode::Front:
+        case EditorViewMode::Back: return 2;
+        case EditorViewMode::Left:
+        case EditorViewMode::Right: return 0;
+        default: return 1;
+        }
+    }
+
+    void EditorV2Layer::SetViewMode(EditorViewMode mode)
+    {
+        const bool wasOrthographic = m_EditorCamera.IsOrthographic();
+        m_EditorCamera.SetViewMode(mode);
+        SyncOrthoRenderSettings(wasOrthographic);
+    }
+
+    void EditorV2Layer::SyncOrthoRenderSettings(bool wasOrthographic)
+    {
+        if (!m_Renderer)
+            return;
+        const bool isOrthographic = m_EditorCamera.IsOrthographic();
+        if (isOrthographic && !wasOrthographic)
+        {
+            m_OrthoSaved = { true, m_Renderer->isDLSSEnabled(), m_Renderer->getRayTracingEnabled(), m_Renderer->isPathTracingEnabled() };
+            m_Renderer->setDLSSEnabled(false);
+            m_Renderer->setRayTracingEnabled(false);
+            m_Renderer->setPathTracingEnabled(false);
+        }
+        else if (!isOrthographic && wasOrthographic && m_OrthoSaved.Valid)
+        {
+            m_Renderer->setDLSSEnabled(m_OrthoSaved.Dlss);
+            m_Renderer->setRayTracingEnabled(m_OrthoSaved.RayTracing);
+            m_Renderer->setPathTracingEnabled(m_OrthoSaved.PathTracing);
+            m_OrthoSaved.Valid = false;
+        }
+    }
+
+    void EditorV2Layer::DrawWorldGrid()
+    {
+        if (!m_Renderer2D || !m_Renderer)
+            return;
+        const float cell = WorldUnits::FromMeters(1.0f);
+        if (m_EditorCamera.IsOrthographic())
+            m_Renderer2D->DrawGrid(m_EditorCamera.GetFocalPoint(), m_Renderer->GetRenderOrigin(), cell, GridPlaneAxis(), m_EditorCamera.GetOrthoHalfHeight());
+        else
+            m_Renderer2D->DrawGrid(m_EditorCamera.GetPosition(), m_Renderer->GetRenderOrigin(), cell, 1, m_EditorCamera.GetDistance());
+    }
+
+    void EditorV2Layer::OnOverlayRender()
+    {
+        if (!m_Renderer || !m_Renderer2D || !m_ActiveScene)
+            return;
+
+        if (m_SceneState == SceneState::Play)
+        {
+            Entity camera = m_ActiveScene->GetPrimaryCameraEntity();
+            if (!camera)
+                return;
+            m_Renderer->BeginScene(camera.GetComponent<CameraComponent>().Camera, camera.GetComponent<WorldTransformComponent>().WorldMatrix);
+        }
+        else
+        {
+            m_Renderer->BeginScene(m_EditorCamera);
+            DrawWorldGrid();
+        }
+
+        m_Renderer->EndScene();
+    }
+
+    void EditorV2Layer::RefreshStatusBar()
+    {
+        if (!m_StatusLabel || !m_Renderer || !Project::GetActive() || !Project::GetActive()->GetEditorAssetManager())
+            return;
+        auto assetManager = Project::GetActive()->GetEditorAssetManager();
+        const EditorAssetManager::ImportProgress import = assetManager->GetImportProgress();
+        const size_t loading = assetManager->GetLoadingCount();
+        const size_t streaming = assetManager->GetStreamingCount();
+        const double pendingMB = static_cast<double>(assetManager->GetPendingUploadBytes()) / (1024.0 * 1024.0);
+        const size_t blasBuilds = m_Renderer->GetPendingBlasBuilds();
+
+        if (import.Imports > 0)
+        {
+            char buf[96];
+            if (import.Total == 0)
+                std::snprintf(buf, sizeof(buf), "Importing: reading the file...");
+            else
+                std::snprintf(buf, sizeof(buf), "Importing meshes %u / %u", import.Done, import.Total);
+            m_StatusLabel->Text = buf;
+        }
+        else if (loading == 0 && streaming == 0 && blasBuilds == 0)
+        {
+            m_StatusLabel->Text = "Ready";
+        }
+        else
+        {
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "Loading %zu asset(s)  |  Streaming %zu texture(s)  |  %.1f MB to upload  |  %zu BLAS build(s) pending",
+                          loading, streaming, pendingMB, blasBuilds);
+            m_StatusLabel->Text = buf;
+        }
+    }
+
     void EditorV2Layer::OnUpdate(Timestep ts)
     {
         if (!Project::GetActive())
             return;
 
-        if (m_ThumbnailPending)
+        if (m_ThumbnailPending && m_SceneState == SceneState::Edit && !m_SceneLoad)
         {
             m_ThumbnailTimer += ts;
             if (m_ThumbnailTimer > 4.0f)
@@ -480,11 +975,60 @@ namespace Nox
             }
         }
 
-        if (Project::GetActive()->GetEditorAssetManager())
-            Project::GetActive()->GetEditorAssetManager()->Update();
+        if (m_SceneLoad && m_SceneLoad->Step(8.0))
+            FinishSceneLoad();
 
-        Renderer* renderer = Application::Get().GetRenderer();
-        if (!renderer || !m_ActiveScene || !m_ViewportImage)
+        m_CustomLitPollTimer += ts;
+        if (m_CustomLitPollTimer > 0.5f)
+        {
+            m_CustomLitPollTimer = 0.0f;
+            PollCustomLitShaders();
+        }
+
+        if (m_TestWorldGeneration && m_TestWorldGeneration->Step())
+        {
+            const AssetHandle scene = m_TestWorldGeneration->Failed() ? AssetHandle(0) : m_TestWorldGeneration->GetScene();
+            const glm::dvec3 middle = m_TestWorldGeneration->GetMiddle();
+            m_TestWorldGeneration.reset();
+            if (scene != 0)
+            {
+                m_FocusOnOpen = middle;
+                OpenScene(scene);
+            }
+        }
+
+        m_ScriptBuilder.Update();
+
+        auto assetManager = Project::GetActive()->GetEditorAssetManager();
+        if (assetManager)
+        {
+            if (m_EditorScene && m_EditorScene->ConsumeAssetReferencesChanged())
+            {
+                m_UnloadUnusedAssetsRequested = true;
+                m_EditorSceneReferencesValid = false;
+            }
+            if (m_ActiveScene && m_ActiveScene != m_EditorScene && m_ActiveScene->ConsumeAssetReferencesChanged())
+                m_UnloadUnusedAssetsRequested = true;
+            if (assetManager->ConsumeLoadsSettledAfterSweep())
+                m_UnloadUnusedAssetsRequested = true;
+            if (m_UnloadUnusedAssetsRequested && std::chrono::steady_clock::now() - m_LastUnloadSweep >= std::chrono::seconds(1))
+            {
+                NOX_PROFILE_SCOPE("Unload Unused Assets");
+                m_UnloadUnusedAssetsRequested = false;
+                m_LastUnloadSweep = std::chrono::steady_clock::now();
+                UnloadUnusedAssets();
+            }
+
+            for (const ModelInstance::LevelDescription& level : assetManager->ConsumeLevelImports())
+            {
+                if (m_EditorScene)
+                    ModelInstance::SpawnLevel(*m_EditorScene, level);
+            }
+
+            assetManager->Update();
+        }
+
+        if (!m_Renderer || !m_ActiveScene || !m_ViewportImage)
             return;
 
         const UI::UIRect& bounds = m_ViewportImage->GetBounds();
@@ -493,20 +1037,45 @@ namespace Nox
         if (wantW > 0 && wantH > 0)
         {
             m_ActiveScene->OnViewportResize(wantW, wantH);
-            const NRI::Extent2D currentSize = renderer->getViewPortSize();
+            const NRI::Extent2D currentSize = m_Renderer->getViewPortSize();
             if (wantW != currentSize.width || wantH != currentSize.height)
             {
-                renderer->onViewportSizeChange({wantW, wantH});
+                m_Renderer->onViewportSizeChange({wantW, wantH});
                 m_EditorCamera.SetViewportSize(static_cast<float>(wantW), static_cast<float>(wantH));
             }
         }
 
-        m_ActiveScene->SetRenderer(renderer);
-        m_ActiveScene->SetRenderer2D(renderer->getRenderer2D());
-
         const bool hovered = UI::HasState(m_ViewportImage->GetState(), UI::UIState::Hovered);
-        m_EditorCamera.OnUpdate(ts, hovered || m_ViewportMouseCaptured);
-        m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
+        const bool focused = UI::HasState(m_ViewportImage->GetState(), UI::UIState::Focused);
+        Input::SetGameInputEnabled(focused || hovered, hovered);
+
+        m_ActiveScene->SetRenderer(m_Renderer);
+        m_ActiveScene->SetRenderer2D(m_Renderer2D);
+
+        switch (m_SceneState)
+        {
+        case SceneState::Edit:
+            m_EditorCamera.OnUpdate(ts, hovered || m_ViewportMouseCaptured);
+            m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
+            break;
+        case SceneState::Simulate:
+            m_EditorCamera.OnUpdate(ts, hovered || m_ViewportMouseCaptured);
+            m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera);
+            break;
+        case SceneState::Play:
+            m_ActiveScene->OnUpdateRuntime(ts);
+            break;
+        }
+
+        OnOverlayRender();
+        UpdateHistory();
+
+        m_StatusRefreshTimer += ts;
+        if (m_StatusRefreshTimer >= 1.0f)
+        {
+            m_StatusRefreshTimer = 0.0f;
+            RefreshStatusBar();
+        }
 
         m_FpsAccumulator += ts;
         ++m_FpsFrames;
@@ -523,12 +1092,21 @@ namespace Nox
             m_FpsFrames = 0;
         }
 
-        Texture2D* sceneTex = renderer->GetSceneResource();
+        Texture2D* sceneTex = m_Renderer->GetSceneResource();
         m_ViewportImage->TextureDescriptorSlot = sceneTex ? sceneTex->GetDescriptorIndexSlot() : ~0u;
     }
 
     void EditorV2Layer::OnEvent(Event& event)
     {
+        if (!Project::GetActive())
+            return;
+
+        if (event.GetEventType() == EventType::ExternalFileDrop)
+        {
+            const auto& drop = static_cast<const ExternalFileDropEvent&>(event);
+            NOX_CORE_INFO("Dropped external file: {}", drop.GetPath());
+        }
+
         if (event.GetEventType() == EventType::KeyPressed)
         {
             const auto& key = static_cast<const KeyPressedEvent&>(event);
@@ -546,33 +1124,48 @@ namespace Nox
                 if (layoutKey >= SDLK_A && layoutKey <= SDLK_Z)
                     keyCode = SDL_SCANCODE_A + static_cast<int>(layoutKey - SDLK_A);
 
-                if (control && keyCode == SDL_SCANCODE_N)
+                const bool viewportHovered = m_ViewportImage && UI::HasState(m_ViewportImage->GetState(), UI::UIState::Hovered);
+
+                switch (keyCode)
                 {
-                    NewScene();
-                    event.Handled = true;
-                    return;
-                }
-                if (control && keyCode == SDL_SCANCODE_O)
-                {
-                    OpenProject();
-                    event.Handled = true;
-                    return;
-                }
-                if (control && keyCode == SDL_SCANCODE_S)
-                {
-                    if (shift)
-                        SaveSceneAs();
-                    else
-                        SaveScene();
-                    event.Handled = true;
-                    return;
-                }
-                if (control && keyCode == SDL_SCANCODE_R)
-                {
-                    if (ScriptEngine::IsInitialized())
-                        ScriptEngine::ReloadAssembly();
-                    event.Handled = true;
-                    return;
+                case SDL_SCANCODE_Z:
+                    if (control) { if (shift) Redo(); else Undo(); event.Handled = true; return; }
+                    break;
+                case SDL_SCANCODE_Y:
+                    if (control) { Redo(); event.Handled = true; return; }
+                    break;
+                case SDL_SCANCODE_N:
+                    if (control) { NewScene(); event.Handled = true; return; }
+                    break;
+                case SDL_SCANCODE_O:
+                    if (control) { OpenProject(); event.Handled = true; return; }
+                    break;
+                case SDL_SCANCODE_S:
+                    if (control) { if (shift) SaveSceneAs(); else SaveScene(); event.Handled = true; return; }
+                    break;
+                case SDL_SCANCODE_B:
+                    if (control) { m_ScriptBuilder.RequestBuild(); event.Handled = true; return; }
+                    break;
+                case SDL_SCANCODE_R:
+                    if (control) { if (ScriptEngine::IsInitialized()) ScriptEngine::ReloadAssembly(); event.Handled = true; return; }
+                    break;
+                case SDL_SCANCODE_KP_1:
+                    if (viewportHovered) { SetViewMode(control ? EditorViewMode::Back : EditorViewMode::Front); event.Handled = true; return; }
+                    break;
+                case SDL_SCANCODE_KP_3:
+                    if (viewportHovered) { SetViewMode(control ? EditorViewMode::Left : EditorViewMode::Right); event.Handled = true; return; }
+                    break;
+                case SDL_SCANCODE_KP_7:
+                    if (viewportHovered) { SetViewMode(control ? EditorViewMode::Bottom : EditorViewMode::Top); event.Handled = true; return; }
+                    break;
+                case SDL_SCANCODE_KP_5:
+                    if (viewportHovered) { SetViewMode(EditorViewMode::Perspective); event.Handled = true; return; }
+                    break;
+                case SDL_SCANCODE_ESCAPE:
+                    if (m_SceneState != SceneState::Edit) { OnSceneStop(); event.Handled = true; return; }
+                    break;
+                default:
+                    break;
                 }
             }
         }
@@ -646,8 +1239,8 @@ namespace Nox
                 {"Save Scene", "Ctrl+S", [this]() { SaveScene(); }},
                 {"Save Scene As...", "Ctrl+Shift+S", [this]() { SaveSceneAs(); }},
                 {"", "", {}, true},
-                {"Package Game...", "", {}, false, false, false, false, "Packaging UI not yet ported to NoxEditorV2"},
-                {"Package Server...", "", {}, false, false, false, false, "Packaging UI not yet ported to NoxEditorV2"},
+                {"Package Game...", "", {}, false, false, false, false, "Packaging dialog not yet ported to NoxEditorV2"},
+                {"Package Server...", "", {}, false, false, false, false, "Packaging dialog not yet ported to NoxEditorV2"},
                 {"", "", {}, true},
                 {"Save Layout", "", [uiLayer]()
                 {
@@ -658,13 +1251,20 @@ namespace Nox
             };
         });
 
-        menuBar->AddDynamicMenu("Edit", []() -> std::vector<UI::UIMenuItem>
+        menuBar->AddDynamicMenu("Edit", [this]() -> std::vector<UI::UIMenuItem>
         {
+            const bool editing = m_SceneState == SceneState::Edit;
+            const std::string undoLabel = m_History.CanUndo() ? "Undo " + m_History.GetUndoName() : std::string("Undo");
+            const std::string redoLabel = m_History.CanRedo() ? "Redo " + m_History.GetRedoName() : std::string("Redo");
+            char historyText[96];
+            const size_t steps = m_History.GetStateCount() > 0 ? m_History.GetStateCount() - 1 : 0;
+            std::snprintf(historyText, sizeof(historyText), "History: %zu steps, %.1f MB",
+                          steps, static_cast<double>(m_History.GetMemoryBytes()) / (1024.0 * 1024.0));
             return {
-                {"Undo", "Ctrl+Z", {}, false, false},
-                {"Redo", "Ctrl+Y / Ctrl+Shift+Z", {}, false, false},
+                {undoLabel, "Ctrl+Z", [this]() { Undo(); }, false, editing && m_History.CanUndo()},
+                {redoLabel, "Ctrl+Y / Ctrl+Shift+Z", [this]() { Redo(); }, false, editing && m_History.CanRedo()},
                 {"", "", {}, true},
-                {"History: 0 steps, 0.0 MB", "", {}, false, false, false, true}
+                {historyText, "", {}, false, false, false, true}
             };
         });
 
@@ -678,11 +1278,18 @@ namespace Nox
             }
 
             return {
-                {"Empty Entity", "", [this]() { if (m_ActiveScene) m_ActiveScene->CreateEntity("Empty Entity"); }},
+                {"Empty Entity", "", [this]()
+                {
+                    if (m_ActiveScene)
+                    {
+                        m_ActiveScene->CreateEntity("Empty Entity");
+                        m_HistoryCheckRequested = true;
+                    }
+                }},
                 {"Shapes", "", {}, false, true, false, false, "", std::move(shapeItems)},
                 {"", "", {}, true},
                 {"Streaming Test World...", "", {}, false, false, false, false,
-                 "A world partition larger than RAM and VRAM (panel not yet ported to NoxEditorV2)."}
+                 "A world partition larger than RAM and VRAM (settings dialog not yet ported to NoxEditorV2)."}
             };
         });
 
@@ -744,13 +1351,20 @@ namespace Nox
         {
             const bool waitForDbg = ScriptEngine::GetWaitForDebugger();
             const bool canReload = ScriptEngine::IsInitialized();
-            return {
-                {"Build and Reload", "Ctrl+B", {}, false, false, false, false, "ScriptBuilder not yet ported to NoxEditorV2"},
+            std::vector<UI::UIMenuItem> items = {
+                {"Build and Reload", "Ctrl+B", [this]() { m_ScriptBuilder.RequestBuild(); }, false, !m_ScriptBuilder.IsBuilding()},
                 {"Reload assembly", "Ctrl+R", []() { ScriptEngine::ReloadAssembly(); }, false, canReload},
-                {"Build on Save", "", [this]() { m_BuildScriptsOnSave = !m_BuildScriptsOnSave; }, false, true, m_BuildScriptsOnSave},
+                {"Build on Save", "", [this]() { m_ScriptBuilder.AutoBuild = !m_ScriptBuilder.AutoBuild; }, false, true, m_ScriptBuilder.AutoBuild, false,
+                 "Saving a .cs file of the project builds its scripts and reloads them a moment later."},
                 {"Wait for Debugger on Play", "", [waitForDbg]() { ScriptEngine::SetWaitForDebugger(!waitForDbg); }, false, true, waitForDbg, false,
                  "Play waits (up to 60 s) until a .NET debugger attaches to the editor, then breaks once."}
             };
+            if (!m_ScriptBuilder.GetStatus().empty())
+            {
+                items.push_back({"", "", {}, true});
+                items.push_back({m_ScriptBuilder.GetStatus(), "", {}, false, false, false, true});
+            }
+            return items;
         });
 
         auto spacer = UI::MakeUI<UI::UIElement>();

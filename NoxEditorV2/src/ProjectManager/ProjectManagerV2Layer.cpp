@@ -238,7 +238,8 @@ namespace Nox
                 titleRow->AddChild(modLabel);
             }
 
-            auto pathLabel = UI::Label(entry.File.parent_path().generic_string());
+            auto pathLabel = UI::Label(entry.File.parent_path().generic_string()).FillWidth();
+            pathLabel->WordWrap = true;
             pathLabel->UseColorOverride = true;
             pathLabel->ColorOverride = entry.Exists ? muted : missingRed;
 
@@ -318,6 +319,18 @@ namespace Nox
             else
                 m_CreatesLabel->Visible = false;
         }
+        if (m_CreatesDetailsLabel)
+        {
+            if (err.empty())
+            {
+                m_CreatesDetailsLabel->Text = settings.Template == ProjectLibrary::ProjectTemplate::Basic
+                    ? "with Assets/ (Scenes with the Main scene, Scripts) and a .gitignore."
+                    : "with Assets/ (Scenes, Scripts) and a .gitignore.";
+                m_CreatesDetailsLabel->Visible = true;
+            }
+            else
+                m_CreatesDetailsLabel->Visible = false;
+        }
         if (m_ErrorLabel)
         {
             m_ErrorLabel->Text = err;
@@ -336,7 +349,9 @@ namespace Nox
         const UI::UIColor muted = { 0.58f, 0.62f, 0.69f, 1.0f };
         const UI::UIColor errorRed = { 0.92f, 0.36f, 0.38f, 1.0f };
 
-        auto subtitle = UI::Label("Open a project or make a new one. Every game is its own project: its own folder, assets, scenes and C# scripts.");
+        auto subtitle = UI::Label("Open a project or make a new one. Every game is its own project: its own folder, assets, scenes and C# scripts.")
+            .FillWidth();
+        subtitle->WordWrap = true;
         subtitle->UseColorOverride = true;
         subtitle->ColorOverride = muted;
 
@@ -363,7 +378,8 @@ namespace Nox
         .FillWidth();
         topBar->HeightMode = UI::UISizeMode::Auto;
 
-        m_OpenErrorLabel = UI::Label();
+        m_OpenErrorLabel = UI::Label().FillWidth();
+        m_OpenErrorLabel->WordWrap = true;
         m_OpenErrorLabel->UseColorOverride = true;
         m_OpenErrorLabel->ColorOverride = errorRed;
         m_OpenErrorLabel->Visible = false;
@@ -409,14 +425,15 @@ namespace Nox
         for (int i = 0; i < 2; ++i)
         {
             const uint32_t picSlot = m_TemplatePictures[i] ? m_TemplatePictures[i]->GetDescriptorIndexSlot() : ~0u;
-            auto pic = UI::MakeUI<UI::UIImage>(picSlot, UI::UIVec2{ 200.0f, 112.0f });
+            auto pic = UI::MakeUI<UI::UIImage>(picSlot, UI::UIVec2{ 160.0f, 90.0f });
             pic->WidthMode = UI::UISizeMode::Fill;
-            pic->HeightMode = UI::UISizeMode::Fixed;
-            pic->FixedSize.y = 112.0f;
+            pic->HeightMode = UI::UISizeMode::Auto;
+            pic->AspectRatio = 16.0f / 9.0f;
             pic->CornerRadius = UI::UICornerRadius::All(4.0f);
 
             auto nameLabel = UI::Label(kTemplates[i].Name);
-            auto descLabel = UI::Label(kTemplates[i].Summary);
+            auto descLabel = UI::Label(kTemplates[i].Summary).FillWidth();
+            descLabel->WordWrap = true;
             descLabel->UseColorOverride = true;
             descLabel->ColorOverride = muted;
 
@@ -426,6 +443,7 @@ namespace Nox
                 .Tooltip(kTemplates[i].Tooltip)
                 .FillWidth();
             tile->HeightMode = UI::UISizeMode::Auto;
+            tile->VAlign = UI::UIAlignment::Top;
             tile->HitTestMode = UI::UIHitTestMode::Self;
             tile->Focusable = true;
             tile->OnMouseUp = [this, i](const UI::UIPointerEvent& e)
@@ -444,6 +462,7 @@ namespace Nox
         }
 
         m_NameInput = UI::TextInput(m_NewName, "Project name").FillWidth();
+        m_NameInput->Tooltip = "Also the C# namespace of its scripts: letters, digits and _.";
         m_NameInput->OnChanged = [this](const std::string& s)
         {
             m_NewName = s;
@@ -469,11 +488,17 @@ namespace Nox
             }
         });
 
-        auto unitsControl = UI::MakeUI<UI::UISegmentedControl>(
-            std::vector<std::string>{ "cm (UE)", "m (1.0)" },
+        auto unitsDropdown = UI::MakeUI<UI::UIDropdown>(
+            &uiLayer->GetContext(),
+            std::vector<std::string>{
+                "Centimeters (1 unit = 1 cm, like Unreal)",
+                "Meters (1 unit = 1 m, like Godot / Unity)"
+            },
             m_UnitsIndex,
             [this](int idx) { m_UnitsIndex = idx; }
         );
+        unitsDropdown->WidthMode = UI::UISizeMode::Fill;
+        unitsDropdown->Tooltip = "What one unit of a position is. Imported models are scaled to it; it cannot be changed later\nwithout re-placing what is built.";
 
         const std::vector<std::string> qualities = QualityChoices();
         auto qualityDropdown = UI::MakeUI<UI::UIDropdown>(
@@ -482,13 +507,23 @@ namespace Nox
             m_QualityIndex,
             [this](int idx) { m_QualityIndex = idx; }
         );
+        qualityDropdown->WidthMode = UI::UISizeMode::Fill;
+        qualityDropdown->Tooltip = "The renderer preset the project opens with (Auto: the one this GPU should run). Changeable later in Settings.";
 
-        m_CreatesLabel = UI::Label();
+        m_CreatesLabel = UI::Label().FillWidth();
+        m_CreatesLabel->WordWrap = true;
         m_CreatesLabel->UseColorOverride = true;
         m_CreatesLabel->ColorOverride = muted;
         m_CreatesLabel->Visible = false;
 
-        m_ErrorLabel = UI::Label();
+        m_CreatesDetailsLabel = UI::Label().FillWidth();
+        m_CreatesDetailsLabel->WordWrap = true;
+        m_CreatesDetailsLabel->UseColorOverride = true;
+        m_CreatesDetailsLabel->ColorOverride = muted;
+        m_CreatesDetailsLabel->Visible = false;
+
+        m_ErrorLabel = UI::Label().FillWidth();
+        m_ErrorLabel->WordWrap = true;
         m_ErrorLabel->UseColorOverride = true;
         m_ErrorLabel->ColorOverride = errorRed;
         m_ErrorLabel->Visible = false;
@@ -523,19 +558,25 @@ namespace Nox
             OpenProjectFile(created, settings.Template == ProjectLibrary::ProjectTemplate::Basic);
         }).Primary().HAlign(UI::UIAlignment::End);
 
-        auto rightColumn = UI::Card("New Project", {
+        auto rightFormScroll = UI::Scroll({
             templateRow,
             UI::Label("Project Name"),
             m_NameInput,
             UI::Label("Location"),
             UI::HStack(6.0f, { m_LocationInput, browseFolderBtn }).FillWidth(),
-            UI::HStack(10.0f, {
-                UI::VStack(4.0f, { UI::Label("World Units"), unitsControl }).FillWidth(),
-                UI::VStack(4.0f, { UI::Label("Render Quality"), qualityDropdown }).FillWidth()
-            }).FillWidth(),
-            UI::CheckBox("Create C# Scripts Project", m_CreateScripts, [this](bool v) { m_CreateScripts = v; }),
+            UI::Label("World Units"),
+            unitsDropdown,
+            UI::Label("Render Quality"),
+            qualityDropdown,
+            UI::CheckBox("Create the scripts project (with an example Rotator behaviour)", m_CreateScripts, [this](bool v) { m_CreateScripts = v; }),
+            UI::Separator(),
             m_CreatesLabel,
-            m_ErrorLabel,
+            m_CreatesDetailsLabel,
+            m_ErrorLabel
+        }, 8.0f);
+
+        auto rightColumn = UI::Card("New Project", {
+            rightFormScroll,
             m_CreateButton
         }).Fill(1.0f);
 

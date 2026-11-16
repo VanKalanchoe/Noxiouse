@@ -64,6 +64,7 @@ namespace Nox
         Ref<UI::UITextInput> m_NameInput;
         Ref<UI::UITextInput> m_LocationInput;
         Ref<UI::UILabel> m_CreatesLabel;
+        Ref<UI::UILabel> m_CreatesDetailsLabel;
         Ref<UI::UILabel> m_ErrorLabel;
         Ref<UI::UIButton> m_CreateButton;
     };

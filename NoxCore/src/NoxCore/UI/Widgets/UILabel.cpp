@@ -71,9 +71,96 @@ namespace Nox::UI
         return { static_cast<float>(maxW), static_cast<float>(totalH) };
     }
 
+    std::string UILabel::WrapText(std::string_view text, const Ref<Font>& fontAsset, float fontSize, float maxWidth)
+    {
+        if (text.empty() || maxWidth <= 1.0f)
+            return std::string(text);
+
+        std::string result;
+        result.reserve(text.size() + 16);
+
+        size_t pos = 0;
+        while (pos < text.size())
+        {
+            size_t lineEnd = text.find('\n', pos);
+            const bool hasNewline = (lineEnd != std::string_view::npos);
+            if (!hasNewline)
+                lineEnd = text.size();
+
+            std::string_view line = text.substr(pos, lineEnd - pos);
+            if (!line.empty() && line.back() == '\r')
+                line.remove_suffix(1);
+
+            std::string current;
+            size_t wordStart = 0;
+            while (wordStart < line.size())
+            {
+                const bool isSpace = (line[wordStart] == ' ' || line[wordStart] == '\t');
+                size_t tokenEnd = wordStart + 1;
+                if (!isSpace)
+                {
+                    while (tokenEnd < line.size() && line[tokenEnd] != ' ' && line[tokenEnd] != '\t')
+                        ++tokenEnd;
+                }
+                else
+                {
+                    while (tokenEnd < line.size() && (line[tokenEnd] == ' ' || line[tokenEnd] == '\t'))
+                        ++tokenEnd;
+                }
+
+                std::string_view token = line.substr(wordStart, tokenEnd - wordStart);
+                if (current.empty())
+                {
+                    if (!isSpace)
+                        current.assign(token);
+                }
+                else
+                {
+                    std::string candidate = current;
+                    candidate.append(token);
+                    if (MeasureText(candidate, fontAsset, fontSize).x <= maxWidth)
+                    {
+                        current = std::move(candidate);
+                    }
+                    else
+                    {
+                        if (!result.empty() && result.back() != '\n')
+                            result.push_back('\n');
+                        result.append(current);
+                        current = isSpace ? std::string() : std::string(token);
+                    }
+                }
+                wordStart = tokenEnd;
+            }
+
+            if (!current.empty())
+            {
+                if (!result.empty() && result.back() != '\n')
+                    result.push_back('\n');
+                result.append(current);
+            }
+            if (hasNewline)
+                result.push_back('\n');
+            pos = lineEnd + 1;
+        }
+        return result;
+    }
+
+    float UILabel::ComputeHeightForWidth(float width)
+    {
+        if (HeightMode == UISizeMode::Fixed)
+            return FixedSize.y;
+        const float fontSize = FontSizeOverride > 0.0f ? FontSizeOverride : GetResolvedStyle().FontSize;
+        if (WordWrap && width > 1.0f && !Text.empty())
+            return MeasureText(WrapText(Text, FontAsset, fontSize, width), FontAsset, fontSize).y;
+        return MeasureText(Text, FontAsset, fontSize).y;
+    }
+
     UIVec2 UILabel::ComputeDesiredSize()
     {
         const float fontSize = FontSizeOverride > 0.0f ? FontSizeOverride : GetResolvedStyle().FontSize;
+        if (WordWrap && WidthMode == UISizeMode::Fill)
+            return { 0.0f, MeasureText(Text.empty() ? " " : Text, FontAsset, fontSize).y };
         return MeasureText(Text, FontAsset, fontSize);
     }
 
@@ -88,11 +175,14 @@ namespace Nox::UI
         const UIColor color = UseColorOverride ? ColorOverride : style.TextColor;
 
         const UIRect& b = GetBounds();
+        const std::string wrapped = (WordWrap && b.Width() > 1.0f) ? WrapText(Text, FontAsset, fontSize, b.Width()) : std::string();
+        const std::string_view painted = (WordWrap && b.Width() > 1.0f) ? std::string_view(wrapped) : std::string_view(Text);
+
         UIVec2 pos = b.Min;
         if (HAlign == UIAlignment::Center || HAlign == UIAlignment::End ||
             VAlign == UIAlignment::Center || VAlign == UIAlignment::End)
         {
-            const UIVec2 textSize = MeasureText(Text, FontAsset, fontSize);
+            const UIVec2 textSize = MeasureText(painted, FontAsset, fontSize);
             if (HAlign == UIAlignment::Center)
                 pos.x = b.Min.x + (b.Width() - textSize.x) * 0.5f;
             else if (HAlign == UIAlignment::End)
@@ -104,6 +194,6 @@ namespace Nox::UI
                 pos.y = b.Max.y - textSize.y;
         }
 
-        drawList.AddText(Text, FontAsset, pos, fontSize, color);
+        drawList.AddText(painted, FontAsset, pos, fontSize, color);
     }
 }

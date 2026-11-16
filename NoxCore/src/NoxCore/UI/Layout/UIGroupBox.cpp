@@ -35,6 +35,7 @@ namespace Nox::UI
 
         m_Content = Ref<UIStackBox>(new UIStackBox(UIOrientation::Vertical, 6.0f));
         m_Content->WidthMode = UISizeMode::Fill;
+        m_Content->HeightMode = UISizeMode::Fill;
         m_Content->ClipChildren = true;
         AddChild(m_Content);
     }

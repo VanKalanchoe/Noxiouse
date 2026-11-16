@@ -13,10 +13,45 @@ namespace Nox::UI
 
     float UIStackBox::ComputeHeightForWidth(float width)
     {
-        if (Orientation == UIOrientation::Horizontal)
-            return GetDesiredSize().y;
+        if (HeightMode == UISizeMode::Fixed)
+            return FixedSize.y;
 
         const float innerW = std::max(0.0f, width - Padding.Horizontal());
+        if (Orientation == UIOrientation::Horizontal)
+        {
+            float fixedW = 0.0f;
+            float totalFlex = 0.0f;
+            size_t visibleCount = 0;
+            for (const auto& child : GetChildren())
+            {
+                if (!child->Visible)
+                    continue;
+                if (child->WidthMode == UISizeMode::Fill)
+                    totalFlex += std::max(0.0f, child->FlexWeight);
+                else
+                    fixedW += child->GetDesiredSize().x;
+                ++visibleCount;
+            }
+            const float totalSpacing = visibleCount > 1 ? Spacing * static_cast<float>(visibleCount - 1) : 0.0f;
+            const float flexSpace = std::max(0.0f, innerW - fixedW - totalSpacing);
+            const float shrinkScale = (fixedW > 0.0f && innerW < fixedW + totalSpacing)
+                ? std::max(0.0f, innerW - totalSpacing) / fixedW
+                : 1.0f;
+
+            float maxH = 0.0f;
+            for (const auto& child : GetChildren())
+            {
+                if (!child->Visible)
+                    continue;
+                float slotW = child->GetDesiredSize().x * shrinkScale;
+                if (child->WidthMode == UISizeMode::Fill && totalFlex > 0.0f)
+                    slotW = flexSpace * (std::max(0.0f, child->FlexWeight) / totalFlex);
+                const float cw = std::max(0.0f, slotW - child->Margin.Horizontal());
+                maxH = std::max(maxH, child->ComputeHeightForWidth(cw) + child->Margin.Vertical());
+            }
+            return maxH + Padding.Vertical();
+        }
+
         float totalH = 0.0f;
         size_t visibleCount = 0;
         for (const auto& child : GetChildren())
@@ -65,6 +100,18 @@ namespace Nox::UI
         float totalFlex = 0.0f;
         size_t visibleCount = 0;
 
+        auto computeFixedMain = [&](const Ref<UIElement>& child) -> float
+        {
+            if (horiz)
+                return child->GetDesiredSize().x;
+            if (child->HeightMode == UISizeMode::Auto)
+            {
+                const float cw = std::max(0.0f, contentRect.Width() - child->Margin.Horizontal());
+                return child->ComputeHeightForWidth(cw) + child->Margin.Vertical();
+            }
+            return child->GetDesiredSize().y;
+        };
+
         for (const auto& child : children)
         {
             if (!child->Visible)
@@ -73,7 +120,7 @@ namespace Nox::UI
             if (mainMode == UISizeMode::Fill)
                 totalFlex += std::max(0.0f, child->FlexWeight);
             else
-                fixedMain += horiz ? child->GetDesiredSize().x : child->GetDesiredSize().y;
+                fixedMain += computeFixedMain(child);
             ++visibleCount;
         }
 
@@ -92,7 +139,7 @@ namespace Nox::UI
 
             const UISizeMode mainMode = horiz ? child->WidthMode : child->HeightMode;
             const UIVec2 desired = child->GetDesiredSize();
-            float childMain = (horiz ? desired.x : desired.y) * shrinkScale;
+            float childMain = computeFixedMain(child) * shrinkScale;
             if (mainMode == UISizeMode::Fill && totalFlex > 0.0f)
                 childMain = flexSpace * (std::max(0.0f, child->FlexWeight) / totalFlex);
 
@@ -104,7 +151,9 @@ namespace Nox::UI
 
                 if (child->VAlign != UIAlignment::Stretch && child->HeightMode != UISizeMode::Fill)
                 {
-                    const float h = std::min(desired.y, contentRect.Height());
+                    const float cw = std::max(0.0f, childMain - child->Margin.Horizontal());
+                    const float childH = child->ComputeHeightForWidth(cw) + child->Margin.Vertical();
+                    const float h = std::min(childH, contentRect.Height());
                     if (child->VAlign == UIAlignment::Center)
                         slot.Min.y = contentRect.Min.y + (contentRect.Height() - h) * 0.5f;
                     else if (child->VAlign == UIAlignment::End)

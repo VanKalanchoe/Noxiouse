@@ -13,8 +13,19 @@ namespace Nox::UI
         HitTestMode = UIHitTestMode::None;
     }
 
+    float UIImage::ComputeHeightForWidth(float width)
+    {
+        if (HeightMode == UISizeMode::Fixed)
+            return FixedSize.y;
+        if (AspectRatio > 0.0f && width > 0.0f)
+            return width / AspectRatio;
+        return m_Desired.y;
+    }
+
     UIVec2 UIImage::ComputeDesiredSize()
     {
+        if (AspectRatio > 0.0f && m_Desired.x > 0.0f)
+            return { m_Desired.x, m_Desired.x / AspectRatio };
         return m_Desired;
     }
 
@@ -22,7 +33,27 @@ namespace Nox::UI
     {
         UIElement::OnPaint(drawList, theme);
 
-        const UIRect& b = GetBounds();
+        UIRect b = GetBounds();
+        if (AspectRatio > 0.0f && b.Width() > 0.0f && b.Height() > 0.0f)
+        {
+            const float boxW = b.Width();
+            const float boxH = b.Height();
+            const float boxAspect = boxW / boxH;
+            if (boxAspect > AspectRatio)
+            {
+                const float fitW = boxH * AspectRatio;
+                const float inset = (boxW - fitW) * 0.5f;
+                b.Min.x += inset;
+                b.Max.x -= inset;
+            }
+            else if (boxAspect < AspectRatio)
+            {
+                const float fitH = boxW / AspectRatio;
+                const float inset = (boxH - fitH) * 0.5f;
+                b.Min.y += inset;
+                b.Max.y -= inset;
+            }
+        }
         if (TextureDescriptorSlot != ~0u)
         {
             drawList.AddTexturedQuad(

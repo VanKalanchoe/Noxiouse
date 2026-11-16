@@ -21,12 +21,15 @@ namespace Nox::UI
         std::string Text;
         float FontSizeOverride = 0.0f; // 0 = use theme style font_size
         bool UseColorOverride = false;
+        bool WordWrap = false;
         UIColor ColorOverride{ 1.0f, 1.0f, 1.0f, 1.0f };
         Ref<Font> FontAsset;
 
         static UIVec2 MeasureText(std::string_view text, const Ref<Font>& fontAsset, float fontSize);
+        static std::string WrapText(std::string_view text, const Ref<Font>& fontAsset, float fontSize, float maxWidth);
 
     protected:
+        float ComputeHeightForWidth(float width) override;
         UIVec2 ComputeDesiredSize() override;
         void OnPaint(UIDrawList& drawList, const UITheme& theme) override;
     };

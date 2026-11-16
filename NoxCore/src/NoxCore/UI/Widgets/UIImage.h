@@ -17,8 +17,10 @@ namespace Nox::UI
         UIVec2 UVMax{ 1.0f, 1.0f };
         UIColor Tint{ 1.0f, 1.0f, 1.0f, 1.0f };
         UICornerRadius CornerRadius = UICornerRadius::All(4.0f);
+        float AspectRatio = 0.0f; // > 0 preserves width / height ratio on auto-sizing and paint
 
     protected:
+        float ComputeHeightForWidth(float width) override;
         UIVec2 ComputeDesiredSize() override;
         void OnPaint(UIDrawList& drawList, const UITheme& theme) override;
 
