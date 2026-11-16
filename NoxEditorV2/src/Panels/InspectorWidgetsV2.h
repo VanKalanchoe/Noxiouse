@@ -84,9 +84,10 @@ namespace Nox
         std::function<void()> onReset,
         std::function<void()> onRemove);
 
-    // The small chevron that opens what is under a row (a material's properties under its slot), and the three dots that
-    // open a row's menu (onOpen gets the button's bounds, to anchor the menu).
-    Ref<UI::UIElement> CreateExpandToggle(bool expanded, std::function<void()> onToggle, const std::string& tooltip = {});
+    // The small chevron that opens what is under a row (a material's properties under its slot): it flips its own state and
+    // calls onToggle(expanded) -- the caller shows or hides the section, no rebuild of the panel. The three dots open a row's
+    // menu (onOpen gets the button's bounds, to anchor the menu).
+    Ref<UI::UIElement> CreateExpandToggle(bool expanded, std::function<void(bool)> onToggle, const std::string& tooltip = {});
     Ref<UI::UIElement> CreateMoreButton(std::function<void(const UI::UIRect&)> onOpen, const std::string& tooltip = "Options");
 
     // A 0..1 (or min..max) value as one field: its fill bar is the slider (drag across it), a click types the exact value.

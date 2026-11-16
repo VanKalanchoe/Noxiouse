@@ -892,15 +892,36 @@ namespace Nox
                              slotRow->WidthMode = UI::UISizeMode::Fill;
                              slotRow->VAlign = UI::UIAlignment::Center;
 
+                             // The material's properties under the row, set in a little so they read as belonging to it. Built the
+                             // first time they are shown; opening and closing then only shows and hides them (a rebuild of the
+                             // whole Inspector for it lost the focus and the work).
+                             Ref<UI::UIStackBox> inlineBody;
+                             std::function<void()> fillInline;
                              if (slotMaterial)
                              {
+                                 inlineBody = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
+                                 inlineBody->WidthMode = UI::UISizeMode::Fill;
+                                 inlineBody->StyleClass = "Card";
+                                 inlineBody->DrawBackground = true;
+                                 inlineBody->Padding = UI::UIThickness::All(8.0f);
+                                 inlineBody->Visible = inlineOpen;
+                                 fillInline = [this, handle, slotMaterial, body = inlineBody, syncs = &c.Syncs, mutate = c.OnMutate, uiContext = c.Context]()
+                                 {
+                                     if (!body->GetChildren().empty())
+                                         return;
+                                     InspectorCardBuilder inlineBuilder{ body, *syncs, mutate, uiContext };
+                                     PopulateMaterialPropertiesUI(handle, slotMaterial->GetData(), inlineBuilder, m_ExpandedCards,
+                                         { m_OnOpenAsset, [this]() { m_Dirty = true; } });
+                                 };
                                  slotRow->AddChild(CreateExpandToggle(inlineOpen,
-                                     [this, expandKey, inlineOpen]()
+                                     [this, expandKey, body = inlineBody, fillInline](bool open)
                                      {
-                                         m_ExpandedCards[expandKey] = !inlineOpen;
-                                         m_Dirty = true;
+                                         m_ExpandedCards[expandKey] = open;
+                                         if (open)
+                                             fillInline();
+                                         body->Visible = open;
                                      },
-                                     inlineOpen ? "Hide this material's properties" : "Show this material's properties here"));
+                                     "Show or hide this material's properties here"));
                              }
 
                              auto pickBtn = UI::Button(matLabel).Tooltip(overridden
@@ -996,17 +1017,10 @@ namespace Nox
 
                              c.AddRow("Slot " + std::to_string(slot), slotRow);
 
-                             if (inlineOpen)
+                             if (inlineBody)
                              {
-                                 // The material's properties, set in a little so they read as belonging to the slot above.
-                                 auto inlineBody = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-                                 inlineBody->WidthMode = UI::UISizeMode::Fill;
-                                 inlineBody->StyleClass = "Card";
-                                 inlineBody->DrawBackground = true;
-                                 inlineBody->Padding = UI::UIThickness::All(8.0f);
-                                 InspectorCardBuilder inlineBuilder{ inlineBody, c.Syncs, c.OnMutate, c.Context };
-                                 PopulateMaterialPropertiesUI(handle, slotMaterial->GetData(), inlineBuilder, m_ExpandedCards,
-                                     { m_OnOpenAsset, [this]() { m_Dirty = true; } });
+                                 if (inlineOpen)
+                                     fillInline();
                                  c.Body->AddChild(inlineBody);
                              }
                          }

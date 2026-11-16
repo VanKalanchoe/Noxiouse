@@ -341,7 +341,7 @@ namespace Nox
         class ExpandToggleButton final : public UI::UIElement
         {
         public:
-            ExpandToggleButton(bool expanded, std::function<void()> onToggle, std::string tooltip)
+            ExpandToggleButton(bool expanded, std::function<void(bool)> onToggle, std::string tooltip)
                 : m_Expanded(expanded), m_OnToggle(std::move(onToggle))
             {
                 DrawBackground = false;
@@ -356,8 +356,9 @@ namespace Nox
             {
                 if (e.Button == 1 && IsEnabled() && GetBounds().Contains(e.Position))
                 {
+                    m_Expanded = !m_Expanded;
                     if (m_OnToggle)
-                        m_OnToggle();
+                        m_OnToggle(m_Expanded);
                     return true;
                 }
                 return false;
@@ -386,7 +387,7 @@ namespace Nox
 
         private:
             bool m_Expanded = false;
-            std::function<void()> m_OnToggle;
+            std::function<void(bool)> m_OnToggle;
         };
 
         std::string TexturePathDisplayName(const std::string& path, const char* emptyText = "None")
@@ -616,7 +617,7 @@ namespace Nox
         return { card, body };
     }
 
-    Ref<UI::UIElement> CreateExpandToggle(bool expanded, std::function<void()> onToggle, const std::string& tooltip)
+    Ref<UI::UIElement> CreateExpandToggle(bool expanded, std::function<void(bool)> onToggle, const std::string& tooltip)
     {
         return Ref<UI::UIElement>(new ExpandToggleButton(expanded, std::move(onToggle), tooltip));
     }

@@ -525,18 +525,29 @@ namespace Nox::UI
         if (!m_Root || !m_Theme)
             return;
 
+        // Styles first: layout reads them (font sizes, paddings). An element made this frame -- a panel rebuilt, a section
+        // opened -- would otherwise be measured with the default style, drawn there for one frame and jump into place on the
+        // next (the whole panel flashed).
+        m_Root->UpdateStylesRecursive(*m_Theme, dt);
+        if (m_Overlay)
+            m_Overlay->UpdateStylesRecursive(*m_Theme, dt);
+
         m_Root->Measure();
         m_Root->Arrange({ { 0.0f, 0.0f }, viewportSize });
-        m_Root->UpdateStylesRecursive(*m_Theme, dt);
-        m_Root->PaintRecursive(drawList, *m_Theme);
-
         if (m_Overlay)
         {
             m_Overlay->Measure();
             m_Overlay->Arrange({ { 0.0f, 0.0f }, viewportSize });
-            m_Overlay->UpdateStylesRecursive(*m_Theme, dt);
-            m_Overlay->PaintRecursive(drawList, *m_Theme);
         }
+
+        // What is under the pointer after this layout, also when the pointer did not move: content that scrolled, moved or
+        // was rebuilt under a resting pointer is hovered right away (not on the next mouse move).
+        if (!m_Captured && !m_DragActive)
+            UpdateHover(m_LastMousePos);
+
+        m_Root->PaintRecursive(drawList, *m_Theme);
+        if (m_Overlay)
+            m_Overlay->PaintRecursive(drawList, *m_Theme);
 
         if (m_Hovered && !m_Captured)
         {

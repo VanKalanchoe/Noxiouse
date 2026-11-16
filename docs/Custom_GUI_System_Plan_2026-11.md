@@ -218,7 +218,13 @@ argument, a temporary; `UIButton` measured with the style's padding but arranged
 style's, and gives way before a fixed-size button's text is cut); a field of a closed popup or a rebuilt panel could still receive keys
 (`UIContext::SetOverlay` / `DropDetachedInput`, `UIElement::OnFocusChanged`).
 
-Checked: clang syntax check of every UI and NoxEditorV2 source; a headless test of the real widget code with fake input (64 checks: lane hit
+Then (user test: "clicking the arrow flashes the whole inspector"): `UIContext::UpdateAndRender` laid elements out before resolving
+their styles, so an element made or shown this frame (a rebuilt panel, an opened section) was measured with the default style (padding 8
+instead of the theme's) and drawn up to 60 px off for one frame. Styles are now resolved first, then layout, then the hover is updated at
+the resting pointer (new content under it is hovered at once), then paint. The slot arrow no longer rebuilds the Inspector: its section is
+built the first time it opens and only shown / hidden after that.
+
+Checked: clang syntax check of every UI and NoxEditorV2 source; a headless test of the real widget code with fake input (68 checks, rebuild and open-section layout included: lane hit
 test and capture, thumb grab without a jump, elision inside the lane, scrub / type / clamp / Escape, picker opens from a context-less editor
 and stays in the window, hex parsing, input dropped for a rebuilt panel) and pictures of its draw lists. **Not run on a GPU**; the test is
 not in the repository yet (it needs a stand-in for the font and the draw list). **Not yet:** a popup cannot leave its OS window (a picker
