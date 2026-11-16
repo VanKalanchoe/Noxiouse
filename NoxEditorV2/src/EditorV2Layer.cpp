@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <format>
 #include <fstream>
 #include <limits>
 #include <sstream>
@@ -50,10 +51,13 @@
 #include "NoxCore/Scene/SceneSerializer.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/UI/Core/UIBuilder.h"
+#include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Core/UILayer.h"
 #include "NoxCore/UI/Layout/UIDockSpace.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
+#include "NoxCore/UI/Widgets/UICheckBox.h"
 #include "NoxCore/UI/Widgets/UIImage.h"
+#include "NoxCore/UI/Widgets/UISlider.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
 #include "NoxCore/Utils/Utils.h"
 #include "ProjectManager/ProcessLauncher.h"
@@ -64,6 +68,9 @@ namespace Nox
     namespace
     {
         constexpr const char* kLayoutPath = "assets/layouts/EditorV2.nlayout";
+        constexpr const char* kViewportPrefsPath = "assets/layouts/EditorV2Viewports.txt";
+        constexpr const char* kViewportTitles[4] = { "Viewport", "Viewport 2", "Viewport 3", "Viewport 4" };
+        constexpr int kDefaultSlotViewModes[4] = { 0, 1, 3, 6 };
 
         std::filesystem::path EditorCamerasFile()
         {
@@ -91,6 +98,15 @@ namespace Nox
         Application& app = Application::Get();
         m_Renderer = app.GetRenderer();
         m_Renderer2D = m_Renderer ? m_Renderer->getRenderer2D() : nullptr;
+
+        for (int i = 0; i < kMaxViewports; ++i)
+        {
+            m_Viewports[i].Title = kViewportTitles[i];
+            m_Viewports[i].Camera = m_EditorCamera;
+            m_Viewports[i].Camera.SetViewMode(static_cast<EditorViewMode>(kDefaultSlotViewModes[i]));
+        }
+        m_Viewports[0].Open = true;
+        LoadViewportPrefs();
 
         m_IconPlay = TextureImporter::LoadTexture2D("assets/Icons/PlayButton.ktx2", { .flip = true, .generateMips = false });
         m_IconStop = TextureImporter::LoadTexture2D("assets/Icons/StopButton.ktx2", { .flip = true, .generateMips = false });
@@ -135,7 +151,9 @@ namespace Nox
             SDL_ShowCursor();
             m_CursorHidden = false;
         }
+        EndMultiplayerPlay();
         SaveEditorCameras();
+        SaveViewportPrefs();
         ScriptEngine::Shutdown();
 
         if (UILayer* uiLayer = Application::Get().GetUILayer())
@@ -997,14 +1015,21 @@ namespace Nox
             return;
         const std::string scene = m_EditorScenePath.generic_string();
         std::vector<std::string> lines = ReadEditorCameraLines();
-        std::erase_if(lines, [&](const std::string& line) { return line.rfind(scene + "|0|", 0) == 0; });
-        const glm::dvec3 focal = m_EditorCamera.GetFocalPoint();
-        char line[512];
-        std::snprintf(line, sizeof(line), "%s|0|%.17g %.17g %.17g %.6g %.6g %.6g %d %.6g",
-                      scene.c_str(), focal.x, focal.y, focal.z,
-                      m_EditorCamera.GetDistance(), m_EditorCamera.GetPitch(), m_EditorCamera.GetYaw(),
-                      static_cast<int>(m_EditorCamera.GetViewMode()), m_EditorCamera.GetOrthoHalfHeight());
-        lines.push_back(line);
+        std::erase_if(lines, [&](const std::string& line) { return line.rfind(scene + "|", 0) == 0; });
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            const ViewportSlot& slot = m_Viewports[index];
+            if (index != m_ActiveViewport && !slot.CameraSet)
+                continue;
+            const EditorCamera& camera = index == m_ActiveViewport ? m_EditorCamera : slot.Camera;
+            const glm::dvec3 focal = camera.GetFocalPoint();
+            char line[512];
+            std::snprintf(line, sizeof(line), "%s|%d|%.17g %.17g %.17g %.6g %.6g %.6g %d %.6g",
+                          scene.c_str(), index, focal.x, focal.y, focal.z,
+                          camera.GetDistance(), camera.GetPitch(), camera.GetYaw(),
+                          static_cast<int>(camera.GetViewMode()), camera.GetOrthoHalfHeight());
+            lines.push_back(line);
+        }
         std::error_code error;
         std::filesystem::create_directories(EditorCamerasFile().parent_path(), error);
         std::ofstream out(EditorCamerasFile(), std::ios::trunc);
@@ -1014,8 +1039,9 @@ namespace Nox
 
     bool EditorV2Layer::RestoreEditorCameras()
     {
+        bool activeRestored = false;
         if (!Project::GetActive() || m_EditorScenePath.empty())
-            return false;
+            return activeRestored;
         const std::string prefix = m_EditorScenePath.generic_string() + "|";
         for (const std::string& line : ReadEditorCameraLines())
         {
@@ -1026,18 +1052,20 @@ namespace Nox
             float distance = 0.0f, pitch = 0.0f, yaw = 0.0f, orthoHalfHeight = 10.0f;
             if (sscanf(line.c_str() + prefix.size(), "%d|%lf %lf %lf %f %f %f %d %f",
                        &index, &focal.x, &focal.y, &focal.z, &distance, &pitch, &yaw,
-                       &mode, &orthoHalfHeight) != 9 || index != 0 ||
+                       &mode, &orthoHalfHeight) != 9 || index < 0 || index >= kMaxViewports ||
                 mode < 0 || mode > static_cast<int>(EditorViewMode::Right))
                 continue;
-            m_EditorCamera.SetViewMode(static_cast<EditorViewMode>(mode));
-            m_EditorCamera.SetFocalPoint(focal);
-            m_EditorCamera.SetDistance(distance);
-            m_EditorCamera.SetOrientation(pitch, yaw);
-            if (m_EditorCamera.IsOrthographic())
-                m_EditorCamera.SetOrthoHalfHeight(orthoHalfHeight);
-            return true;
+            EditorCamera& camera = index == m_ActiveViewport ? m_EditorCamera : m_Viewports[index].Camera;
+            camera.SetViewMode(static_cast<EditorViewMode>(mode));
+            camera.SetFocalPoint(focal);
+            camera.SetDistance(distance);
+            camera.SetOrientation(pitch, yaw);
+            if (camera.IsOrthographic())
+                camera.SetOrthoHalfHeight(orthoHalfHeight);
+            m_Viewports[index].CameraSet = true;
+            activeRestored |= (index == m_ActiveViewport);
         }
-        return false;
+        return activeRestored;
     }
 
     void EditorV2Layer::WriteMaterialShaderEditorSettings()
@@ -1217,10 +1245,32 @@ namespace Nox
         SetViewMode(EditorViewMode::Perspective);
         if (m_SceneState == SceneState::Simulate)
             OnSceneStop();
+
+        if (m_PlayNet.Mode != PlayNetMode::Standalone)
+        {
+            if (!m_PlayNet.SaveWithoutAsking)
+            {
+                m_OpenSaveAndPlay = true;
+                return;
+            }
+            SaveScene();
+            BeginMultiplayerPlay();
+            RefreshToolBar();
+            return;
+        }
+
         m_SceneState = SceneState::Play;
+        StartPlayScene(Scene::NetMode::Standalone);
+        RefreshToolBar();
+    }
+
+    void EditorV2Layer::StartPlayScene(Scene::NetMode netMode)
+    {
         m_HoveredEntity = Entity();
         m_ActiveScene = Scene::Copy(m_EditorScene);
-        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        m_ActiveScene->SetNetMode(netMode);
+        if (m_PlaySession && m_PlaySession->GetReplication())
+            m_PlaySession->GetReplication()->SetScene(m_ActiveScene.get());
         m_ActiveScene->SetRenderer(m_Renderer);
         m_ActiveScene->SetRenderer2D(m_Renderer2D);
         if (m_ViewportImage)
@@ -1232,7 +1282,440 @@ namespace Nox
                 m_ActiveScene->OnViewportResize(w, h);
         }
         m_ActiveScene->OnRuntimeStart();
-        RefreshToolBar();
+        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+    }
+
+    bool EditorV2Layer::LaunchPlayer(const std::vector<std::string>& arguments, bool console, const char* what)
+    {
+#ifdef _WIN32
+        const std::filesystem::path runtime = std::filesystem::path(Application::GetExecutableRootPath()) / "NoxRuntime.exe";
+#else
+        const std::filesystem::path runtime = std::filesystem::path(Application::GetExecutableRootPath()) / "NoxRuntime";
+#endif
+        std::error_code exists;
+        if (!std::filesystem::exists(runtime, exists))
+        {
+            NOX_CORE_ERROR("Multiplayer Play: NoxRuntime is not next to the editor ({}); build the NoxRuntime target", runtime.generic_string());
+            return false;
+        }
+        auto process = std::make_unique<ChildProcess>();
+        std::string error;
+        if (!process->Launch(runtime, arguments, console, error))
+        {
+            NOX_CORE_ERROR("Multiplayer Play: could not start {} ({})", what, error);
+            return false;
+        }
+        NOX_CORE_INFO("Multiplayer Play: started {}", what);
+        m_PlayProcesses.push_back(std::move(process));
+        return true;
+    }
+
+    std::filesystem::path EditorV2Layer::EditorSceneAssetPath() const
+    {
+        if (m_EditorScenePath.empty() || !Project::GetActive())
+            return {};
+        if (!m_EditorScenePath.is_absolute())
+            return m_EditorScenePath.lexically_normal();
+        std::error_code error;
+        const std::filesystem::path relative = std::filesystem::relative(m_EditorScenePath, Project::GetActiveAssetDirectory(), error);
+        if (error || relative.empty() || *relative.begin() == "..")
+            return {};
+        return relative.lexically_normal();
+    }
+
+    AssetHandle EditorV2Layer::EditorSceneHandle() const
+    {
+        const std::filesystem::path relative = EditorSceneAssetPath();
+        if (relative.empty())
+            return 0;
+        return Project::GetActive()->GetEditorAssetManager()->ResolvePath(relative, AssetType::Scene);
+    }
+
+    void EditorV2Layer::BeginMultiplayerPlay()
+    {
+        if (m_EditorScenePath.empty() || !Project::GetActive())
+        {
+            NOX_CORE_WARN("Multiplayer Play: save the scene first (the other players load it from disk)");
+            return;
+        }
+        std::filesystem::path projectFile;
+        std::error_code error;
+        for (const auto& entry : std::filesystem::directory_iterator(Project::GetProjectDirectory(), error))
+        {
+            if (entry.is_regular_file(error) && entry.path().extension() == ".nproj")
+            {
+                projectFile = entry.path();
+                break;
+            }
+        }
+        const std::string scene = EditorSceneAssetPath().generic_string();
+        const AssetHandle sceneHandle = EditorSceneHandle();
+        if (projectFile.empty())
+        {
+            NOX_CORE_ERROR("Multiplayer Play: no .nproj file in {}", Project::GetProjectDirectory().generic_string());
+            return;
+        }
+        if (scene.empty() || sceneHandle == 0)
+        {
+            NOX_CORE_ERROR("Multiplayer Play: the scene '{}' is not an asset of the project (save it under {})",
+                           m_EditorScenePath.generic_string(), Project::GetActiveAssetDirectory().generic_string());
+            return;
+        }
+
+        static const char* emulationNames[] = { "off", "average", "bad" };
+        const std::string emulation = emulationNames[std::clamp(m_PlayNet.Emulation, 0, 2)];
+        Net::NetEmulation emulationValues;
+        Net::NetEmulation::FromPreset(emulation, emulationValues);
+        const uint16_t port = static_cast<uint16_t>(std::clamp(m_PlayNet.Port, 1, 65535));
+
+        SDL_Rect usable{ 0, 0, 1920, 1080 };
+        SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable);
+        const int windowWidth = std::min(usable.w / 2, 1280);
+        const int windowHeight = std::min(usable.h / 2, 720);
+        auto playerArguments = [&](int player)
+        {
+            const int slot = (player - 2) % 4;
+            return std::vector<std::string>{
+                projectFile.string(),
+                "--connect=127.0.0.1:" + std::to_string(port),
+                "--connect-retry=30",
+                "--windowed",
+                "--name=Player" + std::to_string(player),
+                "--scene=" + scene,
+                "--net-emulation=" + emulation,
+                std::format("--window-size={},{}", windowWidth, windowHeight),
+                std::format("--window-pos={},{}", usable.x + (slot % 2) * windowWidth, usable.y + (slot / 2) * windowHeight)
+            };
+        };
+        auto withDebug = [this](std::vector<std::string> arguments)
+        {
+            if (m_PlayNet.DebugTrace)
+                arguments.push_back("--net-debug");
+            return arguments;
+        };
+
+        Net::NetSessionConfig config;
+        config.Port = port;
+        config.Emulation = emulationValues;
+        config.PlayerName = "Player1";
+        config.DebugTrace = m_PlayNet.DebugTrace;
+        m_PlaySessionEnded = false;
+
+        if (m_PlayNet.Mode == PlayNetMode::ListenServer)
+        {
+            config.Role = Net::SessionRole::ListenServer;
+            m_PlaySession = std::make_unique<Net::NetSession>(config);
+            m_PlaySession->FillWelcome = [this, sceneHandle](Net::NetWelcome& welcome)
+            {
+                welcome.ServerTick = m_ActiveScene ? m_ActiveScene->GetTick() : 0;
+                welcome.TickRate = static_cast<uint16_t>(Scene::TickRate);
+                welcome.SceneHandle = static_cast<uint64_t>(sceneHandle);
+            };
+            if (!m_PlaySession->Start())
+            {
+                NOX_CORE_ERROR("Multiplayer Play: port {} cannot be opened (another server running? change it in the Play settings)", port);
+                m_PlaySession.reset();
+                return;
+            }
+            m_SceneState = SceneState::Play;
+            StartPlayScene(Scene::NetMode::Server);
+        }
+        else
+        {
+            if (!LaunchPlayer(withDebug({ projectFile.string(), "--server", "--port=" + std::to_string(port),
+                                          "--scene=" + scene, "--net-emulation=" + emulation }),
+                              true, "the dedicated server"))
+                return;
+            config.Role = Net::SessionRole::Client;
+            config.Address = "127.0.0.1:" + std::to_string(port);
+            config.ConnectRetrySeconds = 30.0;
+            m_PlaySession = std::make_unique<Net::NetSession>(config);
+            m_PlaySession->OnJoined = [this, sceneHandle](AssetHandle serverScene)
+            {
+                if (serverScene != sceneHandle)
+                    return false;
+                m_PlayWaitingForServer = false;
+                StartPlayScene(Scene::NetMode::Client);
+                return true;
+            };
+            m_PlaySession->OnLeft = [this](Net::DisconnectReason reason, const std::string& text, bool)
+            {
+                NOX_CORE_WARN("Multiplayer Play: the session ended -- {} ({})", Net::ToString(reason), text);
+                m_PlaySessionEnded = true;
+            };
+            m_SceneState = SceneState::Play;
+            m_PlayWaitingForServer = true;
+            if (!m_PlaySession->Start())
+                m_PlaySessionEnded = true;
+        }
+
+        for (int player = 2; player <= std::clamp(m_PlayNet.Players, 1, 8); ++player)
+            LaunchPlayer(withDebug(playerArguments(player)), false, std::format("player {}", player).c_str());
+    }
+
+    void EditorV2Layer::EndMultiplayerPlay()
+    {
+        m_PlayProcesses.clear();
+        m_PlaySession.reset();
+        m_PlaySessionEnded = false;
+    }
+
+    void EditorV2Layer::ShowPlaySettingsOverlay(UI::UIElement* anchor)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !anchor)
+            return;
+
+        UI::UIContext& ctx = uiLayer->GetContext();
+        auto backdrop = UI::MakeUI<UI::UIAnchorBox>();
+        backdrop->WidthMode = UI::UISizeMode::Fill;
+        backdrop->HeightMode = UI::UISizeMode::Fill;
+        backdrop->HitTestMode = UI::UIHitTestMode::Self;
+
+        auto card = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 8.0f);
+        card->StyleClass = "Surface";
+        card->DrawBackground = true;
+        card->HitTestMode = UI::UIHitTestMode::Self;
+        card->Padding = UI::UIThickness::All(12.0f);
+        card->WidthMode = UI::UISizeMode::Fixed;
+        card->HeightMode = UI::UISizeMode::Auto;
+        card->FixedSize = { 310.0f, 0.0f };
+
+        const UI::UIRect anchorBounds = anchor->GetBounds();
+        float leftX = anchorBounds.Min.x;
+        float topY = anchorBounds.Max.y + 4.0f;
+        if (const auto& root = ctx.GetRoot())
+        {
+            const UI::UIRect& rootBounds = root->GetBounds();
+            if (rootBounds.Width() > 330.0f)
+                leftX = std::clamp(leftX, 8.0f, rootBounds.Max.x - 320.0f);
+            if (rootBounds.Height() > 360.0f)
+                topY = std::clamp(topY, 8.0f, rootBounds.Max.y - 340.0f);
+        }
+        card->AnchorMin = { 0.0f, 0.0f };
+        card->AnchorMax = { 0.0f, 0.0f };
+        card->AnchorOffsets = { leftX, topY, 0.0f, 0.0f };
+
+        auto title = UI::Label("Multiplayer Play Settings").Get();
+        card->AddChild(title);
+        card->AddChild(UI::Separator().Get());
+
+        auto modeLabel = UI::Label("Net Mode").Get();
+        card->AddChild(modeLabel);
+        std::array<Ref<UI::UIButton>, 3> modeBtns;
+        std::array<Ref<UI::UIButton>, 3> emuBtns;
+        Ref<UI::UISlider> playersSlider;
+        Ref<UI::UILabel> playersLabel;
+        Ref<UI::UITextInput> portInput;
+        Ref<UI::UICheckBox> saveCheck;
+        Ref<UI::UICheckBox> debugCheck;
+
+        auto syncControls = [this, &modeBtns, &emuBtns, &playersSlider, &playersLabel, &portInput, &saveCheck, &debugCheck]() mutable
+        {
+            const bool netEnabled = m_PlayNet.Mode != PlayNetMode::Standalone;
+            for (int i = 0; i < 3; ++i)
+            {
+                if (modeBtns[i])
+                    modeBtns[i]->StyleVariant = (static_cast<int>(m_PlayNet.Mode) == i) ? "primary" : "";
+                if (emuBtns[i])
+                {
+                    emuBtns[i]->StyleVariant = (m_PlayNet.Emulation == i) ? "primary" : "";
+                    emuBtns[i]->SetEnabled(netEnabled);
+                }
+            }
+            if (playersLabel)
+                playersLabel->Text = std::format("Number of Players: {}", m_PlayNet.Players);
+            if (playersSlider)
+                playersSlider->SetEnabled(netEnabled);
+            if (portInput)
+                portInput->SetEnabled(netEnabled);
+            if (saveCheck)
+                saveCheck->SetEnabled(netEnabled);
+            if (debugCheck)
+                debugCheck->SetEnabled(netEnabled);
+        };
+
+        const char* modeLabels[3] = { "Standalone", "Listen Server", "Client" };
+        auto modeRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
+        modeRow->WidthMode = UI::UISizeMode::Fill;
+        modeRow->HeightMode = UI::UISizeMode::Auto;
+        for (int i = 0; i < 3; ++i)
+        {
+            modeBtns[i] = UI::MakeUI<UI::UIButton>(modeLabels[i]);
+            modeBtns[i]->WidthMode = UI::UISizeMode::Fill;
+            modeBtns[i]->Padding = UI::UIThickness::Symmetric(6.0f, 4.0f);
+            modeRow->AddChild(modeBtns[i]);
+        }
+        card->AddChild(modeRow);
+
+        playersLabel = UI::Label(std::format("Number of Players: {}", m_PlayNet.Players)).Get();
+        card->AddChild(playersLabel);
+        playersSlider = UI::MakeUI<UI::UISlider>(static_cast<float>(m_PlayNet.Players), 1.0f, 8.0f);
+        playersSlider->Step = 1.0f;
+        playersSlider->Format = "{:.0f}";
+        playersSlider->WidthMode = UI::UISizeMode::Fill;
+        playersSlider->OnChanged = [this, playersLabel](float value)
+        {
+            m_PlayNet.Players = std::clamp(static_cast<int>(std::round(value)), 1, 8);
+            if (playersLabel)
+                playersLabel->Text = std::format("Number of Players: {}", m_PlayNet.Players);
+        };
+        card->AddChild(playersSlider);
+
+        card->AddChild(UI::Label("Network Emulation").Get());
+        const char* emuLabels[3] = { "Off", "Average", "Bad" };
+        auto emuRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
+        emuRow->WidthMode = UI::UISizeMode::Fill;
+        emuRow->HeightMode = UI::UISizeMode::Auto;
+        for (int i = 0; i < 3; ++i)
+        {
+            emuBtns[i] = UI::MakeUI<UI::UIButton>(emuLabels[i]);
+            emuBtns[i]->WidthMode = UI::UISizeMode::Fill;
+            emuBtns[i]->Padding = UI::UIThickness::Symmetric(6.0f, 4.0f);
+            emuRow->AddChild(emuBtns[i]);
+        }
+        card->AddChild(emuRow);
+
+        auto portRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 8.0f);
+        portRow->WidthMode = UI::UISizeMode::Fill;
+        portRow->HeightMode = UI::UISizeMode::Auto;
+        portRow->AddChild(UI::Label("Port").VAlign(UI::UIAlignment::Center).Get());
+        portInput = UI::MakeUI<UI::UITextInput>(std::to_string(m_PlayNet.Port), "7777");
+        portInput->WidthMode = UI::UISizeMode::Fill;
+        portInput->OnChanged = [this](const std::string& txt)
+        {
+            const int parsed = std::atoi(txt.c_str());
+            if (parsed > 0)
+                m_PlayNet.Port = std::clamp(parsed, 1, 65535);
+        };
+        portRow->AddChild(portInput);
+        card->AddChild(portRow);
+
+        saveCheck = UI::MakeUI<UI::UICheckBox>("Save the scene without asking", m_PlayNet.SaveWithoutAsking);
+        saveCheck->OnChanged = [this](bool v) { m_PlayNet.SaveWithoutAsking = v; };
+        card->AddChild(saveCheck);
+
+        debugCheck = UI::MakeUI<UI::UICheckBox>("Network debug log (--net-debug)", m_PlayNet.DebugTrace);
+        debugCheck->OnChanged = [this](bool v) { m_PlayNet.DebugTrace = v; };
+        card->AddChild(debugCheck);
+
+        auto closeRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
+        closeRow->WidthMode = UI::UISizeMode::Fill;
+        closeRow->HeightMode = UI::UISizeMode::Auto;
+        auto closeSpacer = UI::MakeUI<UI::UIElement>();
+        closeSpacer->WidthMode = UI::UISizeMode::Fill;
+        auto closeBtn = UI::MakeUI<UI::UIButton>("Done", [&ctx]() { ctx.ClearOverlay(); });
+        closeBtn->Padding = UI::UIThickness::Symmetric(12.0f, 4.0f);
+        closeRow->AddChild(closeSpacer);
+        closeRow->AddChild(closeBtn);
+        card->AddChild(closeRow);
+
+        for (int i = 0; i < 3; ++i)
+        {
+            modeBtns[i]->OnClick = [this, i, modeBtns, emuBtns, playersSlider, playersLabel, portInput, saveCheck, debugCheck]()
+            {
+                m_PlayNet.Mode = static_cast<PlayNetMode>(i);
+                const bool netEnabled = m_PlayNet.Mode != PlayNetMode::Standalone;
+                for (int j = 0; j < 3; ++j)
+                {
+                    modeBtns[j]->StyleVariant = (i == j) ? "primary" : "";
+                    emuBtns[j]->StyleVariant = (m_PlayNet.Emulation == j) ? "primary" : "";
+                    emuBtns[j]->SetEnabled(netEnabled);
+                }
+                playersLabel->Text = std::format("Number of Players: {}", m_PlayNet.Players);
+                playersSlider->SetEnabled(netEnabled);
+                portInput->SetEnabled(netEnabled);
+                saveCheck->SetEnabled(netEnabled);
+                debugCheck->SetEnabled(netEnabled);
+            };
+            emuBtns[i]->OnClick = [this, i, emuBtns]()
+            {
+                m_PlayNet.Emulation = i;
+                for (int j = 0; j < 3; ++j)
+                    emuBtns[j]->StyleVariant = (i == j) ? "primary" : "";
+            };
+        }
+
+        syncControls();
+
+        UI::UIElement* cardPtr = card.get();
+        backdrop->OnMouseDown = [cardPtr, &ctx](const UI::UIPointerEvent& e)
+        {
+            if (!cardPtr->GetBounds().Contains(e.Position))
+            {
+                ctx.ClearOverlay();
+                return true;
+            }
+            return false;
+        };
+        backdrop->AddChild(card);
+        ctx.SetOverlay(backdrop);
+    }
+
+    void EditorV2Layer::ShowSaveAndPlayOverlay()
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer)
+            return;
+
+        UI::UIContext& ctx = uiLayer->GetContext();
+        auto backdrop = UI::MakeUI<UI::UIAnchorBox>();
+        backdrop->WidthMode = UI::UISizeMode::Fill;
+        backdrop->HeightMode = UI::UISizeMode::Fill;
+        backdrop->HitTestMode = UI::UIHitTestMode::Self;
+        backdrop->DrawBackground = true;
+        backdrop->StyleClass = "Backdrop";
+
+        auto card = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 10.0f);
+        card->StyleClass = "Surface";
+        card->DrawBackground = true;
+        card->HitTestMode = UI::UIHitTestMode::Self;
+        card->Padding = UI::UIThickness::All(16.0f);
+        card->WidthMode = UI::UISizeMode::Fixed;
+        card->HeightMode = UI::UISizeMode::Auto;
+        card->FixedSize = { 390.0f, 0.0f };
+        card->AnchorMin = { 0.5f, 0.5f };
+        card->AnchorMax = { 0.5f, 0.5f };
+        card->AnchorOffsets = { -195.0f, -95.0f, 195.0f, 95.0f };
+
+        card->AddChild(UI::Label("Save and Play").Get());
+        auto desc = UI::Label("Multiplayer Play starts the other players (NoxRuntime) on the saved scene: the scene is saved first.").Get();
+        desc->WordWrap = true;
+        card->AddChild(desc);
+
+        auto dontAsk = UI::CheckBox("Don't ask again (this session)", m_PlayNet.SaveWithoutAsking,
+                                    [this](bool checked) { m_PlayNet.SaveWithoutAsking = checked; }).Get();
+        card->AddChild(dontAsk);
+
+        auto btnRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 8.0f);
+        btnRow->WidthMode = UI::UISizeMode::Fill;
+        btnRow->HeightMode = UI::UISizeMode::Auto;
+        auto spacer = UI::MakeUI<UI::UIElement>();
+        spacer->WidthMode = UI::UISizeMode::Fill;
+        auto saveBtn = UI::MakeUI<UI::UIButton>("Save and Play", [this, &ctx]()
+        {
+            ctx.ClearOverlay();
+            SaveScene();
+            BeginMultiplayerPlay();
+            RefreshToolBar();
+        });
+        saveBtn->StyleVariant = "primary";
+        saveBtn->Padding = UI::UIThickness::Symmetric(12.0f, 5.0f);
+
+        auto cancelBtn = UI::MakeUI<UI::UIButton>("Cancel", [this, &ctx]()
+        {
+            m_PlayNet.SaveWithoutAsking = false;
+            ctx.ClearOverlay();
+        });
+        cancelBtn->Padding = UI::UIThickness::Symmetric(12.0f, 5.0f);
+
+        btnRow->AddChild(spacer);
+        btnRow->AddChild(saveBtn);
+        btnRow->AddChild(cancelBtn);
+        card->AddChild(btnRow);
+
+        backdrop->AddChild(card);
+        ctx.SetOverlay(backdrop);
     }
 
     void EditorV2Layer::OnSceneSimulate()
@@ -1253,7 +1736,10 @@ namespace Nox
 
     void EditorV2Layer::OnSceneStop()
     {
-        if (m_SceneState == SceneState::Play)
+        const bool started = !(m_SceneState == SceneState::Play && m_PlayWaitingForServer);
+        EndMultiplayerPlay();
+        m_PlayWaitingForServer = false;
+        if (m_SceneState == SceneState::Play && started)
             m_ActiveScene->OnRuntimeStop();
         else if (m_SceneState == SceneState::Simulate)
             m_ActiveScene->OnSimulationStop();
@@ -1273,6 +1759,368 @@ namespace Nox
     {
         if (m_SceneState != SceneState::Edit && m_ActiveScene)
             m_ActiveScene->SetPaused(true);
+    }
+
+    void EditorV2Layer::LoadViewportPrefs()
+    {
+        std::ifstream in(kViewportPrefsPath);
+        if (!in.is_open())
+            return;
+        for (std::string line; std::getline(in, line);)
+        {
+            int index = 0, open = 0, view = 0, grid = 1, resolution = 0, realtime = 1, cameraPos = 0;
+            unsigned flags = Renderer::ExtraViewOutline;
+            const int read = sscanf(line.c_str(), "Viewport%d=%d,%d,%u,%d,%d,%d,%d",
+                                    &index, &open, &view, &flags, &grid, &resolution, &realtime, &cameraPos);
+            if (read >= 3 && index >= 0 && index < kMaxViewports && view >= 0 && view <= static_cast<int>(EditorViewMode::Right))
+            {
+                ViewportSlot& slot = m_Viewports[index];
+                slot.Open = (index == 0) || (open != 0);
+                slot.Camera.SetViewMode(static_cast<EditorViewMode>(view));
+                if (read >= 7)
+                {
+                    slot.ShowFlags = flags;
+                    slot.ShowGrid = (grid != 0);
+                    slot.ResolutionIndex = std::clamp(resolution, 0, 2);
+                    slot.Realtime = (realtime != 0);
+                    slot.ShowCameraPosition = (read == 8 && cameraPos != 0);
+                }
+                if (index == 0)
+                    m_EditorCamera.SetViewMode(static_cast<EditorViewMode>(view));
+            }
+        }
+    }
+
+    void EditorV2Layer::SaveViewportPrefs() const
+    {
+        std::error_code error;
+        std::filesystem::path p(kViewportPrefsPath);
+        if (!p.parent_path().empty())
+            std::filesystem::create_directories(p.parent_path(), error);
+        std::ofstream out(kViewportPrefsPath, std::ios::trunc);
+        if (!out.is_open())
+            return;
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            const ViewportSlot& slot = m_Viewports[index];
+            const int view = static_cast<int>(index == m_ActiveViewport ? m_EditorCamera.GetViewMode() : slot.Camera.GetViewMode());
+            out << "Viewport" << index << "="
+                << (slot.Open ? 1 : 0) << ","
+                << view << ","
+                << slot.ShowFlags << ","
+                << (slot.ShowGrid ? 1 : 0) << ","
+                << slot.ResolutionIndex << ","
+                << (slot.Realtime ? 1 : 0) << ","
+                << (slot.ShowCameraPosition ? 1 : 0) << "\n";
+        }
+    }
+
+    void EditorV2Layer::OpenViewport(int index)
+    {
+        if (index < 0 || index >= kMaxViewports)
+            return;
+        ViewportSlot& slot = m_Viewports[index];
+        if (!slot.CameraSet)
+        {
+            const EditorViewMode keepMode = slot.Camera.GetViewMode();
+            slot.Camera = m_EditorCamera;
+            slot.Camera.SetViewMode(keepMode);
+            slot.CameraSet = true;
+        }
+        slot.Open = true;
+
+        if (index > 0)
+        {
+            if (m_ViewportSlotRoots[index] && m_ExtraViewportHosts[index] && index != m_ActiveViewport)
+            {
+                m_ViewportSlotRoots[index]->ClearChildren();
+                m_ViewportSlotRoots[index]->AddChild(m_ExtraViewportHosts[index]);
+            }
+            if (UILayer* uiLayer = Application::Get().GetUILayer())
+            {
+                if (const auto& dock = uiLayer->GetDockSpaceRef())
+                {
+                    if (!dock->FindNodeByPanelTitle(slot.Title))
+                    {
+                        const UI::UIDockDropZone zone = (index == 2) ? UI::UIDockDropZone::Bottom : UI::UIDockDropZone::Right;
+                        dock->AddPanel(slot.Title, m_ViewportSlotRoots[index], zone, "Viewport", 0.5f);
+                    }
+                }
+            }
+        }
+    }
+
+    void EditorV2Layer::CloseViewport(int index)
+    {
+        if (index <= 0 || index >= kMaxViewports)
+            return;
+        if (m_ActiveViewport == index)
+            ActivateViewport(0);
+
+        ViewportSlot& slot = m_Viewports[index];
+        slot.Open = false;
+        slot.Hovered = false;
+        slot.Size = { 0, 0 };
+        slot.DrawnSize = { 0, 0 };
+        if (m_Renderer && m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)))
+            m_Renderer->ReleaseExtraView(static_cast<uint32_t>(index));
+        if (m_ExtraViewportImages[index])
+            m_ExtraViewportImages[index]->TextureDescriptorSlot = ~0u;
+
+        if (UILayer* uiLayer = Application::Get().GetUILayer())
+        {
+            if (const auto& dock = uiLayer->GetDockSpaceRef())
+                dock->RemovePanel(slot.Title);
+        }
+    }
+
+    void EditorV2Layer::ActivateViewport(int index)
+    {
+        if (index < 0 || index >= kMaxViewports || index == m_ActiveViewport)
+            return;
+
+        ViewportSlot& previous = m_Viewports[m_ActiveViewport];
+        ViewportSlot& next = m_Viewports[index];
+        if (!next.Open)
+            OpenViewport(index);
+        if (!next.CameraSet)
+        {
+            const EditorViewMode keepMode = next.Camera.GetViewMode();
+            next.Camera = m_EditorCamera;
+            next.Camera.SetViewMode(keepMode);
+            next.CameraSet = true;
+        }
+
+        const bool wasOrthographic = m_EditorCamera.IsOrthographic();
+        const int prevIdx = m_ActiveViewport;
+        previous.Camera = m_EditorCamera;
+        previous.CameraSet = true;
+        previous.DrawnSize = { 0, 0 };
+        m_EditorCamera = next.Camera;
+        m_ActiveViewport = index;
+
+        if (m_ViewportSlotRoots[prevIdx] && m_ExtraViewportHosts[prevIdx])
+        {
+            m_ViewportSlotRoots[prevIdx]->ClearChildren();
+            m_ViewportSlotRoots[prevIdx]->AddChild(m_ExtraViewportHosts[prevIdx]);
+        }
+        if (m_ViewportSlotRoots[index] && m_ActiveViewportHost)
+        {
+            m_ViewportSlotRoots[index]->ClearChildren();
+            m_ViewportSlotRoots[index]->AddChild(m_ActiveViewportHost);
+            const UI::UIRect& b = m_ViewportSlotRoots[index]->GetBounds();
+            if (b.Width() > 1.0f && b.Height() > 1.0f)
+                m_EditorCamera.SetViewportSize(b.Width(), b.Height());
+        }
+
+        m_HoveredEntity = Entity();
+        m_ViewportTools.IsBoxSelecting = false;
+        SyncOrthoRenderSettings(wasOrthographic);
+        if (m_Renderer)
+            m_Renderer->ResetCameraHistory();
+        m_ViewportToolbar.Sync();
+    }
+
+    void EditorV2Layer::ApplyViewportLayout(ViewportLayout layout)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !uiLayer->GetDockSpaceRef())
+            return;
+
+        const auto& dock = uiLayer->GetDockSpaceRef();
+        int count = 1;
+        switch (layout)
+        {
+        case ViewportLayout::One: count = 1; break;
+        case ViewportLayout::TwoSideBySide:
+        case ViewportLayout::TwoStacked: count = 2; break;
+        case ViewportLayout::Three: count = 3; break;
+        case ViewportLayout::Four: count = 4; break;
+        }
+
+        if (m_ActiveViewport >= count)
+            ActivateViewport(0);
+
+        for (int index = 1; index < kMaxViewports; ++index)
+        {
+            dock->RemovePanel(m_Viewports[index].Title);
+            m_Viewports[index].Open = false;
+            m_Viewports[index].Hovered = false;
+            m_Viewports[index].Size = { 0, 0 };
+            m_Viewports[index].DrawnSize = { 0, 0 };
+            if (m_Renderer && m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)))
+                m_Renderer->ReleaseExtraView(static_cast<uint32_t>(index));
+            if (m_ExtraViewportImages[index])
+                m_ExtraViewportImages[index]->TextureDescriptorSlot = ~0u;
+        }
+
+        if (!dock->FindNodeByPanelTitle("Viewport") && m_ViewportSlotRoots[0])
+            dock->AddPanel("Viewport", m_ViewportSlotRoots[0], UI::UIDockDropZone::Center, {}, 0.5f, UI::UIDockNodeFlags::CentralNode);
+
+        auto prepareSlot = [this](int index)
+        {
+            ViewportSlot& slot = m_Viewports[index];
+            if (!slot.CameraSet)
+            {
+                const EditorViewMode keepMode = slot.Camera.GetViewMode();
+                slot.Camera = m_EditorCamera;
+                slot.Camera.SetViewMode(keepMode);
+                slot.CameraSet = true;
+            }
+            slot.Open = true;
+            if (index != m_ActiveViewport && m_ViewportSlotRoots[index] && m_ExtraViewportHosts[index])
+            {
+                m_ViewportSlotRoots[index]->ClearChildren();
+                m_ViewportSlotRoots[index]->AddChild(m_ExtraViewportHosts[index]);
+            }
+        };
+
+        for (int i = 1; i < count; ++i)
+            prepareSlot(i);
+
+        switch (layout)
+        {
+        case ViewportLayout::One:
+            break;
+        case ViewportLayout::TwoSideBySide:
+            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], UI::UIDockDropZone::Right, "Viewport", 0.5f);
+            break;
+        case ViewportLayout::TwoStacked:
+            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], UI::UIDockDropZone::Bottom, "Viewport", 0.5f);
+            break;
+        case ViewportLayout::Three:
+            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], UI::UIDockDropZone::Right, "Viewport", 0.4f);
+            dock->AddPanel(m_Viewports[2].Title, m_ViewportSlotRoots[2], UI::UIDockDropZone::Bottom, m_Viewports[1].Title, 0.5f);
+            break;
+        case ViewportLayout::Four:
+            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], UI::UIDockDropZone::Right, "Viewport", 0.5f);
+            dock->AddPanel(m_Viewports[2].Title, m_ViewportSlotRoots[2], UI::UIDockDropZone::Bottom, "Viewport", 0.5f);
+            dock->AddPanel(m_Viewports[3].Title, m_ViewportSlotRoots[3], UI::UIDockDropZone::Bottom, m_Viewports[1].Title, 0.5f);
+            break;
+        }
+    }
+
+    int EditorV2Layer::HoveredViewport() const
+    {
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            if (m_Viewports[index].Open && m_Viewports[index].Hovered)
+                return index;
+        }
+        return -1;
+    }
+
+    int EditorV2Layer::OpenViewportCount() const
+    {
+        int count = 0;
+        for (const ViewportSlot& slot : m_Viewports)
+            count += slot.Open ? 1 : 0;
+        return count;
+    }
+
+    void EditorV2Layer::SubmitExtraViewports(Timestep ts)
+    {
+        if (!m_Renderer)
+            return;
+        const float cell = std::max(m_ViewportTools.LocationSnapWorldUnits(), WorldUnits::FromMeters(1.0f));
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            ViewportSlot& slot = m_Viewports[index];
+            slot.Submitted = false;
+            if (index == m_ActiveViewport || !slot.Open || slot.Size.x == 0 || slot.Size.y == 0)
+            {
+                slot.DrawnSize = { 0, 0 };
+                continue;
+            }
+
+            const float width = static_cast<float>(slot.Size.x);
+            const float height = static_cast<float>(slot.Size.y);
+            if (slot.Camera.GetAspectRatio() != width / height)
+                slot.Camera.SetViewportSize(width, height);
+            slot.Camera.OnUpdate(ts, false);
+
+            const uint32_t divisor = 1u << std::clamp(slot.ResolutionIndex, 0, 2);
+            const glm::uvec2 drawSize = glm::max(slot.Size / divisor, glm::uvec2(1));
+            uint32_t flags = slot.ShowFlags;
+
+            const glm::mat4 viewProjection = slot.Camera.GetProjection() * slot.Camera.GetViewMatrix(m_Renderer->GetRenderOrigin());
+            size_t selection = m_SceneHierarchyPanel.GetSelectedEntities().size();
+            for (const Entity& selected : m_SceneHierarchyPanel.GetSelectedEntities())
+                selection = selection * 31 + static_cast<uint32_t>(selected);
+            slot.SinceDrawn += ts.GetSeconds();
+            if (!slot.Realtime && m_SceneState == SceneState::Edit && slot.DrawnSize == drawSize && slot.DrawnFlags == flags &&
+                slot.DrawnViewProjection == viewProjection && slot.DrawnHistory == m_History.GetPosition() && slot.DrawnSelection == selection &&
+                !m_ViewportTools.GizmoUsing && slot.SinceDrawn < 2.0f && m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)))
+            {
+                slot.Submitted = true;
+                continue;
+            }
+
+            slot.DrawnSize = drawSize;
+            slot.DrawnFlags = flags;
+            slot.DrawnViewProjection = viewProjection;
+            slot.DrawnHistory = m_History.GetPosition();
+            slot.DrawnSelection = selection;
+            slot.SinceDrawn = 0.0f;
+
+            shaderio::PushConstantGrid grid{};
+            const bool showGrid = (m_SceneState != SceneState::Play && m_ViewportTools.ShowGrid && slot.ShowGrid);
+            if (showGrid)
+            {
+                const EditorViewMode mode = slot.Camera.GetViewMode();
+                const int axis = (mode == EditorViewMode::Front || mode == EditorViewMode::Back) ? 2 :
+                                 (mode == EditorViewMode::Left || mode == EditorViewMode::Right) ? 0 : 1;
+                grid = slot.Camera.IsOrthographic()
+                    ? Renderer2D::MakeGrid(slot.Camera.GetFocalPoint(), m_Renderer->GetRenderOrigin(), cell, axis, slot.Camera.GetOrthoHalfHeight())
+                    : Renderer2D::MakeGrid(slot.Camera.GetPosition(), m_Renderer->GetRenderOrigin(), cell, 1, slot.Camera.GetDistance());
+            }
+            if (m_SceneState == SceneState::Play)
+                flags &= ~Renderer::ExtraViewOutline;
+
+            m_Renderer->SubmitExtraView(static_cast<uint32_t>(index), slot.Camera, NRI::Extent2D{ drawSize.x, drawSize.y }, showGrid ? &grid : nullptr, false, flags);
+            slot.Submitted = true;
+        }
+    }
+
+    std::vector<UI::UIMenuItem> EditorV2Layer::BuildViewportOptionsItems(int index)
+    {
+        ViewportSlot& slot = m_Viewports[index];
+        auto toggleFlag = [&slot](uint32_t bit, bool inverted)
+        {
+            const bool on = ((slot.ShowFlags & bit) != 0) != inverted;
+            slot.ShowFlags = (!on != inverted) ? (slot.ShowFlags | bit) : (slot.ShowFlags & ~bit);
+        };
+        const bool lit = (slot.ShowFlags & Renderer::ExtraViewUnlit) == 0;
+        const bool wf = (slot.ShowFlags & Renderer::ExtraViewWireframe) != 0;
+        const bool sky = (slot.ShowFlags & Renderer::ExtraViewNoSky) == 0;
+        const bool particles = (slot.ShowFlags & Renderer::ExtraViewNoParticles) == 0;
+        const bool outline = (slot.ShowFlags & Renderer::ExtraViewOutline) != 0;
+
+        return {
+            {"While it is not the active viewport (full render)", "", {}, false, false, false, true},
+            {"Lit", "", [&slot]() { slot.ShowFlags &= ~Renderer::ExtraViewUnlit; }, false, true, lit},
+            {"Unlit", "", [&slot]() { slot.ShowFlags |= Renderer::ExtraViewUnlit; }, false, true, !lit, false,
+             "Base colors without lighting or exposure."},
+            {"", "", {}, true},
+            {"Wireframe", "", [toggleFlag]() mutable { toggleFlag(Renderer::ExtraViewWireframe, false); }, false, true, wf, false,
+             "The triangles' edges over the image."},
+            {"Sky", "", [toggleFlag]() mutable { toggleFlag(Renderer::ExtraViewNoSky, true); }, false, true, sky, false,
+             "The sky behind the geometry (off: black)."},
+            {"Particles", "", [toggleFlag]() mutable { toggleFlag(Renderer::ExtraViewNoParticles, true); }, false, true, particles, false,
+             "The scene's particle systems."},
+            {"Selection Outline", "", [toggleFlag]() mutable { toggleFlag(Renderer::ExtraViewOutline, false); }, false, true, outline, false,
+             "The orange outline of the selected entities."},
+            {"Grid", "", [&slot]() { slot.ShowGrid = !slot.ShowGrid; }, false, true, slot.ShowGrid},
+            {"", "", {}, true},
+            {"Full Resolution", "", [&slot]() { slot.ResolutionIndex = 0; }, false, true, slot.ResolutionIndex == 0},
+            {"Half Resolution", "", [&slot]() { slot.ResolutionIndex = 1; }, false, true, slot.ResolutionIndex == 1},
+            {"Quarter Resolution", "", [&slot]() { slot.ResolutionIndex = 2; }, false, true, slot.ResolutionIndex == 2},
+            {"", "", {}, true},
+            {"Camera Position", "", [&slot]() { slot.ShowCameraPosition = !slot.ShowCameraPosition; }, false, true, slot.ShowCameraPosition, false,
+             "Show world-unit coordinates next to the axis indicator."},
+            {"Realtime", "", [&slot]() { slot.Realtime = !slot.Realtime; }, false, true, slot.Realtime, false,
+             "Off: drawn again only when its camera, the scene or the selection change."}
+        };
     }
 
     int EditorV2Layer::GridPlaneAxis() const
@@ -1891,6 +2739,22 @@ namespace Nox
             const Ref<Texture2D>& tex = isSim ? m_IconStop : m_IconSimulate;
             m_SimulateBtnIcon->TextureDescriptorSlot = tex ? tex->GetDescriptorIndexSlot() : ~0u;
         }
+        if (m_PlaySettingsCogBtn)
+            m_PlaySettingsCogBtn->SetEnabled(isEdit);
+        if (m_PlayNetStatusLabel)
+        {
+            if (m_PlaySession)
+            {
+                m_PlayNetStatusLabel->Visible = true;
+                m_PlayNetStatusLabel->Text = m_PlayWaitingForServer
+                    ? ("Waiting for dedicated server -- " + m_PlaySession->Describe())
+                    : m_PlaySession->Describe();
+            }
+            else
+            {
+                m_PlayNetStatusLabel->Visible = false;
+            }
+        }
     }
 
     void EditorV2Layer::RefreshSceneLoadOverlay()
@@ -1952,6 +2816,12 @@ namespace Nox
     {
         if (!Project::GetActive())
             return;
+
+        if (m_OpenSaveAndPlay)
+        {
+            m_OpenSaveAndPlay = false;
+            ShowSaveAndPlayOverlay();
+        }
 
         if (m_ThumbnailPending && m_SceneState == SceneState::Edit && !m_SceneLoad)
         {
@@ -2055,6 +2925,30 @@ namespace Nox
                                                          : static_cast<const UI::UIElement*>(m_ViewportImage.get());
         const bool hovered = targetEl && UI::HasState(targetEl->GetState(), UI::UIState::Hovered);
         const bool focused = targetEl && UI::HasState(targetEl->GetState(), UI::UIState::Focused);
+
+        m_Viewports[m_ActiveViewport].Size = { wantW, wantH };
+        m_Viewports[m_ActiveViewport].Hovered = hovered;
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            if (index == m_ActiveViewport)
+                continue;
+            ViewportSlot& slot = m_Viewports[index];
+            if (slot.Open && m_ExtraViewportImages[index] && m_ExtraViewportCanvases[index])
+            {
+                const UI::UIRect& eb = m_ExtraViewportImages[index]->GetBounds();
+                slot.Size = {
+                    static_cast<uint32_t>(std::max(0.0f, std::floor(eb.Width()))),
+                    static_cast<uint32_t>(std::max(0.0f, std::floor(eb.Height())))
+                };
+                slot.Hovered = UI::HasState(m_ExtraViewportCanvases[index]->GetState(), UI::UIState::Hovered);
+            }
+            else
+            {
+                slot.Size = { 0, 0 };
+                slot.Hovered = false;
+            }
+        }
+
         Input::SetGameInputEnabled(focused || hovered, hovered);
 
         m_ActiveScene->SetRenderer(m_Renderer);
@@ -2071,9 +2965,25 @@ namespace Nox
             m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera);
             break;
         case SceneState::Play:
-            m_ActiveScene->OnUpdateRuntime(ts);
+            if (m_PlaySession)
+                m_PlaySession->Receive(static_cast<float>(ts));
+            if (m_PlaySessionEnded)
+            {
+                OnSceneStop();
+                break;
+            }
+            if (!m_PlayWaitingForServer)
+                m_ActiveScene->OnUpdateRuntime(ts);
+            if (m_PlaySession)
+            {
+                m_PlaySession->AfterScene(static_cast<float>(ts));
+                m_PlaySession->Send();
+            }
             break;
         }
+
+        m_Viewports[m_ActiveViewport].Camera = m_EditorCamera;
+        m_Viewports[m_ActiveViewport].CameraSet = true;
 
         if (m_ViewportCanvas)
         {
@@ -2127,6 +3037,7 @@ namespace Nox
         m_Renderer->SetSelectedEntityID(selectedIDs);
 
         OnOverlayRender();
+        SubmitExtraViewports(ts);
         UpdateHistory();
         RefreshToolBar();
         m_ViewportToolbar.Sync();
@@ -2155,6 +3066,20 @@ namespace Nox
 
         Texture2D* sceneTex = m_Renderer->GetSceneResource();
         m_ViewportImage->TextureDescriptorSlot = sceneTex ? sceneTex->GetDescriptorIndexSlot() : ~0u;
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            if (!m_ExtraViewportImages[index])
+                continue;
+            if (index != m_ActiveViewport && m_Viewports[index].Open && m_Viewports[index].Submitted)
+            {
+                Texture2D* extraTex = m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index));
+                m_ExtraViewportImages[index]->TextureDescriptorSlot = extraTex ? extraTex->GetDescriptorIndexSlot() : ~0u;
+            }
+            else
+            {
+                m_ExtraViewportImages[index]->TextureDescriptorSlot = ~0u;
+            }
+        }
     }
 
     void EditorV2Layer::OnEvent(Event& event)
@@ -2293,20 +3218,31 @@ namespace Nox
             }
         }
 
-        const UI::UIElement* scrollEl = m_ViewportCanvas ? static_cast<const UI::UIElement*>(m_ViewportCanvas.get())
-                                                         : static_cast<const UI::UIElement*>(m_ViewportImage.get());
+        const UI::UIElement* scrollEl = m_ViewportSlotRoots[m_ActiveViewport]
+            ? m_ViewportSlotRoots[m_ActiveViewport].get()
+            : (m_ViewportCanvas ? static_cast<const UI::UIElement*>(m_ViewportCanvas.get())
+                                : static_cast<const UI::UIElement*>(m_ViewportImage.get()));
         if (!scrollEl)
             return;
 
-        if (event.GetEventType() == EventType::MouseScrolled &&
-            UI::HasState(scrollEl->GetState(), UI::UIState::Hovered))
+        if (event.GetEventType() == EventType::MouseScrolled && m_SceneState == SceneState::Edit)
         {
-            const UI::UIRect& b = scrollEl->GetBounds();
+            const UI::UIElement* hoveredUi = nullptr;
             glm::vec2 mouse = Input::GetMousePosition();
             if (UILayer* uiLayer = Application::Get().GetUILayer())
+            {
+                hoveredUi = uiLayer->GetContext().GetHovered();
                 mouse = uiLayer->GetContext().GetLastMousePos();
-            m_EditorCamera.SetCursorPosition({ mouse.x - b.Min.x, mouse.y - b.Min.y });
-            m_EditorCamera.OnEvent(event);
+            }
+            const bool activeViewportHovered =
+                (m_ViewportCanvas && (hoveredUi == m_ViewportCanvas.get() || UI::HasState(m_ViewportCanvas->GetState(), UI::UIState::Hovered))) ||
+                (m_ExtraViewportCanvases[m_ActiveViewport] && hoveredUi == m_ExtraViewportCanvases[m_ActiveViewport].get());
+            if (activeViewportHovered)
+            {
+                const UI::UIRect& b = scrollEl->GetBounds();
+                m_EditorCamera.SetCursorPosition({ mouse.x - b.Min.x, mouse.y - b.Min.y });
+                m_EditorCamera.OnEvent(event);
+            }
         }
         else if (event.GetEventType() == EventType::MouseButtonReleased)
         {
@@ -2348,6 +3284,8 @@ namespace Nox
             .Tools = &m_ViewportTools,
             .IsPlayModeFn = [this]() { return m_SceneState == SceneState::Play; },
             .IsEditModeFn = [this]() { return m_SceneState == SceneState::Edit; },
+            .ShowCameraPositionFn = [this]() { return m_Viewports[m_ActiveViewport].ShowCameraPosition; },
+            .ShowActiveFrameFn = [this]() { return OpenViewportCount() > 1; },
             .GridPlaneAxisFn = [this]() { return GridPlaneAxis(); },
             .OnSceneMutated = [this]() { m_HistoryCheckRequested = true; },
             .OnCaptureChanged = [this](bool captured, int) { m_ViewportMouseCaptured = captured; }
@@ -2356,7 +3294,9 @@ namespace Nox
         Ref<UI::UIElement> overlayToolbar = m_ViewportToolbar.Build(m_Renderer, &m_EditorCamera, &m_ViewportTools, {
             .SetViewMode = [this](EditorViewMode mode) { SetViewMode(mode); },
             .SnapToFloor = [this]() { SnapSelectionToFloor(); },
-            .SnapToGrid = [this]() { SnapSelectionToGrid(); }
+            .SnapToGrid = [this]() { SnapSelectionToGrid(); },
+            .GetShowCameraPosition = [this]() { return m_Viewports[m_ActiveViewport].ShowCameraPosition; },
+            .SetShowCameraPosition = [this](bool show) { m_Viewports[m_ActiveViewport].ShowCameraPosition = show; }
         });
 
         // Floating scene load progress banner inside the bottom center of the viewport
@@ -2401,10 +3341,148 @@ namespace Nox
         viewportHost->AddChild(m_ViewportCanvas);
         viewportHost->AddChild(overlayToolbar);
         viewportHost->AddChild(m_SceneLoadBanner);
+        m_ActiveViewportHost = viewportHost;
 
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            auto extraImg = UI::MakeUI<UI::UIImage>();
+            extraImg->AnchorMin = { 0.0f, 0.0f };
+            extraImg->AnchorMax = { 1.0f, 1.0f };
+            extraImg->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
+            extraImg->HitTestMode = UI::UIHitTestMode::None;
+            m_ExtraViewportImages[index] = extraImg;
+
+            auto extraCanvas = UI::MakeUI<ExtraViewportCanvas>();
+            extraCanvas->AnchorMin = { 0.0f, 0.0f };
+            extraCanvas->AnchorMax = { 1.0f, 1.0f };
+            extraCanvas->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
+            extraCanvas->HitTestMode = UI::UIHitTestMode::Self;
+            extraCanvas->Bind({
+                .Index = index,
+                .Render = m_Renderer,
+                .Camera = &m_Viewports[index].Camera,
+                .Hierarchy = &m_SceneHierarchyPanel,
+                .GizmoMode = &m_ViewportTools.GizmoMode,
+                .ShowCameraPosition = &m_Viewports[index].ShowCameraPosition,
+                .ShowFlags = &m_Viewports[index].ShowFlags,
+                .ResolutionIndex = &m_Viewports[index].ResolutionIndex,
+                .Realtime = &m_Viewports[index].Realtime,
+                .IsPlayModeFn = [this]() { return m_SceneState == SceneState::Play; },
+                .OnActivate = [this](int idx) { ActivateViewport(idx); }
+            });
+            m_ExtraViewportCanvases[index] = extraCanvas;
+
+            auto extraHost = UI::MakeUI<UI::UIAnchorBox>();
+            extraHost->WidthMode = UI::UISizeMode::Fill;
+            extraHost->HeightMode = UI::UISizeMode::Fill;
+            extraHost->AddChild(extraImg);
+            extraHost->AddChild(extraCanvas);
+            m_ExtraViewportHosts[index] = extraHost;
+
+            auto root = UI::MakeUI<UI::UIAnchorBox>();
+            root->WidthMode = UI::UISizeMode::Fill;
+            root->HeightMode = UI::UISizeMode::Fill;
+            root->AddChild(index == m_ActiveViewport ? m_ActiveViewportHost : m_ExtraViewportHosts[index]);
+            m_ViewportSlotRoots[index] = root;
+        }
+
+        // Sleek Godot-style Play / Simulate / Pause / Step Toolbar (dockable panel inside UIDockSpace)
+        auto makeToolbarIconBtn = [](const Ref<Texture2D>& icon, const std::string& tip,
+                                     std::function<void()> onClick, Ref<UI::UIImage>& outImg) -> Ref<UI::UIElement>
+        {
+            auto img = UI::MakeUI<UI::UIImage>(icon ? icon->GetDescriptorIndexSlot() : ~0u, UI::UIVec2{ 18.0f, 18.0f });
+            img->WidthMode = UI::UISizeMode::Fixed;
+            img->HeightMode = UI::UISizeMode::Fixed;
+            img->FixedSize = { 18.0f, 18.0f };
+            img->HitTestMode = UI::UIHitTestMode::None;
+            outImg = img;
+
+            auto box = UI::HStack(0.0f, { img })
+                .Padding(6.0f, 3.0f)
+                .Style("Button")
+                .Background(true)
+                .Tooltip(tip)
+                .Get();
+            box->HitTestMode = UI::UIHitTestMode::Self;
+            box->Focusable = true;
+            UI::UIStackBox* boxPtr = box.get();
+            box->OnMouseUp = [onClick = std::move(onClick), boxPtr](const UI::UIPointerEvent& e)
+            {
+                if (e.Button == 1 && boxPtr->GetBounds().Contains(e.Position) && onClick)
+                {
+                    onClick();
+                    return true;
+                }
+                return false;
+            };
+            return box;
+        };
+
+        m_PlayBtnWrap = makeToolbarIconBtn(m_IconPlay, "Play / Stop (Esc)", [this]()
+        {
+            if (m_SceneState == SceneState::Play)
+                OnSceneStop();
+            else
+                OnScenePlay();
+        }, m_PlayBtnIcon);
+
+        m_SimulateBtnWrap = makeToolbarIconBtn(m_IconSimulate, "Simulate / Stop", [this]()
+        {
+            if (m_SceneState == SceneState::Simulate)
+                OnSceneStop();
+            else
+                OnSceneSimulate();
+        }, m_SimulateBtnIcon);
+
+        Ref<UI::UIImage> pauseImg;
+        m_PauseBtnWrap = makeToolbarIconBtn(m_IconPause, "Pause / Resume", [this]()
+        {
+            if (m_SceneState != SceneState::Edit && m_ActiveScene)
+                m_ActiveScene->SetPaused(!m_ActiveScene->IsPaused());
+            RefreshToolBar();
+        }, pauseImg);
+
+        Ref<UI::UIImage> stepImg;
+        m_StepBtnWrap = makeToolbarIconBtn(m_IconStep, "Step one frame", [this]()
+        {
+            if (m_SceneState != SceneState::Edit && m_ActiveScene)
+                m_ActiveScene->Step();
+        }, stepImg);
+
+        m_PlaySettingsCogBtn = UI::MakeUI<UIVectorIconButton>(
+            EditorIconKind::Cogwheel,
+            "Play Settings (Multiplayer: Net Mode, Players, Emulation)",
+            [this]() { ShowPlaySettingsOverlay(m_PlaySettingsCogBtn.get()); });
+        m_PlaySettingsCogBtn->VAlign = UI::UIAlignment::Center;
+
+        m_PlayNetStatusLabel = UI::Label("").VAlign(UI::UIAlignment::Center).Margin(6.0f, 0.0f);
+        m_PlayNetStatusLabel->UseColorOverride = true;
+        m_PlayNetStatusLabel->ColorOverride = { 0.72f, 0.78f, 0.86f, 1.0f };
+        m_PlayNetStatusLabel->Visible = false;
+
+        auto tbLeftSpacer = UI::MakeUI<UI::UIElement>();
+        tbLeftSpacer->WidthMode = UI::UISizeMode::Fill;
+        auto tbRightSpacer = UI::MakeUI<UI::UIElement>();
+        tbRightSpacer->WidthMode = UI::UISizeMode::Fill;
+
+        m_ToolBar = UI::HStack(4.0f, {
+            tbLeftSpacer,
+            m_PlayBtnWrap,
+            m_SimulateBtnWrap,
+            m_PauseBtnWrap,
+            m_StepBtnWrap,
+            m_PlaySettingsCogBtn,
+            m_PlayNetStatusLabel,
+            tbRightSpacer
+        }).Padding(6.0f, 2.0f).Style("Surface").Background(true).Get();
+        m_ToolBar->WidthMode = UI::UISizeMode::Fill;
+        m_ToolBar->HeightMode = UI::UISizeMode::Auto;
+        RefreshToolBar();
+
+        // Dock panels: Viewport Center -> Scene Hierarchy Left (full height) -> Toolbar Top of Viewport
         uiLayer->AddPanel(
             "Viewport",
-            viewportHost,
+            m_ViewportSlotRoots[0],
             UI::UIDockDropZone::Center,
             {},
             0.5f,
@@ -2422,21 +3500,40 @@ namespace Nox
             );
         }
 
+        if (m_ShowToolBar)
+        {
+            uiLayer->AddPanel(
+                "Toolbar",
+                m_ToolBar,
+                UI::UIDockDropZone::Top,
+                "Viewport",
+                0.065f
+            );
+        }
+
+        for (int index = 1; index < kMaxViewports; ++index)
+        {
+            if (m_Viewports[index].Open)
+            {
+                const UI::UIDockDropZone zone = (index == 2) ? UI::UIDockDropZone::Bottom : UI::UIDockDropZone::Right;
+                uiLayer->AddPanel(m_Viewports[index].Title, m_ViewportSlotRoots[index], zone, "Viewport", 0.5f);
+            }
+        }
+
         m_StatusLabel = UI::Label("Ready").Margin(10.0f, 4.0f);
 
         if (loadSavedLayout)
         {
             bool shouldLoad = true;
-            if (m_ShowSceneHierarchy)
+            std::ifstream layoutFile(kLayoutPath);
+            if (layoutFile.is_open())
             {
-                std::ifstream layoutFile(kLayoutPath);
-                if (layoutFile.is_open())
-                {
-                    std::stringstream ss;
-                    ss << layoutFile.rdbuf();
-                    if (ss.str().find("Scene Hierarchy") == std::string::npos)
-                        shouldLoad = false;
-                }
+                std::stringstream ss;
+                ss << layoutFile.rdbuf();
+                const std::string saved = ss.str();
+                if ((m_ShowSceneHierarchy && saved.find("Scene Hierarchy") == std::string::npos) ||
+                    (m_ShowToolBar && saved.find("Toolbar") == std::string::npos))
+                    shouldLoad = false;
             }
             if (shouldLoad)
             {
@@ -2461,10 +3558,11 @@ namespace Nox
                 {"Package Game...", "", {}, false, false, false, false, "Packaging dialog not yet ported to NoxEditorV2"},
                 {"Package Server...", "", {}, false, false, false, false, "Packaging dialog not yet ported to NoxEditorV2"},
                 {"", "", {}, true},
-                {"Save Layout", "", [uiLayer]()
+                {"Save Layout", "", [this, uiLayer]()
                 {
                     if (const auto& dock = uiLayer->GetDockSpaceRef())
                         dock->SaveLayout(kLayoutPath);
+                    SaveViewportPrefs();
                 }},
                 {"Exit", "Alt+F4", []() { Application::Get().Shutdown(); }}
             };
@@ -2526,18 +3624,42 @@ namespace Nox
         menuBar->AddDynamicMenu("Window", [this, uiLayer]() -> std::vector<UI::UIMenuItem>
         {
             std::vector<UI::UIMenuItem> viewportItems = {
-                {"1 Viewport", "", {}, false, false},
-                {"2 Side by Side", "", {}, false, false},
-                {"2 Stacked", "", {}, false, false},
-                {"3 Viewports", "", {}, false, false},
-                {"4 Viewports (2 x 2)", "", {}, false, false},
-                {"", "", {}, true},
-                {"Viewport 2", "", {}, false, false},
-                {"Viewport 3", "", {}, false, false},
-                {"Viewport 4", "", {}, false, false},
-                {"", "", {}, true},
-                {"Click a viewport to use it", "", {}, false, false, false, true}
+                {"1 Viewport", "", [this]() { ApplyViewportLayout(ViewportLayout::One); }},
+                {"2 Side by Side", "", [this]() { ApplyViewportLayout(ViewportLayout::TwoSideBySide); }},
+                {"2 Stacked", "", [this]() { ApplyViewportLayout(ViewportLayout::TwoStacked); }},
+                {"3 Viewports", "", [this]() { ApplyViewportLayout(ViewportLayout::Three); }},
+                {"4 Viewports (2 x 2)", "", [this]() { ApplyViewportLayout(ViewportLayout::Four); }},
+                {"", "", {}, true}
             };
+            for (int index = 1; index < kMaxViewports; ++index)
+            {
+                const bool open = m_Viewports[index].Open;
+                viewportItems.push_back({
+                    m_Viewports[index].Title,
+                    "",
+                    [this, index, open]()
+                    {
+                        if (open)
+                            CloseViewport(index);
+                        else
+                            OpenViewport(index);
+                    },
+                    false, true, open
+                });
+            }
+            viewportItems.push_back({"", "", {}, true});
+            for (int index = 0; index < kMaxViewports; ++index)
+            {
+                viewportItems.push_back({
+                    std::string(m_Viewports[index].Title) + " Options",
+                    "",
+                    {},
+                    false, true, false, false, "",
+                    BuildViewportOptionsItems(index)
+                });
+            }
+            viewportItems.push_back({"", "", {}, true});
+            viewportItems.push_back({"Click a viewport to use it; drag its tab to move it", "", {}, false, false, false, true});
 
             std::vector<UI::UIMenuItem> animGraphItems;
             if (Ref<Project> project = Project::GetActive(); project && project->GetEditorAssetManager())
@@ -2554,11 +3676,28 @@ namespace Nox
                 animGraphItems.push_back({"No .nanimgraph assets found", "", {}, false, false, false, true});
 
             return {
-                {"Scene Hierarchy", "", [this]()
+                {"Scene Hierarchy", "", [this, uiLayer]()
                 {
                     m_ShowSceneHierarchy = !m_ShowSceneHierarchy;
-                    BuildUI(false);
+                    if (const auto& dock = uiLayer->GetDockSpaceRef())
+                    {
+                        if (m_ShowSceneHierarchy)
+                            dock->AddPanel("Scene Hierarchy", m_SceneHierarchyPanel.BuildUI(), UI::UIDockDropZone::Left, "Viewport", 0.155f);
+                        else
+                            dock->RemovePanel("Scene Hierarchy");
+                    }
                 }, false, true, m_ShowSceneHierarchy},
+                {"Toolbar", "", [this, uiLayer]()
+                {
+                    m_ShowToolBar = !m_ShowToolBar;
+                    if (const auto& dock = uiLayer->GetDockSpaceRef())
+                    {
+                        if (m_ShowToolBar)
+                            dock->AddPanel("Toolbar", m_ToolBar, UI::UIDockDropZone::Top, "Viewport", 0.065f);
+                        else
+                            dock->RemovePanel("Toolbar");
+                    }
+                }, false, true, m_ShowToolBar},
                 {"Render Graph", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
                 {"Output Log", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
                 {"Profiler", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
@@ -2568,7 +3707,15 @@ namespace Nox
                 {"Viewports", "", {}, false, true, false, false, "", std::move(viewportItems)},
                 {"Animation Graphs", "", {}, false, true, false, false, "", std::move(animGraphItems)},
                 {"", "", {}, true},
-                {"Reset Layout", "", [this]() { BuildUI(false); }},
+                {"Reset Layout", "", [this]()
+                {
+                    for (int i = 1; i < kMaxViewports; ++i)
+                        m_Viewports[i].Open = false;
+                    m_ActiveViewport = 0;
+                    m_ShowSceneHierarchy = true;
+                    m_ShowToolBar = true;
+                    BuildUI(false);
+                }},
                 {"Reload Theme", "", [uiLayer]() { uiLayer->ReloadTheme(); }}
             };
         });
@@ -2610,89 +3757,9 @@ namespace Nox
         m_FpsLabel->ColorOverride = { 0.72f, 0.76f, 0.82f, 1.0f };
         menuBar->AddChild(m_FpsLabel);
 
-        auto makeToolbarIconBtn = [](const Ref<Texture2D>& icon, const std::string& tip,
-                                     std::function<void()> onClick, Ref<UI::UIImage>& outImg) -> Ref<UI::UIElement>
-        {
-            auto img = UI::MakeUI<UI::UIImage>(icon ? icon->GetDescriptorIndexSlot() : ~0u, UI::UIVec2{ 20.0f, 20.0f });
-            img->WidthMode = UI::UISizeMode::Fixed;
-            img->HeightMode = UI::UISizeMode::Fixed;
-            img->FixedSize = { 20.0f, 20.0f };
-            img->HitTestMode = UI::UIHitTestMode::None;
-            outImg = img;
-
-            auto box = UI::HStack(0.0f, { img })
-                .Padding(6.0f, 4.0f)
-                .Style("Button")
-                .Background(true)
-                .Tooltip(tip)
-                .Get();
-            box->HitTestMode = UI::UIHitTestMode::Self;
-            box->Focusable = true;
-            UI::UIStackBox* boxPtr = box.get();
-            box->OnMouseUp = [onClick = std::move(onClick), boxPtr](const UI::UIPointerEvent& e)
-            {
-                if (e.Button == 1 && boxPtr->GetBounds().Contains(e.Position) && onClick)
-                {
-                    onClick();
-                    return true;
-                }
-                return false;
-            };
-            return box;
-        };
-
-        m_PlayBtnWrap = makeToolbarIconBtn(m_IconPlay, "Play / Stop (Esc)", [this]()
-        {
-            if (m_SceneState == SceneState::Play)
-                OnSceneStop();
-            else
-                OnScenePlay();
-        }, m_PlayBtnIcon);
-
-        m_SimulateBtnWrap = makeToolbarIconBtn(m_IconSimulate, "Simulate / Stop", [this]()
-        {
-            if (m_SceneState == SceneState::Simulate)
-                OnSceneStop();
-            else
-                OnSceneSimulate();
-        }, m_SimulateBtnIcon);
-
-        Ref<UI::UIImage> pauseImg;
-        m_PauseBtnWrap = makeToolbarIconBtn(m_IconPause, "Pause / Resume", [this]()
-        {
-            if (m_SceneState != SceneState::Edit && m_ActiveScene)
-                m_ActiveScene->SetPaused(!m_ActiveScene->IsPaused());
-            RefreshToolBar();
-        }, pauseImg);
-
-        Ref<UI::UIImage> stepImg;
-        m_StepBtnWrap = makeToolbarIconBtn(m_IconStep, "Step one frame", [this]()
-        {
-            if (m_SceneState != SceneState::Edit && m_ActiveScene)
-                m_ActiveScene->Step();
-        }, stepImg);
-
-        auto tbLeftSpacer = UI::MakeUI<UI::UIElement>();
-        tbLeftSpacer->WidthMode = UI::UISizeMode::Fill;
-        auto tbRightSpacer = UI::MakeUI<UI::UIElement>();
-        tbRightSpacer->WidthMode = UI::UISizeMode::Fill;
-
-        m_ToolBar = UI::HStack(6.0f, {
-            tbLeftSpacer,
-            m_PlayBtnWrap,
-            m_SimulateBtnWrap,
-            m_PauseBtnWrap,
-            m_StepBtnWrap,
-            tbRightSpacer
-        }).Padding(8.0f, 4.0f).Style("Surface").Background(true).Get();
-        m_ToolBar->WidthMode = UI::UISizeMode::Fill;
-        m_ToolBar->HeightMode = UI::UISizeMode::Auto;
-        RefreshToolBar();
-
         uiLayer->SetRoot(
             UI::VStack(0.0f, {
                            menuBar,
-                           m_ToolBar,
                            uiLayer->GetDockSpaceRef(),
                            m_StatusLabel
                        })

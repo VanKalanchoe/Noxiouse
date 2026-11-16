@@ -354,7 +354,7 @@ namespace Nox::UI
 
         target->TabPanel = nullptr;
         target->SplitDir = horizontal ? UIDockSplitDir::Horizontal : UIDockSplitDir::Vertical;
-        target->SplitRatio = std::clamp(newIsFirst ? ratio : (1.0f - ratio), 0.1f, 0.9f);
+        target->SplitRatio = std::clamp(newIsFirst ? ratio : (1.0f - ratio), 0.03f, 0.97f);
         target->First = newIsFirst ? newLeaf : existingCopy;
         target->Second = newIsFirst ? existingCopy : newLeaf;
         return newLeaf;
@@ -404,6 +404,35 @@ namespace Nox::UI
     Ref<UIDockNode> UIDockSpace::FindNodeByPanelTitle(const std::string& title) const
     {
         return FindNodeByTitleRecursive(m_RootNode, title);
+    }
+
+    bool UIDockSpace::RemovePanel(const std::string& title)
+    {
+        bool removed = false;
+        if (Ref<UIDockNode> node = FindNodeByPanelTitle(title); node && node->TabPanel)
+        {
+            for (size_t i = 0; i < node->TabPanel->GetTabCount(); ++i)
+            {
+                if (node->TabPanel->GetTabTitle(i) == title)
+                {
+                    node->TabPanel->RemoveTab(i);
+                    CompactTree();
+                    removed = true;
+                    break;
+                }
+            }
+        }
+        for (const auto& win : m_FloatingWindows)
+        {
+            if (win && win->GetTitle() == title)
+            {
+                Ref<UIWindow> keep = win;
+                CloseFloatingWindow(keep);
+                removed = true;
+                break;
+            }
+        }
+        return removed;
     }
 
     Ref<UIDockNode> UIDockSpace::FindNodeByTitleRecursive(const Ref<UIDockNode>& node, const std::string& title) const
@@ -1014,7 +1043,7 @@ namespace Nox::UI
                     Ref<UIDockNode> split(new UIDockNode());
                     const std::string dir = yaml["dir"].as<std::string>("horizontal");
                     split->SplitDir = (dir == "vertical") ? UIDockSplitDir::Vertical : UIDockSplitDir::Horizontal;
-                    split->SplitRatio = std::clamp(yaml["ratio"].as<float>(0.5f), 0.1f, 0.9f);
+                    split->SplitRatio = std::clamp(yaml["ratio"].as<float>(0.5f), 0.03f, 0.97f);
                     split->First = first;
                     split->Second = second;
                     return split;

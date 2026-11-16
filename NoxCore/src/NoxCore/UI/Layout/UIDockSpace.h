@@ -122,6 +122,7 @@ namespace Nox::UI
 
         const Ref<UIDockNode>& GetRootNode() const { return m_RootNode; }
         Ref<UIDockNode> FindNodeByPanelTitle(const std::string& title) const;
+        bool RemovePanel(const std::string& title);
 
         void ClearPanels();
         bool SaveLayout(const std::filesystem::path& path) const;
@@ -164,7 +165,7 @@ namespace Nox::UI
         DropZoneHit ComputeDropZone(UIVec2 localPos) const;
 
         static constexpr float kSplitterThickness = 5.0f;
-        static constexpr float kMinNodeExtent = 80.0f;
+        static constexpr float kMinNodeExtent = 44.0f;
 
         Ref<UIDockNode> m_RootNode;
         Ref<UIElement> m_DockHost;     // Hosts all leaf UITabPanels

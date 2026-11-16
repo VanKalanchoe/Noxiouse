@@ -1,26 +1,33 @@
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 #include "EditorHistory.h"
+#include "EditorViewportV2.h"
 #include "GamePackager.h"
 #include "Panels/SceneHierarchyV2Panel.h"
+#include "ProjectManager/ProcessLauncher.h"
 #include "ScriptBuilder.h"
 #include "StreamingTestWorld.h"
-#include "Viewport/ViewportOverlayV2.h"
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Asset/PrimitiveShapes.h"
 #include "NoxCore/Core/Layer.h"
 #include "NoxCore/Core/Ref.h"
 #include "NRI/Texture.h"
+#include "NoxCore/Network/NetSession.h"
 #include "NoxCore/Renderer/EditorCamera.h"
+#include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneLoader.h"
+#include "NoxCore/UI/Widgets/UIMenu.h"
 
 namespace Nox
 {
@@ -96,6 +103,37 @@ namespace Nox
         void OnSceneStop();
         void OnScenePause();
 
+        enum class PlayNetMode : uint8_t { Standalone = 0, ListenServer, Client };
+        struct PlayNetSettings
+        {
+            PlayNetMode Mode = PlayNetMode::Standalone;
+            int Players = 2;
+            int Emulation = 0;
+            int Port = Net::DefaultPort;
+            bool SaveWithoutAsking = false;
+            bool DebugTrace = false;
+        };
+        std::filesystem::path EditorSceneAssetPath() const;
+        AssetHandle EditorSceneHandle() const;
+        void BeginMultiplayerPlay();
+        void StartPlayScene(Scene::NetMode netMode);
+        void EndMultiplayerPlay();
+        bool LaunchPlayer(const std::vector<std::string>& arguments, bool console, const char* what);
+        void ShowPlaySettingsOverlay(UI::UIElement* anchor);
+        void ShowSaveAndPlayOverlay();
+
+        enum class ViewportLayout { One = 0, TwoSideBySide, TwoStacked, Three, Four };
+        void ApplyViewportLayout(ViewportLayout layout);
+        void OpenViewport(int index);
+        void CloseViewport(int index);
+        void ActivateViewport(int index);
+        int HoveredViewport() const;
+        int OpenViewportCount() const;
+        void SubmitExtraViewports(Timestep ts);
+        std::vector<UI::UIMenuItem> BuildViewportOptionsItems(int index);
+        void LoadViewportPrefs();
+        void SaveViewportPrefs() const;
+
         void SetViewMode(EditorViewMode mode);
         int GridPlaneAxis() const;
         void SyncOrthoRenderSettings(bool wasOrthographic);
@@ -120,6 +158,40 @@ namespace Nox
 
         EditorCamera m_EditorCamera;
         SceneState m_SceneState = SceneState::Edit;
+
+        static constexpr int kMaxViewports = 4;
+        struct ViewportSlot
+        {
+            const char* Title = "Viewport";
+            bool Open = false;
+            bool CameraSet = false;
+            EditorCamera Camera;
+            glm::uvec2 Size = { 0, 0 };
+            bool Hovered = false;
+            bool Submitted = false;
+
+            uint32_t ShowFlags = Renderer::ExtraViewOutline;
+            bool ShowGrid = true;
+            int ResolutionIndex = 0;
+            bool Realtime = true;
+            bool ShowCameraPosition = false;
+
+            glm::mat4 DrawnViewProjection{ 0.0f };
+            glm::uvec2 DrawnSize{ 0, 0 };
+            uint32_t DrawnFlags = 0;
+            size_t DrawnHistory = SIZE_MAX;
+            size_t DrawnSelection = 0;
+            float SinceDrawn = 0.0f;
+        };
+        std::array<ViewportSlot, kMaxViewports> m_Viewports;
+        int m_ActiveViewport = 0;
+
+        PlayNetSettings m_PlayNet;
+        std::unique_ptr<Net::NetSession> m_PlaySession;
+        std::vector<std::unique_ptr<ChildProcess>> m_PlayProcesses;
+        bool m_PlayWaitingForServer = false;
+        bool m_PlaySessionEnded = false;
+        bool m_OpenSaveAndPlay = false;
 
         struct OrthoSavedSettings
         {
@@ -153,8 +225,13 @@ namespace Nox
         float m_FpsAccumulator = 0.0f;
         uint32_t m_FpsFrames = 0;
 
+        std::array<Ref<UI::UIElement>, kMaxViewports> m_ViewportSlotRoots;
+        Ref<UI::UIElement> m_ActiveViewportHost;
         Ref<UI::UIImage> m_ViewportImage;
         Ref<ViewportCanvas> m_ViewportCanvas;
+        std::array<Ref<UI::UIElement>, kMaxViewports> m_ExtraViewportHosts;
+        std::array<Ref<UI::UIImage>, kMaxViewports> m_ExtraViewportImages;
+        std::array<Ref<ExtraViewportCanvas>, kMaxViewports> m_ExtraViewportCanvases;
         ViewportToolState m_ViewportTools;
         ViewportOverlayToolbar m_ViewportToolbar;
         Entity m_HoveredEntity;
@@ -172,6 +249,8 @@ namespace Nox
         Ref<UI::UIElement> m_StepBtnWrap;
         Ref<UI::UIImage> m_PlayBtnIcon;
         Ref<UI::UIImage> m_SimulateBtnIcon;
+        Ref<UIVectorIconButton> m_PlaySettingsCogBtn;
+        Ref<UI::UILabel> m_PlayNetStatusLabel;
 
         Ref<UI::UIElement> m_SceneLoadBanner;
         Ref<UI::UILabel> m_SceneLoadTitleLabel;
@@ -182,6 +261,7 @@ namespace Nox
         Ref<UI::UILabel> m_StatusLabel;
         SceneHierarchyV2Panel m_SceneHierarchyPanel;
         bool m_ShowSceneHierarchy = true;
+        bool m_ShowToolBar = true;
         bool m_ViewportMouseCaptured = false;
         bool m_CursorHidden = false;
 
@@ -191,6 +271,6 @@ namespace Nox
         // - Settings & Stats windows (render quality / RT / NRD / post-process / physics collider toggle UI)
         // - Output Log, Profiler, Render Graph, World Partition (HLOD), Levels, Audio Mixer panels
         // - Node Graph / Material / Animation Clip / Timeline panels (`OpenAsset` dispatchers)
-        // - Modal dialogs (Package Game/Server, Streaming Test World) & Multi-Viewport dockspace
+        // - Modal dialogs (Package Game/Server, Streaming Test World)
     };
 }

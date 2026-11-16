@@ -22,9 +22,6 @@ namespace Nox
     namespace UI
     {
         class UIButton;
-        class UICheckBox;
-        class UILabel;
-        class UIStackBox;
     }
 
     enum class ViewportGizmoMode : int
@@ -33,6 +30,38 @@ namespace Nox
         Translate = 0,
         Rotate = 1,
         Scale = 2
+    };
+
+    enum class EditorIconKind : uint8_t
+    {
+        SelectArrow = 0,
+        MoveArrows,
+        RotateRing,
+        ScaleBox,
+        SnapMagnet,
+        ToFloor,
+        ToGrid,
+        MeasureRuler,
+        GridMesh,
+        WireframeMesh,
+        Cogwheel
+    };
+
+    // Crisp SDF vector icon button (used for Godot-style slim toolbars and cogwheel menus).
+    class UIVectorIconButton : public UI::UIElement
+    {
+    public:
+        explicit UIVectorIconButton(EditorIconKind icon, std::string tooltip = {}, std::function<void()> onClick = {});
+
+        EditorIconKind Icon = EditorIconKind::SelectArrow;
+        bool Active = false;
+        std::function<void()> OnClick;
+
+        bool OnPointerUp(const UI::UIPointerEvent& e) override;
+
+    protected:
+        UI::UIVec2 ComputeDesiredSize() override;
+        void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override;
     };
 
     struct ViewportToolState
@@ -52,7 +81,6 @@ namespace Nox
         bool ShowReferenceFigure = false;
         bool ReferenceFigureAtCursor = false;
         glm::dvec3 ReferenceFigurePosition{ 0.0 };
-        bool ShowCameraPosition = false;
 
         bool MeasureTool = false;
         int MeasureStage = 0; // 0 none, 1 placing second, 2 locked
@@ -96,7 +124,8 @@ namespace Nox
             ViewportToolState* Tools = nullptr;
             std::function<bool()> IsPlayModeFn;
             std::function<bool()> IsEditModeFn;
-
+            std::function<bool()> ShowCameraPositionFn;
+            std::function<bool()> ShowActiveFrameFn;
             std::function<int()> GridPlaneAxisFn;
             std::function<void()> OnSceneMutated;
             std::function<void(bool captured, int button)> OnCaptureChanged;
@@ -142,24 +171,52 @@ namespace Nox
         void CommitBoxSelection(bool shift, bool ctrl);
 
         Context m_Ctx{};
-        float m_LastDt = 0.016f;
-        int m_HoveredAxisIdx = -1; // -1 none, 0..2 X/Y/Z
+        int m_HoveredAxisIdx = -1;
         GizmoPart m_HoveredGizmo = GizmoPart::None;
         GizmoPart m_ActiveGizmo = GizmoPart::None;
 
         bool m_LeftTracking = false;
         UI::UIVec2 m_LeftDownPos{ 0.0f, 0.0f };
 
-        // Gizmo drag baseline
         glm::mat4 m_DragInitialWorldRender{ 1.0f };
         glm::mat4 m_DragPrevWorldRender{ 1.0f };
         glm::vec3 m_DragOriginRender{ 0.0f };
         glm::vec3 m_DragAxisDirs[3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
         glm::vec3 m_DragPlaneNormal{ 0.0f, 1.0f, 0.0f };
         glm::vec3 m_DragStartHit{ 0.0f };
-        glm::vec3 m_DragStartScale{ 1.0f };
         float m_DragStartScalar = 0.0f;
         float m_DragStartMouseX = 0.0f;
+    };
+
+    // Overlay for non-active extra viewports (axis indicator, mini gizmo axes, status badge, click-to-activate).
+    class ExtraViewportCanvas : public UI::UIElement
+    {
+    public:
+        struct Context
+        {
+            int Index = 0;
+            Renderer* Render = nullptr;
+            EditorCamera* Camera = nullptr;
+            SceneHierarchyV2Panel* Hierarchy = nullptr;
+            ViewportGizmoMode* GizmoMode = nullptr;
+            bool* ShowCameraPosition = nullptr;
+            uint32_t* ShowFlags = nullptr;
+            int* ResolutionIndex = nullptr;
+            bool* Realtime = nullptr;
+            std::function<bool()> IsPlayModeFn;
+            std::function<void(int)> OnActivate;
+        };
+
+        void Bind(const Context& ctx) { m_Ctx = ctx; }
+
+        bool OnPointerDown(const UI::UIPointerEvent& e) override;
+        bool OnMouseWheel(const UI::UIPointerEvent& e) override;
+
+    protected:
+        void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override;
+
+    private:
+        Context m_Ctx{};
     };
 
     class ViewportOverlayToolbar
@@ -170,6 +227,8 @@ namespace Nox
             std::function<void(EditorViewMode)> SetViewMode;
             std::function<void()> SnapToFloor;
             std::function<void()> SnapToGrid;
+            std::function<bool()> GetShowCameraPosition;
+            std::function<void(bool)> SetShowCameraPosition;
         };
 
         Ref<UI::UIElement> Build(Renderer* renderer, EditorCamera* camera, ViewportToolState* tools, Callbacks callbacks);
@@ -181,17 +240,13 @@ namespace Nox
         ViewportToolState* m_Tools = nullptr;
         Callbacks m_Callbacks;
 
-        std::array<Ref<UI::UIButton>, 4> m_GizmoButtons;
-        Ref<UI::UIStackBox> m_FrozenRow;
-        Ref<UI::UICheckBox> m_SnapCheck;
-        Ref<UI::UIButton> m_LocStepBtn;
-        Ref<UI::UIButton> m_RotStepBtn;
-        Ref<UI::UIButton> m_ScaleStepBtn;
+        std::array<Ref<UIVectorIconButton>, 4> m_GizmoButtons;
+        Ref<UIVectorIconButton> m_SnapBtn;
+        Ref<UIVectorIconButton> m_MeasureBtn;
+        Ref<UIVectorIconButton> m_GridBtn;
+        Ref<UIVectorIconButton> m_WireframeBtn;
         Ref<UI::UIButton> m_ViewModeBtn;
-        Ref<UI::UIButton> m_FigureBtn;
-        Ref<UI::UICheckBox> m_GridCheck;
-        Ref<UI::UICheckBox> m_WireframeCheck;
-        Ref<UI::UICheckBox> m_MeasureCheck;
-        Ref<UI::UIButton> m_UnitBtn;
+        Ref<UIVectorIconButton> m_SettingsCogBtn;
+        Ref<UI::UIButton> m_UnfreezeBtn;
     };
 }

@@ -1,4 +1,4 @@
-#include "ViewportOverlayV2.h"
+#include "EditorViewportV2.h"
 
 #include <algorithm>
 #include <cmath>
@@ -19,7 +19,6 @@
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UICheckBox.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 #include "NoxCore/UI/Widgets/UIMenu.h"
 #include "Panels/SceneHierarchyV2Panel.h"
@@ -52,6 +51,142 @@ namespace Nox
                 thickness,
                 color
             );
+        }
+
+        void DrawArcApprox(UI::UIDrawList& drawList, const glm::vec2& center, float radius,
+                           float startRad, float endRad, int segments, float thickness, const glm::vec4& color)
+        {
+            glm::vec2 prev = center + glm::vec2(std::cos(startRad), std::sin(startRad)) * radius;
+            for (int i = 1; i <= segments; ++i)
+            {
+                const float t = static_cast<float>(i) / static_cast<float>(segments);
+                const float a = glm::mix(startRad, endRad, t);
+                const glm::vec2 cur = center + glm::vec2(std::cos(a), std::sin(a)) * radius;
+                DrawLine(drawList, prev, cur, thickness, color);
+                prev = cur;
+            }
+        }
+
+        void DrawVectorIcon(UI::UIDrawList& drawList, EditorIconKind kind, const glm::vec2& c, const glm::vec4& col)
+        {
+            switch (kind)
+            {
+            case EditorIconKind::SelectArrow:
+            {
+                const glm::vec2 tip = c + glm::vec2(-4.0f, -6.5f);
+                const glm::vec2 btm = c + glm::vec2(-4.0f, 5.0f);
+                const glm::vec2 notch = c + glm::vec2(-0.8f, 2.2f);
+                const glm::vec2 tailEnd = c + glm::vec2(2.2f, 6.2f);
+                const glm::vec2 wing = c + glm::vec2(4.8f, 0.8f);
+                DrawLine(drawList, tip, btm, 1.7f, col);
+                DrawLine(drawList, tip, wing, 1.7f, col);
+                DrawLine(drawList, wing, notch, 1.5f, col);
+                DrawLine(drawList, notch, btm, 1.5f, col);
+                DrawLine(drawList, notch + glm::vec2(0.5f, 0.0f), tailEnd, 1.8f, col);
+                break;
+            }
+            case EditorIconKind::MoveArrows:
+            {
+                DrawLine(drawList, c - glm::vec2(6.5f, 0.0f), c + glm::vec2(6.5f, 0.0f), 1.6f, col);
+                DrawLine(drawList, c - glm::vec2(0.0f, 6.5f), c + glm::vec2(0.0f, 6.5f), 1.6f, col);
+                DrawLine(drawList, c + glm::vec2(0.0f, -7.0f), c + glm::vec2(-2.4f, -4.4f), 1.5f, col);
+                DrawLine(drawList, c + glm::vec2(0.0f, -7.0f), c + glm::vec2(2.4f, -4.4f), 1.5f, col);
+                DrawLine(drawList, c + glm::vec2(0.0f, 7.0f), c + glm::vec2(-2.4f, 4.4f), 1.5f, col);
+                DrawLine(drawList, c + glm::vec2(0.0f, 7.0f), c + glm::vec2(2.4f, 4.4f), 1.5f, col);
+                DrawLine(drawList, c + glm::vec2(-7.0f, 0.0f), c + glm::vec2(-4.4f, -2.4f), 1.5f, col);
+                DrawLine(drawList, c + glm::vec2(-7.0f, 0.0f), c + glm::vec2(-4.4f, 2.4f), 1.5f, col);
+                DrawLine(drawList, c + glm::vec2(7.0f, 0.0f), c + glm::vec2(4.4f, -2.4f), 1.5f, col);
+                DrawLine(drawList, c + glm::vec2(7.0f, 0.0f), c + glm::vec2(4.4f, 2.4f), 1.5f, col);
+                break;
+            }
+            case EditorIconKind::RotateRing:
+            {
+                DrawArcApprox(drawList, c, 5.5f, -0.4f, 4.35f, 16, 1.7f, col);
+                const glm::vec2 head = c + glm::vec2(std::cos(-0.4f), std::sin(-0.4f)) * 5.5f;
+                DrawLine(drawList, head, head + glm::vec2(-3.2f, 0.2f), 1.5f, col);
+                DrawLine(drawList, head, head + glm::vec2(0.2f, -3.2f), 1.5f, col);
+                DrawCircleFill(drawList, c, 1.4f, col);
+                break;
+            }
+            case EditorIconKind::ScaleBox:
+            {
+                drawList.AddRoundedRect(c - glm::vec2(5.5f), c + glm::vec2(5.5f), { 0, 0, 0, 0 }, glm::vec4(1.5f), 1.4f, col);
+                DrawLine(drawList, c - glm::vec2(2.5f, -2.5f), c + glm::vec2(3.0f, -3.0f), 1.5f, col);
+                DrawLine(drawList, c + glm::vec2(3.2f, -3.2f), c + glm::vec2(0.2f, -3.2f), 1.5f, col);
+                DrawLine(drawList, c + glm::vec2(3.2f, -3.2f), c + glm::vec2(3.2f, -0.2f), 1.5f, col);
+                break;
+            }
+            case EditorIconKind::SnapMagnet:
+            {
+                DrawArcApprox(drawList, c + glm::vec2(0.0f, -1.0f), 4.5f, 0.0f, glm::pi<float>(), 12, 1.8f, col);
+                DrawLine(drawList, c + glm::vec2(-4.5f, -1.0f), c + glm::vec2(-4.5f, -5.8f), 1.8f, col);
+                DrawLine(drawList, c + glm::vec2(4.5f, -1.0f), c + glm::vec2(4.5f, -5.8f), 1.8f, col);
+                DrawLine(drawList, c + glm::vec2(-5.4f, -3.5f), c + glm::vec2(-3.6f, -3.5f), 1.4f, col);
+                DrawLine(drawList, c + glm::vec2(3.6f, -3.5f), c + glm::vec2(5.4f, -3.5f), 1.4f, col);
+                break;
+            }
+            case EditorIconKind::ToFloor:
+            {
+                DrawLine(drawList, c + glm::vec2(0.0f, -6.2f), c + glm::vec2(0.0f, 2.5f), 1.7f, col);
+                DrawLine(drawList, c + glm::vec2(0.0f, 2.5f), c + glm::vec2(-3.0f, -0.8f), 1.6f, col);
+                DrawLine(drawList, c + glm::vec2(0.0f, 2.5f), c + glm::vec2(3.0f, -0.8f), 1.6f, col);
+                DrawLine(drawList, c + glm::vec2(-6.0f, 5.5f), c + glm::vec2(6.0f, 5.5f), 1.8f, col);
+                break;
+            }
+            case EditorIconKind::ToGrid:
+            {
+                DrawLine(drawList, c + glm::vec2(-5.5f, -2.5f), c + glm::vec2(5.5f, -2.5f), 1.1f, { col.r, col.g, col.b, col.a * 0.55f });
+                DrawLine(drawList, c + glm::vec2(-5.5f, 2.5f), c + glm::vec2(5.5f, 2.5f), 1.1f, { col.r, col.g, col.b, col.a * 0.55f });
+                DrawLine(drawList, c + glm::vec2(-2.5f, -5.5f), c + glm::vec2(-2.5f, 5.5f), 1.1f, { col.r, col.g, col.b, col.a * 0.55f });
+                DrawLine(drawList, c + glm::vec2(2.5f, -5.5f), c + glm::vec2(2.5f, 5.5f), 1.1f, { col.r, col.g, col.b, col.a * 0.55f });
+                drawList.AddRoundedRect(c - glm::vec2(2.2f), c + glm::vec2(2.2f), col, glm::vec4(1.0f));
+                break;
+            }
+            case EditorIconKind::MeasureRuler:
+            {
+                const glm::vec2 a = c + glm::vec2(-5.5f, 5.0f);
+                const glm::vec2 b = c + glm::vec2(5.5f, -5.0f);
+                DrawLine(drawList, a, b, 1.8f, col);
+                DrawLine(drawList, a + glm::vec2(-1.5f, -2.0f), a + glm::vec2(2.0f, 1.5f), 1.5f, col);
+                DrawLine(drawList, b + glm::vec2(-2.0f, -1.5f), b + glm::vec2(1.5f, 2.0f), 1.5f, col);
+                DrawLine(drawList, c + glm::vec2(-1.4f, -1.4f), c + glm::vec2(1.4f, 1.4f), 1.4f, col);
+                break;
+            }
+            case EditorIconKind::GridMesh:
+            {
+                DrawLine(drawList, c + glm::vec2(-6.0f, -2.0f), c + glm::vec2(6.0f, -2.0f), 1.2f, col);
+                DrawLine(drawList, c + glm::vec2(-6.0f, 2.0f), c + glm::vec2(6.0f, 2.0f), 1.2f, col);
+                DrawLine(drawList, c + glm::vec2(-2.0f, -6.0f), c + glm::vec2(-2.0f, 6.0f), 1.2f, col);
+                DrawLine(drawList, c + glm::vec2(2.0f, -6.0f), c + glm::vec2(2.0f, 6.0f), 1.2f, col);
+                drawList.AddRoundedRect(c - glm::vec2(6.0f), c + glm::vec2(6.0f), { 0, 0, 0, 0 }, glm::vec4(1.5f), 1.2f, col);
+                break;
+            }
+            case EditorIconKind::WireframeMesh:
+            {
+                const glm::vec2 top = c + glm::vec2(0.0f, -6.2f);
+                const glm::vec2 bl = c + glm::vec2(-6.0f, 4.8f);
+                const glm::vec2 br = c + glm::vec2(6.0f, 4.8f);
+                const glm::vec2 mid = c + glm::vec2(0.0f, 0.2f);
+                DrawLine(drawList, top, bl, 1.4f, col);
+                DrawLine(drawList, bl, br, 1.4f, col);
+                DrawLine(drawList, br, top, 1.4f, col);
+                DrawLine(drawList, top, mid, 1.2f, col);
+                DrawLine(drawList, bl, mid, 1.2f, col);
+                DrawLine(drawList, br, mid, 1.2f, col);
+                break;
+            }
+            case EditorIconKind::Cogwheel:
+            {
+                DrawCircleRing(drawList, c, 3.8f, 1.7f, col);
+                for (int i = 0; i < 8; ++i)
+                {
+                    const float a = glm::two_pi<float>() * static_cast<float>(i) / 8.0f;
+                    const glm::vec2 dir(std::cos(a), std::sin(a));
+                    DrawLine(drawList, c + dir * 4.2f, c + dir * 6.4f, 2.1f, col);
+                }
+                break;
+            }
+            }
         }
 
         float DistPointToSegmentSq(const glm::vec2& p, const glm::vec2& a, const glm::vec2& b, float* outT = nullptr)
@@ -108,6 +243,69 @@ namespace Nox
         }
     }
 
+    UIVectorIconButton::UIVectorIconButton(EditorIconKind icon, std::string tooltip, std::function<void()> onClick)
+        : Icon(icon), OnClick(std::move(onClick))
+    {
+        StyleClass = "Button";
+        DrawBackground = false;
+        HitTestMode = UI::UIHitTestMode::Self;
+        Focusable = true;
+        Tooltip = std::move(tooltip);
+        WidthMode = UI::UISizeMode::Fixed;
+        HeightMode = UI::UISizeMode::Fixed;
+        FixedSize = { 26.0f, 24.0f };
+        VAlign = UI::UIAlignment::Center;
+    }
+
+    bool UIVectorIconButton::OnPointerUp(const UI::UIPointerEvent& e)
+    {
+        if (e.Button == 1 && IsEnabled() && GetBounds().Contains(e.Position))
+        {
+            if (OnClick)
+                OnClick();
+            return true;
+        }
+        return UIElement::OnPointerUp(e);
+    }
+
+    UI::UIVec2 UIVectorIconButton::ComputeDesiredSize()
+    {
+        return FixedSize;
+    }
+
+    void UIVectorIconButton::OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme)
+    {
+        const UI::UIRect& b = GetBounds();
+        const UI::UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
+        const bool hovered = UI::HasState(GetState(), UI::UIState::Hovered);
+        const bool pressed = UI::HasState(GetState(), UI::UIState::Pressed);
+
+        if (Active)
+        {
+            drawList.AddRoundedRect(
+                b.Min, b.Max,
+                { accent.r, accent.g, accent.b, hovered ? 0.36f : 0.26f },
+                glm::vec4(4.0f),
+                1.0f,
+                { accent.r, accent.g, accent.b, 0.85f }
+            );
+        }
+        else if (hovered || pressed)
+        {
+            drawList.AddRoundedRect(
+                b.Min, b.Max,
+                { 1.0f, 1.0f, 1.0f, pressed ? 0.16f : 0.10f },
+                glm::vec4(4.0f)
+            );
+        }
+
+        const glm::vec4 iconColor = Active
+            ? glm::vec4{ 0.62f, 0.82f, 1.0f, 1.0f }
+            : (hovered ? glm::vec4{ 0.96f, 0.97f, 0.99f, 1.0f } : glm::vec4{ 0.78f, 0.82f, 0.88f, 1.0f });
+        const glm::vec2 center = (b.Min + b.Max) * 0.5f;
+        DrawVectorIcon(drawList, Icon, center, iconColor);
+    }
+
     float ViewportToolState::LocationSnapWorldUnits() const
     {
         return WorldUnits::FromCentimeters(kLocationSnapsCm[std::clamp(LocationSnapIndex, 0, static_cast<int>(std::size(kLocationSnapsCm)) - 1)]);
@@ -125,9 +323,7 @@ namespace Nox
     {
         if (!m_Ctx.Tools)
             return false;
-        if (m_Ctx.Tools->AxisIndicatorHovered || m_Ctx.Tools->GizmoUsing || m_Ctx.Tools->GizmoHovered)
-            return true;
-        return false;
+        return m_Ctx.Tools->AxisIndicatorHovered || m_Ctx.Tools->GizmoUsing || m_Ctx.Tools->GizmoHovered;
     }
 
     bool ViewportCanvas::RayFromScreen(const UI::UIVec2& screenPos, glm::vec3& outOrigin, glm::vec3& outDir) const
@@ -255,7 +451,7 @@ namespace Nox
         {
             constexpr int kSegments = 48;
             const float radius = scale * 0.78f;
-            float bestDistSq = 100.0f; // 10 px tolerance
+            float bestDistSq = 100.0f;
             GizmoPart best = GizmoPart::None;
 
             for (int a = 0; a < 3; ++a)
@@ -286,11 +482,9 @@ namespace Nox
             return best;
         }
 
-        // Center dot/cube (FreeMove / UniformScale)
         if (glm::dot(mousePos - originScreen, mousePos - originScreen) <= 10.0f * 10.0f)
             return GizmoPart::FreeCenter;
 
-        // Plane quads (Translate only)
         if (m_Ctx.Tools->GizmoMode == ViewportGizmoMode::Translate)
         {
             struct PlaneSpec { int A; int B; GizmoPart Part; };
@@ -312,8 +506,7 @@ namespace Nox
             }
         }
 
-        // X/Y/Z axis stems
-        float bestDistSq = 100.0f; // 10 px tolerance
+        float bestDistSq = 100.0f;
         GizmoPart best = GizmoPart::None;
         for (int a = 0; a < 3; ++a)
         {
@@ -632,7 +825,6 @@ namespace Nox
 
     void ViewportCanvas::OnUpdate(float dt)
     {
-        m_LastDt = dt;
         if (!m_Ctx.Tools || !m_Ctx.Camera)
             return;
 
@@ -692,7 +884,7 @@ namespace Nox
         }
         m_Ctx.Tools->GizmoHovered = (m_HoveredGizmo != GizmoPart::None);
 
-        if (m_HoveredAxisIdx >= 0 && m_Ctx.Camera && m_Ctx.Render)
+        if (m_HoveredAxisIdx >= 0 && m_Ctx.Camera)
         {
             static const glm::vec3 kWorldAxes[3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
             static const char* kNames[3] = { "X", "Y", "Z" };
@@ -742,7 +934,6 @@ namespace Nox
             return true;
         }
 
-        // 1. Click on Axis Indicator handle
         if (const int axisIdx = HitTestAxisIndicator(e.Position); axisIdx >= 0 && m_Ctx.Camera)
         {
             static const glm::vec3 kWorldAxes[3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
@@ -759,14 +950,12 @@ namespace Nox
             return true;
         }
 
-        // 2. Measure tool click
         if (m_Ctx.Tools->MeasureTool)
         {
             MeasureClick();
             return true;
         }
 
-        // 3. Transform gizmo hit
         const bool isPlay = m_Ctx.IsPlayModeFn && m_Ctx.IsPlayModeFn();
         if (m_Ctx.Tools->GizmoMode != ViewportGizmoMode::Select && m_Ctx.Hierarchy && m_Ctx.Render && !isPlay)
         {
@@ -788,7 +977,6 @@ namespace Nox
                             const glm::vec3 col(world[i]);
                             const float len = glm::length(col);
                             m_DragAxisDirs[i] = len > 1e-6f ? (col / len) : glm::vec3(i == 0 ? 1.f : 0.f, i == 1 ? 1.f : 0.f, i == 2 ? 1.f : 0.f);
-                            m_DragStartScale[i] = len;
                         }
                         m_DragStartMouseX = e.Position.x;
 
@@ -819,7 +1007,6 @@ namespace Nox
             }
         }
 
-        // 4. Entity Click Selection + Start Box Marquee tracking
         const bool shift = Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
         const bool ctrl = Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
         CommitClickSelection(shift, ctrl);
@@ -1070,7 +1257,6 @@ namespace Nox
         else
             drawList.AddRoundedRect(oScr - glm::vec2(4.5f), oScr + glm::vec2(4.5f), centerCol, glm::vec4(1.5f));
 
-        // Snap measuring feedback line while translating with snapping active
         if (m_Ctx.Tools->GizmoUsing && m_Ctx.Tools->GizmoMode == ViewportGizmoMode::Translate)
         {
             const bool snap = m_Ctx.Tools->SnapEnabled != Input::IsKeyPressed(SDL_SCANCODE_LCTRL);
@@ -1128,7 +1314,7 @@ namespace Nox
                              isHovered ? glm::vec4(1.0f) : ax.Color);
         }
 
-        if (m_Ctx.Tools && m_Ctx.Tools->ShowCameraPosition)
+        if (m_Ctx.ShowCameraPositionFn && m_Ctx.ShowCameraPositionFn())
         {
             const glm::dvec3 pos = m_Ctx.Camera->GetPosition();
             const double meters = static_cast<double>(WorldUnits::ToMeters(1.0f));
@@ -1167,6 +1353,151 @@ namespace Nox
         }
         DrawMeasureOverlay(drawList);
         DrawAxisIndicator(drawList);
+
+        if (m_Ctx.ShowActiveFrameFn && m_Ctx.ShowActiveFrameFn())
+        {
+            drawList.AddRoundedRect(
+                b.Min + glm::vec2(1.0f),
+                b.Max - glm::vec2(1.0f),
+                { 0.0f, 0.0f, 0.0f, 0.0f },
+                glm::vec4(0.0f),
+                2.0f,
+                { 1.0f, 0.667f, 0.157f, 1.0f }
+            );
+        }
+        drawList.PopClipRect();
+    }
+
+    bool ExtraViewportCanvas::OnPointerDown(const UI::UIPointerEvent&)
+    {
+        if (m_Ctx.OnActivate)
+            m_Ctx.OnActivate(m_Ctx.Index);
+        return true;
+    }
+
+    bool ExtraViewportCanvas::OnMouseWheel(const UI::UIPointerEvent&)
+    {
+        if (m_Ctx.OnActivate)
+            m_Ctx.OnActivate(m_Ctx.Index);
+        return false;
+    }
+
+    void ExtraViewportCanvas::OnPaint(UI::UIDrawList& drawList, const UI::UITheme&)
+    {
+        const UI::UIRect& b = GetBounds();
+        if (b.Width() <= 1.0f || b.Height() <= 1.0f || !m_Ctx.Camera || !m_Ctx.Render)
+            return;
+
+        drawList.PushClipRect(b.Min, b.Max);
+        const bool isPlay = m_Ctx.IsPlayModeFn && m_Ctx.IsPlayModeFn();
+
+        // Non-clickable axis indicator in lower-left
+        if (!isPlay && b.Width() >= 90.0f && b.Height() >= 90.0f)
+        {
+            const glm::mat3 view(m_Ctx.Camera->GetGizmoView(m_Ctx.Camera->GetPosition()));
+            const glm::vec2 center(b.Min.x + 40.0f, b.Max.y - 40.0f);
+            constexpr float kLength = 24.0f;
+            constexpr float kLabelRadius = 8.0f;
+
+            struct AxisDraw { glm::vec3 InView; glm::vec4 Color; const char* Name; };
+            AxisDraw axes[3] = {
+                { view * glm::vec3(1, 0, 0), { 0.886f, 0.290f, 0.290f, 1.0f }, "X" },
+                { view * glm::vec3(0, 1, 0), { 0.431f, 0.769f, 0.282f, 1.0f }, "Y" },
+                { view * glm::vec3(0, 0, 1), { 0.290f, 0.525f, 0.910f, 1.0f }, "Z" }
+            };
+            std::sort(std::begin(axes), std::end(axes), [](const AxisDraw& a, const AxisDraw& c) { return a.InView.z < c.InView.z; });
+            for (const AxisDraw& ax : axes)
+            {
+                const glm::vec2 end(center.x + ax.InView.x * kLength, center.y - ax.InView.y * kLength);
+                DrawLine(drawList, center + glm::vec2(1.0f), end + glm::vec2(1.0f), 2.0f, { 0.0f, 0.0f, 0.0f, 0.43f });
+                DrawLine(drawList, center, end, 2.0f, ax.Color);
+                DrawCircleFill(drawList, end, kLabelRadius - 1.5f, { 0.078f, 0.078f, 0.086f, 0.67f });
+                const UI::UIVec2 tSize = UI::UILabel::MeasureText(ax.Name, nullptr, 11.5f);
+                drawList.AddText(ax.Name, nullptr, { end.x - tSize.x * 0.5f, end.y - tSize.y * 0.5f }, 11.5f, ax.Color);
+            }
+
+            if (m_Ctx.ShowCameraPosition && *m_Ctx.ShowCameraPosition)
+            {
+                const glm::dvec3 pos = m_Ctx.Camera->GetPosition();
+                const double meters = static_cast<double>(WorldUnits::ToMeters(1.0f));
+                char text[160];
+                std::snprintf(text, sizeof(text), "X %.0f  Y %.0f  Z %.0f  (%.1f, %.1f, %.1f m)",
+                              pos.x, pos.y, pos.z, pos.x * meters, pos.y * meters, pos.z * meters);
+                const UI::UIVec2 size = UI::UILabel::MeasureText(text, nullptr, 13.0f);
+                const glm::vec2 textPos(center.x + kLength + 22.0f, b.Max.y - 24.0f);
+                drawList.AddRoundedRect({ textPos.x - 5.0f, textPos.y - 3.0f }, { textPos.x + size.x + 5.0f, textPos.y + size.y + 3.0f },
+                                        { 0.078f, 0.078f, 0.086f, 0.67f }, glm::vec4(3.0f));
+                drawList.AddText(text, nullptr, textPos, 13.0f, { 0.88f, 0.88f, 0.88f, 1.0f });
+            }
+        }
+
+        // Mini selected entity gizmo axes preview
+        if (m_Ctx.Hierarchy && m_Ctx.GizmoMode && *m_Ctx.GizmoMode != ViewportGizmoMode::Select && !isPlay)
+        {
+            Entity selected = m_Ctx.Hierarchy->GetSelectedEntity();
+            if (selected && selected.HasComponent<WorldTransformComponent>())
+            {
+                const glm::mat4 world = m_Ctx.Render->ToRenderSpace(selected.GetComponent<WorldTransformComponent>().WorldMatrix);
+                const glm::mat4 vp = m_Ctx.Camera->GetProjection() * m_Ctx.Camera->GetViewMatrix(m_Ctx.Render->GetRenderOrigin());
+                auto toScreen = [&](const glm::vec3& pt, glm::vec2& out) -> bool
+                {
+                    const glm::vec4 clip = vp * glm::vec4(pt, 1.0f);
+                    if (clip.w <= 1e-6f)
+                        return false;
+                    const glm::vec2 ndc = glm::vec2(clip) / clip.w;
+                    out = { b.Min.x + (ndc.x * 0.5f + 0.5f) * b.Width(), b.Min.y + (0.5f - ndc.y * 0.5f) * b.Height() };
+                    return true;
+                };
+                const glm::vec3 centre = glm::vec3(world[3]);
+                glm::vec2 centreScr{};
+                if (toScreen(centre, centreScr))
+                {
+                    const glm::vec4 cols[3] = {
+                        { 0.90f, 0.24f, 0.24f, 0.86f },
+                        { 0.31f, 0.82f, 0.31f, 0.86f },
+                        { 0.27f, 0.47f, 0.94f, 0.86f }
+                    };
+                    const float length = std::min(b.Width(), b.Height()) * 0.09f;
+                    const float probe = WorldUnits::FromMeters(0.01f);
+                    for (int axis = 0; axis < 3; ++axis)
+                    {
+                        const glm::vec3 dir = glm::length(glm::vec3(world[axis])) > 0.0f ? glm::normalize(glm::vec3(world[axis])) : glm::vec3(0.0f);
+                        glm::vec2 probeScr{};
+                        if (!toScreen(centre + dir * probe, probeScr))
+                            continue;
+                        const glm::vec2 d = probeScr - centreScr;
+                        const float dLen = glm::length(d);
+                        if (dLen < 1e-4f)
+                            continue;
+                        const glm::vec2 end = centreScr + (d / dLen) * length;
+                        DrawLine(drawList, centreScr, end, 2.0f, cols[axis]);
+                        DrawCircleFill(drawList, end, 3.2f, cols[axis]);
+                    }
+                    DrawCircleFill(drawList, centreScr, 3.0f, { 1.0f, 1.0f, 1.0f, 0.8f });
+                }
+            }
+        }
+
+        // Corner status badge
+        std::string viewLabel = kViewModeNames[std::clamp(static_cast<int>(m_Ctx.Camera->GetViewMode()), 0, 6)];
+        const uint32_t flags = m_Ctx.ShowFlags ? *m_Ctx.ShowFlags : 0u;
+        const int res = m_Ctx.ResolutionIndex ? *m_Ctx.ResolutionIndex : 0;
+        const bool realtime = m_Ctx.Realtime ? *m_Ctx.Realtime : true;
+        if (flags & Renderer::ExtraViewUnlit)
+            viewLabel += " | Unlit";
+        if (flags & Renderer::ExtraViewWireframe)
+            viewLabel += " | Wireframe";
+        if (res > 0)
+            viewLabel += res == 1 ? " | 1/2 res" : " | 1/4 res";
+        if (!realtime)
+            viewLabel += " | Realtime off";
+
+        const UI::UIVec2 textSize = UI::UILabel::MeasureText(viewLabel, nullptr, 13.0f);
+        const glm::vec2 lMin(b.Min.x + 8.0f, b.Min.y + 8.0f);
+        drawList.AddRoundedRect(lMin, { lMin.x + textSize.x + 12.0f, lMin.y + textSize.y + 6.0f },
+                                { 0.0f, 0.0f, 0.0f, 0.63f }, glm::vec4(3.0f));
+        drawList.AddText(viewLabel, nullptr, { lMin.x + 6.0f, lMin.y + 3.0f }, 13.0f, { 0.90f, 0.90f, 0.90f, 1.0f });
+
         drawList.PopClipRect();
     }
 
@@ -1178,97 +1509,71 @@ namespace Nox
         m_Tools = tools;
         m_Callbacks = std::move(callbacks);
 
-        auto makeSmallBtn = [](const std::string& label, const std::string& tip, std::function<void()> onClick) -> Ref<UI::UIButton>
+        auto sep = []() -> Ref<UI::UIElement>
         {
-            auto btn = UI::MakeUI<UI::UIButton>(label, std::move(onClick));
-            btn->Tooltip = tip;
-            btn->Padding = UI::UIThickness::Symmetric(7.0f, 3.0f);
-            btn->HeightMode = UI::UISizeMode::Auto;
-            btn->WidthMode = UI::UISizeMode::Auto;
-            btn->VAlign = UI::UIAlignment::Center;
-            return btn;
+            auto s = UI::MakeUI<UI::UIElement>();
+            s->WidthMode = UI::UISizeMode::Fixed;
+            s->HeightMode = UI::UISizeMode::Fixed;
+            s->FixedSize = { 1.0f, 18.0f };
+            s->Margin = UI::UIThickness::Symmetric(2.0f, 0.0f);
+            s->VAlign = UI::UIAlignment::Center;
+            s->DrawBackground = true;
+            s->StyleClass = "Border";
+            return s;
         };
 
-        m_GizmoButtons[0] = makeSmallBtn("Sel", "Select only, no gizmo", [this]() { m_Tools->GizmoMode = ViewportGizmoMode::Select; Sync(); });
-        m_GizmoButtons[1] = makeSmallBtn("Mov", "Move", [this]() { m_Tools->GizmoMode = ViewportGizmoMode::Translate; Sync(); });
-        m_GizmoButtons[2] = makeSmallBtn("Rot", "Rotate", [this]() { m_Tools->GizmoMode = ViewportGizmoMode::Rotate; Sync(); });
-        m_GizmoButtons[3] = makeSmallBtn("Scl", "Scale", [this]() { m_Tools->GizmoMode = ViewportGizmoMode::Scale; Sync(); });
+        m_GizmoButtons[0] = UI::MakeUI<UIVectorIconButton>(EditorIconKind::SelectArrow, "Select Mode", [this]() { m_Tools->GizmoMode = ViewportGizmoMode::Select; Sync(); });
+        m_GizmoButtons[1] = UI::MakeUI<UIVectorIconButton>(EditorIconKind::MoveArrows, "Move Gizmo", [this]() { m_Tools->GizmoMode = ViewportGizmoMode::Translate; Sync(); });
+        m_GizmoButtons[2] = UI::MakeUI<UIVectorIconButton>(EditorIconKind::RotateRing, "Rotate Gizmo", [this]() { m_Tools->GizmoMode = ViewportGizmoMode::Rotate; Sync(); });
+        m_GizmoButtons[3] = UI::MakeUI<UIVectorIconButton>(EditorIconKind::ScaleBox, "Scale Gizmo", [this]() { m_Tools->GizmoMode = ViewportGizmoMode::Scale; Sync(); });
 
-        auto row1 = UI::HStack(4.0f, { m_GizmoButtons[0], m_GizmoButtons[1], m_GizmoButtons[2], m_GizmoButtons[3] });
-        row1->HeightMode = UI::UISizeMode::Auto;
+        m_SnapBtn = UI::MakeUI<UIVectorIconButton>(
+            EditorIconKind::SnapMagnet,
+            "Toggle Snapping (hold Ctrl to invert temporarily)",
+            [this]() { m_Tools->SnapEnabled = !m_Tools->SnapEnabled; Sync(); });
 
-        auto frozenLabel = UI::Label("Culling view frozen").VAlign(UI::UIAlignment::Center);
-        frozenLabel->UseColorOverride = true;
-        frozenLabel->ColorOverride = { 1.0f, 0.6f, 0.2f, 1.0f };
-        auto unfreezeBtn = makeSmallBtn("Unfreeze", "Only what was in view when it froze is drawn", [this]()
-        {
-            if (m_Renderer)
-                m_Renderer->setFrozen(false);
-            Sync();
-        });
-        m_FrozenRow = UI::HStack(6.0f, { frozenLabel, unfreezeBtn }).Get();
-        m_FrozenRow->HeightMode = UI::UISizeMode::Auto;
-        m_FrozenRow->Visible = false;
+        auto toFloorBtn = UI::MakeUI<UIVectorIconButton>(
+            EditorIconKind::ToFloor,
+            "Snap Selection to Floor (End)",
+            [this]() { if (m_Callbacks.SnapToFloor) m_Callbacks.SnapToFloor(); });
 
-        m_SnapCheck = UI::MakeUI<UI::UICheckBox>("Snap", m_Tools->SnapEnabled, [this](bool v) { m_Tools->SnapEnabled = v; });
-        m_SnapCheck->Tooltip = "Snap moving, rotating, scaling and placing to the steps on the right. Hold Ctrl to switch it for one move.";
-        m_SnapCheck->VAlign = UI::UIAlignment::Center;
+        auto toGridBtn = UI::MakeUI<UIVectorIconButton>(
+            EditorIconKind::ToGrid,
+            "Snap Selection to Grid",
+            [this]() { if (m_Callbacks.SnapToGrid) m_Callbacks.SnapToGrid(); });
 
-        m_LocStepBtn = makeSmallBtn("10 cm", "Location step", nullptr);
-        UI::UIButton* locPtr = m_LocStepBtn.get();
-        m_LocStepBtn->OnClick = [this, locPtr]()
-        {
-            UI::UIContext* ctx = UI::UIContext::GetCurrent();
-            if (!ctx || !m_Tools)
-                return;
-            std::vector<UI::UIMenuItem> items;
-            for (int i = 0; i < static_cast<int>(std::size(ViewportToolState::kLocationSnapsCm)); ++i)
+        m_MeasureBtn = UI::MakeUI<UIVectorIconButton>(
+            EditorIconKind::MeasureRuler,
+            "Measure Tool (M): click two points; Esc clears",
+            [this]()
             {
-                char buf[32];
-                std::snprintf(buf, sizeof(buf), "%g cm", ViewportToolState::kLocationSnapsCm[i]);
-                items.push_back({ buf, "", [this, i]() { m_Tools->LocationSnapIndex = i; Sync(); }, false, true, m_Tools->LocationSnapIndex == i });
-            }
-            const UI::UIRect& b = locPtr->GetBounds();
-            UI::UIMenuPopup::ShowContextMenu(*ctx, { b.Min.x, b.Max.y + 2.0f }, std::move(items));
-        };
+                m_Tools->MeasureTool = !m_Tools->MeasureTool;
+                if (!m_Tools->MeasureTool)
+                    m_Tools->MeasureStage = 0;
+                Sync();
+            });
 
-        m_RotStepBtn = makeSmallBtn("15 deg", "Rotation step", nullptr);
-        UI::UIButton* rotPtr = m_RotStepBtn.get();
-        m_RotStepBtn->OnClick = [this, rotPtr]()
-        {
-            UI::UIContext* ctx = UI::UIContext::GetCurrent();
-            if (!ctx || !m_Tools)
-                return;
-            std::vector<UI::UIMenuItem> items;
-            for (int i = 0; i < static_cast<int>(std::size(ViewportToolState::kRotationSnaps)); ++i)
+        m_GridBtn = UI::MakeUI<UIVectorIconButton>(
+            EditorIconKind::GridMesh,
+            "Toggle World Grid",
+            [this]() { m_Tools->ShowGrid = !m_Tools->ShowGrid; Sync(); });
+
+        m_WireframeBtn = UI::MakeUI<UIVectorIconButton>(
+            EditorIconKind::WireframeMesh,
+            "Toggle Wireframe Overlay",
+            [this]()
             {
-                char buf[32];
-                std::snprintf(buf, sizeof(buf), "%g deg", ViewportToolState::kRotationSnaps[i]);
-                items.push_back({ buf, "", [this, i]() { m_Tools->RotationSnapIndex = i; Sync(); }, false, true, m_Tools->RotationSnapIndex == i });
-            }
-            const UI::UIRect& b = rotPtr->GetBounds();
-            UI::UIMenuPopup::ShowContextMenu(*ctx, { b.Min.x, b.Max.y + 2.0f }, std::move(items));
-        };
+                if (m_Renderer)
+                    m_Renderer->setWireframeOverlay(!m_Renderer->getWireframeOverlay());
+                Sync();
+            });
 
-        m_ScaleStepBtn = makeSmallBtn("0.25", "Scale step", nullptr);
-        UI::UIButton* sclPtr = m_ScaleStepBtn.get();
-        m_ScaleStepBtn->OnClick = [this, sclPtr]()
-        {
-            UI::UIContext* ctx = UI::UIContext::GetCurrent();
-            if (!ctx || !m_Tools)
-                return;
-            std::vector<UI::UIMenuItem> items;
-            for (int i = 0; i < static_cast<int>(std::size(ViewportToolState::kScaleSnaps)); ++i)
-            {
-                char buf[32];
-                std::snprintf(buf, sizeof(buf), "%g", ViewportToolState::kScaleSnaps[i]);
-                items.push_back({ buf, "", [this, i]() { m_Tools->ScaleSnapIndex = i; Sync(); }, false, true, m_Tools->ScaleSnapIndex == i });
-            }
-            const UI::UIRect& b = sclPtr->GetBounds();
-            UI::UIMenuPopup::ShowContextMenu(*ctx, { b.Min.x, b.Max.y + 2.0f }, std::move(items));
-        };
-
-        m_ViewModeBtn = makeSmallBtn("Perspective", "View: Perspective, or orthographic along an axis (Numpad 7 / 1 / 3, 5 = Perspective)", nullptr);
+        m_ViewModeBtn = UI::MakeUI<UI::UIButton>("Perspective v");
+        m_ViewModeBtn->Tooltip = "Camera View Mode (Numpad 7 / 1 / 3, 5 = Perspective)";
+        m_ViewModeBtn->Padding = UI::UIThickness::Symmetric(8.0f, 3.0f);
+        m_ViewModeBtn->WidthMode = UI::UISizeMode::Auto;
+        m_ViewModeBtn->HeightMode = UI::UISizeMode::Auto;
+        m_ViewModeBtn->VAlign = UI::UIAlignment::Center;
         UI::UIButton* vmPtr = m_ViewModeBtn.get();
         m_ViewModeBtn->OnClick = [this, vmPtr]()
         {
@@ -1286,106 +1591,120 @@ namespace Nox
                 }, false, true, static_cast<int>(m_Camera->GetViewMode()) == i });
             }
             const UI::UIRect& b = vmPtr->GetBounds();
-            UI::UIMenuPopup::ShowContextMenu(*ctx, { b.Min.x, b.Max.y + 2.0f }, std::move(items));
+            UI::UIMenuPopup::ShowContextMenu(*ctx, { b.Min.x, b.Max.y + 3.0f }, std::move(items));
         };
 
-        m_FigureBtn = makeSmallBtn("No Figure", "A 180 cm figure to judge sizes: at the world origin, or standing on the surface under the cursor", nullptr);
-        UI::UIButton* figPtr = m_FigureBtn.get();
-        m_FigureBtn->OnClick = [this, figPtr]()
+        m_SettingsCogBtn = UI::MakeUI<UIVectorIconButton>(EditorIconKind::Cogwheel, "Viewport & Snap Settings");
+        UIVectorIconButton* cogPtr = m_SettingsCogBtn.get();
+        m_SettingsCogBtn->OnClick = [this, cogPtr]()
         {
             UI::UIContext* ctx = UI::UIContext::GetCurrent();
             if (!ctx || !m_Tools)
                 return;
-            const int cur = !m_Tools->ShowReferenceFigure ? 0 : m_Tools->ReferenceFigureAtCursor ? 2 : 1;
-            std::vector<UI::UIMenuItem> items;
+
+            std::vector<UI::UIMenuItem> locItems;
+            for (int i = 0; i < static_cast<int>(std::size(ViewportToolState::kLocationSnapsCm)); ++i)
+            {
+                char buf[32];
+                std::snprintf(buf, sizeof(buf), "%g cm", ViewportToolState::kLocationSnapsCm[i]);
+                locItems.push_back({ buf, "", [this, i]() { m_Tools->LocationSnapIndex = i; Sync(); }, false, true, m_Tools->LocationSnapIndex == i });
+            }
+
+            std::vector<UI::UIMenuItem> rotItems;
+            for (int i = 0; i < static_cast<int>(std::size(ViewportToolState::kRotationSnaps)); ++i)
+            {
+                char buf[32];
+                std::snprintf(buf, sizeof(buf), "%g deg", ViewportToolState::kRotationSnaps[i]);
+                rotItems.push_back({ buf, "", [this, i]() { m_Tools->RotationSnapIndex = i; Sync(); }, false, true, m_Tools->RotationSnapIndex == i });
+            }
+
+            std::vector<UI::UIMenuItem> sclItems;
+            for (int i = 0; i < static_cast<int>(std::size(ViewportToolState::kScaleSnaps)); ++i)
+            {
+                char buf[32];
+                std::snprintf(buf, sizeof(buf), "%g", ViewportToolState::kScaleSnaps[i]);
+                sclItems.push_back({ buf, "", [this, i]() { m_Tools->ScaleSnapIndex = i; Sync(); }, false, true, m_Tools->ScaleSnapIndex == i });
+            }
+
+            const int curFig = !m_Tools->ShowReferenceFigure ? 0 : m_Tools->ReferenceFigureAtCursor ? 2 : 1;
+            std::vector<UI::UIMenuItem> figItems;
             for (int i = 0; i < 3; ++i)
             {
-                items.push_back({ kFigureNames[i], "", [this, i]()
+                figItems.push_back({ kFigureNames[i], "", [this, i]()
                 {
                     m_Tools->ShowReferenceFigure = (i != 0);
                     m_Tools->ReferenceFigureAtCursor = (i == 2);
                     Sync();
-                }, false, true, cur == i });
+                }, false, true, curFig == i });
             }
-            const UI::UIRect& b = figPtr->GetBounds();
-            UI::UIMenuPopup::ShowContextMenu(*ctx, { b.Min.x, b.Max.y + 2.0f }, std::move(items));
-        };
 
-        m_GridCheck = UI::MakeUI<UI::UICheckBox>("Grid", m_Tools->ShowGrid, [this](bool v) { m_Tools->ShowGrid = v; });
-        m_GridCheck->Tooltip = "The world grid, with the cells of the location step";
-        m_GridCheck->VAlign = UI::UIAlignment::Center;
-
-        m_WireframeCheck = UI::MakeUI<UI::UICheckBox>("Wireframe", m_Renderer ? m_Renderer->getWireframeOverlay() : false, [this](bool v)
-        {
-            if (m_Renderer)
-                m_Renderer->setWireframeOverlay(v);
-        });
-        m_WireframeCheck->Tooltip = "Every mesh's triangle edges over the image";
-        m_WireframeCheck->VAlign = UI::UIAlignment::Center;
-
-        auto toFloorBtn = makeSmallBtn("To Floor", "Drop the selection onto the surface below it (End)", [this]()
-        {
-            if (m_Callbacks.SnapToFloor)
-                m_Callbacks.SnapToFloor();
-        });
-        auto toGridBtn = makeSmallBtn("To Grid", "Move the selection to the nearest grid point of the location step", [this]()
-        {
-            if (m_Callbacks.SnapToGrid)
-                m_Callbacks.SnapToGrid();
-        });
-
-        m_MeasureCheck = UI::MakeUI<UI::UICheckBox>("Measure", m_Tools->MeasureTool, [this](bool v)
-        {
-            m_Tools->MeasureTool = v;
-            if (!v)
-                m_Tools->MeasureStage = 0;
-        });
-        m_MeasureCheck->Tooltip = "Measure (M): click two points, the distance is written on the line. Esc leaves it.";
-        m_MeasureCheck->VAlign = UI::UIAlignment::Center;
-
-        m_UnitBtn = makeSmallBtn("auto", "Unit lengths are shown in", nullptr);
-        UI::UIButton* unitPtr = m_UnitBtn.get();
-        m_UnitBtn->OnClick = [this, unitPtr]()
-        {
-            UI::UIContext* ctx = UI::UIContext::GetCurrent();
-            if (!ctx)
-                return;
-            const int cur = static_cast<int>(WorldUnits::GetDisplayUnit());
-            std::vector<UI::UIMenuItem> items;
+            const int curUnit = static_cast<int>(WorldUnits::GetDisplayUnit());
+            std::vector<UI::UIMenuItem> unitItems;
             for (int i = 0; i < 3; ++i)
             {
-                items.push_back({ kDisplayUnitNames[i], "", [this, i]()
+                unitItems.push_back({ kDisplayUnitNames[i], "", [this, i]()
                 {
                     WorldUnits::SetDisplayUnit(static_cast<WorldUnits::DisplayUnit>(i));
                     Sync();
-                }, false, true, cur == i });
+                }, false, true, curUnit == i });
             }
-            const UI::UIRect& b = unitPtr->GetBounds();
-            UI::UIMenuPopup::ShowContextMenu(*ctx, { b.Min.x, b.Max.y + 2.0f }, std::move(items));
+
+            const bool showCamPos = m_Callbacks.GetShowCameraPosition ? m_Callbacks.GetShowCameraPosition() : false;
+            std::vector<UI::UIMenuItem> items = {
+                {"Location Step", "", {}, false, true, false, false, "", std::move(locItems)},
+                {"Rotation Step", "", {}, false, true, false, false, "", std::move(rotItems)},
+                {"Scale Step", "", {}, false, true, false, false, "", std::move(sclItems)},
+                {"", "", {}, true},
+                {"Reference Figure", "", {}, false, true, false, false, "", std::move(figItems)},
+                {"Display Units", "", {}, false, true, false, false, "", std::move(unitItems)},
+                {"", "", {}, true},
+                {"Show Physics Colliders", "", [this]() { m_Tools->ShowPhysicsColliders = !m_Tools->ShowPhysicsColliders; }, false, true, m_Tools->ShowPhysicsColliders},
+                {"Show Camera Position", "", [this, showCamPos]()
+                {
+                    if (m_Callbacks.SetShowCameraPosition)
+                        m_Callbacks.SetShowCameraPosition(!showCamPos);
+                }, false, true, showCamPos}
+            };
+
+            const UI::UIRect& b = cogPtr->GetBounds();
+            UI::UIMenuPopup::ShowContextMenu(*ctx, { b.Min.x, b.Max.y + 3.0f }, std::move(items));
         };
 
-        auto row2 = UI::Wrap(5.0f, 4.0f, {
-            m_SnapCheck, m_LocStepBtn, m_RotStepBtn, m_ScaleStepBtn,
-            m_ViewModeBtn, m_FigureBtn, m_GridCheck, m_WireframeCheck,
-            toFloorBtn, toGridBtn, m_MeasureCheck, m_UnitBtn
+        m_UnfreezeBtn = UI::MakeUI<UI::UIButton>("Unfreeze Culling", [this]()
+        {
+            if (m_Renderer)
+                m_Renderer->setFrozen(false);
+            Sync();
         });
-        row2->HeightMode = UI::UISizeMode::Auto;
-        row2->MaxSize = { 760.0f, 200.0f };
+        m_UnfreezeBtn->Tooltip = "Culling view is frozen; click to unfreeze";
+        m_UnfreezeBtn->StyleVariant = "primary";
+        m_UnfreezeBtn->Padding = UI::UIThickness::Symmetric(8.0f, 3.0f);
+        m_UnfreezeBtn->WidthMode = UI::UISizeMode::Auto;
+        m_UnfreezeBtn->HeightMode = UI::UISizeMode::Auto;
+        m_UnfreezeBtn->VAlign = UI::UIAlignment::Center;
+        m_UnfreezeBtn->Visible = false;
 
-        auto container = UI::VStack(4.0f, { row1, m_FrozenRow, row2 })
-            .Padding(6.0f, 5.0f)
-            .Style("Surface")
-            .Background(true)
-            .Get();
-        container->HitTestMode = UI::UIHitTestMode::Self;
-        container->WidthMode = UI::UISizeMode::Auto;
-        container->HeightMode = UI::UISizeMode::Auto;
-        container->AnchorMin = { 0.0f, 0.0f };
-        container->AnchorMax = { 0.0f, 0.0f };
-        container->AnchorOffsets = { 10.0f, 10.0f, 0.0f, 0.0f };
+        auto bar = UI::HStack(3.0f, {
+            m_GizmoButtons[0], m_GizmoButtons[1], m_GizmoButtons[2], m_GizmoButtons[3],
+            sep(),
+            m_SnapBtn, toFloorBtn, toGridBtn, m_MeasureBtn,
+            sep(),
+            m_GridBtn, m_WireframeBtn,
+            sep(),
+            m_ViewModeBtn,
+            m_SettingsCogBtn,
+            m_UnfreezeBtn
+        }).Padding(6.0f, 3.0f).Style("Surface").Background(true).Get();
+
+        bar->HitTestMode = UI::UIHitTestMode::Self;
+        bar->WidthMode = UI::UISizeMode::Auto;
+        bar->HeightMode = UI::UISizeMode::Auto;
+        bar->AnchorMin = { 0.0f, 0.0f };
+        bar->AnchorMax = { 0.0f, 0.0f };
+        bar->AnchorOffsets = { 8.0f, 8.0f, 0.0f, 0.0f };
 
         Sync();
-        return container;
+        return bar;
     }
 
     void ViewportOverlayToolbar::Sync()
@@ -1393,52 +1712,26 @@ namespace Nox
         if (!m_Tools)
             return;
 
-        const int activeIdx = static_cast<int>(m_Tools->GizmoMode) + 1; // Select=-1 -> 0
+        const int activeIdx = static_cast<int>(m_Tools->GizmoMode) + 1;
         for (int i = 0; i < 4; ++i)
         {
             if (m_GizmoButtons[i])
-                m_GizmoButtons[i]->StyleVariant = (i == activeIdx) ? "primary" : "";
+                m_GizmoButtons[i]->Active = (i == activeIdx);
         }
-        if (m_FrozenRow)
-            m_FrozenRow->Visible = (m_Renderer && m_Renderer->getFrozen());
-
-        if (m_SnapCheck)
-            m_SnapCheck->Checked = m_Tools->SnapEnabled;
-        if (m_LocStepBtn)
-        {
-            char buf[32];
-            std::snprintf(buf, sizeof(buf), "%g cm", ViewportToolState::kLocationSnapsCm[std::clamp(m_Tools->LocationSnapIndex, 0, static_cast<int>(std::size(ViewportToolState::kLocationSnapsCm)) - 1)]);
-            m_LocStepBtn->SetText(buf);
-        }
-        if (m_RotStepBtn)
-        {
-            char buf[32];
-            std::snprintf(buf, sizeof(buf), "%g deg", ViewportToolState::kRotationSnaps[std::clamp(m_Tools->RotationSnapIndex, 0, static_cast<int>(std::size(ViewportToolState::kRotationSnaps)) - 1)]);
-            m_RotStepBtn->SetText(buf);
-        }
-        if (m_ScaleStepBtn)
-        {
-            char buf[32];
-            std::snprintf(buf, sizeof(buf), "%g", ViewportToolState::kScaleSnaps[std::clamp(m_Tools->ScaleSnapIndex, 0, static_cast<int>(std::size(ViewportToolState::kScaleSnaps)) - 1)]);
-            m_ScaleStepBtn->SetText(buf);
-        }
+        if (m_SnapBtn)
+            m_SnapBtn->Active = m_Tools->SnapEnabled;
+        if (m_MeasureBtn)
+            m_MeasureBtn->Active = m_Tools->MeasureTool;
+        if (m_GridBtn)
+            m_GridBtn->Active = m_Tools->ShowGrid;
+        if (m_WireframeBtn && m_Renderer)
+            m_WireframeBtn->Active = m_Renderer->getWireframeOverlay();
+        if (m_UnfreezeBtn)
+            m_UnfreezeBtn->Visible = (m_Renderer && m_Renderer->getFrozen());
         if (m_ViewModeBtn && m_Camera)
         {
             const int vm = std::clamp(static_cast<int>(m_Camera->GetViewMode()), 0, 6);
-            m_ViewModeBtn->SetText(kViewModeNames[vm]);
+            m_ViewModeBtn->SetText(std::string(kViewModeNames[vm]) + " v");
         }
-        if (m_FigureBtn)
-        {
-            const int fig = !m_Tools->ShowReferenceFigure ? 0 : m_Tools->ReferenceFigureAtCursor ? 2 : 1;
-            m_FigureBtn->SetText(kFigureNames[fig]);
-        }
-        if (m_GridCheck)
-            m_GridCheck->Checked = m_Tools->ShowGrid;
-        if (m_WireframeCheck && m_Renderer)
-            m_WireframeCheck->Checked = m_Renderer->getWireframeOverlay();
-        if (m_MeasureCheck)
-            m_MeasureCheck->Checked = m_Tools->MeasureTool;
-        if (m_UnitBtn)
-            m_UnitBtn->SetText(kDisplayUnitNames[std::clamp(static_cast<int>(WorldUnits::GetDisplayUnit()), 0, 2)]);
     }
 }
