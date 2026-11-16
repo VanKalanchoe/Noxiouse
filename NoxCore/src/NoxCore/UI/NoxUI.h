@@ -34,7 +34,6 @@
 #include "NoxCore/UI/Widgets/UICurveEditor.h"
 #include "NoxCore/UI/Widgets/UIDragScalar.h"
 #include "NoxCore/UI/Widgets/UIDropdown.h"
-#include "NoxCore/UI/Widgets/UIGizmo.h"
 #include "NoxCore/UI/Widgets/UIImage.h"
 #include "NoxCore/UI/Widgets/UIKeybindButton.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
@@ -68,4 +67,3 @@
 #include "NoxCore/UI/Widgets/UIToggleSwitch.h"
 #include "NoxCore/UI/Widgets/UITreeView.h"
 #include "NoxCore/UI/Widgets/UIVectorEdit.h"
-#include "NoxCore/UI/Widgets/UIViewportSlot.h"

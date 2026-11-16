@@ -220,10 +220,10 @@ namespace Nox::UI
         if (!Prefix.empty())
         {
             const UIVec2 pSize = UILabel::MeasureText(Prefix, nullptr, style.FontSize);
-            tagW = std::max(style.FontSize * 1.35f, pSize.x + style.Padding.Left * 1.5f) + 6.0f;
+            tagW = std::max(style.FontSize * 1.25f, pSize.x + style.Padding.Left * 1.4f) + 6.0f;
         }
         return {
-            std::max(MinSize.x, tagW + style.FontSize * 4.5f + style.Padding.Horizontal()),
+            std::max(MinSize.x, tagW + style.FontSize * 2.2f + style.Padding.Horizontal()),
             style.FontSize + style.Padding.Vertical()
         };
     }
@@ -239,7 +239,7 @@ namespace Nox::UI
         if (!Prefix.empty())
         {
             const UIVec2 pSize = UILabel::MeasureText(Prefix, nullptr, style.FontSize);
-            const float tagW = std::max(style.FontSize * 1.35f, pSize.x + style.Padding.Left * 1.5f);
+            const float tagW = std::max(style.FontSize * 1.25f, pSize.x + style.Padding.Left * 1.4f);
             drawList.AddRoundedRect(
                 b.Min,
                 { b.Min.x + tagW, b.Max.y },
@@ -254,6 +254,8 @@ namespace Nox::UI
             );
             textLeft = b.Min.x + tagW + 6.0f;
         }
+
+        drawList.PushClipRect({ textLeft - 2.0f, b.Min.y + 1.0f }, { b.Max.x - 2.0f, b.Max.y - 1.0f }, style.CornerRadius.ToVec4());
 
         const std::string display = m_Editing ? m_EditText : std::vformat(Format, std::make_format_args(Value));
         const UIVec2 textSize = UILabel::MeasureText(display, nullptr, style.FontSize);
@@ -283,5 +285,7 @@ namespace Nox::UI
                 accent
             );
         }
+
+        drawList.PopClipRect();
     }
 }

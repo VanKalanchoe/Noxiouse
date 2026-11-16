@@ -52,6 +52,24 @@ namespace Nox::UI
             OnChanged(GetValue());
     }
 
+    void UIVectorEdit::SetSpeed(float speed)
+    {
+        for (int i = 0; i < m_Components; ++i)
+        {
+            if (m_Axes[i])
+                m_Axes[i]->Speed = speed;
+        }
+    }
+
+    void UIVectorEdit::SetFormat(const std::string& format)
+    {
+        for (int i = 0; i < m_Components; ++i)
+        {
+            if (m_Axes[i])
+                m_Axes[i]->Format = format;
+        }
+    }
+
     glm::vec4 UIVectorEdit::GetValue() const
     {
         glm::vec4 v(0.0f);
@@ -61,5 +79,15 @@ namespace Nox::UI
                 v[i] = m_Axes[i]->Value;
         }
         return v;
+    }
+
+    bool UIVectorEdit::IsEditing() const
+    {
+        for (int i = 0; i < m_Components; ++i)
+        {
+            if (m_Axes[i] && HasState(m_Axes[i]->GetState(), UIState::Focused | UIState::Pressed))
+                return true;
+        }
+        return false;
     }
 }

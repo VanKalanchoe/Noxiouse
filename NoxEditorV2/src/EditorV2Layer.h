@@ -12,6 +12,7 @@
 #include "EditorHistory.h"
 #include "EditorViewportV2.h"
 #include "GamePackager.h"
+#include "Panels/InspectorV2Panel.h"
 #include "Panels/SceneHierarchyV2Panel.h"
 #include "ProjectManager/ProcessLauncher.h"
 #include "ScriptBuilder.h"
@@ -27,6 +28,7 @@
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneLoader.h"
+#include "NoxCore/UI/Layout/UIWindow.h"
 #include "NoxCore/UI/Widgets/UIMenu.h"
 
 namespace Nox
@@ -42,6 +44,7 @@ namespace Nox
         class UIImage;
         class UILabel;
         class UIStackBox;
+        class UIWindow;
     }
 
     class EditorV2Layer : public Layer
@@ -262,18 +265,34 @@ namespace Nox
 
         Ref<UI::UILabel> m_FpsLabel;
         Ref<UI::UILabel> m_StatusLabel;
+        void OpenAssetV2(AssetHandle handle);
+        void UpdateMaterialEditors();
+
+        struct MaterialEditorState
+        {
+            AssetHandle Handle = 0;
+            std::string Title;
+            Ref<UI::UIWindow> Window;
+            Ref<UI::UIStackBox> Body;
+            std::unordered_map<std::string, bool> ExpandedSections;
+            std::vector<std::function<void()>> Syncs;
+            bool Dirty = true;
+        };
+
         SceneHierarchyV2Panel m_SceneHierarchyPanel;
+        InspectorV2Panel m_InspectorPanel;
+        std::vector<MaterialEditorState> m_MaterialEditors;
         bool m_ShowSceneHierarchy = true;
+        bool m_ShowInspector = true;
         bool m_ShowToolBar = true;
         bool m_ViewportMouseCaptured = false;
         bool m_CursorHidden = false;
 
         // Tracked features intentionally deferred until their corresponding V2 panels exist:
-        // - Properties / Inspector panel (`DrawComponents`, component UIs, AssetPreviewRenderer)
         // - Content Browser panel (drag-drop sources CONTENT_BROWSER_ITEM/ITEMS, CreatePrefab/Variant, ReplaceInScenes)
         // - Settings & Stats windows (render quality / RT / NRD / post-process / physics collider toggle UI)
         // - Output Log, Profiler, Render Graph, World Partition (HLOD), Levels, Audio Mixer panels
-        // - Node Graph / Material / Animation Clip / Timeline panels (`OpenAsset` dispatchers)
+        // - Node Graph / Animation Clip / Timeline panels
         // - Modal dialogs (Package Game/Server, Streaming Test World)
     };
 }

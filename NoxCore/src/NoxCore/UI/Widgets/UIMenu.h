@@ -29,6 +29,12 @@ namespace Nox::UI
         explicit UIMenuPopup(std::vector<UIMenuItem> items, UIContext* context = nullptr, UIElement* host = nullptr, int depth = 0);
 
         static void ShowContextMenu(UIContext& context, const UIVec2& screenPos, std::vector<UIMenuItem> items);
+        static void ShowPopupMenu(UIContext& context, const UIRect& anchorRect, std::vector<UIMenuItem> items, bool alignRight = false);
+
+        void SetMaxContentHeight(float maxHeight);
+
+    private:
+        Ref<class UIScrollView> m_ScrollView;
     };
 
     class UIMenuBar : public UIStackBox

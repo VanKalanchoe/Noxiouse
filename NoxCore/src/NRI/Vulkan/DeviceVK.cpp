@@ -896,8 +896,8 @@ namespace NRI
                         .wideLines = true,
                         .samplerAnisotropy = true,
                         .pipelineStatisticsQuery = m_pipelineStatisticsEnabled,
-                        .shaderInt16 = true, // <-- Required by RTXDI PT's uint16_t path-state fields (RTXDI_PathTracerState, packed reservoir)
-                        .shaderInt64 = true,
+                        .shaderInt64 = true, // <-- Required by RTXDI PT's uint16_t path-state fields (RTXDI_PathTracerState, packed reservoir)
+                        .shaderInt16 = true,
                         .sparseBinding = m_sparseFeatures,         // geometry streams reserve address space (decision D5)
                         .sparseResidencyBuffer = m_sparseFeatures,
                     }
@@ -906,8 +906,8 @@ namespace NRI
                 {
                     .drawIndirectCount = true, // drawMeshTasksIndirectCount (GPU culling)
                     .storageBuffer8BitAccess = true,
-                    .shaderInt8 = true,
-                    .shaderFloat16 = true, // <-- Required by RTXDI PT's float16_t reservoir packing (Reservoir.hlsli)
+                    .shaderFloat16 = true,
+                    .shaderInt8 = true, // <-- Required by RTXDI PT's float16_t reservoir packing (Reservoir.hlsli)
                     .shaderSampledImageArrayNonUniformIndexing = true,
                     .shaderStorageBufferArrayNonUniformIndexing = true,
                     .descriptorBindingUniformBufferUpdateAfterBind = true,

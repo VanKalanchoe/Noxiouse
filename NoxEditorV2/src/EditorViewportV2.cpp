@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_mouse.h>
@@ -15,6 +16,7 @@
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Scene/Components.h"
+#include "NoxCore/Scene/EntityBounds.h"
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
@@ -30,6 +32,8 @@ namespace Nox
         constexpr const char* kViewModeNames[] = { "Perspective", "Top", "Bottom", "Front", "Back", "Left", "Right" };
         constexpr const char* kFigureNames[] = { "No Figure", "Figure at Origin", "Figure at Cursor" };
         constexpr const char* kDisplayUnitNames[] = { "cm", "m", "auto" };
+        constexpr const char* kPivotModeNames[] = { "Center (Bounds)", "Pivot (Origin)" };
+        constexpr float kRotateRingRadiusFactor = 0.88f;
 
         void DrawLine(UI::UIDrawList& drawList, const glm::vec2& a, const glm::vec2& b, float thickness, const glm::vec4& color)
         {
@@ -379,17 +383,96 @@ namespace Nox
         return true;
     }
 
+    bool ViewportCanvas::ComputeGizmoTransform(Entity selected, glm::mat4& outWorldRender) const
+    {
+        if (!selected || !selected.HasComponent<WorldTransformComponent>() || !m_Ctx.Render)
+            return false;
+
+        outWorldRender = m_Ctx.Render->ToRenderSpace(selected.GetComponent<WorldTransformComponent>().WorldMatrix);
+        if (!m_Ctx.Tools || m_Ctx.Tools->PivotMode != GizmoPivotMode::Center || !m_Ctx.ActiveScene || !*m_Ctx.ActiveScene)
+            return true;
+
+        if (m_Ctx.Hierarchy && m_Ctx.Hierarchy->GetSelectedEntities().size() > 1)
+        {
+            glm::dvec3 lowest(std::numeric_limits<double>::max());
+            glm::dvec3 highest(std::numeric_limits<double>::lowest());
+            bool any = false;
+            for (Entity entity : m_Ctx.Hierarchy->GetSelectedEntities())
+            {
+                if (!entity || !entity.HasComponent<WorldTransformComponent>())
+                    continue;
+                const WorldBounds bounds = ComputeWorldBounds(**m_Ctx.ActiveScene, entity, true);
+                if (bounds.Valid)
+                {
+                    lowest = glm::min(lowest, bounds.Min);
+                    highest = glm::max(highest, bounds.Max);
+                }
+                else
+                {
+                    const glm::dvec3 pos = entity.GetComponent<WorldTransformComponent>().GetPosition();
+                    lowest = glm::min(lowest, pos);
+                    highest = glm::max(highest, pos);
+                }
+                any = true;
+            }
+            if (any)
+                outWorldRender[3] = glm::vec4(m_Ctx.Render->ToRenderSpace((lowest + highest) * 0.5), 1.0f);
+            return true;
+        }
+
+        const WorldBounds bounds = ComputeWorldBounds(**m_Ctx.ActiveScene, selected, true);
+        if (bounds.Valid)
+            outWorldRender[3] = glm::vec4(m_Ctx.Render->ToRenderSpace(bounds.Center()), 1.0f);
+        return true;
+    }
+
+    bool ViewportCanvas::ClosestPointOnRotateRing(const UI::UIVec2& mousePos, const glm::vec3& origin,
+                                                  const glm::vec3& u, const glm::vec3& v, float radius,
+                                                  const glm::mat4& viewProj, glm::vec3& outWorldPoint, float& inOutBestDistSq) const
+    {
+        constexpr int kSegments = 64;
+        UI::UIVec2 prevScr{};
+        glm::vec3 prevWorld{};
+        bool hasPrev = false;
+        bool improved = false;
+        for (int s = 0; s <= kSegments; ++s)
+        {
+            const float ang = glm::two_pi<float>() * static_cast<float>(s) / kSegments;
+            const glm::vec3 pWorld = origin + (u * std::cos(ang) + v * std::sin(ang)) * radius;
+            UI::UIVec2 curScr{};
+            const bool ok = ProjectPoint(pWorld, viewProj, curScr);
+            if (ok && hasPrev)
+            {
+                float segT = 0.0f;
+                const float dSq = DistPointToSegmentSq(mousePos, prevScr, curScr, &segT);
+                if (dSq < inOutBestDistSq)
+                {
+                    inOutBestDistSq = dSq;
+                    outWorldPoint = glm::mix(prevWorld, pWorld, segT);
+                    improved = true;
+                }
+            }
+            prevScr = curScr;
+            prevWorld = pWorld;
+            hasPrev = ok;
+        }
+        return improved;
+    }
+
     float ViewportCanvas::ComputeGizmoWorldScale(const glm::vec3& pivotRender, const glm::mat4& viewProj) const
     {
         const UI::UIRect& b = GetBounds();
-        const float minDim = std::max(std::min(b.Width(), b.Height()), 100.0f);
+        const float vpH = std::max(b.Height(), 100.0f);
+        // Constant screen-space size (~13% of viewport height with a comfortable floor so close-up and smaller viewports stay crisp).
+        const float targetRadiusPx = std::clamp(vpH * 0.13f, 96.0f, 150.0f);
         if (m_Ctx.Camera && m_Ctx.Camera->IsOrthographic())
-            return m_Ctx.Camera->GetOrthoHalfHeight() * 0.24f;
+            return m_Ctx.Camera->GetOrthoHalfHeight() * (2.0f * targetRadiusPx / vpH);
 
         const glm::vec4 clip = viewProj * glm::vec4(pivotRender, 1.0f);
         const float tanHalfFov = std::tan(glm::radians(m_Ctx.Camera ? m_Ctx.Camera->GetFOV() : 30.0f) * 0.5f);
-        const float dist = std::max(clip.w, 0.05f);
-        return dist * tanHalfFov * (160.0f / minDim);
+        const float minDist = m_Ctx.Camera ? std::max(m_Ctx.Camera->GetNearClip() * 2.0f, 0.05f) : 0.05f;
+        const float dist = std::max(clip.w, minDist);
+        return dist * tanHalfFov * (2.0f * targetRadiusPx / vpH);
     }
 
     int ViewportCanvas::HitTestAxisIndicator(const UI::UIVec2& mousePos) const
@@ -449,40 +532,22 @@ namespace Nox
 
         if (m_Ctx.Tools->GizmoMode == ViewportGizmoMode::Rotate)
         {
-            constexpr int kSegments = 48;
-            const float radius = scale * 0.78f;
-            float bestDistSq = 100.0f;
+            const float radius = scale * kRotateRingRadiusFactor;
+            float bestDistSq = 121.0f;
             GizmoPart best = GizmoPart::None;
 
             for (int a = 0; a < 3; ++a)
             {
                 const glm::vec3 u = axes[(a + 1) % 3];
                 const glm::vec3 v = axes[(a + 2) % 3];
-                UI::UIVec2 prev{};
-                bool hasPrev = false;
-                for (int s = 0; s <= kSegments; ++s)
-                {
-                    const float ang = glm::two_pi<float>() * static_cast<float>(s) / kSegments;
-                    const glm::vec3 pWorld = origin + (u * std::cos(ang) + v * std::sin(ang)) * radius;
-                    UI::UIVec2 cur{};
-                    const bool ok = ProjectPoint(pWorld, viewProj, cur);
-                    if (ok && hasPrev)
-                    {
-                        const float dSq = DistPointToSegmentSq(mousePos, prev, cur);
-                        if (dSq < bestDistSq)
-                        {
-                            bestDistSq = dSq;
-                            best = axisParts[a];
-                        }
-                    }
-                    prev = cur;
-                    hasPrev = ok;
-                }
+                glm::vec3 hitWorld{};
+                if (ClosestPointOnRotateRing(mousePos, origin, u, v, radius, viewProj, hitWorld, bestDistSq))
+                    best = axisParts[a];
             }
             return best;
         }
 
-        if (glm::dot(mousePos - originScreen, mousePos - originScreen) <= 10.0f * 10.0f)
+        if (glm::dot(mousePos - originScreen, mousePos - originScreen) <= 11.0f * 11.0f)
             return GizmoPart::FreeCenter;
 
         if (m_Ctx.Tools->GizmoMode == ViewportGizmoMode::Translate)
@@ -500,7 +565,7 @@ namespace Nox
                 UI::UIVec2 c{};
                 if (ProjectPoint(origin + (axes[ps.A] + axes[ps.B]) * ((p0 + p1) * 0.5f), viewProj, c))
                 {
-                    if (glm::dot(mousePos - c, mousePos - c) <= 10.0f * 10.0f)
+                    if (glm::dot(mousePos - c, mousePos - c) <= 12.0f * 12.0f)
                         return ps.Part;
                 }
             }
@@ -707,7 +772,7 @@ namespace Nox
             return;
 
         const bool snap = m_Ctx.Tools->SnapEnabled != Input::IsKeyPressed(SDL_SCANCODE_LCTRL);
-        glm::mat4 newWorld = m_DragInitialWorldRender;
+        glm::mat4 newWorld = m_DragInitialEntityWorldRender;
 
         auto axisIndex = [](GizmoPart part) -> int
         {
@@ -726,7 +791,7 @@ namespace Nox
                 float delta = s - m_DragStartScalar;
                 if (snap)
                     delta = SnapValue(delta, m_Ctx.Tools->LocationSnapWorldUnits());
-                newWorld = glm::translate(glm::mat4(1.0f), axis * delta) * m_DragInitialWorldRender;
+                newWorld = glm::translate(glm::mat4(1.0f), axis * delta) * m_DragInitialEntityWorldRender;
             }
             else if (m_ActiveGizmo == GizmoPart::FreeCenter)
             {
@@ -739,7 +804,7 @@ namespace Nox
                         const float step = m_Ctx.Tools->LocationSnapWorldUnits();
                         delta = glm::round(delta / step) * step;
                     }
-                    newWorld = glm::translate(glm::mat4(1.0f), delta) * m_DragInitialWorldRender;
+                    newWorld = glm::translate(glm::mat4(1.0f), delta) * m_DragInitialEntityWorldRender;
                 }
             }
             else
@@ -759,7 +824,7 @@ namespace Nox
                         c0 = SnapValue(c0, step);
                         c1 = SnapValue(c1, step);
                     }
-                    newWorld = glm::translate(glm::mat4(1.0f), m_DragAxisDirs[a0] * c0 + m_DragAxisDirs[a1] * c1) * m_DragInitialWorldRender;
+                    newWorld = glm::translate(glm::mat4(1.0f), m_DragAxisDirs[a0] * c0 + m_DragAxisDirs[a1] * c1) * m_DragInitialEntityWorldRender;
                 }
             }
         }
@@ -768,33 +833,56 @@ namespace Nox
             if (const int idx = axisIndex(m_ActiveGizmo); idx >= 0)
             {
                 const glm::vec3 axis = m_DragAxisDirs[idx];
-                glm::vec3 hit{};
-                if (IntersectRayPlane(rayOrig, rayDir, m_DragOriginRender, axis, hit))
+                const glm::vec2 mouseDelta = mousePos - m_DragPrevMousePos;
+                float stepRad = 0.0f;
+                if (m_DragRotateCircularMode)
                 {
-                    glm::vec3 v0 = m_DragStartHit - m_DragOriginRender;
-                    glm::vec3 v1 = hit - m_DragOriginRender;
-                    if (glm::length(v0) > 1e-4f && glm::length(v1) > 1e-4f)
+                    const glm::mat4 viewProj = m_Ctx.Camera->GetGizmoProjection() * m_Ctx.Camera->GetGizmoView(m_Ctx.Render->GetRenderOrigin());
+                    UI::UIVec2 oScr{};
+                    if (ProjectPoint(m_DragOriginRender, viewProj, oScr))
                     {
-                        v0 = glm::normalize(v0);
-                        v1 = glm::normalize(v1);
-                        const float angleRad = std::atan2(glm::dot(axis, glm::cross(v0, v1)), glm::clamp(glm::dot(v0, v1), -1.0f, 1.0f));
-                        float angleDeg = glm::degrees(angleRad);
-                        if (snap)
+                        const glm::vec2 d0 = m_DragPrevMousePos - oScr;
+                        const glm::vec2 d1 = mousePos - oScr;
+                        if (glm::length(d0) > 8.0f && glm::length(d1) > 8.0f)
                         {
-                            const float step = ViewportToolState::kRotationSnaps[std::clamp(m_Ctx.Tools->RotationSnapIndex, 0, static_cast<int>(std::size(ViewportToolState::kRotationSnaps)) - 1)];
-                            angleDeg = SnapValue(angleDeg, step);
+                            const float cross2d = d0.x * d1.y - d0.y * d1.x;
+                            const float dot2d = glm::dot(d0, d1);
+                            stepRad = std::atan2(cross2d, dot2d) * m_DragRotateScreenSign;
                         }
-                        const glm::mat4 rot = glm::translate(glm::mat4(1.0f), m_DragOriginRender) *
-                                              glm::rotate(glm::mat4(1.0f), glm::radians(angleDeg), axis) *
-                                              glm::translate(glm::mat4(1.0f), -m_DragOriginRender);
-                        newWorld = rot * m_DragInitialWorldRender;
+                        else
+                        {
+                            stepRad = glm::dot(mouseDelta, m_DragRotateScreenTangent) / m_DragRotatePixelRadius;
+                        }
+                    }
+                    else
+                    {
+                        stepRad = glm::dot(mouseDelta, m_DragRotateScreenTangent) / m_DragRotatePixelRadius;
                     }
                 }
+                else
+                {
+                    stepRad = glm::dot(mouseDelta, m_DragRotateScreenTangent) / m_DragRotatePixelRadius;
+                }
+                m_DragRotateAccumRad += stepRad;
+                m_DragPrevMousePos = mousePos;
+
+                float angleDeg = glm::degrees(m_DragRotateAccumRad);
+                if (snap)
+                {
+                    const float step = ViewportToolState::kRotationSnaps[std::clamp(m_Ctx.Tools->RotationSnapIndex, 0, static_cast<int>(std::size(ViewportToolState::kRotationSnaps)) - 1)];
+                    angleDeg = SnapValue(angleDeg, step);
+                }
+                m_DragRotateAppliedDeg = angleDeg;
+                const glm::mat4 rot = glm::translate(glm::mat4(1.0f), m_DragOriginRender) *
+                                      glm::rotate(glm::mat4(1.0f), glm::radians(angleDeg), axis) *
+                                      glm::translate(glm::mat4(1.0f), -m_DragOriginRender);
+                newWorld = rot * m_DragInitialEntityWorldRender;
             }
         }
         else if (m_Ctx.Tools->GizmoMode == ViewportGizmoMode::Scale)
         {
             const float step = ViewportToolState::kScaleSnaps[std::clamp(m_Ctx.Tools->ScaleSnapIndex, 0, static_cast<int>(std::size(ViewportToolState::kScaleSnaps)) - 1)];
+            const glm::vec3 offsetFromPivot = glm::vec3(m_DragInitialEntityWorldRender[3]) - m_DragOriginRender;
             if (const int idx = axisIndex(m_ActiveGizmo); idx >= 0)
             {
                 const glm::vec3 axis = m_DragAxisDirs[idx];
@@ -804,7 +892,8 @@ namespace Nox
                 if (snap)
                     factor = SnapValue(factor, step);
                 factor = std::max(factor, 0.01f);
-                newWorld[idx] = m_DragInitialWorldRender[idx] * factor;
+                newWorld[idx] = m_DragInitialEntityWorldRender[idx] * factor;
+                newWorld[3] = m_DragInitialEntityWorldRender[3] + glm::vec4(axis * (glm::dot(offsetFromPivot, axis) * (factor - 1.0f)), 0.0f);
             }
             else if (m_ActiveGizmo == GizmoPart::FreeCenter)
             {
@@ -812,9 +901,10 @@ namespace Nox
                 if (snap)
                     factor = SnapValue(factor, step);
                 factor = std::max(factor, 0.01f);
-                newWorld[0] = m_DragInitialWorldRender[0] * factor;
-                newWorld[1] = m_DragInitialWorldRender[1] * factor;
-                newWorld[2] = m_DragInitialWorldRender[2] * factor;
+                newWorld[0] = m_DragInitialEntityWorldRender[0] * factor;
+                newWorld[1] = m_DragInitialEntityWorldRender[1] * factor;
+                newWorld[2] = m_DragInitialEntityWorldRender[2] * factor;
+                newWorld[3] = glm::vec4(m_DragOriginRender + offsetFromPivot * factor, 1.0f);
             }
         }
 
@@ -876,10 +966,11 @@ namespace Nox
         const bool isPlay = m_Ctx.IsPlayModeFn && m_Ctx.IsPlayModeFn();
         if (!m_Ctx.Tools->AxisIndicatorHovered && m_Ctx.Hierarchy && m_Ctx.Render && !isPlay)
         {
-            if (Entity sel = m_Ctx.Hierarchy->GetSelectedEntity(); sel && sel.HasComponent<WorldTransformComponent>())
+            if (Entity sel = m_Ctx.Hierarchy->GetSelectedEntity())
             {
-                const glm::mat4 world = m_Ctx.Render->ToRenderSpace(sel.GetComponent<WorldTransformComponent>().WorldMatrix);
-                m_HoveredGizmo = HitTestGizmo(e.Position, world);
+                glm::mat4 world{};
+                if (ComputeGizmoTransform(sel, world))
+                    m_HoveredGizmo = HitTestGizmo(e.Position, world);
             }
         }
         m_Ctx.Tools->GizmoHovered = (m_HoveredGizmo != GizmoPart::None);
@@ -961,47 +1052,100 @@ namespace Nox
         {
             if (Entity sel = m_Ctx.Hierarchy->GetSelectedEntity(); sel && sel.HasComponent<WorldTransformComponent>())
             {
-                const glm::mat4 world = m_Ctx.Render->ToRenderSpace(sel.GetComponent<WorldTransformComponent>().WorldMatrix);
-                const GizmoPart hit = HitTestGizmo(e.Position, world);
-                if (hit != GizmoPart::None)
+                glm::mat4 world{};
+                if (ComputeGizmoTransform(sel, world))
                 {
-                    glm::vec3 rayOrig{}, rayDir{};
-                    if (RayFromScreen(e.Position, rayOrig, rayDir))
+                    const GizmoPart hit = HitTestGizmo(e.Position, world);
+                    if (hit != GizmoPart::None)
                     {
-                        m_ActiveGizmo = hit;
-                        m_DragInitialWorldRender = world;
-                        m_DragPrevWorldRender = world;
-                        m_DragOriginRender = glm::vec3(world[3]);
-                        for (int i = 0; i < 3; ++i)
+                        glm::vec3 rayOrig{}, rayDir{};
+                        if (RayFromScreen(e.Position, rayOrig, rayDir))
                         {
-                            const glm::vec3 col(world[i]);
-                            const float len = glm::length(col);
-                            m_DragAxisDirs[i] = len > 1e-6f ? (col / len) : glm::vec3(i == 0 ? 1.f : 0.f, i == 1 ? 1.f : 0.f, i == 2 ? 1.f : 0.f);
-                        }
-                        m_DragStartMouseX = e.Position.x;
+                            const glm::mat4 entityWorld = m_Ctx.Render->ToRenderSpace(sel.GetComponent<WorldTransformComponent>().WorldMatrix);
+                            m_ActiveGizmo = hit;
+                            m_DragInitialWorldRender = world;
+                            m_DragInitialEntityWorldRender = entityWorld;
+                            m_DragPrevWorldRender = entityWorld;
+                            m_DragOriginRender = glm::vec3(world[3]);
+                            m_DragPrevMousePos = e.Position;
+                            for (int i = 0; i < 3; ++i)
+                            {
+                                const glm::vec3 col(world[i]);
+                                const float len = glm::length(col);
+                                m_DragAxisDirs[i] = len > 1e-6f ? (col / len) : glm::vec3(i == 0 ? 1.f : 0.f, i == 1 ? 1.f : 0.f, i == 2 ? 1.f : 0.f);
+                            }
+                            m_DragStartMouseX = e.Position.x;
 
-                        int aIdx = hit == GizmoPart::AxisX ? 0 : hit == GizmoPart::AxisY ? 1 : hit == GizmoPart::AxisZ ? 2 : -1;
-                        if (aIdx >= 0)
-                        {
-                            m_DragStartScalar = ClosestRayAxisParameter(rayOrig, rayDir, m_DragOriginRender, m_DragAxisDirs[aIdx]);
-                            IntersectRayPlane(rayOrig, rayDir, m_DragOriginRender, m_DragAxisDirs[aIdx], m_DragStartHit);
-                        }
-                        else if (hit == GizmoPart::FreeCenter)
-                        {
-                            m_DragPlaneNormal = m_Ctx.Camera ? -m_Ctx.Camera->GetForwardDirection() : glm::vec3(0, 0, 1);
-                            IntersectRayPlane(rayOrig, rayDir, m_DragOriginRender, m_DragPlaneNormal, m_DragStartHit);
-                        }
-                        else
-                        {
-                            const int nIdx = hit == GizmoPart::PlaneYZ ? 0 : hit == GizmoPart::PlaneXZ ? 1 : 2;
-                            m_DragPlaneNormal = m_DragAxisDirs[nIdx];
-                            IntersectRayPlane(rayOrig, rayDir, m_DragOriginRender, m_DragPlaneNormal, m_DragStartHit);
-                        }
+                            int aIdx = hit == GizmoPart::AxisX ? 0 : hit == GizmoPart::AxisY ? 1 : hit == GizmoPart::AxisZ ? 2 : -1;
+                            if (m_Ctx.Tools->GizmoMode == ViewportGizmoMode::Rotate && aIdx >= 0 && m_Ctx.Camera)
+                            {
+                                const glm::vec3 axis = m_DragAxisDirs[aIdx];
+                                const glm::vec3 u = m_DragAxisDirs[(aIdx + 1) % 3];
+                                const glm::vec3 v = m_DragAxisDirs[(aIdx + 2) % 3];
+                                const glm::mat4 viewProj = m_Ctx.Camera->GetGizmoProjection() * m_Ctx.Camera->GetGizmoView(m_Ctx.Render->GetRenderOrigin());
+                                const float scale = ComputeGizmoWorldScale(m_DragOriginRender, viewProj);
+                                const float radius = scale * kRotateRingRadiusFactor;
+                                glm::vec3 closestWorld{};
+                                float bestDistSq = std::numeric_limits<float>::max();
+                                if (!ClosestPointOnRotateRing(e.Position, m_DragOriginRender, u, v, radius, viewProj, closestWorld, bestDistSq))
+                                    closestWorld = m_DragOriginRender + u * radius;
 
-                        m_Ctx.Tools->GizmoUsing = true;
-                        m_Ctx.Tools->GizmoWasUsing = true;
-                        m_Ctx.Tools->GizmoDragStart = world;
-                        return true;
+                                glm::vec3 r0 = closestWorld - m_DragOriginRender;
+                                r0 -= axis * glm::dot(r0, axis);
+                                r0 = glm::length(r0) > 1e-5f ? glm::normalize(r0) : u;
+                                const glm::vec3 tangent3D = glm::normalize(glm::cross(axis, r0));
+
+                                UI::UIVec2 oScr{}, pScr{}, pTanScr{}, tRingScr{};
+                                ProjectPoint(m_DragOriginRender, viewProj, oScr);
+                                const bool hasP = ProjectPoint(m_DragOriginRender + r0 * radius, viewProj, pScr);
+                                const bool hasPTan = ProjectPoint(m_DragOriginRender + r0 * radius + tangent3D * (radius * 0.25f), viewProj, pTanScr);
+                                if (hasP && hasPTan && glm::length(pTanScr - pScr) > 1e-3f)
+                                    m_DragRotateScreenTangent = glm::normalize(pTanScr - pScr);
+                                else
+                                    m_DragRotateScreenTangent = { 1.0f, 0.0f };
+                                m_DragRotatePixelRadius = hasP ? std::max(glm::length(pScr - oScr), 48.0f) : 96.0f;
+
+                                const glm::vec3 toCam = m_Ctx.Camera->IsOrthographic()
+                                    ? -m_Ctx.Camera->GetForwardDirection()
+                                    : glm::normalize(glm::vec3(m_Ctx.Camera->GetPosition() - m_Ctx.Render->GetRenderOrigin()) - m_DragOriginRender);
+                                m_DragRotateCircularMode = (std::abs(glm::dot(toCam, axis)) > 0.25f);
+                                if (m_DragRotateCircularMode && hasP && ProjectPoint(m_DragOriginRender + (r0 + tangent3D) * radius, viewProj, tRingScr))
+                                {
+                                    const glm::vec2 a = pScr - oScr;
+                                    const glm::vec2 b = tRingScr - oScr;
+                                    const float cross2d = a.x * b.y - a.y * b.x;
+                                    m_DragRotateScreenSign = (cross2d >= 0.0f) ? 1.0f : -1.0f;
+                                }
+                                else
+                                {
+                                    m_DragRotateScreenSign = 1.0f;
+                                }
+                                m_DragRotateStartRadial = r0;
+                                m_DragRotateAccumRad = 0.0f;
+                                m_DragRotateAppliedDeg = 0.0f;
+                            }
+                            else if (aIdx >= 0)
+                            {
+                                m_DragStartScalar = ClosestRayAxisParameter(rayOrig, rayDir, m_DragOriginRender, m_DragAxisDirs[aIdx]);
+                                IntersectRayPlane(rayOrig, rayDir, m_DragOriginRender, m_DragAxisDirs[aIdx], m_DragStartHit);
+                            }
+                            else if (hit == GizmoPart::FreeCenter)
+                            {
+                                m_DragPlaneNormal = m_Ctx.Camera ? -m_Ctx.Camera->GetForwardDirection() : glm::vec3(0, 0, 1);
+                                IntersectRayPlane(rayOrig, rayDir, m_DragOriginRender, m_DragPlaneNormal, m_DragStartHit);
+                            }
+                            else
+                            {
+                                const int nIdx = hit == GizmoPart::PlaneYZ ? 0 : hit == GizmoPart::PlaneXZ ? 1 : 2;
+                                m_DragPlaneNormal = m_DragAxisDirs[nIdx];
+                                IntersectRayPlane(rayOrig, rayDir, m_DragOriginRender, m_DragPlaneNormal, m_DragStartHit);
+                            }
+
+                            m_Ctx.Tools->GizmoUsing = true;
+                            m_Ctx.Tools->GizmoWasUsing = true;
+                            m_Ctx.Tools->GizmoDragStart = world;
+                            return true;
+                        }
                     }
                 }
             }
@@ -1140,7 +1284,19 @@ namespace Nox
         const glm::mat4 view = m_Ctx.Camera->GetGizmoView(m_Ctx.Render->GetRenderOrigin());
         const glm::mat4 proj = m_Ctx.Camera->GetGizmoProjection();
         const glm::mat4 vp = proj * view;
-        const glm::mat4 world = m_Ctx.Render->ToRenderSpace(selected.GetComponent<WorldTransformComponent>().WorldMatrix);
+        glm::mat4 world{};
+        if (m_Ctx.Tools->GizmoUsing)
+        {
+            world = m_DragPrevWorldRender;
+            const glm::vec3 translateOffset = (m_Ctx.Tools->GizmoMode == ViewportGizmoMode::Translate)
+                ? glm::vec3(m_DragPrevWorldRender[3] - m_DragInitialEntityWorldRender[3])
+                : glm::vec3(0.0f);
+            world[3] = glm::vec4(m_DragOriginRender + translateOffset, 1.0f);
+        }
+        else if (!ComputeGizmoTransform(selected, world))
+        {
+            return;
+        }
 
         const glm::vec3 origin(world[3]);
         UI::UIVec2 oScr{};
@@ -1167,16 +1323,23 @@ namespace Nox
 
         if (m_Ctx.Tools->GizmoMode == ViewportGizmoMode::Rotate)
         {
-            constexpr int kSegs = 48;
-            const float radius = scale * 0.78f;
+            constexpr int kSegs = 64;
+            const float radius = scale * kRotateRingRadiusFactor;
+            const glm::vec3 toCam = m_Ctx.Camera->IsOrthographic()
+                ? -m_Ctx.Camera->GetForwardDirection()
+                : glm::normalize(glm::vec3(m_Ctx.Camera->GetPosition() - m_Ctx.Render->GetRenderOrigin()) - origin);
             for (int a = 0; a < 3; ++a)
             {
-                const bool lit = (activeHighlight == axisParts[a]);
-                const glm::vec4 col = lit ? highlightCol : baseColors[a];
-                const float thick = lit ? 3.0f : 2.0f;
+                const bool isActive = (activeHighlight == axisParts[a]);
+                const bool dimmedOther = m_Ctx.Tools->GizmoUsing && !isActive;
+                glm::vec4 col = isActive ? highlightCol : baseColors[a];
+                if (dimmedOther)
+                    col.a *= 0.25f;
+                const float thick = isActive ? 3.2f : 2.1f;
                 const glm::vec3 u = axes[(a + 1) % 3];
                 const glm::vec3 v = axes[(a + 2) % 3];
                 UI::UIVec2 prev{};
+                glm::vec3 prevWorld{};
                 bool hasPrev = false;
                 for (int s = 0; s <= kSegs; ++s)
                 {
@@ -1185,9 +1348,60 @@ namespace Nox
                     UI::UIVec2 cur{};
                     const bool ok = ProjectPoint(pW, vp, cur);
                     if (ok && hasPrev)
-                        DrawLine(drawList, prev, cur, thick, col);
+                    {
+                        const glm::vec3 midOffset = (prevWorld + pW) * 0.5f - origin;
+                        const bool frontFacing = isActive || glm::dot(midOffset, toCam) >= -radius * 0.05f;
+                        glm::vec4 segCol = col;
+                        if (!frontFacing && !dimmedOther)
+                            segCol.a *= 0.34f;
+                        DrawLine(drawList, prev, cur, thick, segCol);
+                    }
                     prev = cur;
+                    prevWorld = pW;
                     hasPrev = ok;
+                }
+            }
+
+            if (m_Ctx.Tools->GizmoUsing)
+            {
+                const int activeIdx = m_ActiveGizmo == GizmoPart::AxisX ? 0 : m_ActiveGizmo == GizmoPart::AxisY ? 1 : m_ActiveGizmo == GizmoPart::AxisZ ? 2 : -1;
+                if (activeIdx >= 0)
+                {
+                    const glm::vec3 axis = m_DragAxisDirs[activeIdx];
+                    const glm::vec3 u = m_DragRotateStartRadial;
+                    const glm::vec3 v = glm::normalize(glm::cross(axis, u));
+                    const float clampedRad = glm::clamp(glm::radians(m_DragRotateAppliedDeg), -glm::two_pi<float>(), glm::two_pi<float>());
+                    constexpr int kArcSegs = 28;
+                    UI::UIVec2 startScr{}, prevScr{};
+                    bool hasStart = ProjectPoint(origin + u * radius, vp, startScr);
+                    if (hasStart)
+                        DrawLine(drawList, oScr, startScr, 1.8f, { 1.0f, 0.86f, 0.25f, 0.75f });
+
+                    bool hasPrev = false;
+                    UI::UIVec2 endScr{};
+                    for (int s = 0; s <= kArcSegs; ++s)
+                    {
+                        const float ang = clampedRad * (static_cast<float>(s) / kArcSegs);
+                        const glm::vec3 pW = origin + (u * std::cos(ang) + v * std::sin(ang)) * radius;
+                        UI::UIVec2 curScr{};
+                        const bool ok = ProjectPoint(pW, vp, curScr);
+                        if (ok && hasPrev)
+                            DrawLine(drawList, prevScr, curScr, 4.0f, { 1.0f, 0.86f, 0.25f, 0.90f });
+                        if (ok)
+                            endScr = curScr;
+                        prevScr = curScr;
+                        hasPrev = ok;
+                    }
+                    if (hasPrev)
+                        DrawLine(drawList, oScr, endScr, 1.8f, { 1.0f, 0.86f, 0.25f, 0.95f });
+
+                    char degBuf[32];
+                    std::snprintf(degBuf, sizeof(degBuf), "%+.1f deg", m_DragRotateAppliedDeg);
+                    const UI::UIVec2 labelPos{ oScr.x + 14.0f, oScr.y - 24.0f };
+                    const UI::UIVec2 textSize = UI::UILabel::MeasureText(degBuf, nullptr, 13.0f);
+                    drawList.AddRoundedRect(labelPos - glm::vec2(5.0f, 3.0f), labelPos + textSize + glm::vec2(5.0f, 3.0f),
+                                            { 0.08f, 0.09f, 0.11f, 0.85f }, glm::vec4(4.0f));
+                    drawList.AddText(degBuf, nullptr, labelPos, 13.0f, { 1.0f, 0.88f, 0.30f, 1.0f });
                 }
             }
             return;
@@ -1650,11 +1864,23 @@ namespace Nox
                 }, false, true, curUnit == i });
             }
 
+            const int curPivot = static_cast<int>(m_Tools->PivotMode);
+            std::vector<UI::UIMenuItem> pivotItems;
+            for (int i = 0; i < 2; ++i)
+            {
+                pivotItems.push_back({ kPivotModeNames[i], "", [this, i]()
+                {
+                    m_Tools->PivotMode = static_cast<GizmoPivotMode>(i);
+                    Sync();
+                }, false, true, curPivot == i });
+            }
+
             const bool showCamPos = m_Callbacks.GetShowCameraPosition ? m_Callbacks.GetShowCameraPosition() : false;
             std::vector<UI::UIMenuItem> items = {
                 {"Location Step", "", {}, false, true, false, false, "", std::move(locItems)},
                 {"Rotation Step", "", {}, false, true, false, false, "", std::move(rotItems)},
                 {"Scale Step", "", {}, false, true, false, false, "", std::move(sclItems)},
+                {"Gizmo Pivot", "", {}, false, true, false, false, "", std::move(pivotItems)},
                 {"", "", {}, true},
                 {"Reference Figure", "", {}, false, true, false, false, "", std::move(figItems)},
                 {"Display Units", "", {}, false, true, false, false, "", std::move(unitItems)},

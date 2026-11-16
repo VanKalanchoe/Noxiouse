@@ -98,15 +98,23 @@ namespace Nox
 
         IsEngineShuttingDown = true;
 
-        PopLayer<ImGuiLayer>();
-        PopLayer<UILayer>();
+        // Tear down layers after audio shutdown in reverse push order (LIFO) below, so user layers finish while UILayer / ImGuiLayer still exist.
+
         AudioMixer::Shutdown();
         AudioEngine::Shutdown(); // (what the layers stop on their way out after this finds no voices: a no-op)
 
         // The layers end while the application still exists: a layer's shutdown stops its scene, whose scripts' OnDestroy may call
         // into the engine (Input.CursorLocked = false reaches Application::Get() for the window). They used to be destroyed with the
         // members, after s_Application was cleared -- an assert on exit. Same order as before: before the renderer and the window.
-        m_LayerStack.clear();
+        while (!m_LayerStack.empty())
+        {
+            Layer* layer = m_LayerStack.back().get();
+            if (layer == m_ImGuiLayer)
+                m_ImGuiLayer = nullptr;
+            if (layer == m_UILayer)
+                m_UILayer = nullptr;
+            m_LayerStack.pop_back();
+        }
 
         s_Application = nullptr;
     }

@@ -194,7 +194,13 @@ namespace Nox
             });
 
             if (it != m_LayerStack.end())
-                m_LayerStack.erase(it); // layer is destroyed here
+                {
+                    if (static_cast<const void*>(it->get()) == static_cast<const void*>(m_ImGuiLayer))
+                        m_ImGuiLayer = nullptr;
+                    if (static_cast<const void*>(it->get()) == static_cast<const void*>(m_UILayer))
+                        m_UILayer = nullptr;
+                    m_LayerStack.erase(it); // layer is destroyed here
+                }
         }
 
         template <typename TLayer>

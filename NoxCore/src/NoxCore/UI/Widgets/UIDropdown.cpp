@@ -5,8 +5,10 @@
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Layout/UILayout.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
+#include "NoxCore/UI/Rendering/UIIcons.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
+#include "NoxCore/UI/Widgets/UIScrollView.h"
 
 namespace Nox::UI
 {
@@ -15,10 +17,12 @@ namespace Nox::UI
         class UIDropdownBackdrop : public UIAnchorBox
         {
         public:
-            explicit UIDropdownBackdrop(UIContext* context)
-                : m_Context(context)
+            UIDropdownBackdrop(UIContext* context, const UIRect& triggerBounds, const Ref<UIStackBox>& popup, const Ref<UIScrollView>& scroll)
+                : m_Context(context), m_TriggerBounds(triggerBounds), m_Popup(popup), m_Scroll(scroll)
             {
                 HitTestMode = UIHitTestMode::Self;
+                if (m_Popup)
+                    AddChild(m_Popup);
             }
 
             bool OnPointerDown(const UIPointerEvent& e) override
@@ -31,8 +35,45 @@ namespace Nox::UI
                 return false;
             }
 
+        protected:
+            void ArrangeChildren(const UIRect& contentRect) override
+            {
+                if (!m_Popup || !m_Popup->Visible)
+                    return;
+
+                constexpr float kMargin = 6.0f;
+                const float maxPopupH = std::max(80.0f, std::min(320.0f, contentRect.Height() - kMargin * 2.0f));
+                if (m_Scroll)
+                    m_Scroll->MaxSize.y = maxPopupH - m_Popup->Padding.Vertical();
+
+                const UIVec2 desired = m_Popup->Measure();
+                const float w = std::min(desired.x, std::max(80.0f, contentRect.Width() - kMargin * 2.0f));
+                float h = std::min(desired.y, maxPopupH);
+
+                const float spaceBelow = contentRect.Max.y - kMargin - (m_TriggerBounds.Max.y + 3.0f);
+                const float spaceAbove = (m_TriggerBounds.Min.y - 3.0f) - (contentRect.Min.y + kMargin);
+                float y = m_TriggerBounds.Max.y + 3.0f;
+                if (h > spaceBelow && spaceAbove > spaceBelow)
+                {
+                    h = std::min(h, std::max(60.0f, spaceAbove));
+                    y = m_TriggerBounds.Min.y - 3.0f - h;
+                }
+                else
+                {
+                    y = std::clamp(y, contentRect.Min.y + kMargin, std::max(contentRect.Min.y + kMargin, contentRect.Max.y - h - kMargin));
+                }
+
+                float x = m_TriggerBounds.Min.x;
+                x = std::clamp(x, contentRect.Min.x + kMargin, std::max(contentRect.Min.x + kMargin, contentRect.Max.x - w - kMargin));
+
+                m_Popup->Arrange({ { x, y }, { x + w, y + h } });
+            }
+
         private:
             UIContext* m_Context = nullptr;
+            UIRect m_TriggerBounds{};
+            Ref<UIStackBox> m_Popup;
+            Ref<UIScrollView> m_Scroll;
         };
     }
 
@@ -131,28 +172,9 @@ namespace Nox::UI
 
         const UIStyleBox& style = GetResolvedStyle();
         const UIRect& b = GetBounds();
-        const float halfW = std::max(3.0f, style.FontSize * 0.28f);
-        const float halfH = std::max(1.5f, style.FontSize * 0.14f);
-        const float cx = b.Max.x - Padding.Right - halfW - 2.0f;
+        const float cx = b.Max.x - Padding.Right - 6.0f;
         const float cy = (b.Min.y + b.Max.y) * 0.5f;
-        const UIColor arrowColor = style.TextColor;
-
-        drawList.AddBezier(
-            { cx - halfW, cy - halfH },
-            { cx - halfW * 0.5f, cy },
-            { cx - halfW * 0.25f, cy + halfH * 0.5f },
-            { cx, cy + halfH },
-            1.6f,
-            arrowColor
-        );
-        drawList.AddBezier(
-            { cx, cy + halfH },
-            { cx + halfW * 0.25f, cy + halfH * 0.5f },
-            { cx + halfW * 0.5f, cy },
-            { cx + halfW, cy - halfH },
-            1.6f,
-            arrowColor
-        );
+        Icons::DrawChevron(drawList, { cx, cy }, 7.0f, true, style.TextColor, 1.5f);
     }
 
     void UIDropdown::SyncLabel()
@@ -168,9 +190,7 @@ namespace Nox::UI
         if (!m_Context || m_Items.empty())
             return;
 
-        Ref<UIDropdownBackdrop> backdrop(new UIDropdownBackdrop(m_Context));
-
-        Ref<UIStackBox> popup(new UIStackBox(UIOrientation::Vertical, 2.0f));
+        Ref<UIStackBox> popup(new UIStackBox(UIOrientation::Vertical, 0.0f));
         popup->StyleClass = "MenuPopup";
         popup->DrawBackground = true;
         popup->HitTestMode = UIHitTestMode::Self;
@@ -178,10 +198,12 @@ namespace Nox::UI
         popup->Padding = UIThickness::All(4.0f);
 
         const UIRect& b = GetBounds();
-        popup->MinSize.x = b.Width();
-        popup->AnchorMin = { 0.0f, 0.0f };
-        popup->AnchorMax = { 0.0f, 0.0f };
-        popup->AnchorOffsets = { b.Min.x, b.Max.y + 3.0f, 0.0f, 0.0f };
+        popup->MinSize.x = std::max(b.Width(), 120.0f);
+
+        Ref<UIScrollView> scroll(new UIScrollView());
+        scroll->WidthMode = UISizeMode::Fill;
+        scroll->HeightMode = UISizeMode::Auto;
+        scroll->ChildSpacing = 2.0f;
 
         for (int i = 0; i < static_cast<int>(m_Items.size()); ++i)
         {
@@ -197,10 +219,11 @@ namespace Nox::UI
                 itemBtn->StyleVariant = "primary";
             itemBtn->WidthMode = UISizeMode::Fill;
             itemBtn->HeightMode = UISizeMode::Auto;
-            popup->AddChild(itemBtn);
+            scroll->AddChild(itemBtn);
         }
 
-        backdrop->AddChild(popup);
+        popup->AddChild(scroll);
+        Ref<UIDropdownBackdrop> backdrop(new UIDropdownBackdrop(m_Context, b, popup, scroll));
         m_Context->SetOverlay(backdrop);
     }
 }

@@ -21,7 +21,10 @@ namespace Nox::UI
             std::function<void(const glm::vec4&)> onChanged = {});
 
         void SetValue(const glm::vec4& value, bool notify = false);
+        void SetSpeed(float speed);
+        void SetFormat(const std::string& format);
         glm::vec4 GetValue() const;
+        bool IsEditing() const;
 
         std::function<void(const glm::vec4&)> OnChanged;
 

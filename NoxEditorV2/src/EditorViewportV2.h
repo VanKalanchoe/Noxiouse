@@ -32,6 +32,12 @@ namespace Nox
         Scale = 2
     };
 
+    enum class GizmoPivotMode : uint8_t
+    {
+        Center = 0,
+        Pivot = 1
+    };
+
     enum class EditorIconKind : uint8_t
     {
         SelectArrow = 0,
@@ -72,6 +78,7 @@ namespace Nox
         static constexpr float kScaleSnaps[] = { 0.1f, 0.25f, 0.5f, 1.0f };
 
         ViewportGizmoMode GizmoMode = ViewportGizmoMode::Translate;
+        GizmoPivotMode PivotMode = GizmoPivotMode::Center;
         bool SnapEnabled = false;
         int LocationSnapIndex = 2; // 10 cm
         int RotationSnapIndex = 2; // 15 degrees
@@ -156,6 +163,10 @@ namespace Nox
             FreeCenter
         };
 
+        bool ComputeGizmoTransform(Entity selected, glm::mat4& outWorldRender) const;
+        bool ClosestPointOnRotateRing(const UI::UIVec2& mousePos, const glm::vec3& origin,
+                                      const glm::vec3& u, const glm::vec3& v, float radius,
+                                      const glm::mat4& viewProj, glm::vec3& outWorldPoint, float& inOutBestDistSq) const;
         bool RayFromScreen(const UI::UIVec2& screenPos, glm::vec3& outOrigin, glm::vec3& outDir) const;
         bool ProjectPoint(const glm::vec3& renderPoint, const glm::mat4& viewProj, UI::UIVec2& outScreen, float* outClipW = nullptr) const;
         float ComputeGizmoWorldScale(const glm::vec3& pivotRender, const glm::mat4& viewProj) const;
@@ -180,11 +191,20 @@ namespace Nox
         UI::UIVec2 m_LeftDownPos{ 0.0f, 0.0f };
 
         glm::mat4 m_DragInitialWorldRender{ 1.0f };
+        glm::mat4 m_DragInitialEntityWorldRender{ 1.0f };
         glm::mat4 m_DragPrevWorldRender{ 1.0f };
         glm::vec3 m_DragOriginRender{ 0.0f };
         glm::vec3 m_DragAxisDirs[3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
         glm::vec3 m_DragPlaneNormal{ 0.0f, 1.0f, 0.0f };
         glm::vec3 m_DragStartHit{ 0.0f };
+        glm::vec2 m_DragPrevMousePos{ 0.0f, 0.0f };
+        glm::vec3 m_DragRotateStartRadial{ 1.0f, 0.0f, 0.0f };
+        glm::vec2 m_DragRotateScreenTangent{ 1.0f, 0.0f };
+        float m_DragRotatePixelRadius = 100.0f;
+        float m_DragRotateScreenSign = 1.0f;
+        bool m_DragRotateCircularMode = true;
+        float m_DragRotateAccumRad = 0.0f;
+        float m_DragRotateAppliedDeg = 0.0f;
         float m_DragStartScalar = 0.0f;
         float m_DragStartMouseX = 0.0f;
     };

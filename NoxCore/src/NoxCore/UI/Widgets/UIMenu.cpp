@@ -3,8 +3,10 @@
 #include <algorithm>
 
 #include "NoxCore/UI/Core/UIContext.h"
+#include "NoxCore/UI/Rendering/UIIcons.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
+#include "NoxCore/UI/Widgets/UIScrollView.h"
 
 namespace Nox::UI
 {
@@ -18,10 +20,10 @@ namespace Nox::UI
                 HitTestMode = UIHitTestMode::Self;
             }
 
-            void SetRootPopup(const Ref<UIElement>& popup)
+            void SetRootPopup(const Ref<UIMenuPopup>& popup, const UIRect& anchorRect, bool hasAnchorRect, bool alignRight)
             {
                 m_Popups.clear();
-                m_Popups.push_back(popup);
+                m_Popups.push_back({ popup, anchorRect, hasAnchorRect, alignRight, false });
                 AddChild(popup);
             }
 
@@ -29,7 +31,7 @@ namespace Nox::UI
             {
                 while (static_cast<int>(m_Popups.size()) > std::max(depth, 1))
                 {
-                    RemoveChild(m_Popups.back());
+                    RemoveChild(m_Popups.back().Popup);
                     m_Popups.pop_back();
                 }
             }
@@ -41,27 +43,103 @@ namespace Nox::UI
                     return;
 
                 Ref<UIMenuPopup> sub(new UIMenuPopup(std::move(subItems), m_Ctx, this, depth));
-                const UIRect& rowBounds = anchorRow->GetBounds();
-                sub->AnchorMin = { 0.0f, 0.0f };
-                sub->AnchorMax = { 0.0f, 0.0f };
-                sub->AnchorOffsets = { rowBounds.Max.x + 2.0f, rowBounds.Min.y, 0.0f, 0.0f };
-                m_Popups.push_back(sub);
+                const UIRect rowBounds = anchorRow->GetBounds();
+                m_Popups.push_back({ sub, rowBounds, true, false, true });
                 AddChild(sub);
             }
 
         protected:
+            void ArrangeChildren(const UIRect& contentRect) override
+            {
+                constexpr float kMargin = 6.0f;
+                const float availW = std::max(80.0f, contentRect.Width() - kMargin * 2.0f);
+                const float availH = std::max(80.0f, contentRect.Height() - kMargin * 2.0f);
+
+                for (const PopupEntry& entry : m_Popups)
+                {
+                    if (!entry.Popup || !entry.Popup->Visible)
+                        continue;
+
+                    entry.Popup->SetMaxContentHeight(availH);
+                    const UIVec2 desired = entry.Popup->Measure();
+                    const float w = std::min(desired.x, availW);
+                    float h = std::min(desired.y, availH);
+
+                    float x = entry.AnchorRect.Min.x;
+                    float y = entry.AnchorRect.Min.y;
+
+                    if (entry.IsSubmenu)
+                    {
+                        const float rightX = entry.AnchorRect.Max.x + 2.0f;
+                        const float leftX = entry.AnchorRect.Min.x - w - 2.0f;
+                        if (rightX + w <= contentRect.Max.x - kMargin || leftX < contentRect.Min.x + kMargin)
+                            x = rightX;
+                        else
+                            x = leftX;
+                        y = entry.AnchorRect.Min.y;
+                    }
+                    else if (entry.HasAnchorRect)
+                    {
+                        x = entry.AlignRight ? (entry.AnchorRect.Max.x - w) : entry.AnchorRect.Min.x;
+
+                        const float belowY = entry.AnchorRect.Max.y + 3.0f;
+                        const float spaceBelow = contentRect.Max.y - kMargin - belowY;
+                        const float spaceAbove = (entry.AnchorRect.Min.y - 3.0f) - (contentRect.Min.y + kMargin);
+                        if (h <= spaceBelow || spaceBelow >= spaceAbove)
+                        {
+                            h = std::min(h, std::max(60.0f, spaceBelow));
+                            y = belowY;
+                        }
+                        else
+                        {
+                            h = std::min(h, std::max(60.0f, spaceAbove));
+                            y = entry.AnchorRect.Min.y - 3.0f - h;
+                        }
+                    }
+                    else
+                    {
+                        // Cursor-anchored context menu: flip up if bottom clips and top has more space.
+                        const float spaceBelow = contentRect.Max.y - kMargin - y;
+                        const float spaceAbove = y - (contentRect.Min.y + kMargin);
+                        if (h > spaceBelow && spaceAbove > spaceBelow)
+                        {
+                            h = std::min(h, std::max(60.0f, spaceAbove));
+                            y -= h;
+                        }
+                        if (x + w > contentRect.Max.x - kMargin && x - w >= contentRect.Min.x + kMargin)
+                            x -= w;
+                    }
+
+                    x = std::clamp(x, contentRect.Min.x + kMargin, std::max(contentRect.Min.x + kMargin, contentRect.Max.x - w - kMargin));
+                    y = std::clamp(y, contentRect.Min.y + kMargin, std::max(contentRect.Min.y + kMargin, contentRect.Max.y - h - kMargin));
+                    entry.Popup->SetMaxContentHeight(h);
+                    entry.Popup->Arrange({ { x, y }, { x + w, y + h } });
+                }
+            }
+
+            struct PopupEntry
+            {
+                Ref<UIMenuPopup> Popup;
+                UIRect AnchorRect{};
+                bool HasAnchorRect = false;
+                bool AlignRight = false;
+                bool IsSubmenu = false;
+            };
+
             UIContext* m_Ctx = nullptr;
-            std::vector<Ref<UIElement>> m_Popups;
+            std::vector<PopupEntry> m_Popups;
         };
 
         class UIMenuRow final : public UIStackBox
         {
         public:
             UIMenuRow(const UIMenuItem& item, UIContext* context, UIMenuHostBase* host, int depth)
-                : UIStackBox(UIOrientation::Horizontal, 16.0f)
+                : UIStackBox(UIOrientation::Horizontal, 14.0f)
                 , m_Context(context)
                 , m_Host(host)
                 , m_Depth(depth)
+                , m_Checked(item.Checked)
+                , m_HasSubmenu(!item.SubItems.empty())
                 , m_SubItems(item.SubItems)
                 , m_OnTrigger(item.OnTrigger)
             {
@@ -73,19 +151,17 @@ namespace Nox::UI
                 Tooltip = item.Tooltip;
                 SetEnabled(item.Enabled);
 
-                const bool hasSubmenu = !item.SubItems.empty();
-                m_TitleLabel = Ref<UILabel>(new UILabel(item.Checked ? ("[x] " + item.Label) : item.Label));
+                if (m_Checked)
+                    Padding = { 24.0f, Padding.Top, m_HasSubmenu ? 22.0f : Padding.Right, Padding.Bottom };
+                else if (m_HasSubmenu)
+                    Padding = { Padding.Left, Padding.Top, 22.0f, Padding.Bottom };
+
+                m_TitleLabel = Ref<UILabel>(new UILabel(item.Label));
                 m_TitleLabel->WidthMode = UISizeMode::Fill;
                 m_TitleLabel->VAlign = UIAlignment::Center;
                 AddChild(m_TitleLabel);
 
-                if (hasSubmenu)
-                {
-                    m_RightLabel = Ref<UILabel>(new UILabel(">"));
-                    m_RightLabel->VAlign = UIAlignment::Center;
-                    AddChild(m_RightLabel);
-                }
-                else if (!item.Shortcut.empty())
+                if (!m_HasSubmenu && !item.Shortcut.empty())
                 {
                     m_RightLabel = Ref<UILabel>(new UILabel(item.Shortcut));
                     m_RightLabel->VAlign = UIAlignment::Center;
@@ -146,10 +222,34 @@ namespace Nox::UI
                 UIStackBox::ArrangeChildren(contentRect);
             }
 
+            void OnPaint(UIDrawList& drawList, const UITheme& theme) override
+            {
+                UIStackBox::OnPaint(drawList, theme);
+                const UIStyleBox& style = GetResolvedStyle();
+                const UIRect& b = GetBounds();
+                const float cy = (b.Min.y + b.Max.y) * 0.5f;
+                if (m_Checked)
+                {
+                    const UIColor accent = theme.GetToken("Accent", style.TextColor);
+                    const UIVec2 cMin{ b.Min.x + 6.0f, cy - 6.0f };
+                    const UIVec2 cMax{ b.Min.x + 18.0f, cy + 6.0f };
+                    Icons::DrawCheckmark(drawList, cMin, cMax, accent, 1.7f);
+                }
+                if (m_HasSubmenu)
+                {
+                    const UIColor chevronCol = HasState(GetState(), UIState::Hovered)
+                        ? style.TextColor
+                        : theme.GetToken("TextMuted", style.TextColor);
+                    Icons::DrawChevron(drawList, { b.Max.x - 10.0f, cy }, 6.5f, false, chevronCol, 1.5f);
+                }
+            }
+
         private:
             UIContext* m_Context = nullptr;
             UIMenuHostBase* m_Host = nullptr;
             int m_Depth = 0;
+            bool m_Checked = false;
+            bool m_HasSubmenu = false;
             std::vector<UIMenuItem> m_SubItems;
             std::function<void()> m_OnTrigger;
             Ref<UILabel> m_TitleLabel;
@@ -222,7 +322,7 @@ namespace Nox::UI
     }
 
     UIMenuPopup::UIMenuPopup(std::vector<UIMenuItem> items, UIContext* context, UIElement* host, int depth)
-        : UIStackBox(UIOrientation::Vertical, 2.0f)
+        : UIStackBox(UIOrientation::Vertical, 0.0f)
     {
         StyleClass = "MenuPopup";
         DrawBackground = true;
@@ -230,6 +330,11 @@ namespace Nox::UI
         WidthMode = UISizeMode::Auto;
         MinSize.x = 180.0f;
         Padding = UIThickness::All(6.0f);
+
+        m_ScrollView = Ref<UIScrollView>(new UIScrollView());
+        m_ScrollView->WidthMode = UISizeMode::Fill;
+        m_ScrollView->HeightMode = UISizeMode::Auto;
+        m_ScrollView->ChildSpacing = 2.0f;
 
         auto* hostBase = dynamic_cast<UIMenuHostBase*>(host);
 
@@ -243,7 +348,7 @@ namespace Nox::UI
                 sep->HeightMode = UISizeMode::Fixed;
                 sep->FixedSize.y = 1.0f;
                 sep->Margin = UIThickness::Symmetric(4.0f, 3.0f);
-                AddChild(sep);
+                m_ScrollView->AddChild(sep);
                 continue;
             }
 
@@ -253,12 +358,20 @@ namespace Nox::UI
                 info->UseColorOverride = true;
                 info->ColorOverride = { 0.58f, 0.62f, 0.69f, 1.0f };
                 info->Margin = UIThickness::Symmetric(10.0f, 4.0f);
-                AddChild(info);
+                m_ScrollView->AddChild(info);
                 continue;
             }
 
-            AddChild(Ref<UIMenuRow>(new UIMenuRow(item, context, hostBase, depth)));
+            m_ScrollView->AddChild(Ref<UIMenuRow>(new UIMenuRow(item, context, hostBase, depth)));
         }
+
+        AddChild(m_ScrollView);
+    }
+
+    void UIMenuPopup::SetMaxContentHeight(float maxHeight)
+    {
+        if (m_ScrollView)
+            m_ScrollView->MaxSize.y = std::max(40.0f, maxHeight - Padding.Vertical());
     }
 
     void UIMenuPopup::ShowContextMenu(UIContext& context, const UIVec2& screenPos, std::vector<UIMenuItem> items)
@@ -268,10 +381,18 @@ namespace Nox::UI
 
         Ref<UIContextMenuBackdrop> backdrop(new UIContextMenuBackdrop(&context));
         Ref<UIMenuPopup> popup(new UIMenuPopup(std::move(items), &context, backdrop.get(), 0));
-        popup->AnchorMin = { 0.0f, 0.0f };
-        popup->AnchorMax = { 0.0f, 0.0f };
-        popup->AnchorOffsets = { screenPos.x, screenPos.y, 0.0f, 0.0f };
-        backdrop->SetRootPopup(popup);
+        backdrop->SetRootPopup(popup, { screenPos, screenPos }, false, false);
+        context.SetOverlay(backdrop);
+    }
+
+    void UIMenuPopup::ShowPopupMenu(UIContext& context, const UIRect& anchorRect, std::vector<UIMenuItem> items, bool alignRight)
+    {
+        if (items.empty())
+            return;
+
+        Ref<UIContextMenuBackdrop> backdrop(new UIContextMenuBackdrop(&context));
+        Ref<UIMenuPopup> popup(new UIMenuPopup(std::move(items), &context, backdrop.get(), 0));
+        backdrop->SetRootPopup(popup, anchorRect, true, alignRight);
         context.SetOverlay(backdrop);
     }
 
@@ -304,11 +425,8 @@ namespace Nox::UI
             Ref<UIMenuOverlayHost> overlayHost(new UIMenuOverlayHost(ctx, this));
             Ref<UIMenuPopup> popup(new UIMenuPopup(builder(), ctx, overlayHost.get(), 0));
             const UIRect& btnBounds = triggerPtr->GetBounds();
-            popup->AnchorMin = { 0.0f, 0.0f };
-            popup->AnchorMax = { 0.0f, 0.0f };
-            popup->AnchorOffsets = { btnBounds.Min.x, btnBounds.Max.y + 2.0f, 0.0f, 0.0f };
 
-            overlayHost->SetRootPopup(popup);
+            overlayHost->SetRootPopup(popup, btnBounds, true, false);
             m_ActiveOverlay = overlayHost;
             m_OpenTrigger = triggerPtr;
             ctx->SetOverlay(overlayHost);

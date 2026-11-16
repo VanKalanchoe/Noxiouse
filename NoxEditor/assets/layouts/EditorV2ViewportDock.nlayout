@@ -1,7 +1,7 @@
 version: 2
 root:
   type: leaf
-  flags: 1
+  flags: 3
   active_tab: 0
   tabs:
     - Viewport

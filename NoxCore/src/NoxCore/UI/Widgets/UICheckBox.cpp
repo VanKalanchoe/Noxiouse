@@ -4,6 +4,7 @@
 
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
+#include "NoxCore/UI/Rendering/UIIcons.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 
 namespace Nox::UI
@@ -32,10 +33,10 @@ namespace Nox::UI
     UIVec2 UICheckBox::ComputeDesiredSize()
     {
         const UIStyleBox& style = GetResolvedStyle();
-        const float boxSize = std::max(12.0f, style.FontSize * 1.25f);
-        const float labelGap = style.FontSize * 0.55f;
+        const float boxSize = std::clamp(style.FontSize * 0.92f, 15.0f, 18.0f);
+        const float labelGap = style.FontSize * 0.50f;
         float w = boxSize;
-        float h = boxSize;
+        float h = std::max(boxSize + 2.0f, style.FontSize * 1.15f);
         if (!Label.empty())
         {
             const UIVec2 textSize = UILabel::MeasureText(Label, nullptr, style.FontSize);
@@ -49,15 +50,16 @@ namespace Nox::UI
     {
         const UIStyleBox& style = GetResolvedStyle();
         const UIRect& bounds = GetBounds();
-        const float boxSize = std::max(12.0f, style.FontSize * 1.25f);
-        const float labelGap = style.FontSize * 0.55f;
+        const float boxSize = std::clamp(style.FontSize * 0.92f, 15.0f, 18.0f);
+        const float labelGap = style.FontSize * 0.50f;
         const float boxY = bounds.Min.y + (bounds.Height() - boxSize) * 0.5f;
         const UIVec2 boxMin{ bounds.Min.x, boxY };
         const UIVec2 boxMax{ bounds.Min.x + boxSize, boxY + boxSize };
 
         const UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
+        const bool hovered = HasState(GetState(), UIState::Hovered);
         const UIColor boxFill = Checked ? accent : style.FillColor;
-        const UIColor border = Checked ? accent : style.BorderColor;
+        const UIColor border = Checked ? accent : (hovered ? theme.GetToken("AccentHover", accent) : style.BorderColor);
 
         drawList.AddRoundedRect(
             boxMin, boxMax,
@@ -69,14 +71,8 @@ namespace Nox::UI
 
         if (Checked)
         {
-            const float inset = boxSize * 0.25f;
-            const UIVec2 innerMin = boxMin + UIVec2(inset, inset);
-            const UIVec2 innerMax = boxMax - UIVec2(inset, inset);
-            drawList.AddRoundedRect(
-                innerMin, innerMax,
-                theme.GetToken("Text", { 1.0f, 1.0f, 1.0f, 0.95f }),
-                glm::vec4(std::max(1.5f, inset * 0.5f))
-            );
+            const UIColor checkCol = theme.GetToken("Text", { 1.0f, 1.0f, 1.0f, 0.98f });
+            Icons::DrawCheckmark(drawList, boxMin, boxMax, checkCol, std::max(1.75f, boxSize * 0.13f));
         }
 
         if (!Label.empty())

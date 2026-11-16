@@ -11,6 +11,7 @@
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
+#include "NoxCore/UI/Rendering/UIIcons.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
 
@@ -632,10 +633,7 @@ namespace Nox::UI
 
             if (!row.Node->Children.empty())
             {
-                const char* arrow = row.Node->Expanded ? "v" : ">";
-                const float arrowSize = std::max(10.0f, style.FontSize * 0.85f);
-                const UIVec2 aSize = UILabel::MeasureText(arrow, nullptr, arrowSize);
-                drawList.AddText(arrow, nullptr, { xBase, cy - aSize.y * 0.5f }, arrowSize, textMuted);
+                Icons::DrawChevron(drawList, { xBase + 5.0f, cy }, 7.5f, row.Node->Expanded, textMuted, 1.5f);
             }
 
             if (row.Node->IsFolder)

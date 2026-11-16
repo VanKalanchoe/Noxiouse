@@ -171,7 +171,7 @@ namespace Nox::UI
                 AddRow(prop.Name, vec, section);
                 rowSyncs.push_back([vec, instance, prop]()
                 {
-                    if (HasState(vec->GetState(), UIState::Focused)) return;
+                    if (vec->IsEditing()) return;
                     glm::vec2 cur(0.0f);
                     prop.Read(&cur, instance);
                     vec->SetValue({ cur.x, cur.y, 0.0f, 0.0f }, false);
@@ -191,7 +191,7 @@ namespace Nox::UI
                 AddRow(prop.Name, vec, section);
                 rowSyncs.push_back([vec, instance, prop]()
                 {
-                    if (HasState(vec->GetState(), UIState::Focused)) return;
+                    if (vec->IsEditing()) return;
                     glm::vec3 cur(0.0f);
                     prop.Read(&cur, instance);
                     vec->SetValue({ cur.x, cur.y, cur.z, 0.0f }, false);
@@ -210,7 +210,7 @@ namespace Nox::UI
                 AddRow(prop.Name, vec, section);
                 rowSyncs.push_back([vec, instance, prop]()
                 {
-                    if (HasState(vec->GetState(), UIState::Focused)) return;
+                    if (vec->IsEditing()) return;
                     glm::vec4 cur(0.0f);
                     prop.Read(&cur, instance);
                     vec->SetValue(cur, false);
@@ -357,8 +357,10 @@ namespace Nox::UI
     void UIPropertyGrid::AddBool(const std::string& label, bool value, std::function<void(bool)> onChanged,
                                  const Ref<UIStackBox>& section)
     {
+        Ref<UIStackBox> wrap(new UIStackBox(UIOrientation::Horizontal, 0.0f));
         Ref<UICheckBox> cb(new UICheckBox({}, value, std::move(onChanged)));
-        AddRow(label, cb, section);
+        wrap->AddChild(cb);
+        AddRow(label, wrap, section);
     }
 
     void UIPropertyGrid::AddFloatSlider(const std::string& label, float value, float min, float max,

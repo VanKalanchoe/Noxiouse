@@ -1,4 +1,5 @@
 #include "EditorV2Layer.h"
+#include "Panels/InspectorWidgetsV2.h"
 
 #include <algorithm>
 #include <cmath>
@@ -26,6 +27,7 @@
 #include "json.hpp"
 
 #include "NoxCore/Asset/AssetManager.h"
+#include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/SceneImporter.h"
 #include "NoxCore/Asset/TextureImporter.h"
 #include "NoxCore/Audio/AudioMixer.h"
@@ -57,6 +59,7 @@
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UICheckBox.h"
 #include "NoxCore/UI/Widgets/UIImage.h"
+#include "NoxCore/UI/Widgets/UIScrollView.h"
 #include "NoxCore/UI/Widgets/UISlider.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
 #include "NoxCore/Utils/Utils.h"
@@ -122,6 +125,18 @@ namespace Nox
         m_SceneHierarchyPanel.SetSceneMutatedCallback([this]() { m_HistoryCheckRequested = true; });
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
 
+        m_InspectorPanel.SetSceneMutatedCallback([this]() { m_HistoryCheckRequested = true; });
+        m_InspectorPanel.SetTagChangedCallback([this]() { m_SceneHierarchyPanel.MarkDirty(); });
+        m_InspectorPanel.SetOpenAssetCallback([this](AssetHandle h) { OpenAssetV2(h); });
+        m_InspectorPanel.SetSelectEntityCallback([this](Entity entity)
+        {
+            if (entity)
+                m_SceneHierarchyPanel.SetSelectedEntity(entity);
+            else
+                m_SceneHierarchyPanel.ClearSelection();
+        });
+        m_InspectorPanel.SetContext(m_ActiveScene);
+
         if (!projectFile.empty())
             NOX_CORE_INFO("Loading project {}", projectFile.generic_string());
         if ((projectFile.empty() || !OpenProject(projectFile)) && !OpenStartupProject(projectFile))
@@ -160,8 +175,14 @@ namespace Nox
         if (UILayer* uiLayer = Application::Get().GetUILayer())
         {
             if (const auto& dock = uiLayer->GetDockSpaceRef())
+            {
+                for (const auto& me : m_MaterialEditors)
+                    dock->RemovePanel(me.Title);
                 dock->SaveLayout(kLayoutPath);
+            }
         }
+        if (m_ViewportDockSpace)
+            m_ViewportDockSpace->SaveLayout(kViewportDockLayoutPath);
         if (Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
             Project::GetActive()->GetEditorAssetManager()->Shutdown();
     }
@@ -326,6 +347,7 @@ namespace Nox
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        m_InspectorPanel.SetContext(m_ActiveScene);
         m_EditorScenePath.clear();
         m_UnloadUnusedAssetsRequested = true;
 #if NOX_PROFILE_STATS
@@ -372,6 +394,7 @@ namespace Nox
         m_ActiveScene = m_EditorScene;
         m_EditorScenePath = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        m_InspectorPanel.SetContext(m_ActiveScene);
         RefreshSceneLoadOverlay();
 
         const bool cameraRestored = RestoreEditorCameras();
@@ -944,6 +967,7 @@ namespace Nox
         m_EditorScenePath = path;
         AdoptStartSceneIfNone(path);
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        m_InspectorPanel.SetContext(m_ActiveScene);
         m_HistoryCheckRequested = true;
         m_ApplyBasicSceneView = true;
         ApplyBasicSceneView();
@@ -1206,6 +1230,7 @@ namespace Nox
         m_EditorScene = restored;
         m_ActiveScene = restored;
         m_SceneHierarchyPanel.SetContext(restored);
+        m_InspectorPanel.SetContext(restored);
         for (UUID id : selection)
         {
             if (Entity entity = restored->GetEntityByUUID(id))
@@ -1284,6 +1309,7 @@ namespace Nox
         }
         m_ActiveScene->OnRuntimeStart();
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        m_InspectorPanel.SetContext(m_ActiveScene);
     }
 
     bool EditorV2Layer::LaunchPlayer(const std::vector<std::string>& arguments, bool console, const char* what)
@@ -1728,6 +1754,7 @@ namespace Nox
         m_HoveredEntity = Entity();
         m_ActiveScene = Scene::Copy(m_EditorScene);
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        m_InspectorPanel.SetContext(m_ActiveScene);
         m_ActiveScene->SetRenderer(m_Renderer);
         m_ActiveScene->SetRenderer2D(m_Renderer2D);
         const glm::dvec3 streamingSource = m_EditorCamera.GetPosition();
@@ -1752,6 +1779,7 @@ namespace Nox
         m_HoveredEntity = Entity();
         m_ActiveScene = m_EditorScene;
         m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        m_InspectorPanel.SetContext(m_ActiveScene);
         m_UnloadUnusedAssetsRequested = true;
         RefreshToolBar();
     }
@@ -3042,6 +3070,12 @@ namespace Nox
 
         if (m_ShowSceneHierarchy)
             m_SceneHierarchyPanel.Update();
+        if (m_ShowInspector)
+        {
+            m_InspectorPanel.SetSelection(m_SceneHierarchyPanel.GetSelectedEntity(), m_SceneHierarchyPanel.GetSelectedEntities());
+            m_InspectorPanel.Update();
+        }
+        UpdateMaterialEditors();
 
         std::vector<int32_t> selectedIDs;
         for (const Entity& entity : m_SceneHierarchyPanel.GetSelectedEntities())
@@ -3601,6 +3635,17 @@ namespace Nox
             );
         }
 
+        if (m_ShowInspector)
+        {
+            uiLayer->AddPanel(
+                "Inspector",
+                m_InspectorPanel.BuildUI(),
+                UI::UIDockDropZone::Right,
+                "Viewports",
+                0.22f
+            );
+        }
+
         if (m_ShowToolBar)
         {
             uiLayer->AddPanel(
@@ -3626,6 +3671,7 @@ namespace Nox
                 const std::string saved = ss.str();
                 if (saved.find("Viewports") == std::string::npos ||
                     (m_ShowSceneHierarchy && saved.find("Scene Hierarchy") == std::string::npos) ||
+                    (m_ShowInspector && saved.find("Inspector") == std::string::npos) ||
                     (m_ShowToolBar && (saved.find("Toolbar") == std::string::npos || saved.find("flags: 6") == std::string::npos)))
                     shouldLoad = false;
             }
@@ -3786,6 +3832,24 @@ namespace Nox
                             dock->RemovePanel("Scene Hierarchy");
                     }
                 }, false, true, m_ShowSceneHierarchy},
+                {"Inspector", "", [this, uiLayer]()
+                {
+                    m_ShowInspector = !m_ShowInspector;
+                    if (const auto& dock = uiLayer->GetDockSpaceRef())
+                    {
+                        if (m_ShowInspector)
+                        {
+                            dock->AddPanel("Inspector", m_InspectorPanel.BuildUI(), UI::UIDockDropZone::Right, "Viewports", 0.22f);
+                            m_InspectorPanel.SetSelection(m_SceneHierarchyPanel.GetSelectedEntity(), m_SceneHierarchyPanel.GetSelectedEntities());
+                            m_InspectorPanel.MarkDirty();
+                            m_InspectorPanel.Update();
+                        }
+                        else
+                        {
+                            dock->RemovePanel("Inspector");
+                        }
+                    }
+                }, false, true, m_ShowInspector},
                 {"Toolbar", "", [this, uiLayer]()
                 {
                     m_ShowToolBar = !m_ShowToolBar;
@@ -3817,6 +3881,7 @@ namespace Nox
                     m_EditorCamera.SetViewMode(static_cast<EditorViewMode>(kDefaultSlotViewModes[0]));
                     m_ActiveViewport = 0;
                     m_ShowSceneHierarchy = true;
+                    m_ShowInspector = true;
                     m_ShowToolBar = true;
                     BuildUI(false);
                 }},
@@ -3871,5 +3936,146 @@ namespace Nox
             .Style("Background")
             .Background(true)
         );
+    }
+
+    void EditorV2Layer::OpenAssetV2(AssetHandle handle)
+    {
+        if (handle == 0 || !AssetManager::IsAssetHandleValid(handle))
+            return;
+
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !uiLayer->GetDockSpaceRef())
+            return;
+
+        const AssetType type = AssetManager::GetAssetType(handle);
+        if (type != AssetType::Material)
+        {
+            uiLayer->GetContext().PushToast(
+                "Standalone V2 editor for " + AssetDisplayName(handle) + " is not yet implemented.",
+                3.0f,
+                { 0.45f, 0.72f, 0.98f, 1.0f });
+            return;
+        }
+
+        const auto& dock = uiLayer->GetDockSpaceRef();
+        for (auto& existing : m_MaterialEditors)
+        {
+            if (existing.Handle == handle)
+            {
+                if (existing.Window && existing.Window->GetParent())
+                {
+                    if (existing.Window->OnActivate)
+                        existing.Window->OnActivate();
+                    return;
+                }
+                if (dock->FindNodeByPanelTitle(existing.Title))
+                    return;
+            }
+        }
+
+        std::erase_if(m_MaterialEditors, [handle](const MaterialEditorState& s) { return s.Handle == handle; });
+
+        std::string title = "Material: " + AssetDisplayName(handle);
+        auto rootBox = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
+        rootBox->WidthMode = UI::UISizeMode::Fill;
+        rootBox->HeightMode = UI::UISizeMode::Fill;
+        rootBox->StyleClass = "Surface";
+        rootBox->DrawBackground = true;
+        rootBox->Padding = UI::UIThickness::All(10.0f);
+
+        if (Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
+        {
+            auto pathLbl = UI::Label(Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle).FilePath.generic_string());
+            pathLbl->FontSizeOverride = 13.0f;
+            pathLbl->UseColorOverride = true;
+            pathLbl->ColorOverride = { 0.58f, 0.64f, 0.74f, 1.0f };
+            rootBox->AddChild(pathLbl);
+        }
+
+        auto scroll = UI::MakeUI<UI::UIScrollView>();
+        scroll->WidthMode = UI::UISizeMode::Fill;
+        scroll->HeightMode = UI::UISizeMode::Fill;
+        scroll->ChildSpacing = 6.0f;
+        rootBox->AddChild(scroll);
+
+        const float offset = static_cast<float>((m_MaterialEditors.size() % 5) * 28);
+        Ref<UI::UIWindow> win = dock->FloatPanel(title, rootBox, { 380.0f + offset, 110.0f + offset }, { 430.0f, 580.0f }, false);
+
+        MaterialEditorState state;
+        state.Handle = handle;
+        state.Title = std::move(title);
+        state.Window = std::move(win);
+        state.Body = scroll ? UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f) : nullptr;
+        if (state.Body)
+        {
+            state.Body->WidthMode = UI::UISizeMode::Fill;
+            scroll->AddChild(state.Body);
+        }
+        state.Dirty = true;
+        m_MaterialEditors.push_back(std::move(state));
+        UpdateMaterialEditors();
+    }
+
+    void EditorV2Layer::UpdateMaterialEditors()
+    {
+        if (m_MaterialEditors.empty())
+            return;
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        const auto& dock = uiLayer ? uiLayer->GetDockSpaceRef() : nullptr;
+
+        std::erase_if(m_MaterialEditors, [&](const MaterialEditorState& me)
+        {
+            if (!AssetManager::IsAssetHandleValid(me.Handle) || AssetManager::GetAssetType(me.Handle) != AssetType::Material)
+                return true;
+            if (!dock)
+                return true;
+            const bool floatingAlive = me.Window && me.Window->GetParent() != nullptr;
+            const bool dockedAlive = dock->FindNodeByPanelTitle(me.Title) != nullptr;
+            return !floatingAlive && !dockedAlive;
+        });
+
+        UI::UIContext* ctx = uiLayer ? &uiLayer->GetContext() : nullptr;
+        for (size_t i = 0; i < m_MaterialEditors.size(); ++i)
+        {
+            MaterialEditorState& me = m_MaterialEditors[i];
+            if (!me.Body)
+                continue;
+            if (me.Dirty)
+            {
+                me.Dirty = false;
+                me.Syncs.clear();
+                me.Body->ClearChildren();
+                Ref<Material> mat = AssetManager::GetAsset<Material>(me.Handle);
+                if (!mat)
+                {
+                    auto loading = UI::Label("Loading material...");
+                    loading->FontSizeOverride = 14.5f;
+                    me.Body->AddChild(loading);
+                }
+                else
+                {
+                    const AssetHandle h = me.Handle;
+                    InspectorCardBuilder builder{ me.Body, me.Syncs, {}, ctx };
+                    PopulateMaterialPropertiesUI(
+                        h,
+                        mat->GetData(),
+                        builder,
+                        me.ExpandedSections,
+                        {
+                            [this](AssetHandle childHandle) { OpenAssetV2(childHandle); },
+                            [this, h]()
+                            {
+                                for (auto& entry : m_MaterialEditors)
+                                    if (entry.Handle == h) entry.Dirty = true;
+                            }
+                        });
+                }
+            }
+            else
+            {
+                for (const auto& sync : me.Syncs)
+                    sync();
+            }
+        }
     }
 }
