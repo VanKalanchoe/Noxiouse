@@ -12,7 +12,9 @@
 #include "EditorHistory.h"
 #include "EditorViewportV2.h"
 #include "GamePackager.h"
+#include "Panels/ContentBrowserV2Panel.h"
 #include "Panels/InspectorV2Panel.h"
+#include "Panels/OutputLogV2Panel.h"
 #include "Panels/SceneHierarchyV2Panel.h"
 #include "ProjectManager/ProcessLauncher.h"
 #include "ScriptBuilder.h"
@@ -152,6 +154,20 @@ namespace Nox
 
         void BuildUI(bool loadSavedLayout = true);
 
+        // The layout files live with the project (<Project>/Saved/Layout, like Unreal's Saved/Config): every project keeps its own,
+        // nothing in the engine's folder is written. Reset Layout runs at the start of the next frame (not inside the menu's click).
+        std::filesystem::path LayoutDirectory() const;
+        void SaveLayoutFiles();
+        void ResetLayout();
+        void ShowOutputLog();
+        bool IsPanelDocked(const std::string& title) const;
+        void TogglePanel(const std::string& title);
+
+        // Entities from the hierarchy as a .nprefab in `relativeFolder` (the dragged one, or the selection it is part of).
+        AssetHandle CreatePrefab(UUID dragged, const std::filesystem::path& relativeFolder);
+        // A toast at the bottom right (above the status bar).
+        void Notify(UI::UINotificationSeverity severity, std::string title, std::string message = {});
+
         Renderer* m_Renderer = nullptr;
         Renderer2D* m_Renderer2D = nullptr;
 
@@ -264,7 +280,12 @@ namespace Nox
         Ref<UI::UIElement> m_SceneLoadProgressFill;
 
         Ref<UI::UILabel> m_FpsLabel;
-        Ref<UI::UILabel> m_StatusLabel;
+        Ref<UI::UIElement> m_StatusBar;
+        Ref<UI::UIElement> m_StatusActivity; // left: Ready / loading / streaming / importing / building
+        Ref<UI::UIElement> m_StatusCounts;   // right: warnings and errors in the log (click: the Output Log)
+        bool m_ResetLayoutRequested = false;
+        bool m_LayoutBuilt = false;
+        uint64_t m_LastScriptBuildNotified = 0;
         void OpenAssetV2(AssetHandle handle);
         void UpdateMaterialEditors();
 
@@ -281,6 +302,10 @@ namespace Nox
 
         SceneHierarchyV2Panel m_SceneHierarchyPanel;
         InspectorV2Panel m_InspectorPanel;
+        ContentBrowserV2Panel m_ContentBrowserPanel;
+        OutputLogV2Panel m_OutputLogPanel;
+        Ref<UI::UIElement> m_ContentBrowserRoot;
+        Ref<UI::UIElement> m_OutputLogRoot;
         std::vector<MaterialEditorState> m_MaterialEditors;
         bool m_ShowSceneHierarchy = true;
         bool m_ShowInspector = true;
@@ -289,7 +314,8 @@ namespace Nox
         bool m_CursorHidden = false;
 
         // Tracked features intentionally deferred until their corresponding V2 panels exist:
-        // - Content Browser panel (drag-drop sources CONTENT_BROWSER_ITEM/ITEMS, CreatePrefab/Variant, ReplaceInScenes)
+        // - Content Browser: prefab variants, Replace References, the asset preview panel (thumbnails, browser, drag and drop,
+        //   Create Prefab are in)
         // - Settings & Stats windows (render quality / RT / NRD / post-process / physics collider toggle UI)
         // - Output Log, Profiler, Render Graph, World Partition (HLOD), Levels, Audio Mixer panels
         // - Node Graph / Animation Clip / Timeline panels

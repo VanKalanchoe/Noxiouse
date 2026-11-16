@@ -54,7 +54,8 @@ namespace Nox::UI
         void DrawSwatch(UIDrawList& drawList, const UIRect& rect, const UIColor& srgb, bool showAlpha, float radius,
                         float borderThickness, const UIColor& borderColor)
         {
-            const UIColor linear = UIColorPicker::SrgbToLinear(srgb);
+            // UI colours are display (sRGB) values: the UI shader converts them for the swapchain.
+            const UIColor linear = srgb;
             const UIColor opaque{ linear.r, linear.g, linear.b, 1.0f };
             if (showAlpha && srgb.a < 0.999f && rect.Width() > 12.0f)
             {
@@ -546,8 +547,8 @@ namespace Nox::UI
         const UIColor markerFill{ 1.0f, 1.0f, 1.0f, 1.0f };
         const UIColor markerEdge{ 0.04f, 0.05f, 0.07f, 1.0f };
 
-        // 1. The saturation (left to right) / value (top to bottom) square, in small gradient tiles: the renderer blends
-        //    in linear light, so a single gradient from the top colour to black would look far too bright in its middle.
+        // 1. The saturation (left to right) / value (top to bottom) square, in small gradient tiles (each exact HSV at its
+        //    corners: a single gradient from the hue to black would not follow the value's curve).
         constexpr int kColumns = 32;
         constexpr int kRows = 10;
         const float tileW = r.SV.Width() / static_cast<float>(kColumns);
@@ -564,8 +565,8 @@ namespace Nox::UI
                 const float y0 = r.SV.Min.y + static_cast<float>(row) * tileH;
                 drawList.AddRoundedRectGradient(
                     { x0, y0 }, { x0 + tileW + 0.5f, y0 + tileH + 0.5f },
-                    SrgbToLinear(HsvToRgb(m_Hue, sat, valueTop)),
-                    SrgbToLinear(HsvToRgb(m_Hue, sat, valueBottom)));
+                    HsvToRgb(m_Hue, sat, valueTop),
+                    HsvToRgb(m_Hue, sat, valueBottom));
             }
         }
         drawList.PopClipRect();
@@ -585,8 +586,8 @@ namespace Nox::UI
             const float y0 = r.Hue.Min.y + static_cast<float>(i) * hueStep;
             drawList.AddRoundedRectGradient(
                 { r.Hue.Min.x, y0 }, { r.Hue.Max.x, y0 + hueStep + 0.5f },
-                SrgbToLinear(HsvToRgb(360.0f * static_cast<float>(i) / static_cast<float>(kHueSteps), 1.0f, 1.0f)),
-                SrgbToLinear(HsvToRgb(360.0f * static_cast<float>(i + 1) / static_cast<float>(kHueSteps), 1.0f, 1.0f)));
+                HsvToRgb(360.0f * static_cast<float>(i) / static_cast<float>(kHueSteps), 1.0f, 1.0f),
+                HsvToRgb(360.0f * static_cast<float>(i + 1) / static_cast<float>(kHueSteps), 1.0f, 1.0f));
         }
         drawList.PopClipRect();
         drawList.AddRoundedRect(r.Hue.Min, r.Hue.Max, { 0.0f, 0.0f, 0.0f, 0.0f }, glm::vec4(3.0f), 1.0f, border);
@@ -604,7 +605,7 @@ namespace Nox::UI
         {
             drawList.PushClipRect(r.Alpha.Min, r.Alpha.Max, glm::vec4(3.0f));
             DrawChecker(drawList, r.Alpha, kBarWidth * 0.5f);
-            const UIColor solid = SrgbToLinear(HsvToRgb(m_Hue, m_Sat, m_Val, 1.0f));
+            const UIColor solid = HsvToRgb(m_Hue, m_Sat, m_Val, 1.0f);
             drawList.AddRoundedRectGradient(r.Alpha.Min, r.Alpha.Max, solid, { solid.r, solid.g, solid.b, 0.0f });
             drawList.PopClipRect();
             drawList.AddRoundedRect(r.Alpha.Min, r.Alpha.Max, { 0.0f, 0.0f, 0.0f, 0.0f }, glm::vec4(3.0f), 1.0f, border);

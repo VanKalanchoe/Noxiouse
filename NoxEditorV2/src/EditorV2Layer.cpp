@@ -1,9 +1,11 @@
 #include "EditorV2Layer.h"
+#include "Panels/AssetPreviewRenderer.h"
 #include "Panels/InspectorWidgetsV2.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <format>
 #include <fstream>
 #include <limits>
@@ -55,10 +57,15 @@
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Core/UILayer.h"
+#include "NoxCore/UI/Core/UIViewportManager.h"
 #include "NoxCore/UI/Layout/UIDockSpace.h"
+#include "NoxCore/UI/Layout/UITabPanel.h"
+#include "NoxCore/UI/Rendering/UIDrawList.h"
+#include "NoxCore/UI/Rendering/UIIcons.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UICheckBox.h"
 #include "NoxCore/UI/Widgets/UIImage.h"
+#include "NoxCore/UI/Widgets/UILabel.h"
 #include "NoxCore/UI/Widgets/UIScrollView.h"
 #include "NoxCore/UI/Widgets/UISlider.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
@@ -70,9 +77,115 @@ namespace Nox
 {
     namespace
     {
-        constexpr const char* kLayoutPath = "assets/layouts/EditorV2.nlayout";
-        constexpr const char* kViewportDockLayoutPath = "assets/layouts/EditorV2ViewportDock.nlayout";
-        constexpr const char* kViewportPrefsPath = "assets/layouts/EditorV2Viewports.txt";
+        // In <Project>/Saved/Layout (EditorV2Layer::LayoutDirectory).
+        constexpr const char* kLayoutFile = "EditorV2.nlayout";
+        constexpr const char* kViewportDockLayoutFile = "EditorV2ViewportDock.nlayout";
+        constexpr const char* kViewportPrefsFile = "EditorV2Viewports.txt";
+        constexpr float kStatusBarHeight = 28.0f;
+
+        // The status bar's left side: a dot (green: nothing is running; amber, pulsing: something loads, streams, imports or
+        // builds) and what it is.
+        class StatusActivityElement final : public UI::UIElement
+        {
+        public:
+            std::string Text = "Ready";
+            bool Busy = false;
+
+        protected:
+            UI::UIVec2 ComputeDesiredSize() override
+            {
+                return { 26.0f + UI::UILabel::MeasureText(Text, nullptr, kFont).x + 8.0f, kStatusBarHeight - 4.0f };
+            }
+
+            void OnUpdate(float dt) override { m_Time += dt; }
+
+            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+            {
+                const UI::UIRect& b = GetBounds();
+                const UI::UIVec2 dot{ b.Min.x + 12.0f, b.Center().y };
+                const UI::UIColor ready{ 0.36f, 0.80f, 0.46f, 1.0f };
+                const UI::UIColor busy{ 0.96f, 0.70f, 0.26f, 1.0f };
+                if (Busy)
+                {
+                    const float pulse = 0.5f + 0.5f * std::sin(m_Time * 5.0f);
+                    d.AddRoundedRect(dot - UI::UIVec2{ 7.0f }, dot + UI::UIVec2{ 7.0f }, { busy.r, busy.g, busy.b, 0.25f * pulse }, glm::vec4(7.0f));
+                }
+                d.AddRoundedRect(dot - UI::UIVec2{ 4.0f }, dot + UI::UIVec2{ 4.0f }, Busy ? busy : ready, glm::vec4(4.0f));
+                const UI::UIColor text = Busy ? theme.GetToken("Text", { 0.92f, 0.93f, 0.95f, 1.0f }) : theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+                const std::string shown = UI::UILabel::ElideText(Text, nullptr, kFont, std::max(0.0f, b.Width() - 30.0f));
+                const UI::UIVec2 size = UI::UILabel::MeasureText(shown, nullptr, kFont);
+                d.AddText(shown, nullptr, { b.Min.x + 24.0f, b.Center().y - size.y * 0.5f }, kFont, text);
+            }
+
+        private:
+            static constexpr float kFont = 13.0f;
+            float m_Time = 0.0f;
+        };
+
+        // The status bar's right side: the log's warnings and errors since its last Clear; a click opens the Output Log.
+        class StatusCountsElement final : public UI::UIElement
+        {
+        public:
+            StatusCountsElement(const OutputLogV2Panel& log, std::function<void()> onClick)
+                : m_Log(log), m_OnClick(std::move(onClick))
+            {
+                HitTestMode = UI::UIHitTestMode::Self;
+                Tooltip = "Warnings and errors in the Output Log since its last Clear -- click to open it";
+            }
+
+            bool OnPointerDown(const UI::UIPointerEvent& e) override
+            {
+                if (e.Button != 1)
+                    return false;
+                if (m_OnClick)
+                    m_OnClick();
+                return true;
+            }
+            bool OnPointerEnter(const UI::UIPointerEvent&) override { m_Hovered = true; return false; }
+            bool OnPointerLeave(const UI::UIPointerEvent&) override { m_Hovered = false; return false; }
+
+        protected:
+            UI::UIVec2 ComputeDesiredSize() override { return { 150.0f, kStatusBarHeight - 4.0f }; }
+
+            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+            {
+                const UI::UIRect& b = GetBounds();
+                if (m_Hovered)
+                    d.AddRoundedRect(b.Min, b.Max, { 1.0f, 1.0f, 1.0f, 0.06f }, glm::vec4(4.0f));
+                const UI::UIColor muted = theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+                const size_t warnings = m_Log.GetWarningCount(), errors = m_Log.GetErrorCount();
+                const UI::UIColor warnColor = warnings > 0 ? UI::UIColor{ 0.96f, 0.74f, 0.28f, 1.0f } : muted;
+                const UI::UIColor errorColor = errors > 0 ? UI::UIColor{ 0.95f, 0.38f, 0.38f, 1.0f } : muted;
+                const std::string errorText = std::to_string(errors);
+                const std::string warnText = std::to_string(warnings);
+                const float errorW = UI::UILabel::MeasureText(errorText, nullptr, kFont).x;
+                const float warnW = UI::UILabel::MeasureText(warnText, nullptr, kFont).x;
+                const float cy = b.Center().y;
+
+                // Right to left: errors, then warnings.
+                float x = b.Max.x - 10.0f - errorW;
+                d.AddText(errorText, nullptr, { x, cy - UI::UILabel::MeasureText(errorText, nullptr, kFont).y * 0.5f }, kFont, errorColor);
+                const UI::UIVec2 disc{ x - 11.0f, cy };
+                d.AddRoundedRect(disc - UI::UIVec2{ 6.5f }, disc + UI::UIVec2{ 6.5f }, { errorColor.r, errorColor.g, errorColor.b, 0.22f }, glm::vec4(6.5f), 1.5f, errorColor);
+                UI::Icons::DrawSegment(d, disc + UI::UIVec2{ -2.6f, -2.6f }, disc + UI::UIVec2{ 2.6f, 2.6f }, 1.6f, errorColor);
+                UI::Icons::DrawSegment(d, disc + UI::UIVec2{ -2.6f, 2.6f }, disc + UI::UIVec2{ 2.6f, -2.6f }, 1.6f, errorColor);
+
+                x = disc.x - 18.0f - warnW;
+                d.AddText(warnText, nullptr, { x, cy - UI::UILabel::MeasureText(warnText, nullptr, kFont).y * 0.5f }, kFont, warnColor);
+                const UI::UIVec2 tri{ x - 11.0f, cy + 0.5f };
+                UI::Icons::DrawSegment(d, { tri.x - 6.5f, tri.y + 5.5f }, { tri.x, tri.y - 6.0f }, 1.6f, warnColor);
+                UI::Icons::DrawSegment(d, { tri.x, tri.y - 6.0f }, { tri.x + 6.5f, tri.y + 5.5f }, 1.6f, warnColor);
+                UI::Icons::DrawSegment(d, { tri.x + 6.5f, tri.y + 5.5f }, { tri.x - 6.5f, tri.y + 5.5f }, 1.6f, warnColor);
+                UI::Icons::DrawSegment(d, { tri.x, tri.y - 2.2f }, { tri.x, tri.y + 1.6f }, 1.6f, warnColor);
+                UI::Icons::DrawSegment(d, { tri.x, tri.y + 3.4f }, { tri.x, tri.y + 3.6f }, 1.8f, warnColor);
+            }
+
+        private:
+            static constexpr float kFont = 13.0f;
+            const OutputLogV2Panel& m_Log;
+            std::function<void()> m_OnClick;
+            bool m_Hovered = false;
+        };
         constexpr const char* kViewportTitles[4] = { "Viewport", "Viewport 2", "Viewport 3", "Viewport 4" };
         constexpr int kDefaultSlotViewModes[4] = { 0, 0, 0, 0 };
 
@@ -110,7 +223,6 @@ namespace Nox
             m_Viewports[i].Camera.SetViewMode(static_cast<EditorViewMode>(kDefaultSlotViewModes[i]));
         }
         m_Viewports[0].Open = true;
-        LoadViewportPrefs();
 
         m_IconPlay = TextureImporter::LoadTexture2D("assets/Icons/PlayButton.ktx2", { .flip = true, .generateMips = false });
         m_IconStop = TextureImporter::LoadTexture2D("assets/Icons/StopButton.ktx2", { .flip = true, .generateMips = false });
@@ -137,6 +249,40 @@ namespace Nox
         });
         m_InspectorPanel.SetContext(m_ActiveScene);
 
+        m_SceneHierarchyPanel.SetCreatePrefabCallback([this](UUID entity)
+        {
+            // Into the folder the Content Browser shows, like entities dragged into it.
+            const AssetHandle created = CreatePrefab(entity, m_ContentBrowserPanel.CurrentFolder());
+            if (created == 0)
+            {
+                Notify(UI::UINotificationSeverity::Error, "Prefab not created", "See the Output Log for why.");
+                return;
+            }
+            Notify(UI::UINotificationSeverity::Success, "Prefab created", "In " + (m_ContentBrowserPanel.CurrentFolder().empty() ? std::string("Assets") : m_ContentBrowserPanel.CurrentFolder().generic_string()));
+            m_ContentBrowserPanel.ShowNewAsset(created);
+        });
+        m_ContentBrowserPanel.SetOpenAssetCallback([this](AssetHandle handle) { OpenAssetV2(handle); });
+        m_ContentBrowserPanel.SetCreatePrefabCallback([this](uint64_t dragId, const std::filesystem::path& folder)
+        {
+            // The hierarchy's drag id of an entity row is the entity's UUID (SceneHierarchyV2Panel::NodeIdForEntity).
+            return CreatePrefab(UUID(dragId), folder);
+        });
+        m_ContentBrowserPanel.SetSceneReferencesCallback([this](std::unordered_set<AssetHandle>& handles)
+        {
+            if (m_EditorScene)
+                m_EditorScene->CollectAssetReferences(handles);
+            if (m_ActiveScene && m_ActiveScene != m_EditorScene)
+                m_ActiveScene->CollectAssetReferences(handles);
+        });
+        m_ContentBrowserPanel.SetNotifyCallback([this](UI::UINotification note)
+        {
+            Notify(note.Severity, std::move(note.Title), std::move(note.Message));
+        });
+
+        // The Content Browser's pictures: meshes, prefabs and material spheres drawn by the renderer's thumbnail view.
+        AssetPreviewRenderer::SetRenderer(m_Renderer);
+        AssetPreviewRenderer::Get().SetSphereProvider([this]() { return GetShapeAsset(PrimitiveShape::Sphere); });
+
         if (!projectFile.empty())
             NOX_CORE_INFO("Loading project {}", projectFile.generic_string());
         if ((projectFile.empty() || !OpenProject(projectFile)) && !OpenStartupProject(projectFile))
@@ -157,6 +303,7 @@ namespace Nox
         if (const char* exec = app.GetSpecification().CommandLineArgs.Value("--exec"))
             Console::Get().Execute(exec);
 
+        LoadViewportPrefs(); // the project's (Saved/Layout)
         BuildUI(true);
     }
 
@@ -169,7 +316,6 @@ namespace Nox
         }
         EndMultiplayerPlay();
         SaveEditorCameras();
-        SaveViewportPrefs();
         ScriptEngine::Shutdown();
 
         if (UILayer* uiLayer = Application::Get().GetUILayer())
@@ -178,11 +324,11 @@ namespace Nox
             {
                 for (const auto& me : m_MaterialEditors)
                     dock->RemovePanel(me.Title);
-                dock->SaveLayout(kLayoutPath);
             }
         }
-        if (m_ViewportDockSpace)
-            m_ViewportDockSpace->SaveLayout(kViewportDockLayoutPath);
+        SaveLayoutFiles();
+        AssetPreviewRenderer::Get().Clear();
+        AssetPreviewRenderer::SetRenderer(nullptr);
         if (Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
             Project::GetActive()->GetEditorAssetManager()->Shutdown();
     }
@@ -229,11 +375,15 @@ namespace Nox
             return false;
 
         const bool hadProject = Project::GetActive() != nullptr;
+        if (hadProject)
+            SaveLayoutFiles(); // the project being left keeps its layout
         if (!Project::Load(path))
         {
             NOX_CORE_ERROR("Could not open the project '{}'", path.string());
+            Notify(UI::UINotificationSeverity::Error, "Project not opened", path.filename().string() + " -- see the Output Log.");
             return false;
         }
+        AssetPreviewRenderer::Get().Clear(); // the thumbnails were the other project's
 
         Ref<Project> project = Project::GetActive();
         ProjectLibrary::RememberRecentProject(path);
@@ -278,6 +428,9 @@ namespace Nox
             m_ThumbnailPending = !std::filesystem::exists(ProjectLibrary::ThumbnailPath(Project::GetActiveProjectDirectory()), error);
             m_ThumbnailTimer = 0.0f;
         }
+        m_ContentBrowserPanel.Refresh();
+        if (project)
+            Notify(UI::UINotificationSeverity::Success, "Project opened", project->GetConfig().Name);
         return true;
     }
 
@@ -372,8 +525,14 @@ namespace Nox
     {
         Scope<SceneLoader> load = std::move(m_SceneLoad);
         const AssetHandle handle = std::exchange(m_SceneLoadHandle, AssetHandle(0));
-        if (!load || load->Failed() || !Project::GetActive())
+        if (!load || !Project::GetActive())
             return;
+        if (load->Failed())
+        {
+            Notify(UI::UINotificationSeverity::Error, "Scene not opened",
+                   Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle).filename().string() + " could not be read -- see the Output Log.");
+            return;
+        }
         if (m_SceneState != SceneState::Edit)
             OnSceneStop();
 
@@ -428,6 +587,7 @@ namespace Nox
 #if NOX_PROFILE_STATS
         Profiler::Get().ResetStats();
 #endif
+        Notify(UI::UINotificationSeverity::Info, "Scene opened", m_EditorScenePath.filename().string());
     }
 
     void EditorV2Layer::SaveScene()
@@ -446,9 +606,18 @@ namespace Nox
             : Project::GetActiveAssetDirectory() / m_EditorScenePath;
         std::error_code error;
         std::filesystem::create_directories(fullPath.parent_path(), error);
+        const auto before = std::filesystem::last_write_time(fullPath, error);
+        const bool existed = !error;
         SerializeScene(m_ActiveScene, fullPath);
+        const auto after = std::filesystem::last_write_time(fullPath, error);
+        if (error || (existed && after == before))
+        {
+            Notify(UI::UINotificationSeverity::Error, "Scene not saved", fullPath.filename().string() + " could not be written -- see the Output Log.");
+            return;
+        }
         AdoptStartSceneIfNone(fullPath);
         CaptureProjectThumbnail();
+        Notify(UI::UINotificationSeverity::Success, "Scene saved", m_EditorScenePath.generic_string());
     }
 
     void EditorV2Layer::SaveSceneAs()
@@ -464,6 +633,11 @@ namespace Nox
         std::filesystem::create_directories(path.parent_path(), error);
         m_ActiveScene->CopyWorldCellsTo(path);
         SerializeScene(m_ActiveScene, path);
+        if (!std::filesystem::exists(path, error))
+        {
+            Notify(UI::UINotificationSeverity::Error, "Scene not saved", path.filename().string() + " could not be written -- see the Output Log.");
+            return;
+        }
 
         const std::filesystem::path rel = std::filesystem::relative(path, Project::GetActiveAssetDirectory(), error);
         if (!error && !rel.empty() && !rel.native().starts_with(std::filesystem::path("..").native()))
@@ -473,6 +647,8 @@ namespace Nox
 
         AdoptStartSceneIfNone(path);
         CaptureProjectThumbnail();
+        m_ContentBrowserPanel.Refresh();
+        Notify(UI::UINotificationSeverity::Success, "Scene saved", m_EditorScenePath.generic_string());
     }
 
     void EditorV2Layer::SerializeScene(const Ref<Scene>& scene, const std::filesystem::path& path)
@@ -1262,6 +1438,8 @@ namespace Nox
         }
         if (m_ActiveScene && m_ActiveScene != m_EditorScene)
             m_ActiveScene->CollectAssetReferences(referencedAssets);
+        AssetPreviewRenderer::Get().CollectAssetReferences(referencedAssets); // what the thumbnails draw right now
+        m_ContentBrowserPanel.CollectAssetReferences(referencedAssets);       // textures shown as tile pictures
         Project::GetActive()->GetEditorAssetManager()->UnloadUnusedAssets(referencedAssets);
     }
 
@@ -1792,7 +1970,9 @@ namespace Nox
 
     void EditorV2Layer::LoadViewportPrefs()
     {
-        std::ifstream in(kViewportPrefsPath);
+        if (LayoutDirectory().empty())
+            return;
+        std::ifstream in(LayoutDirectory() / kViewportPrefsFile);
         if (!in.is_open())
             return;
         for (std::string line; std::getline(in, line);)
@@ -1822,11 +2002,11 @@ namespace Nox
 
     void EditorV2Layer::SaveViewportPrefs() const
     {
+        if (LayoutDirectory().empty())
+            return;
         std::error_code error;
-        std::filesystem::path p(kViewportPrefsPath);
-        if (!p.parent_path().empty())
-            std::filesystem::create_directories(p.parent_path(), error);
-        std::ofstream out(kViewportPrefsPath, std::ios::trunc);
+        std::filesystem::create_directories(LayoutDirectory(), error);
+        std::ofstream out(LayoutDirectory() / kViewportPrefsFile, std::ios::trunc);
         if (!out.is_open())
             return;
         for (int index = 0; index < kMaxViewports; ++index)
@@ -2821,7 +3001,8 @@ namespace Nox
 
     void EditorV2Layer::RefreshStatusBar()
     {
-        if (!m_StatusLabel || !m_Renderer || !Project::GetActive() || !Project::GetActive()->GetEditorAssetManager())
+        auto* activity = static_cast<StatusActivityElement*>(m_StatusActivity.get());
+        if (!activity || !m_Renderer || !Project::GetActive() || !Project::GetActive()->GetEditorAssetManager())
             return;
         auto assetManager = Project::GetActive()->GetEditorAssetManager();
         const EditorAssetManager::ImportProgress import = assetManager->GetImportProgress();
@@ -2830,32 +3011,46 @@ namespace Nox
         const double pendingMB = static_cast<double>(assetManager->GetPendingUploadBytes()) / (1024.0 * 1024.0);
         const size_t blasBuilds = m_Renderer->GetPendingBlasBuilds();
 
+        // Most important first: what the user started (an import, a script build, a scene opening), then background work.
+        std::string text;
         if (import.Imports > 0)
+            text = import.Total == 0 ? std::string("Importing: reading the file...") : std::format("Importing meshes {} / {}", import.Done, import.Total);
+        else if (m_ScriptBuilder.IsBuilding())
+            text = "Building scripts...";
+        else if (m_SceneLoad)
+            text = "Opening scene...";
+        if (loading > 0 || streaming > 0 || blasBuilds > 0)
         {
-            char buf[96];
-            if (import.Total == 0)
-                std::snprintf(buf, sizeof(buf), "Importing: reading the file...");
-            else
-                std::snprintf(buf, sizeof(buf), "Importing meshes %u / %u", import.Done, import.Total);
-            m_StatusLabel->Text = buf;
+            std::string background;
+            auto add = [&background](const std::string& part)
+            {
+                background += (background.empty() ? "" : "   |   ") + part;
+            };
+            if (loading > 0)
+                add(std::format("Loading {} asset{}", loading, loading == 1 ? "" : "s"));
+            if (streaming > 0)
+                add(std::format("Streaming {} texture{}", streaming, streaming == 1 ? "" : "s"));
+            if (pendingMB >= 0.05)
+                add(std::format("{:.1f} MB to upload", pendingMB));
+            if (blasBuilds > 0)
+                add(std::format("{} BLAS build{}", blasBuilds, blasBuilds == 1 ? "" : "s"));
+            text += (text.empty() ? "" : "   |   ") + background;
         }
-        else if (loading == 0 && streaming == 0 && blasBuilds == 0)
-        {
-            m_StatusLabel->Text = "Ready";
-        }
-        else
-        {
-            char buf[160];
-            std::snprintf(buf, sizeof(buf), "Loading %zu asset(s)  |  Streaming %zu texture(s)  |  %.1f MB to upload  |  %zu BLAS build(s) pending",
-                          loading, streaming, pendingMB, blasBuilds);
-            m_StatusLabel->Text = buf;
-        }
+        activity->Busy = !text.empty();
+        activity->Text = text.empty() ? std::string("Ready") : text;
     }
 
     void EditorV2Layer::OnUpdate(Timestep ts)
     {
         if (!Project::GetActive())
             return;
+
+        if (m_ResetLayoutRequested)
+        {
+            // Here, between frames: the menu that asked for it is gone and no UI event is being dispatched.
+            m_ResetLayoutRequested = false;
+            ResetLayout();
+        }
 
         if (m_OpenSaveAndPlay)
         {
@@ -2896,6 +3091,19 @@ namespace Nox
         }
 
         m_ScriptBuilder.Update();
+        if (const ScriptBuilder::BuildResult& build = m_ScriptBuilder.GetLastResult(); build.Number != m_LastScriptBuildNotified)
+        {
+            m_LastScriptBuildNotified = build.Number;
+            size_t errors = 0, warnings = 0;
+            for (const ScriptDiagnostic& diagnostic : build.Diagnostics)
+                (diagnostic.Severity == "error" ? errors : warnings) += 1;
+            if (build.Succeeded)
+                Notify(UI::UINotificationSeverity::Success, build.Reloaded ? "Scripts built and reloaded" : "Scripts built",
+                       std::format("{:.1f} s{}", build.Seconds, warnings > 0 ? std::format(", {} warning{}", warnings, warnings == 1 ? "" : "s") : std::string()));
+            else
+                Notify(UI::UINotificationSeverity::Error, "Script build failed",
+                       std::format("{} error{} -- the Output Log lists them.", errors, errors == 1 ? "" : "s"));
+        }
 
         auto assetManager = Project::GetActive()->GetEditorAssetManager();
         if (assetManager)
@@ -2933,6 +3141,8 @@ namespace Nox
         }
 
         RefreshSceneLoadOverlay();
+        m_ContentBrowserPanel.Update(ts);
+        m_OutputLogPanel.Update(ts);
 
         if (!m_Renderer || !m_ActiveScene || !m_ViewportImage)
             return;
@@ -3087,12 +3297,13 @@ namespace Nox
 
         OnOverlayRender();
         SubmitExtraViewports(ts);
+        AssetPreviewRenderer::Get().Update(); // the Content Browser thumbnail in progress
         UpdateHistory();
         RefreshToolBar();
         m_ViewportToolbar.Sync();
 
         m_StatusRefreshTimer += ts;
-        if (m_StatusRefreshTimer >= 1.0f)
+        if (m_StatusRefreshTimer >= 0.25f)
         {
             m_StatusRefreshTimer = 0.0f;
             RefreshStatusBar();
@@ -3139,7 +3350,12 @@ namespace Nox
         if (event.GetEventType() == EventType::ExternalFileDrop)
         {
             const auto& drop = static_cast<const ExternalFileDropEvent&>(event);
-            NOX_CORE_INFO("Dropped external file: {}", drop.GetPath());
+            // Into the folder the Content Browser shows (a model opens the import dialog first).
+            if (!IsPanelDocked("Content Browser"))
+                TogglePanel("Content Browser");
+            m_ContentBrowserPanel.ImportFile(drop.GetPath());
+            event.Handled = true;
+            return;
         }
 
         if (event.GetEventType() == EventType::KeyPressed)
@@ -3148,8 +3364,20 @@ namespace Nox
             if (UILayer* uiLayer = Application::Get().GetUILayer())
                 textInputFocused = dynamic_cast<UI::UITextInput*>(uiLayer->GetContext().GetFocused()) != nullptr;
 
+            // Keys typed into the Content Browser or the Output Log are theirs (Delete deletes assets there, not entities).
+            bool panelFocused = false;
+            if (UILayer* uiLayer = Application::Get().GetUILayer())
+            {
+                for (const UI::UIElement* cur = uiLayer->GetContext().GetFocused(); cur && !panelFocused; cur = cur->GetParent())
+                    panelFocused = cur == m_ContentBrowserRoot.get() || cur == m_OutputLogRoot.get();
+            }
+
             const auto& key = static_cast<const KeyPressedEvent&>(event);
-            if (!key.IsRepeat() && !textInputFocused)
+            const int scancode = key.GetKeyCode();
+            const bool panelKey = panelFocused && (scancode == SDL_SCANCODE_DELETE || scancode == SDL_SCANCODE_F2 || scancode == SDL_SCANCODE_RETURN ||
+                                                   scancode == SDL_SCANCODE_BACKSPACE || scancode == SDL_SCANCODE_A || scancode == SDL_SCANCODE_C ||
+                                                   scancode == SDL_SCANCODE_D || scancode == SDL_SCANCODE_V || scancode == SDL_SCANCODE_F);
+            if (!key.IsRepeat() && !textInputFocused && !panelKey)
             {
                 const bool control = (key.GetModifiers() & SDL_KMOD_CTRL) != 0 ||
                                      Input::IsKeyPressed(SDL_SCANCODE_LCTRL) ||
@@ -3184,6 +3412,12 @@ namespace Nox
                 case SDL_SCANCODE_S:
                     if (control) { if (shift) SaveSceneAs(); else SaveScene(); event.Handled = true; return; }
                     break;
+                case SDL_SCANCODE_GRAVE:
+                    // ` : the Output Log's Cmd line (Unreal's console key).
+                    ShowOutputLog();
+                    m_OutputLogPanel.FocusCommandLine();
+                    event.Handled = true;
+                    return;
                 case SDL_SCANCODE_D:
                     if (control && m_SceneState == SceneState::Edit) { m_SceneHierarchyPanel.DuplicateSelection(); event.Handled = true; return; }
                     break;
@@ -3339,6 +3573,41 @@ namespace Nox
             .OnSceneMutated = [this]() { m_HistoryCheckRequested = true; },
             .OnCaptureChanged = [this](bool captured, int) { m_ViewportMouseCaptured = captured; }
         });
+        // Assets dragged from the Content Browser: meshes and prefabs are placed where the pointer is (on the surface under it,
+        // else on the ground plane); a scene opens.
+        m_ViewportCanvas->OnDrop = [this](const UI::UIDragPayload& payload) -> bool
+        {
+            if (payload.Type != "CONTENT_BROWSER_ITEM" && payload.Type != "CONTENT_BROWSER_ITEMS")
+                return false;
+            if (m_SceneState != SceneState::Edit)
+            {
+                Notify(UI::UINotificationSeverity::Info, "Stop Play to place assets", "Assets are placed in the edited scene.");
+                return true;
+            }
+            std::vector<AssetHandle> place;
+            for (uint64_t id : payload.Ids.empty() ? std::vector<uint64_t>{ payload.UserId } : payload.Ids)
+            {
+                const AssetHandle handle(id);
+                const AssetType type = AssetManager::GetAssetType(handle);
+                if (type == AssetType::Scene && payload.Ids.size() <= 1)
+                {
+                    OpenScene(handle);
+                    return true;
+                }
+                if (type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::Prefab)
+                    place.push_back(handle);
+            }
+            if (place.empty())
+            {
+                Notify(UI::UINotificationSeverity::Info, "Nothing to place", "Meshes, prefabs and scenes can be dropped into the viewport.");
+                return true;
+            }
+            glm::dvec3 point{ 0.0 };
+            if (!m_ViewportCanvas->PickWorldPoint(point))
+                point = m_EditorCamera.GetFocalPoint();
+            PlaceAssets(place, point, {});
+            return true;
+        };
 
         Ref<UI::UIElement> overlayToolbar = m_ViewportToolbar.Build(m_Renderer, &m_EditorCamera, &m_ViewportTools, {
             .SetViewMode = [this](EditorViewMode mode) { SetViewMode(mode); },
@@ -3658,12 +3927,33 @@ namespace Nox
             );
         }
 
-        m_StatusLabel = UI::Label("Ready").Margin(10.0f, 4.0f);
+        // Bottom, under the viewports: the Content Browser and the Output Log as two tabs of one area (Unreal's drawer).
+        m_ContentBrowserRoot = m_ContentBrowserPanel.BuildUI();
+        m_OutputLogRoot = m_OutputLogPanel.BuildUI();
+        uiLayer->AddPanel("Content Browser", m_ContentBrowserRoot, UI::UIDockDropZone::Bottom, "Viewports", 0.30f);
+        uiLayer->AddPanel("Output Log", m_OutputLogRoot, UI::UIDockDropZone::Center, "Content Browser");
+        if (const auto& dock = uiLayer->GetDockSpaceRef())
+        {
+            if (Ref<UI::UIDockNode> node = dock->FindNodeByPanelTitle("Content Browser"); node && node->TabPanel)
+                node->TabPanel->SetActiveTab(0);
+        }
+
+        // Status bar: what runs on the left, the log's warnings / errors on the right; toasts stack above it at the right.
+        m_StatusActivity = UI::MakeUI<StatusActivityElement>();
+        m_StatusActivity->WidthMode = UI::UISizeMode::Fill;
+        m_StatusActivity->Tooltip = "Imports, script builds, assets loading and textures streaming show here; Ready when nothing runs";
+        m_StatusCounts = Ref<UI::UIElement>(new StatusCountsElement(m_OutputLogPanel, [this]() { ShowOutputLog(); }));
+        m_StatusBar = UI::HStack(8.0f, { m_StatusActivity, m_StatusCounts }).Padding(4.0f, 2.0f).Style("Surface").Background(true).Get();
+        m_StatusBar->WidthMode = UI::UISizeMode::Fill;
+        m_StatusBar->HeightMode = UI::UISizeMode::Fixed;
+        m_StatusBar->FixedSize = { 0.0f, kStatusBarHeight };
+        uiLayer->GetContext().SetToastBottomInset(kStatusBarHeight + 6.0f);
+        RefreshStatusBar();
 
         if (loadSavedLayout)
         {
             bool shouldLoad = true;
-            std::ifstream layoutFile(kLayoutPath);
+            std::ifstream layoutFile(LayoutDirectory() / kLayoutFile);
             if (layoutFile.is_open())
             {
                 std::stringstream ss;
@@ -3677,10 +3967,10 @@ namespace Nox
             }
             if (shouldLoad)
             {
-                if (const auto& dock = uiLayer->GetDockSpaceRef())
-                    dock->LoadLayout(kLayoutPath);
-                if (m_ViewportDockSpace && std::filesystem::exists(kViewportDockLayoutPath))
-                    m_ViewportDockSpace->LoadLayout(kViewportDockLayoutPath);
+                if (const auto& dock = uiLayer->GetDockSpaceRef(); dock && std::filesystem::exists(LayoutDirectory() / kLayoutFile))
+                    dock->LoadLayout(LayoutDirectory() / kLayoutFile);
+                if (m_ViewportDockSpace && std::filesystem::exists(LayoutDirectory() / kViewportDockLayoutFile))
+                    m_ViewportDockSpace->LoadLayout(LayoutDirectory() / kViewportDockLayoutFile);
             }
         }
         SyncViewportTabBars();
@@ -3701,13 +3991,10 @@ namespace Nox
                 {"Package Game...", "", {}, false, false, false, false, "Packaging dialog not yet ported to NoxEditorV2"},
                 {"Package Server...", "", {}, false, false, false, false, "Packaging dialog not yet ported to NoxEditorV2"},
                 {"", "", {}, true},
-                {"Save Layout", "", [this, uiLayer]()
+                {"Save Layout", "", [this]()
                 {
-                    if (const auto& dock = uiLayer->GetDockSpaceRef())
-                        dock->SaveLayout(kLayoutPath);
-                    if (m_ViewportDockSpace)
-                        m_ViewportDockSpace->SaveLayout(kViewportDockLayoutPath);
-                    SaveViewportPrefs();
+                    SaveLayoutFiles();
+                    Notify(UI::UINotificationSeverity::Success, "Layout saved", "In the project's Saved/Layout folder (it is also saved on exit).");
                 }},
                 {"Exit", "Alt+F4", []() { Application::Get().Shutdown(); }}
             };
@@ -3863,7 +4150,8 @@ namespace Nox
                     }
                 }, false, true, m_ShowToolBar},
                 {"Render Graph", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
-                {"Output Log", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
+                {"Content Browser", "", [this]() { TogglePanel("Content Browser"); }, false, true, IsPanelDocked("Content Browser")},
+                {"Output Log", "", [this]() { TogglePanel("Output Log"); }, false, true, IsPanelDocked("Output Log")},
                 {"Profiler", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
                 {"World Partition", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
                 {"Levels", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
@@ -3871,20 +4159,8 @@ namespace Nox
                 {"Viewports", "", {}, false, true, false, false, "", std::move(viewportItems)},
                 {"Animation Graphs", "", {}, false, true, false, false, "", std::move(animGraphItems)},
                 {"", "", {}, true},
-                {"Reset Layout", "", [this]()
-                {
-                    for (int i = 0; i < kMaxViewports; ++i)
-                    {
-                        m_Viewports[i].Open = (i == 0);
-                        m_Viewports[i].Camera.SetViewMode(static_cast<EditorViewMode>(kDefaultSlotViewModes[i]));
-                    }
-                    m_EditorCamera.SetViewMode(static_cast<EditorViewMode>(kDefaultSlotViewModes[0]));
-                    m_ActiveViewport = 0;
-                    m_ShowSceneHierarchy = true;
-                    m_ShowInspector = true;
-                    m_ShowToolBar = true;
-                    BuildUI(false);
-                }},
+                {"Reset Layout", "", [this]() { m_ResetLayoutRequested = true; }, false, true, false, false,
+                 "Back to the default panels (closes windows torn off into their own OS window); the saved layout is replaced."},
                 {"Reload Theme", "", [uiLayer]() { uiLayer->ReloadTheme(); }}
             };
         });
@@ -3930,12 +4206,13 @@ namespace Nox
             UI::VStack(0.0f, {
                            menuBar,
                            uiLayer->GetDockSpaceRef(),
-                           m_StatusLabel
+                           m_StatusBar
                        })
             .Padding(0.0f)
             .Style("Background")
             .Background(true)
         );
+        m_LayoutBuilt = true;
     }
 
     void EditorV2Layer::OpenAssetV2(AssetHandle handle)
@@ -3948,12 +4225,15 @@ namespace Nox
             return;
 
         const AssetType type = AssetManager::GetAssetType(handle);
+        if (type == AssetType::Scene)
+        {
+            OpenScene(handle);
+            return;
+        }
         if (type != AssetType::Material)
         {
-            uiLayer->GetContext().PushToast(
-                "Standalone V2 editor for " + AssetDisplayName(handle) + " is not yet implemented.",
-                3.0f,
-                { 0.45f, 0.72f, 0.98f, 1.0f });
+            Notify(UI::UINotificationSeverity::Info, "No editor for " + AssetDisplayName(handle) + " yet",
+                   "NoxEditorV2 opens scenes and materials so far; the old NoxEditor has the other editors.");
             return;
         }
 
@@ -4077,5 +4357,172 @@ namespace Nox
                     sync();
             }
         }
+    }
+
+    std::filesystem::path EditorV2Layer::LayoutDirectory() const
+    {
+        if (!Project::GetActive())
+            return {};
+        return Project::GetProjectDirectory() / "Saved" / "Layout";
+    }
+
+    void EditorV2Layer::SaveLayoutFiles()
+    {
+        const std::filesystem::path directory = LayoutDirectory();
+        if (directory.empty() || !m_LayoutBuilt)
+            return;
+        std::error_code error;
+        std::filesystem::create_directories(directory, error);
+        if (UILayer* uiLayer = Application::Get().GetUILayer())
+        {
+            if (const auto& dock = uiLayer->GetDockSpaceRef())
+                dock->SaveLayout(directory / kLayoutFile);
+        }
+        if (m_ViewportDockSpace)
+            m_ViewportDockSpace->SaveLayout(directory / kViewportDockLayoutFile);
+        SaveViewportPrefs();
+    }
+
+    void EditorV2Layer::ResetLayout()
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer)
+            return;
+
+        // Panels torn off into OS windows close first: the default layout docks every panel again, and a window left open would
+        // keep a second copy of one.
+        if (UI::UIViewportManager* windows = uiLayer->GetViewportManager())
+            windows->Shutdown();
+
+        // The saved files go, so the next start shows the default layout too (until the layout is saved again on exit).
+        std::error_code error;
+        for (const char* file : { kLayoutFile, kViewportDockLayoutFile, kViewportPrefsFile })
+            std::filesystem::remove(LayoutDirectory() / file, error);
+
+        for (int i = 0; i < kMaxViewports; ++i)
+        {
+            m_Viewports[i].Open = (i == 0);
+            m_Viewports[i].Camera.SetViewMode(static_cast<EditorViewMode>(kDefaultSlotViewModes[i]));
+        }
+        m_EditorCamera.SetViewMode(static_cast<EditorViewMode>(kDefaultSlotViewModes[0]));
+        m_ActiveViewport = 0;
+        m_ShowSceneHierarchy = true;
+        m_ShowInspector = true;
+        m_ShowToolBar = true;
+        m_MaterialEditors.clear(); // their floating windows go with the old layout
+
+        BuildUI(false);
+        SaveLayoutFiles();
+        Notify(UI::UINotificationSeverity::Success, "Layout reset", "The default panels are back.");
+    }
+
+    bool EditorV2Layer::IsPanelDocked(const std::string& title) const
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        return uiLayer && uiLayer->GetDockSpaceRef() && uiLayer->GetDockSpaceRef()->FindNodeByPanelTitle(title) != nullptr;
+    }
+
+    void EditorV2Layer::TogglePanel(const std::string& title)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !uiLayer->GetDockSpaceRef())
+            return;
+        const auto& dock = uiLayer->GetDockSpaceRef();
+        if (dock->FindNodeByPanelTitle(title))
+        {
+            dock->RemovePanel(title);
+            return;
+        }
+        // Back where the default layout puts it: the bottom area, as a tab beside its partner when that one is open.
+        const bool isLog = title == "Output Log";
+        Ref<UI::UIElement>& root = isLog ? m_OutputLogRoot : m_ContentBrowserRoot;
+        root = isLog ? m_OutputLogPanel.BuildUI() : m_ContentBrowserPanel.BuildUI();
+        const std::string partner = isLog ? "Content Browser" : "Output Log";
+        if (dock->FindNodeByPanelTitle(partner))
+            dock->AddPanel(title, root, UI::UIDockDropZone::Center, partner);
+        else
+            dock->AddPanel(title, root, UI::UIDockDropZone::Bottom, "Viewports", 0.30f);
+        if (Ref<UI::UIDockNode> node = dock->FindNodeByPanelTitle(title); node && node->TabPanel)
+        {
+            for (size_t i = 0; i < node->TabPanel->GetTabCount(); ++i)
+            {
+                if (node->TabPanel->GetTabTitle(i) == title)
+                    node->TabPanel->SetActiveTab(i);
+            }
+        }
+    }
+
+    void EditorV2Layer::ShowOutputLog()
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !uiLayer->GetDockSpaceRef())
+            return;
+        const auto& dock = uiLayer->GetDockSpaceRef();
+        Ref<UI::UIDockNode> node = dock->FindNodeByPanelTitle("Output Log");
+        if (!node)
+        {
+            if (m_OutputLogRoot && m_OutputLogRoot->GetParent())
+                return; // floating in a window of its own: already in sight
+            TogglePanel("Output Log");
+            return;
+        }
+        if (node->TabPanel)
+        {
+            for (size_t i = 0; i < node->TabPanel->GetTabCount(); ++i)
+            {
+                if (node->TabPanel->GetTabTitle(i) == "Output Log")
+                    node->TabPanel->SetActiveTab(i);
+            }
+        }
+    }
+
+    AssetHandle EditorV2Layer::CreatePrefab(UUID dragged, const std::filesystem::path& relativeFolder)
+    {
+        if (!m_ActiveScene || !Project::GetActive())
+            return 0;
+        Entity draggedEntity = m_ActiveScene->GetEntityByUUID(dragged);
+        if (!draggedEntity)
+        {
+            NOX_CORE_WARN("Create Prefab: drag entities from the Scene Hierarchy (a folder row is not an entity)");
+            return 0;
+        }
+
+        // The dragged entity, or the whole selection when it is part of it; the dragged one first (the pivot of the others).
+        std::vector<Entity> entities{ draggedEntity };
+        if (m_SceneHierarchyPanel.IsSelected(draggedEntity))
+        {
+            for (Entity selected : m_SceneHierarchyPanel.GetSelectedEntities())
+            {
+                if (selected && !(selected == draggedEntity))
+                    entities.push_back(selected);
+            }
+        }
+
+        std::string name = entities.size() == 1 ? draggedEntity.GetName() : std::string("New Prefab");
+        for (char& character : name)
+        {
+            if (std::strchr("\\/:*?\"<>|", character) != nullptr)
+                character = '_';
+        }
+        if (name.empty())
+            name = "New Prefab";
+
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        std::filesystem::path relativePath = relativeFolder / (name + ".nprefab");
+        for (int suffix = 2; std::filesystem::exists(assetDirectory / relativePath); ++suffix)
+            relativePath = relativeFolder / (name + " " + std::to_string(suffix) + ".nprefab");
+
+        if (!SceneSerializer::SerializePrefab(*m_ActiveScene, entities, relativePath.stem().string(), assetDirectory / relativePath))
+        {
+            NOX_CORE_ERROR("Create Prefab: could not write {}", relativePath.generic_string());
+            return 0;
+        }
+        return Project::GetActive()->GetEditorAssetManager()->RegisterExistingFile(relativePath, AssetType::Prefab);
+    }
+
+    void EditorV2Layer::Notify(UI::UINotificationSeverity severity, std::string title, std::string message)
+    {
+        if (UILayer* uiLayer = Application::Get().GetUILayer())
+            uiLayer->GetContext().PushNotification({ severity, std::move(title), std::move(message) });
     }
 }

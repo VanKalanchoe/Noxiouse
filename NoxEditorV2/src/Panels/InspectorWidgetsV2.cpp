@@ -19,6 +19,7 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/Renderer/Renderer.h"
+#include "Panels/AssetPreviewRenderer.h"
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
@@ -390,6 +391,56 @@ namespace Nox
             std::function<void(bool)> m_OnToggle;
         };
 
+        // A property row: its name on the left, its editor on the right. The name column is a third of the row, but never
+        // narrower than 76 px nor wider than 150 px -- a wide Inspector gives the extra room to the values (three number
+        // fields of a Transform need it), not to the names (Unreal's details rows behave the same).
+        class InspectorPropertyRow final : public UI::UIElement
+        {
+        public:
+            InspectorPropertyRow(const Ref<UI::UIElement>& label, const Ref<UI::UIElement>& value)
+                : m_Label(label), m_Value(value)
+            {
+                WidthMode = UI::UISizeMode::Fill;
+                AddChild(label);
+                AddChild(value);
+            }
+
+            static constexpr float kGap = 8.0f;
+
+            float LabelWidth(float width) const { return std::clamp(width * 0.34f, 76.0f, 150.0f); }
+
+            float ComputeHeightForWidth(float width) override
+            {
+                const float labelW = LabelWidth(width);
+                const float valueW = std::max(0.0f, width - labelW - kGap);
+                return std::max(m_Label->ComputeHeightForWidth(labelW), m_Value->ComputeHeightForWidth(valueW));
+            }
+
+        protected:
+            UI::UIVec2 ComputeDesiredSize() override
+            {
+                const UI::UIVec2 l = m_Label->Measure();
+                const UI::UIVec2 v = m_Value->Measure();
+                return { std::min(l.x, 150.0f) + kGap + v.x, std::max(l.y, v.y) };
+            }
+
+            void ArrangeChildren(const UI::UIRect& rect) override
+            {
+                const float labelW = LabelWidth(rect.Width());
+                const float valueX = rect.Min.x + labelW + kGap;
+                const float valueH = std::min(rect.Height(), m_Value->ComputeHeightForWidth(std::max(0.0f, rect.Max.x - valueX)));
+                const float valueY = rect.Min.y + (rect.Height() - valueH) * 0.5f;
+                const float labelH = std::min(rect.Height(), m_Label->GetDesiredSize().y);
+                const float labelY = rect.Min.y + (rect.Height() - labelH) * 0.5f;
+                m_Label->Arrange({ { rect.Min.x, labelY }, { rect.Min.x + labelW, labelY + labelH } });
+                m_Value->Arrange({ { valueX, valueY }, { rect.Max.x, valueY + valueH } });
+            }
+
+        private:
+            Ref<UI::UIElement> m_Label;
+            Ref<UI::UIElement> m_Value;
+        };
+
         std::string TexturePathDisplayName(const std::string& path, const char* emptyText = "None")
         {
             if (path.empty())
@@ -629,29 +680,23 @@ namespace Nox
 
     void InspectorCardBuilder::AddRow(const std::string& labelText, const Ref<UI::UIElement>& editor, const std::string& tooltip)
     {
-        auto row = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 8.0f);
-        row->WidthMode = UI::UISizeMode::Fill;
-        row->VAlign = UI::UIAlignment::Center;
-        if (!tooltip.empty())
-            row->Tooltip = tooltip;
-
         auto label = UI::Label(labelText);
-        label->WidthMode = UI::UISizeMode::Fill;
-        label->FlexWeight = kLabelRatio;
         label->VAlign = UI::UIAlignment::Center;
         label->FontSizeOverride = 15.0f;
         label->UseColorOverride = true;
         label->ColorOverride = { 0.72f, 0.77f, 0.85f, 1.0f };
-        row->AddChild(label);
+        // A name too long for its column ends in "..."; the whole name is in the tooltip.
+        label->Tooltip = tooltip.empty() ? labelText : labelText + "\n" + tooltip;
 
         auto valWrap = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
         valWrap->WidthMode = UI::UISizeMode::Fill;
-        valWrap->FlexWeight = 1.0f - kLabelRatio;
         valWrap->VAlign = UI::UIAlignment::Center;
         if (editor)
             valWrap->AddChild(editor);
-        row->AddChild(valWrap);
 
+        auto row = Ref<UI::UIElement>(new InspectorPropertyRow(label.Get(), valWrap));
+        if (!tooltip.empty())
+            row->Tooltip = tooltip;
         Body->AddChild(row);
     }
 
@@ -1023,6 +1068,7 @@ namespace Nox
         if (handle == 0 || !Project::GetActive() || !Project::GetActive()->GetEditorAssetManager())
             return;
         Renderer::MarkMaterialChanged(handle);
+        AssetPreviewRenderer::Get().Invalidate(handle); // its Content Browser sphere is drawn again
         auto assets = Project::GetActive()->GetEditorAssetManager();
         const AssetMetadata& metadata = assets->GetMetadata(handle);
         if (!metadata.FilePath.empty() &&

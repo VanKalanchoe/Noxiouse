@@ -7,6 +7,7 @@
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
+#include "NoxCore/UI/Rendering/UIIcons.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 
 namespace Nox::UI
@@ -118,9 +119,41 @@ namespace Nox::UI
     {
         if (message.empty())
             return;
-        m_Toasts.push_back({ std::move(message), std::max(0.5f, durationSeconds), std::max(0.5f, durationSeconds), accentColor });
+        ToastItem item;
+        item.Note.Title = std::move(message);
+        item.Note.DurationSeconds = std::max(0.5f, durationSeconds);
+        item.Remaining = item.Note.DurationSeconds;
+        item.HasAccent = true;
+        item.Accent = accentColor;
+        m_Toasts.push_back(std::move(item));
         if (m_Toasts.size() > 5)
             m_Toasts.erase(m_Toasts.begin());
+    }
+
+    void UIContext::PushNotification(UINotification notification)
+    {
+        if (notification.Title.empty() && notification.Message.empty())
+            return;
+        ToastItem item;
+        item.Note = std::move(notification);
+        item.Note.DurationSeconds = std::max(1.0f, item.Note.DurationSeconds);
+        item.Remaining = item.Note.DurationSeconds;
+        m_Toasts.push_back(std::move(item));
+        if (m_Toasts.size() > 5)
+            m_Toasts.erase(m_Toasts.begin());
+    }
+
+    bool UIContext::DismissToastAt(const UIVec2& pos)
+    {
+        for (auto it = m_Toasts.begin(); it != m_Toasts.end(); ++it)
+        {
+            if (it->Bounds.Contains(pos))
+            {
+                m_Toasts.erase(it);
+                return true;
+            }
+        }
+        return false;
     }
 
     bool UIContext::IsInTree(const UIElement* element) const
@@ -300,6 +333,8 @@ namespace Nox::UI
     bool UIContext::DispatchPointerDown(const UIVec2& pos, int button)
     {
         m_LastMousePos = pos;
+        if (button == 1 && DismissToastAt(pos))
+            return true;
         if (m_Overlay && !m_Overlay->HitTest(pos))
             SetOverlay(nullptr);
 
@@ -415,7 +450,7 @@ namespace Nox::UI
             return true;
         }
 
-        if (keyCode == SDL_SCANCODE_TAB)
+        if (keyCode == SDL_SCANCODE_TAB && !(m_Focused && m_Focused->CapturesTab))
         {
             std::vector<UIElement*> focusables;
             auto collect = [&](auto& self, UIElement* node) -> void
@@ -639,55 +674,104 @@ namespace Nox::UI
             drawList.AddText(label, font, boxPos + pad, fontSize, tipStyle.TextColor);
         }
 
-        // Render bottom-right stacked toast notifications
-        if (!m_Toasts.empty())
+        PaintToasts(drawList, viewportSize, dt);
+    }
+
+    void UIContext::PaintToasts(UIDrawList& drawList, const UIVec2& viewportSize, float dt)
+    {
+        if (m_Toasts.empty())
+            return;
+
+        // The one under the pointer waits (it is being read); the rest count down.
+        for (auto& toast : m_Toasts)
         {
-            for (auto& toast : m_Toasts)
+            toast.Age += dt;
+            if (!toast.Bounds.Contains(m_LastMousePos))
                 toast.Remaining -= dt;
-            std::erase_if(m_Toasts, [](const ToastItem& t) { return t.Remaining <= 0.0f; });
+        }
+        std::erase_if(m_Toasts, [](const ToastItem& t) { return t.Remaining <= 0.0f; });
+        if (m_Toasts.empty())
+            return;
 
-            const UIStyleBox toastStyle = m_Theme ? m_Theme->Resolve("Tooltip", "", UIState::Normal) : UIStyleBox{};
-            const float fontSize = toastStyle.FontSize > 0.0f ? toastStyle.FontSize : 18.0f;
-            const float margin = fontSize * 1.3f;
-            float bottomY = viewportSize.y - margin;
-            const Ref<Font> font = Font::GetDefault();
-            for (int i = static_cast<int>(m_Toasts.size()) - 1; i >= 0; --i)
+        const UIStyleBox card = m_Theme ? m_Theme->Resolve("Tooltip", "", UIState::Normal) : UIStyleBox{};
+        const Ref<Font> font = Font::GetDefault();
+        constexpr float kTitleSize = 15.5f;
+        constexpr float kMessageSize = 13.5f;
+        constexpr float kWidth = 340.0f;
+        constexpr float kMargin = 14.0f;
+        constexpr float kPad = 12.0f;
+        constexpr float kIcon = 18.0f;
+        const float width = std::min(kWidth, std::max(160.0f, viewportSize.x - kMargin * 2.0f));
+        const float textWidth = width - kPad * 3.0f - kIcon - 4.0f;
+        const UIColor text = m_Theme ? m_Theme->GetToken("Text", card.TextColor) : card.TextColor;
+        const UIColor muted = m_Theme ? m_Theme->GetToken("TextMuted", card.TextColor) : card.TextColor;
+
+        float bottom = viewportSize.y - kMargin - m_ToastBottomInset;
+        for (int i = static_cast<int>(m_Toasts.size()) - 1; i >= 0; --i)
+        {
+            ToastItem& t = m_Toasts[static_cast<size_t>(i)];
+            UIColor accent = t.Accent;
+            if (!t.HasAccent)
             {
-                const ToastItem& t = m_Toasts[i];
-                const float alpha = std::clamp(t.Remaining / 0.4f, 0.0f, 1.0f);
-                const UIVec2 textSize = UILabel::MeasureText(t.Message, font, fontSize);
-                const float padX = fontSize * 1.1f;
-                const float padY = fontSize * 0.65f;
-                const UIVec2 boxSize{ textSize.x + padX * 2.0f + 6.0f, textSize.y + padY * 2.0f };
-                const UIVec2 boxMin{ viewportSize.x - boxSize.x - margin, bottomY - boxSize.y };
-                const UIVec2 boxMax = boxMin + boxSize;
-
-                drawList.AddRoundedRect(
-                    boxMin,
-                    boxMax,
-                    { toastStyle.FillColor.r, toastStyle.FillColor.g, toastStyle.FillColor.b, toastStyle.FillColor.a * alpha },
-                    glm::vec4(toastStyle.CornerRadius.TopLeft),
-                    1.0f,
-                    { toastStyle.BorderColor.r, toastStyle.BorderColor.g, toastStyle.BorderColor.b, toastStyle.BorderColor.a * alpha },
-                    { toastStyle.ShadowColor.r, toastStyle.ShadowColor.g, toastStyle.ShadowColor.b, toastStyle.ShadowColor.a * alpha },
-                    toastStyle.ShadowOffset,
-                    toastStyle.ShadowBlur
-                );
-                drawList.AddRoundedRect(
-                    { boxMin.x + 2.0f, boxMin.y + 4.0f },
-                    { boxMin.x + 5.5f, boxMax.y - 4.0f },
-                    { t.Accent.r, t.Accent.g, t.Accent.b, t.Accent.a * alpha },
-                    glm::vec4(2.0f)
-                );
-                drawList.AddText(
-                    t.Message,
-                    font,
-                    { boxMin.x + padX + 4.0f, boxMin.y + padY },
-                    fontSize,
-                    { toastStyle.TextColor.r, toastStyle.TextColor.g, toastStyle.TextColor.b, toastStyle.TextColor.a * alpha }
-                );
-                bottomY = boxMin.y - (fontSize * 0.6f);
+                switch (t.Note.Severity)
+                {
+                case UINotificationSeverity::Success: accent = m_Theme ? m_Theme->GetToken("Success", { 0.24f, 0.68f, 0.48f, 1.0f }) : UIColor{ 0.24f, 0.68f, 0.48f, 1.0f }; break;
+                case UINotificationSeverity::Warning: accent = m_Theme ? m_Theme->GetToken("Warning", { 0.85f, 0.62f, 0.22f, 1.0f }) : UIColor{ 0.85f, 0.62f, 0.22f, 1.0f }; break;
+                case UINotificationSeverity::Error:   accent = m_Theme ? m_Theme->GetToken("Danger", { 0.84f, 0.31f, 0.33f, 1.0f }) : UIColor{ 0.84f, 0.31f, 0.33f, 1.0f }; break;
+                default:                              accent = m_Theme ? m_Theme->GetToken("Accent", { 0.26f, 0.53f, 0.96f, 1.0f }) : UIColor{ 0.26f, 0.53f, 0.96f, 1.0f }; break;
+                }
             }
+
+            const std::string title = UILabel::ElideText(t.Note.Title, font, kTitleSize, textWidth);
+            const std::string message = t.Note.Message.empty() ? std::string() : UILabel::WrapText(t.Note.Message, font, kMessageSize, textWidth);
+            const float titleH = UILabel::MeasureText(title.empty() ? " " : title, font, kTitleSize).y;
+            const float messageH = message.empty() ? 0.0f : UILabel::MeasureText(message, font, kMessageSize).y + 3.0f;
+            const float height = kPad * 2.0f + std::max(kIcon, titleH + messageH);
+
+            // In: slides up and fades in over 0.18 s; out: fades over its last 0.35 s.
+            const float in = std::clamp(t.Age / 0.18f, 0.0f, 1.0f);
+            const float alpha = std::min(in, std::clamp(t.Remaining / 0.35f, 0.0f, 1.0f));
+            const float slide = (1.0f - in) * 14.0f;
+            const UIVec2 min{ viewportSize.x - kMargin - width, bottom - height + slide };
+            const UIVec2 max{ min.x + width, min.y + height };
+            t.Bounds = { min, max };
+
+            auto fade = [alpha](UIColor c) { c.a *= alpha; return c; };
+            drawList.AddRoundedRect(min, max, fade(card.FillColor), glm::vec4(6.0f), 1.0f, fade(card.BorderColor),
+                                    fade({ 0.0f, 0.0f, 0.0f, 0.45f }), { 0.0f, 4.0f }, 14.0f);
+            drawList.AddRoundedRect({ min.x + 1.0f, min.y + 1.0f }, { min.x + 4.0f, max.y - 1.0f }, fade(accent), { 5.0f, 0.0f, 0.0f, 5.0f });
+
+            // The severity's icon: a disc in its colour with a mark (i, check, !, x).
+            const UIVec2 iconCenter{ min.x + kPad + 3.0f + kIcon * 0.5f, min.y + kPad + kIcon * 0.5f };
+            drawList.AddRoundedRect(iconCenter - UIVec2{ kIcon * 0.5f }, iconCenter + UIVec2{ kIcon * 0.5f }, fade(accent), glm::vec4(kIcon * 0.5f));
+            const UIColor mark = fade({ 1.0f, 1.0f, 1.0f, 1.0f });
+            const float r = kIcon * 0.24f;
+            switch (t.Note.Severity)
+            {
+            case UINotificationSeverity::Success:
+                Icons::DrawSegment(drawList, iconCenter + UIVec2{ -r, 0.0f }, iconCenter + UIVec2{ -r * 0.25f, r * 0.75f }, 1.8f, mark);
+                Icons::DrawSegment(drawList, iconCenter + UIVec2{ -r * 0.25f, r * 0.75f }, iconCenter + UIVec2{ r * 1.1f, -r * 0.8f }, 1.8f, mark);
+                break;
+            case UINotificationSeverity::Error:
+                Icons::DrawSegment(drawList, iconCenter + UIVec2{ -r, -r }, iconCenter + UIVec2{ r, r }, 1.8f, mark);
+                Icons::DrawSegment(drawList, iconCenter + UIVec2{ -r, r }, iconCenter + UIVec2{ r, -r }, 1.8f, mark);
+                break;
+            case UINotificationSeverity::Warning:
+                Icons::DrawSegment(drawList, iconCenter + UIVec2{ 0.0f, -r * 1.2f }, iconCenter + UIVec2{ 0.0f, r * 0.3f }, 2.0f, mark);
+                drawList.AddRoundedRect(iconCenter + UIVec2{ -1.2f, r * 0.8f }, iconCenter + UIVec2{ 1.2f, r * 0.8f + 2.4f }, mark, glm::vec4(1.2f));
+                break;
+            default:
+                drawList.AddRoundedRect(iconCenter + UIVec2{ -1.2f, -r * 1.3f }, iconCenter + UIVec2{ 1.2f, -r * 1.3f + 2.4f }, mark, glm::vec4(1.2f));
+                Icons::DrawSegment(drawList, iconCenter + UIVec2{ 0.0f, -r * 0.3f }, iconCenter + UIVec2{ 0.0f, r * 1.2f }, 2.0f, mark);
+                break;
+            }
+
+            const float textX = min.x + kPad * 2.0f + kIcon + 4.0f;
+            drawList.AddText(title, font, { textX, min.y + kPad + std::max(0.0f, (kIcon - titleH) * 0.5f) - (message.empty() ? 0.0f : 1.0f) }, kTitleSize, fade(text));
+            if (!message.empty())
+                drawList.AddText(message, font, { textX, min.y + kPad + titleH + 3.0f }, kMessageSize, fade(muted));
+
+            bottom = min.y - 8.0f;
         }
     }
 }

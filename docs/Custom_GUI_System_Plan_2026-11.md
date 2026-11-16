@@ -230,6 +230,45 @@ and stays in the window, hex parsing, input dropped for a rebuilt panel) and pic
 not in the repository yet (it needs a stand-in for the font and the draw list). **Not yet:** a popup cannot leave its OS window (a picker
 opened in a small floating panel window is squeezed into it); `UISlider` itself is unchanged (animation time, players).
 
+#### Content Browser, thumbnails, Output Log, status bar and toasts (2026-11-16)
+
+The user asked for the old Content Browser and its thumbnails back, redesigned: Unreal-style tiles, no prototype controls, rendered
+pictures, the log as a tab beside it, a working Reset Layout, readable transform fields, and the notification system in the status bar.
+
+Flaws of what was there before (NoxEditor's ImGui browser and the state of NoxEditorV2):
+
+| Flaw | Now |
+|---|---|
+| Old browser: file-icon image buttons, names cut by a clip rect, no type label or colour, a toolbar with prototype controls (Tools, a tile-size slider, an up arrow), no Material creation, a modal for everything | `Panels/ContentBrowserV2Panel` (new): tiles like Unreal's -- a card with a shadow, the picture on top, a 3 px line in the type's colour, the name on up to two lines ending in "...", the type at the bottom right, small and muted. Folder tree on the left, toolbar `+ Add`, `Import`, `<` `>`, breadcrumb, search, type filter, `View` (Small / Medium / Large Tiles, Refresh, Show in Explorer). Footer: item count and selection |
+| V2 had no Content Browser and no thumbnails | `Panels/AssetPreviewRenderer` (from NoxEditor) renders meshes, prefabs and material spheres with the thumbnail view and keeps them in `<Project>/Cache/Thumbnails`; textures show the texture itself in its proportions; everything else shows a vector icon of its type (cube, figure, sphere, picture, globe, node graph, bone, play, film strip, "Aa", speaker, `</>`). Saving a material in the Inspector redraws its sphere |
+| V2 had no Output Log | `Panels/OutputLogV2Panel` (new): filter chips Errors / Warnings / Messages / Verbose with counts, search (every word), Copy, Clear, line selection (click, Shift, Ctrl, Ctrl+A, Ctrl+C, right-click menu), follows new lines at the bottom, the Cmd line (Tab completes -- `UIElement::CapturesTab` keeps Tab in the field --, Up / Down history, matching names listed above it). The ` key opens it |
+| Reset Layout did not work | It rebuilt the UI inside the menu's own click (`SetRoot` while the event was being dispatched), left torn-off OS windows open and the old file in place, and the layout was saved into the engine's `assets/layouts` (in git). Now Reset runs at the start of the next frame: closes the OS windows (`UIViewportManager::Shutdown`), deletes the saved files, builds the default layout and saves it. Layout files live in `<Project>/Saved/Layout` (per project, like Unreal's `Saved/Config`); the three files in `NoxEditor/assets/layouts` are removed |
+| Transform fields: the last digit hidden | Rows gave the label 39 % and the fields had lettered tags at font 18. `InspectorPropertyRow`: label `clamp(0.34 w, 76, 150)` px, the value the rest; axis fields with a coloured stripe instead of a letter, font 15, three decimals with trailing zeros dropped (`TrimZeros`), and a number too wide for its field drops decimals until it fits (123.456 -> 123.46 -> 123.5 -> 123; typing shows every digit) |
+| Status bar was one label; toasts were plain text | Status bar: left a dot (green Ready / amber pulsing busy) and what runs (import progress, script build, scene opening, assets loading, textures streaming, MB to upload, BLAS builds); right the log's warnings and errors (click: the Output Log). `UIContext::PushNotification` (`UINotification`: Info / Success / Warning / Error, title, message): 340 px cards at the bottom right above the status bar, severity icon and stripe, slide and fade, a hovered toast waits, a click dismisses |
+
+Toasts come from: scene saved / not saved, scene opened / not readable, project opened / not opened, layout saved / reset, script build
+result (time, warnings, errors), model import started / finished, prefab created, assets moved / deleted / renamed (failures), files
+imported, an asset with no V2 editor yet. Running work stays in the status bar (it is not a toast).
+
+Also built: drag tiles into the viewport (meshes and prefabs placed on the surface under the pointer, else the ground plane; a scene
+opens), onto a folder tile (moves them), entities from the hierarchy onto the tiles (a prefab in that folder; also the hierarchy's
+Create Prefab), files dropped from the system (imported into the open folder; a model opens the import dialog first: static / skeletal
+meshes, combine modes, animations, scale, file name), inline rename (F2), Duplicate, Delete with the users listed (files and the open
+scene), Find References, Reimport, Copy Path, Show in Explorer, + Add: folder, Material, Material Graph, Material Shader, Animation Graph,
+Audio Graph, Timeline, C# Script. Double-click: folder, scene, material (others: a toast that V2 has no editor for them yet). Keys typed
+in the browser or the log no longer reach the editor's shortcuts (Delete deleted the selected entities as well).
+
+Found by the headless test and fixed: every modal dialog's buttons were dead -- a press inside the dialog bubbled up to the backdrop,
+which closed it before the button saw the release (the Delete and import confirmations would never have run); the buttons also called
+their action through the lambda the close had destroyed (now copied first). `PickWorldPoint` used the depth of the last pick request
+even when the pointer had moved since (pick requests pause during a drag); now only within 6 px of the pointer, else the ground plane.
+
+Checked: clang syntax check of every touched source; the headless test (78 checks; new: toasts placed above the inset, click dismiss,
+time-out, a hovered toast waits; transform numbers inside their fields at 200 px with their integer part; CapturesTab; custom modal
+button order and primary action). **Not run on a GPU or on Windows; not user-tested.** **Not yet:** prefab variants and Replace
+References from the browser, the asset preview panel (rotating live preview), audio preview, opening graphs / timelines in V2 (their
+editors are not ported).
+
 ### Phase 3: Docking & Multi-Viewport
 - Implement `DockSpace` (splitters, tab bars, drag-to-dock preview overlays, layout save/load).
 - Extend `UIPlatformSDL` + `Renderer` to support secondary `SDL_Window*` + `NRI::Swapchain` viewports for torn-off panels and popups.

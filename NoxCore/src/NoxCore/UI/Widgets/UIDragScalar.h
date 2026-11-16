@@ -31,6 +31,8 @@ namespace Nox::UI
         std::string Prefix;
         UIColor PrefixColor{ 0.24f, 0.56f, 0.96f, 1.0f };
         std::string Format = "{:.2f}";
+        // Unreal's way of showing a number: Format's decimals at most, the trailing zeros dropped but one ("120.5", "0.0").
+        bool TrimZeros = false;
         std::function<void(float)> OnChanged;
 
         bool IsEditing() const { return m_Editing; }
@@ -56,6 +58,7 @@ namespace Nox::UI
         void SetValue(float next);
         float TextLeft() const;
         float TextSize() const;
+        std::string DisplayText() const;
         bool HasRange() const { return Max > Min; }
 
         bool m_Pressed = false;   // the left button went down on the field (not while editing)

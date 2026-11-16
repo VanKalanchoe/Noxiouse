@@ -29,6 +29,11 @@ namespace Nox::UI
         void ClearOverlay() { SetOverlay(nullptr); }
 
         void PushToast(std::string message, float durationSeconds = 3.0f, const UIColor& accentColor = { 0.24f, 0.56f, 0.96f, 1.0f });
+        // A toast with a severity (its icon and colour), a title and an optional detail line. A click on it dismisses it; the
+        // pointer resting on it keeps it. At most five are shown, the newest at the bottom.
+        void PushNotification(UINotification notification);
+        // Space kept free under the toasts (a status bar at the bottom of the window).
+        void SetToastBottomInset(float pixels) { m_ToastBottomInset = pixels; }
 
         void SetTheme(const Ref<UITheme>& theme);
         const Ref<UITheme>& GetTheme() const { return m_Theme; }
@@ -86,11 +91,16 @@ namespace Nox::UI
 
         struct ToastItem
         {
-            std::string Message;
+            UINotification Note;
             float Remaining = 3.0f;
-            float Duration = 3.0f;
+            float Age = 0.0f;     // seconds shown (fade / slide in)
+            bool HasAccent = false;
             UIColor Accent{ 0.24f, 0.56f, 0.96f, 1.0f };
+            UIRect Bounds{};      // where it was drawn last frame (clicks)
         };
+        void PaintToasts(UIDrawList& drawList, const UIVec2& viewportSize, float dt);
+        bool DismissToastAt(const UIVec2& pos);
         std::vector<ToastItem> m_Toasts;
+        float m_ToastBottomInset = 0.0f;
     };
 }

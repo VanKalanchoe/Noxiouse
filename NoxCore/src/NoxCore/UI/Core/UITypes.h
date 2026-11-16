@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include <glm/glm.hpp>
 
@@ -135,5 +136,23 @@ namespace Nox::UI
         std::string Type;
         std::string Text;
         uint64_t UserId = 0;
+        std::vector<uint64_t> Ids; // several items dragged together (a multi-selection); UserId is the one grabbed
+    };
+
+    // A notification shown at the bottom right (a toast): something that finished or failed -- saved, imported, built.
+    enum class UINotificationSeverity : uint8_t
+    {
+        Info = 0,
+        Success,
+        Warning,
+        Error
+    };
+
+    struct UINotification
+    {
+        UINotificationSeverity Severity = UINotificationSeverity::Info;
+        std::string Title;      // one line ("Scene saved")
+        std::string Message;    // optional detail under it, wrapped ("Levels/Main.nox")
+        float DurationSeconds = 4.0f;
     };
 }

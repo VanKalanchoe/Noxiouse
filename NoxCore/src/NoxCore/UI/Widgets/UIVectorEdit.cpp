@@ -11,7 +11,7 @@ namespace Nox::UI
         const glm::vec4& initialValue,
         float speed,
         std::function<void(const glm::vec4&)> onChanged)
-        : UIStackBox(UIOrientation::Horizontal, 6.0f)
+        : UIStackBox(UIOrientation::Horizontal, 4.0f)
         , OnChanged(std::move(onChanged))
         , m_Components(std::clamp(components, 2, 4))
     {
@@ -27,9 +27,15 @@ namespace Nox::UI
 
         for (int i = 0; i < m_Components; ++i)
         {
+            // Unreal's look: the axis is a thin coloured edge on the field, not a lettered tag that takes a fifth of its width --
+            // the number gets the room (three fields share an inspector row). The letter is in the tooltip.
             auto scalar = Ref<UIDragScalar>(new UIDragScalar(initialValue[i], speed));
-            scalar->Prefix = kPrefixes[i];
-            scalar->PrefixColor = kColors[i];
+            scalar->Stripe = kColors[i];
+            scalar->Tooltip = std::string(kPrefixes[i]) + " -- drag to change, click to type";
+            scalar->FontSize = 15.0f;
+            scalar->Format = "{:.3f}";
+            scalar->TrimZeros = true;
+            scalar->MinSize.x = 0.0f;
             scalar->WidthMode = UISizeMode::Fill;
             scalar->OnChanged = [this](float)
             {

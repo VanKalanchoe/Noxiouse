@@ -63,6 +63,8 @@ namespace Nox::UI
         bool ClipChildren = false;
         bool DrawBackground = false;
         bool Focusable = false;
+        // Tab goes to this element while it has the focus (a console line completes with it) instead of moving the focus on.
+        bool CapturesTab = false;
         UIHitTestMode HitTestMode = UIHitTestMode::PassThrough;
 
         UISizeMode WidthMode = UISizeMode::Auto;

@@ -599,19 +599,17 @@ namespace Nox
 
         int32_t pickedX = 0, pickedY = 0;
         float depth = 0.0f;
-        const bool hasDepth = m_Ctx.Render->getPickedDepth(pickedX, pickedY, depth, 4);
+        bool hasDepth = m_Ctx.Render->getPickedDepth(pickedX, pickedY, depth, 4);
 
-        glm::vec2 pixel;
-        if (hasDepth)
-        {
-            pixel = glm::vec2(static_cast<float>(pickedX) + 0.5f, static_cast<float>(pickedY) + 0.5f);
-        }
-        else
-        {
-            const UI::UIContext* ctx = UI::UIContext::GetCurrent();
-            const glm::vec2 mouse = ctx ? ctx->GetLastMousePos() : Input::GetMousePosition();
-            pixel = glm::vec2(mouse.x - GetBounds().Min.x, mouse.y - GetBounds().Min.y);
-        }
+        const UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        const glm::vec2 mouse = ctx ? ctx->GetLastMousePos() : Input::GetMousePosition();
+        const glm::vec2 mousePixel(mouse.x - GetBounds().Min.x, mouse.y - GetBounds().Min.y);
+        // The depth read back belongs to the last pick request. When the pointer has moved away since (pick requests pause while
+        // an asset is dragged over the viewport), it is not the surface under the pointer: the ground plane is used instead.
+        if (hasDepth && glm::length(glm::vec2(static_cast<float>(pickedX), static_cast<float>(pickedY)) - mousePixel) > 6.0f)
+            hasDepth = false;
+
+        glm::vec2 pixel = hasDepth ? glm::vec2(static_cast<float>(pickedX) + 0.5f, static_cast<float>(pickedY) + 0.5f) : mousePixel;
 
         const glm::vec2 ndc((pixel.x / viewportSize.x) * 2.0f - 1.0f, 1.0f - (pixel.y / viewportSize.y) * 2.0f);
         const glm::mat4 invVP = glm::inverse(

@@ -42,6 +42,25 @@ namespace Nox::UI
         }
     }
 
+    std::string UIDragScalar::DisplayText() const
+    {
+        std::string text = std::vformat(Format, std::make_format_args(Value));
+        if (TrimZeros)
+        {
+            const size_t dot = text.find('.');
+            if (dot != std::string::npos && text.find_first_of("eE") == std::string::npos)
+            {
+                size_t end = text.size();
+                while (end > dot + 2 && text[end - 1] == '0')
+                    --end;
+                text.resize(end);
+            }
+            if (text == "-0.0")
+                text = "0.0";
+        }
+        return text;
+    }
+
     float UIDragScalar::TextSize() const
     {
         return FontSize > 0.0f ? FontSize : GetResolvedStyle().FontSize;
@@ -380,7 +399,27 @@ namespace Nox::UI
 
         drawList.PushClipRect({ textLeft - 2.0f, b.Min.y + 1.0f }, { b.Max.x - 2.0f, b.Max.y - 1.0f }, radii);
 
-        const std::string display = m_Editing ? m_EditText : std::vformat(Format, std::make_format_args(Value));
+        std::string display = m_Editing ? m_EditText : DisplayText();
+        if (!m_Editing)
+        {
+            // Too wide for the field (a narrow inspector): fewer decimals until it fits -- 123.456 -> 123.46 -> 123.5 -> 123 --
+            // so the whole number stays readable; typing into the field shows every digit.
+            const float available = (b.Max.x - 2.0f) - textLeft;
+            const size_t dot = display.find('.');
+            if (dot != std::string::npos && display.find_first_of("eE") == std::string::npos &&
+                UILabel::MeasureText(display, nullptr, TextSize()).x > available)
+            {
+                for (int decimals = static_cast<int>(display.size() - dot - 1) - 1; decimals >= 0; --decimals)
+                {
+                    std::string shorter = std::vformat("{:." + std::to_string(decimals) + "f}", std::make_format_args(Value));
+                    if (shorter == "-0" || shorter == "-0.0")
+                        shorter.erase(0, 1);
+                    display = std::move(shorter);
+                    if (UILabel::MeasureText(display, nullptr, TextSize()).x <= available)
+                        break;
+                }
+            }
+        }
         const UIVec2 textSize = UILabel::MeasureText(display, nullptr, TextSize());
         const float textY = b.Min.y + (b.Height() - textSize.y) * 0.5f;
 
