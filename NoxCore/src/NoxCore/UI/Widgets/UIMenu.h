@@ -16,12 +16,17 @@ namespace Nox::UI
         std::string Shortcut;
         std::function<void()> OnTrigger;
         bool IsSeparator = false;
+        bool Enabled = true;
+        bool Checked = false;
+        bool IsInfo = false;
+        std::string Tooltip;
+        std::vector<UIMenuItem> SubItems;
     };
 
     class UIMenuPopup : public UIStackBox
     {
     public:
-        explicit UIMenuPopup(std::vector<UIMenuItem> items, UIContext* context = nullptr);
+        explicit UIMenuPopup(std::vector<UIMenuItem> items, UIContext* context = nullptr, UIElement* host = nullptr, int depth = 0);
 
         static void ShowContextMenu(UIContext& context, const UIVec2& screenPos, std::vector<UIMenuItem> items);
     };
@@ -32,6 +37,7 @@ namespace Nox::UI
         UIMenuBar();
 
         void AddMenu(const std::string& title, std::vector<UIMenuItem> items);
+        void AddDynamicMenu(const std::string& title, std::function<std::vector<UIMenuItem>()> builder);
 
     private:
         Ref<UIElement> m_ActiveOverlay;

@@ -13,9 +13,9 @@ namespace Nox
     namespace UI
     {
         class UIButton;
-        class UIImage;
         class UILabel;
         class UIScrollView;
+        class UIStackBox;
         class UITextInput;
     }
 
@@ -59,8 +59,7 @@ namespace Nox
 
         Ref<Texture2D> m_TemplatePictures[2];
         Ref<UI::UIScrollView> m_ProjectList;
-        Ref<UI::UIImage> m_TemplatePreview;
-        Ref<UI::UILabel> m_TemplateDesc;
+        Ref<UI::UIStackBox> m_TemplateTiles[2];
         Ref<UI::UILabel> m_OpenErrorLabel;
         Ref<UI::UITextInput> m_NameInput;
         Ref<UI::UITextInput> m_LocationInput;

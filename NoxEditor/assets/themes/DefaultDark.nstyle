@@ -214,6 +214,32 @@ styles:
     fill: "$Accent"
     text_color: "#FFFFFF"
 
+  "MenuItem:disabled":
+    text_color: "$TextMuted"
+
+  TemplateCard:
+    fill: "$Surface1"
+    border_color: "$Border"
+    border_thickness: 1.5
+    corner_radius: 6
+    padding: 8
+    text_color: "$Text"
+    font_size: 18
+    transition_ms: 80
+
+  "TemplateCard:hover":
+    fill: "$Surface2"
+    border_color: "$Accent"
+
+  "TemplateCard.selected":
+    fill: "#1F2E47"
+    border_color: "$AccentHover"
+    border_thickness: 2.0
+
+  "TemplateCard.selected:hover":
+    fill: "#243654"
+    border_color: "$AccentHover"
+
   Separator:
     fill: "$Border"
     corner_radius: 0

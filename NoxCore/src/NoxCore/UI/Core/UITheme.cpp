@@ -429,6 +429,40 @@ namespace Nox::UI
         menuItemHover.TextColor = { 1.0f, 1.0f, 1.0f, 1.0f };
         theme->SetStyle("MenuItem:hover", menuItemHover);
 
+        UIStyleBox menuItemDisabled = menuItem;
+        menuItemDisabled.TextColor = theme->GetToken("TextMuted");
+        theme->SetStyle("MenuItem:disabled", menuItemDisabled);
+
+        UIStyleBox templateCard{};
+        templateCard.FillColor = theme->GetToken("Surface1");
+        templateCard.FillColorBottom = templateCard.FillColor;
+        templateCard.BorderColor = theme->GetToken("Border");
+        templateCard.BorderThickness = 1.5f;
+        templateCard.CornerRadius = UICornerRadius::All(6.0f);
+        templateCard.Padding = UIThickness::All(8.0f);
+        templateCard.TextColor = theme->GetToken("Text");
+        templateCard.FontSize = 18.0f;
+        templateCard.TransitionSeconds = 0.08f;
+        theme->SetStyle("TemplateCard", templateCard);
+
+        UIStyleBox templateCardHover = templateCard;
+        templateCardHover.FillColor = theme->GetToken("Surface2");
+        templateCardHover.FillColorBottom = templateCardHover.FillColor;
+        templateCardHover.BorderColor = theme->GetToken("Accent");
+        theme->SetStyle("TemplateCard:hover", templateCardHover);
+
+        UIStyleBox templateCardSelected = templateCard;
+        templateCardSelected.FillColor = { 0.122f, 0.180f, 0.278f, 1.0f };
+        templateCardSelected.FillColorBottom = templateCardSelected.FillColor;
+        templateCardSelected.BorderColor = theme->GetToken("AccentHover");
+        templateCardSelected.BorderThickness = 2.0f;
+        theme->SetStyle("TemplateCard.selected", templateCardSelected);
+
+        UIStyleBox templateCardSelectedHover = templateCardSelected;
+        templateCardSelectedHover.FillColor = { 0.141f, 0.212f, 0.329f, 1.0f };
+        templateCardSelectedHover.FillColorBottom = templateCardSelectedHover.FillColor;
+        theme->SetStyle("TemplateCard.selected:hover", templateCardSelectedHover);
+
         UIStyleBox menuItemPrimary = menuItem;
         menuItemPrimary.FillColor = { 0.180f, 0.340f, 0.580f, 1.0f };
         menuItemPrimary.FillColorBottom = menuItemPrimary.FillColor;

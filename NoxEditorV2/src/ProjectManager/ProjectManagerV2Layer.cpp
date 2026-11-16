@@ -287,16 +287,10 @@ namespace Nox
 
     void ProjectManagerV2Layer::UpdateNewProjectPreview()
     {
-        if (m_TemplatePreview)
+        for (int i = 0; i < 2; ++i)
         {
-            const auto& tex = m_TemplatePictures[m_TemplateIndex];
-            m_TemplatePreview->TextureDescriptorSlot = tex ? tex->GetDescriptorIndexSlot() : ~0u;
-        }
-        if (m_TemplateDesc)
-        {
-            m_TemplateDesc->Text = (m_TemplateIndex == 0)
-                ? "Basic: starts with a sky, sun, floor, and camera."
-                : "Blank: starts with an empty scene.";
+            if (m_TemplateTiles[i])
+                m_TemplateTiles[i]->StyleVariant = (m_TemplateIndex == i) ? "selected" : "";
         }
 
         const std::vector<std::string> qualities = QualityChoices();
@@ -390,23 +384,64 @@ namespace Nox
             m_ProjectList
         }).Fill(1.45f);
 
-        auto tmplControl = UI::MakeUI<UI::UISegmentedControl>(
-            std::vector<std::string>{ "Basic", "Blank" },
-            m_TemplateIndex,
-            [this](int idx)
+        struct TemplateCardInfo
+        {
+            const char* Name;
+            const char* Summary;
+            const char* Tooltip;
+        };
+        static constexpr TemplateCardInfo kTemplates[2] = {
             {
-                m_TemplateIndex = idx;
-                UpdateNewProjectPreview();
+                "Basic",
+                "Sky, sun, floor, camera",
+                "Starts on a scene with a procedural sky (clouds, sun, moon at night), a sun light, a 50 m floor\n"
+                "with collision and a camera: Unreal's default level. Saved as Scenes/Main, the project's Start Scene."
+            },
+            {
+                "Blank",
+                "Empty scene",
+                "Starts on an empty scene: nothing in it, so the view is black until you add a sky or lights."
             }
-        );
+        };
 
-        m_TemplatePreview = UI::MakeUI<UI::UIImage>(~0u, UI::UIVec2{ 320.0f, 160.0f });
-        m_TemplatePreview->WidthMode = UI::UISizeMode::Fill;
-        m_TemplatePreview->CornerRadius = UI::UICornerRadius::All(6.0f);
+        auto templateRow = UI::HStack(10.0f, {}).FillWidth();
+        templateRow->HeightMode = UI::UISizeMode::Auto;
+        for (int i = 0; i < 2; ++i)
+        {
+            const uint32_t picSlot = m_TemplatePictures[i] ? m_TemplatePictures[i]->GetDescriptorIndexSlot() : ~0u;
+            auto pic = UI::MakeUI<UI::UIImage>(picSlot, UI::UIVec2{ 200.0f, 112.0f });
+            pic->WidthMode = UI::UISizeMode::Fill;
+            pic->HeightMode = UI::UISizeMode::Fixed;
+            pic->FixedSize.y = 112.0f;
+            pic->CornerRadius = UI::UICornerRadius::All(4.0f);
 
-        m_TemplateDesc = UI::Label();
-        m_TemplateDesc->UseColorOverride = true;
-        m_TemplateDesc->ColorOverride = muted;
+            auto nameLabel = UI::Label(kTemplates[i].Name);
+            auto descLabel = UI::Label(kTemplates[i].Summary);
+            descLabel->UseColorOverride = true;
+            descLabel->ColorOverride = muted;
+
+            auto tile = UI::VStack(6.0f, { pic, nameLabel, descLabel })
+                .Style("TemplateCard", m_TemplateIndex == i ? "selected" : "")
+                .Background(true)
+                .Tooltip(kTemplates[i].Tooltip)
+                .FillWidth();
+            tile->HeightMode = UI::UISizeMode::Auto;
+            tile->HitTestMode = UI::UIHitTestMode::Self;
+            tile->Focusable = true;
+            tile->OnMouseUp = [this, i](const UI::UIPointerEvent& e)
+            {
+                if (e.Button == 1 && m_TemplateTiles[i] && m_TemplateTiles[i]->GetBounds().Contains(e.Position))
+                {
+                    m_TemplateIndex = i;
+                    UpdateNewProjectPreview();
+                    return true;
+                }
+                return false;
+            };
+
+            m_TemplateTiles[i] = tile.Get();
+            templateRow->AddChild(tile);
+        }
 
         m_NameInput = UI::TextInput(m_NewName, "Project name").FillWidth();
         m_NameInput->OnChanged = [this](const std::string& s)
@@ -489,9 +524,7 @@ namespace Nox
         }).Primary().HAlign(UI::UIAlignment::End);
 
         auto rightColumn = UI::Card("New Project", {
-            tmplControl,
-            m_TemplatePreview,
-            m_TemplateDesc,
+            templateRow,
             UI::Label("Project Name"),
             m_NameInput,
             UI::Label("Location"),

@@ -35,7 +35,10 @@ namespace Nox
         void OpenProjectManager();
 
         void NewScene();
+        void SaveScene();
+        void SaveSceneAs();
         void CreateBasicScene();
+        void CreateShape(PrimitiveShape shape);
         AssetHandle GetShapeAsset(PrimitiveShape shape);
         AssetHandle RegisterSceneAsset(const std::filesystem::path& scenePath);
         void AdoptStartSceneIfNone(const std::filesystem::path& scenePath);
@@ -52,8 +55,13 @@ namespace Nox
         bool m_ApplyBasicSceneView = false;
         bool m_ThumbnailPending = false;
         float m_ThumbnailTimer = 0.0f;
+        bool m_BuildScriptsOnSave = false;
+
+        float m_FpsAccumulator = 0.0f;
+        uint32_t m_FpsFrames = 0;
 
         Ref<UI::UIImage> m_ViewportImage;
+        Ref<UI::UILabel> m_FpsLabel;
         Ref<UI::UILabel> m_StatusLabel;
         bool m_ViewportMouseCaptured = false;
     };

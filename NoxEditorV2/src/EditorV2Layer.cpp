@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <system_error>
 
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_keycode.h>
 #include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_video.h>
 #include <glm/gtc/quaternion.hpp>
@@ -25,6 +27,7 @@
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneSerializer.h"
+#include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UILayer.h"
 #include "NoxCore/UI/Layout/UIDockSpace.h"
@@ -222,6 +225,67 @@ namespace Nox
     {
         m_ActiveScene = CreateRef<Scene>();
         m_ActiveScenePath.clear();
+    }
+
+    void EditorV2Layer::SaveScene()
+    {
+        if (!m_ActiveScene || !Project::GetActive())
+            return;
+        if (m_ActiveScenePath.empty())
+        {
+            SaveSceneAs();
+            return;
+        }
+        const std::filesystem::path fullPath = m_ActiveScenePath.is_absolute()
+            ? m_ActiveScenePath
+            : Project::GetActiveAssetDirectory() / m_ActiveScenePath;
+        std::error_code error;
+        std::filesystem::create_directories(fullPath.parent_path(), error);
+        SceneSerializer serializer(m_ActiveScene);
+        serializer.Serialize(fullPath);
+        AdoptStartSceneIfNone(fullPath);
+        NOX_CORE_INFO("Saved scene {}", fullPath.generic_string());
+    }
+
+    void EditorV2Layer::SaveSceneAs()
+    {
+        if (!m_ActiveScene || !Project::GetActive())
+            return;
+        std::filesystem::path path = Utility::SaveFile("Nox Scene\0nox\0");
+        if (path.empty())
+            return;
+        if (!path.has_extension())
+            path += ".nox";
+        std::error_code error;
+        std::filesystem::create_directories(path.parent_path(), error);
+        SceneSerializer serializer(m_ActiveScene);
+        serializer.Serialize(path);
+
+        const std::filesystem::path rel = std::filesystem::relative(path, Project::GetActiveAssetDirectory(), error);
+        if (!error && !rel.empty() && !rel.native().starts_with(std::filesystem::path("..").native()))
+            m_ActiveScenePath = rel;
+        else
+            m_ActiveScenePath = path;
+
+        AdoptStartSceneIfNone(path);
+        NOX_CORE_INFO("Saved scene {}", path.generic_string());
+    }
+
+    void EditorV2Layer::CreateShape(PrimitiveShape shape)
+    {
+        if (!m_ActiveScene)
+            return;
+        const AssetHandle mesh = GetShapeAsset(shape);
+        if (mesh == 0)
+            return;
+        Entity entity = m_ActiveScene->CreateEntity(PrimitiveShapes::GetName(shape));
+        auto& instance = entity.AddComponent<ModelInstanceComponent>();
+        instance.Model = mesh;
+        instance.AtFileLayout = true;
+        entity.GetComponent<TransformComponent>().Translation =
+            m_EditorCamera.GetPosition() + glm::dvec3(m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance());
+        entity.MarkTransformDirty();
+        AssetManager::RequestAsset(mesh);
     }
 
     AssetHandle EditorV2Layer::GetShapeAsset(PrimitiveShape shape)
@@ -444,6 +508,21 @@ namespace Nox
         m_EditorCamera.OnUpdate(ts, hovered || m_ViewportMouseCaptured);
         m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
 
+        m_FpsAccumulator += ts;
+        ++m_FpsFrames;
+        if (m_FpsAccumulator >= 0.25f)
+        {
+            if (m_FpsLabel)
+            {
+                char fpsBuf[32];
+                const float fps = static_cast<float>(m_FpsFrames) / m_FpsAccumulator;
+                std::snprintf(fpsBuf, sizeof(fpsBuf), "FPS: %.1f", fps);
+                m_FpsLabel->Text = fpsBuf;
+            }
+            m_FpsAccumulator = 0.0f;
+            m_FpsFrames = 0;
+        }
+
         Texture2D* sceneTex = renderer->GetSceneResource();
         m_ViewportImage->TextureDescriptorSlot = sceneTex ? sceneTex->GetDescriptorIndexSlot() : ~0u;
     }
@@ -453,14 +532,48 @@ namespace Nox
         if (event.GetEventType() == EventType::KeyPressed)
         {
             const auto& key = static_cast<const KeyPressedEvent&>(event);
-            const bool control = (key.GetModifiers() & SDL_KMOD_CTRL) != 0 ||
-                                 Input::IsKeyPressed(SDL_SCANCODE_LCTRL) ||
-                                 Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
-            if (control && !key.IsRepeat() && key.GetKeyCode() == SDL_SCANCODE_O)
+            if (!key.IsRepeat())
             {
-                OpenProject();
-                event.Handled = true;
-                return;
+                const bool control = (key.GetModifiers() & SDL_KMOD_CTRL) != 0 ||
+                                     Input::IsKeyPressed(SDL_SCANCODE_LCTRL) ||
+                                     Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
+                const bool shift = (key.GetModifiers() & SDL_KMOD_SHIFT) != 0 ||
+                                   Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) ||
+                                   Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
+
+                int keyCode = key.GetKeyCode();
+                const SDL_Keycode layoutKey = SDL_GetKeyFromScancode(static_cast<SDL_Scancode>(keyCode), SDL_KMOD_NONE, false);
+                if (layoutKey >= SDLK_A && layoutKey <= SDLK_Z)
+                    keyCode = SDL_SCANCODE_A + static_cast<int>(layoutKey - SDLK_A);
+
+                if (control && keyCode == SDL_SCANCODE_N)
+                {
+                    NewScene();
+                    event.Handled = true;
+                    return;
+                }
+                if (control && keyCode == SDL_SCANCODE_O)
+                {
+                    OpenProject();
+                    event.Handled = true;
+                    return;
+                }
+                if (control && keyCode == SDL_SCANCODE_S)
+                {
+                    if (shift)
+                        SaveSceneAs();
+                    else
+                        SaveScene();
+                    event.Handled = true;
+                    return;
+                }
+                if (control && keyCode == SDL_SCANCODE_R)
+                {
+                    if (ScriptEngine::IsInitialized())
+                        ScriptEngine::ReloadAssembly();
+                    event.Handled = true;
+                    return;
+                }
             }
         }
 
@@ -520,32 +633,146 @@ namespace Nox
                 dock->LoadLayout(kLayoutPath);
         }
 
+        auto menuBar = UI::MakeUI<UI::UIMenuBar>();
+        menuBar->AddDynamicMenu("File", [this, uiLayer]() -> std::vector<UI::UIMenuItem>
+        {
+            return {
+                {"New Project...", "", [this]() { NewProject(); }},
+                {"Open Project...", "Ctrl+O", [this]() { OpenProject(); }},
+                {"Project Manager...", "", [this]() { OpenProjectManager(); }, false, true, false, false,
+                 "Close this project and show the Project Manager (save the scene first: like Exit, this does not ask)."},
+                {"", "", {}, true},
+                {"New Scene", "Ctrl+N", [this]() { NewScene(); }},
+                {"Save Scene", "Ctrl+S", [this]() { SaveScene(); }},
+                {"Save Scene As...", "Ctrl+Shift+S", [this]() { SaveSceneAs(); }},
+                {"", "", {}, true},
+                {"Package Game...", "", {}, false, false, false, false, "Packaging UI not yet ported to NoxEditorV2"},
+                {"Package Server...", "", {}, false, false, false, false, "Packaging UI not yet ported to NoxEditorV2"},
+                {"", "", {}, true},
+                {"Save Layout", "", [uiLayer]()
+                {
+                    if (const auto& dock = uiLayer->GetDockSpaceRef())
+                        dock->SaveLayout(kLayoutPath);
+                }},
+                {"Exit", "Alt+F4", []() { Application::Get().Shutdown(); }}
+            };
+        });
+
+        menuBar->AddDynamicMenu("Edit", []() -> std::vector<UI::UIMenuItem>
+        {
+            return {
+                {"Undo", "Ctrl+Z", {}, false, false},
+                {"Redo", "Ctrl+Y / Ctrl+Shift+Z", {}, false, false},
+                {"", "", {}, true},
+                {"History: 0 steps, 0.0 MB", "", {}, false, false, false, true}
+            };
+        });
+
+        menuBar->AddDynamicMenu("Create", [this]() -> std::vector<UI::UIMenuItem>
+        {
+            std::vector<UI::UIMenuItem> shapeItems;
+            for (uint8_t index = 0; index < static_cast<uint8_t>(PrimitiveShape::Count); ++index)
+            {
+                const PrimitiveShape shape = static_cast<PrimitiveShape>(index);
+                shapeItems.push_back({PrimitiveShapes::GetName(shape), "", [this, shape]() { CreateShape(shape); }});
+            }
+
+            return {
+                {"Empty Entity", "", [this]() { if (m_ActiveScene) m_ActiveScene->CreateEntity("Empty Entity"); }},
+                {"Shapes", "", {}, false, true, false, false, "", std::move(shapeItems)},
+                {"", "", {}, true},
+                {"Streaming Test World...", "", {}, false, false, false, false,
+                 "A world partition larger than RAM and VRAM (panel not yet ported to NoxEditorV2)."}
+            };
+        });
+
+#if NOX_WITH_MCP
+        menuBar->AddDynamicMenu("Tools", []() -> std::vector<UI::UIMenuItem>
+        {
+            return {
+                {"MCP Server (not yet wired in V2)", "", {}, false, false, false, true}
+            };
+        });
+#endif
+
+        menuBar->AddDynamicMenu("Window", [this, uiLayer]() -> std::vector<UI::UIMenuItem>
+        {
+            std::vector<UI::UIMenuItem> viewportItems = {
+                {"1 Viewport", "", {}, false, false},
+                {"2 Side by Side", "", {}, false, false},
+                {"2 Stacked", "", {}, false, false},
+                {"3 Viewports", "", {}, false, false},
+                {"4 Viewports (2 x 2)", "", {}, false, false},
+                {"", "", {}, true},
+                {"Viewport 2", "", {}, false, false},
+                {"Viewport 3", "", {}, false, false},
+                {"Viewport 4", "", {}, false, false},
+                {"", "", {}, true},
+                {"Click a viewport to use it", "", {}, false, false, false, true}
+            };
+
+            std::vector<UI::UIMenuItem> animGraphItems;
+            if (Ref<Project> project = Project::GetActive(); project && project->GetEditorAssetManager())
+            {
+                for (const auto& [handle, metadata] : project->GetEditorAssetManager()->GetAssetRegistry())
+                {
+                    if (metadata.Type != AssetType::AnimationGraph)
+                        continue;
+                    animGraphItems.push_back({metadata.FilePath.stem().string(), "", {}, false, false, false, false,
+                                              "Graph editor panel not yet ported to NoxEditorV2"});
+                }
+            }
+            if (animGraphItems.empty())
+                animGraphItems.push_back({"No .nanimgraph assets found", "", {}, false, false, false, true});
+
+            return {
+                {"Render Graph", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
+                {"Output Log", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
+                {"Profiler", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
+                {"World Partition", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
+                {"Levels", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
+                {"Mixer", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
+                {"Viewports", "", {}, false, true, false, false, "", std::move(viewportItems)},
+                {"Animation Graphs", "", {}, false, true, false, false, "", std::move(animGraphItems)},
+                {"", "", {}, true},
+                {"Reset Layout", "", [this]() { BuildUI(false); }},
+                {"Reload Theme", "", [uiLayer]() { uiLayer->ReloadTheme(); }}
+            };
+        });
+
+        menuBar->AddDynamicMenu("Script", [this]() -> std::vector<UI::UIMenuItem>
+        {
+            const bool waitForDbg = ScriptEngine::GetWaitForDebugger();
+            const bool canReload = ScriptEngine::IsInitialized();
+            return {
+                {"Build and Reload", "Ctrl+B", {}, false, false, false, false, "ScriptBuilder not yet ported to NoxEditorV2"},
+                {"Reload assembly", "Ctrl+R", []() { ScriptEngine::ReloadAssembly(); }, false, canReload},
+                {"Build on Save", "", [this]() { m_BuildScriptsOnSave = !m_BuildScriptsOnSave; }, false, true, m_BuildScriptsOnSave},
+                {"Wait for Debugger on Play", "", [waitForDbg]() { ScriptEngine::SetWaitForDebugger(!waitForDbg); }, false, true, waitForDbg, false,
+                 "Play waits (up to 60 s) until a .NET debugger attaches to the editor, then breaks once."}
+            };
+        });
+
+        auto spacer = UI::MakeUI<UI::UIElement>();
+        spacer->WidthMode = UI::UISizeMode::Fill;
+        menuBar->AddChild(spacer);
+
+        Renderer* renderer = Application::Get().GetRenderer();
+        auto vsyncBox = UI::CheckBox("VSync", renderer ? renderer->getVSync() : false, [renderer](bool enabled)
+        {
+            if (renderer)
+                renderer->setVSync(enabled);
+        }).VAlign(UI::UIAlignment::Center).Margin(6.0f, 0.0f);
+        menuBar->AddChild(vsyncBox);
+
+        m_FpsLabel = UI::Label("FPS: --.-").VAlign(UI::UIAlignment::Center).Margin(10.0f, 0.0f);
+        m_FpsLabel->UseColorOverride = true;
+        m_FpsLabel->ColorOverride = { 0.72f, 0.76f, 0.82f, 1.0f };
+        menuBar->AddChild(m_FpsLabel);
+
         uiLayer->SetRoot(
             UI::VStack(0.0f, {
-                           UI::MenuBar({
-                               {
-                                   "File", {
-                                       {"New Project...", "", [this]() { NewProject(); }},
-                                       {"Open Project...", "Ctrl+O", [this]() { OpenProject(); }},
-                                       {"Project Manager...", "", [this]() { OpenProjectManager(); }},
-                                       {"", "", {}, true},
-                                       {
-                                           "Save Layout", "", [uiLayer]()
-                                           {
-                                               if (const auto& dock = uiLayer->GetDockSpaceRef())
-                                                   dock->SaveLayout(kLayoutPath);
-                                           }
-                                       },
-                                       {"Exit", "Alt+F4", []() { Application::Get().Shutdown(); }}
-                                   }
-                               },
-                               {
-                                   "Window", {
-                                       {"Reset Layout", "", [this]() { BuildUI(false); }},
-                                       {"Reload Theme", "", [uiLayer]() { uiLayer->ReloadTheme(); }}
-                                   }
-                               }
-                           }),
+                           menuBar,
                            uiLayer->GetDockSpaceRef(),
                            m_StatusLabel
                        })

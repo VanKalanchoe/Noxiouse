@@ -1,96 +1,161 @@
 #include "UIMenu.h"
 
+#include <algorithm>
+
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 
 namespace Nox::UI
 {
-    UIMenuPopup::UIMenuPopup(std::vector<UIMenuItem> items, UIContext* context)
-        : UIStackBox(UIOrientation::Vertical, 2.0f)
+    namespace
     {
-        StyleClass = "MenuPopup";
-        DrawBackground = true;
-        HitTestMode = UIHitTestMode::Self;
-        WidthMode = UISizeMode::Auto;
-        MinSize.x = 160.0f;
-        Padding = UIThickness::All(6.0f);
-
-        for (auto& item : items)
-        {
-            if (item.IsSeparator)
-            {
-                Ref<UIElement> sep(new UIElement());
-                sep->StyleClass = "Separator";
-                sep->DrawBackground = true;
-                sep->HeightMode = UISizeMode::Fixed;
-                sep->FixedSize.y = 1.0f;
-                sep->Margin = UIThickness::Symmetric(4.0f, 3.0f);
-                AddChild(sep);
-                continue;
-            }
-
-            Ref<UIButton> btn(new UIButton(item.Label, [cb = std::move(item.OnTrigger), context]()
-            {
-                if (context)
-                    context->ClearOverlay();
-                if (cb)
-                    cb();
-            }));
-            btn->StyleClass = "MenuItem";
-            btn->WidthMode = UISizeMode::Fill;
-            btn->HeightMode = UISizeMode::Auto;
-            AddChild(btn);
-        }
-    }
-
-    void UIMenuPopup::ShowContextMenu(UIContext& context, const UIVec2& screenPos, std::vector<UIMenuItem> items)
-    {
-        if (items.empty())
-            return;
-
-        class UIContextMenuBackdrop : public UIAnchorBox
+        class UIMenuHostBase : public UIAnchorBox
         {
         public:
-            explicit UIContextMenuBackdrop(UIContext* ctx) : m_Ctx(ctx)
+            explicit UIMenuHostBase(UIContext* ctx) : m_Ctx(ctx)
             {
                 HitTestMode = UIHitTestMode::Self;
             }
 
-            bool OnPointerDown(const UIPointerEvent& e) override
+            void SetRootPopup(const Ref<UIElement>& popup)
             {
-                if ((e.Button == 1 || e.Button == 3) && m_Ctx)
+                m_Popups.clear();
+                m_Popups.push_back(popup);
+                AddChild(popup);
+            }
+
+            void CloseSubmenusFrom(int depth)
+            {
+                while (static_cast<int>(m_Popups.size()) > std::max(depth, 1))
                 {
-                    m_Ctx->ClearOverlay();
+                    RemoveChild(m_Popups.back());
+                    m_Popups.pop_back();
+                }
+            }
+
+            void OpenSubmenu(int depth, UIElement* anchorRow, std::vector<UIMenuItem> subItems)
+            {
+                CloseSubmenusFrom(depth);
+                if (subItems.empty() || !anchorRow)
+                    return;
+
+                Ref<UIMenuPopup> sub(new UIMenuPopup(std::move(subItems), m_Ctx, this, depth));
+                const UIRect& rowBounds = anchorRow->GetBounds();
+                sub->AnchorMin = { 0.0f, 0.0f };
+                sub->AnchorMax = { 0.0f, 0.0f };
+                sub->AnchorOffsets = { rowBounds.Max.x + 2.0f, rowBounds.Min.y, 0.0f, 0.0f };
+                m_Popups.push_back(sub);
+                AddChild(sub);
+            }
+
+        protected:
+            UIContext* m_Ctx = nullptr;
+            std::vector<Ref<UIElement>> m_Popups;
+        };
+
+        class UIMenuRow final : public UIStackBox
+        {
+        public:
+            UIMenuRow(const UIMenuItem& item, UIContext* context, UIMenuHostBase* host, int depth)
+                : UIStackBox(UIOrientation::Horizontal, 16.0f)
+                , m_Context(context)
+                , m_Host(host)
+                , m_Depth(depth)
+                , m_SubItems(item.SubItems)
+                , m_OnTrigger(item.OnTrigger)
+            {
+                StyleClass = "MenuItem";
+                DrawBackground = true;
+                HitTestMode = UIHitTestMode::Self;
+                WidthMode = UISizeMode::Fill;
+                HeightMode = UISizeMode::Auto;
+                Tooltip = item.Tooltip;
+                SetEnabled(item.Enabled);
+
+                const bool hasSubmenu = !item.SubItems.empty();
+                m_TitleLabel = Ref<UILabel>(new UILabel(item.Checked ? ("[x] " + item.Label) : item.Label));
+                m_TitleLabel->WidthMode = UISizeMode::Fill;
+                m_TitleLabel->VAlign = UIAlignment::Center;
+                AddChild(m_TitleLabel);
+
+                if (hasSubmenu)
+                {
+                    m_RightLabel = Ref<UILabel>(new UILabel(">"));
+                    m_RightLabel->VAlign = UIAlignment::Center;
+                    AddChild(m_RightLabel);
+                }
+                else if (!item.Shortcut.empty())
+                {
+                    m_RightLabel = Ref<UILabel>(new UILabel(item.Shortcut));
+                    m_RightLabel->VAlign = UIAlignment::Center;
+                    AddChild(m_RightLabel);
+                }
+            }
+
+            bool OnPointerEnter(const UIPointerEvent& e) override
+            {
+                if (m_Host && IsEnabled())
+                {
+                    if (!m_SubItems.empty())
+                        m_Host->OpenSubmenu(m_Depth + 1, this, m_SubItems);
+                    else
+                        m_Host->CloseSubmenusFrom(m_Depth + 1);
+                }
+                return UIStackBox::OnPointerEnter(e);
+            }
+
+            bool OnPointerUp(const UIPointerEvent& e) override
+            {
+                if (e.Button == 1 && IsEnabled() && GetBounds().Contains(e.Position))
+                {
+                    if (!m_SubItems.empty())
+                    {
+                        if (m_Host)
+                            m_Host->OpenSubmenu(m_Depth + 1, this, m_SubItems);
+                        return true;
+                    }
+                    auto cb = m_OnTrigger;
+                    if (m_Context)
+                        m_Context->ClearOverlay();
+                    if (cb)
+                        cb();
                     return true;
                 }
-                return false;
+                return UIStackBox::OnPointerUp(e);
+            }
+
+        protected:
+            void ArrangeChildren(const UIRect& contentRect) override
+            {
+                const UIStyleBox& style = GetResolvedStyle();
+                if (m_TitleLabel)
+                {
+                    m_TitleLabel->UseColorOverride = true;
+                    m_TitleLabel->ColorOverride = style.TextColor;
+                    m_TitleLabel->FontSizeOverride = style.FontSize;
+                }
+                if (m_RightLabel)
+                {
+                    m_RightLabel->UseColorOverride = true;
+                    m_RightLabel->ColorOverride = HasState(GetState(), UIState::Hovered)
+                        ? style.TextColor
+                        : UIColor{ 0.58f, 0.62f, 0.69f, style.TextColor.a };
+                    m_RightLabel->FontSizeOverride = style.FontSize;
+                }
+                UIStackBox::ArrangeChildren(contentRect);
             }
 
         private:
-            UIContext* m_Ctx = nullptr;
+            UIContext* m_Context = nullptr;
+            UIMenuHostBase* m_Host = nullptr;
+            int m_Depth = 0;
+            std::vector<UIMenuItem> m_SubItems;
+            std::function<void()> m_OnTrigger;
+            Ref<UILabel> m_TitleLabel;
+            Ref<UILabel> m_RightLabel;
         };
 
-        Ref<UIContextMenuBackdrop> backdrop(new UIContextMenuBackdrop(&context));
-        Ref<UIMenuPopup> popup(new UIMenuPopup(std::move(items), &context));
-        popup->AnchorMin = { 0.0f, 0.0f };
-        popup->AnchorMax = { 0.0f, 0.0f };
-        popup->AnchorOffsets = { screenPos.x, screenPos.y, 0.0f, 0.0f };
-        backdrop->AddChild(popup);
-        context.SetOverlay(backdrop);
-    }
-
-    UIMenuBar::UIMenuBar()
-        : UIStackBox(UIOrientation::Horizontal, 4.0f)
-    {
-        StyleClass = "MenuBar";
-        DrawBackground = true;
-        HeightMode = UISizeMode::Auto;
-        Padding = UIThickness::Symmetric(8.0f, 3.0f);
-    }
-
-    void UIMenuBar::AddMenu(const std::string& title, std::vector<UIMenuItem> items)
-    {
         class UIMenuTriggerButton final : public UIButton
         {
         public:
@@ -105,13 +170,12 @@ namespace Nox::UI
             }
         };
 
-        class UIMenuOverlayHost final : public UIAnchorBox
+        class UIMenuOverlayHost final : public UIMenuHostBase
         {
         public:
             UIMenuOverlayHost(UIContext* ctx, UIMenuBar* bar)
-                : m_Ctx(ctx), m_Bar(bar)
+                : UIMenuHostBase(ctx), m_Bar(bar)
             {
-                HitTestMode = UIHitTestMode::Self;
             }
 
             UIElement* HitTest(const UIVec2& pos) override
@@ -137,28 +201,114 @@ namespace Nox::UI
             }
 
         private:
-            UIContext* m_Ctx = nullptr;
             UIMenuBar* m_Bar = nullptr;
         };
 
+        class UIContextMenuBackdrop final : public UIMenuHostBase
+        {
+        public:
+            using UIMenuHostBase::UIMenuHostBase;
+
+            bool OnPointerDown(const UIPointerEvent& e) override
+            {
+                if ((e.Button == 1 || e.Button == 3) && m_Ctx)
+                {
+                    m_Ctx->ClearOverlay();
+                    return true;
+                }
+                return false;
+            }
+        };
+    }
+
+    UIMenuPopup::UIMenuPopup(std::vector<UIMenuItem> items, UIContext* context, UIElement* host, int depth)
+        : UIStackBox(UIOrientation::Vertical, 2.0f)
+    {
+        StyleClass = "MenuPopup";
+        DrawBackground = true;
+        HitTestMode = UIHitTestMode::Self;
+        WidthMode = UISizeMode::Auto;
+        MinSize.x = 180.0f;
+        Padding = UIThickness::All(6.0f);
+
+        auto* hostBase = dynamic_cast<UIMenuHostBase*>(host);
+
+        for (const auto& item : items)
+        {
+            if (item.IsSeparator)
+            {
+                Ref<UIElement> sep(new UIElement());
+                sep->StyleClass = "Separator";
+                sep->DrawBackground = true;
+                sep->HeightMode = UISizeMode::Fixed;
+                sep->FixedSize.y = 1.0f;
+                sep->Margin = UIThickness::Symmetric(4.0f, 3.0f);
+                AddChild(sep);
+                continue;
+            }
+
+            if (item.IsInfo)
+            {
+                Ref<UILabel> info(new UILabel(item.Label));
+                info->UseColorOverride = true;
+                info->ColorOverride = { 0.58f, 0.62f, 0.69f, 1.0f };
+                info->Margin = UIThickness::Symmetric(10.0f, 4.0f);
+                AddChild(info);
+                continue;
+            }
+
+            AddChild(Ref<UIMenuRow>(new UIMenuRow(item, context, hostBase, depth)));
+        }
+    }
+
+    void UIMenuPopup::ShowContextMenu(UIContext& context, const UIVec2& screenPos, std::vector<UIMenuItem> items)
+    {
+        if (items.empty())
+            return;
+
+        Ref<UIContextMenuBackdrop> backdrop(new UIContextMenuBackdrop(&context));
+        Ref<UIMenuPopup> popup(new UIMenuPopup(std::move(items), &context, backdrop.get(), 0));
+        popup->AnchorMin = { 0.0f, 0.0f };
+        popup->AnchorMax = { 0.0f, 0.0f };
+        popup->AnchorOffsets = { screenPos.x, screenPos.y, 0.0f, 0.0f };
+        backdrop->SetRootPopup(popup);
+        context.SetOverlay(backdrop);
+    }
+
+    UIMenuBar::UIMenuBar()
+        : UIStackBox(UIOrientation::Horizontal, 4.0f)
+    {
+        StyleClass = "MenuBar";
+        DrawBackground = true;
+        HeightMode = UISizeMode::Auto;
+        Padding = UIThickness::Symmetric(8.0f, 3.0f);
+    }
+
+    void UIMenuBar::AddMenu(const std::string& title, std::vector<UIMenuItem> items)
+    {
+        AddDynamicMenu(title, [items = std::move(items)]() { return items; });
+    }
+
+    void UIMenuBar::AddDynamicMenu(const std::string& title, std::function<std::vector<UIMenuItem>()> builder)
+    {
         Ref<UIMenuTriggerButton> trigger(new UIMenuTriggerButton(title));
         trigger->StyleClass = "MenuTrigger";
         trigger->VAlign = UIAlignment::Center;
         UIMenuTriggerButton* triggerPtr = trigger.get();
 
-        auto openMenu = [this, triggerPtr, items = std::move(items)]()
+        auto openMenu = [this, triggerPtr, builder = std::move(builder)]()
         {
             UIContext* ctx = UIContext::GetCurrent();
-            if (!ctx)
+            if (!ctx || !builder)
                 return;
             Ref<UIMenuOverlayHost> overlayHost(new UIMenuOverlayHost(ctx, this));
-            Ref<UIMenuPopup> popup(new UIMenuPopup(items, ctx));
+            Ref<UIMenuPopup> popup(new UIMenuPopup(builder(), ctx, overlayHost.get(), 0));
             const UIRect& btnBounds = triggerPtr->GetBounds();
             popup->AnchorMin = { 0.0f, 0.0f };
             popup->AnchorMax = { 0.0f, 0.0f };
             popup->AnchorOffsets = { btnBounds.Min.x, btnBounds.Max.y + 2.0f, 0.0f, 0.0f };
 
-            overlayHost->AddChild(popup);
+            overlayHost->SetRootPopup(popup);
             m_ActiveOverlay = overlayHost;
             m_OpenTrigger = triggerPtr;
             ctx->SetOverlay(overlayHost);
