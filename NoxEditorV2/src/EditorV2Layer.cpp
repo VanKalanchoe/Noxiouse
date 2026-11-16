@@ -30,6 +30,7 @@
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Network/NetReplication.h"
+#include "NoxCore/Network/NetSession.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/CustomLitShaders.h"

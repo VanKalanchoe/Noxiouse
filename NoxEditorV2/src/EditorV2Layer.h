@@ -15,6 +15,7 @@
 #include "NoxCore/Core/Layer.h"
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Renderer/EditorCamera.h"
+#include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneLoader.h"
 
 namespace Nox

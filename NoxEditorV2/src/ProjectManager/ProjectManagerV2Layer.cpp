@@ -443,7 +443,7 @@ namespace Nox
                 .Tooltip(kTemplates[i].Tooltip)
                 .FillWidth();
             tile->HeightMode = UI::UISizeMode::Auto;
-            tile->VAlign = UI::UIAlignment::Top;
+            tile->VAlign = UI::UIAlignment::Start;
             tile->HitTestMode = UI::UIHitTestMode::Self;
             tile->Focusable = true;
             tile->OnMouseUp = [this, i](const UI::UIPointerEvent& e)
