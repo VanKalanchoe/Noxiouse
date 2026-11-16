@@ -8,6 +8,7 @@
 
 #include "EditorHistory.h"
 #include "GamePackager.h"
+#include "Panels/SceneHierarchyV2Panel.h"
 #include "ScriptBuilder.h"
 #include "StreamingTestWorld.h"
 #include "NoxCore/Asset/Asset.h"
@@ -61,7 +62,8 @@ namespace Nox
         void SerializeScene(const Ref<Scene>& scene, const std::filesystem::path& path);
 
         void CreateBasicScene();
-        void CreateShape(PrimitiveShape shape);
+        void CreateShape(PrimitiveShape shape, const std::string& folder = {});
+        void FocusOnEntity(Entity entity);
         AssetHandle GetShapeAsset(PrimitiveShape shape);
         AssetHandle RegisterSceneAsset(const std::filesystem::path& scenePath);
         void AdoptStartSceneIfNone(const std::filesystem::path& scenePath);
@@ -142,6 +144,8 @@ namespace Nox
         Ref<UI::UIImage> m_ViewportImage;
         Ref<UI::UILabel> m_FpsLabel;
         Ref<UI::UILabel> m_StatusLabel;
+        SceneHierarchyV2Panel m_SceneHierarchyPanel;
+        bool m_ShowSceneHierarchy = true;
         bool m_ViewportMouseCaptured = false;
     };
 }

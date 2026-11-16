@@ -42,6 +42,8 @@ namespace Nox::UI
         void SetPointerCapture(const Ref<UIElement>& element);
         void ReleasePointerCapture();
         const UIVec2& GetLastMousePos() const { return m_LastMousePos; }
+        bool IsDragging() const { return m_DragActive; }
+        const UIDragPayload& GetDragPayload() const { return m_ActivePayload; }
 
     private:
         void UpdateHover(const UIVec2& pos);

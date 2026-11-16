@@ -38,6 +38,7 @@
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Scene/Components.h"
 #include "NoxCore/Scene/Entity.h"
+#include "NoxCore/Scene/EntityBounds.h"
 #include "NoxCore/Scene/ModelInstance.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneSerializer.h"
@@ -46,6 +47,7 @@
 #include "NoxCore/UI/Core/UILayer.h"
 #include "NoxCore/UI/Layout/UIDockSpace.h"
 #include "NoxCore/UI/Widgets/UIImage.h"
+#include "NoxCore/UI/Widgets/UITextInput.h"
 #include "NoxCore/Utils/Utils.h"
 #include "ProjectManager/ProcessLauncher.h"
 #include "ProjectManager/ProjectLibrary.h"
@@ -85,6 +87,10 @@ namespace Nox
 
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
+        m_SceneHierarchyPanel.SetFocusEntityCallback([this](Entity entity) { FocusOnEntity(entity); });
+        m_SceneHierarchyPanel.SetCreateShapeCallback([this](PrimitiveShape shape, const std::string& folder) { CreateShape(shape, folder); });
+        m_SceneHierarchyPanel.SetSceneMutatedCallback([this]() { m_HistoryCheckRequested = true; });
+        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
 
         if (!projectFile.empty())
             NOX_CORE_INFO("Loading project {}", projectFile.generic_string());
@@ -281,6 +287,7 @@ namespace Nox
         SaveEditorCameras();
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
+        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
         m_EditorScenePath.clear();
         m_UnloadUnusedAssetsRequested = true;
 #if NOX_PROFILE_STATS
@@ -325,6 +332,7 @@ namespace Nox
         m_EditorScene = newScene;
         m_ActiveScene = m_EditorScene;
         m_EditorScenePath = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
+        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
 
         const bool cameraRestored = RestoreEditorCameras();
         if (!cameraRestored && !m_FocusOnOpen && m_EditorScene->IsWorldPartitioned() && !m_EditorScene->GetWorldPartition().Cells.empty())
@@ -409,7 +417,7 @@ namespace Nox
         SceneImporter::SaveScene(scene, path);
     }
 
-    void EditorV2Layer::CreateShape(PrimitiveShape shape)
+    void EditorV2Layer::CreateShape(PrimitiveShape shape, const std::string& folder)
     {
         if (!m_ActiveScene)
             return;
@@ -417,6 +425,8 @@ namespace Nox
         if (mesh == 0)
             return;
         Entity entity = m_ActiveScene->CreateEntity(PrimitiveShapes::GetName(shape));
+        if (!folder.empty())
+            entity.AddComponent<FolderComponent>(folder);
         auto& instance = entity.AddComponent<ModelInstanceComponent>();
         instance.Model = mesh;
         instance.AtFileLayout = true;
@@ -424,7 +434,35 @@ namespace Nox
             m_EditorCamera.GetPosition() + glm::dvec3(m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance());
         entity.MarkTransformDirty();
         AssetManager::RequestAsset(mesh);
+        m_SceneHierarchyPanel.SetSelectedEntity(entity);
+        m_SceneHierarchyPanel.MarkDirty();
         m_HistoryCheckRequested = true;
+    }
+
+    void EditorV2Layer::FocusOnEntity(Entity entity)
+    {
+        if (!entity || !m_ActiveScene)
+            return;
+
+        glm::dvec3 centre;
+        float radius;
+        const WorldBounds bounds = ComputeWorldBounds(*m_ActiveScene, entity);
+        if (bounds.Valid)
+        {
+            centre = bounds.Center();
+            radius = glm::length(bounds.Size()) * 0.5f;
+        }
+        else if (entity.HasComponent<WorldTransformComponent>())
+        {
+            centre = entity.GetComponent<WorldTransformComponent>().GetPosition();
+            radius = 0.0f;
+        }
+        else
+        {
+            return;
+        }
+
+        m_EditorCamera.Focus(centre, radius);
     }
 
     AssetHandle EditorV2Layer::GetShapeAsset(PrimitiveShape shape)
@@ -535,6 +573,7 @@ namespace Nox
         SerializeScene(m_EditorScene, path);
         m_EditorScenePath = path;
         AdoptStartSceneIfNone(path);
+        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
         m_HistoryCheckRequested = true;
         m_ApplyBasicSceneView = true;
         ApplyBasicSceneView();
@@ -731,6 +770,8 @@ namespace Nox
         frame.InteractionEnded = m_HistoryCheckRequested;
         m_HistoryCheckRequested = false;
         frame.AssetsLoading = Project::GetActive()->GetEditorAssetManager()->GetLoadingCount() > 0;
+        if (Entity watched = m_SceneHierarchyPanel.GetSelectedEntity())
+            frame.Watched = watched.GetUUID();
         m_History.Update(m_ActiveScene, frame);
     }
 
@@ -771,9 +812,22 @@ namespace Nox
             if (w > 0 && h > 0)
                 restored->OnViewportResize(w, h);
         }
+        std::vector<UUID> selection;
+        for (Entity selected : m_SceneHierarchyPanel.GetSelectedEntities())
+        {
+            if (selected)
+                selection.push_back(selected.GetUUID());
+        }
+
         restored->AdoptWorldState(*m_EditorScene);
         m_EditorScene = restored;
         m_ActiveScene = restored;
+        m_SceneHierarchyPanel.SetContext(restored);
+        for (UUID id : selection)
+        {
+            if (Entity entity = restored->GetEntityByUUID(id))
+                m_SceneHierarchyPanel.ToggleSelectedEntity(entity);
+        }
         m_UnloadUnusedAssetsRequested = true;
         m_History.OnSceneRestored(restored);
     }
@@ -811,6 +865,7 @@ namespace Nox
             OnSceneStop();
         m_SceneState = SceneState::Play;
         m_ActiveScene = Scene::Copy(m_EditorScene);
+        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
         m_ActiveScene->SetRenderer(m_Renderer);
         m_ActiveScene->SetRenderer2D(m_Renderer2D);
         if (m_ViewportImage)
@@ -831,6 +886,7 @@ namespace Nox
             OnSceneStop();
         m_SceneState = SceneState::Simulate;
         m_ActiveScene = Scene::Copy(m_EditorScene);
+        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
         const glm::dvec3 streamingSource = m_EditorCamera.GetPosition();
         m_ActiveScene->OnSimulationStart(&streamingSource);
     }
@@ -847,6 +903,7 @@ namespace Nox
             Input::SetRelativeMouseMode(false);
         Input::ClearInjected();
         m_ActiveScene = m_EditorScene;
+        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
         m_UnloadUnusedAssetsRequested = true;
     }
 
@@ -1068,6 +1125,17 @@ namespace Nox
             break;
         }
 
+        if (m_ShowSceneHierarchy)
+            m_SceneHierarchyPanel.Update();
+
+        std::vector<int32_t> selectedIDs;
+        for (const Entity& entity : m_SceneHierarchyPanel.GetSelectedEntities())
+        {
+            if (entity)
+                selectedIDs.push_back(static_cast<int32_t>(static_cast<uint32_t>(entity)));
+        }
+        m_Renderer->SetSelectedEntityID(selectedIDs);
+
         OnOverlayRender();
         UpdateHistory();
 
@@ -1110,8 +1178,12 @@ namespace Nox
 
         if (event.GetEventType() == EventType::KeyPressed)
         {
+            bool textInputFocused = false;
+            if (UILayer* uiLayer = Application::Get().GetUILayer())
+                textInputFocused = dynamic_cast<UI::UITextInput*>(uiLayer->GetContext().GetFocused()) != nullptr;
+
             const auto& key = static_cast<const KeyPressedEvent&>(event);
-            if (!key.IsRepeat())
+            if (!key.IsRepeat() && !textInputFocused)
             {
                 const bool control = (key.GetModifiers() & SDL_KMOD_CTRL) != 0 ||
                                      Input::IsKeyPressed(SDL_SCANCODE_LCTRL) ||
@@ -1144,11 +1216,38 @@ namespace Nox
                 case SDL_SCANCODE_S:
                     if (control) { if (shift) SaveSceneAs(); else SaveScene(); event.Handled = true; return; }
                     break;
+                case SDL_SCANCODE_D:
+                    if (control && m_SceneState == SceneState::Edit) { m_SceneHierarchyPanel.DuplicateSelection(); event.Handled = true; return; }
+                    break;
+                case SDL_SCANCODE_F:
+                    if (control)
+                    {
+                        if (m_ShowSceneHierarchy)
+                            m_SceneHierarchyPanel.FocusSearch();
+                        event.Handled = true;
+                        return;
+                    }
+                    if (m_SceneState == SceneState::Edit)
+                    {
+                        if (Entity selected = m_SceneHierarchyPanel.GetSelectedEntity())
+                            FocusOnEntity(selected);
+                        event.Handled = true;
+                        return;
+                    }
+                    break;
                 case SDL_SCANCODE_B:
                     if (control) { m_ScriptBuilder.RequestBuild(); event.Handled = true; return; }
                     break;
                 case SDL_SCANCODE_R:
                     if (control) { if (ScriptEngine::IsInitialized()) ScriptEngine::ReloadAssembly(); event.Handled = true; return; }
+                    break;
+                case SDL_SCANCODE_DELETE:
+                    if (m_SceneState == SceneState::Edit && !m_SceneHierarchyPanel.GetSelectedEntities().empty())
+                    {
+                        m_SceneHierarchyPanel.DeleteSelection();
+                        event.Handled = true;
+                        return;
+                    }
                     break;
                 case SDL_SCANCODE_KP_1:
                     if (viewportHovered) { SetViewMode(control ? EditorViewMode::Back : EditorViewMode::Front); event.Handled = true; return; }
@@ -1219,12 +1318,38 @@ namespace Nox
             UI::UIDockNodeFlags::CentralNode
         );
 
+        if (m_ShowSceneHierarchy)
+        {
+            uiLayer->AddPanel(
+                "Scene Hierarchy",
+                m_SceneHierarchyPanel.BuildUI(),
+                UI::UIDockDropZone::Left,
+                "Viewport",
+                0.22f
+            );
+        }
+
         m_StatusLabel = UI::Label("Ready").Margin(10.0f, 4.0f);
 
         if (loadSavedLayout)
         {
-            if (const auto& dock = uiLayer->GetDockSpaceRef())
-                dock->LoadLayout(kLayoutPath);
+            bool shouldLoad = true;
+            if (m_ShowSceneHierarchy)
+            {
+                std::ifstream layoutFile(kLayoutPath);
+                if (layoutFile.is_open())
+                {
+                    std::stringstream ss;
+                    ss << layoutFile.rdbuf();
+                    if (ss.str().find("Scene Hierarchy") == std::string::npos)
+                        shouldLoad = false;
+                }
+            }
+            if (shouldLoad)
+            {
+                if (const auto& dock = uiLayer->GetDockSpaceRef())
+                    dock->LoadLayout(kLayoutPath);
+            }
         }
 
         auto menuBar = UI::MakeUI<UI::UIMenuBar>();
@@ -1283,7 +1408,9 @@ namespace Nox
                 {
                     if (m_ActiveScene)
                     {
-                        m_ActiveScene->CreateEntity("Empty Entity");
+                        Entity created = m_ActiveScene->CreateEntity("Empty Entity");
+                        m_SceneHierarchyPanel.SetSelectedEntity(created);
+                        m_SceneHierarchyPanel.MarkDirty();
                         m_HistoryCheckRequested = true;
                     }
                 }},
@@ -1334,6 +1461,11 @@ namespace Nox
                 animGraphItems.push_back({"No .nanimgraph assets found", "", {}, false, false, false, true});
 
             return {
+                {"Scene Hierarchy", "", [this]()
+                {
+                    m_ShowSceneHierarchy = !m_ShowSceneHierarchy;
+                    BuildUI(false);
+                }, false, true, m_ShowSceneHierarchy},
                 {"Render Graph", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
                 {"Output Log", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
                 {"Profiler", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
