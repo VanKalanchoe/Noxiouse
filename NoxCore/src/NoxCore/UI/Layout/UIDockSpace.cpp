@@ -282,6 +282,8 @@ namespace Nox::UI
         UIWindow* rawWin = win.get();
         win->OnClose = [this, rawWin]()
         {
+            if (CanClosePanel && !CanClosePanel(rawWin->GetTitle()))
+                return;
             for (const auto& w : m_FloatingWindows)
             {
                 if (w.get() == rawWin)
@@ -514,6 +516,20 @@ namespace Nox::UI
             node->TabPanel->GetContentHost()->Padding = UIThickness::All(hideBar ? 0.0f : 4.0f);
         }
         return true;
+    }
+
+    Ref<UIWindow> UIDockSpace::FindFloatingWindow(const std::string& title) const
+    {
+        for (const auto& win : m_FloatingWindows)
+            if (win && win->GetTitle() == title)
+                return win;
+        return nullptr;
+    }
+
+    bool UIDockSpace::HasPanel(const std::string& title) const
+    {
+        return FindNodeByPanelTitle(title) != nullptr || FindFloatingWindow(title) != nullptr ||
+               (m_ViewportManager && m_ViewportManager->HasPanel(title));
     }
 
     bool UIDockSpace::RemovePanel(const std::string& title)

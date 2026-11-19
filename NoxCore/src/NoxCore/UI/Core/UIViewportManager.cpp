@@ -39,6 +39,11 @@ namespace Nox::UI
 
                 m_CloseBtn = Ref<UIButton>(new UIButton("X", [&viewport]()
                 {
+                    // The dock space may keep it open (unsaved changes to ask about).
+                    UIViewportManager* manager = UIViewportManager::GetActive();
+                    UIDockSpace* dock = manager ? manager->GetDockSpace() : nullptr;
+                    if (dock && dock->CanClosePanel && !dock->CanClosePanel(viewport.Title))
+                        return;
                     viewport.PendingClose = true;
                 }));
                 m_CloseBtn->StyleClass = "TitleClose";
@@ -250,6 +255,27 @@ namespace Nox::UI
         }
     }
 
+    bool UIViewportManager::ClosePanel(const std::string& title)
+    {
+        for (const auto& vp : m_Viewports)
+        {
+            if (vp->Title == title)
+            {
+                vp->PendingClose = true;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool UIViewportManager::HasPanel(const std::string& title) const
+    {
+        for (const auto& vp : m_Viewports)
+            if (vp->Title == title && !vp->PendingClose)
+                return true;
+        return false;
+    }
+
     UIViewport* UIViewportManager::FindByWindowID(uint32_t windowID) const
     {
         for (const auto& vp : m_Viewports)
@@ -352,7 +378,8 @@ namespace Nox::UI
         switch (e.type)
         {
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-            vp->PendingClose = true;
+            if (!m_DockSpace || !m_DockSpace->CanClosePanel || m_DockSpace->CanClosePanel(vp->Title))
+                vp->PendingClose = true;
             return true;
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:

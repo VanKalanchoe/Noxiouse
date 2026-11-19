@@ -377,7 +377,7 @@ Flaws of the old graph editor, not carried over:
 | Properties edited inside the nodes needed workarounds (combos and popups do not work inside imgui-node-editor nodes; pickers drawn later, "suspended") | Properties in a Details panel with the editor's normal widgets |
 | Keys typed in a graph reached the editor's shortcuts (Delete also deleted the selected entity); fixed by polling "wants input" | Keys go by focus: the graph window is in the editor's panel-focus guard |
 | History by polling each frame for "no mouse button held and no widget active" | The canvas reports each finished operation; only Details drags merge on mouse release |
-| A graph closed with unsaved edits said nothing | A toast says the changes are not saved |
+| A graph closed with unsaved edits said nothing (the edits stayed in memory, as if saved) | Closing asks "Save changes to the graph ...?" (Save / Don't Save / Cancel); Don't Save reads the file back |
 | A file changed on disk while open: handled (kept as is) | Kept: taken as an undo step, rows rebuilt (they point into the graph), or kept back with a warning when there are unsaved edits |
 
 Changed on purpose: wires are bezier curves (Unreal's look) instead of right-angle routes; hand-shaped routes saved in a file
@@ -387,6 +387,26 @@ canvas (17 checks: wires and type checks, replacing a wire, output kept, box sel
 from a right click with search + Enter, node list from a dropped wire) and a picture of its draw list.
 
 Also: `**/Saved/` is ignored (per-user layouts, viewport options, the project thumbnail -- rewritten on every exit, as Unreal's Saved/).
+
+**Closing a graph with unsaved edits (2026-11-19, after the user's test: the window closed and its edits stayed).** The X of the graph
+window (floating, or torn off into its own OS window -- its X and Alt+F4) asks first: `UIDockSpace::CanClosePanel(title)` (a false
+keeps the window; the floating window's OnClose, the torn-off window's X button and `SDL_EVENT_WINDOW_CLOSE_REQUESTED` consult it).
+The editor answers false for a graph with unsaved edits and shows "Save changes?": **Save** writes the file and closes (a failed write
+keeps the window), **Don't Save** puts the file's version back (`NodeGraphEditorV2::RevertToDisk`, recompiled, so a playing scene runs
+what is saved) and closes, **Cancel** keeps it open. Nothing is saved automatically and no edit is kept silently. The window then
+closes wherever it is (`UIDockSpace::RemovePanel`, `UIViewportManager::ClosePanel`). The scope of the other questions follows what
+the action drops: New Scene and opening a scene ask about the scene only (an open graph keeps its edits); a project change, the
+Project Manager and Exit ask about everything and Don't Save reverts the graphs; Reset Layout asks about the graphs (it closes their
+windows). Docked panels have no close button, so they cannot be closed without the question.
+
+Flaws found on the way and fixed: a graph or material window torn off into its own OS window counted as closed (the editor behind it
+ended at once) -- open now means docked, floating or torn off (`UIDockSpace::HasPanel`, `FindFloatingWindow`,
+`UIViewportManager::HasPanel`); opening a graph that is already open raises it wherever it is (it used the window pointer from when it
+was opened, stale after a dock / undock); Save left a version from disk that waited behind the edits, so closing after Save brought
+that older version back; opening another project left the graph and material windows of the old one open (closed now, before the
+project changes); the editor's own end (a quit after Don't Save) drops unsaved edits instead of leaving them in the loaded asset.
+Checked: syntax check; the headless UI test clicks a floating window's real X (19 checks: refused -> stays open, `RemovePanel` closes
+it, allowed -> closes). Not run on a GPU; the torn-off window paths are not covered by the headless test.
 
 ### Phase 3: Docking & Multi-Viewport
 - Implement `DockSpace` (splitters, tab bars, drag-to-dock preview overlays, layout save/load).

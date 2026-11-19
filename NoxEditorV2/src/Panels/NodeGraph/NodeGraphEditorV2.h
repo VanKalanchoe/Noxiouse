@@ -35,7 +35,11 @@ namespace Nox
         Ref<UI::UIElement> BuildUI();
         // Once a frame: finished edits become history steps, the window's labels follow.
         void Update();
+        // Writes the file (nothing when nothing changed); IsDirty() says whether it worked.
         void Save();
+        // Drops the unsaved edits: the graph is the file's again (and recompiled). False when the file could not be read (the
+        // edits stay, the window says why).
+        bool RevertToDisk();
 
         AssetHandle GetHandle() const { return m_Handle; }
         const std::string& GetTitle() const { return m_Title; }

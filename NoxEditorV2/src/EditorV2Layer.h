@@ -79,9 +79,14 @@ namespace Nox
         void SaveScene();
         void SaveSceneAs();
         // Unsaved work (the scene, open graphs, the mixer): asked about before what would drop it -- Save (then go on), Don't Save
-        // (go on), Cancel. `action` names what would happen ("opening the project"). Without unsaved work it goes on at once.
-        void ConfirmUnsavedChanges(const std::string& action, std::function<void()> proceed);
-        bool HasUnsavedChanges() const;
+        // (the edits are dropped: graphs go back to their files; then go on), Cancel. `action` names what would happen ("opening
+        // the project"); `scope` is what the action drops (a new scene drops the scene, not an open graph's edits). Without
+        // unsaved work in scope it goes on at once.
+        enum UnsavedScope : uint32_t { UnsavedScene = 1, UnsavedGraphs = 2, UnsavedMixer = 4, UnsavedAll = 7 };
+        void ConfirmUnsavedChanges(const std::string& action, std::function<void()> proceed, uint32_t scope = UnsavedAll);
+        bool HasUnsavedChanges(uint32_t scope = UnsavedAll) const;
+        // Save / Don't Save / Cancel: the dialog every unsaved-changes question uses.
+        void ShowSaveChangesDialog(const std::string& text, std::function<void()> save, std::function<void()> dontSave);
         void UpdateSceneDirtyState();
         void SerializeScene(const Ref<Scene>& scene, const std::filesystem::path& path);
 
@@ -311,6 +316,13 @@ namespace Nox
         // Animation, audio and material graphs: one window each (NodeGraphEditorV2), floating until docked.
         void OpenGraphEditor(AssetHandle handle);
         void UpdateGraphEditors();
+        // The dock space asks before a panel's window closes: a graph with unsaved edits stays open and the dialog asks (Save /
+        // Don't Save / Cancel); true closes it now.
+        bool CanClosePanel(const std::string& title);
+        // Closes a graph's window wherever it is (docked, floating, torn off); its editor ends next frame.
+        void CloseGraphWindow(const std::string& title);
+        // Every graph and material window closes (the project changes, the layout is reset); asked about before, by the caller.
+        void CloseAssetEditors();
         struct GraphEditorWindow
         {
             std::unique_ptr<NodeGraphEditorV2> Editor;

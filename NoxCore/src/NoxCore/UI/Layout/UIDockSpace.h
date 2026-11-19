@@ -109,6 +109,9 @@ namespace Nox::UI
         );
 
         void SetViewportManager(UIViewportManager* manager) { m_ViewportManager = manager; }
+        // Asked when the user closes a panel's window (a floating window's X, a torn-off OS window's X): false keeps it open -- an
+        // editor with unsaved changes asks first, then closes it itself (RemovePanel / UIViewportManager::ClosePanel).
+        std::function<bool(const std::string& title)> CanClosePanel;
         UIViewportManager* GetViewportManager() const { return m_ViewportManager; }
         void SetContext(UIContext* context) { m_Context = context; }
         UIContext* GetContext() const { return m_Context; }
@@ -124,6 +127,10 @@ namespace Nox::UI
 
         const Ref<UIDockNode>& GetRootNode() const { return m_RootNode; }
         Ref<UIDockNode> FindNodeByPanelTitle(const std::string& title) const;
+        // The floating window showing `title` (null: none).
+        Ref<UIWindow> FindFloatingWindow(const std::string& title) const;
+        // `title` is open anywhere: docked, floating, or torn off into its own OS window.
+        bool HasPanel(const std::string& title) const;
         bool SetPanelFlags(const std::string& title, UIDockNodeFlags flags);
         bool RemovePanel(const std::string& title);
         bool BeginPanelDrag(const std::string& title, UIVec2 pointerPos);

@@ -60,6 +60,7 @@ namespace Nox::UI
         ~UIViewportManager();
 
         void SetDockSpace(UIDockSpace* dockSpace) { m_DockSpace = dockSpace; }
+        UIDockSpace* GetDockSpace() const { return m_DockSpace; }
 
         // Promotes a panel/floating window into its own OS window at the global cursor position.
         UIViewport* PromoteToViewport(
@@ -83,6 +84,10 @@ namespace Nox::UI
         void UpdateAndRender(float dt);
 
         void Shutdown();
+        // Closes the torn-off window showing `title` (no question asked: the caller decided); false when there is none.
+        bool ClosePanel(const std::string& title);
+        // A torn-off window shows `title` (and is not closing).
+        bool HasPanel(const std::string& title) const;
 
         size_t GetViewportCount() const { return m_Viewports.size(); }
 

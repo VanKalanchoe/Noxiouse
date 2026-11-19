@@ -88,17 +88,14 @@ namespace Nox
 
     NodeGraphEditorV2::~NodeGraphEditorV2()
     {
-        // Closed: a version from disk it had not taken is what the file holds now -- applied, so the asset matches the file again.
+        // Closed: the asset matches the file again. The editor asked about unsaved edits before closing the window (Save / Don't
+        // Save); edits still here (the editor shutting down) are dropped, never kept in memory as if saved. A version from disk it
+        // had not taken is what the file holds now.
+        Notify = nullptr; // (whoever listened may be going away too)
+        if (m_Asset && (m_Dirty || m_Asset->DiskGraph))
+            RevertToDisk();
         if (m_Asset)
-        {
             m_Asset->HasUnsavedEdits = false;
-            if (m_Asset->DiskGraph)
-            {
-                m_Asset->Graph = std::move(*m_Asset->DiskGraph);
-                m_Asset->DiskGraph.reset();
-                m_Asset->Recompile();
-            }
-        }
     }
 
     Ref<UI::UIElement> NodeGraphEditorV2::BuildUI()
@@ -216,7 +213,7 @@ namespace Nox
         {
             if (Notify)
                 Notify({ UI::UINotificationSeverity::Warning, m_Title + " changed on disk",
-                         "Your unsaved edits are kept; Save writes them over the file, closing the window takes the file's version." });
+                         "Your unsaved edits are kept: Save writes them over the file; closing the window and choosing Don't Save takes the file's version." });
             return;
         }
         m_UndoStack.push_back(std::move(m_Committed));
@@ -355,9 +352,55 @@ namespace Nox
         }
         m_Dirty = false;
         m_Asset->HasUnsavedEdits = false;
+        m_Asset->DiskGraph.reset(); // (a version from disk that waited is overwritten now: closing must not bring it back)
         assets->NoteSourceWritten(m_Handle); // (its own save is no change on disk to reload)
         if (Notify)
             Notify({ UI::UINotificationSeverity::Success, "Graph saved", found->second.FilePath.generic_string() });
+    }
+
+    bool NodeGraphEditorV2::RevertToDisk()
+    {
+        if (!m_Asset)
+            return false;
+        if (!m_Dirty && !m_Asset->DiskGraph)
+            return true;
+        NodeGraph fromDisk;
+        if (m_Asset->DiskGraph)
+        {
+            // The file changed while this window had edits: that version is what the file holds.
+            fromDisk = std::move(*m_Asset->DiskGraph);
+            m_Asset->DiskGraph.reset();
+        }
+        else
+        {
+            bool read = false;
+            if (auto assets = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr)
+            {
+                const auto& registry = assets->GetAssetRegistry();
+                if (const auto found = registry.find(m_Handle); found != registry.end())
+                    read = NodeGraphSerializer::Deserialize(Project::GetActiveAssetDirectory() / found->second.FilePath, fromDisk);
+            }
+            if (!read)
+            {
+                if (Notify)
+                    Notify({ UI::UINotificationSeverity::Error, "Changes not discarded",
+                             m_Title + ": the file could not be read back -- see the Output Log. The edits stay." });
+                return false;
+            }
+        }
+        m_Asset->Graph = std::move(fromDisk);
+        m_Asset->HasUnsavedEdits = false;
+        m_Asset->Recompile();
+        m_Committed = m_Asset->Graph;
+        m_UndoStack.clear();
+        m_RedoStack.clear();
+        m_EditPending = false;
+        m_Dirty = false;
+        if (m_Canvas)
+            m_Canvas->ReloadGraph();
+        m_ParametersDirty = true;
+        m_DetailsDirty = true;
+        return true;
     }
 
     // ------------------------------------------------------------------------------------------------------------------------------
