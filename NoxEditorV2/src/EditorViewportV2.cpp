@@ -23,7 +23,7 @@
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 #include "NoxCore/UI/Widgets/UIMenu.h"
-#include "Panels/SceneHierarchyV2Panel.h"
+#include "EditorSelection.h"
 
 namespace Nox
 {
@@ -392,12 +392,12 @@ namespace Nox
         if (!m_Ctx.Tools || m_Ctx.Tools->PivotMode != GizmoPivotMode::Center || !m_Ctx.ActiveScene || !*m_Ctx.ActiveScene)
             return true;
 
-        if (m_Ctx.Hierarchy && m_Ctx.Hierarchy->GetSelectedEntities().size() > 1)
+        if (m_Ctx.Selection && m_Ctx.Selection->GetEntities().size() > 1)
         {
             glm::dvec3 lowest(std::numeric_limits<double>::max());
             glm::dvec3 highest(std::numeric_limits<double>::lowest());
             bool any = false;
-            for (Entity entity : m_Ctx.Hierarchy->GetSelectedEntities())
+            for (Entity entity : m_Ctx.Selection->GetEntities())
             {
                 if (!entity || !entity.HasComponent<WorldTransformComponent>())
                     continue;
@@ -674,7 +674,7 @@ namespace Nox
 
     void ViewportCanvas::CommitClickSelection(bool shift, bool ctrl)
     {
-        if (!m_Ctx.Hierarchy || !m_Ctx.ActiveScene || !*m_Ctx.ActiveScene)
+        if (!m_Ctx.Selection || !m_Ctx.ActiveScene || !*m_Ctx.ActiveScene)
             return;
 
         Entity picked = m_Ctx.HoveredEntity ? *m_Ctx.HoveredEntity : Entity{};
@@ -686,48 +686,58 @@ namespace Nox
             picked = instance;
         }
 
+        // Unreal's viewport: click selects, Shift+click adds, Ctrl+click toggles, a click on nothing clears. (It was a range by
+        // the hierarchy's row order, which means nothing in the viewport.)
         if (picked)
         {
             if (shift)
-                m_Ctx.Hierarchy->SelectRangeTo(picked);
+                m_Ctx.Selection->Add(picked);
             else if (ctrl)
-                m_Ctx.Hierarchy->ToggleSelectedEntity(picked);
+                m_Ctx.Selection->Toggle(picked);
             else
-                m_Ctx.Hierarchy->SetSelectedEntity(picked);
+                m_Ctx.Selection->Select(picked);
         }
         else if (!shift && !ctrl)
         {
-            m_Ctx.Hierarchy->ClearSelection();
+            m_Ctx.Selection->Clear();
         }
     }
 
     void ViewportCanvas::CommitBoxSelection(bool shift, bool ctrl)
     {
-        if (!m_Ctx.Render || !m_Ctx.Hierarchy || !m_Ctx.ActiveScene || !*m_Ctx.ActiveScene)
+        if (!m_Ctx.Render || !m_Ctx.Selection || !m_Ctx.ActiveScene || !*m_Ctx.ActiveScene)
             return;
 
-        if (!shift && !ctrl)
-            m_Ctx.Hierarchy->ClearSelection();
-
-        const std::vector<int32_t> pickedIDs = m_Ctx.Render->getPickedEntityIDs();
-        for (int32_t id : pickedIDs)
+        std::vector<Entity> boxed;
+        for (int32_t id : m_Ctx.Render->getPickedEntityIDs())
         {
             if (id < 0)
                 continue;
             Entity entity{ static_cast<entt::entity>(id), (*m_Ctx.ActiveScene).get() };
-            if (!entity)
-                continue;
-            if (ctrl || !m_Ctx.Hierarchy->IsSelected(entity))
-                m_Ctx.Hierarchy->ToggleSelectedEntity(entity);
+            if (entity)
+                boxed.push_back(entity);
+        }
+        // A box replaces the selection; Shift adds to it; Ctrl toggles what it covers.
+        if (!shift && !ctrl)
+        {
+            m_Ctx.Selection->Set(boxed);
+            return;
+        }
+        for (Entity entity : boxed)
+        {
+            if (ctrl)
+                m_Ctx.Selection->Toggle(entity);
+            else
+                m_Ctx.Selection->Add(entity);
         }
     }
 
     void ViewportCanvas::ApplyEntityDelta(const glm::mat4& deltaRender, const glm::mat4& primaryWorldRender)
     {
-        if (!m_Ctx.Hierarchy || !m_Ctx.ActiveScene || !*m_Ctx.ActiveScene || !m_Ctx.Render)
+        if (!m_Ctx.Selection || !m_Ctx.ActiveScene || !*m_Ctx.ActiveScene || !m_Ctx.Render)
             return;
-        const auto& selected = m_Ctx.Hierarchy->GetSelectedEntities();
-        Entity primary = m_Ctx.Hierarchy->GetSelectedEntity();
+        const auto& selected = m_Ctx.Selection->GetEntities();
+        Entity primary = m_Ctx.Selection->GetPrimary();
         if (!primary)
             return;
 
@@ -743,7 +753,7 @@ namespace Nox
                     if (parentUUID != 0)
                     {
                         Entity parent = (*m_Ctx.ActiveScene)->GetEntityByUUID(parentUUID);
-                        if (parent && m_Ctx.Hierarchy->IsSelected(parent))
+                        if (parent && m_Ctx.Selection->Contains(parent))
                             continue;
                     }
                 }
@@ -759,9 +769,9 @@ namespace Nox
 
     void ViewportCanvas::UpdateGizmoDrag(const UI::UIVec2& mousePos)
     {
-        if (!m_Ctx.Tools || !m_Ctx.Camera || !m_Ctx.Render || !m_Ctx.Hierarchy)
+        if (!m_Ctx.Tools || !m_Ctx.Camera || !m_Ctx.Render || !m_Ctx.Selection)
             return;
-        Entity selected = m_Ctx.Hierarchy->GetSelectedEntity();
+        Entity selected = m_Ctx.Selection->GetPrimary();
         if (!selected)
             return;
 
@@ -962,9 +972,9 @@ namespace Nox
 
         m_HoveredGizmo = GizmoPart::None;
         const bool isPlay = m_Ctx.IsPlayModeFn && m_Ctx.IsPlayModeFn();
-        if (!m_Ctx.Tools->AxisIndicatorHovered && m_Ctx.Hierarchy && m_Ctx.Render && !isPlay)
+        if (!m_Ctx.Tools->AxisIndicatorHovered && m_Ctx.Selection && m_Ctx.Render && !isPlay)
         {
-            if (Entity sel = m_Ctx.Hierarchy->GetSelectedEntity())
+            if (Entity sel = m_Ctx.Selection->GetPrimary())
             {
                 glm::mat4 world{};
                 if (ComputeGizmoTransform(sel, world))
@@ -1046,9 +1056,9 @@ namespace Nox
         }
 
         const bool isPlay = m_Ctx.IsPlayModeFn && m_Ctx.IsPlayModeFn();
-        if (m_Ctx.Tools->GizmoMode != ViewportGizmoMode::Select && m_Ctx.Hierarchy && m_Ctx.Render && !isPlay)
+        if (m_Ctx.Tools->GizmoMode != ViewportGizmoMode::Select && m_Ctx.Selection && m_Ctx.Render && !isPlay)
         {
-            if (Entity sel = m_Ctx.Hierarchy->GetSelectedEntity(); sel && sel.HasComponent<WorldTransformComponent>())
+            if (Entity sel = m_Ctx.Selection->GetPrimary(); sel && sel.HasComponent<WorldTransformComponent>())
             {
                 glm::mat4 world{};
                 if (ComputeGizmoTransform(sel, world))
@@ -1273,9 +1283,9 @@ namespace Nox
     void ViewportCanvas::DrawTransformGizmo(UI::UIDrawList& drawList) const
     {
         const bool isPlay = m_Ctx.IsPlayModeFn && m_Ctx.IsPlayModeFn();
-        if (!m_Ctx.Tools || m_Ctx.Tools->GizmoMode == ViewportGizmoMode::Select || !m_Ctx.Camera || !m_Ctx.Render || !m_Ctx.Hierarchy || isPlay)
+        if (!m_Ctx.Tools || m_Ctx.Tools->GizmoMode == ViewportGizmoMode::Select || !m_Ctx.Camera || !m_Ctx.Render || !m_Ctx.Selection || isPlay)
             return;
-        Entity selected = m_Ctx.Hierarchy->GetSelectedEntity();
+        Entity selected = m_Ctx.Selection->GetPrimary();
         if (!selected || !selected.HasComponent<WorldTransformComponent>())
             return;
 
@@ -1645,9 +1655,9 @@ namespace Nox
 
         // Mini selected entity gizmo axes preview (only once the extra view image has been drawn)
         const bool hasImage = !m_Ctx.HasImageFn || m_Ctx.HasImageFn();
-        if (hasImage && m_Ctx.Hierarchy && m_Ctx.GizmoMode && *m_Ctx.GizmoMode != ViewportGizmoMode::Select && !isPlay)
+        if (hasImage && m_Ctx.Selection && m_Ctx.GizmoMode && *m_Ctx.GizmoMode != ViewportGizmoMode::Select && !isPlay)
         {
-            Entity selected = m_Ctx.Hierarchy->GetSelectedEntity();
+            Entity selected = m_Ctx.Selection->GetPrimary();
             if (selected && selected.HasComponent<WorldTransformComponent>())
             {
                 const glm::mat4 world = m_Ctx.Render->ToRenderSpace(selected.GetComponent<WorldTransformComponent>().WorldMatrix);

@@ -422,7 +422,8 @@ namespace Nox
         m_SceneHierarchyPanel.SetFocusEntityCallback([this](Entity entity) { FocusOnEntity(entity); });
         m_SceneHierarchyPanel.SetCreateShapeCallback([this](PrimitiveShape shape, const std::string& folder) { CreateShape(shape, folder); });
         m_SceneHierarchyPanel.SetSceneMutatedCallback([this]() { m_HistoryCheckRequested = true; });
-        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        m_SceneHierarchyPanel.SetSelection(&m_Selection);
+        m_InspectorPanel.SetSelection(&m_Selection);
 
         m_InspectorPanel.SetSceneMutatedCallback([this]() { m_HistoryCheckRequested = true; });
         m_InspectorPanel.SetTagChangedCallback([this]() { m_SceneHierarchyPanel.MarkDirty(); });
@@ -430,11 +431,11 @@ namespace Nox
         m_InspectorPanel.SetSelectEntityCallback([this](Entity entity)
         {
             if (entity)
-                m_SceneHierarchyPanel.SetSelectedEntity(entity);
+                m_Selection.Select(entity);
             else
-                m_SceneHierarchyPanel.ClearSelection();
+                m_Selection.Clear();
         });
-        m_InspectorPanel.SetContext(m_ActiveScene);
+        SetSceneContext(m_ActiveScene);
 
         m_SceneHierarchyPanel.SetCreatePrefabCallback([this](UUID entity)
         {
@@ -695,8 +696,7 @@ namespace Nox
         m_HoveredEntity = Entity();
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
-        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
-        m_InspectorPanel.SetContext(m_ActiveScene);
+        SetSceneContext(m_ActiveScene);
         m_EditorScenePath.clear();
         m_UnloadUnusedAssetsRequested = true;
         m_SceneCleanPending = true;
@@ -749,8 +749,7 @@ namespace Nox
         m_EditorScene = newScene;
         m_ActiveScene = m_EditorScene;
         m_EditorScenePath = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
-        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
-        m_InspectorPanel.SetContext(m_ActiveScene);
+        SetSceneContext(m_ActiveScene);
         RefreshSceneLoadOverlay();
 
         const bool cameraRestored = RestoreEditorCameras();
@@ -862,7 +861,7 @@ namespace Nox
     {
         if (!m_ActiveScene || !Project::GetActive())
             return;
-        m_SceneHierarchyPanel.ClearSelection();
+        m_Selection.Clear();
         Entity lastCreated;
         for (AssetHandle handle : handles)
         {
@@ -900,7 +899,7 @@ namespace Nox
             lastCreated = root;
         }
         if (lastCreated)
-            m_SceneHierarchyPanel.SetSelectedEntity(lastCreated);
+            m_Selection.Select(lastCreated);
         m_SceneHierarchyPanel.MarkDirty();
         m_HistoryCheckRequested = true;
     }
@@ -1107,7 +1106,7 @@ namespace Nox
     {
         if (!m_ActiveScene || !m_Renderer)
             return;
-        const auto& selection = m_SceneHierarchyPanel.GetSelectedEntities();
+        const auto& selection = m_Selection.GetEntities();
         if (selection.empty())
             return;
 
@@ -1118,7 +1117,7 @@ namespace Nox
                 continue;
             const bool parentSelected = entity.HasComponent<RelationshipComponent>() &&
                                         entity.GetComponent<RelationshipComponent>().Parent != 0 &&
-                                        m_SceneHierarchyPanel.IsSelected(m_ActiveScene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent));
+                                        m_Selection.Contains(m_ActiveScene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent));
             if (!parentSelected)
                 tops.push_back(entity);
         }
@@ -1218,13 +1217,13 @@ namespace Nox
         const float step = m_ViewportTools.LocationSnapWorldUnits();
         if (step <= 0.0f)
             return;
-        for (Entity entity : m_SceneHierarchyPanel.GetSelectedEntities())
+        for (Entity entity : m_Selection.GetEntities())
         {
             if (!entity || !entity.HasComponent<WorldTransformComponent>())
                 continue;
             const bool parentSelected = entity.HasComponent<RelationshipComponent>() &&
                                         entity.GetComponent<RelationshipComponent>().Parent != 0 &&
-                                        m_SceneHierarchyPanel.IsSelected(m_ActiveScene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent));
+                                        m_Selection.Contains(m_ActiveScene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent));
             if (parentSelected)
                 continue;
             glm::dmat4 world = entity.GetComponent<WorldTransformComponent>().WorldMatrix;
@@ -1344,8 +1343,7 @@ namespace Nox
         SerializeScene(m_EditorScene, path);
         m_EditorScenePath = path;
         AdoptStartSceneIfNone(path);
-        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
-        m_InspectorPanel.SetContext(m_ActiveScene);
+        SetSceneContext(m_ActiveScene);
         m_HistoryCheckRequested = true;
         m_ApplyBasicSceneView = true;
         ApplyBasicSceneView();
@@ -1554,7 +1552,7 @@ namespace Nox
         m_ViewportTools.GizmoWasUsing = m_ViewportTools.GizmoUsing;
         m_HistoryCheckRequested = false;
         frame.AssetsLoading = Project::GetActive()->GetEditorAssetManager()->GetLoadingCount() > 0;
-        if (Entity watched = m_SceneHierarchyPanel.GetSelectedEntity())
+        if (Entity watched = m_Selection.GetPrimary())
             frame.Watched = watched.GetUUID();
         m_History.Update(m_ActiveScene, frame);
         UpdateSceneDirtyState();
@@ -1585,6 +1583,14 @@ namespace Nox
                 SDL_SetWindowTitle(win->getHandle(), title.c_str());
             }
         }
+    }
+
+    void EditorV2Layer::SetSceneContext(const Ref<Scene>& scene)
+    {
+        // The selection first: the panels read it for the new scene (same ids kept: undo / redo, Play; others dropped).
+        m_Selection.SetScene(scene);
+        m_SceneHierarchyPanel.SetContext(scene);
+        m_InspectorPanel.SetContext(scene);
     }
 
     bool EditorV2Layer::HasUnsavedChanges(uint32_t scope) const
@@ -1706,24 +1712,11 @@ namespace Nox
             if (w > 0 && h > 0)
                 restored->OnViewportResize(w, h);
         }
-        std::vector<UUID> selection;
-        for (Entity selected : m_SceneHierarchyPanel.GetSelectedEntities())
-        {
-            if (selected)
-                selection.push_back(selected.GetUUID());
-        }
-
         m_HoveredEntity = Entity();
         restored->AdoptWorldState(*m_EditorScene);
         m_EditorScene = restored;
         m_ActiveScene = restored;
-        m_SceneHierarchyPanel.SetContext(restored);
-        m_InspectorPanel.SetContext(restored);
-        for (UUID id : selection)
-        {
-            if (Entity entity = restored->GetEntityByUUID(id))
-                m_SceneHierarchyPanel.ToggleSelectedEntity(entity);
-        }
+        SetSceneContext(restored); // (the selection carries over by id)
         m_UnloadUnusedAssetsRequested = true;
         m_History.OnSceneRestored(restored);
     }
@@ -1798,8 +1791,7 @@ namespace Nox
                 m_ActiveScene->OnViewportResize(w, h);
         }
         m_ActiveScene->OnRuntimeStart();
-        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
-        m_InspectorPanel.SetContext(m_ActiveScene);
+        SetSceneContext(m_ActiveScene);
     }
 
     bool EditorV2Layer::LaunchPlayer(const std::vector<std::string>& arguments, bool console, const char* what)
@@ -2243,8 +2235,7 @@ namespace Nox
         m_SceneState = SceneState::Simulate;
         m_HoveredEntity = Entity();
         m_ActiveScene = Scene::Copy(m_EditorScene);
-        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
-        m_InspectorPanel.SetContext(m_ActiveScene);
+        SetSceneContext(m_ActiveScene);
         m_ActiveScene->SetRenderer(m_Renderer);
         m_ActiveScene->SetRenderer2D(m_Renderer2D);
         const glm::dvec3 streamingSource = m_EditorCamera.GetPosition();
@@ -2268,8 +2259,7 @@ namespace Nox
         Input::ClearInjected();
         m_HoveredEntity = Entity();
         m_ActiveScene = m_EditorScene;
-        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
-        m_InspectorPanel.SetContext(m_ActiveScene);
+        SetSceneContext(m_ActiveScene);
         m_UnloadUnusedAssetsRequested = true;
         RefreshToolBar();
     }
@@ -2576,8 +2566,8 @@ namespace Nox
             uint32_t flags = slot.ShowFlags;
 
             const glm::mat4 viewProjection = slot.Camera.GetProjection() * slot.Camera.GetViewMatrix(m_Renderer->GetRenderOrigin());
-            size_t selection = m_SceneHierarchyPanel.GetSelectedEntities().size();
-            for (const Entity& selected : m_SceneHierarchyPanel.GetSelectedEntities())
+            size_t selection = m_Selection.GetEntities().size();
+            for (const Entity& selected : m_Selection.GetEntities())
                 selection = selection * 31 + static_cast<uint32_t>(selected);
             slot.SinceDrawn += ts.GetSeconds();
             if (!slot.Realtime && m_SceneState == SceneState::Edit && slot.DrawnSize == drawSize && slot.DrawnFlags == flags &&
@@ -3125,7 +3115,7 @@ namespace Nox
                     m_Renderer2D->DrawXRayLine(centre, centre + glm::normalize(forward) * light.Radius * scale, colour);
             }
 
-            Entity selected = m_SceneHierarchyPanel.GetSelectedEntity();
+            Entity selected = m_Selection.GetPrimary();
             if (selected && selected.HasComponent<AudioSourceComponent>() && selected.HasComponent<WorldTransformComponent>() &&
                 selected.GetComponent<AudioSourceComponent>().Spatial && !selected.HasComponent<InactiveInHierarchyComponent>())
             {
@@ -3451,7 +3441,7 @@ namespace Nox
                 {
                     if (Entity imported = ModelInstance::SpawnLevel(*m_EditorScene, level))
                     {
-                        m_SceneHierarchyPanel.SetSelectedEntity(imported);
+                        m_Selection.Select(imported);
                         m_SceneHierarchyPanel.MarkDirty();
                     }
                 }
@@ -3617,18 +3607,18 @@ namespace Nox
             }
         }
 
+        m_Selection.Prune(); // (entities destroyed this frame -- by a script, a shortcut, the hierarchy -- are not selected)
         if (m_ShowSceneHierarchy)
             m_SceneHierarchyPanel.Update();
         if (m_ShowInspector)
         {
-            m_InspectorPanel.SetSelection(m_SceneHierarchyPanel.GetSelectedEntity(), m_SceneHierarchyPanel.GetSelectedEntities());
             m_InspectorPanel.Update();
         }
         UpdateMaterialEditors();
         UpdateGraphEditors();
 
         std::vector<int32_t> selectedIDs;
-        for (const Entity& entity : m_SceneHierarchyPanel.GetSelectedEntities())
+        for (const Entity& entity : m_Selection.GetEntities())
         {
             if (entity)
                 selectedIDs.push_back(static_cast<int32_t>(static_cast<uint32_t>(entity)));
@@ -3819,7 +3809,7 @@ namespace Nox
                     }
                     if (m_SceneState == SceneState::Edit)
                     {
-                        if (Entity selected = m_SceneHierarchyPanel.GetSelectedEntity())
+                        if (Entity selected = m_Selection.GetPrimary())
                             FocusOnEntity(selected);
                         event.Handled = true;
                         return;
@@ -3851,7 +3841,7 @@ namespace Nox
                     if (control) { if (ScriptEngine::IsInitialized()) ScriptEngine::ReloadAssembly(); event.Handled = true; return; }
                     break;
                 case SDL_SCANCODE_DELETE:
-                    if (m_SceneState == SceneState::Edit && !m_SceneHierarchyPanel.GetSelectedEntities().empty())
+                    if (m_SceneState == SceneState::Edit && !m_Selection.GetEntities().empty())
                     {
                         m_SceneHierarchyPanel.DeleteSelection();
                         event.Handled = true;
@@ -3953,7 +3943,7 @@ namespace Nox
             .Render = m_Renderer,
             .Camera = &m_EditorCamera,
             .ActiveScene = &m_ActiveScene,
-            .Hierarchy = &m_SceneHierarchyPanel,
+            .Selection = &m_Selection,
             .HoveredEntity = &m_HoveredEntity,
             .Tools = &m_ViewportTools,
             .IsPlayModeFn = [this]() { return m_SceneState == SceneState::Play; },
@@ -4073,7 +4063,7 @@ namespace Nox
                 .Index = index,
                 .Render = m_Renderer,
                 .Camera = &m_Viewports[index].Camera,
-                .Hierarchy = &m_SceneHierarchyPanel,
+                .Selection = &m_Selection,
                 .GizmoMode = &m_ViewportTools.GizmoMode,
                 .ShowCameraPosition = &m_Viewports[index].ShowCameraPosition,
                 .ShowFlags = &m_Viewports[index].ShowFlags,
@@ -4473,7 +4463,7 @@ namespace Nox
                     if (m_ActiveScene)
                     {
                         Entity created = m_ActiveScene->CreateEntity("Empty Entity");
-                        m_SceneHierarchyPanel.SetSelectedEntity(created);
+                        m_Selection.Select(created);
                         m_SceneHierarchyPanel.MarkDirty();
                         m_HistoryCheckRequested = true;
                     }
@@ -4568,7 +4558,6 @@ namespace Nox
                         if (m_ShowInspector)
                         {
                             dock->AddPanel("Inspector", m_InspectorPanel.BuildUI(), UI::UIDockDropZone::Right, "Viewports", 0.22f);
-                            m_InspectorPanel.SetSelection(m_SceneHierarchyPanel.GetSelectedEntity(), m_SceneHierarchyPanel.GetSelectedEntities());
                             m_InspectorPanel.MarkDirty();
                             m_InspectorPanel.Update();
                         }
@@ -5119,9 +5108,9 @@ namespace Nox
 
         // The dragged entity, or the whole selection when it is part of it; the dragged one first (the pivot of the others).
         std::vector<Entity> entities{ draggedEntity };
-        if (m_SceneHierarchyPanel.IsSelected(draggedEntity))
+        if (m_Selection.Contains(draggedEntity))
         {
-            for (Entity selected : m_SceneHierarchyPanel.GetSelectedEntities())
+            for (Entity selected : m_Selection.GetEntities())
             {
                 if (selected && !(selected == draggedEntity))
                     entities.push_back(selected);

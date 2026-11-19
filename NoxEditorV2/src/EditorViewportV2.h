@@ -17,7 +17,7 @@
 namespace Nox
 {
     class Renderer;
-    class SceneHierarchyV2Panel;
+    class EditorSelection;
 
     namespace UI
     {
@@ -127,7 +127,7 @@ namespace Nox
             Renderer* Render = nullptr;
             EditorCamera* Camera = nullptr;
             Ref<Scene>* ActiveScene = nullptr;
-            SceneHierarchyV2Panel* Hierarchy = nullptr;
+            EditorSelection* Selection = nullptr;
             Entity* HoveredEntity = nullptr;
             ViewportToolState* Tools = nullptr;
             std::function<bool()> IsPlayModeFn;
@@ -218,7 +218,7 @@ namespace Nox
             int Index = 0;
             Renderer* Render = nullptr;
             EditorCamera* Camera = nullptr;
-            SceneHierarchyV2Panel* Hierarchy = nullptr;
+            EditorSelection* Selection = nullptr;
             ViewportGizmoMode* GizmoMode = nullptr;
             bool* ShowCameraPosition = nullptr;
             uint32_t* ShowFlags = nullptr;

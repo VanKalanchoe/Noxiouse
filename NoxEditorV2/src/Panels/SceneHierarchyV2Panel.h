@@ -13,6 +13,7 @@
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/UI/Core/UITypes.h"
+#include "EditorSelection.h"
 
 namespace Nox
 {
@@ -39,8 +40,9 @@ namespace Nox
         void Update();
         void MarkDirty() { m_Dirty = true; }
 
-        const std::vector<Entity>& GetSelectedEntities() const { return m_Selection; }
-        Entity GetSelectedEntity() const { return m_Selection.empty() ? Entity{} : m_Selection.back(); }
+        // The editor's selection this panel shows and changes (null: a selection of its own). The selection is not the panel's:
+        // the viewport, the inspector and the shortcuts change it too, and the rows follow.
+        void SetSelection(EditorSelection* selection) { m_Selection = selection; }
         bool IsSelected(Entity entity) const;
         void SetSelectedEntity(Entity entity);
         void ToggleSelectedEntity(Entity entity);
@@ -79,12 +81,20 @@ namespace Nox
         void ShowAddMenu(const UI::UIVec2& screenPos);
 
         void SyncTreeSelection();
+        void UpdateCountLabel();
+        EditorSelection& Sel() { return m_Selection ? *m_Selection : m_OwnSelection; }
+        const EditorSelection& Sel() const { return m_Selection ? *m_Selection : m_OwnSelection; }
         uint64_t NodeIdForEntity(UUID uuid) const;
         uint64_t NodeIdForFolder(const std::string& path);
 
         Ref<Scene> m_Context;
-        std::vector<Entity> m_Selection;
-        Entity m_SelectionAnchor;
+        EditorSelection* m_Selection = nullptr;
+        EditorSelection m_OwnSelection;
+        uint64_t m_SeenSelectionVersion = 0;
+        Entity m_SelectionAnchor; // where Shift+click ranges start
+        size_t m_TotalEntities = 0;
+        size_t m_MatchedEntities = 0;
+        bool m_Filtering = false;
         std::unordered_set<UUID> m_OpenRows;
 
         std::string m_SearchFilter;

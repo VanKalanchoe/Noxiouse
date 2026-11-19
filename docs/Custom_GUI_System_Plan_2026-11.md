@@ -334,7 +334,7 @@ it yet):
 |---|---|---|---|---|
 | E1 | Nothing asked before unsaved work was dropped: New Scene, opening a scene or project, the Project Manager and Exit (close button, Alt+F4) threw away scene edits; no title marker | both editors (NoxEditor asked only in Prefab Mode) | lost work | **fixed** (below) |
 | E2 | One class does everything: menus, shortcuts, play, viewports, layout, saving, every panel's wiring | EditorV2Layer 4960 lines (NoxEditor's EditorLayer 7336) | every port makes it bigger; changes collide | split into editor modules (scene, play, layout, viewports, menus) as panels are ported |
-| E3 | The selection belongs to the Scene Hierarchy panel; the Inspector, viewport, gizmo, play and prefab code reach into it (26 places) | SceneHierarchyV2Panel | a panel closed or rebuilt is the selection's owner gone; no selection of assets / nodes shared | an editor-level selection service (Unreal's USelection) all panels read and write |
+| E3 | The selection belongs to the Scene Hierarchy panel; the Inspector, viewport, gizmo, play and prefab code reach into it (26 places) | SceneHierarchyV2Panel | a panel closed or rebuilt is the selection's owner gone; no selection of assets / nodes shared | an editor-level selection service (Unreal's USelection) all panels read and write -- **built** (below) |
 | E4 | Shortcuts are one switch in the layer's OnEvent, with hand-kept lists of panels whose keys must not reach it | EditorV2Layer::OnEvent | each new panel must be added to the list or Delete deletes entities (it happened); keys cannot be rebound; menus show shortcut text by hand | a command system: commands with a name, a default key, a focus scope (viewport, hierarchy, graph ...), shown in menus and rebindable (Unreal's UICommandList) |
 | E5 | Undo stores the whole scene as text per step, found by polling a fingerprint each frame; panels must remember to request a check; an undo reloads the whole scene | EditorHistory | memory and a hitch per step in large scenes; an edit a panel forgets to report is not undoable; graphs have separate histories | keep for now (it is robust: nothing is forgotten when a check runs); later per-object transactions (Unreal's FTransaction) when large scenes need it |
 | E6 | Which editor opens an asset is a hard-coded switch | EditorV2Layer::OpenAssetV2 | every asset editor touches the layer | an asset-editor registry (Unreal's asset type actions): a type registers its editor and its Content Browser actions |
@@ -353,6 +353,18 @@ Save that leaves something unsaved (Save As cancelled) goes no further. The wind
 `Application` raises `WindowClosedEvent` for a quit from outside and a layer can keep the program running
 (`Application::s_QuitConfirmed` is set by Shutdown, so the confirmed quit is not asked again). Also: a graph's Save button is greyed
 while there is nothing to save, and Ctrl+S then does nothing.
+
+**E3 (built, not run on a GPU / not user-tested).** `NoxEditorV2/src/EditorSelection.h/.cpp`: the editor owns the selection
+(`EditorV2Layer::m_Selection`); the Scene Hierarchy, the Inspector, the viewports (click, box, gizmo, focus, snapping) and the
+shortcuts read and change it, and the panels follow its `GetVersion()`. It holds UUIDs in order (the last is the primary), so a scene
+put back by undo / redo or copied for Play keeps the selection by itself (`EditorV2Layer::SetSceneContext` sets the selection's
+scene, then the panels'); ids the scene does not have are dropped (`Prune` once a frame, and on a scene change). Locked entities are
+never selected. Flaws fixed with it: the undo restore re-selected by toggling entity by entity; Play and Stop cleared the selection;
+a Shift+click in the viewport selected a range in the hierarchy's row order (now it adds, as in Unreal; Ctrl toggles); a Shift box
+toggled instead of adding; the Inspector rebuilt only when the primary or the count changed (A,B -> A,C kept the old rows' entity
+list in its header badge until something else changed); the hierarchy's "N selected" line went stale when the viewport selected.
+The range anchor (Shift+click in the hierarchy) stays the hierarchy's. Checked: syntax check. Not headless-tested (the service needs a
+`Scene`); not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

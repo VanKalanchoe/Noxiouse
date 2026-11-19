@@ -248,7 +248,7 @@ namespace Nox
             if (!entity || entity.HasComponent<PrefabNodeComponent>())
                 return std::nullopt;
 
-            const size_t count = IsSelected(entity) ? m_Selection.size() : 1;
+            const size_t count = IsSelected(entity) ? Sel().Count() : 1;
             const std::string text = count > 1
                 ? std::to_string(count) + " entities"
                 : entity.GetComponent<TagComponent>().Tag;
@@ -288,7 +288,7 @@ namespace Nox
 
             std::vector<Entity> moved;
             if (IsSelected(draggedEntity))
-                moved = m_Selection;
+                moved = Sel().GetEntities();
             else
                 moved.push_back(draggedEntity);
 
@@ -322,8 +322,8 @@ namespace Nox
         m_TreeView->OnDeleteRequested = [this]() { DeleteSelection(); };
         m_TreeView->OnFocusRequested = [this]()
         {
-            if (m_FocusEntity && GetSelectedEntity())
-                m_FocusEntity(GetSelectedEntity());
+            if (m_FocusEntity && Sel().GetPrimary())
+                m_FocusEntity(Sel().GetPrimary());
         };
 
         m_CountLabel = UI::Label("0 entities");
@@ -344,7 +344,10 @@ namespace Nox
     void SceneHierarchyV2Panel::SetContext(const Ref<Scene>& context)
     {
         m_Context = context;
-        ClearSelection();
+        // The editor's selection follows its scene itself (the editor sets both); a selection of the panel's own follows here.
+        if (!m_Selection)
+            m_OwnSelection.SetScene(context);
+        m_SelectionAnchor = {};
         m_LastSignature = 0;
         m_Dirty = true;
     }
@@ -361,6 +364,23 @@ namespace Nox
             m_Dirty = false;
             RebuildTree();
         }
+        // Selected elsewhere (the viewport, the inspector, a shortcut): the rows follow.
+        else if (Sel().GetVersion() != m_SeenSelectionVersion)
+            SyncTreeSelection();
+    }
+
+    void SceneHierarchyV2Panel::UpdateCountLabel()
+    {
+        if (!m_CountLabel)
+            return;
+        char buf[96];
+        if (m_Filtering)
+            std::snprintf(buf, sizeof(buf), "%zu / %zu matching", m_MatchedEntities, m_TotalEntities);
+        else if (!Sel().IsEmpty())
+            std::snprintf(buf, sizeof(buf), "%zu entities  |  %zu selected", m_TotalEntities, Sel().Count());
+        else
+            std::snprintf(buf, sizeof(buf), "%zu entities", m_TotalEntities);
+        m_CountLabel->Text = buf;
     }
 
     uint64_t SceneHierarchyV2Panel::ComputeSceneSignature() const
@@ -399,17 +419,13 @@ namespace Nox
 
     bool SceneHierarchyV2Panel::IsSelected(Entity entity) const
     {
-        return std::find(m_Selection.begin(), m_Selection.end(), entity) != m_Selection.end();
+        return Sel().Contains(entity);
     }
 
     void SceneHierarchyV2Panel::SetSelectedEntity(Entity entity)
     {
-        m_Selection.clear();
-        if (entity && m_Context && m_Context->IsEntityLocked(entity))
-            entity = {};
-        if (entity)
-            m_Selection.push_back(entity);
-        m_SelectionAnchor = entity;
+        Sel().Select(entity);
+        m_SelectionAnchor = Sel().IsEmpty() ? Entity{} : entity;
         SyncTreeSelection();
     }
 
@@ -417,11 +433,7 @@ namespace Nox
     {
         if (entity && m_Context && m_Context->IsEntityLocked(entity))
             return;
-        auto it = std::find(m_Selection.begin(), m_Selection.end(), entity);
-        if (it != m_Selection.end())
-            m_Selection.erase(it);
-        else
-            m_Selection.push_back(entity);
+        Sel().Toggle(entity);
         m_SelectionAnchor = entity;
         SyncTreeSelection();
     }
@@ -450,22 +462,22 @@ namespace Nox
         const size_t lo = std::min(i0, i1);
         const size_t hi = std::max(i0, i1);
 
-        m_Selection.clear();
+        std::vector<Entity> range;
         for (size_t i = lo; i <= hi; ++i)
         {
             auto mapIt = m_NodeMap.find(visible[i]);
             if (mapIt == m_NodeMap.end() || mapIt->second.Kind != NodeKind::Entity)
                 continue;
-            Entity e = m_Context->GetEntityByUUID(mapIt->second.EntityId);
-            if (e && !m_Context->IsEntityLocked(e))
-                m_Selection.push_back(e);
+            if (Entity e = m_Context->GetEntityByUUID(mapIt->second.EntityId))
+                range.push_back(e);
         }
+        Sel().Set(range);
         SyncTreeSelection();
     }
 
     void SceneHierarchyV2Panel::ClearSelection()
     {
-        m_Selection.clear();
+        Sel().Clear();
         m_SelectionAnchor = {};
         SyncTreeSelection();
     }
@@ -481,11 +493,11 @@ namespace Nox
 
     void SceneHierarchyV2Panel::DeleteSelection()
     {
-        if (!m_Context || m_Selection.empty())
+        if (!m_Context || Sel().IsEmpty())
             return;
         std::vector<UUID> toDelete;
-        toDelete.reserve(m_Selection.size());
-        for (Entity e : m_Selection)
+        toDelete.reserve(Sel().Count());
+        for (Entity e : Sel().GetEntities())
         {
             if (e && !m_Context->IsEntityLocked(e))
                 toDelete.push_back(e.GetUUID());
@@ -503,17 +515,18 @@ namespace Nox
 
     void SceneHierarchyV2Panel::DuplicateSelection()
     {
-        if (!m_Context || m_Selection.empty())
+        if (!m_Context || Sel().IsEmpty())
             return;
         std::vector<Entity> copies;
-        for (Entity e : m_Selection)
+        const std::vector<Entity> originals = Sel().GetEntities();
+        for (Entity e : originals)
         {
             if (e && !m_Context->IsEntityLocked(e))
                 copies.push_back(m_Context->DuplicateEntity(e));
         }
         if (!copies.empty())
         {
-            m_Selection = copies;
+            Sel().Set(copies);
             m_SelectionAnchor = copies.back();
             m_Dirty = true;
             if (m_OnSceneMutated)
@@ -654,10 +667,12 @@ namespace Nox
     {
         if (!m_TreeView)
             return;
+        m_SeenSelectionVersion = Sel().GetVersion();
+        UpdateCountLabel();
         std::unordered_set<uint64_t> ids;
-        ids.reserve(m_Selection.size());
+        ids.reserve(Sel().Count());
         uint64_t primary = 0;
-        for (Entity e : m_Selection)
+        for (Entity e : Sel().GetEntities())
         {
             if (e)
             {
@@ -685,8 +700,7 @@ namespace Nox
             return;
         }
 
-        // Remove stale dead handles from m_Selection cleanly
-        std::erase_if(m_Selection, [](const Entity& e) { return !static_cast<bool>(e); });
+        Sel().Prune(); // (entities deleted since: not selected)
         if (!m_SelectionAnchor)
             m_SelectionAnchor = {};
 
@@ -865,19 +879,10 @@ namespace Nox
         });
 
         m_TreeView->SetNodes(std::move(roots));
-        SyncTreeSelection();
-
-        if (m_CountLabel)
-        {
-            char buf[96];
-            if (filtering)
-                std::snprintf(buf, sizeof(buf), "%zu / %zu matching", matchedEntities, totalEntities);
-            else if (!m_Selection.empty())
-                std::snprintf(buf, sizeof(buf), "%zu entities  |  %zu selected", totalEntities, m_Selection.size());
-            else
-                std::snprintf(buf, sizeof(buf), "%zu entities", totalEntities);
-            m_CountLabel->Text = buf;
-        }
+        m_TotalEntities = totalEntities;
+        m_MatchedEntities = matchedEntities;
+        m_Filtering = filtering;
+        SyncTreeSelection(); // (and the count line)
     }
 
     void SceneHierarchyV2Panel::ShowContextMenuForNode(uint64_t nodeId, const UI::UIVec2& screenPos)
@@ -912,12 +917,8 @@ namespace Nox
             }});
             items.push_back({"Select Contents", "", [this, path]()
             {
-                ClearSelection();
-                for (Entity e : CollectFolderContents(path))
-                    if (!m_Context->IsEntityLocked(e))
-                        m_Selection.push_back(e);
-                if (!m_Selection.empty())
-                    m_SelectionAnchor = m_Selection.back();
+                Sel().Set(CollectFolderContents(path)); // (locked ones are left out)
+                m_SelectionAnchor = Sel().GetPrimary();
                 SyncTreeSelection();
                 m_Dirty = true;
             }});
@@ -996,7 +997,7 @@ namespace Nox
 
         if (!m_Context->GetSubLevels().empty() && !m_Context->IsRunning())
         {
-            const std::vector<Entity> moved = m_Selection;
+            const std::vector<Entity> moved = Sel().GetEntities();
             const AssetHandle from = m_Context->GetEntityLevel(entity);
             std::vector<UI::UIMenuItem> levelItems;
             levelItems.push_back({"Persistent Level", "", [this, moved]()
@@ -1028,7 +1029,8 @@ namespace Nox
         {
             items.push_back({"Unparent", "", [this]()
             {
-                ReparentEntities(m_Selection, Entity{});
+                const std::vector<Entity> selected = Sel().GetEntities();
+                ReparentEntities(selected, Entity{});
                 m_Dirty = true;
                 if (m_OnSceneMutated)
                     m_OnSceneMutated();

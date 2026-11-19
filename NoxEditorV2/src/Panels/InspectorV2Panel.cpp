@@ -1,4 +1,6 @@
 #include "InspectorV2Panel.h"
+
+#include "EditorSelection.h"
 #include "InspectorWidgetsV2.h"
 
 #include <algorithm>
@@ -222,25 +224,22 @@ namespace Nox
         m_Context = context;
         m_Primary = {};
         m_Selection.clear();
+        m_SeenSelectionVersion = 0; // (read again for this scene)
         m_LastEntityID = 0;
         m_LastSignature = 0;
         m_Dirty = true;
     }
 
-    void InspectorV2Panel::SetSelection(Entity primary, const std::vector<Entity>& selection)
+    void InspectorV2Panel::FollowSelection()
     {
-        const UUID nextID = primary ? primary.GetUUID() : UUID(0);
-        if (nextID != m_LastEntityID || selection.size() != m_LastSelectionCount)
-        {
-            m_Primary = primary;
-            m_Selection = selection;
-            m_Dirty = true;
-        }
-        else
-        {
-            m_Primary = primary;
-            m_Selection = selection;
-        }
+        // Any change of the editor's selection is a new set of rows: other entities, or the same ones with new handles (undo put
+        // another copy of the scene back, Play started). Comparing only the primary and the count missed A,B -> A,C.
+        if (!m_SelectionSource || m_SelectionSource->GetVersion() == m_SeenSelectionVersion)
+            return;
+        m_SeenSelectionVersion = m_SelectionSource->GetVersion();
+        m_Primary = m_SelectionSource->GetPrimary();
+        m_Selection = m_SelectionSource->GetEntities();
+        m_Dirty = true;
     }
 
     void InspectorV2Panel::NotifyMutated(bool markDirty)
@@ -358,11 +357,9 @@ namespace Nox
             m_PendingSplit = 0;
         }
 
+        FollowSelection();
         if (!m_ScrollView)
             return;
-
-        if (m_Primary && !m_Primary)
-            m_Primary = {};
 
         const uint64_t sig = ComputeEntitySignature();
         const WorldUnits::DisplayUnit unit = WorldUnits::GetDisplayUnit();

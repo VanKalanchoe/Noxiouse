@@ -15,6 +15,7 @@
 
 namespace Nox
 {
+    class EditorSelection;
     class EntityActiveSwitch;
 
     namespace UI
@@ -36,7 +37,8 @@ namespace Nox
         const Ref<UI::UIElement>& BuildUI();
 
         void SetContext(const Ref<Scene>& context);
-        void SetSelection(Entity primary, const std::vector<Entity>& selection);
+        // The editor's selection: the inspector shows its primary (and applies transform deltas to the rest).
+        void SetSelection(const EditorSelection* selection) { m_SelectionSource = selection; m_SeenSelectionVersion = 0; }
         void Update();
         void MarkDirty() { m_Dirty = true; }
 
@@ -51,9 +53,12 @@ namespace Nox
         void SyncLiveFields();
         void ShowAddComponentMenu(const UI::UIRect& triggerBounds);
         void NotifyMutated(bool markDirty = false);
+        void FollowSelection();
 
         Ref<Scene> m_Context;
-        Entity m_Primary;
+        const EditorSelection* m_SelectionSource = nullptr;
+        uint64_t m_SeenSelectionVersion = 0;
+        Entity m_Primary;                 // (resolved from the selection at its last change)
         std::vector<Entity> m_Selection;
         UUID m_LastEntityID = 0;
         size_t m_LastSelectionCount = 0;

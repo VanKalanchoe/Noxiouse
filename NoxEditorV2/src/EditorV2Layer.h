@@ -16,6 +16,7 @@
 #include "Panels/InspectorV2Panel.h"
 #include "Panels/OutputLogV2Panel.h"
 #include "Panels/NodeGraph/NodeGraphEditorV2.h"
+#include "EditorSelection.h"
 #include "Panels/SceneHierarchyV2Panel.h"
 #include "ProjectManager/ProcessLauncher.h"
 #include "ScriptBuilder.h"
@@ -88,6 +89,8 @@ namespace Nox
         // Save / Don't Save / Cancel: the dialog every unsaved-changes question uses.
         void ShowSaveChangesDialog(const std::string& text, std::function<void()> save, std::function<void()> dontSave);
         void UpdateSceneDirtyState();
+        // The scene the editor shows changed (opened, Play / Stop, undo put another copy back): the selection and the panels follow.
+        void SetSceneContext(const Ref<Scene>& scene);
         void SerializeScene(const Ref<Scene>& scene, const std::filesystem::path& path);
 
         void CreateBasicScene();
@@ -342,6 +345,8 @@ namespace Nox
             bool Dirty = true;
         };
 
+        // What is selected: the editor's, read and changed by every panel, the viewports and the shortcuts (E3).
+        EditorSelection m_Selection;
         SceneHierarchyV2Panel m_SceneHierarchyPanel;
         InspectorV2Panel m_InspectorPanel;
         ContentBrowserV2Panel m_ContentBrowserPanel;
