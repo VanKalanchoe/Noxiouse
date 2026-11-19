@@ -4446,7 +4446,12 @@ namespace Nox
                  [this]() { if (IsPanelDocked("Output Log")) UndockPage(DrawerPage::Log); else DockPage(DrawerPage::Log); }},
                 {"Profiler", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
                 {"World Partition", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
-                {"Levels", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
+                {"Levels", "", [this, uiLayer]()
+                {
+                    if (!m_LevelsPanel.GetRoot())
+                        m_LevelsPanel.BuildUI(&uiLayer->GetContext());
+                    OpenToolWindow("Levels", m_LevelsPanel.GetRoot(), { 820.0f, 320.0f });
+                }, false, true, false, false, "The open scene and its sub-levels: current, visible, locked, loading, placement."},
                 {"Mixer", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
                 {"Viewports", "", {}, false, true, false, false, "", std::move(viewportItems)},
                 {"Animation Graphs", "", {}, false, true, false, false, "", std::move(animGraphItems)},
@@ -4583,7 +4588,21 @@ namespace Nox
                 m_HistoryCheckRequested = true; // (the scene changed: an undo step, and unsaved)
         };
         m_ProjectSettings.SetHooks(std::move(projectHooks));
+
+        LevelsV2Panel::Hooks levelHooks;
+        levelHooks.ActiveScene = [this]() { return m_ActiveScene; };
+        levelHooks.Editing = [this]() { return m_SceneState == SceneState::Edit; };
+        levelHooks.OpenScene = [this]() { return EditorSceneHandle(); };
+        levelHooks.Selection = [this]() { return m_Selection.GetEntities(); };
+        levelHooks.Save = [this]() { SaveScene(); };
+        levelHooks.SceneChanged = [this]() { m_HistoryCheckRequested = true; m_SceneHierarchyPanel.MarkDirty(); };
+        levelHooks.AskSave = [this](const std::string& text, std::function<void()> save, std::function<void()> dontSave)
+        {
+            ShowSaveChangesDialog(text, std::move(save), std::move(dontSave));
+        };
+        m_LevelsPanel.SetHooks(std::move(levelHooks));
     }
+
 
     void EditorV2Layer::ApplyQualityPreset(int quality)
     {
@@ -4632,6 +4651,8 @@ namespace Nox
             m_RendererSettings.Update();
         if (m_ProjectSettings.GetRoot() && dock->HasPanel("Project Settings"))
             m_ProjectSettings.Update();
+        if (m_LevelsPanel.GetRoot() && dock->HasPanel("Levels"))
+            m_LevelsPanel.Update();
     }
 
     std::filesystem::path EditorV2Layer::LayoutDirectory() const

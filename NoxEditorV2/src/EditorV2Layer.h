@@ -16,6 +16,7 @@
 #include "Panels/InspectorV2Panel.h"
 #include "Panels/OutputLogV2Panel.h"
 #include "Panels/AssetEditorV2.h"
+#include "Panels/LevelsV2Panel.h"
 #include "Panels/ProjectSettingsV2Panel.h"
 #include "Panels/RendererSettingsV2Panel.h"
 #include "Panels/NodeGraph/NodeGraphEditorV2.h"
@@ -329,6 +330,7 @@ namespace Nox
         // windows, updated while open (R1).
         RendererSettingsV2Panel m_RendererSettings;
         ProjectSettingsV2Panel m_ProjectSettings;
+        LevelsV2Panel m_LevelsPanel;          // Window > Levels (L1)
         void OpenToolWindow(const std::string& title, const Ref<UI::UIElement>& root, UI::UIVec2 size);
         void UpdateToolWindows();
         void ApplyQualityPreset(int quality);

@@ -428,6 +428,16 @@ window's ImGui active id (dropped); Camera FOV and Show physics collider sat in 
 colliders are in the viewport's Show menu already). Checked: syntax check; the headless UI test (22 checks; new: a checkbox in a
 disabled row does not toggle, enabled again it does; a drag changes on every step and commits once). Not run on a GPU.
 
+**L1 part 1 -- Levels (built, not run on a GPU / not user-tested).** `Panels/LevelsV2Panel`, Window > Levels: one row per level
+(Current, Visible, Locked, the level's name with "not read" / its loading state in Play, Loading: Always Loaded / Streamed, Placement:
+a popup with Offset X / Y / Z (m) and Yaw (deg) and Reset, Remove), then Add Existing Level... (a menu of the project's other
+scenes), New Level... (a dialog: the name, Create; an error keeps it open) and Move Selection to Current. Rows are rebuilt only when
+the levels change; their values follow the scene every frame. Flaws of the old panel not carried over: no level change was an edit
+(Visible, Locked, Loading, placement, add, remove, current, move: the scene stayed "saved" and nothing was undoable) -- each one
+asks for an undo step now and marks the scene unsaved; a new level's file was written by hand as text (a second copy of the scene
+format) -- the scene serializer writes it; Remove asked "Save and Remove / Remove / Cancel" its own way -- it is the editor's
+Save / Don't Save / Cancel question now. Checked: syntax check. Not run on a GPU.
+
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and
 `Panels/NodeGraph/NodeGraphEditorV2` (the window: Save / Undo / Redo / Frame, Parameters on the left, Details on the right). Opened by
