@@ -1,5 +1,6 @@
 #pragma once
 #include "xxhash.h"
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,15 @@ namespace Nox
         static std::string SaveFile(const char* filter);
         // A folder picked in the system's folder dialog, starting in `defaultLocation` when given.
         static std::string OpenFolder(const char* defaultLocation = nullptr);
+
+        // The same without waiting: the dialog opens and the program keeps running (drawing, streaming, previews); `done` runs on the
+        // main thread at the start of a later frame (Application's loop) with the path, empty when cancelled. The blocking ones above
+        // spin the main loop until the dialog closes.
+        static void OpenFileAsync(const char* filter, std::function<void(std::string)> done);
+        static void SaveFileAsync(const char* filter, std::function<void(std::string)> done);
+        static void OpenFolderAsync(const char* defaultLocation, std::function<void(std::string)> done);
+        // Main thread, once a frame (Application::Run): the answers that came in are given to their callers.
+        static void DeliverDialogResults();
         
         static std::string LoadFileFromPath(const std::string& path);
         static std::vector<uint32_t> LoadSpvFromPath(const std::string& path);

@@ -893,17 +893,24 @@ namespace Nox
 
     void ProfilerV2Panel::SaveCapture()
     {
-        std::filesystem::path path = Utility::SaveFile("Nox Profiler Capture\0noxprof\0");
-        if (path.empty())
-            return;
-        if (path.extension() != ".noxprof")
-            path += ".noxprof";
-        m_Message = Profiler::Get().SaveTimeline(path.string()) ? std::format("Saved {}", path.filename().string()) : std::format("Could not write {}", path.string());
+        Utility::SaveFileAsync("Nox Profiler Capture\0noxprof\0", [this](std::string chosen)
+        {
+            if (chosen.empty())
+                return;
+            std::filesystem::path path(chosen);
+            if (path.extension() != ".noxprof")
+                path += ".noxprof";
+            m_Message = Profiler::Get().SaveTimeline(path.string()) ? std::format("Saved {}", path.filename().string()) : std::format("Could not write {}", path.string());
+        });
     }
 
     void ProfilerV2Panel::LoadCapture()
     {
-        const std::string path = Utility::OpenFile("Nox Profiler Capture\0noxprof\0");
+        Utility::OpenFileAsync("Nox Profiler Capture\0noxprof\0", [this](std::string path) { LoadCaptureFrom(path); });
+    }
+
+    void ProfilerV2Panel::LoadCaptureFrom(const std::string& path)
+    {
         if (path.empty())
             return;
         auto capture = std::make_unique<ProfileCapture>();

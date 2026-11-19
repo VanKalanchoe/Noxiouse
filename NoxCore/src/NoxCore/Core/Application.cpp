@@ -1,4 +1,5 @@
 #include "Application.h"
+#include "NoxCore/Utils/Utils.h"
 
 #define SDL_MAIN_USE_CALLBACKS 1  /* use the callbacks instead of main() */
 #include <imgui_impl_sdl3.h>
@@ -139,6 +140,7 @@ namespace Nox
             Timestep timestep = static_cast<float>(currentTime - m_LastFrameTime);
             m_LastFrameTime = currentTime;
             Input::BeginFrame(); // the mouse motion since the last frame, for game scripts
+            Utility::DeliverDialogResults(); // file dialogs opened without waiting: their answers, on this thread
 
             // Main layer update here
             {

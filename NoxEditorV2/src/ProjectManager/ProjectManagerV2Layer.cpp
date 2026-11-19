@@ -93,6 +93,7 @@ namespace Nox
 
     ProjectManagerV2Layer::~ProjectManagerV2Layer()
     {
+        *m_Alive = false;
         for (Entry& entry : m_Projects)
             if (entry.Thumbnail)
                 Renderer::DeferAssetRelease(entry.Thumbnail);
@@ -371,9 +372,11 @@ namespace Nox
             }).VAlign(UI::UIAlignment::Center),
             UI::Button("Browse...", [this]()
             {
-                const std::string file = Utility::OpenFile("Nox Project\0nproj\0");
-                if (!file.empty())
-                    OpenProjectFile(file);
+                Utility::OpenFileAsync("Nox Project\0nproj\0", [this, alive = m_Alive](std::string file)
+                {
+                    if (*alive && !file.empty())
+                        OpenProjectFile(file);
+                });
             }).VAlign(UI::UIAlignment::Center)
         })
         .Style("TopBar")
@@ -503,14 +506,15 @@ namespace Nox
 
         auto browseFolderBtn = UI::Button("Browse...", [this]()
         {
-            const std::string folder = Utility::OpenFolder(m_NewLocation.empty() ? nullptr : m_NewLocation.c_str());
-            if (!folder.empty())
+            Utility::OpenFolderAsync(m_NewLocation.empty() ? nullptr : m_NewLocation.c_str(), [this, alive = m_Alive](std::string folder)
             {
+                if (!*alive || folder.empty())
+                    return;
                 m_NewLocation = std::filesystem::path(folder).generic_string();
                 if (m_LocationInput)
                     m_LocationInput->Text = m_NewLocation;
                 UpdateNewProjectPreview();
-            }
+            });
         });
 
         auto unitsDropdown = UI::MakeUI<UI::UIDropdown>(

@@ -338,7 +338,7 @@ it yet):
 | E4 | Shortcuts are one switch in the layer's OnEvent, with hand-kept lists of panels whose keys must not reach it | EditorV2Layer::OnEvent | each new panel must be added to the list or Delete deletes entities (it happened); keys cannot be rebound; menus show shortcut text by hand | a command system: commands with a name, a default key, a focus scope (viewport, hierarchy, graph ...), shown in menus and rebindable (Unreal's UICommandList) -- **built** (below) |
 | E5 | Undo stores the whole scene as text per step, found by polling a fingerprint each frame; panels must remember to request a check; an undo reloads the whole scene | EditorHistory | memory and a hitch per step in large scenes; an edit a panel forgets to report is not undoable; graphs have separate histories | keep for now (it is robust: nothing is forgotten when a check runs); later per-object transactions (Unreal's FTransaction) when large scenes need it |
 | E6 | Which editor opens an asset is a hard-coded switch | EditorV2Layer::OpenAssetV2 | every asset editor touches the layer | an asset-editor registry (Unreal's asset type actions): a type registers its editor and its Content Browser actions -- **built** (below; Content Browser actions per type not yet) |
-| E7 | File dialogs block: the main loop spins until the dialog returns | Utility::OpenFile / SaveFile | the editor stops drawing (and streaming, previews) while a dialog is open | asynchronous dialogs (SDL's callback) with the result delivered next frame |
+| E7 | File dialogs block: the main loop spins until the dialog returns | Utility::OpenFile / SaveFile | the editor stops drawing (and streaming, previews) while a dialog is open | asynchronous dialogs (SDL's callback) with the result delivered next frame -- **built** (below) |
 | E8 | Colours written into widgets instead of theme tokens (my new panels included) | UI widgets, panels | a theme change does not reach them | move to theme tokens when each panel is touched |
 | E9 | Two editors with copied code (AssetPreviewRenderer, EditorHistory, ScriptBuilder, GamePackager live twice) | NoxEditor, NoxEditorV2 | fixes made twice or only once | shared editor code in one place; NoxEditor retired when V2 has everything |
 
@@ -509,6 +509,15 @@ Copy connect command (Claude Code), Copy JSON config, Rotate token -- the copies
 settings and token as NoxEditor (`<Project>/.nox/mcp.ini`, `.nox/mcp-token`; port 8765). Not yet: runtime_call finds no game -- V2's
 multiplayer Play does not start the players' MCP servers. Checked: syntax check of every MCP source against V2's headers with
 NOX_WITH_MCP=1. Not run.
+
+**E7 (built, not run / not user-tested).** `Utility::OpenFileAsync` / `SaveFileAsync` / `OpenFolderAsync`: the dialog opens and the
+program keeps running (drawing, streaming, previews); the answer is queued (SDL may call back on another thread) and given to the
+caller on the main thread at the start of the next frame (`Utility::DeliverDialogResults` in `Application::Run`). NoxEditorV2 uses
+them for Save Scene As (and Save of an untitled scene), New / Open Project (menus and Ctrl+O), Content Browser Import, the profiler's
+Save / Load and the Project Manager's Browse buttons. The "Save changes?" question goes on when the Save As dialog answers (Save
+takes a continuation: `SaveScene(then)`, `SaveSceneAs(then)`, `SaveSceneTo(path)`); cancelled, nothing is dropped. The blocking
+versions stay for the start-up loop (before the editor runs). The Project Manager's callbacks check that the layer still exists.
+Checked: syntax check. Not run.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

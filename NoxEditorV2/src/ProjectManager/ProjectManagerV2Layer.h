@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -28,6 +30,8 @@ namespace Nox
         void OnUpdate(Timestep ts) override;
 
     private:
+        // Dialogs answer later (E7): their callbacks check this (false once the layer is gone).
+        std::shared_ptr<bool> m_Alive = std::make_shared<bool>(true);
         struct Entry
         {
             std::filesystem::path File;

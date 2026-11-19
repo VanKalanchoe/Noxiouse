@@ -87,7 +87,7 @@ namespace Nox
         add("File.NewScene", "New Scene", "File", CommandScope::Global, Chord(SDL_SCANCODE_N, true),
             [this]() { ConfirmUnsavedChanges("making a new scene", [this]() { NewScene(); }, UnsavedScene); });
         add("File.OpenProject", "Open Project...", "File", CommandScope::Global, Chord(SDL_SCANCODE_O, true),
-            [this]() { ConfirmUnsavedChanges("opening another project", [this]() { OpenProject(); }); });
+            [this]() { ConfirmUnsavedChanges("opening another project", [this]() { OpenProjectAsync(); }); });
         add("File.SaveScene", "Save Scene", "File", CommandScope::Global, Chord(SDL_SCANCODE_S, true), [this]() { SaveScene(); });
         add("File.SaveSceneAs", "Save Scene As...", "File", CommandScope::Global, Chord(SDL_SCANCODE_S, true, true), [this]() { SaveSceneAs(); });
 

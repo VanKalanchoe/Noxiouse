@@ -1,6 +1,8 @@
 #include "Utils.h"
 
 #include <atomic>
+#include <cstring>
+#include <memory>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -162,6 +164,76 @@ namespace Nox
             SDL_Delay(10);
         }
         return selectedFile;
+    }
+
+    namespace
+    {
+        // One dialog waiting for its answer: what SDL must keep until it calls back (the filters' strings), and who to tell.
+        struct AsyncDialog
+        {
+            std::string FilterName;
+            std::string FilterPattern;
+            SDL_DialogFileFilter Filters[2]{};
+            std::function<void(std::string)> Done;
+        };
+        std::mutex s_DialogMutex;
+        std::vector<std::pair<std::function<void(std::string)>, std::string>> s_DialogResults; // (SDL may answer on another thread)
+
+        void SDLCALL AsyncDialogCallback(void* userdata, const char* const* filelist, int)
+        {
+            std::unique_ptr<AsyncDialog> dialog(static_cast<AsyncDialog*>(userdata));
+            std::string path;
+            if (!filelist)
+                SDL_Log("File dialog failed: %s", SDL_GetError());
+            else if (*filelist)
+                path = filelist[0];
+            std::lock_guard lock(s_DialogMutex);
+            s_DialogResults.emplace_back(std::move(dialog->Done), std::move(path));
+        }
+
+        AsyncDialog* MakeDialog(const char* filter, std::function<void(std::string)> done)
+        {
+            auto* dialog = new AsyncDialog();
+            dialog->Done = std::move(done);
+            if (filter)
+            {
+                dialog->FilterName = filter;
+                dialog->FilterPattern = NormalizeFilterPattern(filter + std::strlen(filter) + 1);
+            }
+            dialog->Filters[0] = { dialog->FilterName.c_str(), dialog->FilterPattern.c_str() };
+            dialog->Filters[1] = { "All files", "*" };
+            return dialog;
+        }
+    }
+
+    void Utility::OpenFileAsync(const char* filter, std::function<void(std::string)> done)
+    {
+        AsyncDialog* dialog = MakeDialog(filter, std::move(done));
+        SDL_ShowOpenFileDialog(AsyncDialogCallback, dialog, Application::Get().getWindow()->getHandle(), dialog->Filters, 2, SDL_GetBasePath(), false);
+    }
+
+    void Utility::SaveFileAsync(const char* filter, std::function<void(std::string)> done)
+    {
+        AsyncDialog* dialog = MakeDialog(filter, std::move(done));
+        SDL_ShowSaveFileDialog(AsyncDialogCallback, dialog, Application::Get().getWindow()->getHandle(), dialog->Filters, 2, SDL_GetBasePath());
+    }
+
+    void Utility::OpenFolderAsync(const char* defaultLocation, std::function<void(std::string)> done)
+    {
+        AsyncDialog* dialog = MakeDialog(nullptr, std::move(done));
+        SDL_ShowOpenFolderDialog(AsyncDialogCallback, dialog, Application::Get().getWindow()->getHandle(), defaultLocation, false);
+    }
+
+    void Utility::DeliverDialogResults()
+    {
+        std::vector<std::pair<std::function<void(std::string)>, std::string>> results;
+        {
+            std::lock_guard lock(s_DialogMutex);
+            results.swap(s_DialogResults);
+        }
+        for (auto& [done, path] : results)
+            if (done)
+                done(std::move(path));
     }
 
     // load file without dialog

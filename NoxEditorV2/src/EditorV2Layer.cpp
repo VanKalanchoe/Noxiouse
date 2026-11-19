@@ -562,6 +562,38 @@ namespace Nox
         return OpenProject(projectFile);
     }
 
+    void EditorV2Layer::NewProjectAsync()
+    {
+        Utility::SaveFileAsync("Nox Project\0nproj\0", [this](std::string chosen)
+        {
+            if (chosen.empty())
+                return;
+            const std::filesystem::path path(chosen);
+            ProjectLibrary::NewProjectSettings settings;
+            settings.Name = path.stem().string();
+            settings.Location = path.parent_path();
+            std::string error;
+            const std::filesystem::path projectFile = ProjectLibrary::CreateProject(settings, error);
+            if (projectFile.empty())
+            {
+                NOX_CORE_ERROR("New Project: {}", error);
+                Notify(UI::UINotificationSeverity::Error, "Project not made", error);
+                return;
+            }
+            m_CreateBasicScene = true;
+            OpenProject(projectFile);
+        });
+    }
+
+    void EditorV2Layer::OpenProjectAsync()
+    {
+        Utility::OpenFileAsync("Nox Project\0nproj\0", [this](std::string chosen)
+        {
+            if (!chosen.empty())
+                OpenProject(std::filesystem::path(chosen));
+        });
+    }
+
     bool EditorV2Layer::OpenProject()
     {
         const std::string filepath = Utility::OpenFile("Nox Project\0nproj\0");
@@ -800,15 +832,19 @@ namespace Nox
         Notify(UI::UINotificationSeverity::Info, "Scene opened", m_EditorScenePath.filename().string());
     }
 
-    void EditorV2Layer::SaveScene()
+    void EditorV2Layer::SaveScene(std::function<void(bool saved)> then)
     {
         if (!m_ActiveScene || !Project::GetActive())
+        {
+            if (then)
+                then(false);
             return;
+        }
         if (AudioMixer::IsDirty())
             AudioMixer::Save();
         if (m_EditorScenePath.empty())
         {
-            SaveSceneAs();
+            SaveSceneAs(std::move(then)); // (never saved: named first, in a dialog that does not stop the editor)
             return;
         }
         const std::filesystem::path fullPath = m_EditorScenePath.is_absolute()
@@ -823,6 +859,8 @@ namespace Nox
         if (error || (existed && after == before))
         {
             Notify(UI::UINotificationSeverity::Error, "Scene not saved", fullPath.filename().string() + " could not be written -- see the Output Log.");
+            if (then)
+                then(false);
             return;
         }
         AdoptStartSceneIfNone(fullPath);
@@ -830,15 +868,31 @@ namespace Nox
         m_SceneDirty = false;
         m_HistoryPositionSeen = m_History.GetPosition();
         Notify(UI::UINotificationSeverity::Success, "Scene saved", m_EditorScenePath.generic_string());
+        if (then)
+            then(true);
     }
 
-    void EditorV2Layer::SaveSceneAs()
+    void EditorV2Layer::SaveSceneAs(std::function<void(bool saved)> then)
     {
         if (!m_ActiveScene || !Project::GetActive())
+        {
+            if (then)
+                then(false);
             return;
-        std::filesystem::path path = Utility::SaveFile("Nox Scene *.nox\0nox\0");
-        if (path.empty())
-            return;
+        }
+        // The dialog does not stop the editor (E7); the scene is written when it answers.
+        Utility::SaveFileAsync("Nox Scene *.nox\0nox\0", [this, then](std::string chosen)
+        {
+            const bool saved = !chosen.empty() && SaveSceneTo(chosen);
+            if (then)
+                then(saved);
+        });
+    }
+
+    bool EditorV2Layer::SaveSceneTo(std::filesystem::path path)
+    {
+        if (!m_ActiveScene || !Project::GetActive() || path.empty())
+            return false;
         if (!path.has_extension())
             path += ".nox";
         std::error_code error;
@@ -848,7 +902,7 @@ namespace Nox
         if (!std::filesystem::exists(path, error))
         {
             Notify(UI::UINotificationSeverity::Error, "Scene not saved", path.filename().string() + " could not be written -- see the Output Log.");
-            return;
+            return false;
         }
 
         const std::filesystem::path rel = std::filesystem::relative(path, Project::GetActiveAssetDirectory(), error);
@@ -863,6 +917,7 @@ namespace Nox
         m_SceneDirty = false;
         m_HistoryPositionSeen = m_History.GetPosition();
         Notify(UI::UINotificationSeverity::Success, "Scene saved", m_EditorScenePath.generic_string());
+        return true;
     }
 
     void EditorV2Layer::SerializeScene(const Ref<Scene>& scene, const std::filesystem::path& path)
@@ -1657,20 +1712,26 @@ namespace Nox
         ShowSaveChangesDialog("You have unsaved changes in " + list + ".\nSave them before " + action + "?",
             [this, proceed, scope]()
             {
-                if ((scope & UnsavedScene) && m_SceneDirty)
-                    SaveScene();
-                if (scope & UnsavedAssets)
-                    m_AssetEditors.SaveAll();
-                if ((scope & UnsavedMixer) && AudioMixer::IsDirty())
-                    AudioMixer::Save();
-                // Still unsaved (Save As was cancelled, a file could not be written): nothing is dropped.
-                if (HasUnsavedChanges(scope))
+                const auto finish = [this, proceed, scope]()
                 {
-                    Notify(UI::UINotificationSeverity::Warning, "Not everything was saved", "Nothing was closed: save again or choose Don't Save.");
-                    return;
-                }
-                if (proceed)
-                    proceed();
+                    if (scope & UnsavedAssets)
+                        m_AssetEditors.SaveAll();
+                    if ((scope & UnsavedMixer) && AudioMixer::IsDirty())
+                        AudioMixer::Save();
+                    // Still unsaved (Save As was cancelled, a file could not be written): nothing is dropped.
+                    if (HasUnsavedChanges(scope))
+                    {
+                        Notify(UI::UINotificationSeverity::Warning, "Not everything was saved", "Nothing was closed: save again or choose Don't Save.");
+                        return;
+                    }
+                    if (proceed)
+                        proceed();
+                };
+                // The scene first: an untitled one asks for its name, and the rest goes on when that dialog answers.
+                if ((scope & UnsavedScene) && m_SceneDirty)
+                    SaveScene([finish](bool) { finish(); });
+                else
+                    finish();
             },
             [this, proceed, scope]()
             {
@@ -4310,7 +4371,7 @@ namespace Nox
         menuBar->AddDynamicMenu("File", [this, uiLayer]() -> std::vector<UI::UIMenuItem>
         {
             return {
-                {"New Project...", "", [this]() { ConfirmUnsavedChanges("making a new project", [this]() { NewProject(); }); }},
+                {"New Project...", "", [this]() { ConfirmUnsavedChanges("making a new project", [this]() { NewProjectAsync(); }); }},
                 {"Open Project...", m_Commands.ShortcutText("File.OpenProject"), [this]() { m_Commands.Execute("File.OpenProject"); }},
                 {"Project Manager...", "", [this]() { ConfirmUnsavedChanges("closing this project", [this]() { OpenProjectManager(); }); }, false, true, false, false,
                  "Close this project and show the Project Manager (unsaved changes are asked about first)."},

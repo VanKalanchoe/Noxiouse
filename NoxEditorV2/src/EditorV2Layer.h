@@ -83,8 +83,11 @@ namespace Nox
             Simulate = 2
         };
 
+        // Blocking (the start-up loop, before the editor runs); the menus use the Async ones (the dialog does not stop the editor).
         bool NewProject();
         bool OpenProject();
+        void NewProjectAsync();
+        void OpenProjectAsync();
         bool OpenProject(const std::filesystem::path& path);
         bool OpenStartupProject(const std::filesystem::path& failed = {});
         void OpenProjectManager();
@@ -92,8 +95,10 @@ namespace Nox
         void NewScene();
         void OpenScene(AssetHandle handle);
         void FinishSceneLoad();
-        void SaveScene();
-        void SaveSceneAs();
+        // `then` runs once the scene is written or not (an untitled scene asks for its name first, without stopping the editor).
+        void SaveScene(std::function<void(bool saved)> then = {});
+        void SaveSceneAs(std::function<void(bool saved)> then = {});
+        bool SaveSceneTo(std::filesystem::path path);
         // Unsaved work (the scene, open graphs, the mixer): asked about before what would drop it -- Save (then go on), Don't Save
         // (the edits are dropped: graphs go back to their files; then go on), Cancel. `action` names what would happen ("opening
         // the project"); `scope` is what the action drops (a new scene drops the scene, not an open graph's edits). Without

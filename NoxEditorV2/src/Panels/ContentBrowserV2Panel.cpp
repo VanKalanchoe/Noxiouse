@@ -2077,9 +2077,11 @@ namespace Nox
     {
         // SDL's dialog takes extensions without "*." (it refuses a filter that has them).
         static constexpr char filter[] = "Models, textures, sounds, fonts, scenes\0gltf;glb;png;jpg;jpeg;tga;hdr;wav;ogg;flac;mp3;ttf;otf;nox\0";
-        const std::string file = Utility::OpenFile(filter);
-        if (!file.empty())
-            ImportFile(file);
+        Utility::OpenFileAsync(filter, [this](std::string file) // (the editor keeps running while the dialog is open)
+        {
+            if (!file.empty())
+                ImportFile(file);
+        });
     }
 
     void ContentBrowserV2Panel::ShowInExplorer(const std::filesystem::path& absolutePath)

@@ -61,6 +61,7 @@ namespace Nox
     private:
         void SaveCapture();
         void LoadCapture();
+        void LoadCaptureFrom(const std::string& path);
 
         UI::UIContext* m_Context = nullptr;
         Ref<UI::UIElement> m_Root;
