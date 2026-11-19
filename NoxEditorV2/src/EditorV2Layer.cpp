@@ -66,6 +66,7 @@
 #include "NoxCore/UI/Widgets/UICheckBox.h"
 #include "NoxCore/UI/Widgets/UIImage.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
+#include "NoxCore/UI/Widgets/UIModal.h"
 #include "NoxCore/UI/Widgets/UIScrollView.h"
 #include "NoxCore/UI/Widgets/UISlider.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
@@ -689,6 +690,7 @@ namespace Nox
         m_InspectorPanel.SetContext(m_ActiveScene);
         m_EditorScenePath.clear();
         m_UnloadUnusedAssetsRequested = true;
+        m_SceneCleanPending = true;
 #if NOX_PROFILE_STATS
         Profiler::Get().ResetStats();
 #endif
@@ -773,6 +775,7 @@ namespace Nox
 #if NOX_PROFILE_STATS
         Profiler::Get().ResetStats();
 #endif
+        m_SceneCleanPending = true;
         Notify(UI::UINotificationSeverity::Info, "Scene opened", m_EditorScenePath.filename().string());
     }
 
@@ -803,6 +806,8 @@ namespace Nox
         }
         AdoptStartSceneIfNone(fullPath);
         CaptureProjectThumbnail();
+        m_SceneDirty = false;
+        m_HistoryPositionSeen = m_History.GetPosition();
         Notify(UI::UINotificationSeverity::Success, "Scene saved", m_EditorScenePath.generic_string());
     }
 
@@ -834,6 +839,8 @@ namespace Nox
         AdoptStartSceneIfNone(path);
         CaptureProjectThumbnail();
         m_ContentBrowserPanel.Refresh();
+        m_SceneDirty = false;
+        m_HistoryPositionSeen = m_History.GetPosition();
         Notify(UI::UINotificationSeverity::Success, "Scene saved", m_EditorScenePath.generic_string());
     }
 
@@ -1541,6 +1548,95 @@ namespace Nox
         if (Entity watched = m_SceneHierarchyPanel.GetSelectedEntity())
             frame.Watched = watched.GetUUID();
         m_History.Update(m_ActiveScene, frame);
+        UpdateSceneDirtyState();
+    }
+
+    void EditorV2Layer::UpdateSceneDirtyState()
+    {
+        const size_t position = m_History.GetPosition();
+        if (m_SceneCleanPending)
+        {
+            m_SceneCleanPending = false;
+            m_SceneDirty = false;
+            m_HistoryPositionSeen = position;
+        }
+        else if (position != m_HistoryPositionSeen)
+        {
+            m_SceneDirty = true;
+            m_HistoryPositionSeen = position;
+        }
+        // The window's title: project, scene, and * while there is something unsaved (as every editor does).
+        if (auto win = Application::Get().getWindow(); win && win->getHandle() && Project::GetActive())
+        {
+            const std::string scene = m_EditorScenePath.empty() ? std::string("Untitled") : m_EditorScenePath.stem().string();
+            const std::string title = "Nox Editor - " + Project::GetActive()->GetConfig().Name + " - " + scene + (HasUnsavedChanges() ? " *" : "");
+            if (title != m_WindowTitleShown)
+            {
+                m_WindowTitleShown = title;
+                SDL_SetWindowTitle(win->getHandle(), title.c_str());
+            }
+        }
+    }
+
+    bool EditorV2Layer::HasUnsavedChanges() const
+    {
+        if (m_SceneDirty || AudioMixer::IsDirty())
+            return true;
+        return std::any_of(m_GraphEditors.begin(), m_GraphEditors.end(), [](const GraphEditorWindow& g) { return g.Editor && g.Editor->IsDirty(); });
+    }
+
+    void EditorV2Layer::ConfirmUnsavedChanges(const std::string& action, std::function<void()> proceed)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!HasUnsavedChanges() || !uiLayer)
+        {
+            if (proceed)
+                proceed();
+            return;
+        }
+        // What is unsaved, by name.
+        std::vector<std::string> unsaved;
+        if (m_SceneDirty)
+            unsaved.push_back("the scene " + (m_EditorScenePath.empty() ? std::string("(untitled)") : m_EditorScenePath.filename().string()));
+        for (const GraphEditorWindow& graph : m_GraphEditors)
+            if (graph.Editor && graph.Editor->IsDirty())
+                unsaved.push_back("the graph " + graph.Editor->GetTitle());
+        if (AudioMixer::IsDirty())
+            unsaved.push_back("the audio mixer");
+        std::string list;
+        for (size_t i = 0; i < unsaved.size(); ++i)
+            list += (i == 0 ? "" : i + 1 == unsaved.size() ? " and " : ", ") + unsaved[i];
+
+        Ref<UI::UILabel> text(new UI::UILabel("You have unsaved changes in " + list + ".\nSave them before " + action + "?", 14.0f));
+        text->WordWrap = true;
+        text->WidthMode = UI::UISizeMode::Fill;
+        std::vector<UI::UIModal::Button> buttons;
+        buttons.push_back({ "Save", [this, proceed]()
+        {
+            if (m_SceneDirty)
+                SaveScene();
+            for (GraphEditorWindow& graph : m_GraphEditors)
+                if (graph.Editor && graph.Editor->IsDirty())
+                    graph.Editor->Save();
+            if (AudioMixer::IsDirty())
+                AudioMixer::Save();
+            // Still unsaved (Save As was cancelled, a file could not be written): nothing is dropped.
+            if (HasUnsavedChanges())
+            {
+                Notify(UI::UINotificationSeverity::Warning, "Not everything was saved", "Nothing was closed: save again or choose Don't Save.");
+                return;
+            }
+            if (proceed)
+                proceed();
+        }, true });
+        buttons.push_back({ "Don't Save", [this, proceed]()
+        {
+            m_SceneDirty = false; // (what follows replaces it; the title must not keep the *)
+            if (proceed)
+                proceed();
+        } });
+        buttons.push_back({ "Cancel", {} });
+        UI::UIModal::ShowCustom(uiLayer->GetContext(), "Save changes?", text, std::move(buttons), 480.0f);
     }
 
     void EditorV2Layer::Undo()
@@ -3571,6 +3667,14 @@ namespace Nox
             return;
         }
 
+        // The window's close button / Alt+F4 with unsaved work: kept open, asked first (Application quits after Save / Don't Save).
+        if (event.GetEventType() == EventType::WindowClose && HasUnsavedChanges())
+        {
+            event.Handled = true;
+            ConfirmUnsavedChanges("quitting", []() { Application::Get().Shutdown(); });
+            return;
+        }
+
         // A press outside the open drawer closes it (not while one of its menus or dialogs is open, and not on the status bar's
         // tabs, which toggle it themselves).
         if (event.GetEventType() == EventType::MouseButtonPressed && IsDrawerOpen())
@@ -3658,10 +3762,10 @@ namespace Nox
                     if (control) { Redo(); event.Handled = true; return; }
                     break;
                 case SDL_SCANCODE_N:
-                    if (control) { NewScene(); event.Handled = true; return; }
+                    if (control) { ConfirmUnsavedChanges("making a new scene", [this]() { NewScene(); }); event.Handled = true; return; }
                     break;
                 case SDL_SCANCODE_O:
-                    if (control) { OpenProject(); event.Handled = true; return; }
+                    if (control) { ConfirmUnsavedChanges("opening another project", [this]() { OpenProject(); }); event.Handled = true; return; }
                     break;
                 case SDL_SCANCODE_S:
                     if (control) { if (shift) SaveSceneAs(); else SaveScene(); event.Handled = true; return; }
@@ -3845,7 +3949,7 @@ namespace Nox
                 const AssetType type = AssetManager::GetAssetType(handle);
                 if (type == AssetType::Scene && payload.Ids.size() <= 1)
                 {
-                    OpenScene(handle);
+                    ConfirmUnsavedChanges("opening " + AssetDisplayName(handle), [this, handle]() { OpenScene(handle); });
                     return true;
                 }
                 if (type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::Prefab)
@@ -4283,12 +4387,12 @@ namespace Nox
         menuBar->AddDynamicMenu("File", [this, uiLayer]() -> std::vector<UI::UIMenuItem>
         {
             return {
-                {"New Project...", "", [this]() { NewProject(); }},
-                {"Open Project...", "Ctrl+O", [this]() { OpenProject(); }},
-                {"Project Manager...", "", [this]() { OpenProjectManager(); }, false, true, false, false,
-                 "Close this project and show the Project Manager (save the scene first: like Exit, this does not ask)."},
+                {"New Project...", "", [this]() { ConfirmUnsavedChanges("making a new project", [this]() { NewProject(); }); }},
+                {"Open Project...", "Ctrl+O", [this]() { ConfirmUnsavedChanges("opening another project", [this]() { OpenProject(); }); }},
+                {"Project Manager...", "", [this]() { ConfirmUnsavedChanges("closing this project", [this]() { OpenProjectManager(); }); }, false, true, false, false,
+                 "Close this project and show the Project Manager (unsaved changes are asked about first)."},
                 {"", "", {}, true},
-                {"New Scene", "Ctrl+N", [this]() { NewScene(); }},
+                {"New Scene", "Ctrl+N", [this]() { ConfirmUnsavedChanges("making a new scene", [this]() { NewScene(); }); }},
                 {"Save Scene", "Ctrl+S", [this]() { SaveScene(); }},
                 {"Save Scene As...", "Ctrl+Shift+S", [this]() { SaveSceneAs(); }},
                 {"", "", {}, true},
@@ -4300,7 +4404,7 @@ namespace Nox
                     SaveLayoutFiles();
                     Notify(UI::UINotificationSeverity::Success, "Layout saved", "In the project's Saved/Layout folder (it is also saved on exit).");
                 }},
-                {"Exit", "Alt+F4", []() { Application::Get().Shutdown(); }}
+                {"Exit", "Alt+F4", [this]() { ConfirmUnsavedChanges("quitting", []() { Application::Get().Shutdown(); }); }}
             };
         });
 
@@ -4536,7 +4640,7 @@ namespace Nox
         const AssetType type = AssetManager::GetAssetType(handle);
         if (type == AssetType::Scene)
         {
-            OpenScene(handle);
+            ConfirmUnsavedChanges("opening " + AssetDisplayName(handle), [this, handle]() { OpenScene(handle); });
             return;
         }
         if (type == AssetType::AnimationGraph || type == AssetType::AudioGraph || type == AssetType::MaterialGraph)

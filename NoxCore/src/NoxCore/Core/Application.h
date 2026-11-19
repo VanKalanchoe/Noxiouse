@@ -156,6 +156,7 @@ namespace Nox
         ~Application();
 
         void Run(AppState& applicationState);
+        // Ends the program (the quit is decided: no layer is asked again).
         static void Shutdown();
         
         Renderer* GetRenderer() { return renderer.get(); }
@@ -237,6 +238,11 @@ namespace Nox
         std::unique_ptr<JobSystem> m_JobSystem;
         ApplicationSpecification m_Specification;
         bool m_BlockEvents = false;
+    public:
+        // Set by Shutdown(): a quit the program decided itself. A quit from outside (the window's close button, Alt+F4) is first
+        // raised as WindowClosedEvent; a layer that sets Handled keeps the program running (an editor asking to save).
+        inline static bool s_QuitConfirmed = false;
+    private:
         std::shared_ptr<Window> m_Window;
         ImGuiLayer* m_ImGuiLayer = nullptr;
         UILayer* m_UILayer = nullptr;

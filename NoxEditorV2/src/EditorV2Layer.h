@@ -78,6 +78,11 @@ namespace Nox
         void FinishSceneLoad();
         void SaveScene();
         void SaveSceneAs();
+        // Unsaved work (the scene, open graphs, the mixer): asked about before what would drop it -- Save (then go on), Don't Save
+        // (go on), Cancel. `action` names what would happen ("opening the project"). Without unsaved work it goes on at once.
+        void ConfirmUnsavedChanges(const std::string& action, std::function<void()> proceed);
+        bool HasUnsavedChanges() const;
+        void UpdateSceneDirtyState();
         void SerializeScene(const Ref<Scene>& scene, const std::filesystem::path& path);
 
         void CreateBasicScene();
@@ -234,6 +239,11 @@ namespace Nox
 
         EditorHistory m_History;
         bool m_HistoryCheckRequested = false;
+        // The scene changed since it was opened or saved: an undo step was taken (or one undone / redone) since then.
+        bool m_SceneDirty = false;
+        bool m_SceneCleanPending = true; // set on open / new / save: the history position then is the clean one
+        size_t m_HistoryPositionSeen = 0;
+        std::string m_WindowTitleShown;
 
         ScriptBuilder m_ScriptBuilder;
         Scope<StreamingTestWorldGenerator> m_TestWorldGeneration;

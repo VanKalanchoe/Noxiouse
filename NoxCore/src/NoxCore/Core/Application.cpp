@@ -122,6 +122,7 @@ namespace Nox
     void Application::Shutdown()
     {
         NOX_CORE_INFO("Application Shutdown");
+        s_QuitConfirmed = true;
 
         SDL_Event quitEvent;
         SDL_zero(quitEvent); // Zero-initialize
@@ -338,7 +339,18 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
 
     switch (currentEvent->type)
     {
-    case SDL_EVENT_QUIT: return SDL_APP_SUCCESS; /* end the program, reporting success to the OS. */
+    case SDL_EVENT_QUIT:
+        {
+            // A quit from outside the program (close button, Alt+F4): the layers may keep it running (unsaved changes to ask about).
+            if (!Nox::Application::s_QuitConfirmed)
+            {
+                Nox::WindowClosedEvent closeEvent;
+                applicationState->app->RaiseEvent(closeEvent);
+                if (closeEvent.Handled)
+                    return SDL_APP_CONTINUE;
+            }
+            return SDL_APP_SUCCESS; /* end the program, reporting success to the OS. */
+        }
     case SDL_EVENT_WINDOW_RESIZED:
         {
             if (!applicationState->app->GetRenderer())

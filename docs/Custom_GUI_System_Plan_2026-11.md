@@ -328,6 +328,32 @@ it yet):
 | D1 | Package Game / Server, Streaming Test World, MCP server menu | EditorLayer dialogs, GamePackager | open |
 | F1 | Prefab mode, prefab variants, Replace References | EditorLayer, ContentBrowserPanel | open |
 
+**Design review of the editor (2026-11-20), checked in the code -- not only the graph editor:**
+
+| # | Flaw | Where | What it costs | Plan |
+|---|---|---|---|---|
+| E1 | Nothing asked before unsaved work was dropped: New Scene, opening a scene or project, the Project Manager and Exit (close button, Alt+F4) threw away scene edits; no title marker | both editors (NoxEditor asked only in Prefab Mode) | lost work | **fixed** (below) |
+| E2 | One class does everything: menus, shortcuts, play, viewports, layout, saving, every panel's wiring | EditorV2Layer 4960 lines (NoxEditor's EditorLayer 7336) | every port makes it bigger; changes collide | split into editor modules (scene, play, layout, viewports, menus) as panels are ported |
+| E3 | The selection belongs to the Scene Hierarchy panel; the Inspector, viewport, gizmo, play and prefab code reach into it (26 places) | SceneHierarchyV2Panel | a panel closed or rebuilt is the selection's owner gone; no selection of assets / nodes shared | an editor-level selection service (Unreal's USelection) all panels read and write |
+| E4 | Shortcuts are one switch in the layer's OnEvent, with hand-kept lists of panels whose keys must not reach it | EditorV2Layer::OnEvent | each new panel must be added to the list or Delete deletes entities (it happened); keys cannot be rebound; menus show shortcut text by hand | a command system: commands with a name, a default key, a focus scope (viewport, hierarchy, graph ...), shown in menus and rebindable (Unreal's UICommandList) |
+| E5 | Undo stores the whole scene as text per step, found by polling a fingerprint each frame; panels must remember to request a check; an undo reloads the whole scene | EditorHistory | memory and a hitch per step in large scenes; an edit a panel forgets to report is not undoable; graphs have separate histories | keep for now (it is robust: nothing is forgotten when a check runs); later per-object transactions (Unreal's FTransaction) when large scenes need it |
+| E6 | Which editor opens an asset is a hard-coded switch | EditorV2Layer::OpenAssetV2 | every asset editor touches the layer | an asset-editor registry (Unreal's asset type actions): a type registers its editor and its Content Browser actions |
+| E7 | File dialogs block: the main loop spins until the dialog returns | Utility::OpenFile / SaveFile | the editor stops drawing (and streaming, previews) while a dialog is open | asynchronous dialogs (SDL's callback) with the result delivered next frame |
+| E8 | Colours written into widgets instead of theme tokens (my new panels included) | UI widgets, panels | a theme change does not reach them | move to theme tokens when each panel is touched |
+| E9 | Two editors with copied code (AssetPreviewRenderer, EditorHistory, ScriptBuilder, GamePackager live twice) | NoxEditor, NoxEditorV2 | fixes made twice or only once | shared editor code in one place; NoxEditor retired when V2 has everything |
+
+Order from here: E3 selection service, E4 command system and E6 asset-editor registry first (every panel ported after them uses them,
+instead of being ported twice), E2 split while doing so, then the graph editor's G2-G4 and the panels below. E5 and E7 when they are
+the bottleneck.
+
+**E1 (fixed).** The scene counts as changed when its undo history moves after it was opened or saved; the window title shows
+"Nox Editor - <project> - <scene> *" while anything is unsaved (the scene, an open graph, the audio mixer). New Scene, opening a scene
+(double-click, drop on the viewport), New / Open Project, the Project Manager and Exit ask "Save changes?" (Save, Don't Save, Cancel);
+Save that leaves something unsaved (Save As cancelled) goes no further. The window's close button and Alt+F4 ask too:
+`Application` raises `WindowClosedEvent` for a quit from outside and a layer can keep the program running
+(`Application::s_QuitConfirmed` is set by Shutdown, so the confirmed quit is not asked again). Also: a graph's Save button is greyed
+while there is nothing to save, and Ctrl+S then does nothing.
+
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and
 `Panels/NodeGraph/NodeGraphEditorV2` (the window: Save / Undo / Redo / Frame, Parameters on the left, Details on the right). Opened by

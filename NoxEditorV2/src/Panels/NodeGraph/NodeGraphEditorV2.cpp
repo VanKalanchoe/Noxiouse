@@ -234,7 +234,12 @@ namespace Nox
     void NodeGraphEditorV2::RefreshToolbar()
     {
         if (m_SaveButton)
+        {
+            // Only something to save makes it a button to press (Unreal greys it out too).
             m_SaveButton->StyleVariant = m_Dirty ? "primary" : "";
+            m_SaveButton->SetEnabled(m_Dirty);
+            m_SaveButton->Tooltip = m_Dirty ? "Write the graph to its file (Ctrl+S)" : "Saved: nothing changed since";
+        }
         if (m_UndoButton)
             m_UndoButton->SetEnabled(!m_UndoStack.empty() || m_EditPending);
         if (m_RedoButton)
@@ -331,8 +336,8 @@ namespace Nox
     void NodeGraphEditorV2::Save()
     {
         auto assets = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr;
-        if (!m_Asset || !assets)
-            return;
+        if (!m_Asset || !assets || !m_Dirty)
+            return; // (Ctrl+S with nothing changed: nothing to write, no toast)
         const auto found = assets->GetAssetRegistry().find(m_Handle);
         if (found == assets->GetAssetRegistry().end())
         {
