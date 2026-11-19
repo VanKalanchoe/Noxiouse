@@ -13,6 +13,7 @@
 #include <algorithm>
 #include "AssetImporter.h"
 #include "MeshImporter.h"
+#include "MeshSerializer.h"
 #include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/Entity.h"
@@ -210,6 +211,13 @@ namespace Nox
         m_MemoryAssets.erase(handle);
     }
 
+    namespace
+    {
+        // (Defined with the reference helpers further down.)
+        AssetReferenceTokens ReadReferenceTokens(const std::filesystem::path& file);
+        std::vector<std::pair<std::filesystem::path, AssetHandle>> ReferencingFiles(const AssetRegistry& registry);
+    }
+
     void EditorAssetManager::Init()
     {
         if (m_ReadOnly)
@@ -221,6 +229,16 @@ namespace Nox
         {
             OnAssetModifiedOnDisk(path);
         });
+
+        // The reference cache: what every file that can name assets names, read in the background (only the files that changed
+        // since the last session), so Delete / Find References / unused assets are lookups.
+        m_ReferenceIndex = std::make_shared<AssetReferenceIndex>(
+            Project::GetActiveAssetDirectory(), Project::GetProjectDirectory() / "Cache" / "AssetReferences.nrefs",
+            [](const std::filesystem::path& file) { return ReadReferenceTokens(file); });
+        std::vector<std::filesystem::path> referencingFiles;
+        for (const auto& [file, handle] : ReferencingFiles(m_AssetRegistry))
+            referencingFiles.push_back(file);
+        m_ReferenceIndex->StartBuild(std::move(referencingFiles));
     }
 
     void EditorAssetManager::Update()
@@ -1301,11 +1319,35 @@ namespace Nox
 
         // What one file mentions: numbers that can be handles, and path-like strings with every tail that starts after a '/'
         // (a material may hold an absolute path; the registry's paths are relative to the asset directory).
-        struct ReferenceTokens
+        using ReferenceTokens = AssetReferenceTokens;
+
+        // What of a file can name assets: all of it, but for a cooked mesh only its metadata block (descriptors, materials,
+        // lights, nodes) -- the geometry pages behind it are most of the file and name nothing.
+        std::string ReadReferenceContent(const std::filesystem::path& file)
         {
-            std::unordered_set<AssetHandle> Handles;
-            std::unordered_set<std::string> Paths;
-        };
+            std::ifstream stream(file, std::ios::binary);
+            if (!stream)
+                return {};
+            char header[MeshSerializer::MetadataHeaderBytes] = {};
+            if (stream.read(header, sizeof(header)))
+            {
+                if (const uint64_t metadataEnd = MeshSerializer::MetadataEnd(header); metadataEnd > 0)
+                {
+                    std::error_code error;
+                    const uint64_t fileSize = std::filesystem::file_size(file, error);
+                    if (!error && metadataEnd <= fileSize)
+                    {
+                        std::string content(static_cast<size_t>(metadataEnd), '\0');
+                        stream.seekg(0);
+                        if (stream.read(content.data(), static_cast<std::streamsize>(metadataEnd)))
+                            return content;
+                    }
+                }
+            }
+            stream.clear();
+            stream.seekg(0);
+            return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+        }
 
         void AddPathToken(std::string_view raw, ReferenceTokens& tokens)
         {
@@ -1328,10 +1370,7 @@ namespace Nox
         ReferenceTokens ReadReferenceTokens(const std::filesystem::path& file)
         {
             ReferenceTokens tokens;
-            std::ifstream stream(file, std::ios::binary);
-            if (!stream)
-                return tokens;
-            const std::string content((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+            const std::string content = ReadReferenceContent(file);
 
             // Handles: runs of 6+ digits (YAML writes them as decimal numbers).
             for (size_t i = 0; i < content.size();)
@@ -1463,10 +1502,9 @@ namespace Nox
         // instead of indexing every number and string of the file (a cooked mesh is mostly binary geometry).
         bool FileMentionsAsset(const std::filesystem::path& file, AssetHandle handle, const AssetMetadata& metadata)
         {
-            std::ifstream stream(file, std::ios::binary);
-            if (!stream)
+            const std::string content = ReadReferenceContent(file);
+            if (content.empty())
                 return false;
-            const std::string content((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
 
             // The handle: its digits, not part of a longer number.
             const std::string digits = std::to_string(static_cast<uint64_t>(handle));
@@ -1508,7 +1546,8 @@ namespace Nox
 
     std::vector<std::filesystem::path> EditorAssetManager::FindReferencesIn(const AssetRegistry& registry, AssetHandle handle,
                                                                             const std::filesystem::path& assetDirectory,
-                                                                            const std::filesystem::path& projectDirectory)
+                                                                            const std::filesystem::path& projectDirectory,
+                                                                            const std::shared_ptr<AssetReferenceIndex>& index)
     {
         std::vector<std::filesystem::path> referencing;
         const auto found = registry.find(handle);
@@ -1534,7 +1573,9 @@ namespace Nox
                                           fileType == AssetType::SkeletalMesh;
             if (carriesMaterials && !embeddable)
                 continue;
-            if (FileMentionsAsset(assetDirectory / file, handle, target))
+            // The cache when there is one (a lookup; the file is read again only if it changed), else a search of the file.
+            const bool mentions = index ? MentionsAsset(*index->Get(file), handle, target) : FileMentionsAsset(assetDirectory / file, handle, target);
+            if (mentions)
                 referencing.push_back(file);
         }
         // Assets made from this one (a model's meshes from its .gltf).
@@ -1549,7 +1590,7 @@ namespace Nox
 
     std::vector<std::filesystem::path> EditorAssetManager::FindReferences(AssetHandle handle) const
     {
-        return FindReferencesIn(m_AssetRegistry, handle, Project::GetActiveAssetDirectory(), Project::GetProjectDirectory());
+        return FindReferencesIn(m_AssetRegistry, handle, Project::GetActiveAssetDirectory(), Project::GetProjectDirectory(), m_ReferenceIndex);
     }
 
     size_t EditorAssetManager::ReplaceReferences(AssetHandle from, AssetHandle to)
@@ -1621,7 +1662,10 @@ namespace Nox
         const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
         for (const auto& [file, fileHandle] : ReferencingFiles(m_AssetRegistry))
         {
-            const ReferenceTokens tokens = ReadReferenceTokens(assetDirectory / file);
+            std::shared_ptr<const ReferenceTokens> cached = m_ReferenceIndex ? m_ReferenceIndex->Get(file) : nullptr;
+            if (!cached)
+                cached = std::make_shared<const ReferenceTokens>(ReadReferenceTokens(assetDirectory / file));
+            const ReferenceTokens& tokens = *cached;
             const auto owner = m_AssetRegistry.find(fileHandle);
             for (const auto& [handle, metadata] : m_AssetRegistry)
             {
@@ -1946,6 +1990,7 @@ namespace Nox
 
     void EditorAssetManager::Shutdown()
     {
+        m_ReferenceIndex.reset(); // stops its build, saves it
         m_RegistryWrite.Wait();
         if (m_RegistryDirty && !m_ReadOnly)
         {

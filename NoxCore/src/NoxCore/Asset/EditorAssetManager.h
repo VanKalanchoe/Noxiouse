@@ -4,6 +4,7 @@
 #include "TextureStreamer.h"
 #include "AssetManagerBase.h"
 #include "AssetMetadata.h"
+#include "AssetReferenceIndex.h"
 #include "NoxCore/Tasks/JobSystem.h"
 
 #include <chrono>
@@ -91,9 +92,13 @@ namespace Nox
         // can look while it keeps drawing. Files that cannot name the asset are not read at all (a cooked mesh carries its
         // materials' textures, never another material), and a file is searched for the asset's handle and file name instead of
         // being indexed whole.
+        // `index`: the project's reference cache (GetReferenceIndex); without one, the files are searched.
         static std::vector<std::filesystem::path> FindReferencesIn(const AssetRegistry& registry, AssetHandle handle,
                                                                    const std::filesystem::path& assetDirectory,
-                                                                   const std::filesystem::path& projectDirectory);
+                                                                   const std::filesystem::path& projectDirectory,
+                                                                   const std::shared_ptr<AssetReferenceIndex>& index = nullptr);
+        // What every file that can name assets names, cached (AssetReferenceIndex): built in the background when the project opens.
+        const std::shared_ptr<AssetReferenceIndex>& GetReferenceIndex() const { return m_ReferenceIndex; }
         // Registered assets nothing uses, by the same rules (scenes are where use starts, so never listed).
         std::vector<AssetHandle> FindUnusedAssets() const;
         // Every asset the roots need, transitively, by the same rules read forwards (what their files name, what a mesh owns by name),
@@ -180,6 +185,7 @@ namespace Nox
         void LinkImportedAssets(const Ref<Asset>& meshAsset, const AssetMetadata& meshMetadata);
     private:
         Utils::NOXWatcher m_AssetWatcher;
+        std::shared_ptr<AssetReferenceIndex> m_ReferenceIndex;
         
         // Filled by the watcher thread, drained by Update() on the main thread.
         std::vector<std::filesystem::path> m_PendingModifiedPaths;

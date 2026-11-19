@@ -3222,6 +3222,12 @@ namespace Nox
                 add(std::format("{} BLAS build{}", blasBuilds, blasBuilds == 1 ? "" : "s"));
             text += (text.empty() ? "" : "   |   ") + background;
         }
+        if (const auto& index = assetManager->GetReferenceIndex(); index && index->GetProgress().Building)
+        {
+            // The reference cache being built (a project's first open, or files changed since the last session).
+            const AssetReferenceIndex::Progress progress = index->GetProgress();
+            text += (text.empty() ? "" : "   |   ") + std::format("Indexing asset references {} / {}", progress.Done, progress.Total);
+        }
         activity->Busy = !text.empty();
         activity->Text = text.empty() ? std::string("Ready") : text;
     }

@@ -290,6 +290,17 @@ and the asset's file name (case ignored) and only the text around a hit is judge
 same answers on handles, longer numbers, upper-case and absolute paths, binary strings and unrelated files; a 300 MB mesh takes 1.9 s
 instead of 5.2 s, and a material's delete does not read meshes at all. Not timed on the user's project.
 
+Then ("delete works but is insanely slow, how do big engines do it?"): they never read the project to answer "who uses this?"
+-- Unreal's asset registry keeps every package's dependencies (gathered when it is saved or scanned, cached on disk), Unity's
+AssetDatabase and Godot's file system cache do the same. Nox now has that cache: `AssetReferenceIndex` (NoxCore/Asset) keeps, for every
+file that can name assets, the handles and paths it names, with the file's size and write time. Built on a background thread when the
+project opens (the status bar shows "Indexing asset references n / m"), saved to `<Project>/Cache/AssetReferences.nrefs` (the next
+session reads only files that changed), checked against each file's size and time on every lookup (a changed file is read again).
+`FindReferences` / `FindReferencesIn`, `FindUnusedAssets` and the browser's background check use it. A cooked mesh is read only up to its
+metadata block (`MeshSerializer::MetadataEnd`: descriptors, materials, lights, nodes -- the geometry pages behind it name nothing), which
+also speeds up packaging's dependency walk. Offline: a 400 MB mesh is read for references in 0.1 ms (whole: ~7 s), a cached lookup reads
+no file, the next session reads nothing unchanged, an edited scene is read again, digits inside geometry pages are not taken for handles.
+
 Checked: syntax check of every touched source with the vendors fetched; the headless test, rebuilt (the old one was lost with the
 container): 15 checks with the real dock space, menus, dropdown, tree view and the real `ContentTileView` / `ContentPathBar` extracted
 from the panel source (menu items and dropdown choices run, the wheel scrolls tiles and tree, a refresh keeps the scroll position, path

@@ -923,6 +923,19 @@ namespace Nox
         // The cooked file is in the layout this build reads (else it is cooked again from its source).
         static bool IsCurrentVersion(const std::filesystem::path& filepath) { return ReadVersion(filepath) == CurrentVersion; }
 
+        // A file's first MetadataHeaderBytes bytes: where its metadata (descriptors, materials, lights, nodes, cameras -- everything
+        // but the geometry pages) ends, or 0 when they are not the header of a mesh in the current layout. What names other assets
+        // is all in front of that offset.
+        static constexpr size_t MetadataHeaderBytes = HeaderBytes;
+        static uint64_t MetadataEnd(const char* header)
+        {
+            if (std::max(MagicVersion(header, "NSM"), MagicVersion(header, "NMS")) != CurrentVersion)
+                return 0;
+            uint64_t payloadBase = 0;
+            std::memcpy(&payloadBase, header + 4 + sizeof(uint32_t), sizeof(uint64_t));
+            return payloadBase >= HeaderBytes ? payloadBase : 0;
+        }
+
         static void SerializeStaticMesh
         (
             const std::filesystem::path& filepath,

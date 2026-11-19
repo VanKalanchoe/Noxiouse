@@ -1774,12 +1774,14 @@ namespace Nox
             m_SceneReferences(check->InScene);
         // The project's files on a worker thread, from a copy of the registry: the editor keeps drawing meanwhile.
         check->Users = std::async(std::launch::async,
-            [registry = assets->GetAssetRegistry(), handles, assetDirectory = Project::GetActiveAssetDirectory(), projectDirectory = Project::GetProjectDirectory()]()
+            [registry = assets->GetAssetRegistry(), handles, assetDirectory = Project::GetActiveAssetDirectory(), projectDirectory = Project::GetProjectDirectory(),
+             index = assets->GetReferenceIndex()]()
             {
+                // Through the project's reference cache: a lookup per file (only files changed since they were indexed are read).
                 std::vector<std::vector<std::filesystem::path>> users;
                 users.reserve(handles.size());
                 for (AssetHandle handle : handles)
-                    users.push_back(EditorAssetManager::FindReferencesIn(registry, handle, assetDirectory, projectDirectory));
+                    users.push_back(EditorAssetManager::FindReferencesIn(registry, handle, assetDirectory, projectDirectory, index));
                 return users;
             });
         m_ReferenceCheck = std::move(check);
