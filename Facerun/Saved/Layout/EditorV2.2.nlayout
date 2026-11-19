@@ -1,0 +1,39 @@
+version: 2
+root:
+  type: split
+  dir: horizontal
+  ratio: 0.155
+  first:
+    type: leaf
+    flags: 0
+    active_tab: 0
+    tabs:
+      - Scene Hierarchy
+  second:
+    type: split
+    dir: horizontal
+    ratio: 0.78
+    first:
+      type: split
+      dir: vertical
+      ratio: 0.038
+      first:
+        type: leaf
+        flags: 6
+        active_tab: 0
+        tabs:
+          - Toolbar
+      second:
+        type: leaf
+        flags: 7
+        active_tab: 0
+        tabs:
+          - Viewports
+    second:
+      type: leaf
+      flags: 0
+      active_tab: 0
+      tabs:
+        - Inspector
+floating:
+  []
