@@ -78,7 +78,8 @@ namespace Nox
     namespace
     {
         // In <Project>/Saved/Layout (EditorV2Layer::LayoutDirectory).
-        constexpr const char* kLayoutFile = "EditorV2.nlayout";
+        // ("2": the layouts saved before the drawer had the Content Browser and the Output Log docked; they start fresh once.)
+        constexpr const char* kLayoutFile = "EditorV2.2.nlayout";
         constexpr const char* kViewportDockLayoutFile = "EditorV2ViewportDock.nlayout";
         constexpr const char* kViewportPrefsFile = "EditorV2Viewports.txt";
         constexpr float kStatusBarHeight = 28.0f;
@@ -118,8 +119,191 @@ namespace Nox
             }
 
         private:
-            static constexpr float kFont = 13.0f;
+            static constexpr float kFont = 15.0f;
             float m_Time = 0.0f;
+        };
+
+        // A tab of the status bar's left end ("Content Drawer", "Output Log"): flat text, lit while its page is shown.
+        class StatusTabButton final : public UI::UIElement
+        {
+        public:
+            StatusTabButton(std::string label, std::function<void()> onClick)
+                : m_Label(std::move(label)), m_OnClick(std::move(onClick))
+            {
+                HitTestMode = UI::UIHitTestMode::Self;
+                VAlign = UI::UIAlignment::Center;
+            }
+
+            bool Active = false;
+
+            bool OnPointerDown(const UI::UIPointerEvent& e) override
+            {
+                if (e.Button != 1)
+                    return false;
+                if (m_OnClick)
+                    m_OnClick();
+                return true;
+            }
+            bool OnPointerEnter(const UI::UIPointerEvent&) override { m_Hovered = true; return false; }
+            bool OnPointerLeave(const UI::UIPointerEvent&) override { m_Hovered = false; return false; }
+
+        protected:
+            UI::UIVec2 ComputeDesiredSize() override
+            {
+                return { UI::UILabel::MeasureText(m_Label, nullptr, kFont).x + 24.0f, kStatusBarHeight - 4.0f };
+            }
+
+            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+            {
+                const UI::UIRect& b = GetBounds();
+                const UI::UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
+                if (Active || m_Hovered)
+                    d.AddRoundedRect(b.Min, b.Max, Active ? UI::UIColor{ accent.r, accent.g, accent.b, 0.22f } : UI::UIColor{ 1.0f, 1.0f, 1.0f, 0.06f }, glm::vec4(4.0f));
+                if (Active)
+                    d.AddRoundedRect({ b.Min.x + 6.0f, b.Max.y - 2.0f }, { b.Max.x - 6.0f, b.Max.y }, accent, glm::vec4(1.0f));
+                const UI::UIColor text = (Active || m_Hovered) ? theme.GetToken("Text", { 0.92f, 0.93f, 0.95f, 1.0f })
+                                                               : theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+                const UI::UIVec2 size = UI::UILabel::MeasureText(m_Label, nullptr, kFont);
+                d.AddText(m_Label, nullptr, { b.Center().x - size.x * 0.5f, b.Center().y - size.y * 0.5f }, kFont, text);
+            }
+
+        private:
+            static constexpr float kFont = 14.0f;
+            std::string m_Label;
+            std::function<void()> m_OnClick;
+            bool m_Hovered = false;
+        };
+
+        // The drawer's top edge: drag it to make the drawer taller or shorter.
+        class DrawerGrip final : public UI::UIElement
+        {
+        public:
+            explicit DrawerGrip(std::function<void(float dy)> onDrag)
+                : m_OnDrag(std::move(onDrag))
+            {
+                HitTestMode = UI::UIHitTestMode::Self;
+                WidthMode = UI::UISizeMode::Fill;
+                HeightMode = UI::UISizeMode::Fixed;
+                FixedSize = { 0.0f, 6.0f };
+                Tooltip = "Drag to resize the drawer";
+            }
+
+            UI::UICursorShape GetCursorShape(const UI::UIVec2&) const override { return UI::UICursorShape::ResizeNS; }
+            bool OnPointerDown(const UI::UIPointerEvent& e) override
+            {
+                if (e.Button != 1)
+                    return false;
+                m_Dragging = true;
+                m_LastY = e.Position.y;
+                if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
+                    ctx->CancelPendingDrag();
+                return true;
+            }
+            bool OnPointerMove(const UI::UIPointerEvent& e) override
+            {
+                if (!m_Dragging)
+                    return false;
+                if (m_OnDrag)
+                    m_OnDrag(e.Position.y - m_LastY);
+                m_LastY = e.Position.y;
+                return true;
+            }
+            bool OnPointerUp(const UI::UIPointerEvent&) override
+            {
+                m_Dragging = false;
+                return true;
+            }
+            bool OnPointerEnter(const UI::UIPointerEvent&) override { m_Hovered = true; return false; }
+            bool OnPointerLeave(const UI::UIPointerEvent&) override { m_Hovered = false; return false; }
+
+        protected:
+            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+            {
+                const UI::UIRect& b = GetBounds();
+                const UI::UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
+                const UI::UIColor line = (m_Hovered || m_Dragging) ? accent : theme.GetToken("Border", { 0.20f, 0.235f, 0.32f, 1.0f });
+                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Min.y + ((m_Hovered || m_Dragging) ? 2.0f : 1.0f) }, line);
+                const float cx = b.Center().x;
+                d.AddRoundedRect({ cx - 18.0f, b.Min.y + 2.0f }, { cx + 18.0f, b.Min.y + 4.0f }, { line.r, line.g, line.b, 0.9f }, glm::vec4(1.0f));
+            }
+
+        private:
+            std::function<void(float)> m_OnDrag;
+            bool m_Dragging = false;
+            bool m_Hovered = false;
+            float m_LastY = 0.0f;
+        };
+
+        // The drawer: the page (Content Browser or Output Log) on the panel colour, a shadow over what it covers.
+        class DrawerFrame final : public UI::UIStackBox
+        {
+        public:
+            DrawerFrame()
+                : UI::UIStackBox(UI::UIOrientation::Vertical, 0.0f)
+            {
+                WidthMode = UI::UISizeMode::Fill;
+                HeightMode = UI::UISizeMode::Fill;
+                HitTestMode = UI::UIHitTestMode::Self; // its empty parts take the pointer too (nothing behind it gets a click)
+            }
+
+        protected:
+            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+            {
+                const UI::UIRect& b = GetBounds();
+                d.AddRoundedRect(b.Min, b.Max, theme.GetToken("Surface0", { 0.094f, 0.11f, 0.149f, 1.0f }), glm::vec4(0.0f), 0.0f, {},
+                                 { 0.0f, 0.0f, 0.0f, 0.55f }, { 0.0f, -4.0f }, 18.0f);
+            }
+        };
+
+        // The editor between the menu bar and the status bar: the dock space, and the drawer sliding up over it from the bottom
+        // (it covers the viewport instead of resizing it, as Unreal's Content Drawer does).
+        class EditorCenterArea final : public UI::UIElement
+        {
+        public:
+            EditorCenterArea(const Ref<UI::UIElement>& dock, const Ref<UI::UIElement>& drawer)
+                : m_Dock(dock), m_Drawer(drawer)
+            {
+                WidthMode = UI::UISizeMode::Fill;
+                HeightMode = UI::UISizeMode::Fill;
+                AddChild(dock);
+                AddChild(drawer);
+                drawer->Visible = false;
+            }
+
+            bool Open = false;
+            float HeightFraction = 0.42f;
+            float Openness = 0.0f; // 0 closed .. 1 open (animated)
+
+            UI::UIRect DrawerRect() const { return m_Drawer && m_Drawer->Visible ? m_Drawer->GetBounds() : UI::UIRect{}; }
+
+        protected:
+            UI::UIVec2 ComputeDesiredSize() override
+            {
+                m_Dock->Measure();
+                m_Drawer->Measure();
+                return { 100.0f, 100.0f };
+            }
+
+            void OnUpdate(float dt) override
+            {
+                const float target = Open ? 1.0f : 0.0f;
+                Openness += (target - Openness) * (1.0f - std::exp(-std::max(0.0f, dt) / 0.045f));
+                if (std::abs(target - Openness) < 0.01f)
+                    Openness = target;
+                m_Drawer->Visible = Openness > 0.0f;
+            }
+
+            void ArrangeChildren(const UI::UIRect& rect) override
+            {
+                m_Dock->Arrange(rect);
+                const float eased = 1.0f - (1.0f - Openness) * (1.0f - Openness);
+                const float height = std::floor(rect.Height() * std::clamp(HeightFraction, 0.15f, 0.9f) * eased);
+                m_Drawer->Arrange({ { rect.Min.x, rect.Max.y - height }, { rect.Max.x, rect.Max.y } });
+            }
+
+        private:
+            Ref<UI::UIElement> m_Dock;
+            Ref<UI::UIElement> m_Drawer;
         };
 
         // The status bar's right side: the log's warnings and errors since its last Clear; a click opens the Output Log.
@@ -181,7 +365,7 @@ namespace Nox
             }
 
         private:
-            static constexpr float kFont = 13.0f;
+            static constexpr float kFont = 14.0f;
             const OutputLogV2Panel& m_Log;
             std::function<void()> m_OnClick;
             bool m_Hovered = false;
@@ -3144,6 +3328,25 @@ namespace Nox
         m_ContentBrowserPanel.Update(ts);
         m_OutputLogPanel.Update(ts);
 
+        // The drawer: an asset dragged out of it closes it (the viewport under it takes the drop); its tabs show what is open;
+        // "Dock in Layout" only while a page is in the drawer.
+        if (UILayer* uiLayer = Application::Get().GetUILayer(); uiLayer && IsDrawerOpen())
+        {
+            const UI::UIContext& ui = uiLayer->GetContext();
+            const auto* area = static_cast<const EditorCenterArea*>(m_CenterArea.get());
+            if (ui.IsDragging() && area && !area->DrawerRect().Contains(ui.GetLastMousePos()))
+                CloseDrawer();
+        }
+        const bool contentDocked = IsPanelDocked("Content Browser"), logDocked = IsPanelDocked("Output Log");
+        if (auto* tab = static_cast<StatusTabButton*>(m_ContentDrawerTab.get()))
+            tab->Active = IsDrawerOpen() && m_DrawerPage == DrawerPage::Content;
+        if (auto* tab = static_cast<StatusTabButton*>(m_LogDrawerTab.get()))
+            tab->Active = IsDrawerOpen() && m_DrawerPage == DrawerPage::Log;
+        if (m_ContentDockButton)
+            m_ContentDockButton->Visible = !contentDocked;
+        if (m_LogDockButton)
+            m_LogDockButton->Visible = !logDocked;
+
         if (!m_Renderer || !m_ActiveScene || !m_ViewportImage)
             return;
 
@@ -3351,15 +3554,51 @@ namespace Nox
         {
             const auto& drop = static_cast<const ExternalFileDropEvent&>(event);
             // Into the folder the Content Browser shows (a model opens the import dialog first).
-            if (!IsPanelDocked("Content Browser"))
-                TogglePanel("Content Browser");
+            ShowPage(DrawerPage::Content);
             m_ContentBrowserPanel.ImportFile(drop.GetPath());
             event.Handled = true;
             return;
         }
 
+        // A press outside the open drawer closes it (not while one of its menus or dialogs is open, and not on the status bar's
+        // tabs, which toggle it themselves).
+        if (event.GetEventType() == EventType::MouseButtonPressed && IsDrawerOpen())
+        {
+            if (UILayer* uiLayer = Application::Get().GetUILayer())
+            {
+                const UI::UIContext& ui = uiLayer->GetContext();
+                const UI::UIVec2 pos = ui.GetLastMousePos();
+                const auto* area = static_cast<const EditorCenterArea*>(m_CenterArea.get());
+                const bool onTab = (m_ContentDrawerTab && m_ContentDrawerTab->GetBounds().Contains(pos)) ||
+                                   (m_LogDrawerTab && m_LogDrawerTab->GetBounds().Contains(pos));
+                if (!ui.GetOverlay() && area && !area->DrawerRect().Contains(pos) && !onTab)
+                    CloseDrawer();
+            }
+        }
+
         if (event.GetEventType() == EventType::KeyPressed)
         {
+            // Ctrl+Space: the Content Drawer, wherever the keyboard is (Unreal's).
+            {
+                const auto& key = static_cast<const KeyPressedEvent&>(event);
+                const bool control = (key.GetModifiers() & SDL_KMOD_CTRL) != 0 || Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
+                if (!key.IsRepeat() && control && key.GetKeyCode() == SDL_SCANCODE_SPACE)
+                {
+                    ToggleDrawer(DrawerPage::Content);
+                    event.Handled = true;
+                    return;
+                }
+                if (!key.IsRepeat() && key.GetKeyCode() == SDL_SCANCODE_ESCAPE && IsDrawerOpen())
+                {
+                    if (UILayer* uiLayer = Application::Get().GetUILayer(); uiLayer && !uiLayer->GetContext().GetOverlay())
+                    {
+                        CloseDrawer();
+                        event.Handled = true;
+                        return;
+                    }
+                }
+            }
+
             bool textInputFocused = false;
             if (UILayer* uiLayer = Application::Get().GetUILayer())
                 textInputFocused = dynamic_cast<UI::UITextInput*>(uiLayer->GetContext().GetFocused()) != nullptr;
@@ -3927,23 +4166,73 @@ namespace Nox
             );
         }
 
-        // Bottom, under the viewports: the Content Browser and the Output Log as two tabs of one area (Unreal's drawer).
+        // The Content Browser and the Output Log: in the drawer (opened from the status bar), or docked under the viewports when
+        // the saved layout has them there ("Dock in Layout").
+        auto dockButton = [this](DrawerPage page)
+        {
+            Ref<UI::UIButton> button = UI::MakeUI<UI::UIButton>("Dock in Layout", [this, page]() { DockPage(page); });
+            button->Padding = UI::UIThickness::Symmetric(10.0f, 2.0f);
+            button->HeightMode = UI::UISizeMode::Fixed;
+            button->FixedSize = { 0.0f, 26.0f };
+            button->Tooltip = "Keep it open as a tab under the viewport (Window > Back to Drawer puts it back here)";
+            return button;
+        };
+        m_ContentDockButton = dockButton(DrawerPage::Content);
+        m_LogDockButton = dockButton(DrawerPage::Log);
+        m_ContentBrowserPanel.SetToolbarExtra(m_ContentDockButton);
+        m_OutputLogPanel.SetToolbarExtra(m_LogDockButton);
         m_ContentBrowserRoot = m_ContentBrowserPanel.BuildUI();
         m_OutputLogRoot = m_OutputLogPanel.BuildUI();
-        uiLayer->AddPanel("Content Browser", m_ContentBrowserRoot, UI::UIDockDropZone::Bottom, "Viewports", 0.30f);
-        uiLayer->AddPanel("Output Log", m_OutputLogRoot, UI::UIDockDropZone::Center, "Content Browser");
-        if (const auto& dock = uiLayer->GetDockSpaceRef())
+
+        std::string savedLayout;
+        if (loadSavedLayout)
         {
-            if (Ref<UI::UIDockNode> node = dock->FindNodeByPanelTitle("Content Browser"); node && node->TabPanel)
-                node->TabPanel->SetActiveTab(0);
+            std::ifstream layoutFile(LayoutDirectory() / kLayoutFile);
+            std::stringstream ss;
+            ss << layoutFile.rdbuf();
+            savedLayout = ss.str();
+        }
+        if (savedLayout.find("Content Browser") != std::string::npos)
+            uiLayer->AddPanel("Content Browser", m_ContentBrowserRoot, UI::UIDockDropZone::Bottom, "Viewports", 0.30f);
+        if (savedLayout.find("Output Log") != std::string::npos)
+        {
+            const bool besideBrowser = savedLayout.find("Content Browser") != std::string::npos;
+            uiLayer->AddPanel("Output Log", m_OutputLogRoot, besideBrowser ? UI::UIDockDropZone::Center : UI::UIDockDropZone::Bottom,
+                              besideBrowser ? "Content Browser" : "Viewports", 0.30f);
         }
 
-        // Status bar: what runs on the left, the log's warnings / errors on the right; toasts stack above it at the right.
+        Ref<DrawerFrame> drawer(new DrawerFrame());
+        drawer->AddChild(Ref<UI::UIElement>(new DrawerGrip([this](float dy)
+        {
+            auto* area = static_cast<EditorCenterArea*>(m_CenterArea.get());
+            if (!area || area->GetBounds().Height() < 1.0f)
+                return;
+            m_DrawerFraction = std::clamp(m_DrawerFraction - dy / area->GetBounds().Height(), 0.15f, 0.9f);
+            area->HeightFraction = m_DrawerFraction;
+        })));
+        m_DrawerHost = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 0.0f);
+        m_DrawerHost->WidthMode = UI::UISizeMode::Fill;
+        m_DrawerHost->HeightMode = UI::UISizeMode::Fill;
+        drawer->AddChild(m_DrawerHost);
+        Ref<EditorCenterArea> center(new EditorCenterArea(uiLayer->GetDockSpaceRef(), drawer));
+        center->HeightFraction = m_DrawerFraction;
+        m_CenterArea = center;
+        m_DrawerPage = DrawerPage::None;
+
+        // Status bar: the drawer's tabs and what runs on the left, the log's warnings / errors on the right; toasts stack above it
+        // at the right.
+        Ref<StatusTabButton> contentTab(new StatusTabButton("Content Drawer", [this]() { ToggleDrawer(DrawerPage::Content); }));
+        contentTab->Tooltip = "The Content Browser (Ctrl+Space)";
+        Ref<StatusTabButton> logTab(new StatusTabButton("Output Log", [this]() { ToggleDrawer(DrawerPage::Log); }));
+        logTab->Tooltip = "The Output Log and the console's Cmd line (the ` key)";
+        m_ContentDrawerTab = contentTab;
+        m_LogDrawerTab = logTab;
         m_StatusActivity = UI::MakeUI<StatusActivityElement>();
         m_StatusActivity->WidthMode = UI::UISizeMode::Fill;
+        m_StatusActivity->Margin = UI::UIThickness{ 8.0f, 0.0f, 0.0f, 0.0f };
         m_StatusActivity->Tooltip = "Imports, script builds, assets loading and textures streaming show here; Ready when nothing runs";
         m_StatusCounts = Ref<UI::UIElement>(new StatusCountsElement(m_OutputLogPanel, [this]() { ShowOutputLog(); }));
-        m_StatusBar = UI::HStack(8.0f, { m_StatusActivity, m_StatusCounts }).Padding(4.0f, 2.0f).Style("Surface").Background(true).Get();
+        m_StatusBar = UI::HStack(4.0f, { contentTab, logTab, m_StatusActivity, m_StatusCounts }).Padding(4.0f, 2.0f).Style("Surface").Background(true).Get();
         m_StatusBar->WidthMode = UI::UISizeMode::Fill;
         m_StatusBar->HeightMode = UI::UISizeMode::Fixed;
         m_StatusBar->FixedSize = { 0.0f, kStatusBarHeight };
@@ -4150,8 +4439,13 @@ namespace Nox
                     }
                 }, false, true, m_ShowToolBar},
                 {"Render Graph", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
-                {"Content Browser", "", [this]() { TogglePanel("Content Browser"); }, false, true, IsPanelDocked("Content Browser")},
-                {"Output Log", "", [this]() { TogglePanel("Output Log"); }, false, true, IsPanelDocked("Output Log")},
+                {"Content Browser", "Ctrl+Space", [this]() { ShowPage(DrawerPage::Content); }, false, true, false, false,
+                 "In the drawer over the viewport (or its tab, when it is docked in the layout)."},
+                {"Output Log", "`", [this]() { ShowPage(DrawerPage::Log); }},
+                {IsPanelDocked("Content Browser") ? "Content Browser: Back to Drawer" : "Content Browser: Dock in Layout", "",
+                 [this]() { if (IsPanelDocked("Content Browser")) UndockPage(DrawerPage::Content); else DockPage(DrawerPage::Content); }},
+                {IsPanelDocked("Output Log") ? "Output Log: Back to Drawer" : "Output Log: Dock in Layout", "",
+                 [this]() { if (IsPanelDocked("Output Log")) UndockPage(DrawerPage::Log); else DockPage(DrawerPage::Log); }},
                 {"Profiler", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
                 {"World Partition", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
                 {"Levels", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
@@ -4205,7 +4499,7 @@ namespace Nox
         uiLayer->SetRoot(
             UI::VStack(0.0f, {
                            menuBar,
-                           uiLayer->GetDockSpaceRef(),
+                           m_CenterArea,
                            m_StatusBar
                        })
             .Padding(0.0f)
@@ -4410,6 +4704,8 @@ namespace Nox
         m_ShowInspector = true;
         m_ShowToolBar = true;
         m_MaterialEditors.clear(); // their floating windows go with the old layout
+        m_DrawerPage = DrawerPage::None;
+        m_DrawerFraction = 0.42f;
 
         BuildUI(false);
         SaveLayoutFiles();
@@ -4422,58 +4718,121 @@ namespace Nox
         return uiLayer && uiLayer->GetDockSpaceRef() && uiLayer->GetDockSpaceRef()->FindNodeByPanelTitle(title) != nullptr;
     }
 
-    void EditorV2Layer::TogglePanel(const std::string& title)
+    namespace
     {
-        UILayer* uiLayer = Application::Get().GetUILayer();
-        if (!uiLayer || !uiLayer->GetDockSpaceRef())
-            return;
-        const auto& dock = uiLayer->GetDockSpaceRef();
-        if (dock->FindNodeByPanelTitle(title))
+        const char* PageTitle(int page) { return page == 2 ? "Output Log" : "Content Browser"; }
+
+        void ActivateDockedTab(UI::UIDockSpace& dock, const std::string& title)
         {
-            dock->RemovePanel(title);
-            return;
-        }
-        // Back where the default layout puts it: the bottom area, as a tab beside its partner when that one is open.
-        const bool isLog = title == "Output Log";
-        Ref<UI::UIElement>& root = isLog ? m_OutputLogRoot : m_ContentBrowserRoot;
-        root = isLog ? m_OutputLogPanel.BuildUI() : m_ContentBrowserPanel.BuildUI();
-        const std::string partner = isLog ? "Content Browser" : "Output Log";
-        if (dock->FindNodeByPanelTitle(partner))
-            dock->AddPanel(title, root, UI::UIDockDropZone::Center, partner);
-        else
-            dock->AddPanel(title, root, UI::UIDockDropZone::Bottom, "Viewports", 0.30f);
-        if (Ref<UI::UIDockNode> node = dock->FindNodeByPanelTitle(title); node && node->TabPanel)
-        {
-            for (size_t i = 0; i < node->TabPanel->GetTabCount(); ++i)
+            if (Ref<UI::UIDockNode> node = dock.FindNodeByPanelTitle(title); node && node->TabPanel)
             {
-                if (node->TabPanel->GetTabTitle(i) == title)
-                    node->TabPanel->SetActiveTab(i);
+                for (size_t i = 0; i < node->TabPanel->GetTabCount(); ++i)
+                {
+                    if (node->TabPanel->GetTabTitle(i) == title)
+                        node->TabPanel->SetActiveTab(i);
+                }
             }
         }
     }
 
-    void EditorV2Layer::ShowOutputLog()
+    bool EditorV2Layer::IsDrawerOpen() const
+    {
+        const auto* area = static_cast<const EditorCenterArea*>(m_CenterArea.get());
+        return area && area->Open;
+    }
+
+    void EditorV2Layer::ShowPage(DrawerPage page)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !uiLayer->GetDockSpaceRef() || page == DrawerPage::None)
+            return;
+        const std::string title = PageTitle(static_cast<int>(page));
+        if (IsPanelDocked(title))
+        {
+            ActivateDockedTab(*uiLayer->GetDockSpaceRef(), title);
+            return;
+        }
+        OpenDrawer(page);
+    }
+
+    void EditorV2Layer::ToggleDrawer(DrawerPage page)
+    {
+        if (IsPanelDocked(PageTitle(static_cast<int>(page))))
+        {
+            ShowPage(page);
+            return;
+        }
+        if (IsDrawerOpen() && m_DrawerPage == page)
+            CloseDrawer();
+        else
+            OpenDrawer(page);
+    }
+
+    void EditorV2Layer::OpenDrawer(DrawerPage page)
+    {
+        auto* area = static_cast<EditorCenterArea*>(m_CenterArea.get());
+        if (!area || !m_DrawerHost || page == DrawerPage::None || IsPanelDocked(PageTitle(static_cast<int>(page))))
+            return;
+        Ref<UI::UIElement> root = page == DrawerPage::Content ? m_ContentBrowserRoot : m_OutputLogRoot;
+        if (!root)
+            return;
+        if (m_DrawerPage != page || m_DrawerHost->GetChildren().empty() || m_DrawerHost->GetChildren().front() != root)
+        {
+            m_DrawerHost->ClearChildren();
+            m_DrawerHost->AddChild(root);
+            root->Visible = true;
+        }
+        m_DrawerPage = page;
+        area->HeightFraction = m_DrawerFraction;
+        area->Open = true;
+    }
+
+    void EditorV2Layer::CloseDrawer()
+    {
+        if (auto* area = static_cast<EditorCenterArea*>(m_CenterArea.get()))
+            area->Open = false;
+    }
+
+    void EditorV2Layer::DockPage(DrawerPage page)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !uiLayer->GetDockSpaceRef() || page == DrawerPage::None)
+            return;
+        const auto& dock = uiLayer->GetDockSpaceRef();
+        const std::string title = PageTitle(static_cast<int>(page));
+        if (dock->FindNodeByPanelTitle(title))
+            return;
+        Ref<UI::UIElement> root = page == DrawerPage::Content ? m_ContentBrowserRoot : m_OutputLogRoot;
+        if (!root)
+            return;
+        // Out of the drawer (closed at once: the page is needed in the dock now).
+        if (m_DrawerPage == page)
+        {
+            if (m_DrawerHost)
+                m_DrawerHost->ClearChildren();
+            if (auto* area = static_cast<EditorCenterArea*>(m_CenterArea.get()))
+            {
+                area->Open = false;
+                area->Openness = 0.0f;
+            }
+            m_DrawerPage = DrawerPage::None;
+        }
+        // Under the viewports, as a tab beside the other page when that one is docked already.
+        const std::string partner = PageTitle(page == DrawerPage::Log ? 1 : 2);
+        if (dock->FindNodeByPanelTitle(partner))
+            dock->AddPanel(title, root, UI::UIDockDropZone::Center, partner);
+        else
+            dock->AddPanel(title, root, UI::UIDockDropZone::Bottom, "Viewports", 0.30f);
+        ActivateDockedTab(*dock, title);
+    }
+
+    void EditorV2Layer::UndockPage(DrawerPage page)
     {
         UILayer* uiLayer = Application::Get().GetUILayer();
         if (!uiLayer || !uiLayer->GetDockSpaceRef())
             return;
-        const auto& dock = uiLayer->GetDockSpaceRef();
-        Ref<UI::UIDockNode> node = dock->FindNodeByPanelTitle("Output Log");
-        if (!node)
-        {
-            if (m_OutputLogRoot && m_OutputLogRoot->GetParent())
-                return; // floating in a window of its own: already in sight
-            TogglePanel("Output Log");
-            return;
-        }
-        if (node->TabPanel)
-        {
-            for (size_t i = 0; i < node->TabPanel->GetTabCount(); ++i)
-            {
-                if (node->TabPanel->GetTabTitle(i) == "Output Log")
-                    node->TabPanel->SetActiveTab(i);
-            }
-        }
+        uiLayer->GetDockSpaceRef()->RemovePanel(PageTitle(static_cast<int>(page)));
+        OpenDrawer(page);
     }
 
     AssetHandle EditorV2Layer::CreatePrefab(UUID dragged, const std::filesystem::path& relativeFolder)

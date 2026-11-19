@@ -98,6 +98,8 @@ namespace Nox
 
             bool OnPointerDown(const UI::UIPointerEvent& e) override
             {
+                if (AnyChildContains(e.Position))
+                    return true; // on the popup: its row acts on the release
                 if ((e.Button == 1 || e.Button == 3) && m_Context)
                 {
                     m_Context->ClearOverlay();

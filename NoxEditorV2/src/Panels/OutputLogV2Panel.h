@@ -42,6 +42,8 @@ namespace Nox
         size_t GetWarningCount() const { return m_WarningCount; }
         // Puts the keyboard into the Cmd line (the status bar's counters, the ` key).
         void FocusCommandLine();
+        // An element put at the right end of the toolbar (the editor's "Dock in Layout" while the log is in the drawer).
+        void SetToolbarExtra(Ref<UI::UIElement> element) { m_ToolbarExtra = std::move(element); }
 
     private:
         friend class LogLinesView;
@@ -75,6 +77,7 @@ namespace Nox
         int m_HistoryIndex = -1;
 
         Ref<UI::UIElement> m_Root;
+        Ref<UI::UIElement> m_ToolbarExtra;
         Ref<LogLinesView> m_Lines;
         Ref<LogFilterChip> m_Chips[4];
         Ref<ConsoleLine> m_Command;

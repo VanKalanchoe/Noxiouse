@@ -93,7 +93,7 @@ namespace Nox
         UIVec2 ComputeDesiredSize() override
         {
             const UIVec2 text = UI::UILabel::MeasureText(Label(), nullptr, kFont);
-            return { 10.0f + 8.0f + 6.0f + text.x + 10.0f, 26.0f };
+            return { 10.0f + 8.0f + 6.0f + text.x + 12.0f, 26.0f };
         }
 
         void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
@@ -118,7 +118,7 @@ namespace Nox
     private:
         std::string Label() const { return std::string(kGroupNames[m_Group]) + "  " + std::to_string(Count); }
 
-        static constexpr float kFont = 13.0f;
+        static constexpr float kFont = 14.5f;
         int m_Group;
         std::function<void()> m_OnToggle;
         bool m_Hovered = false;
@@ -351,9 +351,9 @@ namespace Nox
         }
 
     private:
-        static constexpr float kRow = 19.0f;
+        static constexpr float kRow = 22.0f;
         static constexpr float kTop = 3.0f;
-        static constexpr float kFont = 13.0f;
+        static constexpr float kFont = 15.0f;
 
         void Sync()
         {
@@ -486,6 +486,8 @@ namespace Nox
             Refilter();
         }));
         search->WidthMode = UI::UISizeMode::Fill;
+        search->HeightMode = UI::UISizeMode::Fixed;
+        search->FixedSize = { 0.0f, 26.0f };
         search->VAlign = UI::UIAlignment::Center;
         toolbar->AddChild(search);
 
@@ -497,6 +499,8 @@ namespace Nox
                 Refilter();
             }));
             m_Chips[group]->On = m_Show[group];
+            const size_t counts[4] = { m_ErrorCount, m_WarningCount, m_InfoCount, m_VerboseCount };
+            m_Chips[group]->Count = counts[group];
             m_Chips[group]->Tooltip = std::string("Show or hide ") + kGroupNames[group] + " (the number counts them since Clear)";
             toolbar->AddChild(m_Chips[group]);
         }
@@ -504,18 +508,25 @@ namespace Nox
         auto button = [](const std::string& text, std::function<void()> onClick, const std::string& tooltip)
         {
             Ref<UI::UIButton> b(new UI::UIButton(text, std::move(onClick)));
-            b->Padding = UI::UIThickness::Symmetric(10.0f, 4.0f);
+            b->Padding = UI::UIThickness::Symmetric(10.0f, 2.0f);
+            b->HeightMode = UI::UISizeMode::Fixed;
+            b->FixedSize = { 0.0f, 26.0f };
             b->Tooltip = tooltip;
             b->VAlign = UI::UIAlignment::Center;
             return b;
         };
         toolbar->AddChild(button("Copy", [this]() { CopyLines(!m_Selected.empty()); }, "Copies the selected lines (all shown lines when none is selected)"));
         toolbar->AddChild(button("Clear", [this]() { Clear(); }, "Hides what is listed now; Nox.log keeps everything"));
+        if (m_ToolbarExtra)
+        {
+            m_ToolbarExtra->VAlign = UI::UIAlignment::Center;
+            toolbar->AddChild(m_ToolbarExtra);
+        }
 
         m_Lines = Ref<LogLinesView>(new LogLinesView(*this));
         m_Lines->Margin = UI::UIThickness{ 6.0f, 0.0f, 6.0f, 0.0f };
 
-        m_Suggestions = Ref<UI::UILabel>(new UI::UILabel("", 12.5f));
+        m_Suggestions = Ref<UI::UILabel>(new UI::UILabel("", 14.0f));
         m_Suggestions->UseColorOverride = true;
         m_Suggestions->ColorOverride = { 0.62f, 0.68f, 0.78f, 1.0f };
         m_Suggestions->Margin = UI::UIThickness{ 50.0f, 4.0f, 8.0f, 0.0f };
@@ -525,7 +536,7 @@ namespace Nox
         commandRow->WidthMode = UI::UISizeMode::Fill;
         commandRow->Padding = UI::UIThickness{ 6.0f, 5.0f, 6.0f, 6.0f };
         commandRow->VAlign = UI::UIAlignment::Center;
-        Ref<UI::UILabel> cmd(new UI::UILabel("Cmd", 13.5f));
+        Ref<UI::UILabel> cmd(new UI::UILabel("Cmd", 15.0f));
         cmd->VAlign = UI::UIAlignment::Center;
         cmd->Tooltip = "Engine console commands and variables: 'help' lists them, 'help <name>' explains one";
         commandRow->AddChild(cmd);

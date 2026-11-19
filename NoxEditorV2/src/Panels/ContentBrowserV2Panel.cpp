@@ -327,6 +327,156 @@ namespace Nox
     }
 
     // ------------------------------------------------------------------------------------------------------------------------------
+    // The path bar
+    // ------------------------------------------------------------------------------------------------------------------------------
+
+    // Where you are, as Unreal shows it: "Assets > Models > bistro" in plain text with chevrons, one click on a folder goes there.
+    // As high as the toolbar's buttons; when the path is longer than the bar, its first folders give way to "...".
+    class ContentPathBar final : public UI::UIElement
+    {
+    public:
+        ContentPathBar()
+        {
+            HitTestMode = UI::UIHitTestMode::Self;
+            WidthMode = UI::UISizeMode::Fill;
+            HeightMode = UI::UISizeMode::Fixed;
+            FixedSize = { 0.0f, 26.0f };
+            VAlign = UI::UIAlignment::Center;
+        }
+
+        std::function<void(int segment)> OnNavigate;
+
+        void SetSegments(std::vector<std::string> segments)
+        {
+            m_Segments = std::move(segments);
+            m_Hovered = -1;
+        }
+        const std::vector<std::string>& GetSegments() const { return m_Segments; }
+
+        bool OnPointerMove(const UI::UIPointerEvent& e) override
+        {
+            m_Hovered = SegmentAt(e.Position);
+            return true;
+        }
+        bool OnPointerLeave(const UI::UIPointerEvent&) override
+        {
+            m_Hovered = -1;
+            return false;
+        }
+        bool OnPointerDown(const UI::UIPointerEvent& e) override
+        {
+            if (e.Button != 1)
+                return false;
+            const int segment = SegmentAt(e.Position);
+            if (segment >= 0 && segment + 1 < static_cast<int>(m_Segments.size()) && OnNavigate)
+                OnNavigate(segment);
+            return true;
+        }
+
+    protected:
+        UIVec2 ComputeDesiredSize() override { return { 80.0f, 26.0f }; }
+
+        void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+        {
+            Place();
+            const UI::UIRect& b = GetBounds();
+            const UIColor text = theme.GetToken("Text", { 0.92f, 0.93f, 0.95f, 1.0f });
+            const UIColor muted = theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+            d.AddRoundedRect(b.Min, b.Max, theme.GetToken("Background", { 0.063f, 0.075f, 0.106f, 1.0f }), glm::vec4(4.0f), 1.0f,
+                             theme.GetToken("Border", { 0.20f, 0.235f, 0.32f, 1.0f }));
+            d.PushClipRect(b.Min, b.Max);
+            const float cy = b.Center().y;
+            if (m_Elided)
+            {
+                const UIVec2 size = UI::UILabel::MeasureText("...", nullptr, kFont);
+                d.AddText("...", nullptr, { b.Min.x + kInset, cy - size.y * 0.5f }, kFont, muted);
+                const float x = b.Min.x + kInset + size.x + kChevron * 0.5f;
+                UI::Icons::DrawSegment(d, { x - 2.0f, cy - 4.0f }, { x + 2.0f, cy }, 1.5f, muted);
+                UI::Icons::DrawSegment(d, { x + 2.0f, cy }, { x - 2.0f, cy + 4.0f }, 1.5f, muted);
+            }
+            for (size_t i = 0; i < m_Placed.size(); ++i)
+            {
+                const Placed& p = m_Placed[i];
+                const bool last = p.Index + 1 == static_cast<int>(m_Segments.size());
+                if (p.Index == m_Hovered && !last)
+                    d.AddRoundedRect({ p.X0, b.Min.y + 3.0f }, { p.X1, b.Max.y - 3.0f }, { 1.0f, 1.0f, 1.0f, 0.08f }, glm::vec4(3.0f));
+                const std::string& label = m_Segments[static_cast<size_t>(p.Index)];
+                const UIVec2 size = UI::UILabel::MeasureText(label, nullptr, kFont);
+                d.AddText(label, nullptr, { p.X0 + kPad, cy - size.y * 0.5f }, kFont, last || p.Index == m_Hovered ? text : muted);
+                if (!last)
+                {
+                    // The chevron after it.
+                    const float x = p.X1 + kChevron * 0.5f;
+                    UI::Icons::DrawSegment(d, { x - 2.0f, cy - 4.0f }, { x + 2.0f, cy }, 1.5f, muted);
+                    UI::Icons::DrawSegment(d, { x + 2.0f, cy }, { x - 2.0f, cy + 4.0f }, 1.5f, muted);
+                }
+            }
+            d.PopClipRect();
+        }
+
+    private:
+        static constexpr float kFont = 14.0f;
+        static constexpr float kPad = 6.0f;
+        static constexpr float kChevron = 14.0f;
+        static constexpr float kInset = 6.0f;
+
+        struct Placed
+        {
+            int Index = 0;
+            float X0 = 0.0f, X1 = 0.0f;
+        };
+
+        // The segments that fit, the last one always; the ones that do not are left out from the front.
+        void Place()
+        {
+            m_Placed.clear();
+            m_Elided = false;
+            const UI::UIRect& b = GetBounds();
+            const float available = b.Width() - kInset * 2.0f;
+            std::vector<float> widths;
+            for (const std::string& segment : m_Segments)
+                widths.push_back(UI::UILabel::MeasureText(segment, nullptr, kFont).x + kPad * 2.0f);
+            const float ellipsis = UI::UILabel::MeasureText("...", nullptr, kFont).x + kChevron;
+            int first = static_cast<int>(m_Segments.size());
+            float used = 0.0f;
+            while (first > 0)
+            {
+                const float add = widths[static_cast<size_t>(first - 1)] + (first < static_cast<int>(m_Segments.size()) ? kChevron : 0.0f);
+                const float reserve = first - 1 > 0 ? ellipsis : 0.0f;
+                if (used + add + reserve > available && first < static_cast<int>(m_Segments.size()))
+                    break;
+                used += add;
+                --first;
+            }
+            m_Elided = first > 0;
+            float x = b.Min.x + kInset + (m_Elided ? ellipsis : 0.0f);
+            for (int i = first; i < static_cast<int>(m_Segments.size()); ++i)
+            {
+                m_Placed.push_back({ i, x, x + widths[static_cast<size_t>(i)] });
+                x += widths[static_cast<size_t>(i)] + kChevron;
+            }
+        }
+
+        int SegmentAt(const UIVec2& p) const
+        {
+            const UI::UIRect& b = GetBounds();
+            if (!b.Contains(p))
+                return -1;
+            for (const Placed& placed : m_Placed)
+            {
+                if (p.x >= placed.X0 && p.x <= placed.X1)
+                    return placed.Index;
+            }
+            return -1;
+        }
+
+        std::vector<std::string> m_Segments;
+        std::vector<Placed> m_Placed;
+        bool m_Elided = false;
+        int m_Hovered = -1;
+    };
+
+    // ------------------------------------------------------------------------------------------------------------------------------
     // The tiles
     // ------------------------------------------------------------------------------------------------------------------------------
 
@@ -410,9 +560,11 @@ namespace Nox
         // The textures shown as tile pictures in the last frame: kept loaded by the editor's unused-asset sweep.
         mutable std::unordered_set<AssetHandle> PaintedTextures;
 
-        void ResetForNewEntries()
+        // `newListing`: another folder, search or filter (back to the top). A refresh of the same listing keeps the scroll position.
+        void ResetForNewEntries(bool newListing)
         {
-            m_ScrollY = 0.0f;
+            if (newListing)
+                m_ScrollY = 0.0f;
             m_HoveredIndex = -1;
             m_PressedIndex = -1;
             m_Anchor = -1;
@@ -781,7 +933,7 @@ namespace Nox
     private:
         static constexpr float kGap = 10.0f;
         static constexpr float kNameSize = 13.5f;
-        static constexpr float kTypeSize = 11.5f;
+        static constexpr float kTypeSize = 12.5f;
 
         float TileWidth() const { return ThumbSize; }
         float TileHeight() const { return ThumbSize + 3.0f + 6.0f + UI::UILabel::MeasureText("Ag", nullptr, kNameSize).y * 2.0f + 2.0f + 16.0f; }
@@ -887,7 +1039,8 @@ namespace Nox
             // The type at the bottom right, small and muted.
             const std::string type = UI::UILabel::ElideText(visual.Label, nullptr, kTypeSize, nameWidth);
             const UIVec2 typeSize = UI::UILabel::MeasureText(type, nullptr, kTypeSize);
-            d.AddText(type, nullptr, { r.Max.x - 6.0f - typeSize.x, r.Max.y - 5.0f - typeSize.y }, kTypeSize, muted);
+            const UIColor typeColor = glm::mix(muted, text, 0.3f);
+            d.AddText(type, nullptr, { r.Max.x - 6.0f - typeSize.x, r.Max.y - 5.0f - typeSize.y }, kTypeSize, typeColor);
         }
 
         bool IsRenamingIndex(const ContentEntry& entry) const { return IsRenaming() && entry.Handle == m_RenameHandle; }
@@ -985,19 +1138,23 @@ namespace Nox
                 m_CurrentDirectory = m_BaseDirectory;
         }
 
+        // Every control of the bars is this high, so they line up.
+        constexpr float kBarHeight = 26.0f;
         auto compactButton = [](const std::string& text, std::function<void()> onClick, const std::string& tooltip)
         {
             Ref<UI::UIButton> button(new UI::UIButton(text, std::move(onClick)));
-            button->Padding = UI::UIThickness::Symmetric(9.0f, 4.0f);
+            button->Padding = UI::UIThickness::Symmetric(10.0f, 2.0f);
+            button->HeightMode = UI::UISizeMode::Fixed;
+            button->FixedSize = { 0.0f, kBarHeight };
             button->Tooltip = tooltip;
             button->VAlign = UI::UIAlignment::Center;
             return button;
         };
 
-        // Toolbar: what makes things on the left, where you are in the middle, how you look on the right.
+        // First row (Unreal's): what makes things, then where you are, then the settings.
         Ref<UI::UIStackBox> toolbar(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
         toolbar->WidthMode = UI::UISizeMode::Fill;
-        toolbar->Padding = UI::UIThickness::Symmetric(6.0f, 5.0f);
+        toolbar->Padding = UI::UIThickness{ 6.0f, 5.0f, 6.0f, 4.0f };
         toolbar->VAlign = UI::UIAlignment::Center;
 
         Ref<UI::UIButton> addButton = compactButton("+ Add", {}, "Make a new asset or folder here");
@@ -1009,20 +1166,16 @@ namespace Nox
                 UI::UIMenuPopup::ShowPopupMenu(*ctx, addRaw->GetBounds(), BuildAddMenu());
         };
         toolbar->AddChild(addButton);
-        toolbar->AddChild(compactButton("Import", [this]()
-        {
-            static constexpr char filter[] = "Models, textures, sounds, fonts, scenes\0*.gltf;*.glb;*.png;*.jpg;*.jpeg;*.tga;*.hdr;*.wav;*.ogg;*.flac;*.mp3;*.ttf;*.otf;*.nox\0";
-            const std::string file = Utility::OpenFile(filter);
-            if (!file.empty())
-                ImportFile(file);
-        }, "Bring a file into the open folder (or drag files from the system onto the editor)"));
+        toolbar->AddChild(compactButton("Import", [this]() { PickAndImport(); }, "Bring a file into the open folder (or drag files from the system onto the editor)"));
 
         m_BackButton = compactButton("<", [this]() { GoBack(); }, "Back (the folder you came from)");
         m_ForwardButton = compactButton(">", [this]() { GoForward(); }, "Forward");
+        m_BackButton->Margin = UI::UIThickness{ 6.0f, 0.0f, 0.0f, 0.0f };
         toolbar->AddChild(m_BackButton);
         toolbar->AddChild(m_ForwardButton);
 
-        m_Breadcrumb = Ref<UI::UIBreadcrumb>(new UI::UIBreadcrumb({}, [this](int segment)
+        m_PathBar = Ref<ContentPathBar>(new ContentPathBar());
+        m_PathBar->OnNavigate = [this](int segment)
         {
             std::filesystem::path target = m_BaseDirectory;
             const std::filesystem::path relative = m_CurrentDirectory.lexically_relative(m_BaseDirectory);
@@ -1034,32 +1187,15 @@ namespace Nox
                 target /= part;
             }
             NavigateTo(target);
-        }));
-        m_Breadcrumb->WidthMode = UI::UISizeMode::Fill;
-        m_Breadcrumb->VAlign = UI::UIAlignment::Center;
-        toolbar->AddChild(m_Breadcrumb);
-
-        m_SearchBar = Ref<UI::UISearchBar>(new UI::UISearchBar("Search this folder and below", [this](const std::string& query)
+        };
+        toolbar->AddChild(m_PathBar);
+        if (m_ToolbarExtra)
         {
-            m_Search = query;
-            m_EntriesDirty = true;
-        }));
-        m_SearchBar->WidthMode = UI::UISizeMode::Fixed;
-        m_SearchBar->FixedSize = { 230.0f, 30.0f };
-        m_SearchBar->VAlign = UI::UIAlignment::Center;
-        toolbar->AddChild(m_SearchBar);
+            m_ToolbarExtra->VAlign = UI::UIAlignment::Center;
+            toolbar->AddChild(m_ToolbarExtra);
+        }
 
-        m_FilterDropdown = Ref<UI::UIDropdown>(new UI::UIDropdown(nullptr, std::vector<std::string>(std::begin(kFilterNames), std::end(kFilterNames)), m_TypeFilter,
-            [this](int index)
-            {
-                m_TypeFilter = index;
-                m_EntriesDirty = true;
-            }));
-        m_FilterDropdown->MinSize = { 118.0f, 28.0f };
-        m_FilterDropdown->VAlign = UI::UIAlignment::Center;
-        toolbar->AddChild(m_FilterDropdown);
-
-        Ref<UI::UIButton> viewButton = compactButton("View", {}, "Tile size, refresh, show in Explorer");
+        Ref<UI::UIButton> viewButton = compactButton("Settings", {}, "Tile size, refresh, show in Explorer");
         UI::UIButton* viewRaw = viewButton.get();
         viewButton->OnClick = [this, viewRaw]()
         {
@@ -1083,7 +1219,7 @@ namespace Nox
         };
         toolbar->AddChild(viewButton);
 
-        // Folder tree | tiles.
+        // Folder tree | (type filter + search over the tiles).
         m_FolderTree = Ref<UI::UITreeView>(new UI::UITreeView());
         m_FolderTree->WidthMode = UI::UISizeMode::Fixed;
         m_FolderTree->FixedSize = { 210.0f, 0.0f };
@@ -1101,14 +1237,49 @@ namespace Nox
                 NavigateTo(it->second);
         };
 
+        m_FilterDropdown = Ref<UI::UIDropdown>(new UI::UIDropdown(nullptr, std::vector<std::string>(std::begin(kFilterNames), std::end(kFilterNames)), m_TypeFilter,
+            [this](int index)
+            {
+                m_TypeFilter = index;
+                m_EntriesDirty = true;
+            }));
+        m_FilterDropdown->WidthMode = UI::UISizeMode::Fixed;
+        m_FilterDropdown->HeightMode = UI::UISizeMode::Fixed;
+        m_FilterDropdown->FixedSize = { 128.0f, kBarHeight };
+        m_FilterDropdown->MinSize = { 0.0f, 0.0f }; // (its own minimum is 28 px)
+        m_FilterDropdown->VAlign = UI::UIAlignment::Center;
+        m_FilterDropdown->Tooltip = "Show only one kind of asset";
+
+        m_SearchBar = Ref<UI::UISearchBar>(new UI::UISearchBar("Search this folder and below", [this](const std::string& query)
+        {
+            m_Search = query;
+            m_EntriesDirty = true;
+        }));
+        m_SearchBar->WidthMode = UI::UISizeMode::Fill;
+        m_SearchBar->HeightMode = UI::UISizeMode::Fixed;
+        m_SearchBar->FixedSize = { 0.0f, kBarHeight };
+        m_SearchBar->VAlign = UI::UIAlignment::Center;
+
+        Ref<UI::UIStackBox> searchRow(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
+        searchRow->WidthMode = UI::UISizeMode::Fill;
+        searchRow->VAlign = UI::UIAlignment::Center;
+        searchRow->AddChild(m_FilterDropdown);
+        searchRow->AddChild(m_SearchBar);
+
         m_Tiles = Ref<ContentTileView>(new ContentTileView(*this));
 
-        Ref<UI::UIStackBox> body(new UI::UIStackBox(UI::UIOrientation::Horizontal, 4.0f));
+        Ref<UI::UIStackBox> assetsColumn(new UI::UIStackBox(UI::UIOrientation::Vertical, 6.0f));
+        assetsColumn->WidthMode = UI::UISizeMode::Fill;
+        assetsColumn->HeightMode = UI::UISizeMode::Fill;
+        assetsColumn->AddChild(searchRow);
+        assetsColumn->AddChild(m_Tiles);
+
+        Ref<UI::UIStackBox> body(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
         body->WidthMode = UI::UISizeMode::Fill;
         body->HeightMode = UI::UISizeMode::Fill;
-        body->Padding = UI::UIThickness{ 4.0f, 0.0f, 4.0f, 0.0f };
+        body->Padding = UI::UIThickness{ 6.0f, 0.0f, 6.0f, 0.0f };
         body->AddChild(m_FolderTree);
-        body->AddChild(m_Tiles);
+        body->AddChild(assetsColumn);
 
         m_Footer = Ref<UI::UILabel>(new UI::UILabel("", 13.0f));
         m_Footer->UseColorOverride = true;
@@ -1177,15 +1348,14 @@ namespace Nox
 
         // Files that came in (an import finishing, a tool, a copy in Explorer): the registry grew, or the folder changed on disk
         // (looked at twice a second -- one stat).
-        if (assets->GetAssetRegistry().size() != m_RegistrySize)
-            Refresh();
+        // (Twice a second at most: while a big folder's textures are cooked, files arrive many times a second.)
         m_RescanTimer += dt;
         if (m_RescanTimer > 0.5f)
         {
             m_RescanTimer = 0.0f;
             std::error_code error;
             const auto stamp = std::filesystem::last_write_time(m_CurrentDirectory, error);
-            if (!error && stamp != m_FolderStamp)
+            if ((!error && stamp != m_FolderStamp) || assets->GetAssetRegistry().size() != m_RegistrySize)
                 Refresh();
         }
 
@@ -1266,7 +1436,20 @@ namespace Nox
         std::vector<UI::UITreeNode> nodes;
         nodes.push_back(build(m_BaseDirectory, "Assets", 0));
         nodes.front().Expanded = true;
-        m_FolderTree->SetNodes(std::move(nodes));
+        // The same folders, opened the same way: the tree keeps its rows (and its scroll position, its hover).
+        size_t signature = 0;
+        std::function<void(const UI::UITreeNode&)> hash = [&](const UI::UITreeNode& node)
+        {
+            signature = signature * 1099511628211ull ^ (node.Id + (node.Expanded ? 1 : 0));
+            for (const UI::UITreeNode& child : node.Children)
+                hash(child);
+        };
+        hash(nodes.front());
+        if (signature != m_TreeSignature)
+        {
+            m_TreeSignature = signature;
+            m_FolderTree->SetNodes(std::move(nodes));
+        }
         m_FolderTree->SetSelectedId(FolderId(m_CurrentDirectory));
     }
 
@@ -1294,6 +1477,10 @@ namespace Nox
             return;
         m_Entries.clear();
         m_RegistrySize = assets->GetAssetRegistry().size();
+        const bool newListing = m_ListedDirectory != m_CurrentDirectory || m_ListedSearch != m_Search || m_ListedFilter != m_TypeFilter;
+        m_ListedDirectory = m_CurrentDirectory;
+        m_ListedSearch = m_Search;
+        m_ListedFilter = m_TypeFilter;
         std::error_code error;
         m_FolderStamp = std::filesystem::last_write_time(m_CurrentDirectory, error);
 
@@ -1329,7 +1516,7 @@ namespace Nox
             }
             std::sort(m_Entries.begin(), m_Entries.end(), [](const ContentEntry& a, const ContentEntry& b) { return ToLower(a.Name) < ToLower(b.Name); });
             if (m_Tiles)
-                m_Tiles->ResetForNewEntries();
+                m_Tiles->ResetForNewEntries(newListing);
             return;
         }
 
@@ -1374,12 +1561,12 @@ namespace Nox
         m_Entries = std::move(folders);
         m_Entries.insert(m_Entries.end(), std::make_move_iterator(files.begin()), std::make_move_iterator(files.end()));
         if (m_Tiles)
-            m_Tiles->ResetForNewEntries();
+            m_Tiles->ResetForNewEntries(newListing);
     }
 
     void ContentBrowserV2Panel::SyncChrome()
     {
-        if (m_Breadcrumb)
+        if (m_PathBar)
         {
             std::vector<std::string> segments = { "Assets" };
             const std::filesystem::path relative = m_CurrentDirectory.lexically_relative(m_BaseDirectory);
@@ -1388,8 +1575,8 @@ namespace Nox
                 if (part != "." && !part.empty())
                     segments.push_back(part.string());
             }
-            if (segments != m_Breadcrumb->GetSegments())
-                m_Breadcrumb->SetSegments(std::move(segments));
+            if (segments != m_PathBar->GetSegments())
+                m_PathBar->SetSegments(std::move(segments));
         }
         if (m_BackButton)
             m_BackButton->SetEnabled(!m_Back.empty());
@@ -1816,6 +2003,15 @@ namespace Nox
             });
     }
 
+    void ContentBrowserV2Panel::PickAndImport()
+    {
+        // SDL's dialog takes extensions without "*." (it refuses a filter that has them).
+        static constexpr char filter[] = "Models, textures, sounds, fonts, scenes\0gltf;glb;png;jpg;jpeg;tga;hdr;wav;ogg;flac;mp3;ttf;otf;nox\0";
+        const std::string file = Utility::OpenFile(filter);
+        if (!file.empty())
+            ImportFile(file);
+    }
+
     void ContentBrowserV2Panel::ShowInExplorer(const std::filesystem::path& absolutePath)
     {
         const std::filesystem::path folder = std::filesystem::is_directory(absolutePath) ? absolutePath : absolutePath.parent_path();
@@ -2024,13 +2220,7 @@ namespace Nox
     {
         std::vector<UI::UIMenuItem> items = BuildAddMenu();
         items.push_back({ "", "", {}, true });
-        items.push_back({ "Import...", "", [this]()
-        {
-            static constexpr char filter[] = "Models, textures, sounds, fonts, scenes\0*.gltf;*.glb;*.png;*.jpg;*.jpeg;*.tga;*.hdr;*.wav;*.ogg;*.flac;*.mp3;*.ttf;*.otf;*.nox\0";
-            const std::string file = Utility::OpenFile(filter);
-            if (!file.empty())
-                ImportFile(file);
-        } });
+        items.push_back({ "Import...", "", [this]() { PickAndImport(); } });
         items.push_back({ "Show in Explorer", "", [this]() { ShowInExplorer(m_CurrentDirectory); } });
         return items;
     }

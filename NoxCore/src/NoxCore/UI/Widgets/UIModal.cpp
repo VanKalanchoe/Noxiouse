@@ -54,11 +54,8 @@ namespace Nox::UI
                 {
                     // A press inside the dialog (on its buttons, fields, text) bubbles up to here too: only the dimmed area
                     // around it dismisses.
-                    for (const auto& child : GetChildren())
-                    {
-                        if (child->Visible && child->GetBounds().Contains(e.Position))
-                            return true;
-                    }
+                    if (AnyChildContains(e.Position))
+                        return true;
                     UIContext* ctx = m_Context;
                     auto onDismiss = std::move(m_OnDismiss);
                     ctx->ClearOverlay();

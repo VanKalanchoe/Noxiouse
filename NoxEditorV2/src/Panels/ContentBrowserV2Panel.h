@@ -30,6 +30,7 @@ namespace Nox
     }
 
     class ContentTileView;
+    class ContentPathBar;
 
     // How an asset type looks in the editor: its name ("Static Mesh"), its colour (the line under a tile's picture, as in
     // Unreal) and its icon (drawn with vectors: crisp at any tile size, no image files).
@@ -94,9 +95,12 @@ namespace Nox
         void SetSceneReferencesCallback(std::function<void(std::unordered_set<AssetHandle>&)> callback) { m_SceneReferences = std::move(callback); }
         // Saved, imported, failed: shown as a toast by the editor.
         void SetNotifyCallback(std::function<void(UI::UINotification)> callback) { m_Notify = std::move(callback); }
+        // An element put at the right end of the toolbar (the editor's "Dock in Layout" while the browser is in the drawer).
+        void SetToolbarExtra(Ref<UI::UIElement> element) { m_ToolbarExtra = std::move(element); }
 
     private:
         friend class ContentTileView;
+        friend class ContentPathBar;
 
         void NavigateTo(const std::filesystem::path& absoluteFolder, bool recordHistory = true);
         void GoBack();
@@ -124,6 +128,7 @@ namespace Nox
         void CreateScript();
         void OpenModelImportDialog(const std::filesystem::path& relativeSource, const std::filesystem::path& externalSource);
         void ShowInExplorer(const std::filesystem::path& absolutePath);
+        void PickAndImport();
         // A new file of the open folder: registered, listed, selected and put into rename mode.
         void AdoptNewFile(const std::filesystem::path& absolutePath);
         std::vector<UI::UIMenuItem> BuildAssetMenu(const ContentEntry& entry);
@@ -146,11 +151,17 @@ namespace Nox
         bool m_TreeDirty = true;
         std::unordered_map<uint64_t, std::filesystem::path> m_TreeFolders; // tree node id -> absolute folder
         bool m_ImportsWereRunning = false;
+        // What the tiles list now: a refresh of the same listing keeps its scroll position and selection.
+        std::filesystem::path m_ListedDirectory;
+        std::string m_ListedSearch;
+        int m_ListedFilter = -1;
+        size_t m_TreeSignature = 0; // the folder tree is rebuilt only when its folders changed
 
         Ref<UI::UIElement> m_Root;
         Ref<UI::UITreeView> m_FolderTree;
         Ref<ContentTileView> m_Tiles;
-        Ref<UI::UIBreadcrumb> m_Breadcrumb;
+        Ref<ContentPathBar> m_PathBar;
+        Ref<UI::UIElement> m_ToolbarExtra;
         Ref<UI::UISearchBar> m_SearchBar;
         Ref<UI::UIDropdown> m_FilterDropdown;
         Ref<UI::UIButton> m_BackButton;

@@ -292,6 +292,8 @@ namespace Nox::UI
 
             bool OnPointerDown(const UIPointerEvent& e) override
             {
+                if (AnyChildContains(e.Position))
+                    return true; // on a menu: its row acts on the release
                 if ((e.Button == 1 || e.Button == 3) && m_Ctx)
                 {
                     m_Ctx->ClearOverlay();
@@ -311,6 +313,8 @@ namespace Nox::UI
 
             bool OnPointerDown(const UIPointerEvent& e) override
             {
+                if (AnyChildContains(e.Position))
+                    return true; // on a menu: its row acts on the release
                 if ((e.Button == 1 || e.Button == 3) && m_Ctx)
                 {
                     m_Ctx->ClearOverlay();

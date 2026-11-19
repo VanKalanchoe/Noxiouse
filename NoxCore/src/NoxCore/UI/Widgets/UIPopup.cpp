@@ -24,9 +24,11 @@ namespace Nox::UI
 
             std::shared_ptr<const bool> GetOpenFlag() const { return m_Open; }
 
-            bool OnPointerDown(const UIPointerEvent&) override
+            bool OnPointerDown(const UIPointerEvent& e) override
             {
-                // Reached only by a press outside the content (the content takes its own).
+                // A press on the content bubbles up to here as well: only one outside it closes the popup.
+                if (AnyChildContains(e.Position))
+                    return true;
                 if (m_Context && m_Context->GetOverlay().get() == this)
                     m_Context->ClearOverlay();
                 return true;

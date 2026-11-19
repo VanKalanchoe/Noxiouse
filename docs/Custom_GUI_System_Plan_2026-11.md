@@ -269,6 +269,24 @@ button order and primary action). **Not run on a GPU or on Windows; not user-tes
 References from the browser, the asset preview panel (rotating live preview), audio preview, opening graphs / timelines in V2 (their
 editors are not ported).
 
+#### After the first test of the Content Browser (2026-11-19)
+
+| Seen | Cause | Now |
+|---|---|---|
+| + Add, Settings (View) and the type filter "do nothing" | The menus opened, but a press on one of their rows bubbled up to the menu's invisible backdrop, which closed the menu before the row saw the release: no menu item or dropdown choice anywhere ran (the dialog bug fixed before, in every popup) | `UIElement::AnyChildContains`; the backdrops of context menus, menu bars, dropdowns, popups, the command palette, the Inspector's slot popup and dialogs dismiss only on a press outside their popup |
+| Import: "Invalid dialog file filters" | SDL's dialogs take extensions only (`gltf;glb`), the filter had `*.gltf;*.glb` | The browser's filter fixed; `Utility::OpenFile` / `SaveFile` turn `*.ext` patterns into SDL's form |
+| Wheel over the tiles does nothing, the folder tree stops half way | Every refresh of the open folder put the tiles back at the top and gave the tree new rows; while a big folder's textures are loaded and cooked, files arrive in it many times a second | A refresh of the same folder / search / filter keeps the scroll position and selection; the tree keeps its rows unless its folders changed; the registry and folder checks run twice a second at most |
+| NOXWatcher lines for `.idea/workspace.xml` | Rider writes its workspace files inside `Assets/Scripts/build` | The watcher ignores dot-folders (`.idea`, `.vs`, `.git`, `.vscode`) under the watched one |
+| Bars of uneven height, the path a row of big buttons, search squeezed | The generic breadcrumb used the theme's button padding | Unreal's layout: row 1 `+ Add`, `Import`, `<` `>`, a text path bar with chevrons (`ContentPathBar`: first folders give way to "..."), `Dock in Layout`, `Settings`; row 2 over the tiles: type filter + search across the width; every control 26 px |
+| Small text | -- | Status bar "Ready" 15 px, Output Log lines 15 px (rows 22 px), level chips 14.5, Cmd 15, tile type label 12.5 and brighter |
+| Bottom tabs take space from the viewport | They were docked | Unreal's Content Drawer: the status bar's **Content Drawer** (Ctrl+Space) and **Output Log** (`) tabs slide the page up over the viewport (`EditorCenterArea`, which does not resize the viewport); a click outside, Escape or dragging an asset out closes it; its top edge resizes it. **Dock in Layout** docks a page under the viewport, Window > ... **Back to Drawer** returns it. The default layout has nothing docked at the bottom; the layout file is `EditorV2.2.nlayout` (older ones start fresh once) |
+
+Checked: syntax check of every touched source with the vendors fetched; the headless test, rebuilt (the old one was lost with the
+container): 15 checks with the real dock space, menus, dropdown, tree view and the real `ContentTileView` / `ContentPathBar` extracted
+from the panel source (menu items and dropdown choices run, the wheel scrolls tiles and tree, a refresh keeps the scroll position, path
+bar elision and click, toolbar controls one height). **Not run on a GPU or Windows; the drawer itself (`EditorCenterArea`) is not in the
+headless test** (it lives in EditorV2Layer, which needs the renderer).
+
 ### Phase 3: Docking & Multi-Viewport
 - Implement `DockSpace` (splitters, tab bars, drag-to-dock preview overlays, layout save/load).
 - Extend `UIPlatformSDL` + `Renderer` to support secondary `SDL_Window*` + `NRI::Swapchain` viewports for torn-off panels and popups.

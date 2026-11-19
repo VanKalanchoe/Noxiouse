@@ -27,6 +27,8 @@ namespace Nox::UI
 
             bool OnPointerDown(const UIPointerEvent& e) override
             {
+                if (AnyChildContains(e.Position))
+                    return true; // on the list: the item acts on the release
                 if (e.Button == 1 && m_Context)
                 {
                     m_Context->ClearOverlay();

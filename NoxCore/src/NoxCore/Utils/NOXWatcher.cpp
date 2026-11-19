@@ -32,6 +32,18 @@ namespace Utils
                 if (change_type != filewatch::Event::modified)
                     return;
 
+                // Tool folders inside the watched one (.idea, .vs, .git, .vscode): an IDE rewrites its workspace files there
+                // all the time, and nothing in them is an asset or a script.
+                if (isDir)
+                {
+                    for (const auto& part : std::filesystem::path(pathStr))
+                    {
+                        const std::string name = part.string();
+                        if (name.size() > 1 && name[0] == '.' && name != "..")
+                            return;
+                    }
+                }
+
                 // If directory: pathStr is relative to it.
                 // If single file: the modified path is the file itself!
                 std::filesystem::path modifiedPath = isDir ? (absPath / pathStr) : absPath;

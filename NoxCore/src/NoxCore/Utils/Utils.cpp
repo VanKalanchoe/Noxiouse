@@ -27,6 +27,32 @@ namespace Nox
     // Atomic flag to indicate when the callback is done
     std::atomic<bool> callbackDone(false);
     std::string selectedFile;
+
+    // SDL's dialogs take extensions only ("gltf;glb;png") and refuse anything else in a pattern ("Invalid dialog file filters").
+    // Windows-style patterns ("*.gltf;*.glb") are turned into that form, so either way of writing a filter works.
+    static std::string NormalizeFilterPattern(const char* pattern)
+    {
+        std::string result;
+        std::string_view rest(pattern ? pattern : "");
+        while (!rest.empty())
+        {
+            const size_t end = rest.find(';');
+            std::string_view part = rest.substr(0, end);
+            rest = end == std::string_view::npos ? std::string_view() : rest.substr(end + 1);
+            while (!part.empty() && part.front() == ' ')
+                part.remove_prefix(1);
+            if (part.starts_with("*."))
+                part.remove_prefix(2);
+            else if (part.starts_with("."))
+                part.remove_prefix(1);
+            if (part.empty())
+                continue;
+            if (!result.empty())
+                result += ';';
+            result += part;
+        }
+        return result.empty() ? std::string("*") : result;
+    }
     
     static void SDLCALL callback(void* userdata, const char* const* filelist, int filter)
     {
@@ -68,7 +94,8 @@ namespace Nox
 
         // Split the filter string by '\0'
         const char* filterName = filter;
-        const char* filterPattern = filter + strlen(filter) + 1;  // Move the pointer to the pattern part
+        const std::string filterPatternText = NormalizeFilterPattern(filter + strlen(filter) + 1);
+        const char* filterPattern = filterPatternText.c_str();
 
         // Define the filter array. Not `static`: a static local's initializer only runs on the very first call this
         // function ever makes, so every OpenFile call after the first kept showing whichever filter (e.g. "*.hdr")
@@ -100,7 +127,8 @@ namespace Nox
 
         // Split the filter string by '\0'
         const char* filterName = filter;
-        const char* filterPattern = filter + strlen(filter) + 1;  // Move the pointer to the pattern part
+        const std::string filterPatternText = NormalizeFilterPattern(filter + strlen(filter) + 1);
+        const char* filterPattern = filterPatternText.c_str();
 
         // Define the filter array. Not `static` -- see the matching comment in OpenFile above; same bug, same fix.
         const SDL_DialogFileFilter filters[] = {

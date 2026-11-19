@@ -159,9 +159,18 @@ namespace Nox
         std::filesystem::path LayoutDirectory() const;
         void SaveLayoutFiles();
         void ResetLayout();
-        void ShowOutputLog();
+        // The Content Browser and the Output Log live in the drawer (Unreal's Content Drawer: slides up over the viewport from the
+        // status bar, Ctrl+Space / `) until "Dock in Layout" docks them as tabs under the viewport.
+        enum class DrawerPage : uint8_t { None = 0, Content, Log };
+        void ShowPage(DrawerPage page);   // the drawer opened on it, or its docked tab brought to the front
+        void ToggleDrawer(DrawerPage page);
+        void OpenDrawer(DrawerPage page);
+        void CloseDrawer();
+        bool IsDrawerOpen() const;
+        void DockPage(DrawerPage page);   // "Dock in Layout"
+        void UndockPage(DrawerPage page); // back into the drawer
+        void ShowOutputLog() { ShowPage(DrawerPage::Log); }
         bool IsPanelDocked(const std::string& title) const;
-        void TogglePanel(const std::string& title);
 
         // Entities from the hierarchy as a .nprefab in `relativeFolder` (the dragged one, or the selection it is part of).
         AssetHandle CreatePrefab(UUID dragged, const std::filesystem::path& relativeFolder);
@@ -306,6 +315,12 @@ namespace Nox
         OutputLogV2Panel m_OutputLogPanel;
         Ref<UI::UIElement> m_ContentBrowserRoot;
         Ref<UI::UIElement> m_OutputLogRoot;
+        Ref<UI::UIElement> m_CenterArea;      // the dock space with the drawer over it
+        Ref<UI::UIElement> m_DrawerHost;      // where the drawer's page goes
+        Ref<UI::UIElement> m_ContentDockButton, m_LogDockButton;
+        Ref<UI::UIElement> m_ContentDrawerTab, m_LogDrawerTab; // in the status bar
+        DrawerPage m_DrawerPage = DrawerPage::None;
+        float m_DrawerFraction = 0.42f;
         std::vector<MaterialEditorState> m_MaterialEditors;
         bool m_ShowSceneHierarchy = true;
         bool m_ShowInspector = true;
