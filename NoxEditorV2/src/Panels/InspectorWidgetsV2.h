@@ -142,9 +142,13 @@ namespace Nox
     {
         std::function<void(AssetHandle)> OpenAsset;
         std::function<void()> RequestRebuild;
+        // A line at the top, shown while the material is unsaved: Save / Revert (the Inspector's card; the Material window has
+        // its own toolbar).
+        bool InlineSave = false;
     };
 
-    void SaveAndNotifyMaterialChanged(AssetHandle handle, const MaterialData& data);
+    // An edit of a material's values: drawn with them now, marked unsaved (MaterialEdits; nothing is written per change).
+    void NotifyMaterialEdited(AssetHandle handle);
 
     // Populates full native Nox::UI material properties (used by Quick Edit in Inspector AND standalone Material Editor V2 windows).
     void PopulateMaterialPropertiesUI(

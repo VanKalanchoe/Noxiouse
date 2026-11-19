@@ -320,7 +320,7 @@ it yet):
 | G3 | Graph editor: state machine view (states, transitions, rules) | ThedmdCanvasBackend::DrawStateMachine, the panel's inspector | open |
 | G4 | Graph editor: animation preview (skeletal mesh), audio preview (play, sliders, meter) | the panel's previews | open |
 | R1 | Renderer Settings / Stats / Post Process windows | EditorLayer, PostProcessSettingsUI | **built** (below) |
-| M1 | Material Editor (full: graph slot, Custom Lit, lobes, preview sphere) | MaterialEditorPanel | open (V2 has the basic window) |
+| M1 | Material Editor (full: graph slot, Custom Lit, lobes, preview sphere) | MaterialEditorPanel | **built** (below) |
 | L1 | Levels, World Partition (HLOD) panels | LevelsPanel, WorldPartitionPanel | **built** (below) |
 | A1 | Audio Mixer | MixerPanel, AudioWidgets | **built** (below) |
 | T1 | Timeline (sequencer), Animation Clip | TimelinePanel, AnimationClipPanel | open |
@@ -518,6 +518,18 @@ Save / Load and the Project Manager's Browse buttons. The "Save changes?" questi
 takes a continuation: `SaveScene(then)`, `SaveSceneAs(then)`, `SaveSceneTo(path)`); cancelled, nothing is dropped. The blocking
 versions stay for the start-up loop (before the editor runs). The Project Manager's callbacks check that the layer still exists.
 Checked: syntax check. Not run.
+
+**M1 -- Material Editor and unsaved materials (built, not run on a GPU / not user-tested).** V2's material properties already had
+every section of the old editor (factors and textures, Layers, UV Channels, Shading Model with Toon / Custom Lit, the Material Graph
+slot); the window now has a toolbar (Save -- greyed while nothing changed --, the file, "unsaved") and the live preview sphere
+(`AssetPreviewRenderer::GetLivePreview`, redrawn with every change). **Changed on purpose** (as for graphs, after the user's test:
+"what if I did not want to hold those changes"): a material edit no longer writes the .nmat at once -- both editors did, on every step
+of a slider drag (a file write per frame while dragging) and with no way back. `Panels/MaterialEdits`: an edit (Material window or the
+Inspector's material card) changes the loaded material at once (drawn with it this frame) and marks it unsaved; Save writes it;
+Revert / Don't Save reads the file back. The Material window's X asks Save / Don't Save / Cancel; the Inspector's card shows
+"Unsaved changes -- Save / Revert"; File > Save All (Ctrl+Alt+S) saves the scene, the asset editors, the materials and the mixer; the
+editor's "Save changes?" questions (quit, project change, Reset Layout) list unsaved materials too, also those edited only in the
+Inspector; the window title's * counts them. Checked: syntax check. Not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

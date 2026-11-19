@@ -5,6 +5,7 @@
 #include "Panels/AssetPreviewRenderer.h"
 #include "Panels/InspectorWidgetsV2.h"
 #include "Panels/MaterialEditorV2.h"
+#include "Panels/MaterialEdits.h"
 
 #include <algorithm>
 #include <cmath>
@@ -562,6 +563,19 @@ namespace Nox
         return OpenProject(projectFile);
     }
 
+    void EditorV2Layer::SaveAll()
+    {
+        // Assets first (they do not ask anything); the scene last (an untitled one asks for its name).
+        m_AssetEditors.SaveAll();
+        MaterialEdits::SaveAll();
+        if (AudioMixer::IsDirty())
+            AudioMixer::Save();
+        if (m_SceneDirty || m_EditorScenePath.empty())
+            SaveScene();
+        if (!HasUnsavedChanges(UnsavedAssets | UnsavedMixer))
+            Notify(UI::UINotificationSeverity::Success, "Saved", "Everything that was unsaved.");
+    }
+
     void EditorV2Layer::NewProjectAsync()
     {
         Utility::SaveFileAsync("Nox Project\0nproj\0", [this](std::string chosen)
@@ -613,6 +627,7 @@ namespace Nox
             // The graph and material windows show the project being left: closed while it is still loaded (unsaved edits were
             // asked about before; what is left goes back to the files).
             m_AssetEditors.CloseAll();
+            MaterialEdits::Clear(); // (asked about before: what is left belonged to the project being left)
             SaveLayoutFiles(); // the project being left keeps its layout
         }
         if (!Project::Load(path))
@@ -1669,7 +1684,7 @@ namespace Nox
             return true;
         if ((scope & UnsavedMixer) && AudioMixer::IsDirty())
             return true;
-        return (scope & UnsavedAssets) && m_AssetEditors.HasUnsaved();
+        return (scope & UnsavedAssets) && (m_AssetEditors.HasUnsaved() || MaterialEdits::Any());
     }
 
     void EditorV2Layer::ShowSaveChangesDialog(const std::string& text, std::function<void()> save, std::function<void()> dontSave)
@@ -1701,8 +1716,13 @@ namespace Nox
         if ((scope & UnsavedScene) && m_SceneDirty)
             unsaved.push_back("the scene " + (m_EditorScenePath.empty() ? std::string("(untitled)") : m_EditorScenePath.filename().string()));
         if (scope & UnsavedAssets)
+        {
             for (std::string& name : m_AssetEditors.UnsavedNames())
                 unsaved.push_back(std::move(name));
+            for (AssetHandle material : MaterialEdits::Unsaved()) // (edited in the Inspector, no window open)
+                if (!m_AssetEditors.Find(material))
+                    unsaved.push_back("the material " + AssetDisplayName(material));
+        }
         if ((scope & UnsavedMixer) && AudioMixer::IsDirty())
             unsaved.push_back("the audio mixer");
         std::string list;
@@ -1715,7 +1735,10 @@ namespace Nox
                 const auto finish = [this, proceed, scope]()
                 {
                     if (scope & UnsavedAssets)
+                    {
                         m_AssetEditors.SaveAll();
+                        MaterialEdits::SaveAll();
+                    }
                     if ((scope & UnsavedMixer) && AudioMixer::IsDirty())
                         AudioMixer::Save();
                     // Still unsaved (Save As was cancelled, a file could not be written): nothing is dropped.
@@ -1739,7 +1762,10 @@ namespace Nox
                     m_SceneDirty = false; // (what follows replaces it; the title must not keep the *)
                 // The asset editors' edits are dropped: back to their files (a playing scene runs what is saved again).
                 if (scope & UnsavedAssets)
+                {
                     m_AssetEditors.RevertAll();
+                    MaterialEdits::RevertAll();
+                }
                 if (proceed)
                     proceed();
             });
@@ -4379,6 +4405,8 @@ namespace Nox
                 {"New Scene", m_Commands.ShortcutText("File.NewScene"), [this]() { m_Commands.Execute("File.NewScene"); }},
                 {"Save Scene", m_Commands.ShortcutText("File.SaveScene"), [this]() { m_Commands.Execute("File.SaveScene"); }},
                 {"Save Scene As...", m_Commands.ShortcutText("File.SaveSceneAs"), [this]() { m_Commands.Execute("File.SaveSceneAs"); }},
+                {"Save All", m_Commands.ShortcutText("File.SaveAll"), [this]() { m_Commands.Execute("File.SaveAll"); }, false, true, false, false,
+                 "The scene, every asset editor's unsaved edits, the materials edited in the Inspector and the mixer."},
                 {"", "", {}, true},
                 {"Package Game...", "", [this]() { ShowPackageDialog(false); }, false, true, false, false,
                  "A folder that runs the game on its own (the runtime, scripts, shaders and the cooked assets the scenes need)."},

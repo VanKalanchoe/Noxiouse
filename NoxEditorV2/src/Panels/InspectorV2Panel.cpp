@@ -910,7 +910,7 @@ namespace Nox
                                          return;
                                      InspectorCardBuilder inlineBuilder{ body, *syncs, mutate, uiContext };
                                      PopulateMaterialPropertiesUI(handle, slotMaterial->GetData(), inlineBuilder, m_ExpandedCards,
-                                         { m_OnOpenAsset, [this]() { m_Dirty = true; } });
+                                         { m_OnOpenAsset, [this]() { m_Dirty = true; }, true });
                                  };
                                  slotRow->AddChild(CreateExpandToggle(inlineOpen,
                                      [this, expandKey, body = inlineBody, fillInline](bool open)

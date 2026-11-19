@@ -1,4 +1,5 @@
 #include "InspectorWidgetsV2.h"
+#include "MaterialEdits.h"
 
 #include <algorithm>
 #include <cctype>
@@ -1065,19 +1066,10 @@ namespace Nox
         AddRow(label, slotRow);
     }
 
-    void SaveAndNotifyMaterialChanged(AssetHandle handle, const MaterialData& data)
+    void NotifyMaterialEdited(AssetHandle handle)
     {
-        if (handle == 0 || !Project::GetActive() || !Project::GetActive()->GetEditorAssetManager())
-            return;
-        Renderer::MarkMaterialChanged(handle);
-        AssetPreviewRenderer::Get().Invalidate(handle); // its Content Browser sphere is drawn again
-        auto assets = Project::GetActive()->GetEditorAssetManager();
-        const AssetMetadata& metadata = assets->GetMetadata(handle);
-        if (!metadata.FilePath.empty() &&
-            MaterialSerializer::Serialize(Project::GetActiveAssetDirectory() / metadata.FilePath, data))
-        {
-            assets->NoteSourceWritten(handle);
-        }
+        // Changed in memory and marked unsaved; the Material window's Save (or the editor's Save All / "Save changes?") writes it.
+        MaterialEdits::MarkEdited(handle);
     }
 
     void PopulateMaterialPropertiesUI(
@@ -1087,11 +1079,36 @@ namespace Nox
         std::unordered_map<std::string, bool>& expandedSections,
         const MaterialPropertiesCallbacks& callbacks)
     {
-        auto notifySaved = [handle, &data]() { SaveAndNotifyMaterialChanged(handle, data); };
-        // By value: the callbacks are a temporary of the caller, and these run long after this function returned.
-        auto notifySavedRebuild = [handle, &data, requestRebuild = callbacks.RequestRebuild]()
+        if (callbacks.InlineSave)
         {
-            SaveAndNotifyMaterialChanged(handle, data);
+            auto line = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
+            line->WidthMode = UI::UISizeMode::Fill;
+            auto label = UI::Label("Unsaved changes", 13.0f);
+            label->UseColorOverride = true;
+            label->ColorOverride = { 0.95f, 0.65f, 0.3f, 1.0f };
+            label->VAlign = UI::UIAlignment::Center;
+            line->AddChild(label);
+            auto save = UI::Button("Save", [handle]() { MaterialEdits::Save(handle); });
+            save->StyleVariant = "primary";
+            save->Tooltip = "Write the material to its file (File > Save All saves every unsaved material)";
+            line->AddChild(save);
+            auto revert = UI::Button("Revert", [handle, rebuild = callbacks.RequestRebuild]()
+            {
+                if (MaterialEdits::Revert(handle) && rebuild)
+                    rebuild(); // (the rows pointed at the values that were replaced)
+            });
+            revert->Tooltip = "Drop the changes: the material as its file has it";
+            line->AddChild(revert);
+            Ref<UI::UIStackBox> lineRef = line;
+            c.Body->AddChild(lineRef);
+            c.Syncs.push_back([lineRef, handle]() { lineRef->Visible = MaterialEdits::IsUnsaved(handle); });
+        }
+
+        auto notifySaved = [handle]() { NotifyMaterialEdited(handle); };
+        // By value: the callbacks are a temporary of the caller, and these run long after this function returned.
+        auto notifySavedRebuild = [handle, requestRebuild = callbacks.RequestRebuild]()
+        {
+            NotifyMaterialEdited(handle);
             if (requestRebuild)
                 requestRebuild();
         };

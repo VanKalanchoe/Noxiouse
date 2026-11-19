@@ -90,6 +90,8 @@ namespace Nox
             [this]() { ConfirmUnsavedChanges("opening another project", [this]() { OpenProjectAsync(); }); });
         add("File.SaveScene", "Save Scene", "File", CommandScope::Global, Chord(SDL_SCANCODE_S, true), [this]() { SaveScene(); });
         add("File.SaveSceneAs", "Save Scene As...", "File", CommandScope::Global, Chord(SDL_SCANCODE_S, true, true), [this]() { SaveSceneAs(); });
+        add("File.SaveAll", "Save All", "File", CommandScope::Global, Chord(SDL_SCANCODE_S, true, false, true), [this]() { SaveAll(); }, {},
+            "The scene, every asset editor's unsaved edits, the materials edited in the Inspector and the mixer.");
 
         // Edit (the level editor's keys: not while the Content Browser, the Output Log or an asset editor has the keyboard).
         add("Edit.Undo", "Undo", "Edit", CommandScope::Level, Chord(SDL_SCANCODE_Z, true), [this]() { Undo(); },

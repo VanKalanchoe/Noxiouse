@@ -87,6 +87,8 @@ namespace Nox
         bool NewProject();
         bool OpenProject();
         void NewProjectAsync();
+        // File > Save All: the scene, the asset editors, materials edited in the Inspector, the mixer.
+        void SaveAll();
         void OpenProjectAsync();
         bool OpenProject(const std::filesystem::path& path);
         bool OpenStartupProject(const std::filesystem::path& failed = {});
