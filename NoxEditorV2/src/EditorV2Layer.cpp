@@ -4,6 +4,7 @@
 #endif
 #include "Panels/AssetPreviewRenderer.h"
 #include "Panels/InspectorWidgetsV2.h"
+#include "Panels/AnimationClipEditorV2.h"
 #include "Panels/MaterialEditorV2.h"
 #include "Panels/MaterialEdits.h"
 
@@ -4709,7 +4710,7 @@ namespace Nox
             return;
         if (!m_AssetEditors.HasEditorFor(type))
             Notify(UI::UINotificationSeverity::Info, "No editor for " + AssetDisplayName(handle) + " yet",
-                   "NoxEditorV2 opens scenes, materials and graphs so far; the old NoxEditor has the other editors.");
+                   "NoxEditorV2 opens scenes, materials, graphs and animation clips so far; the old NoxEditor has the other editors.");
     }
 
     void EditorV2Layer::RegisterAssetEditors()
@@ -4720,6 +4721,7 @@ namespace Nox
         registry.Register(AssetType::AudioGraph, graph);
         registry.Register(AssetType::MaterialGraph, graph);
         registry.Register(AssetType::Material, [](AssetHandle handle) -> std::unique_ptr<AssetEditorV2> { return std::make_unique<MaterialEditorV2>(handle); });
+        registry.Register(AssetType::AnimationSequence, [](AssetHandle handle) -> std::unique_ptr<AssetEditorV2> { return std::make_unique<AnimationClipEditorV2>(handle); });
 
         AssetEditorManager::Hooks hooks;
         hooks.Notify = [this](UI::UINotification note) { Notify(note.Severity, std::move(note.Title), std::move(note.Message)); };

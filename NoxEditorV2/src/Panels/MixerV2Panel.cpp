@@ -381,6 +381,11 @@ namespace Nox
         }
         for (const auto& sync : m_Syncs)
             sync();
+        if (m_PopupSyncs && m_PopupOpen && *m_PopupOpen)
+            for (const auto& sync : *m_PopupSyncs)
+                sync();
+        else
+            m_PopupSyncs.reset();
         // One history step per finished change: taken once no mouse button is held (a fader drag is one step).
         if (!m_HaveCommitted)
         {
@@ -636,9 +641,9 @@ namespace Nox
                           probes.ListenerInside ? "inside one" : "outside them", stats.ListenerReverb ? "yes" : "no", stats.PathingVoices);
             return std::string(text);
         });
-        // The panel's frame runs the popup's rows while it is open (they hold only the popup's own elements).
-        m_Syncs.push_back([syncs]() { for (const auto& sync : *syncs) sync(); });
-        UI::UIPopup::Show(*m_Context, anchor, box);
+        // The panel's frame runs the popup's rows while it is open; closed, they stop (they were added on every opening).
+        m_PopupSyncs = syncs;
+        m_PopupOpen = UI::UIPopup::Show(*m_Context, anchor, box);
     }
 
     void MixerV2Panel::BuildSnapshots(UI::UIStackBox& into)

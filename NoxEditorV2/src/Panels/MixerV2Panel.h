@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -55,6 +56,9 @@ namespace Nox
         Ref<UI::UIElement> m_Root;
         Ref<UI::UIStackBox> m_Body;
         std::vector<std::function<void()>> m_Syncs;
+        // An open popup's rows (run while it is open).
+        std::shared_ptr<std::vector<std::function<void()>>> m_PopupSyncs;
+        std::shared_ptr<const bool> m_PopupOpen;
         uint64_t m_Signature = 0;
         bool m_Rebuild = true;
         uint64_t m_SelectedBus = kAudioBusMaster;

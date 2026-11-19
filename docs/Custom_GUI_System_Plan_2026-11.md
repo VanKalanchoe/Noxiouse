@@ -531,6 +531,19 @@ Revert / Don't Save reads the file back. The Material window's X asks Save / Don
 editor's "Save changes?" questions (quit, project change, Reset Layout) list unsaved materials too, also those edited only in the
 Inspector; the window title's * counts them. Checked: syntax check. Not run on a GPU.
 
+**T1 part 1 -- Animation Clip editor (built, not run on a GPU / not user-tested).** `Panels/AnimationClipEditorV2` (registered for
+animation clips: double-click one in the Content Browser): Save + the clip's figures; the clip on a skeletal mesh (256 px,
+`AssetPreviewRenderer::GetAnimationPreview`) with Play / Pause, Loop, Speed (-2 .. 2x), Preview Mesh (a menu of the project's skeletal
+meshes; found from the clip's model or folder first); a timeline element (click / drag the playhead; notifies as orange markers, sync
+markers green, the loop range blue) with Range Start Here / Range End Here / Whole Clip; the notifies (Time, Name, Sync, the Sound
+button -- a popup with Sound, Bone (the preview skeleton's bones, or typed), Trace Surface with Trace Distance and sounds per physical
+surface, Volume, Pitch Variation, Remove Sound --, Go to, Delete) and Add at Playhead. Passed notifies play their sound in the preview.
+Flaws not carried over: notifies were written to the file on every change (now unsaved until Save; closing asks Save / Don't Save /
+Cancel; Don't Save reads them back); the rows were sorted by time on every change, so a row jumped away while its time was dragged
+(sorted on Save now); clearing a name deleted the notify silently (an empty name puts the old one back). Also in the Mixer: the
+Acoustics popup's rows were added to the panel on every opening and kept running after it closed (now only while it is open).
+Checked: syntax check. Not run on a GPU.
+
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and
 `Panels/NodeGraph/NodeGraphEditorV2` (the window: Save / Undo / Redo / Frame, Parameters on the left, Details on the right). Opened by
