@@ -491,6 +491,7 @@ namespace Nox
         if (const char* exec = app.GetSpecification().CommandLineArgs.Value("--exec"))
             Console::Get().Execute(exec);
 
+        RegisterCommands();
         LoadViewportPrefs(); // the project's (Saved/Layout)
         BuildUI(true);
     }
@@ -625,6 +626,7 @@ namespace Nox
             m_ThumbnailPending = !std::filesystem::exists(ProjectLibrary::ThumbnailPath(Project::GetActiveProjectDirectory()), error);
             m_ThumbnailTimer = 0.0f;
         }
+        m_Commands.Load(KeyBindingsPath()); // (this project's key bindings)
         m_ContentBrowserPanel.Refresh();
         if (project)
             Notify(UI::UINotificationSeverity::Success, "Project opened", project->GetConfig().Name);
@@ -3711,171 +3713,13 @@ namespace Nox
             }
         }
 
+        // Keys: the focused widget first, then the editor's commands (EditorV2Commands.cpp).
         if (event.GetEventType() == EventType::KeyPressed)
         {
-            // Ctrl+Space: the Content Drawer, wherever the keyboard is (Unreal's).
+            if (DispatchCommandKey(static_cast<KeyPressedEvent&>(event)))
             {
-                const auto& key = static_cast<const KeyPressedEvent&>(event);
-                const bool control = (key.GetModifiers() & SDL_KMOD_CTRL) != 0 || Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
-                if (!key.IsRepeat() && control && key.GetKeyCode() == SDL_SCANCODE_SPACE)
-                {
-                    ToggleDrawer(DrawerPage::Content);
-                    event.Handled = true;
-                    return;
-                }
-                if (!key.IsRepeat() && key.GetKeyCode() == SDL_SCANCODE_ESCAPE && IsDrawerOpen())
-                {
-                    if (UILayer* uiLayer = Application::Get().GetUILayer(); uiLayer && !uiLayer->GetContext().GetOverlay())
-                    {
-                        CloseDrawer();
-                        event.Handled = true;
-                        return;
-                    }
-                }
-            }
-
-            bool textInputFocused = false;
-            if (UILayer* uiLayer = Application::Get().GetUILayer())
-                textInputFocused = dynamic_cast<UI::UITextInput*>(uiLayer->GetContext().GetFocused()) != nullptr;
-
-            // Keys typed into the Content Browser or the Output Log are theirs (Delete deletes assets there, not entities).
-            bool panelFocused = false;
-            if (UILayer* uiLayer = Application::Get().GetUILayer())
-            {
-                for (const UI::UIElement* cur = uiLayer->GetContext().GetFocused(); cur && !panelFocused; cur = cur->GetParent())
-                {
-                    panelFocused = cur == m_ContentBrowserRoot.get() || cur == m_OutputLogRoot.get();
-                    for (const auto& graph : m_GraphEditors)
-                        panelFocused = panelFocused || (graph.Editor && cur == graph.Editor->GetRoot().get());
-                }
-            }
-
-            const auto& key = static_cast<const KeyPressedEvent&>(event);
-            const int scancode = key.GetKeyCode();
-            const bool panelKey = panelFocused && (scancode == SDL_SCANCODE_DELETE || scancode == SDL_SCANCODE_F2 || scancode == SDL_SCANCODE_RETURN ||
-                                                   scancode == SDL_SCANCODE_BACKSPACE || scancode == SDL_SCANCODE_A || scancode == SDL_SCANCODE_C ||
-                                                   scancode == SDL_SCANCODE_D || scancode == SDL_SCANCODE_V || scancode == SDL_SCANCODE_F);
-            if (!key.IsRepeat() && !textInputFocused && !panelKey)
-            {
-                const bool control = (key.GetModifiers() & SDL_KMOD_CTRL) != 0 ||
-                                     Input::IsKeyPressed(SDL_SCANCODE_LCTRL) ||
-                                     Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
-                const bool shift = (key.GetModifiers() & SDL_KMOD_SHIFT) != 0 ||
-                                   Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) ||
-                                   Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
-
-                int keyCode = key.GetKeyCode();
-                const SDL_Keycode layoutKey = SDL_GetKeyFromScancode(static_cast<SDL_Scancode>(keyCode), SDL_KMOD_NONE, false);
-                if (layoutKey >= SDLK_A && layoutKey <= SDLK_Z)
-                    keyCode = SDL_SCANCODE_A + static_cast<int>(layoutKey - SDLK_A);
-
-                const UI::UIElement* vpEl = m_ViewportCanvas ? static_cast<const UI::UIElement*>(m_ViewportCanvas.get())
-                                                             : static_cast<const UI::UIElement*>(m_ViewportImage.get());
-                const bool viewportHovered = vpEl && UI::HasState(vpEl->GetState(), UI::UIState::Hovered);
-
-                switch (keyCode)
-                {
-                case SDL_SCANCODE_Z:
-                    if (control) { if (shift) Redo(); else Undo(); event.Handled = true; return; }
-                    break;
-                case SDL_SCANCODE_Y:
-                    if (control) { Redo(); event.Handled = true; return; }
-                    break;
-                case SDL_SCANCODE_N:
-                    if (control) { ConfirmUnsavedChanges("making a new scene", [this]() { NewScene(); }, UnsavedScene); event.Handled = true; return; }
-                    break;
-                case SDL_SCANCODE_O:
-                    if (control) { ConfirmUnsavedChanges("opening another project", [this]() { OpenProject(); }); event.Handled = true; return; }
-                    break;
-                case SDL_SCANCODE_S:
-                    if (control) { if (shift) SaveSceneAs(); else SaveScene(); event.Handled = true; return; }
-                    break;
-                case SDL_SCANCODE_GRAVE:
-                    // ` : the Output Log's Cmd line (Unreal's console key).
-                    ShowOutputLog();
-                    m_OutputLogPanel.FocusCommandLine();
-                    event.Handled = true;
-                    return;
-                case SDL_SCANCODE_D:
-                    if (control && m_SceneState == SceneState::Edit) { m_SceneHierarchyPanel.DuplicateSelection(); event.Handled = true; return; }
-                    break;
-                case SDL_SCANCODE_F:
-                    if (control)
-                    {
-                        if (m_ShowSceneHierarchy)
-                            m_SceneHierarchyPanel.FocusSearch();
-                        event.Handled = true;
-                        return;
-                    }
-                    if (m_SceneState == SceneState::Edit)
-                    {
-                        if (Entity selected = m_Selection.GetPrimary())
-                            FocusOnEntity(selected);
-                        event.Handled = true;
-                        return;
-                    }
-                    break;
-                case SDL_SCANCODE_M:
-                    if (viewportHovered && !control && m_SceneState == SceneState::Edit)
-                    {
-                        m_ViewportTools.MeasureTool = !m_ViewportTools.MeasureTool;
-                        if (!m_ViewportTools.MeasureTool)
-                            m_ViewportTools.MeasureStage = 0;
-                        m_ViewportToolbar.Sync();
-                        event.Handled = true;
-                        return;
-                    }
-                    break;
-                case SDL_SCANCODE_END:
-                    if (m_SceneState == SceneState::Edit)
-                    {
-                        SnapSelectionToFloor();
-                        event.Handled = true;
-                        return;
-                    }
-                    break;
-                case SDL_SCANCODE_B:
-                    if (control) { m_ScriptBuilder.RequestBuild(); event.Handled = true; return; }
-                    break;
-                case SDL_SCANCODE_R:
-                    if (control) { if (ScriptEngine::IsInitialized()) ScriptEngine::ReloadAssembly(); event.Handled = true; return; }
-                    break;
-                case SDL_SCANCODE_DELETE:
-                    if (m_SceneState == SceneState::Edit && !m_Selection.GetEntities().empty())
-                    {
-                        m_SceneHierarchyPanel.DeleteSelection();
-                        event.Handled = true;
-                        return;
-                    }
-                    break;
-                case SDL_SCANCODE_KP_1:
-                    if (viewportHovered) { SetViewMode(control ? EditorViewMode::Back : EditorViewMode::Front); event.Handled = true; return; }
-                    break;
-                case SDL_SCANCODE_KP_3:
-                    if (viewportHovered) { SetViewMode(control ? EditorViewMode::Left : EditorViewMode::Right); event.Handled = true; return; }
-                    break;
-                case SDL_SCANCODE_KP_7:
-                    if (viewportHovered) { SetViewMode(control ? EditorViewMode::Bottom : EditorViewMode::Top); event.Handled = true; return; }
-                    break;
-                case SDL_SCANCODE_KP_5:
-                    if (viewportHovered) { SetViewMode(EditorViewMode::Perspective); event.Handled = true; return; }
-                    break;
-                case SDL_SCANCODE_ESCAPE:
-                    if (m_ViewportTools.MeasureTool)
-                    {
-                        if (m_ViewportTools.MeasureStage != 0)
-                            m_ViewportTools.MeasureStage = 0;
-                        else
-                            m_ViewportTools.MeasureTool = false;
-                        m_ViewportToolbar.Sync();
-                        event.Handled = true;
-                        return;
-                    }
-                    if (m_SceneState != SceneState::Edit) { OnSceneStop(); event.Handled = true; return; }
-                    break;
-                default:
-                    break;
-                }
+                event.Handled = true;
+                return;
             }
         }
 
@@ -4411,13 +4255,13 @@ namespace Nox
         {
             return {
                 {"New Project...", "", [this]() { ConfirmUnsavedChanges("making a new project", [this]() { NewProject(); }); }},
-                {"Open Project...", "Ctrl+O", [this]() { ConfirmUnsavedChanges("opening another project", [this]() { OpenProject(); }); }},
+                {"Open Project...", m_Commands.ShortcutText("File.OpenProject"), [this]() { m_Commands.Execute("File.OpenProject"); }},
                 {"Project Manager...", "", [this]() { ConfirmUnsavedChanges("closing this project", [this]() { OpenProjectManager(); }); }, false, true, false, false,
                  "Close this project and show the Project Manager (unsaved changes are asked about first)."},
                 {"", "", {}, true},
-                {"New Scene", "Ctrl+N", [this]() { ConfirmUnsavedChanges("making a new scene", [this]() { NewScene(); }, UnsavedScene); }},
-                {"Save Scene", "Ctrl+S", [this]() { SaveScene(); }},
-                {"Save Scene As...", "Ctrl+Shift+S", [this]() { SaveSceneAs(); }},
+                {"New Scene", m_Commands.ShortcutText("File.NewScene"), [this]() { m_Commands.Execute("File.NewScene"); }},
+                {"Save Scene", m_Commands.ShortcutText("File.SaveScene"), [this]() { m_Commands.Execute("File.SaveScene"); }},
+                {"Save Scene As...", m_Commands.ShortcutText("File.SaveSceneAs"), [this]() { m_Commands.Execute("File.SaveSceneAs"); }},
                 {"", "", {}, true},
                 {"Package Game...", "", {}, false, false, false, false, "Packaging dialog not yet ported to NoxEditorV2"},
                 {"Package Server...", "", {}, false, false, false, false, "Packaging dialog not yet ported to NoxEditorV2"},
@@ -4441,8 +4285,15 @@ namespace Nox
             std::snprintf(historyText, sizeof(historyText), "History: %zu steps, %.1f MB",
                           steps, static_cast<double>(m_History.GetMemoryBytes()) / (1024.0 * 1024.0));
             return {
-                {undoLabel, "Ctrl+Z", [this]() { Undo(); }, false, editing && m_History.CanUndo()},
-                {redoLabel, "Ctrl+Y / Ctrl+Shift+Z", [this]() { Redo(); }, false, editing && m_History.CanRedo()},
+                {undoLabel, m_Commands.ShortcutText("Edit.Undo"), [this]() { m_Commands.Execute("Edit.Undo"); }, false, m_Commands.CanExecute("Edit.Undo")},
+                {redoLabel, m_Commands.ShortcutText("Edit.Redo"), [this]() { m_Commands.Execute("Edit.Redo"); }, false, m_Commands.CanExecute("Edit.Redo")},
+                {"", "", {}, true},
+                {"Duplicate", m_Commands.ShortcutText("Edit.Duplicate"), [this]() { m_Commands.Execute("Edit.Duplicate"); }, false, m_Commands.CanExecute("Edit.Duplicate")},
+                {"Delete", m_Commands.ShortcutText("Edit.Delete"), [this]() { m_Commands.Execute("Edit.Delete"); }, false, m_Commands.CanExecute("Edit.Delete")},
+                {"Snap Selection to Floor", m_Commands.ShortcutText("Edit.SnapToFloor"), [this]() { m_Commands.Execute("Edit.SnapToFloor"); }, false, m_Commands.CanExecute("Edit.SnapToFloor")},
+                {"", "", {}, true},
+                {"Keyboard Shortcuts...", "", [this]() { m_Commands.Execute("Edit.KeyboardShortcuts"); }, false, true, false, false,
+                 "Every command and its keys; click a key to change it."},
                 {"", "", {}, true},
                 {historyText, "", {}, false, false, false, true}
             };
@@ -4580,9 +4431,9 @@ namespace Nox
                     }
                 }, false, true, m_ShowToolBar},
                 {"Render Graph", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
-                {"Content Browser", "Ctrl+Space", [this]() { ShowPage(DrawerPage::Content); }, false, true, false, false,
+                {"Content Browser", m_Commands.ShortcutText("Window.ContentDrawer"), [this]() { ShowPage(DrawerPage::Content); }, false, true, false, false,
                  "In the drawer over the viewport (or its tab, when it is docked in the layout)."},
-                {"Output Log", "`", [this]() { ShowPage(DrawerPage::Log); }},
+                {"Output Log", m_Commands.ShortcutText("Window.OutputLogCommand"), [this]() { ShowPage(DrawerPage::Log); }},
                 {IsPanelDocked("Content Browser") ? "Content Browser: Back to Drawer" : "Content Browser: Dock in Layout", "",
                  [this]() { if (IsPanelDocked("Content Browser")) UndockPage(DrawerPage::Content); else DockPage(DrawerPage::Content); }},
                 {IsPanelDocked("Output Log") ? "Output Log: Back to Drawer" : "Output Log: Dock in Layout", "",
@@ -4605,8 +4456,8 @@ namespace Nox
             const bool waitForDbg = ScriptEngine::GetWaitForDebugger();
             const bool canReload = ScriptEngine::IsInitialized();
             std::vector<UI::UIMenuItem> items = {
-                {"Build and Reload", "Ctrl+B", [this]() { m_ScriptBuilder.RequestBuild(); }, false, !m_ScriptBuilder.IsBuilding()},
-                {"Reload assembly", "Ctrl+R", []() { ScriptEngine::ReloadAssembly(); }, false, canReload},
+                {"Build and Reload", m_Commands.ShortcutText("Script.Build"), [this]() { m_Commands.Execute("Script.Build"); }, false, m_Commands.CanExecute("Script.Build")},
+                {"Reload assembly", m_Commands.ShortcutText("Script.ReloadAssembly"), [this]() { m_Commands.Execute("Script.ReloadAssembly"); }, false, canReload},
                 {"Build on Save", "", [this]() { m_ScriptBuilder.AutoBuild = !m_ScriptBuilder.AutoBuild; }, false, true, m_ScriptBuilder.AutoBuild, false,
                  "Saving a .cs file of the project builds its scripts and reloads them a moment later."},
                 {"Wait for Debugger on Play", "", [waitForDbg]() { ScriptEngine::SetWaitForDebugger(!waitForDbg); }, false, true, waitForDbg, false,

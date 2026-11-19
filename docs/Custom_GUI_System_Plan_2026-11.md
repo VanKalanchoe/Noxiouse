@@ -335,7 +335,7 @@ it yet):
 | E1 | Nothing asked before unsaved work was dropped: New Scene, opening a scene or project, the Project Manager and Exit (close button, Alt+F4) threw away scene edits; no title marker | both editors (NoxEditor asked only in Prefab Mode) | lost work | **fixed** (below) |
 | E2 | One class does everything: menus, shortcuts, play, viewports, layout, saving, every panel's wiring | EditorV2Layer 4960 lines (NoxEditor's EditorLayer 7336) | every port makes it bigger; changes collide | split into editor modules (scene, play, layout, viewports, menus) as panels are ported |
 | E3 | The selection belongs to the Scene Hierarchy panel; the Inspector, viewport, gizmo, play and prefab code reach into it (26 places) | SceneHierarchyV2Panel | a panel closed or rebuilt is the selection's owner gone; no selection of assets / nodes shared | an editor-level selection service (Unreal's USelection) all panels read and write -- **built** (below) |
-| E4 | Shortcuts are one switch in the layer's OnEvent, with hand-kept lists of panels whose keys must not reach it | EditorV2Layer::OnEvent | each new panel must be added to the list or Delete deletes entities (it happened); keys cannot be rebound; menus show shortcut text by hand | a command system: commands with a name, a default key, a focus scope (viewport, hierarchy, graph ...), shown in menus and rebindable (Unreal's UICommandList) |
+| E4 | Shortcuts are one switch in the layer's OnEvent, with hand-kept lists of panels whose keys must not reach it | EditorV2Layer::OnEvent | each new panel must be added to the list or Delete deletes entities (it happened); keys cannot be rebound; menus show shortcut text by hand | a command system: commands with a name, a default key, a focus scope (viewport, hierarchy, graph ...), shown in menus and rebindable (Unreal's UICommandList) -- **built** (below) |
 | E5 | Undo stores the whole scene as text per step, found by polling a fingerprint each frame; panels must remember to request a check; an undo reloads the whole scene | EditorHistory | memory and a hitch per step in large scenes; an edit a panel forgets to report is not undoable; graphs have separate histories | keep for now (it is robust: nothing is forgotten when a check runs); later per-object transactions (Unreal's FTransaction) when large scenes need it |
 | E6 | Which editor opens an asset is a hard-coded switch | EditorV2Layer::OpenAssetV2 | every asset editor touches the layer | an asset-editor registry (Unreal's asset type actions): a type registers its editor and its Content Browser actions |
 | E7 | File dialogs block: the main loop spins until the dialog returns | Utility::OpenFile / SaveFile | the editor stops drawing (and streaming, previews) while a dialog is open | asynchronous dialogs (SDL's callback) with the result delivered next frame |
@@ -365,6 +365,28 @@ toggled instead of adding; the Inspector rebuilt only when the primary or the co
 list in its header badge until something else changed); the hierarchy's "N selected" line went stale when the viewport selected.
 The range anchor (Shift+click in the hierarchy) stays the hierarchy's. Checked: syntax check. Not headless-tested (the service needs a
 `Scene`); not run on a GPU.
+
+**E4 (built, not run on a GPU / not user-tested).** `EditorCommands.h/.cpp` (`KeyChord`, `EditorCommand`, `EditorCommandList`) and
+`EditorV2Commands.cpp` (the layer's commands, the key dispatch, the Keyboard Shortcuts window -- the first piece of E2: the layer's
+code moves into files by area). A key press goes to the **focused widget and its parents first** (a text field types, the Content
+Browser takes Delete, a graph window takes Ctrl+Z / Ctrl+S); what none takes runs the command bound to it, by scope: **Global**
+(anywhere; while typing only with Ctrl / Alt or an F key -- Ctrl+S, Ctrl+N, Ctrl+O, Ctrl+B, Ctrl+R, Ctrl+Space, `), **Level** (the
+level editor has the keyboard: nothing focused, or the viewports, Scene Hierarchy, Inspector or toolbar -- Undo, Redo, Duplicate,
+Delete, F, End, Ctrl+F, Esc) and **Viewport** (Level and the pointer over a viewport -- M, the numpad views). One key may serve several
+commands; the first that can run now takes it (Esc: close the drawer, else end the measure tool, else stop Play). The menus show the
+bound keys and run the same commands. **Edit > Keyboard Shortcuts...** lists every command by category (hover a name: what it does
+and where it works) with two key buttons each: click one, press the new key (Esc keeps the old one, Backspace leaves none); a key
+another command used moves and a toast names that command; Reset / Reset All to Defaults. Bindings that differ from the defaults
+are saved in `<Project>/Saved/Config/EditorKeyBindings.txt` (`Id: key | second key`; no file when all are defaults).
+
+Flaws fixed with it: the hand-kept lists of panels whose keys must not reach the shortcuts are gone (a panel is outside the level
+editor unless it is one of its four roots, so a panel ported later is safe without being listed -- Delete in it never deletes
+entities); keys reached the shortcuts while a menu, popup or dialog was open (Delete under a "Save changes?" dialog deleted the
+selection) -- an open overlay now keeps every command back; the editor saw keys before the focused widget, so a panel could not take
+a key the editor also used; menus showed key text written by hand (Redo said "Ctrl+Y / Ctrl+Shift+Z" whatever the keys were); keys
+could not be changed. Checked: syntax check; an offline test of the command list (20 checks: key names and parsing, the three
+scopes with the Content Browser focused / typing / over a viewport, Esc served by the first command that can run, rebinding moves a
+used key, save and load, defaults leave no file). Not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

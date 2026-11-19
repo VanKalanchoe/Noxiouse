@@ -16,6 +16,7 @@
 #include "Panels/InspectorV2Panel.h"
 #include "Panels/OutputLogV2Panel.h"
 #include "Panels/NodeGraph/NodeGraphEditorV2.h"
+#include "EditorCommands.h"
 #include "EditorSelection.h"
 #include "Panels/SceneHierarchyV2Panel.h"
 #include "ProjectManager/ProcessLauncher.h"
@@ -24,6 +25,7 @@
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Asset/PrimitiveShapes.h"
 #include "NoxCore/Core/Layer.h"
+#include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Core/Ref.h"
 #include "NRI/Texture.h"
 #include "NoxCore/Network/NetSession.h"
@@ -347,6 +349,19 @@ namespace Nox
 
         // What is selected: the editor's, read and changed by every panel, the viewports and the shortcuts (E3).
         EditorSelection m_Selection;
+        // What the menus and keys run (E4; EditorV2Commands.cpp).
+        EditorCommandList m_Commands;
+        void RegisterCommands();
+        // A key press: the focused widget first, then the command bound to it. True: dispatched here (the UI layer must not
+        // dispatch it again).
+        bool DispatchCommandKey(KeyPressedEvent& key);
+        bool IsLevelFocus() const;
+        std::filesystem::path KeyBindingsPath() const;
+        void OpenKeyboardShortcuts();
+        void RebuildKeyboardShortcuts();
+        Ref<UI::UIStackBox> m_ShortcutsList;
+        std::string m_CaptureCommand; // the command whose key the Keyboard Shortcuts window waits for
+        bool m_CapturePrimary = true;
         SceneHierarchyV2Panel m_SceneHierarchyPanel;
         InspectorV2Panel m_InspectorPanel;
         ContentBrowserV2Panel m_ContentBrowserPanel;

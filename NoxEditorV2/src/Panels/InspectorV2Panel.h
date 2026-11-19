@@ -35,6 +35,7 @@ namespace Nox
         ~InspectorV2Panel();
 
         const Ref<UI::UIElement>& BuildUI();
+        const Ref<UI::UIElement>& GetRoot() const { return m_Root; }
 
         void SetContext(const Ref<Scene>& context);
         // The editor's selection: the inspector shows its primary (and applies transform deltas to the rest).
