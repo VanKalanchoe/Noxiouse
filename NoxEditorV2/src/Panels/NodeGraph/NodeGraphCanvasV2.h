@@ -28,6 +28,9 @@ namespace Nox
     //    empty canvas opens the node list with what fits and connects the node picked; Alt+click on a pin cuts its wires;
     //    click a wire to select it (Delete removes it); double-click a wire to put a reroute node on it.
     //  - Right click on empty canvas: the node list (search as you type, Enter takes the first); on a node: its menu.
+    //  - Values on nodes (an input without a wire): drag a number sideways to change it (Shift: finer, one undo step), click a
+    //    true / false to switch it, click any other value (or a number without dragging) for its editor beside it (OnEditValue).
+    //  - A parameter dragged from the window's Parameters list and let go here: a reader of it (Get) where it was let go.
     class NodeGraphCanvasV2 final : public UI::UIElement
     {
     public:
@@ -49,6 +52,12 @@ namespace Nox
         std::function<void()> OnSelectionChanged;
         // A node with states (a state machine) double-clicked.
         std::function<void(uint32_t nodeId)> OnOpenNode;
+        // A value on a node clicked: the window shows the editor of node's `property` beside `at` (screen).
+        std::function<void(uint32_t nodeId, const std::string& property, const UI::UIRect& at)> OnEditValue;
+        // The payload type of a parameter dragged from the window's list (Text: its name).
+        static constexpr const char* kParameterDragType = "NoxGraphParameter";
+        // A reader (Get) of the parameter at `screen`, selected; its id or 0 (no reader of its type in this graph's nodes).
+        uint32_t AddParameterReader(const std::string& parameter, const UI::UIVec2& screen);
 
         const std::vector<uint32_t>& GetSelectedNodes() const { return m_Selected; }
         void SelectNode(uint32_t nodeId);
@@ -127,7 +136,20 @@ namespace Nox
         float m_Zoom = 1.0f;
         bool m_NeedsFrame = true;
 
-        enum class Drag : uint8_t { None, Pan, Nodes, Wire, Box };
+        // Where each value on a node is drawn (screen space, refilled each paint; the top node's last).
+        struct ValueHit
+        {
+            uint32_t Node = 0;
+            std::string Property;
+            UI::UIRect Rect;
+        };
+        const ValueHit* ValueAt(const UI::UIVec2& screen) const;
+        std::vector<ValueHit> m_ValueHits;
+        ValueHit m_ValueDrag;            // the value pressed (Drag::Value)
+        NodeGraphValue m_ValueStart;     // its value when pressed
+        bool m_ValueChanged = false;
+
+        enum class Drag : uint8_t { None, Pan, Nodes, Wire, Box, Value };
         Drag m_Drag = Drag::None;
         UI::UIVec2 m_DragStart{ 0.0f };
         UI::UIVec2 m_DragLast{ 0.0f };

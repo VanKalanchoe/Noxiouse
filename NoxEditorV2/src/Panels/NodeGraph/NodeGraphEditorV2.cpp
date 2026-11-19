@@ -10,6 +10,7 @@
 #include "Panels/InspectorWidgetsV2.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
+#include "NoxCore/Animation/Skeleton.h"
 #include "NoxCore/Asset/NodeGraphSerializer.h"
 #include "NoxCore/Audio/AudioGraph.h"
 #include "NoxCore/Core/Log.h"
@@ -18,10 +19,13 @@
 #include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Layout/UILayout.h"
+#include "NoxCore/UI/Rendering/UIDrawList.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 #include "NoxCore/UI/Widgets/UIMenu.h"
+#include "NoxCore/UI/Widgets/UIPopup.h"
 #include "NoxCore/UI/Widgets/UIScrollView.h"
+#include "NoxCore/UI/Widgets/UITextInput.h"
 
 namespace Nox
 {
@@ -54,6 +58,167 @@ namespace Nox
 
         private:
             std::function<bool(int)> m_OnKey;
+        };
+
+        // A curve (x -> y) to see and shape: key dots dragged (kept between their neighbours), a double-click adds a key there, a
+        // right click on a key removes it. The range follows the keys (held still while one is dragged).
+        class CurveEditView final : public UI::UIElement
+        {
+        public:
+            CurveEditView(std::function<NodeGraphCurve*()> curve, std::function<void()> changing, std::function<void()> reshaped)
+                : m_Curve(std::move(curve)), m_Changing(std::move(changing)), m_Reshaped(std::move(reshaped))
+            {
+                HitTestMode = UI::UIHitTestMode::Self;
+                WidthMode = UI::UISizeMode::Fill;
+                HeightMode = UI::UISizeMode::Fixed;
+                FixedSize = { 0.0f, 120.0f };
+                Tooltip = "Drag a key; double-click to add one; right-click a key to remove it.";
+            }
+            bool OnPointerDown(const UI::UIPointerEvent& e) override
+            {
+                NodeGraphCurve* curve = m_Curve();
+                if (!curve)
+                    return true;
+                if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
+                    ctx->CancelPendingDrag();
+                const int key = KeyAt(*curve, e.Position);
+                if (e.Button == 3 && key >= 0)
+                {
+                    curve->Keys.erase(curve->Keys.begin() + key);
+                    m_Reshaped();
+                    return true;
+                }
+                if (e.Button != 1)
+                    return false;
+                const auto now = std::chrono::steady_clock::now();
+                const bool quick = now - m_LastClick < std::chrono::milliseconds(350);
+                m_LastClick = now;
+                if (key >= 0)
+                {
+                    m_Dragged = key;
+                    return true;
+                }
+                if (quick)
+                {
+                    const glm::vec2 point = ToCurve(e.Position);
+                    const auto at = std::upper_bound(curve->Keys.begin(), curve->Keys.end(), point.x, [](float x, const glm::vec2& k) { return x < k.x; });
+                    curve->Keys.insert(at, point);
+                    m_Reshaped();
+                }
+                return true;
+            }
+            bool OnPointerMove(const UI::UIPointerEvent& e) override
+            {
+                NodeGraphCurve* curve = m_Curve();
+                if (m_Dragged < 0 || !curve || m_Dragged >= static_cast<int>(curve->Keys.size()))
+                    return true;
+                glm::vec2 point = ToCurve(e.Position);
+                const size_t i = static_cast<size_t>(m_Dragged);
+                if (i > 0)
+                    point.x = std::max(point.x, curve->Keys[i - 1].x);
+                if (i + 1 < curve->Keys.size())
+                    point.x = std::min(point.x, curve->Keys[i + 1].x);
+                curve->Keys[i] = point;
+                m_Changing();
+                return true;
+            }
+            bool OnPointerUp(const UI::UIPointerEvent&) override
+            {
+                m_Dragged = -1;
+                return true;
+            }
+
+        protected:
+            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+            {
+                const UI::UIRect b = GetBounds();
+                d.AddRoundedRect(b.Min, b.Max, theme.GetToken("Background", { 0.063f, 0.075f, 0.106f, 1.0f }), glm::vec4(4.0f), 1.0f,
+                                 theme.GetToken("Border", { 0.20f, 0.235f, 0.32f, 1.0f }));
+                NodeGraphCurve* curve = m_Curve();
+                if (!curve)
+                    return;
+                if (m_Dragged < 0)
+                {
+                    // The keys' range with a margin (one key, or all at one height: a unit around them).
+                    glm::vec2 low(0.0f), high(1.0f);
+                    if (!curve->Keys.empty())
+                    {
+                        low = high = curve->Keys.front();
+                        for (const glm::vec2& key : curve->Keys)
+                        {
+                            low = glm::min(low, key);
+                            high = glm::max(high, key);
+                        }
+                    }
+                    for (int axis = 0; axis < 2; ++axis)
+                        if (high[axis] - low[axis] < 1e-4f)
+                        {
+                            low[axis] -= 0.5f;
+                            high[axis] += 0.5f;
+                        }
+                    const glm::vec2 margin = (high - low) * 0.12f;
+                    m_Low = low - margin;
+                    m_High = high + margin;
+                }
+                d.PushClipRect(b.Min, b.Max);
+                const UI::UIColor axisColor{ 1.0f, 1.0f, 1.0f, 0.10f };
+                if (m_Low.y < 0.0f && m_High.y > 0.0f)
+                {
+                    const float y = ToScreen({ 0.0f, 0.0f }).y;
+                    d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + 1.0f }, axisColor);
+                }
+                if (m_Low.x < 0.0f && m_High.x > 0.0f)
+                {
+                    const float x = ToScreen({ 0.0f, 0.0f }).x;
+                    d.AddRoundedRect({ x, b.Min.y }, { x + 1.0f, b.Max.y }, axisColor);
+                }
+                const UI::UIColor line = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
+                constexpr int kSamples = 96;
+                UI::UIVec2 previous = ToScreen({ m_Low.x, curve->Evaluate(m_Low.x) });
+                for (int s = 1; s <= kSamples; ++s)
+                {
+                    const float x = m_Low.x + (m_High.x - m_Low.x) * static_cast<float>(s) / kSamples;
+                    const UI::UIVec2 point = ToScreen({ x, curve->Evaluate(x) });
+                    d.AddBezier(previous, previous, point, point, 2.0f, line);
+                    previous = point;
+                }
+                for (size_t i = 0; i < curve->Keys.size(); ++i)
+                {
+                    const UI::UIVec2 p = ToScreen(curve->Keys[i]);
+                    const float r = static_cast<int>(i) == m_Dragged ? 5.5f : 4.5f;
+                    d.AddRoundedRect(p - UI::UIVec2{ r }, p + UI::UIVec2{ r }, { 1.0f, 0.82f, 0.35f, 1.0f }, glm::vec4(r), 1.0f, { 0.05f, 0.05f, 0.05f, 1.0f });
+                }
+                d.AddText(std::format("x {:.3g} .. {:.3g}   y {:.3g} .. {:.3g}", m_Low.x, m_High.x, m_Low.y, m_High.y), nullptr, { b.Min.x + 6.0f, b.Min.y + 4.0f },
+                          11.0f, theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f }));
+                d.PopClipRect();
+            }
+
+        private:
+            UI::UIVec2 ToScreen(const glm::vec2& p) const
+            {
+                const UI::UIRect b = GetBounds();
+                const glm::vec2 t = (p - m_Low) / glm::max(m_High - m_Low, glm::vec2(1e-6f));
+                return { b.Min.x + t.x * b.Width(), b.Max.y - t.y * b.Height() };
+            }
+            glm::vec2 ToCurve(const UI::UIVec2& p) const
+            {
+                const UI::UIRect b = GetBounds();
+                const glm::vec2 t{ (p.x - b.Min.x) / std::max(b.Width(), 1.0f), (b.Max.y - p.y) / std::max(b.Height(), 1.0f) };
+                return m_Low + glm::clamp(t, 0.0f, 1.0f) * (m_High - m_Low);
+            }
+            int KeyAt(const NodeGraphCurve& curve, const UI::UIVec2& p) const
+            {
+                for (size_t i = 0; i < curve.Keys.size(); ++i)
+                    if (glm::length(ToScreen(curve.Keys[i]) - p) <= 7.0f)
+                        return static_cast<int>(i);
+                return -1;
+            }
+
+            std::function<NodeGraphCurve*()> m_Curve;
+            std::function<void()> m_Changing, m_Reshaped;
+            int m_Dragged = -1;
+            glm::vec2 m_Low{ 0.0f }, m_High{ 1.0f };
+            std::chrono::steady_clock::time_point m_LastClick{};
         };
 
         Ref<UI::UILabel> MutedLabel(const std::string& text, float size = 13.0f)
@@ -133,6 +298,13 @@ namespace Nox
         m_Status->Margin = UI::UIThickness{ 8.0f, 0.0f, 0.0f, 0.0f };
         toolbar->AddChild(m_Status);
         root->AddChild(toolbar);
+        if (m_Asset && m_Asset->Graph.Domain == kMaterialGraphDomain)
+        {
+            m_CompileStatus = MutedLabel("", 12.5f);
+            m_CompileStatus->Margin = UI::UIThickness{ 8.0f, 0.0f, 8.0f, 4.0f };
+            root->AddChild(m_CompileStatus);
+            m_CompileStatusDirty = true;
+        }
 
         // Parameters | canvas | Details.
         auto column = [](float width)
@@ -160,6 +332,7 @@ namespace Nox
                 Notify({ UI::UINotificationSeverity::Info, "State machines are not in NoxEditorV2 yet",
                          "Their states and transitions open in the next step of the port; NoxEditor edits them meanwhile." });
         };
+        m_Canvas->OnEditValue = [this](uint32_t nodeId, const std::string& property, const UI::UIRect& at) { ShowValuePopup(nodeId, property, at); };
         m_Canvas->SetGraph(m_Asset ? &m_Asset->Graph : nullptr);
 
         Ref<UI::UIScrollView> right = column(300.0f);
@@ -194,10 +367,25 @@ namespace Nox
             CommitHistory();
         if (m_ParametersDirty)
             RebuildParameters();
+        if (!m_PreviewSearched)
+            FindPreviewMesh();
         if (m_DetailsDirty)
             RebuildDetails();
         for (const auto& sync : m_DetailSyncs)
             sync();
+        if (m_DeferredPopup)
+        {
+            std::function<void()> show = std::move(m_DeferredPopup);
+            m_DeferredPopup = nullptr;
+            show();
+        }
+        if (m_PopupSyncs && m_PopupOpen && *m_PopupOpen)
+            for (const auto& sync : *m_PopupSyncs)
+                sync();
+        else
+            m_PopupSyncs.reset();
+        if (m_CompileStatusDirty)
+            RefreshCompileStatus();
         RefreshToolbar();
     }
 
@@ -216,6 +404,8 @@ namespace Nox
                          "Your unsaved edits are kept: Save writes them over the file; closing the window and choosing Don't Save takes the file's version." });
             return;
         }
+        ClosePopup();
+        m_CompileStatusDirty = true;
         m_UndoStack.push_back(std::move(m_Committed));
         m_RedoStack.clear();
         m_Committed = m_Asset->Graph;
@@ -277,7 +467,10 @@ namespace Nox
         m_Asset->HasUnsavedEdits = true;
         // What the graph computes changed: compiled again, so a playing scene uses it now (moving a node changes nothing to run).
         if (structural)
+        {
             m_Asset->Recompile();
+            m_CompileStatusDirty = true;
+        }
     }
 
     void NodeGraphEditorV2::CommitHistory()
@@ -293,6 +486,8 @@ namespace Nox
 
     void NodeGraphEditorV2::RestoreGraph(NodeGraph graph)
     {
+        ClosePopup(); // (its rows point into the graph being replaced)
+        m_CompileStatusDirty = true;
         m_Asset->Graph = std::move(graph);
         m_Committed = m_Asset->Graph;
         m_EditPending = false;
@@ -401,6 +596,8 @@ namespace Nox
                 return false;
             }
         }
+        ClosePopup();
+        m_CompileStatusDirty = true;
         m_Asset->Graph = std::move(fromDisk);
         m_Asset->HasUnsavedEdits = false;
         m_Asset->Recompile();
@@ -478,6 +675,17 @@ namespace Nox
             card->StyleClass = "Card";
             card->DrawBackground = true;
             card->Padding = UI::UIThickness::All(6.0f);
+            // Dragged (by its background or labels) onto the canvas: a Get node of it there.
+            card->Tooltip = "Drag onto the graph for a node that reads it";
+            card->OnDragStart = [this, index]() -> std::optional<UI::UIDragPayload>
+            {
+                if (!m_Asset || index >= m_Asset->Graph.Parameters.size())
+                    return std::nullopt;
+                UI::UIDragPayload payload;
+                payload.Type = NodeGraphCanvasV2::kParameterDragType;
+                payload.Text = m_Asset->Graph.Parameters[index].Name;
+                return payload;
+            };
             InspectorCardBuilder builder{ card, m_ParameterSyncs, [this](bool) { MarkEdited(true); }, UI::UIContext::GetCurrent() };
             auto lastName = std::make_shared<std::string>(parameter.Name);
             builder.AddString("Name", &parameter.Name, "Name", [this, index, lastName]()
@@ -560,78 +768,10 @@ namespace Nox
         body->WidthMode = UI::UISizeMode::Fill;
         m_Details->AddChild(body);
         InspectorCardBuilder builder{ body, m_DetailSyncs, [this](bool) { MarkEdited(true); }, UI::UIContext::GetCurrent() };
-        auto edited = [this]() { MarkEdited(true); };
-
-        // One property's editor, by what it holds and what its type declares (a range, choices, an asset kind, a parameter).
+        const uint32_t nodeId = node->Id;
         auto addProperty = [&](const std::string& key, const std::string& label)
         {
-            NodeGraphValue& value = node->Properties[key];
-            if (key == kParameterReferenceProperty)
-            {
-                std::vector<std::string> names;
-                int selected = -1;
-                for (const GraphParameter& parameter : graph.Parameters)
-                {
-                    if (!type->ParameterType.empty() && type->ParameterType != GraphParameterTypeName(parameter))
-                        continue;
-                    if (const auto* current = std::get_if<std::string>(&value); current && *current == parameter.Name)
-                        selected = static_cast<int>(names.size());
-                    names.push_back(parameter.Name);
-                }
-                if (names.empty())
-                {
-                    builder.AddReadonly(label, "No parameter of this type (+ Add on the left)");
-                    return;
-                }
-                builder.AddEnum(label, names, selected, [this, nodeId = node->Id, names](int index)
-                {
-                    for (GraphNode& n : m_Asset->Graph.Nodes)
-                        if (n.Id == nodeId && index >= 0 && index < static_cast<int>(names.size()))
-                            n.Properties[kParameterReferenceProperty] = names[static_cast<size_t>(index)];
-                    MarkEdited(true);
-                });
-                return;
-            }
-            const auto hint = type->PropertyAssetTypeHints.find(key);
-            const auto range = type->PropertyRanges.find(key);
-            const auto choices = type->PropertyEnums.find(key);
-            if (auto* flag = std::get_if<bool>(&value))
-                builder.AddBool(label, flag, edited);
-            else if (auto* number = std::get_if<int32_t>(&value))
-            {
-                if (choices != type->PropertyEnums.end())
-                    builder.AddEnum(label, choices->second, *number, [this, number](int index) { *number = index; MarkEdited(true); });
-                else
-                    builder.AddInt32(label, number, 0, 0, edited);
-            }
-            else if (auto* real = std::get_if<float>(&value))
-            {
-                if (range != type->PropertyRanges.end())
-                    builder.AddSlider(label, real, range->second.first, range->second.second, edited);
-                else
-                    builder.AddFloat(label, real, 0.01f, 0.0f, 0.0f, "{:.3f}", edited);
-            }
-            else if (auto* pair = std::get_if<glm::vec2>(&value))
-                builder.AddVec2(label, pair, 0.01f, edited);
-            else if (auto* color = std::get_if<glm::vec4>(&value))
-                builder.AddColor4(label, color, edited);
-            else if (auto* handle = std::get_if<uint64_t>(&value))
-            {
-                std::vector<AssetType> accepted;
-                if (hint != type->PropertyAssetTypeHints.end())
-                    if (const AssetType assetType = AssetTypeFromString(hint->second); assetType != AssetType::None)
-                        accepted.push_back(assetType);
-                builder.AddAssetSlot(label, AssetHandle(*handle), accepted, [this, handle](AssetHandle picked)
-                {
-                    *handle = static_cast<uint64_t>(picked);
-                    MarkEdited(true);
-                });
-            }
-            else if (auto* text = std::get_if<std::string>(&value))
-                builder.AddString(label, text, hint != type->PropertyAssetTypeHints.end() && hint->second == "Bone" ? "Bone name" : "", edited,
-                                  hint != type->PropertyAssetTypeHints.end() && hint->second == "Bone" ? "The bone's name in the skeleton (the bone picker comes with the preview step)" : "");
-            else if (const auto* curve = std::get_if<NodeGraphCurve>(&value))
-                builder.AddReadonly(label, std::to_string(curve->Keys.size()) + " keys (curve editing comes in a later step)");
+            AddValueEditor(builder, nodeId, key, label, [this]() { m_DetailsDirty = true; });
         };
 
         // Properties the type declares, in its order (the variable input count is the + / - Pin buttons').
@@ -674,7 +814,6 @@ namespace Nox
         {
             const uint32_t variable = VariableInputCount(*type, node->Properties);
             Ref<UI::UIStackBox> row(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
-            const uint32_t nodeId = node->Id;
             Ref<UI::UIButton> addPin(new UI::UIButton("+ Pin", [this, nodeId, type, variable]()
             {
                 for (GraphNode& n : m_Asset->Graph.Nodes)
@@ -726,5 +865,411 @@ namespace Nox
         }
         if (!anyProperty && !anyInput && type->VariableInputs.empty())
             m_Details->AddChild(MutedLabel("This node has nothing to set."));
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------------------
+
+    void NodeGraphEditorV2::AddValueEditor(InspectorCardBuilder& builder, uint32_t nodeId, const std::string& key, const std::string& label,
+                                           std::function<void()> rebuild)
+    {
+        NodeGraph& graph = m_Asset->Graph;
+        GraphNode* node = nullptr;
+        for (GraphNode& candidate : graph.Nodes)
+            if (candidate.Id == nodeId)
+                node = &candidate;
+        const NodeTypeDesc* type = node ? NodeTypeRegistry::Find(graph.Domain, node->TypeName) : nullptr;
+        if (!node || !type)
+            return;
+        auto edited = [this]() { MarkEdited(true); };
+        NodeGraphValue& value = node->Properties[key];
+        if (key == kParameterReferenceProperty)
+        {
+            std::vector<std::string> names;
+            int selected = -1;
+            for (const GraphParameter& parameter : graph.Parameters)
+            {
+                if (!type->ParameterType.empty() && type->ParameterType != GraphParameterTypeName(parameter))
+                    continue;
+                if (const auto* current = std::get_if<std::string>(&value); current && *current == parameter.Name)
+                    selected = static_cast<int>(names.size());
+                names.push_back(parameter.Name);
+            }
+            if (names.empty())
+            {
+                builder.AddReadonly(label, "No parameter of this type (+ Add on the left)");
+                return;
+            }
+            builder.AddEnum(label, names, selected, [this, nodeId, names](int index)
+            {
+                for (GraphNode& n : m_Asset->Graph.Nodes)
+                    if (n.Id == nodeId && index >= 0 && index < static_cast<int>(names.size()))
+                        n.Properties[kParameterReferenceProperty] = names[static_cast<size_t>(index)];
+                MarkEdited(true);
+            });
+            return;
+        }
+        const auto hint = type->PropertyAssetTypeHints.find(key);
+        const auto range = type->PropertyRanges.find(key);
+        const auto choices = type->PropertyEnums.find(key);
+        const bool bone = hint != type->PropertyAssetTypeHints.end() && hint->second == "Bone";
+        if (auto* flag = std::get_if<bool>(&value))
+            builder.AddBool(label, flag, edited);
+        else if (auto* number = std::get_if<int32_t>(&value))
+        {
+            if (choices != type->PropertyEnums.end())
+                builder.AddEnum(label, choices->second, *number, [this, number](int index) { *number = index; MarkEdited(true); });
+            else
+                builder.AddInt32(label, number, 0, 0, edited);
+        }
+        else if (auto* real = std::get_if<float>(&value))
+        {
+            if (range != type->PropertyRanges.end())
+                builder.AddSlider(label, real, range->second.first, range->second.second, edited);
+            else
+                builder.AddFloat(label, real, 0.01f, 0.0f, 0.0f, "{:.3f}", edited);
+        }
+        else if (auto* pair = std::get_if<glm::vec2>(&value))
+            builder.AddVec2(label, pair, 0.01f, edited);
+        else if (auto* color = std::get_if<glm::vec4>(&value))
+            builder.AddColor4(label, color, edited);
+        else if (auto* handle = std::get_if<uint64_t>(&value))
+        {
+            std::vector<AssetType> accepted;
+            if (hint != type->PropertyAssetTypeHints.end())
+                if (const AssetType assetType = AssetTypeFromString(hint->second); assetType != AssetType::None)
+                    accepted.push_back(assetType);
+            builder.AddAssetSlot(label, AssetHandle(*handle), accepted, [this, handle](AssetHandle picked)
+            {
+                *handle = static_cast<uint64_t>(picked);
+                MarkEdited(true);
+                m_PreviewSearched = m_PreviewMesh != 0; // (a clip picked: the bone list may now find its skeleton)
+            });
+        }
+        else if (auto* text = bone ? std::get_if<std::string>(&value) : nullptr)
+        {
+            // A bone: a button reading the bone (marked when the preview skeleton has no bone of that name) that opens the picker.
+            const Skeleton* skeleton = m_PreviewSkeleton != 0 ? AssetManager::FindLoadedAsset<Skeleton>(m_PreviewSkeleton) : nullptr;
+            const bool known = !skeleton || text->empty() ||
+                               std::any_of(skeleton->AllNodes.begin(), skeleton->AllNodes.end(), [&](const Node* n) { return n && n->Name == *text; });
+            Ref<UI::UIButton> pick(new UI::UIButton(text->empty() ? std::string("(pick a bone)") : *text + (known ? "" : "  (not in the skeleton)")));
+            pick->WidthMode = UI::UISizeMode::Fill;
+            pick->Tooltip = skeleton ? "Pick from the preview skeleton's bones, or type a name" : "Type the bone's name, or pick a preview mesh to list its bones";
+            UI::UIButton* raw = pick.get();
+            pick->OnClick = [this, nodeId, key, raw]() { ShowBonePicker(nodeId, key, raw->GetBounds()); };
+            // (the button follows the value: a pick or an undo changes it)
+            builder.Syncs.push_back([this, nodeId, key, raw]()
+            {
+                for (const GraphNode& n : m_Asset->Graph.Nodes)
+                    if (n.Id == nodeId)
+                        if (const auto found = n.Properties.find(key); found != n.Properties.end())
+                            if (const auto* name = std::get_if<std::string>(&found->second))
+                            {
+                                const std::string shown = name->empty() ? std::string("(pick a bone)") : *name;
+                                if (raw->GetText().rfind(shown, 0) != 0)
+                                    raw->SetText(shown);
+                            }
+            });
+            builder.AddRow(label, pick);
+        }
+        else if (auto* plain = std::get_if<std::string>(&value))
+            builder.AddString(label, plain, "", edited);
+        else if (std::holds_alternative<NodeGraphCurve>(value))
+        {
+            // The curve drawn and shaped by hand, then its keys as numbers, + Key and Smooth.
+            const auto curveOf = [this, nodeId, key]() -> NodeGraphCurve*
+            {
+                for (GraphNode& n : m_Asset->Graph.Nodes)
+                    if (n.Id == nodeId)
+                        if (auto found = n.Properties.find(key); found != n.Properties.end())
+                            return std::get_if<NodeGraphCurve>(&found->second);
+                return nullptr;
+            };
+            builder.AddSubheader(label, "x (what comes in) -> y (what goes out)");
+            Ref<CurveEditView> view(new CurveEditView(curveOf, [this]() { MarkEdited(true); }, [this, rebuild]() { MarkEdited(true); if (rebuild) rebuild(); }));
+            builder.Body->AddChild(view);
+            NodeGraphCurve* curve = curveOf();
+            for (size_t k = 0; curve && k < curve->Keys.size(); ++k)
+            {
+                // A key's x stays between its neighbours (the keys stay in order: no row jumps to another key).
+                builder.AddVec2("Key " + std::to_string(k + 1), &curve->Keys[k], 0.01f, [this, curveOf, k]()
+                {
+                    if (NodeGraphCurve* c = curveOf(); c && k < c->Keys.size())
+                    {
+                        if (k > 0)
+                            c->Keys[k].x = std::max(c->Keys[k].x, c->Keys[k - 1].x);
+                        if (k + 1 < c->Keys.size())
+                            c->Keys[k].x = std::min(c->Keys[k].x, c->Keys[k + 1].x);
+                    }
+                    MarkEdited(true);
+                });
+            }
+            Ref<UI::UIStackBox> row(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
+            Ref<UI::UIButton> addKey(new UI::UIButton("+ Key", [this, curveOf, rebuild]()
+            {
+                if (NodeGraphCurve* c = curveOf())
+                    c->Keys.push_back(c->Keys.empty() ? glm::vec2(0.0f) : c->Keys.back() + glm::vec2(1.0f, 0.0f));
+                MarkEdited(true);
+                if (rebuild)
+                    rebuild();
+            }));
+            addKey->Tooltip = "A key one unit after the last";
+            row->AddChild(addKey);
+            if (curve && !curve->Keys.empty())
+            {
+                Ref<UI::UIButton> removeKey(new UI::UIButton("- Key", [this, curveOf, rebuild]()
+                {
+                    if (NodeGraphCurve* c = curveOf(); c && !c->Keys.empty())
+                        c->Keys.pop_back();
+                    MarkEdited(true);
+                    if (rebuild)
+                        rebuild();
+                }));
+                removeKey->Tooltip = "Removes the last key (right-click a key on the curve to remove that one)";
+                row->AddChild(removeKey);
+            }
+            builder.AddRow("Keys", row);
+            if (curve)
+                builder.AddBool("Smooth", &curve->Smooth, edited, "Off: straight lines between the keys. On: smooth through them.");
+        }
+    }
+
+    void NodeGraphEditorV2::ClosePopup()
+    {
+        m_DeferredPopup = nullptr;
+        if (m_PopupOpen && *m_PopupOpen)
+            if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
+                ctx->ClearOverlay();
+        m_PopupSyncs.reset();
+        m_PopupOpen.reset();
+    }
+
+    void NodeGraphEditorV2::ShowValuePopup(uint32_t nodeId, const std::string& key, const UI::UIRect& at)
+    {
+        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        if (!ctx || !m_Asset)
+            return;
+        // A bone opens its picker straight away (the popup would only hold its button).
+        for (const GraphNode& n : m_Asset->Graph.Nodes)
+            if (n.Id == nodeId)
+                if (const NodeTypeDesc* type = NodeTypeRegistry::Find(m_Asset->Graph.Domain, n.TypeName))
+                    if (const auto hint = type->PropertyAssetTypeHints.find(key); hint != type->PropertyAssetTypeHints.end() && hint->second == "Bone")
+                    {
+                        ShowBonePicker(nodeId, key, at);
+                        return;
+                    }
+        Ref<UI::UIStackBox> box(new UI::UIStackBox(UI::UIOrientation::Vertical, 4.0f));
+        box->Padding = UI::UIThickness::All(10.0f);
+        box->FixedSize = { 340.0f, 0.0f };
+        auto syncs = std::make_shared<std::vector<std::function<void()>>>();
+        InspectorCardBuilder builder{ box, *syncs, [this](bool) { MarkEdited(true); }, ctx };
+        // (built again next frame, not from inside the click that changed its shape: that would destroy the button running it)
+        AddValueEditor(builder, nodeId, key, key, [this, nodeId, key, at]() { m_DeferredPopup = [this, nodeId, key, at]() { ShowValuePopup(nodeId, key, at); }; });
+        for (const auto& sync : *syncs)
+            sync();
+        m_PopupSyncs = syncs;
+        m_PopupOpen = UI::UIPopup::Show(*ctx, at, box);
+        m_DetailsDirty = true; // (Details shows the same value: built again so both point at it)
+    }
+
+    void NodeGraphEditorV2::ShowBonePicker(uint32_t nodeId, const std::string& key, const UI::UIRect& at)
+    {
+        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        if (!ctx || !m_Asset)
+            return;
+        std::string current;
+        for (const GraphNode& n : m_Asset->Graph.Nodes)
+            if (n.Id == nodeId)
+                if (const auto found = n.Properties.find(key); found != n.Properties.end())
+                    if (const auto* name = std::get_if<std::string>(&found->second))
+                        current = *name;
+        // Choosing: the value set (one step), the popup closed. Copied first: closing destroys the button that called it.
+        auto choose = [this, nodeId, key, ctx](const std::string& bone)
+        {
+            const std::string chosen = bone;
+            const uint32_t id = nodeId;
+            const std::string property = key;
+            UI::UIContext* context = ctx;
+            NodeGraphEditorV2* self = this;
+            context->ClearOverlay(); // (nothing of this lambda is used after: it goes with the popup)
+            for (GraphNode& n : self->m_Asset->Graph.Nodes)
+                if (n.Id == id)
+                    n.Properties[property] = chosen;
+            self->MarkEdited(true);
+            self->m_DetailsDirty = true;
+        };
+
+        Ref<UI::UIStackBox> box(new UI::UIStackBox(UI::UIOrientation::Vertical, 6.0f));
+        box->Padding = UI::UIThickness::All(10.0f);
+        box->FixedSize = { 300.0f, 0.0f };
+        const Skeleton* skeleton = m_PreviewSkeleton != 0 ? AssetManager::FindLoadedAsset<Skeleton>(m_PreviewSkeleton) : nullptr;
+        if (m_PreviewSkeleton != 0 && !skeleton)
+            AssetManager::RequestAsset(m_PreviewSkeleton);
+        auto syncs = std::make_shared<std::vector<std::function<void()>>>();
+        if (!skeleton)
+        {
+            box->AddChild(MutedLabel(m_PreviewSkeleton != 0 ? "The preview skeleton is loading: open the picker again in a moment."
+                                                             : "No preview mesh: pick the skeletal mesh this graph animates to list its bones, or type the bone's name below."));
+            InspectorCardBuilder slot{ box, *syncs, {}, ctx };
+            slot.AddAssetSlot("Preview Mesh", m_PreviewMesh, { AssetType::Mesh }, [this, nodeId, key, at](AssetHandle mesh)
+            {
+                SetPreviewMesh(mesh);
+                m_DeferredPopup = [this, nodeId, key, at]() { ShowBonePicker(nodeId, key, at); }; // (next frame: this slot goes with the popup)
+            });
+        }
+        else
+        {
+            const std::string skeletonName = AssetDisplayName(m_PreviewSkeleton);
+            box->AddChild(MutedLabel("Bones of " + skeletonName));
+            // The skin's joints and the nodes above them (a mesh node under the armature is not a bone), in tree order.
+            std::unordered_set<const Node*> joints;
+            for (const Skin* skin : skeleton->Skins)
+                if (skin)
+                    joints.insert(skin->Joints.begin(), skin->Joints.end());
+            std::function<bool(const Node*)> holdsJoint = [&](const Node* n)
+            {
+                if (!n)
+                    return false;
+                if (joints.empty() || joints.contains(n))
+                    return true;
+                return std::any_of(n->Children.begin(), n->Children.end(), [&](const Node* child) { return holdsJoint(child); });
+            };
+            auto bones = std::make_shared<std::vector<std::pair<std::string, int>>>();
+            std::function<void(const Node*, int)> walk = [&](const Node* n, int depth)
+            {
+                if (!n || !holdsJoint(n))
+                    return;
+                bones->emplace_back(n->Name, depth);
+                for (const Node* child : n->Children)
+                    walk(child, depth + 1);
+            };
+            for (const Node* root : skeleton->RootNodes)
+                walk(root, 0);
+
+            Ref<UI::UITextInput> search(new UI::UITextInput("", "Search bones..."));
+            search->WidthMode = UI::UISizeMode::Fill;
+            box->AddChild(search);
+            Ref<UI::UIScrollView> scroll(new UI::UIScrollView());
+            scroll->WidthMode = UI::UISizeMode::Fill;
+            scroll->HeightMode = UI::UISizeMode::Fixed;
+            scroll->FixedSize = { 0.0f, 260.0f };
+            box->AddChild(scroll);
+            Ref<UI::UIStackBox> list(new UI::UIStackBox(UI::UIOrientation::Vertical, 1.0f));
+            list->WidthMode = UI::UISizeMode::Fill;
+            scroll->AddChild(list);
+            UI::UIStackBox* listRaw = list.get();
+            auto fill = [listRaw, bones, choose, current](const std::string& filterText)
+            {
+                listRaw->ClearChildren();
+                std::string filter = filterText;
+                std::transform(filter.begin(), filter.end(), filter.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                for (const auto& [name, depth] : *bones)
+                {
+                    std::string lower = name;
+                    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (!filter.empty() && lower.find(filter) == std::string::npos)
+                        continue;
+                    // Indented by depth while the whole tree shows; a flat list of matches while searching.
+                    const std::string shown = (filter.empty() ? std::string(static_cast<size_t>(std::min(depth, 12)) * 2, ' ') : std::string()) + name;
+                    Ref<UI::UIButton> row(new UI::UIButton(shown, [choose, name]() { choose(name); }));
+                    row->WidthMode = UI::UISizeMode::Fill;
+                    if (name == current)
+                        row->StyleVariant = "primary";
+                    listRaw->AddChild(row);
+                }
+            };
+            search->OnChanged = [fill](const std::string& text) { fill(text); };
+            fill("");
+        }
+        // Or typed (Enter): a bone the preview skeleton does not have (another rig), or clearing it.
+        Ref<UI::UITextInput> typed(new UI::UITextInput(current, "Bone name, Enter to set"));
+        typed->WidthMode = UI::UISizeMode::Fill;
+        typed->OnSubmit = [choose](const std::string& text) { choose(text); };
+        box->AddChild(typed);
+        m_PopupSyncs = syncs;
+        m_PopupOpen = UI::UIPopup::Show(*ctx, at, box);
+    }
+
+    void NodeGraphEditorV2::FindPreviewMesh()
+    {
+        m_PreviewSearched = true;
+        auto assets = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr;
+        if (!assets || !m_Asset || m_Asset->Graph.Domain == kAudioGraphDomain || m_Asset->Graph.Domain == kMaterialGraphDomain || m_PreviewMesh != 0)
+            return;
+        // The first clip the graph plays (in it or a state under it): a skeletal mesh cooked from the same model, else one in its folder.
+        AssetHandle clip = 0;
+        std::function<void(const NodeGraph&)> findClip = [&](const NodeGraph& graph)
+        {
+            for (const GraphNode& node : graph.Nodes)
+            {
+                for (const auto& [name, value] : node.Properties)
+                    if (const auto* handle = std::get_if<uint64_t>(&value); handle && clip == 0 && *handle != 0 &&
+                        AssetManager::IsAssetHandleValid(*handle) && AssetManager::GetAssetType(*handle) == AssetType::AnimationSequence)
+                        clip = *handle;
+                for (const NodeSubGraph& state : node.SubGraphs)
+                    findClip(state.Graph);
+            }
+        };
+        findClip(m_Asset->Graph);
+        if (clip == 0)
+            return;
+        const AssetMetadata& clipMetadata = assets->GetMetadata(clip);
+        AssetHandle sameSource = 0, sameFolder = 0;
+        for (const auto& [handle, metadata] : assets->GetAssetRegistry())
+        {
+            if (metadata.Type != AssetType::Mesh)
+                continue;
+            if (!clipMetadata.SourceFilePath.empty() && metadata.SourceFilePath == clipMetadata.SourceFilePath && sameSource == 0)
+                sameSource = handle;
+            if (metadata.FilePath.parent_path() == clipMetadata.FilePath.parent_path() && sameFolder == 0)
+                sameFolder = handle;
+        }
+        SetPreviewMesh(sameSource != 0 ? sameSource : sameFolder);
+    }
+
+    void NodeGraphEditorV2::SetPreviewMesh(AssetHandle mesh)
+    {
+        m_PreviewMesh = mesh;
+        m_PreviewSkeleton = 0;
+        if (mesh != 0)
+            if (auto assets = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr)
+                m_PreviewSkeleton = assets->FindSkeletonOf(mesh);
+        if (m_PreviewSkeleton != 0)
+            AssetManager::RequestAsset(m_PreviewSkeleton); // (loaded for the bone list)
+        m_DetailsDirty = true;
+    }
+
+    void NodeGraphEditorV2::RefreshCompileStatus()
+    {
+        m_CompileStatusDirty = false;
+        if (!m_CompileStatus || !m_Asset)
+            return;
+        // Compiled here from the graph as it is on the canvas, so an error shows while editing.
+        const MaterialGraphProgram program = CompileMaterialGraph(m_Asset->Graph);
+        m_CompileStatus->UseColorOverride = true;
+        if (!program.Valid)
+        {
+            m_CompileStatus->ColorOverride = { 1.0f, 0.45f, 0.40f, 1.0f };
+            m_CompileStatus->Text = "Does not compile: " + program.Error;
+            return;
+        }
+        static constexpr const char* kOutputNames[] = { "Base Color", "Metallic", "Roughness", "Normal", "Emissive", "Ambient Occlusion", "Opacity",
+                                                        "Opacity Mask", "World Position Offset", "Custom Light", "Custom Ambient" };
+        std::string outputs;
+        for (uint32_t bit = 0; bit < std::size(kOutputNames); ++bit)
+            if ((program.Outputs & (1u << bit)) != 0)
+                outputs += std::string(outputs.empty() ? "" : ", ") + kOutputNames[bit];
+        std::string parameters;
+        for (const MaterialGraphParameter& parameter : program.Parameters)
+            if (!parameter.Name.starts_with('#'))
+                parameters += std::string(parameters.empty() ? "" : ", ") + parameter.Name;
+        std::string text = "Compiles. Sets: " + (outputs.empty() ? std::string("nothing yet (connect the Material Output)") : outputs) +
+                           ". Parameters: " + (parameters.empty() ? std::string("none") : parameters) + ".";
+        // World Position Offset without a Max Displacement: culled by the mesh's own bounds while pushed out of them.
+        const bool wpoWithoutBounds = (program.Outputs & MaterialGraphOutputWorldPositionOffset) != 0 && program.MaxDisplacement <= 0.0f;
+        if (wpoWithoutBounds)
+            text += "\nWorld Position Offset: set Max World Position Offset Displacement on the Material Output (how far it moves the surface, "
+                    "world units), or the surface may be culled while pushed out of its bounds.";
+        m_CompileStatus->ColorOverride = wpoWithoutBounds ? UI::UIColor{ 1.0f, 0.80f, 0.30f, 1.0f } : UI::UIColor{ 0.55f, 0.82f, 0.60f, 1.0f };
+        m_CompileStatus->Text = text;
     }
 }

@@ -102,6 +102,22 @@ namespace Nox
             }, value);
         }
 
+        // The node type reading a parameter of its type in this domain (Get Float, Get Trigger), else one that reads any.
+        const NodeTypeDesc* FindParameterReader(const std::string& domain, const GraphParameter& parameter)
+        {
+            const NodeTypeDesc* reader = nullptr;
+            for (const NodeTypeDesc& type : NodeTypeRegistry::All())
+            {
+                if (type.Domain != domain || !ReadsParameter(type))
+                    continue;
+                if (type.ParameterType == GraphParameterTypeName(parameter))
+                    return &type;
+                if (type.ParameterType.empty() && !reader)
+                    reader = &type;
+            }
+            return reader;
+        }
+
         bool Ctrl() { return (SDL_GetModState() & SDL_KMOD_CTRL) != 0; }
         bool Shift() { return (SDL_GetModState() & SDL_KMOD_SHIFT) != 0; }
         bool Alt() { return (SDL_GetModState() & SDL_KMOD_ALT) != 0; }
@@ -127,6 +143,40 @@ namespace Nox
         ClipChildren = true;
         WidthMode = UI::UISizeMode::Fill;
         HeightMode = UI::UISizeMode::Fill;
+        AcceptedDropType = kParameterDragType;
+        OnDrop = [this](const UI::UIDragPayload& payload)
+        {
+            UI::UIContext* ctx = UI::UIContext::GetCurrent();
+            return ctx && AddParameterReader(payload.Text, ctx->GetLastMousePos()) != 0;
+        };
+    }
+
+    uint32_t NodeGraphCanvasV2::AddParameterReader(const std::string& parameterName, const UIVec2& screen)
+    {
+        if (!m_Graph || !Parameters)
+            return 0;
+        const auto parameter = std::find_if(Parameters->begin(), Parameters->end(), [&](const GraphParameter& p) { return p.Name == parameterName; });
+        if (parameter == Parameters->end())
+            return 0;
+        const NodeTypeDesc* reader = FindParameterReader(m_Graph->Domain, *parameter);
+        if (!reader)
+            return 0;
+        const uint32_t id = AddNodeAt(reader->TypeName, screen);
+        if (GraphNode* node = FindNode(id))
+        {
+            node->Properties[kParameterReferenceProperty] = parameterName;
+            Relayout();
+            Edited(true);
+        }
+        return id;
+    }
+
+    const NodeGraphCanvasV2::ValueHit* NodeGraphCanvasV2::ValueAt(const UIVec2& screen) const
+    {
+        for (auto it = m_ValueHits.rbegin(); it != m_ValueHits.rend(); ++it)
+            if (it->Rect.Contains(screen))
+                return &*it;
+        return nullptr;
     }
 
     void NodeGraphCanvasV2::SetGraph(NodeGraph* graph)
@@ -666,6 +716,32 @@ namespace Nox
             return true;
         }
 
+        // A value on a node: a bool switches now, a number waits to see whether it is dragged, anything else opens on release.
+        if (const ValueHit* hit = !Ctrl() && !Shift() && !Alt() ? ValueAt(e.Position) : nullptr)
+        {
+            GraphNode* node = FindNode(hit->Node);
+            const auto value = node ? node->Properties.find(hit->Property) : decltype(node->Properties.end()){};
+            if (node && value != node->Properties.end())
+            {
+                if (std::find(m_Selected.begin(), m_Selected.end(), hit->Node) == m_Selected.end())
+                    SetSelection({ hit->Node });
+                if (bool* flag = std::get_if<bool>(&value->second))
+                {
+                    *flag = !*flag;
+                    Relayout();
+                    Edited(true);
+                    return true;
+                }
+                m_Drag = Drag::Value;
+                m_ValueDrag = *hit;
+                m_ValueStart = value->second;
+                m_ValueChanged = false;
+                if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
+                    ctx->CancelPendingDrag();
+                return true;
+            }
+        }
+
         if (const uint32_t node = NodeAt(e.Position); node != 0)
         {
             if (quick && node == m_LastClickNode)
@@ -754,6 +830,36 @@ namespace Nox
                     node->EditorPosition = origin + glm::vec2(delta);
             break;
         }
+        case Drag::Value:
+        {
+            // A number dragged sideways: its type's range over 300 px (no range: 0.01 a pixel; an int: one per 8 px); Shift finer.
+            GraphNode* node = m_DragMoved ? FindNode(m_ValueDrag.Node) : nullptr;
+            const NodeTypeDesc* type = node ? TypeOf(*node) : nullptr;
+            const auto value = node ? node->Properties.find(m_ValueDrag.Property) : decltype(node->Properties.end()){};
+            if (!node || value == node->Properties.end())
+                break;
+            const float dx = (e.Position.x - m_DragStart.x) * (Shift() ? 0.1f : 1.0f);
+            const auto range = type ? type->PropertyRanges.find(m_ValueDrag.Property) : decltype(type->PropertyRanges.end()){};
+            const bool hasRange = type && range != type->PropertyRanges.end();
+            if (const float* start = std::get_if<float>(&m_ValueStart); start && std::holds_alternative<float>(value->second))
+            {
+                float next = *start + dx * (hasRange ? (range->second.second - range->second.first) / 300.0f : 0.01f);
+                if (hasRange)
+                    next = std::clamp(next, range->second.first, range->second.second);
+                value->second = next;
+                m_ValueChanged = true;
+            }
+            else if (const int32_t* startInt = std::get_if<int32_t>(&m_ValueStart); startInt && std::holds_alternative<int32_t>(value->second))
+            {
+                int32_t next = *startInt + static_cast<int32_t>(dx / 8.0f);
+                if (hasRange)
+                    next = std::clamp(next, static_cast<int32_t>(range->second.first), static_cast<int32_t>(range->second.second));
+                value->second = next;
+                m_ValueChanged = true;
+            }
+            Relayout();
+            break;
+        }
         case Drag::Box:
         {
             const UIVec2 a = ScreenToGraph(m_DragStart), b = ScreenToGraph(e.Position);
@@ -774,10 +880,21 @@ namespace Nox
             break;
         }
         default:
+        {
             m_HoveredPin = PinAt(e.Position);
             m_HoveredNode = m_HoveredPin.Valid() ? 0 : NodeAt(e.Position);
             m_HoveredLink = (m_HoveredPin.Valid() || m_HoveredNode) ? -1 : LinkAt(e.Position);
+            // What a value on a node does, while the pointer is on it.
+            Tooltip.clear();
+            if (const ValueHit* hit = m_HoveredPin.Valid() ? nullptr : ValueAt(e.Position))
+                if (const GraphNode* node = FindNode(hit->Node))
+                    if (const auto value = node->Properties.find(hit->Property); value != node->Properties.end())
+                        Tooltip = std::holds_alternative<bool>(value->second) ? hit->Property + ": click to switch"
+                                : (std::holds_alternative<float>(value->second) || std::holds_alternative<int32_t>(value->second))
+                                    ? hit->Property + ": drag sideways to change (Shift: finer), click to type"
+                                    : hit->Property + ": click to edit";
             break;
+        }
         }
         if (m_Drag == Drag::Wire)
             m_HoveredPin = PinAt(e.Position);
@@ -805,6 +922,15 @@ namespace Nox
         case Drag::Nodes:
             if (m_DragMoved)
                 Edited(false);
+            break;
+        case Drag::Value:
+            if (m_DragMoved)
+            {
+                if (m_ValueChanged)
+                    Edited(true); // (one step for the whole drag; compiled once, when let go)
+            }
+            else if (OnEditValue)
+                OnEditValue(m_ValueDrag.Node, m_ValueDrag.Property, m_ValueDrag.Rect);
             break;
         case Drag::Wire:
             if (const PinRef target = PinAt(e.Position); target.Valid())
@@ -943,20 +1069,7 @@ namespace Nox
         {
             for (const GraphParameter& parameter : *Parameters)
             {
-                // The reader of its type (Get Float, Get Trigger), else one that reads any.
-                const NodeTypeDesc* reader = nullptr;
-                for (const NodeTypeDesc& type : NodeTypeRegistry::All())
-                {
-                    if (type.Domain != m_Graph->Domain || !ReadsParameter(type))
-                        continue;
-                    if (type.ParameterType == GraphParameterTypeName(parameter))
-                    {
-                        reader = &type;
-                        break;
-                    }
-                    if (type.ParameterType.empty() && !reader)
-                        reader = &type;
-                }
+                const NodeTypeDesc* reader = FindParameterReader(m_Graph->Domain, parameter);
                 if (!reader)
                     continue;
                 if (fromPin.Valid())
@@ -1112,6 +1225,7 @@ namespace Nox
         const UIColor muted = theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
         d.AddRoundedRect(b.Min, b.Max, theme.GetToken("Background", { 0.063f, 0.075f, 0.106f, 1.0f }));
         d.PushClipRect(b.Min, b.Max);
+        m_ValueHits.clear();
 
         // Grid: fine lines every 16 units, stronger every 128.
         for (const auto& [step, alpha] : { std::pair{ 16.0f, 0.025f }, std::pair{ 128.0f, 0.05f } })
@@ -1243,10 +1357,20 @@ namespace Nox
                     continue;
                 const UIVec2 extent = UI::UILabel::MeasureText(pin.Name, nullptr, pinSize);
                 d.AddText(pin.Name, nullptr, { p.x + 12.0f * m_Zoom, p.y - extent.y * 0.5f }, pinSize, { 0.86f, 0.88f, 0.92f, 1.0f });
-                // An input without a wire shows the value it uses.
+                // An input without a wire shows the value it uses, in a field it can be changed in.
                 if (!connected)
                     if (const auto literal = node->Properties.find(pin.Name); literal != node->Properties.end())
-                        d.AddText(ShortValue(literal->second), nullptr, { p.x + 12.0f * m_Zoom + extent.x + 8.0f * m_Zoom, p.y - extent.y * 0.5f }, pinSize, muted);
+                    {
+                        const std::string text = ShortValue(literal->second);
+                        const UIVec2 textPos{ p.x + 12.0f * m_Zoom + extent.x + 8.0f * m_Zoom, p.y - extent.y * 0.5f };
+                        const UIVec2 textSize = UI::UILabel::MeasureText(text.empty() ? std::string("...") : text, nullptr, pinSize);
+                        const UI::UIRect field{ textPos - UIVec2{ 4.0f * m_Zoom, 2.0f * m_Zoom }, textPos + textSize + UIVec2{ 4.0f * m_Zoom, 2.0f * m_Zoom } };
+                        const bool fieldHovered = field.Contains(m_DragLast) && m_Drag == Drag::None;
+                        const bool fieldActive = m_Drag == Drag::Value && m_ValueDrag.Node == node->Id && m_ValueDrag.Property == pin.Name;
+                        d.AddRoundedRect(field.Min, field.Max, { 1.0f, 1.0f, 1.0f, fieldActive ? 0.14f : fieldHovered ? 0.10f : 0.05f }, glm::vec4(3.0f * m_Zoom));
+                        d.AddText(text.empty() ? std::string("...") : text, nullptr, textPos, pinSize, fieldHovered || fieldActive ? UIColor{ 0.95f, 0.96f, 1.0f, 1.0f } : muted);
+                        m_ValueHits.push_back({ node->Id, pin.Name, field });
+                    }
             }
             for (uint32_t i = 0; i < layout->Outputs.size(); ++i)
             {

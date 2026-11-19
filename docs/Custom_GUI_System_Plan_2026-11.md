@@ -316,7 +316,7 @@ it yet):
 | # | Item | Old source | Status |
 |---|---|---|---|
 | G1 | Graph editor: canvas, window, parameters, node Details | NodeGraphEditorPanel, ThedmdCanvasBackend, NodeGraphPropertyEditor | **built** (below) |
-| G2 | Graph editor: in-node value widgets, curve editor, bone picker, parameter drag onto the canvas, material graph compile status | same | open |
+| G2 | Graph editor: in-node value widgets, curve editor, bone picker, parameter drag onto the canvas, material graph compile status | same | built (not run on a GPU / not user-tested) |
 | G3 | Graph editor: state machine view (states, transitions, rules) | ThedmdCanvasBackend::DrawStateMachine, the panel's inspector | open |
 | G4 | Graph editor: animation preview (skeletal mesh), audio preview (play, sliders, meter) | the panel's previews | open |
 | R1 | Renderer Settings / Stats / Post Process windows | EditorLayer, PostProcessSettingsUI | **built** (below) |
@@ -589,6 +589,23 @@ loaded users are read again, the open scene's instances of rewritten prefabs res
 is refused in Play / Simulate, Prefab Mode, while a scene loads or HLODs build. The Inspector's Overrides list is worked out again twice a
 second while no mouse button is held (the old one each frame). Not carried over yet: variants' purple tiles in the Content Browser.
 Checked: syntax check (MCP on and off). Not run on a GPU.
+
+**G2 -- graph editor: values on nodes, curves, bones, parameter drag, compile status (built, not run on a GPU / not user-tested).**
+Canvas: an input without a wire shows its value in a field on the node; drag a number sideways to change it (the type's range over
+300 px, no range 0.01 a pixel, an int one per 8 px; Shift finer; one undo step, compiled once when let go), click true / false to
+switch it, click any other value (or a number without dragging) for its editor in a popup beside it (the same editor as Details). A
+parameter card dragged from Parameters onto the canvas makes its Get node there. Details / popup: a curve is drawn and shaped by hand
+(drag a key -- kept between its neighbours --, double-click adds one, right-click removes one), then its keys as X / Y numbers, + Key,
+- Key, Smooth; a bone property is a button reading the bone ("(not in the skeleton)" when the preview skeleton has none of that name)
+that opens the bone picker: the preview skeleton's bones in tree order, indented by depth, Search bones..., the current one highlighted,
+or a name typed + Enter; with no preview mesh the picker offers Preview Mesh (a skeletal mesh) first. The preview mesh is found from the
+first clip the graph plays (a mesh cooked from the same model, else one in its folder). Material graphs: a line under the toolbar, compiled
+as the canvas is after each change -- "Does not compile: <why>" in red, or "Compiles. Sets: ... Parameters: ..." in green, amber with the
+World Position Offset without Max Displacement warning. Flaws not carried over: in-node property editing in the old canvas made every
+node as wide as its widgets and changes there did not merge into one undo step per drag; the curve's key rows let a key's x pass its
+neighbour and the keys were re-sorted under the rows (a row then edited another key) -- x is now kept between the neighbours; a popup
+rebuilt from inside its own click (a key added) is built next frame (rebuilding it at once destroyed the button running the click).
+Checked: syntax check. Not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

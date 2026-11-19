@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,7 @@ namespace Nox
         class UIStackBox;
     }
     class NodeGraphCanvasV2;
+    struct InspectorCardBuilder;
 
     // One open graph (.nanimgraph / .naudiograph / .nmatgraph) in NoxEditorV2: toolbar, the graph's parameters on the left, the
     // canvas in the middle, the selected node's properties on the right (Unreal's Details panel).
@@ -64,6 +66,20 @@ namespace Nox
         void RefreshToolbar();
         bool HandleKey(int keyCode);
         void FollowDiskChanges();
+        // One value's editor (a node property or an input's value), in Details or in the popup beside a node: by what it holds and
+        // what the node type declares (range, choices, asset kind, bone, curve, parameter). `rebuild`: what to build again when the
+        // editor's shape changes (a curve key added).
+        void AddValueEditor(InspectorCardBuilder& builder, uint32_t nodeId, const std::string& key, const std::string& label, std::function<void()> rebuild);
+        // A value on the canvas clicked: its editor in a popup beside it.
+        void ShowValuePopup(uint32_t nodeId, const std::string& key, const UI::UIRect& at);
+        // A bone property: the preview skeleton's bones (searchable, by depth) or a name typed.
+        void ShowBonePicker(uint32_t nodeId, const std::string& key, const UI::UIRect& at);
+        void ClosePopup();
+        // The skeletal mesh bone pickers list the bones of (found from the graph's clips; picked in the bone picker otherwise).
+        void FindPreviewMesh();
+        void SetPreviewMesh(AssetHandle mesh);
+        // A material graph compiled as it is on the canvas (microseconds): the error, or what it sets and its parameters.
+        void RefreshCompileStatus();
 
         AssetHandle m_Handle = 0;
         Ref<NodeGraphAsset> m_Asset;
@@ -85,6 +101,15 @@ namespace Nox
         Ref<UI::UIButton> m_UndoButton;
         Ref<UI::UIButton> m_RedoButton;
         Ref<UI::UILabel> m_Status;
+        Ref<UI::UILabel> m_CompileStatus;    // a material graph's compile status under the toolbar
+        bool m_CompileStatusDirty = true;
+        // An open popup's rows run while it is open (they point into the graph): dropped when it closes or the graph is replaced.
+        std::shared_ptr<std::vector<std::function<void()>>> m_PopupSyncs;
+        std::shared_ptr<const bool> m_PopupOpen;
+        std::function<void()> m_DeferredPopup; // a popup built again next frame (its shape changed from inside one of its clicks)
+        AssetHandle m_PreviewMesh = 0;
+        AssetHandle m_PreviewSkeleton = 0;
+        bool m_PreviewSearched = false;
         std::vector<std::function<void()>> m_DetailSyncs;
         std::vector<std::function<void()>> m_ParameterSyncs;
         bool m_DetailsDirty = true;
