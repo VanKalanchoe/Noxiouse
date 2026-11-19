@@ -322,7 +322,7 @@ it yet):
 | R1 | Renderer Settings / Stats / Post Process windows | EditorLayer, PostProcessSettingsUI | **built** (below) |
 | M1 | Material Editor (full: graph slot, Custom Lit, lobes, preview sphere) | MaterialEditorPanel | open (V2 has the basic window) |
 | L1 | Levels, World Partition (HLOD) panels | LevelsPanel, WorldPartitionPanel | **built** (below) |
-| A1 | Audio Mixer | MixerPanel, AudioWidgets | open |
+| A1 | Audio Mixer | MixerPanel, AudioWidgets | **built** (below) |
 | T1 | Timeline (sequencer), Animation Clip | TimelinePanel, AnimationClipPanel | open |
 | P1 | Profiler, Render Graph | ProfilerPanel, RenderGraphPanel | open |
 | D1 | Package Game / Server, Streaming Test World, MCP server menu | EditorLayer dialogs, GamePackager | open |
@@ -452,6 +452,22 @@ conversion) was not an edit -- each is an undo step and marks the scene unsaved 
 Unload / Cancel" -- it is the editor's Save / Don't Save / Cancel (Don't Save unloads and drops those cells' changes); the map's colours
 were constants -- theme tokens now (`WorldMapBackground`, `WorldMapGrid`, `WorldCellUnloaded` / `Loading` / `Loaded` / `Activated` /
 `Border` / `Selected` / `Bounds`, `WorldMapCamera`). Checked: syntax check. Not run on a GPU.
+
+**A1 -- Mixer (built, not run on a GPU / not user-tested).** `Panels/MixerV2Panel`, Window > Mixer ("Mixer *" while unsaved): toolbar
+(Save, Add Bus, Undo, Redo, Headphones (HRTF), Real Voices with the live voice counts in its tooltip, Acoustics... -- a popup with the
+reflection and baked-acoustics settings and their live stats -- the mixer file and the acoustic scene); snapshots (Default and one
+button per snapshot, + adds; right-click: Rename..., Duplicate, Delete; a line says which snapshot is edited and what the game plays);
+a strip per bus in a row that scrolls sideways with the wheel (name -- click selects --, where it plays into, a stereo meter with RMS
+and peak, a vertical fader: drag, Shift finer, double-click 0 dB, right-click 0 dB / Remove from Snapshot; the gain reduction, a dB
+field, M / S / B, its effects); the selected bus's details (Name, Output To, Plays While Paused, Volume, Delete Bus...; effects as
+cards with Bypass / Up / Down / remove, the gain reduction, Sidechain, Impulse Response slot, parameters; Sends with Pre-Fader and
+Remove, Add Send...; Ducking). Values a snapshot overrides say "in snapshot"; right-click a value: Reset, Remove from Snapshot.
+History: Ctrl+Z / Ctrl+Y while the window has the keyboard (its root takes them -- no window-focus polling). Flaws not carried over:
+the history step was taken when "no ImGui item is active" (a step per finished change now, when the mouse button is up); a bus
+rename applied only on Enter (also when the field is left now); undo / redo did not mark the mixer unsaved; deleting the bus the
+reflections play into left them on a bus that no longer existed (they go to Master); Delete Bus asked in a popup without saying it
+can be undone; the meter colours were constants (theme tokens `MeterBackground`, `MeterLow`, `MeterLoud`, `MeterClip`, `FaderTrack`,
+`FaderKnob`). Checked: syntax check. Not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

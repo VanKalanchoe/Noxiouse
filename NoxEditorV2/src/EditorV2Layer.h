@@ -17,6 +17,7 @@
 #include "Panels/OutputLogV2Panel.h"
 #include "Panels/AssetEditorV2.h"
 #include "Panels/LevelsV2Panel.h"
+#include "Panels/MixerV2Panel.h"
 #include "Panels/WorldPartitionV2Panel.h"
 #include "Panels/ProjectSettingsV2Panel.h"
 #include "Panels/RendererSettingsV2Panel.h"
@@ -333,6 +334,7 @@ namespace Nox
         ProjectSettingsV2Panel m_ProjectSettings;
         LevelsV2Panel m_LevelsPanel;          // Window > Levels (L1)
         WorldPartitionV2Panel m_WorldPartitionPanel; // Window > World Partition (L1)
+        MixerV2Panel m_MixerPanel;                   // Window > Mixer (A1)
         Scope<HLODBuilder> m_HLODBuild;              // Build HLODs: a step a frame while it runs
         void StartHLODBuild();
         void CancelHLODBuild(const char* reason); // (the scene changes, Play / Simulate start)

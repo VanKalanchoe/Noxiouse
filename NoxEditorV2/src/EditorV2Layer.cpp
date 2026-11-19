@@ -4504,7 +4504,12 @@ namespace Nox
                         m_LevelsPanel.BuildUI(&uiLayer->GetContext());
                     OpenToolWindow("Levels", m_LevelsPanel.GetRoot(), { 820.0f, 320.0f });
                 }, false, true, false, false, "The open scene and its sub-levels: current, visible, locked, loading, placement."},
-                {"Mixer", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
+                {AudioMixer::IsDirty() ? "Mixer *" : "Mixer", "", [this, uiLayer]()
+                {
+                    if (!m_MixerPanel.GetRoot())
+                        m_MixerPanel.BuildUI(&uiLayer->GetContext());
+                    OpenToolWindow("Mixer", m_MixerPanel.GetRoot(), { 960.0f, 680.0f });
+                }, false, true, false, false, "The project's audio mixer: buses, effects, sends, ducking, snapshots, acoustics (* : unsaved)."},
                 {"Viewports", "", {}, false, true, false, false, "", std::move(viewportItems)},
                 {"Animation Graphs", "", {}, false, true, false, false, "", std::move(animGraphItems)},
                 {"", "", {}, true},
@@ -4757,6 +4762,8 @@ namespace Nox
             m_LevelsPanel.Update();
         if (m_WorldPartitionPanel.GetRoot() && dock->HasPanel("World Partition"))
             m_WorldPartitionPanel.Update();
+        if (m_MixerPanel.GetRoot() && dock->HasPanel("Mixer"))
+            m_MixerPanel.Update();
     }
 
     std::filesystem::path EditorV2Layer::LayoutDirectory() const
