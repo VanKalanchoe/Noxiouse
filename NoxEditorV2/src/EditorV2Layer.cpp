@@ -1,6 +1,7 @@
 #include "EditorV2Layer.h"
 #include "Panels/AssetPreviewRenderer.h"
 #include "Panels/InspectorWidgetsV2.h"
+#include "Panels/MaterialEditorV2.h"
 
 #include <algorithm>
 #include <cmath>
@@ -78,7 +79,6 @@ namespace Nox
 {
     namespace
     {
-        void ActivateDockedTab(UI::UIDockSpace& dock, const std::string& title); // (below)
 
         // In <Project>/Saved/Layout (EditorV2Layer::LayoutDirectory).
         // ("2": the layouts saved before the drawer had the Content Browser and the Output Log docked; they start fresh once.)
@@ -492,6 +492,7 @@ namespace Nox
             Console::Get().Execute(exec);
 
         RegisterCommands();
+        RegisterAssetEditors();
         LoadViewportPrefs(); // the project's (Saved/Layout)
         BuildUI(true);
     }
@@ -512,13 +513,9 @@ namespace Nox
             if (const auto& dock = uiLayer->GetDockSpaceRef())
             {
                 dock->CanClosePanel = nullptr; // (it asks this layer)
-                for (const auto& me : m_MaterialEditors)
-                    dock->RemovePanel(me.Title);
-                for (const auto& graph : m_GraphEditors)
-                    dock->RemovePanel(graph.Title);
             }
         }
-        m_GraphEditors.clear(); // (while the project's assets are still loaded)
+        m_AssetEditors.CloseAll(); // (while the project's assets are still loaded; their windows are not saved in the layout)
         SaveLayoutFiles();
         AssetPreviewRenderer::Get().Clear();
         AssetPreviewRenderer::SetRenderer(nullptr);
@@ -572,7 +569,7 @@ namespace Nox
         {
             // The graph and material windows show the project being left: closed while it is still loaded (unsaved edits were
             // asked about before; what is left goes back to the files).
-            CloseAssetEditors();
+            m_AssetEditors.CloseAll();
             SaveLayoutFiles(); // the project being left keeps its layout
         }
         if (!Project::Load(path))
@@ -1601,8 +1598,7 @@ namespace Nox
             return true;
         if ((scope & UnsavedMixer) && AudioMixer::IsDirty())
             return true;
-        return (scope & UnsavedGraphs) &&
-               std::any_of(m_GraphEditors.begin(), m_GraphEditors.end(), [](const GraphEditorWindow& g) { return g.Editor && g.Editor->IsDirty(); });
+        return (scope & UnsavedAssets) && m_AssetEditors.HasUnsaved();
     }
 
     void EditorV2Layer::ShowSaveChangesDialog(const std::string& text, std::function<void()> save, std::function<void()> dontSave)
@@ -1633,10 +1629,9 @@ namespace Nox
         std::vector<std::string> unsaved;
         if ((scope & UnsavedScene) && m_SceneDirty)
             unsaved.push_back("the scene " + (m_EditorScenePath.empty() ? std::string("(untitled)") : m_EditorScenePath.filename().string()));
-        if (scope & UnsavedGraphs)
-            for (const GraphEditorWindow& graph : m_GraphEditors)
-                if (graph.Editor && graph.Editor->IsDirty())
-                    unsaved.push_back("the graph " + graph.Editor->GetTitle());
+        if (scope & UnsavedAssets)
+            for (std::string& name : m_AssetEditors.UnsavedNames())
+                unsaved.push_back(std::move(name));
         if ((scope & UnsavedMixer) && AudioMixer::IsDirty())
             unsaved.push_back("the audio mixer");
         std::string list;
@@ -1648,10 +1643,8 @@ namespace Nox
             {
                 if ((scope & UnsavedScene) && m_SceneDirty)
                     SaveScene();
-                if (scope & UnsavedGraphs)
-                    for (GraphEditorWindow& graph : m_GraphEditors)
-                        if (graph.Editor && graph.Editor->IsDirty())
-                            graph.Editor->Save();
+                if (scope & UnsavedAssets)
+                    m_AssetEditors.SaveAll();
                 if ((scope & UnsavedMixer) && AudioMixer::IsDirty())
                     AudioMixer::Save();
                 // Still unsaved (Save As was cancelled, a file could not be written): nothing is dropped.
@@ -1667,11 +1660,9 @@ namespace Nox
             {
                 if (scope & UnsavedScene)
                     m_SceneDirty = false; // (what follows replaces it; the title must not keep the *)
-                // The graphs' edits are dropped: back to their files (a playing scene runs what is saved again).
-                if (scope & UnsavedGraphs)
-                    for (GraphEditorWindow& graph : m_GraphEditors)
-                        if (graph.Editor && graph.Editor->IsDirty())
-                            graph.Editor->RevertToDisk();
+                // The asset editors' edits are dropped: back to their files (a playing scene runs what is saved again).
+                if (scope & UnsavedAssets)
+                    m_AssetEditors.RevertAll();
                 if (proceed)
                     proceed();
             });
@@ -3616,8 +3607,7 @@ namespace Nox
         {
             m_InspectorPanel.Update();
         }
-        UpdateMaterialEditors();
-        UpdateGraphEditors();
+        m_AssetEditors.Update();
 
         std::vector<int32_t> selectedIDs;
         for (const Entity& entity : m_Selection.GetEntities())
@@ -3768,7 +3758,7 @@ namespace Nox
         if (const auto& dock = uiLayer->GetDockSpaceRef())
         {
             dock->ClearPanels();
-            dock->CanClosePanel = [this](const std::string& title) { return CanClosePanel(title); };
+            dock->CanClosePanel = [this](const std::string& title) { return m_AssetEditors.CanClosePanel(title); };
         }
 
         m_ViewportImage = UI::MakeUI<UI::UIImage>();
@@ -4382,8 +4372,9 @@ namespace Nox
                 {
                     if (metadata.Type != AssetType::AnimationGraph)
                         continue;
-                    animGraphItems.push_back({metadata.FilePath.stem().string(), "", {}, false, false, false, false,
-                                              "Graph editor panel not yet ported to NoxEditorV2"});
+                    const AssetHandle graphHandle = handle;
+                    animGraphItems.push_back({metadata.FilePath.stem().string(), "", [this, graphHandle]() { OpenAssetV2(graphHandle); }, false, true, false, false,
+                                              "Opens the graph in its editor window"});
                 }
             }
             if (animGraphItems.empty())
@@ -4445,7 +4436,7 @@ namespace Nox
                 {"Viewports", "", {}, false, true, false, false, "", std::move(viewportItems)},
                 {"Animation Graphs", "", {}, false, true, false, false, "", std::move(animGraphItems)},
                 {"", "", {}, true},
-                {"Reset Layout", "", [this]() { ConfirmUnsavedChanges("resetting the layout (it closes the graph windows)", [this]() { m_ResetLayoutRequested = true; }, UnsavedGraphs); }, false, true, false, false,
+                {"Reset Layout", "", [this]() { ConfirmUnsavedChanges("resetting the layout (it closes the asset editor windows)", [this]() { m_ResetLayoutRequested = true; }, UnsavedAssets); }, false, true, false, false,
                  "Back to the default panels (closes windows torn off into their own OS window and the graph and material windows); the saved layout is replaced."},
                 {"Reload Theme", "", [uiLayer]() { uiLayer->ReloadTheme(); }}
             };
@@ -4516,252 +4507,31 @@ namespace Nox
             ConfirmUnsavedChanges("opening " + AssetDisplayName(handle), [this, handle]() { OpenScene(handle); }, UnsavedScene);
             return;
         }
-        if (type == AssetType::AnimationGraph || type == AssetType::AudioGraph || type == AssetType::MaterialGraph)
-        {
-            OpenGraphEditor(handle);
+        // The editor registered for the type (RegisterAssetEditors); one window per asset.
+        if (m_AssetEditors.Open(handle) || !AssetManager::IsAssetHandleValid(handle))
             return;
-        }
-        if (type != AssetType::Material)
-        {
+        if (!m_AssetEditors.HasEditorFor(type))
             Notify(UI::UINotificationSeverity::Info, "No editor for " + AssetDisplayName(handle) + " yet",
-                   "NoxEditorV2 opens scenes and materials so far; the old NoxEditor has the other editors.");
-            return;
-        }
-
-        const auto& dock = uiLayer->GetDockSpaceRef();
-        for (auto& existing : m_MaterialEditors)
-        {
-            if (existing.Handle == handle)
-            {
-                if (existing.Window && existing.Window->GetParent())
-                {
-                    if (existing.Window->OnActivate)
-                        existing.Window->OnActivate();
-                    return;
-                }
-                if (dock->FindNodeByPanelTitle(existing.Title))
-                    return;
-            }
-        }
-
-        std::erase_if(m_MaterialEditors, [handle](const MaterialEditorState& s) { return s.Handle == handle; });
-
-        std::string title = "Material: " + AssetDisplayName(handle);
-        auto rootBox = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-        rootBox->WidthMode = UI::UISizeMode::Fill;
-        rootBox->HeightMode = UI::UISizeMode::Fill;
-        rootBox->StyleClass = "Surface";
-        rootBox->DrawBackground = true;
-        rootBox->Padding = UI::UIThickness::All(10.0f);
-
-        if (Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
-        {
-            auto pathLbl = UI::Label(Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle).FilePath.generic_string());
-            pathLbl->FontSizeOverride = 13.0f;
-            pathLbl->UseColorOverride = true;
-            pathLbl->ColorOverride = { 0.58f, 0.64f, 0.74f, 1.0f };
-            rootBox->AddChild(pathLbl);
-        }
-
-        auto scroll = UI::MakeUI<UI::UIScrollView>();
-        scroll->WidthMode = UI::UISizeMode::Fill;
-        scroll->HeightMode = UI::UISizeMode::Fill;
-        scroll->ChildSpacing = 6.0f;
-        rootBox->AddChild(scroll);
-
-        const float offset = static_cast<float>((m_MaterialEditors.size() % 5) * 28);
-        Ref<UI::UIWindow> win = dock->FloatPanel(title, rootBox, { 380.0f + offset, 110.0f + offset }, { 430.0f, 580.0f }, false);
-
-        MaterialEditorState state;
-        state.Handle = handle;
-        state.Title = std::move(title);
-        state.Window = std::move(win);
-        state.Body = scroll ? UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f) : nullptr;
-        if (state.Body)
-        {
-            state.Body->WidthMode = UI::UISizeMode::Fill;
-            scroll->AddChild(state.Body);
-        }
-        state.Dirty = true;
-        m_MaterialEditors.push_back(std::move(state));
-        UpdateMaterialEditors();
+                   "NoxEditorV2 opens scenes, materials and graphs so far; the old NoxEditor has the other editors.");
     }
 
-    void EditorV2Layer::OpenGraphEditor(AssetHandle handle)
+    void EditorV2Layer::RegisterAssetEditors()
     {
-        UILayer* uiLayer = Application::Get().GetUILayer();
-        if (!uiLayer || !uiLayer->GetDockSpaceRef())
-            return;
-        const auto& dock = uiLayer->GetDockSpaceRef();
-        // Already open: brought to the front (floating: raised; docked: its tab chosen).
-        for (GraphEditorWindow& open : m_GraphEditors)
+        AssetEditorRegistry& registry = m_AssetEditors.GetRegistry();
+        const auto graph = [](AssetHandle handle) -> std::unique_ptr<AssetEditorV2> { return std::make_unique<NodeGraphEditorV2>(handle); };
+        registry.Register(AssetType::AnimationGraph, graph);
+        registry.Register(AssetType::AudioGraph, graph);
+        registry.Register(AssetType::MaterialGraph, graph);
+        registry.Register(AssetType::Material, [](AssetHandle handle) -> std::unique_ptr<AssetEditorV2> { return std::make_unique<MaterialEditorV2>(handle); });
+
+        AssetEditorManager::Hooks hooks;
+        hooks.Notify = [this](UI::UINotification note) { Notify(note.Severity, std::move(note.Title), std::move(note.Message)); };
+        hooks.AskSave = [this](const std::string& text, std::function<void()> save, std::function<void()> dontSave)
         {
-            if (open.Editor && open.Editor->GetHandle() == handle)
-            {
-                if (const Ref<UI::UIWindow> window = dock->FindFloatingWindow(open.Title); window && window->OnActivate)
-                    window->OnActivate();
-                else if (dock->FindNodeByPanelTitle(open.Title))
-                    ActivateDockedTab(*dock, open.Title);
-                return;
-            }
-        }
-        auto editor = std::make_unique<NodeGraphEditorV2>(handle);
-        if (!editor->IsValid())
-        {
-            Notify(UI::UINotificationSeverity::Error, "Graph not opened", AssetDisplayName(handle) + " could not be loaded -- see the Output Log.");
-            return;
-        }
-        editor->Notify = [this](UI::UINotification note) { Notify(note.Severity, std::move(note.Title), std::move(note.Message)); };
-        std::string title = "Graph: " + editor->GetTitle();
-        const Ref<UI::UIElement> root = editor->BuildUI();
-        const float offset = static_cast<float>((m_GraphEditors.size() % 5) * 28);
-        Ref<UI::UIWindow> window = dock->FloatPanel(title, root, { 220.0f + offset, 90.0f + offset }, { 1180.0f, 700.0f }, false);
-        m_GraphEditors.push_back({ std::move(editor), std::move(title), std::move(window) });
-    }
-
-    void EditorV2Layer::UpdateGraphEditors()
-    {
-        if (m_GraphEditors.empty())
-            return;
-        UILayer* uiLayer = Application::Get().GetUILayer();
-        const auto& dock = uiLayer ? uiLayer->GetDockSpaceRef() : nullptr;
-        // Closed windows (open nowhere: not docked, floating or torn off) end their editor. Closing asked about unsaved edits
-        // (CanClosePanel); a window gone another way drops them (the editor goes back to the file) and says so.
-        std::erase_if(m_GraphEditors, [&](GraphEditorWindow& open)
-        {
-            if (dock && dock->HasPanel(open.Title))
-                return false;
-            if (open.Editor && open.Editor->IsDirty())
-                Notify(UI::UINotificationSeverity::Warning, open.Editor->GetTitle() + ": unsaved changes dropped",
-                       "Its window closed without the Save question; the graph is the file's version again.");
-            return true;
-        });
-        for (GraphEditorWindow& open : m_GraphEditors)
-            if (open.Editor)
-                open.Editor->Update();
-    }
-
-    bool EditorV2Layer::CanClosePanel(const std::string& title)
-    {
-        const auto found = std::find_if(m_GraphEditors.begin(), m_GraphEditors.end(), [&](const GraphEditorWindow& g) { return g.Title == title; });
-        if (found == m_GraphEditors.end() || !found->Editor || !found->Editor->IsDirty())
-            return true;
-        // Kept open; the answer closes it (or not). Looked up by title again then: the dialog outlives this call.
-        ShowSaveChangesDialog("Save changes to the graph " + found->Editor->GetTitle() + " before closing it?",
-            [this, title]()
-            {
-                for (GraphEditorWindow& graph : m_GraphEditors)
-                {
-                    if (graph.Title != title || !graph.Editor)
-                        continue;
-                    graph.Editor->Save();
-                    if (graph.Editor->IsDirty())
-                        return; // (not written: the window stays, the toast says why)
-                    CloseGraphWindow(title);
-                    return;
-                }
-            },
-            [this, title]()
-            {
-                for (GraphEditorWindow& graph : m_GraphEditors)
-                {
-                    if (graph.Title != title || !graph.Editor)
-                        continue;
-                    if (graph.Editor->RevertToDisk())
-                        CloseGraphWindow(title);
-                    return;
-                }
-            });
-        return false;
-    }
-
-    void EditorV2Layer::CloseGraphWindow(const std::string& title)
-    {
-        UILayer* uiLayer = Application::Get().GetUILayer();
-        if (!uiLayer)
-            return;
-        bool closed = false;
-        if (const auto& dock = uiLayer->GetDockSpaceRef())
-            closed = dock->RemovePanel(title);
-        if (!closed)
-            if (UI::UIViewportManager* windows = uiLayer->GetViewportManager())
-                windows->ClosePanel(title);
-    }
-
-    void EditorV2Layer::CloseAssetEditors()
-    {
-        UILayer* uiLayer = Application::Get().GetUILayer();
-        const auto& dock = uiLayer ? uiLayer->GetDockSpaceRef() : nullptr;
-        UI::UIViewportManager* windows = uiLayer ? uiLayer->GetViewportManager() : nullptr;
-        for (const GraphEditorWindow& graph : m_GraphEditors)
-            if (!(dock && dock->RemovePanel(graph.Title)) && windows)
-                windows->ClosePanel(graph.Title);
-        for (const MaterialEditorState& material : m_MaterialEditors)
-            if (!(dock && dock->RemovePanel(material.Title)) && windows)
-                windows->ClosePanel(material.Title);
-        m_GraphEditors.clear(); // (edits not saved by now go back to the files: the caller asked)
-        m_MaterialEditors.clear();
-    }
-
-    void EditorV2Layer::UpdateMaterialEditors()
-    {
-        if (m_MaterialEditors.empty())
-            return;
-        UILayer* uiLayer = Application::Get().GetUILayer();
-        const auto& dock = uiLayer ? uiLayer->GetDockSpaceRef() : nullptr;
-
-        std::erase_if(m_MaterialEditors, [&](const MaterialEditorState& me)
-        {
-            if (!AssetManager::IsAssetHandleValid(me.Handle) || AssetManager::GetAssetType(me.Handle) != AssetType::Material)
-                return true;
-            if (!dock)
-                return true;
-            return !dock->HasPanel(me.Title); // (docked, floating or torn off into its own OS window: still open)
-        });
-
-        UI::UIContext* ctx = uiLayer ? &uiLayer->GetContext() : nullptr;
-        for (size_t i = 0; i < m_MaterialEditors.size(); ++i)
-        {
-            MaterialEditorState& me = m_MaterialEditors[i];
-            if (!me.Body)
-                continue;
-            if (me.Dirty)
-            {
-                me.Dirty = false;
-                me.Syncs.clear();
-                me.Body->ClearChildren();
-                Ref<Material> mat = AssetManager::GetAsset<Material>(me.Handle);
-                if (!mat)
-                {
-                    auto loading = UI::Label("Loading material...");
-                    loading->FontSizeOverride = 14.5f;
-                    me.Body->AddChild(loading);
-                }
-                else
-                {
-                    const AssetHandle h = me.Handle;
-                    InspectorCardBuilder builder{ me.Body, me.Syncs, {}, ctx };
-                    PopulateMaterialPropertiesUI(
-                        h,
-                        mat->GetData(),
-                        builder,
-                        me.ExpandedSections,
-                        {
-                            [this](AssetHandle childHandle) { OpenAssetV2(childHandle); },
-                            [this, h]()
-                            {
-                                for (auto& entry : m_MaterialEditors)
-                                    if (entry.Handle == h) entry.Dirty = true;
-                            }
-                        });
-                }
-            }
-            else
-            {
-                for (const auto& sync : me.Syncs)
-                    sync();
-            }
-        }
+            ShowSaveChangesDialog(text, std::move(save), std::move(dontSave));
+        };
+        hooks.OpenAsset = [this](AssetHandle handle) { OpenAssetV2(handle); };
+        m_AssetEditors.SetHooks(std::move(hooks));
     }
 
     std::filesystem::path EditorV2Layer::LayoutDirectory() const
@@ -4814,7 +4584,7 @@ namespace Nox
         m_ShowSceneHierarchy = true;
         m_ShowInspector = true;
         m_ShowToolBar = true;
-        CloseAssetEditors(); // (their windows go with the old layout; unsaved graph edits were asked about)
+        m_AssetEditors.CloseAll(); // (their windows go with the old layout; unsaved edits were asked about)
         m_DrawerPage = DrawerPage::None;
         m_DrawerFraction = 0.42f;
 

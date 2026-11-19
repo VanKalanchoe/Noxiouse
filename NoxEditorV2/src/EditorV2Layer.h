@@ -15,6 +15,7 @@
 #include "Panels/ContentBrowserV2Panel.h"
 #include "Panels/InspectorV2Panel.h"
 #include "Panels/OutputLogV2Panel.h"
+#include "Panels/AssetEditorV2.h"
 #include "Panels/NodeGraph/NodeGraphEditorV2.h"
 #include "EditorCommands.h"
 #include "EditorSelection.h"
@@ -85,7 +86,7 @@ namespace Nox
         // (the edits are dropped: graphs go back to their files; then go on), Cancel. `action` names what would happen ("opening
         // the project"); `scope` is what the action drops (a new scene drops the scene, not an open graph's edits). Without
         // unsaved work in scope it goes on at once.
-        enum UnsavedScope : uint32_t { UnsavedScene = 1, UnsavedGraphs = 2, UnsavedMixer = 4, UnsavedAll = 7 };
+        enum UnsavedScope : uint32_t { UnsavedScene = 1, UnsavedAssets = 2, UnsavedMixer = 4, UnsavedAll = 7 }; // (assets: the open asset editors)
         void ConfirmUnsavedChanges(const std::string& action, std::function<void()> proceed, uint32_t scope = UnsavedAll);
         bool HasUnsavedChanges(uint32_t scope = UnsavedAll) const;
         // Save / Don't Save / Cancel: the dialog every unsaved-changes question uses.
@@ -317,35 +318,10 @@ namespace Nox
         bool m_LayoutBuilt = false;
         uint64_t m_LastScriptBuildNotified = 0;
         void OpenAssetV2(AssetHandle handle);
-        void UpdateMaterialEditors();
-        // Animation, audio and material graphs: one window each (NodeGraphEditorV2), floating until docked.
-        void OpenGraphEditor(AssetHandle handle);
-        void UpdateGraphEditors();
-        // The dock space asks before a panel's window closes: a graph with unsaved edits stays open and the dialog asks (Save /
-        // Don't Save / Cancel); true closes it now.
-        bool CanClosePanel(const std::string& title);
-        // Closes a graph's window wherever it is (docked, floating, torn off); its editor ends next frame.
-        void CloseGraphWindow(const std::string& title);
-        // Every graph and material window closes (the project changes, the layout is reset); asked about before, by the caller.
-        void CloseAssetEditors();
-        struct GraphEditorWindow
-        {
-            std::unique_ptr<NodeGraphEditorV2> Editor;
-            std::string Title;
-            Ref<UI::UIWindow> Window;
-        };
-        std::vector<GraphEditorWindow> m_GraphEditors;
-
-        struct MaterialEditorState
-        {
-            AssetHandle Handle = 0;
-            std::string Title;
-            Ref<UI::UIWindow> Window;
-            Ref<UI::UIStackBox> Body;
-            std::unordered_map<std::string, bool> ExpandedSections;
-            std::vector<std::function<void()>> Syncs;
-            bool Dirty = true;
-        };
+        // Asset editors (E6): which editor opens which asset type is registered once (RegisterAssetEditors); the manager owns
+        // the open windows, asks before one with unsaved edits closes and ends an editor whose window is gone.
+        void RegisterAssetEditors();
+        AssetEditorManager m_AssetEditors;
 
         // What is selected: the editor's, read and changed by every panel, the viewports and the shortcuts (E3).
         EditorSelection m_Selection;
@@ -374,7 +350,6 @@ namespace Nox
         Ref<UI::UIElement> m_ContentDrawerTab, m_LogDrawerTab; // in the status bar
         DrawerPage m_DrawerPage = DrawerPage::None;
         float m_DrawerFraction = 0.42f;
-        std::vector<MaterialEditorState> m_MaterialEditors;
         bool m_ShowSceneHierarchy = true;
         bool m_ShowInspector = true;
         bool m_ShowToolBar = true;

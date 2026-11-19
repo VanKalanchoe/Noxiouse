@@ -337,7 +337,7 @@ it yet):
 | E3 | The selection belongs to the Scene Hierarchy panel; the Inspector, viewport, gizmo, play and prefab code reach into it (26 places) | SceneHierarchyV2Panel | a panel closed or rebuilt is the selection's owner gone; no selection of assets / nodes shared | an editor-level selection service (Unreal's USelection) all panels read and write -- **built** (below) |
 | E4 | Shortcuts are one switch in the layer's OnEvent, with hand-kept lists of panels whose keys must not reach it | EditorV2Layer::OnEvent | each new panel must be added to the list or Delete deletes entities (it happened); keys cannot be rebound; menus show shortcut text by hand | a command system: commands with a name, a default key, a focus scope (viewport, hierarchy, graph ...), shown in menus and rebindable (Unreal's UICommandList) -- **built** (below) |
 | E5 | Undo stores the whole scene as text per step, found by polling a fingerprint each frame; panels must remember to request a check; an undo reloads the whole scene | EditorHistory | memory and a hitch per step in large scenes; an edit a panel forgets to report is not undoable; graphs have separate histories | keep for now (it is robust: nothing is forgotten when a check runs); later per-object transactions (Unreal's FTransaction) when large scenes need it |
-| E6 | Which editor opens an asset is a hard-coded switch | EditorV2Layer::OpenAssetV2 | every asset editor touches the layer | an asset-editor registry (Unreal's asset type actions): a type registers its editor and its Content Browser actions |
+| E6 | Which editor opens an asset is a hard-coded switch | EditorV2Layer::OpenAssetV2 | every asset editor touches the layer | an asset-editor registry (Unreal's asset type actions): a type registers its editor and its Content Browser actions -- **built** (below; Content Browser actions per type not yet) |
 | E7 | File dialogs block: the main loop spins until the dialog returns | Utility::OpenFile / SaveFile | the editor stops drawing (and streaming, previews) while a dialog is open | asynchronous dialogs (SDL's callback) with the result delivered next frame |
 | E8 | Colours written into widgets instead of theme tokens (my new panels included) | UI widgets, panels | a theme change does not reach them | move to theme tokens when each panel is touched |
 | E9 | Two editors with copied code (AssetPreviewRenderer, EditorHistory, ScriptBuilder, GamePackager live twice) | NoxEditor, NoxEditorV2 | fixes made twice or only once | shared editor code in one place; NoxEditor retired when V2 has everything |
@@ -387,6 +387,17 @@ a key the editor also used; menus showed key text written by hand (Redo said "Ct
 could not be changed. Checked: syntax check; an offline test of the command list (20 checks: key names and parsing, the three
 scopes with the Content Browser focused / typing / over a viewport, Esc served by the first command that can run, rebinding moves a
 used key, save and load, defaults leave no file). Not run on a GPU.
+
+**E6 (built, not run on a GPU / not user-tested).** `Panels/AssetEditorV2.h` + `AssetEditorManager.cpp`: `AssetEditorV2` is one
+asset in its own window (name, kind, window title, default size, BuildUI / Update, IsDirty / Save / RevertToDisk); the
+`AssetEditorRegistry` maps an asset type to the editor that opens it (`EditorV2Layer::RegisterAssetEditors`: animation, audio and
+material graphs -> `NodeGraphEditorV2`, materials -> `Panels/MaterialEditorV2`, moved out of the layer); the `AssetEditorManager`
+(Unreal's UAssetEditorSubsystem) opens one window per asset or raises the open one (floating or docked tab), updates the editors,
+asks "Save changes to the <kind> <name> before closing it?" for any editor with unsaved edits, ends an editor whose window is gone,
+and gives the unsaved names, Save All and Revert All to the editor's "Save changes?" questions. `OpenAssetV2` has no switch over
+graph / material types any more. Flaws fixed with it: the material window said "Loading material..." for good when the material was
+still loading when it opened (it was built once); a material deleted while its window was open kept the window; Window > Animation
+Graphs listed the graphs but could not open them. Checked: syntax check. Not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

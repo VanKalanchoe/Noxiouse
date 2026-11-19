@@ -8,6 +8,7 @@
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/NodeGraph/NodeGraphAsset.h"
 #include "NoxCore/UI/Core/UITypes.h"
+#include "Panels/AssetEditorV2.h"
 
 namespace Nox
 {
@@ -26,29 +27,28 @@ namespace Nox
     // It edits the loaded NodeGraphAsset in place and recompiles it after each change (a playing scene picks the change up);
     // Save writes the file. History: the whole graph after each finished edit (a drag or a connection is one step; a value
     // dragged in Details is one step when the mouse button comes up), Ctrl+Z / Ctrl+Y.
-    class NodeGraphEditorV2
+    class NodeGraphEditorV2 final : public AssetEditorV2
     {
     public:
         explicit NodeGraphEditorV2(AssetHandle graph);
-        ~NodeGraphEditorV2();
+        ~NodeGraphEditorV2() override;
 
-        Ref<UI::UIElement> BuildUI();
+        Ref<UI::UIElement> BuildUI() override;
         // Once a frame: finished edits become history steps, the window's labels follow.
-        void Update();
+        void Update() override;
         // Writes the file (nothing when nothing changed); IsDirty() says whether it worked.
-        void Save();
+        void Save() override;
         // Drops the unsaved edits: the graph is the file's again (and recompiled). False when the file could not be read (the
         // edits stay, the window says why).
-        bool RevertToDisk();
+        bool RevertToDisk() override;
 
-        AssetHandle GetHandle() const { return m_Handle; }
-        const std::string& GetTitle() const { return m_Title; }
-        bool IsDirty() const { return m_Dirty; }
-        bool IsValid() const { return m_Asset != nullptr; }
-        // The window's root (the editor routes keys typed in it here, not to its own shortcuts).
-        const Ref<UI::UIElement>& GetRoot() const { return m_Root; }
-
-        std::function<void(UI::UINotification)> Notify;
+        AssetHandle GetHandle() const override { return m_Handle; }
+        const std::string& GetName() const override { return m_Title; }
+        const char* GetKind() const override { return "graph"; }
+        std::string GetWindowTitle() const override { return "Graph: " + m_Title; }
+        UI::UIVec2 GetDefaultSize() const override { return { 1180.0f, 700.0f }; }
+        bool IsDirty() const override { return m_Dirty; }
+        bool IsValid() const override { return m_Asset != nullptr; }
 
     private:
         void OnCanvasEdited(bool structural);
