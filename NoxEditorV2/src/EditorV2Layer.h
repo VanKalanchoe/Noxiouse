@@ -269,6 +269,7 @@ namespace Nox
 
         EditorHistory m_History;
         bool m_HistoryCheckRequested = false;
+        bool m_TimelinePreviewWasOn = false; // (UpdateHistory: a check when a timeline preview ends)
         // The scene changed since it was opened or saved: an undo step was taken (or one undone / redone) since then.
         bool m_SceneDirty = false;
         bool m_SceneCleanPending = true; // set on open / new / save: the history position then is the clean one

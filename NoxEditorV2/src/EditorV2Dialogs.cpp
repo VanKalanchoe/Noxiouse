@@ -22,6 +22,7 @@ namespace Nox
         UILayer* uiLayer = Application::Get().GetUILayer();
         if (!uiLayer || !Project::GetActive())
             return;
+        m_AssetEditors.EndPreviews(); // (the package cooks the scenes from disk; a preview's poses are not part of them)
         UI::UIContext* context = &uiLayer->GetContext();
         // Each target its own folder by default (Build/<Project>, Build/<Project>Server); a folder typed for this target is kept.
         if (m_PackageOutputText.empty() || server != m_PackageSettings.Server)

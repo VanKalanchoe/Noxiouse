@@ -5,6 +5,7 @@
 #include "Panels/AssetPreviewRenderer.h"
 #include "Panels/InspectorWidgetsV2.h"
 #include "Panels/AnimationClipEditorV2.h"
+#include "Panels/TimelineEditorV2.h"
 #include "Panels/MaterialEditorV2.h"
 #include "Panels/MaterialEdits.h"
 
@@ -569,6 +570,7 @@ namespace Nox
         // Assets first (they do not ask anything); the scene last (an untitled one asks for its name).
         m_AssetEditors.SaveAll();
         MaterialEdits::SaveAll();
+        m_AssetEditors.EndPreviews(); // (a timeline's poses are not saved into the scene)
         if (AudioMixer::IsDirty())
             AudioMixer::Save();
         if (m_SceneDirty || m_EditorScenePath.empty())
@@ -909,6 +911,7 @@ namespace Nox
     {
         if (!m_ActiveScene || !Project::GetActive() || path.empty())
             return false;
+        m_AssetEditors.EndPreviews();
         if (!path.has_extension())
             path += ".nox";
         std::error_code error;
@@ -1633,6 +1636,17 @@ namespace Nox
         EditorHistory::FrameInfo frame;
         frame.InteractionActive = m_ViewportTools.GizmoUsing;
         frame.InteractionEnded = m_HistoryCheckRequested || (m_ViewportTools.GizmoWasUsing && !m_ViewportTools.GizmoUsing);
+        // A timeline preview poses its targets (not edits): nothing is taken while it runs; when it ends (what they had back) the
+        // scene is checked once, so an edit made meanwhile to something else becomes a step then.
+        const bool previewing = m_AssetEditors.AnyPreviewing();
+        if (previewing)
+        {
+            frame.InteractionActive = true;
+            frame.InteractionEnded = false;
+        }
+        else if (m_TimelinePreviewWasOn)
+            frame.InteractionEnded = true;
+        m_TimelinePreviewWasOn = previewing;
         m_ViewportTools.GizmoWasUsing = m_ViewportTools.GizmoUsing;
         m_HistoryCheckRequested = false;
         frame.AssetsLoading = Project::GetActive()->GetEditorAssetManager()->GetLoadingCount() > 0;
@@ -1776,6 +1790,7 @@ namespace Nox
     {
         if (m_SceneState != SceneState::Edit || !m_History.CanUndo() || m_HLODBuild) // (an HLOD build reads the scene it started from)
             return;
+        m_AssetEditors.EndPreviews(); // (a timeline's poses come off first; it poses again from the restored scene)
         const std::string name = m_History.GetUndoName();
         RestoreHistoryState(m_History.StepBack());
         NOX_CORE_INFO("Undo: {}", name);
@@ -1785,6 +1800,7 @@ namespace Nox
     {
         if (m_SceneState != SceneState::Edit || !m_History.CanRedo() || m_HLODBuild)
             return;
+        m_AssetEditors.EndPreviews();
         const std::string name = m_History.GetRedoName();
         RestoreHistoryState(m_History.StepForward());
         NOX_CORE_INFO("Redo: {}", name);
@@ -1850,6 +1866,7 @@ namespace Nox
     void EditorV2Layer::OnScenePlay()
     {
         CancelHLODBuild("Play");
+        m_AssetEditors.EndPreviews(); // (Play copies the scene: without the timeline's poses)
         m_EditorSceneReferencesValid = false;
         SetViewMode(EditorViewMode::Perspective);
         if (m_SceneState == SceneState::Simulate)
@@ -2330,6 +2347,7 @@ namespace Nox
     void EditorV2Layer::OnSceneSimulate()
     {
         CancelHLODBuild("Simulate");
+        m_AssetEditors.EndPreviews();
         m_EditorSceneReferencesValid = false;
         if (m_SceneState == SceneState::Play)
             OnSceneStop();
@@ -4710,7 +4728,7 @@ namespace Nox
             return;
         if (!m_AssetEditors.HasEditorFor(type))
             Notify(UI::UINotificationSeverity::Info, "No editor for " + AssetDisplayName(handle) + " yet",
-                   "NoxEditorV2 opens scenes, materials, graphs and animation clips so far; the old NoxEditor has the other editors.");
+                   "NoxEditorV2 opens scenes, materials, graphs, animation clips and timelines so far; the old NoxEditor has the other editors.");
     }
 
     void EditorV2Layer::RegisterAssetEditors()
@@ -4722,6 +4740,14 @@ namespace Nox
         registry.Register(AssetType::MaterialGraph, graph);
         registry.Register(AssetType::Material, [](AssetHandle handle) -> std::unique_ptr<AssetEditorV2> { return std::make_unique<MaterialEditorV2>(handle); });
         registry.Register(AssetType::AnimationSequence, [](AssetHandle handle) -> std::unique_ptr<AssetEditorV2> { return std::make_unique<AnimationClipEditorV2>(handle); });
+        registry.Register(AssetType::Timeline, [this](AssetHandle handle) -> std::unique_ptr<AssetEditorV2>
+        {
+            TimelineEditorV2::Hooks timelineHooks;
+            timelineHooks.ActiveScene = [this]() { return m_ActiveScene; };
+            timelineHooks.Editing = [this]() { return m_SceneState == SceneState::Edit; };
+            timelineHooks.Selected = [this]() { return m_Selection.GetPrimary(); };
+            return std::make_unique<TimelineEditorV2>(handle, std::move(timelineHooks));
+        });
 
         AssetEditorManager::Hooks hooks;
         hooks.Notify = [this](UI::UINotification note) { Notify(note.Severity, std::move(note.Title), std::move(note.Message)); };

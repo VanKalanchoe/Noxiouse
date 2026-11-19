@@ -46,6 +46,11 @@ namespace Nox
         // Drops the unsaved edits (the asset is the file's again); false when that failed (the edits stay).
         virtual bool RevertToDisk() { return true; }
 
+        // An editor that poses the scene to preview (a timeline): while it does, the scene's undo history waits (the poses are not
+        // edits), and saving the scene or starting Play ends the preview first (what the targets had comes back).
+        virtual bool IsPreviewing() const { return false; }
+        virtual void EndPreview() {}
+
         // Set by the manager: toasts, and opening another asset (a material's texture).
         std::function<void(UI::UINotification)> Notify;
         std::function<void(AssetHandle)> OpenAsset;
@@ -99,6 +104,8 @@ namespace Nox
 
         // The open editor of the asset (null: none open).
         AssetEditorV2* Find(AssetHandle handle) const;
+        bool AnyPreviewing() const;
+        void EndPreviews();
         bool HasUnsaved() const;
         // "the graph UAL_Locomotion", one per editor with unsaved edits.
         std::vector<std::string> UnsavedNames() const;

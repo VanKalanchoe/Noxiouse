@@ -323,7 +323,7 @@ it yet):
 | M1 | Material Editor (full: graph slot, Custom Lit, lobes, preview sphere) | MaterialEditorPanel | **built** (below) |
 | L1 | Levels, World Partition (HLOD) panels | LevelsPanel, WorldPartitionPanel | **built** (below) |
 | A1 | Audio Mixer | MixerPanel, AudioWidgets | **built** (below) |
-| T1 | Timeline (sequencer), Animation Clip | TimelinePanel, AnimationClipPanel | open |
+| T1 | Timeline (sequencer), Animation Clip | TimelinePanel, AnimationClipPanel | built (not run on a GPU / not user-tested) |
 | P1 | Profiler, Render Graph | ProfilerPanel, RenderGraphPanel | **built** (below) |
 | D1 | Package Game / Server, Streaming Test World, MCP server menu | EditorLayer dialogs, GamePackager | **built** (below) |
 | F1 | Prefab mode, prefab variants, Replace References | EditorLayer, ContentBrowserPanel | open |
@@ -543,6 +543,25 @@ Cancel; Don't Save reads them back); the rows were sorted by time on every chang
 (sorted on Save now); clearing a name deleted the notify silently (an empty name puts the old one back). Also in the Mixer: the
 Acoustics popup's rows were added to the panel on every opening and kept running after it closed (now only while it is open).
 Checked: syntax check. Not run on a GPU.
+
+**T1 part 2 -- Timeline editor (built, not run on a GPU / not user-tested).** `Panels/TimelineEditorV2` (registered for timelines:
+double-click a `.ntimeline` in the Content Browser, or Open Timeline on a Timeline Player in the Inspector). Toolbar: Save, Undo, Redo,
+Play / Pause, `|<` (back to the start), the time, Duration, Loop, Preview, Auto-Key, Curves, Zoom, + Track (a menu: the player entity and
+every entity under it, each with the properties its components have -- Translation / Rotation / Scale, Light Color / Intensity, Camera
+FOV, Morph Weight (the mesh's morph targets), Material Parameter, Sub Timeline, Audio; Event and Camera Cut on the player only). The
+tracks view: a label column (mute box, the track's name, Key, X) and a lane per track; the ruler scrubs (snapped to 0.01 s, Ctrl free);
+click a key to select it, drag it to move it (snapped; sorted when let go, kept selected); Audio sections drawn as bars with their
+sound's name; the wheel scrolls sideways (Shift: up / down). Curves: the selected track's values over time; drag a key's dot up / down
+(Shift: also its time). Below: the selected key's details (Time, Go to, the values by property; Sub Timeline: Child Timeline, Length,
+Start in Child, Rate, Loop Child; Audio: Sound, Length, Start in Sound, Volume, 3D; Event: Event Name; Camera Cut: Camera; To Next Key
+interpolation). The player is the selected entity when it has a Timeline Player with this timeline, else the first one in the scene.
+Flaws not carried over: every change was written to the file at once (now unsaved until Save, closing asks Save / Don't Save / Cancel,
+Don't Save reads the file back); there was no undo (now the window's own Ctrl+Z / Ctrl+Y, a drag is one step); Delete was polled from the
+keyboard whenever the panel had focus (now the window's key handler: Delete removes the selected key); the preview's poses went into the
+scene's undo history and, saved while previewing, into the scene file (now the scene's history waits while a preview runs and checks
+once when it ends; the preview ends -- what the targets had comes back -- before the scene is saved, before Play / Simulate, before
+packaging and before a scene undo / redo; it also ends when a track is added or removed, so the new target is in the snapshot).
+Auto-Key waits until no mouse button is held (a gizmo drag keys once, when let go). Checked: syntax check. Not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

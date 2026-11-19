@@ -100,6 +100,7 @@ namespace Nox
             if (assetGone && dock && !dock->RemovePanel(open.Title))
                 if (UILayer* uiLayer = Application::Get().GetUILayer(); uiLayer && uiLayer->GetViewportManager())
                     uiLayer->GetViewportManager()->ClosePanel(open.Title);
+            open.Editor->EndPreview();
             if (open.Editor->IsDirty() && !assetGone)
                 Say(UI::UINotificationSeverity::Warning, open.Editor->GetName() + ": unsaved changes dropped",
                     "Its window closed without the Save question; the asset is the file's version again.");
@@ -152,7 +153,10 @@ namespace Nox
     void AssetEditorManager::CloseAll()
     {
         for (const OpenEditor& open : m_Open)
+        {
+            open.Editor->EndPreview();
             CloseWindow(open.Title);
+        }
         m_Open.clear(); // (edits not saved by now go back to the files: the caller asked)
     }
 
@@ -162,6 +166,17 @@ namespace Nox
             if (open.Editor->GetHandle() == handle)
                 return open.Editor.get();
         return nullptr;
+    }
+
+    bool AssetEditorManager::AnyPreviewing() const
+    {
+        return std::any_of(m_Open.begin(), m_Open.end(), [](const OpenEditor& open) { return open.Editor->IsPreviewing(); });
+    }
+
+    void AssetEditorManager::EndPreviews()
+    {
+        for (OpenEditor& open : m_Open)
+            open.Editor->EndPreview();
     }
 
     bool AssetEditorManager::HasUnsaved() const
