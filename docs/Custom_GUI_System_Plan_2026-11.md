@@ -318,7 +318,7 @@ it yet):
 | G1 | Graph editor: canvas, window, parameters, node Details | NodeGraphEditorPanel, ThedmdCanvasBackend, NodeGraphPropertyEditor | **built** (below) |
 | G2 | Graph editor: in-node value widgets, curve editor, bone picker, parameter drag onto the canvas, material graph compile status | same | built (not run on a GPU / not user-tested) |
 | G3 | Graph editor: state machine view (states, transitions, rules) | ThedmdCanvasBackend::DrawStateMachine, the panel's inspector | built (not run on a GPU / not user-tested) |
-| G4 | Graph editor: animation preview (skeletal mesh), audio preview (play, sliders, meter) | the panel's previews | open |
+| G4 | Graph editor: animation preview (skeletal mesh), audio preview (play, sliders, meter) | the panel's previews | built (not run on a GPU / not user-tested) |
 | R1 | Renderer Settings / Stats / Post Process windows | EditorLayer, PostProcessSettingsUI | **built** (below) |
 | M1 | Material Editor (full: graph slot, Custom Lit, lobes, preview sphere) | MaterialEditorPanel | **built** (below) |
 | L1 | Levels, World Partition (HLOD) panels | LevelsPanel, WorldPartitionPanel | **built** (below) |
@@ -623,6 +623,18 @@ graph's new address). Flaws not carried over: the old transition wires were rout
 transition's route recomputed when any box moved (now straight arrows, Unreal's look, no routing); deleting the entry state left a
 dangling entry until the next pick (now another state becomes the entry); a rule kept a float value against a bool parameter.
 Checked: syntax check. Not run on a GPU.
+
+**G4 -- graph editor: previews (built, not run on a GPU / not user-tested).** A Preview card above Details (animation and audio graphs;
+material graphs have the Material Editor's sphere). Animation: the mesh button (a menu of the project's skeletal meshes -- meshes with a
+skeleton beside them; found from the graph's first clip when it plays one), Pause / Play, Restart (playheads from the start, parameters
+back to their defaults), the graph's pose on the mesh at 280 px every frame (`AssetPreviewRenderer::GetPosePreview`, evaluated from the
+graph as edited), "Notify: <name>" for 1.5 s after the playheads pass one, then the parameters as a script would set them (numbers
+dragged, bools ticked, triggers Fire). Audio: Play / Stop (an edit is heard at once: a value change goes into the playing sound, any
+other edit crossfades to the new graph), "Cannot play: <why>" / "Loading...", the output level L / R in dB (red at 0 dB), the parameters
+while it plays with Reset (back to following the graph's default) and Fire for triggers. Nothing in the preview is saved; closing the
+window stops the sound. Flaws not carried over: the animation preview showed triggers as a tick box that stayed on (now Fire, true for
+one update); its time step was the UI's frame time (now the real time since the last update, at most 0.1 s). Checked: syntax check.
+Not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

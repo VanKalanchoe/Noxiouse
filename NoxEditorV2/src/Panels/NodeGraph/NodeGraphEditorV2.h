@@ -1,6 +1,8 @@
 #pragma once
 
+#include <chrono>
 #include <functional>
+#include <unordered_map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -9,6 +11,7 @@
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/NodeGraph/NodeGraphAsset.h"
 #include "NoxCore/UI/Core/UITypes.h"
+#include <glm/glm.hpp>
 #include "Panels/AssetEditorV2.h"
 
 namespace Nox
@@ -22,6 +25,8 @@ namespace Nox
     }
     class NodeGraphCanvasV2;
     class StateMachineViewV2;
+    class AnimationGraphInstance;
+    class AudioGraphProgram;
     struct GraphNode;
     struct InspectorCardBuilder;
 
@@ -90,6 +95,14 @@ namespace Nox
         void BuildMachineDetails(GraphNode& machine);
         // The graph the canvas shows (a state's graph when one is open, else the asset's).
         NodeGraph& ShownGraph();
+        // The preview card above Details (G4). An animation graph: played on a skeletal mesh (Mesh menu, Play / Pause, Restart) with
+        // its parameters set as a script would; the last notify it passed. An audio graph: Play / Stop, the output's level (L / R, dB),
+        // its parameters while it plays (Reset back to the graph's default; triggers: Fire). Neither is saved; closing stops them.
+        void RebuildPreview();
+        void UpdateAnimationPreview();
+        void UpdateAudioPreview();
+        void StopAudioPreview();
+        void ShowPreviewMeshMenu(const UI::UIRect& anchor);
 
         AssetHandle m_Handle = 0;
         Ref<NodeGraphAsset> m_Asset;
@@ -122,6 +135,21 @@ namespace Nox
         std::shared_ptr<std::vector<std::function<void()>>> m_PopupSyncs;
         std::shared_ptr<const bool> m_PopupOpen;
         std::function<void()> m_DeferredPopup; // a popup built again next frame (its shape changed from inside one of its clicks)
+        Ref<UI::UIStackBox> m_PreviewBox;
+        std::vector<std::function<void()>> m_PreviewSyncs;
+        bool m_PreviewDirty = true;
+        std::unique_ptr<AnimationGraphInstance> m_AnimPreview;
+        bool m_AnimPlaying = true;
+        std::vector<glm::mat4> m_PreviewBones;
+        Ref<UI::UIElement> m_PreviewImage;
+        std::string m_PreviewNotify;
+        float m_PreviewNotifyAge = 10.0f;
+        std::chrono::steady_clock::time_point m_PreviewTick{};
+        uint64_t m_AudioVoice = 0;
+        bool m_AudioWanted = false;
+        std::shared_ptr<const AudioGraphProgram> m_AudioProgram;
+        std::string m_AudioError;
+        std::unordered_map<std::string, NodeGraphValue> m_AudioValues; // set in the preview (not saved)
         AssetHandle m_PreviewMesh = 0;
         AssetHandle m_PreviewSkeleton = 0;
         bool m_PreviewSearched = false;

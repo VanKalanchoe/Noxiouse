@@ -8,7 +8,11 @@
 
 #include "NodeGraphCanvasV2.h"
 #include "StateMachineViewV2.h"
+#include "Panels/AssetPreviewRenderer.h"
 #include "Panels/InspectorWidgetsV2.h"
+#include "NoxCore/Animation/AnimPose.h"
+#include "NoxCore/Animation/AnimationGraphInstance.h"
+#include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Animation/Skeleton.h"
@@ -22,6 +26,9 @@
 #include "NoxCore/UI/Layout/UILayout.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
 #include "NoxCore/UI/Widgets/UIButton.h"
+#include "NoxCore/UI/Widgets/UICheckBox.h"
+#include "NoxCore/UI/Widgets/UIDragScalar.h"
+#include "NoxCore/UI/Widgets/UIImage.h"
 #include "NoxCore/UI/Widgets/UILabel.h"
 #include "NoxCore/UI/Widgets/UIMenu.h"
 #include "NoxCore/UI/Widgets/UIPopup.h"
@@ -222,6 +229,43 @@ namespace Nox
             std::chrono::steady_clock::time_point m_LastClick{};
         };
 
+        // A voice's output level, left and right: bars over -60 .. 0 dB, red at 0 dB and above, the dB written on them.
+        class LevelMeter final : public UI::UIElement
+        {
+        public:
+            explicit LevelMeter(std::function<glm::vec2()> peak) : m_Peak(std::move(peak))
+            {
+                HitTestMode = UI::UIHitTestMode::None;
+                WidthMode = UI::UISizeMode::Fill;
+                HeightMode = UI::UISizeMode::Fixed;
+                FixedSize = { 0.0f, 34.0f };
+            }
+
+        protected:
+            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+            {
+                const UI::UIRect b = GetBounds();
+                const glm::vec2 peak = m_Peak ? m_Peak() : glm::vec2(0.0f);
+                for (int channel = 0; channel < 2; ++channel)
+                {
+                    const float level = channel == 0 ? peak.x : peak.y;
+                    const float db = 20.0f * std::log10(std::max(level, 1e-6f));
+                    const float fill = std::clamp((db + 60.0f) / 60.0f, 0.0f, 1.0f);
+                    const float top = b.Min.y + static_cast<float>(channel) * 17.0f;
+                    const UI::UIVec2 min{ b.Min.x, top }, max{ b.Max.x, top + 15.0f };
+                    d.AddRoundedRect(min, max, theme.GetToken("Background", { 0.063f, 0.075f, 0.106f, 1.0f }), glm::vec4(3.0f));
+                    if (fill > 0.0f)
+                        d.AddRoundedRect(min, { min.x + (max.x - min.x) * fill, max.y }, level >= 1.0f ? UI::UIColor{ 0.9f, 0.25f, 0.2f, 1.0f } : UI::UIColor{ 0.3f, 0.75f, 0.35f, 1.0f },
+                                         glm::vec4(3.0f));
+                    const std::string text = std::string(channel == 0 ? "L" : "R") + (level > 1e-6f ? std::format("  {:.1f} dB", db) : std::string());
+                    d.AddText(text, nullptr, { min.x + 6.0f, top + 1.0f }, 11.5f, { 0.95f, 0.96f, 1.0f, 0.95f });
+                }
+            }
+
+        private:
+            std::function<glm::vec2()> m_Peak;
+        };
+
         Ref<UI::UILabel> MutedLabel(const std::string& text, float size = 13.0f)
         {
             Ref<UI::UILabel> label(new UI::UILabel(text, size));
@@ -258,6 +302,7 @@ namespace Nox
         // Save); edits still here (the editor shutting down) are dropped, never kept in memory as if saved. A version from disk it
         // had not taken is what the file holds now.
         Notify = nullptr; // (whoever listened may be going away too)
+        StopAudioPreview(); // (closing the window stops what it plays)
         if (m_Asset && (m_Dirty || m_Asset->DiskGraph))
             RevertToDisk();
         if (m_Asset)
@@ -332,6 +377,16 @@ namespace Nox
         m_Canvas->SetGraph(m_Asset ? &m_Asset->Graph : nullptr);
 
         Ref<UI::UIScrollView> right = column(300.0f);
+        if (m_Asset && m_Asset->Graph.Domain != kMaterialGraphDomain)
+        {
+            m_PreviewBox = Ref<UI::UIStackBox>(new UI::UIStackBox(UI::UIOrientation::Vertical, 4.0f));
+            m_PreviewBox->WidthMode = UI::UISizeMode::Fill;
+            m_PreviewBox->Padding = UI::UIThickness::All(8.0f);
+            m_PreviewBox->StyleClass = "Card";
+            m_PreviewBox->DrawBackground = true;
+            right->AddChild(m_PreviewBox);
+            m_PreviewDirty = true;
+        }
         m_Details = Ref<UI::UIStackBox>(new UI::UIStackBox(UI::UIOrientation::Vertical, 6.0f));
         m_Details->WidthMode = UI::UISizeMode::Fill;
         m_Details->Padding = UI::UIThickness::All(8.0f);
@@ -404,6 +459,17 @@ namespace Nox
             m_PopupSyncs.reset();
         if (m_CompileStatusDirty)
             RefreshCompileStatus();
+        if (m_PreviewBox)
+        {
+            if (m_PreviewDirty)
+                RebuildPreview();
+            if (m_Asset->Graph.Domain == kAudioGraphDomain)
+                UpdateAudioPreview();
+            else
+                UpdateAnimationPreview();
+            for (const auto& sync : m_PreviewSyncs)
+                sync();
+        }
         RefreshToolbar();
     }
 
@@ -639,6 +705,7 @@ namespace Nox
     void NodeGraphEditorV2::RebuildParameters()
     {
         m_ParametersDirty = false;
+        m_PreviewDirty = true; // (the preview lists the parameters too)
         m_ParameterSyncs.clear();
         if (!m_Parameters)
             return;
@@ -1564,5 +1631,310 @@ namespace Nox
         m_Details->AddChild(MutedLabel(std::to_string(machine.SubGraphs.size()) + " states, " + std::to_string(machine.Transitions.size()) +
                                        " transitions.\n\nRight-click: Add State. Drag from a state's round handle onto another state: a transition "
                                        "(click its middle button to edit its rules). Double-click a state: what it plays. F frames the states."));
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------------------
+
+    void NodeGraphEditorV2::ShowPreviewMeshMenu(const UI::UIRect& anchor)
+    {
+        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        auto assets = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr;
+        if (!ctx || !assets)
+            return;
+        // Skeletal meshes: meshes with a skeleton beside them (the rule the import links them by).
+        std::vector<std::pair<std::string, AssetHandle>> meshes;
+        for (const auto& [handle, metadata] : assets->GetAssetRegistry())
+            if (metadata.Type == AssetType::Mesh && assets->FindSkeletonOf(handle) != 0)
+                meshes.emplace_back(metadata.FilePath.generic_string(), handle);
+        std::sort(meshes.begin(), meshes.end());
+        std::vector<UI::UIMenuItem> items;
+        for (const auto& [path, handle] : meshes)
+            items.push_back({ path, "", [this, handle]()
+            {
+                SetPreviewMesh(handle);
+                m_AnimPreview.reset(); // (playheads from the start)
+                m_PreviewDirty = true;
+            }, false, true, handle == m_PreviewMesh });
+        if (items.empty())
+            items.push_back({ "No skeletal mesh in the project (import a skinned model)", "", {}, false, false, false, true });
+        UI::UIMenuPopup::ShowPopupMenu(*ctx, anchor, std::move(items));
+    }
+
+    void NodeGraphEditorV2::RebuildPreview()
+    {
+        m_PreviewDirty = false;
+        m_PreviewSyncs.clear();
+        m_PreviewImage = nullptr;
+        if (!m_PreviewBox || !m_Asset)
+            return;
+        m_PreviewBox->ClearChildren();
+        m_PreviewBox->AddChild(Ref<UI::UILabel>(new UI::UILabel("Preview", 15.0f)));
+        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        const auto smallButton = [](const std::string& text, std::function<void()> onClick, const std::string& tooltip)
+        {
+            Ref<UI::UIButton> b(new UI::UIButton(text, std::move(onClick)));
+            b->Padding = UI::UIThickness::Symmetric(10.0f, 2.0f);
+            b->Tooltip = tooltip;
+            return b;
+        };
+        const bool audio = m_Asset->Graph.Domain == kAudioGraphDomain;
+        Ref<UI::UIStackBox> controls(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
+        controls->WidthMode = UI::UISizeMode::Fill;
+        m_PreviewBox->AddChild(controls);
+        if (audio)
+        {
+            Ref<UI::UIButton> play = smallButton("Play", {}, "Plays the graph as it is now; an edit is heard at once (a value change goes into the playing sound)");
+            UI::UIButton* playRaw = play.get();
+            play->OnClick = [this]()
+            {
+                if (m_AudioWanted)
+                    StopAudioPreview();
+                else
+                    m_AudioWanted = true;
+            };
+            m_PreviewSyncs.push_back([this, playRaw]()
+            {
+                const char* text = m_AudioWanted ? "Stop" : "Play";
+                if (playRaw->GetText() != text)
+                    playRaw->SetText(text);
+                playRaw->StyleVariant = m_AudioWanted ? "primary" : "";
+            });
+            controls->AddChild(play);
+            Ref<UI::UILabel> status = MutedLabel("", 12.5f);
+            status->VAlign = UI::UIAlignment::Center;
+            UI::UILabel* statusRaw = status.get();
+            m_PreviewSyncs.push_back([this, statusRaw]()
+            {
+                statusRaw->Text = !m_AudioError.empty() ? "Cannot play: " + m_AudioError : !m_AudioProgram ? std::string("Loading...") : std::string();
+            });
+            controls->AddChild(status);
+            m_PreviewBox->AddChild(Ref<LevelMeter>(new LevelMeter([this]() { return m_AudioVoice != 0 ? AudioEngine::GetVoicePeak(m_AudioVoice) : glm::vec2(0.0f); })));
+        }
+        else
+        {
+            const std::string meshName = m_PreviewMesh != 0 ? AssetDisplayName(m_PreviewMesh) : std::string("(pick a skeletal mesh)");
+            Ref<UI::UIButton> mesh = smallButton(meshName, {}, "The skeletal mesh the graph plays on (its skeleton lists the bones in bone pickers too)");
+            UI::UIButton* meshRaw = mesh.get();
+            mesh->OnClick = [this, meshRaw]() { ShowPreviewMeshMenu(meshRaw->GetBounds()); };
+            controls->AddChild(mesh);
+            Ref<UI::UIButton> play = smallButton("Pause", [this]() { m_AnimPlaying = !m_AnimPlaying; }, "Plays / holds the playheads");
+            UI::UIButton* playRaw = play.get();
+            m_PreviewSyncs.push_back([this, playRaw]()
+            {
+                const char* text = m_AnimPlaying ? "Pause" : "Play";
+                if (playRaw->GetText() != text)
+                    playRaw->SetText(text);
+            });
+            controls->AddChild(play);
+            controls->AddChild(smallButton("Restart", [this]() { m_AnimPreview.reset(); }, "Every playhead from the start, the parameters back to their defaults"));
+            if (m_PreviewMesh == 0)
+            {
+                m_PreviewBox->AddChild(MutedLabel("Pick a skeletal mesh to see the graph play (found from the graph's clips when it plays one)."));
+                return;
+            }
+            Ref<UI::UIImage> image(new UI::UIImage(~0u, { 280.0f, 280.0f }));
+            image->WidthMode = UI::UISizeMode::Fixed;
+            image->HeightMode = UI::UISizeMode::Fixed;
+            image->FixedSize = { 280.0f, 280.0f };
+            image->HAlign = UI::UIAlignment::Center;
+            image->Tooltip = "The graph's pose on the preview mesh, every frame";
+            m_PreviewImage = image;
+            m_PreviewBox->AddChild(image);
+            Ref<UI::UILabel> notify = MutedLabel("", 12.5f);
+            UI::UILabel* notifyRaw = notify.get();
+            m_PreviewSyncs.push_back([this, notifyRaw]()
+            {
+                notifyRaw->Text = m_PreviewNotifyAge < 1.5f ? "Notify: " + m_PreviewNotify : std::string();
+                notifyRaw->ColorOverride = { 1.0f, 0.75f, 0.25f, 1.0f };
+            });
+            m_PreviewBox->AddChild(notify);
+        }
+
+        // The parameters, as a script would set them while it plays (not saved: the graph's defaults are in Parameters).
+        const std::vector<GraphParameter>& parameters = m_Asset->Graph.Parameters;
+        if (parameters.empty())
+            return;
+        Ref<UI::UIStackBox> rowsBox(new UI::UIStackBox(UI::UIOrientation::Vertical, 3.0f));
+        rowsBox->WidthMode = UI::UISizeMode::Fill;
+        m_PreviewBox->AddChild(rowsBox);
+        InspectorCardBuilder rows{ rowsBox, m_PreviewSyncs, {}, ctx };
+        for (const GraphParameter& parameter : parameters)
+        {
+            const std::string name = parameter.Name;
+            if (parameter.IsTrigger)
+            {
+                rows.AddRow(name, smallButton("Fire", [this, name]()
+                {
+                    if (m_Asset->Graph.Domain == kAudioGraphDomain)
+                    {
+                        if (m_AudioProgram && m_AudioVoice != 0)
+                            AudioEngine::FireGraphParameter(m_AudioVoice, m_AudioProgram->FindParameter(name));
+                    }
+                    else if (m_AnimPreview)
+                        m_AnimPreview->SetBool(name, true); // (true for one update)
+                }, "Fires it once, as a script would"));
+                continue;
+            }
+            // The value now: the preview's own, else the graph's default.
+            const auto current = [this, name, audio]() -> NodeGraphValue
+            {
+                const GraphParameter* declared = nullptr;
+                for (const GraphParameter& p : m_Asset->Graph.Parameters)
+                    if (p.Name == name)
+                        declared = &p;
+                const NodeGraphValue fallback = declared ? declared->DefaultValue : NodeGraphValue(0.0f);
+                if (audio)
+                {
+                    const auto set = m_AudioValues.find(name);
+                    return set != m_AudioValues.end() && set->second.index() == fallback.index() ? set->second : fallback;
+                }
+                if (!m_AnimPreview)
+                    return fallback;
+                if (std::holds_alternative<bool>(fallback))
+                    return m_AnimPreview->GetBool(name);
+                if (std::holds_alternative<int32_t>(fallback))
+                    return static_cast<int32_t>(m_AnimPreview->GetFloat(name));
+                return m_AnimPreview->GetFloat(name);
+            };
+            const auto apply = [this, name, audio](const NodeGraphValue& value)
+            {
+                if (audio)
+                {
+                    m_AudioValues[name] = value;
+                    if (m_AudioProgram && m_AudioVoice != 0)
+                        AudioEngine::SetGraphParameter(m_AudioVoice, m_AudioProgram->FindParameter(name), NodeGraphValueToFloat(value));
+                }
+                else if (m_AnimPreview)
+                {
+                    if (const bool* flag = std::get_if<bool>(&value))
+                        m_AnimPreview->SetBool(name, *flag);
+                    else
+                        m_AnimPreview->SetFloat(name, NodeGraphValueToFloat(value));
+                }
+            };
+            if (std::holds_alternative<bool>(parameter.DefaultValue))
+            {
+                Ref<UI::UICheckBox> box(new UI::UICheckBox("", false, [apply](bool on) { apply(on); }));
+                UI::UICheckBox* boxRaw = box.get();
+                rows.Syncs.push_back([boxRaw, current]() { const NodeGraphValue v = current(); boxRaw->Checked = std::holds_alternative<bool>(v) && std::get<bool>(v); });
+                rows.AddRow(name, box);
+            }
+            else
+            {
+                const bool isInt = std::holds_alternative<int32_t>(parameter.DefaultValue);
+                Ref<UI::UIDragScalar> drag(new UI::UIDragScalar(0.0f, isInt ? 0.1f : 0.01f, [apply, isInt](float v)
+                {
+                    apply(isInt ? NodeGraphValue(static_cast<int32_t>(std::round(v))) : NodeGraphValue(v));
+                }));
+                drag->Format = isInt ? "{:.0f}" : "{:.3f}";
+                UI::UIDragScalar* dragRaw = drag.get();
+                rows.Syncs.push_back([dragRaw, current]() { if (!dragRaw->IsInteracting()) dragRaw->Value = NodeGraphValueToFloat(current()); });
+                rows.AddRow(name, drag);
+            }
+            if (audio)
+            {
+                // Changed here: Reset goes back to following the graph's default.
+                Ref<UI::UIButton> reset = smallButton("Reset", [this, name]()
+                {
+                    m_AudioValues.erase(name);
+                    if (m_AudioProgram && m_AudioVoice != 0)
+                    {
+                        const int32_t index = m_AudioProgram->FindParameter(name);
+                        for (const GraphParameter& p : m_Asset->Graph.Parameters)
+                            if (p.Name == name)
+                                AudioEngine::SetGraphParameter(m_AudioVoice, index, NodeGraphValueToFloat(p.DefaultValue));
+                    }
+                }, "Changed here for the preview only: back to the default set in Parameters");
+                UI::UIButton* resetRaw = reset.get();
+                rows.Syncs.push_back([this, resetRaw, name]() { resetRaw->Visible = m_AudioValues.contains(name); });
+                rows.AddRow("", reset);
+            }
+        }
+    }
+
+    void NodeGraphEditorV2::UpdateAnimationPreview()
+    {
+        const auto now = std::chrono::steady_clock::now();
+        const float dt = m_PreviewTick.time_since_epoch().count() == 0 ? 0.0f : std::min(std::chrono::duration<float>(now - m_PreviewTick).count(), 0.1f);
+        m_PreviewTick = now;
+        m_PreviewNotifyAge += dt;
+        auto* image = static_cast<UI::UIImage*>(m_PreviewImage.get());
+        if (!image || m_PreviewMesh == 0)
+            return;
+        if (!m_AnimPreview)
+            m_AnimPreview = std::make_unique<AnimationGraphInstance>();
+        // One evaluation a frame (the graph as edited: Recompile after each change), its pose on the mesh.
+        std::vector<AssetHandle> missing;
+        m_AnimPreview->Sync(m_Handle, missing);
+        for (AssetHandle asset : missing)
+            AssetManager::RequestAsset(asset);
+        const Skeleton* skeleton = m_PreviewSkeleton != 0 && AssetManager::RequestAsset(m_PreviewSkeleton) == AssetState::Ready
+            ? AssetManager::FindLoadedAsset<Skeleton>(m_PreviewSkeleton) : nullptr;
+        m_PreviewBones.clear();
+        if (skeleton && !skeleton->AllNodes.empty())
+            if (const AnimPose* pose = m_AnimPreview->Evaluate(dt, m_AnimPlaying, *skeleton))
+                ApplyPoseToSkeleton(*pose, *skeleton, m_PreviewBones);
+        if (!m_AnimPreview->GetFiredNotifies().empty())
+        {
+            m_PreviewNotify = m_AnimPreview->GetFiredNotifies().back().Name;
+            m_PreviewNotifyAge = 0.0f;
+        }
+        Texture2D* texture = AssetPreviewRenderer::Get().GetPosePreview(m_PreviewMesh, m_PreviewBones, { m_Handle, m_PreviewSkeleton }, 280);
+        image->TextureDescriptorSlot = texture ? texture->GetDescriptorIndexSlot() : ~0u;
+    }
+
+    void NodeGraphEditorV2::StopAudioPreview()
+    {
+        if (m_AudioVoice != 0)
+            AudioEngine::Stop(m_AudioVoice, 0.05f);
+        m_AudioVoice = 0;
+        m_AudioWanted = false;
+        m_AudioProgram = nullptr;
+    }
+
+    void NodeGraphEditorV2::UpdateAudioPreview()
+    {
+        // Only while it plays or is asked to: the program is built from the graph as edited (the cache hands out a new one per edit).
+        if (!m_AudioWanted && m_AudioVoice == 0)
+            return;
+        m_AudioError.clear();
+        const std::shared_ptr<const AudioGraphProgram> program = GetAudioGraphProgram(m_Handle, &m_AudioError);
+        if (m_AudioVoice != 0 && !AudioEngine::IsPlaying(m_AudioVoice))
+        {
+            // It ended by itself (its Output's On Finished): a one-shot graph played once.
+            m_AudioVoice = 0;
+            m_AudioWanted = false;
+            return;
+        }
+        // An edit that changed only values (a frequency, a gain) goes into the playing sound, as MetaSounds does; a parameter's default
+        // changed in Parameters follows too, unless set here.
+        std::vector<std::pair<uint32_t, float>> literalChanges;
+        if (m_AudioVoice != 0 && program && m_AudioProgram && program != m_AudioProgram && m_AudioProgram->LiteralChanges(*program, literalChanges))
+        {
+            for (const auto& [slot, value] : literalChanges)
+                AudioEngine::SetGraphConstant(m_AudioVoice, slot, value);
+            const auto& before = m_AudioProgram->GetParameters();
+            const auto& after = program->GetParameters();
+            for (size_t i = 0; i < after.size() && i < before.size(); ++i)
+                if (after[i].Default != before[i].Default && !m_AudioValues.contains(after[i].Name))
+                    AudioEngine::SetGraphParameter(m_AudioVoice, static_cast<int32_t>(i), after[i].Default);
+            m_AudioProgram = program;
+        }
+        if (m_AudioWanted && program && (m_AudioVoice == 0 || program != m_AudioProgram))
+        {
+            // Any other edit: the new graph replaces the playing one (crossfaded), with the values set here.
+            if (m_AudioVoice != 0)
+                AudioEngine::Stop(m_AudioVoice, 0.02f);
+            AudioPlayDesc desc;
+            desc.Graph = program;
+            desc.GraphParameters = m_AudioValues;
+            desc.Bus = kAudioBusMaster;
+            desc.Group = AudioVoiceGroup::Editor;
+            desc.FadeIn = m_AudioVoice != 0 ? 0.02f : 0.0f;
+            m_AudioVoice = AudioEngine::Play(desc);
+            m_AudioProgram = program;
+            if (m_AudioVoice == 0)
+                m_AudioWanted = false;
+        }
     }
 }
