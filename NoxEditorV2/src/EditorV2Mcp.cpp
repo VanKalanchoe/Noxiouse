@@ -72,6 +72,11 @@ namespace Nox
         };
         context.SaveScene = [this](std::string& error)
         {
+            if (m_PrefabMode.Active)
+            {
+                error = "the editor is in Prefab Mode (Ctrl+S there saves the prefab): the user leaves it first";
+                return false;
+            }
             if (m_EditorScenePath.empty())
             {
                 error = "the scene was never saved: the user names it once (File > Save Scene As)";
@@ -102,6 +107,11 @@ namespace Nox
             if (m_SceneState == SceneState::Play)
             {
                 error = "already in Play";
+                return false;
+            }
+            if (m_PrefabMode.Active)
+            {
+                error = "the editor is in Prefab Mode: the user leaves it first";
                 return false;
             }
             // The call's choices for this Play only: the user's Play settings stay as they were.
@@ -135,6 +145,11 @@ namespace Nox
             if (m_SceneState == SceneState::Simulate)
             {
                 error = "already simulating";
+                return false;
+            }
+            if (m_PrefabMode.Active)
+            {
+                error = "the editor is in Prefab Mode: the user leaves it first";
                 return false;
             }
             OnSceneSimulate();

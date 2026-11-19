@@ -210,6 +210,24 @@ namespace Nox
 
         // Entities from the hierarchy as a .nprefab in `relativeFolder` (the dragged one, or the selection it is part of).
         AssetHandle CreatePrefab(UUID dragged, const std::filesystem::path& relativeFolder);
+
+        // Prefab Mode (F1, EditorV2Prefab.cpp): the prefab's entities as a scene of their own, edited in isolation (double-click a
+        // prefab). The level waits aside -- its history, unsaved state, camera and assets kept -- and comes back on Exit. Save writes
+        // the .nprefab (a variant: its changes to its base), reloads the asset and spawns the level's instances again. Ctrl+S saves
+        // the prefab; Play, Simulate, the level's panels and HLOD builds wait; leaving with changes asks Save / Don't Save / Cancel.
+        void OpenPrefabMode(AssetHandle prefab);
+        bool SavePrefabMode();
+        void ExitPrefabMode();
+        // Leaves Prefab Mode (asking first when it has unsaved changes), then runs `afterwards`; Cancel runs nothing.
+        void RequestExitPrefabMode(std::function<void()> afterwards = {});
+        void UpdatePrefabMode(); // (every frame: the bar's name and unsaved mark, framing the prefab once it has spawned)
+        Ref<UI::UIElement> BuildPrefabBar();
+        // A prefab's Create Variant: "<Base> Variant" next to it.
+        AssetHandle CreateVariant(AssetHandle base, const std::filesystem::path& relativeFolder);
+        // Replace References: asks about unsaved asset editors, rewrites the files, reads the loaded users again, respawns the open
+        // scene's instances of rewritten prefabs and replaces the asset in the open scene (one undo step).
+        void ReplaceReferences(AssetHandle from, AssetHandle to);
+        void ApplyReplaceReferences(AssetHandle from, AssetHandle to);
         // A toast at the bottom right (above the status bar).
         void Notify(UI::UINotificationSeverity severity, std::string title, std::string message = {});
 
@@ -341,6 +359,27 @@ namespace Nox
         Ref<UI::UIImage> m_SimulateBtnIcon;
         Ref<UIVectorIconButton> m_PlaySettingsCogBtn;
         Ref<UI::UILabel> m_PlayNetStatusLabel;
+        Ref<UI::UIElement> m_PrefabBar;       // the toolbar in Prefab Mode: the prefab's name, Save, Save & Exit, Exit
+        Ref<UI::UILabel> m_PrefabBarLabel;
+
+        struct PrefabModeState
+        {
+            bool Active = false;
+            AssetHandle Prefab = 0;
+            std::string Name;
+            bool Variant = false;                 // the scene holds an instance of its base carrying the variant's changes
+            UUID Root = 0;                        // the prefab's root entity in the prefab scene
+            std::vector<UUID> PreviewEntities;    // the light it is seen in (the level's sun and sky): never saved
+            int FramePending = 0;                 // frames until the camera frames the prefab (it spawns over a frame or two)
+            // The level, waiting.
+            Ref<Scene> ReturnScene;
+            std::filesystem::path ReturnScenePath;
+            EditorHistory ReturnHistory;
+            bool ReturnDirty = false;
+            size_t ReturnHistoryPositionSeen = 0;
+            EditorCamera ReturnCamera;
+        };
+        PrefabModeState m_PrefabMode;
 
         Ref<UI::UIElement> m_SceneLoadBanner;
         Ref<UI::UILabel> m_SceneLoadTitleLabel;

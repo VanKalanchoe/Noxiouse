@@ -94,6 +94,10 @@ namespace Nox
         void SetOpenAssetCallback(std::function<void(AssetHandle)> callback) { m_OpenAsset = std::move(callback); }
         // Entities dragged from the hierarchy onto the browser: the prefab made in `folder` (relative), its handle or 0.
         void SetCreatePrefabCallback(std::function<AssetHandle(uint64_t dragId, const std::filesystem::path& folder)> callback) { m_CreatePrefab = std::move(callback); }
+        // A prefab's right-click Create Variant: the variant made next to it in `folder` (relative), its handle or 0.
+        void SetCreateVariantCallback(std::function<AssetHandle(AssetHandle base, const std::filesystem::path& folder)> callback) { m_CreateVariant = std::move(callback); }
+        // Replace References: what uses `from` uses `to` instead (the files, the loaded assets and the open scene; the editor does it).
+        void SetReplaceReferencesCallback(std::function<void(AssetHandle from, AssetHandle to)> callback) { m_ReplaceReferences = std::move(callback); }
         // The assets the open scenes use (unsaved changes included): Delete warns about them too.
         void SetSceneReferencesCallback(std::function<void(std::unordered_set<AssetHandle>&)> callback) { m_SceneReferences = std::move(callback); }
         // Saved, imported, failed: shown as a toast by the editor.
@@ -124,11 +128,14 @@ namespace Nox
         void RequestDelete(std::vector<AssetHandle> handles);
         void ShowReferences(AssetHandle handle);
         // Who uses assets is looked up on a worker thread (it reads the project's files); the dialog opens when it is known.
-        enum class ReferenceCheckMode : uint8_t { Delete, Show };
+        enum class ReferenceCheckMode : uint8_t { Delete, Show, Replace };
         void StartReferenceCheck(ReferenceCheckMode mode, std::vector<AssetHandle> handles);
         void FinishReferenceCheck();
         void ShowDeleteDialog(UI::UIContext& context, const std::vector<AssetHandle>& handles,
                               const std::vector<std::vector<std::filesystem::path>>& users, const std::unordered_set<AssetHandle>& inScene);
+        // Replace References: the asset to use instead (same type, searchable), what will be rewritten and what cannot be.
+        void ShowReplaceDialog(UI::UIContext& context, AssetHandle from, const std::vector<std::filesystem::path>& users, bool sceneUses);
+        void CreateVariant(AssetHandle base);
         void MoveAssets(const std::vector<AssetHandle>& handles, const std::filesystem::path& absoluteFolder);
         void CreatePrefabFromDrop(uint64_t dragId, const std::filesystem::path& absoluteFolder);
         void NewFolder();
@@ -182,6 +189,8 @@ namespace Nox
         std::function<void(AssetHandle)> m_OpenAsset;
         std::function<AssetHandle(uint64_t, const std::filesystem::path&)> m_CreatePrefab;
         std::function<void(std::unordered_set<AssetHandle>&)> m_SceneReferences;
+        std::function<AssetHandle(AssetHandle, const std::filesystem::path&)> m_CreateVariant;
+        std::function<void(AssetHandle, AssetHandle)> m_ReplaceReferences;
         std::function<void(UI::UINotification)> m_Notify;
         AssetHandle m_PendingShow = 0;
 

@@ -39,6 +39,7 @@
 #include "NoxCore/UI/Widgets/UIMenu.h"
 #include "NoxCore/UI/Widgets/UIModal.h"
 #include "NoxCore/UI/Widgets/UIScrollBar.h"
+#include "NoxCore/UI/Widgets/UIScrollView.h"
 #include "NoxCore/UI/Widgets/UISearchBar.h"
 #include "NoxCore/UI/Widgets/UITextInput.h"
 #include "NoxCore/UI/Widgets/UITreeView.h"
@@ -1820,6 +1821,11 @@ namespace Nox
             ShowDeleteDialog(*check->Context, handles, stillUsers, check->InScene);
             return;
         }
+        if (check->Mode == ReferenceCheckMode::Replace)
+        {
+            ShowReplaceDialog(*check->Context, handles.front(), stillUsers.front(), check->InScene.contains(handles.front()));
+            return;
+        }
         const AssetHandle handle = handles.front();
         const std::vector<std::filesystem::path>& found = stillUsers.front();
         std::string message;
@@ -1888,6 +1894,173 @@ namespace Nox
                    deleted == 1 ? "Asset deleted" : std::to_string(deleted) + " assets deleted",
                    deleted == handles.size() ? std::string() : "Some files could not be deleted (see the Output Log).");
         }, {}, "Delete", "Cancel");
+    }
+
+    void ContentBrowserV2Panel::CreateVariant(AssetHandle base)
+    {
+        EditorAssetManager* assets = Assets();
+        if (!m_CreateVariant || !assets || !assets->IsAssetHandleValid(base))
+            return;
+        // Next to its base (the base's folder, not the open one: a variant found beside what it varies).
+        const AssetHandle variant = m_CreateVariant(base, assets->GetMetadata(base).FilePath.parent_path());
+        if (variant == 0)
+        {
+            Notify(UI::UINotificationSeverity::Error, "Variant not created", "See the Output Log for why.");
+            return;
+        }
+        Notify(UI::UINotificationSeverity::Success, "Variant created", assets->GetMetadata(variant).FilePath.filename().string());
+        ShowNewAsset(variant);
+    }
+
+    void ContentBrowserV2Panel::ShowReplaceDialog(UI::UIContext& context, AssetHandle from, const std::vector<std::filesystem::path>& users, bool sceneUses)
+    {
+        EditorAssetManager* assets = Assets();
+        if (!assets || !assets->IsAssetHandleValid(from))
+            return;
+        const AssetMetadata fromMetadata = assets->GetMetadata(from);
+        const AssetType type = fromMetadata.Type;
+
+        // Which users are rewritten: the text files that name assets by handle (scenes, world cells, prefabs, graphs, timelines, the
+        // mixer). Materials and cooked meshes are binary: they keep the old asset, and say so here (re-pick it in them by hand).
+        std::unordered_map<std::string, AssetType> typeByPath;
+        for (const auto& [handle, metadata] : assets->GetAssetRegistry())
+            typeByPath[metadata.FilePath.lexically_normal().generic_string()] = metadata.Type;
+        std::vector<std::string> rewritten, kept;
+        for (const std::filesystem::path& file : users)
+        {
+            const auto found = typeByPath.find(file.lexically_normal().generic_string());
+            const AssetType userType = found != typeByPath.end() ? found->second : AssetType::None;
+            const bool text = file.extension() == ".noxcell" || userType == AssetType::Scene || userType == AssetType::Prefab || userType == AssetType::AnimationGraph ||
+                              userType == AssetType::AudioGraph || userType == AssetType::AudioMixer || userType == AssetType::Timeline || userType == AssetType::MaterialGraph;
+            (text ? rewritten : kept).push_back(file.generic_string());
+        }
+
+        struct State
+        {
+            AssetHandle Picked = 0;
+            std::string Filter;
+            std::vector<std::pair<UI::UIButton*, AssetHandle>> Rows; // (the list's buttons: restyled in place when one is picked)
+        };
+        auto state = std::make_shared<State>();
+        auto content = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
+        const auto note = [&content](const std::string& text, glm::vec4 color = { 0.72f, 0.76f, 0.84f, 1.0f })
+        {
+            Ref<UI::UILabel> ref(new UI::UILabel(text, 13.0f));
+            ref->WordWrap = true;
+            ref->WidthMode = UI::UISizeMode::Fill;
+            ref->UseColorOverride = true;
+            ref->ColorOverride = { color.r, color.g, color.b, color.a };
+            content->AddChild(ref);
+        };
+        note("Everything that uses " + fromMetadata.FilePath.generic_string() + " will use the asset picked below instead. The asset itself stays "
+             "(delete it afterwards if nothing needs it).");
+
+        Ref<UI::UITextInput> search(new UI::UITextInput("", "Search"));
+        search->WidthMode = UI::UISizeMode::Fill;
+        content->AddChild(search);
+        auto scroll = UI::MakeUI<UI::UIScrollView>();
+        scroll->WidthMode = UI::UISizeMode::Fill;
+        scroll->HeightMode = UI::UISizeMode::Fixed;
+        scroll->FixedSize = { 0.0f, 200.0f };
+        content->AddChild(scroll);
+        auto list = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 2.0f);
+        list->WidthMode = UI::UISizeMode::Fill;
+        scroll->AddChild(list);
+
+        std::string summary;
+        if (sceneUses)
+            summary += "The open scene (an undo step)\n";
+        for (size_t i = 0; i < rewritten.size() && i < 8; ++i)
+            summary += rewritten[i] + "\n";
+        if (rewritten.size() > 8)
+            summary += "... and " + std::to_string(rewritten.size() - 8) + " more\n";
+        note(summary.empty() ? std::string("Nothing in the project names it in a file that can be rewritten.")
+                             : "Rewritten (" + std::to_string(rewritten.size() + (sceneUses ? 1 : 0)) + "):\n" + summary);
+        if (!kept.empty())
+        {
+            std::string text = "Not rewritten -- materials and meshes are binary files; pick the new asset in them by hand:\n";
+            for (size_t i = 0; i < kept.size() && i < 6; ++i)
+                text += kept[i] + "\n";
+            if (kept.size() > 6)
+                text += "... and " + std::to_string(kept.size() - 6) + " more\n";
+            note(text, { 0.95f, 0.78f, 0.45f, 1.0f });
+        }
+        note("Open asset editors with unsaved changes are asked about first; loaded assets that use it are read again.", { 0.6f, 0.64f, 0.72f, 1.0f });
+
+        // Replace (only once something is picked) and Cancel, at the bottom of the content: a dialog button cannot wait for a choice.
+        auto buttons = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 8.0f);
+        buttons->HAlign = UI::UIAlignment::End;
+        UI::UIContext* ctx = &context;
+        Ref<UI::UIButton> cancel(new UI::UIButton("Cancel", [ctx]() { ctx->ClearOverlay(); }));
+        Ref<UI::UIButton> replace(new UI::UIButton("Replace", [this, ctx, state, from]()
+        {
+            const AssetHandle to = state->Picked;
+            ctx->ClearOverlay(); // (this button goes with the dialog: copied first)
+            if (to != 0 && m_ReplaceReferences)
+                m_ReplaceReferences(from, to);
+        }));
+        replace->StyleVariant = "primary";
+        replace->SetEnabled(false);
+        for (const Ref<UI::UIButton>& button : { cancel, replace })
+        {
+            button->Padding = UI::UIThickness::Symmetric(14.0f, 6.0f);
+            buttons->AddChild(button);
+        }
+
+        // The candidates: every other asset of its type, filtered by the search; the picked one highlighted.
+        UI::UIStackBox* listRaw = list.get();
+        UI::UIButton* replaceRaw = replace.get();
+        auto rebuild = [this, state, from, type, listRaw, replaceRaw]()
+        {
+            EditorAssetManager* manager = Assets();
+            listRaw->ClearChildren();
+            state->Rows.clear();
+            if (!manager)
+                return;
+            std::vector<std::pair<std::string, AssetHandle>> candidates;
+            std::string filter = state->Filter;
+            std::transform(filter.begin(), filter.end(), filter.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            for (const auto& [candidate, metadata] : manager->GetAssetRegistry())
+            {
+                if (candidate == from || metadata.Type != type)
+                    continue;
+                std::string path = metadata.FilePath.generic_string();
+                std::string lower = path;
+                std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (filter.empty() || lower.find(filter) != std::string::npos)
+                    candidates.emplace_back(std::move(path), candidate);
+            }
+            std::sort(candidates.begin(), candidates.end());
+            for (const auto& [path, candidate] : candidates)
+            {
+                Ref<UI::UIButton> row(new UI::UIButton(path, [state, candidate, replaceRaw]()
+                {
+                    // (restyled, not rebuilt: rebuilding would destroy the button running this)
+                    state->Picked = candidate;
+                    for (const auto& [button, handle] : state->Rows)
+                        button->StyleVariant = handle == candidate ? "primary" : "";
+                    replaceRaw->SetEnabled(true);
+                }));
+                row->WidthMode = UI::UISizeMode::Fill;
+                row->StyleVariant = candidate == state->Picked ? "primary" : "";
+                state->Rows.emplace_back(row.get(), candidate);
+                listRaw->AddChild(row);
+            }
+            if (candidates.empty())
+            {
+                Ref<UI::UILabel> none(new UI::UILabel(state->Filter.empty() ? "No other asset of this type." : "Nothing matches the search.", 13.0f));
+                listRaw->AddChild(none);
+            }
+            replaceRaw->SetEnabled(state->Picked != 0);
+        };
+        search->OnChanged = [state, rebuild](const std::string& text)
+        {
+            state->Filter = text;
+            rebuild();
+        };
+        rebuild();
+        content->AddChild(buttons);
+        UI::UIModal::ShowCustom(context, "Replace References to " + fromMetadata.FilePath.filename().string(), content, {}, 560.0f);
     }
 
     void ContentBrowserV2Panel::MoveAssets(const std::vector<AssetHandle>& handles, const std::filesystem::path& absoluteFolder)
@@ -2338,7 +2511,13 @@ namespace Nox
             RequestDelete(std::move(handles));
         } });
         items.push_back({ "", "", {}, true });
+        if (entry.Type == AssetType::Prefab)
+            items.push_back({ "Create Variant", "", [this, handle]() { CreateVariant(handle); }, false, static_cast<bool>(m_CreateVariant), false, false,
+                              "A prefab of its own that is this one plus its changes: what the base gets later, the variant gets too." });
         items.push_back({ "Find References", "", [this, handle]() { ShowReferences(handle); } });
+        items.push_back({ "Replace References...", "", [this, handle]() { StartReferenceCheck(ReferenceCheckMode::Replace, { handle }); }, false,
+                          selected == 1 && static_cast<bool>(m_ReplaceReferences) && entry.Type != AssetType::Scene, false, false,
+                          "Everything that uses this asset uses another of its type instead (the asset itself stays)." });
         items.push_back({ "Reimport", "", [this, handle]()
         {
             if (EditorAssetManager* manager = Assets())

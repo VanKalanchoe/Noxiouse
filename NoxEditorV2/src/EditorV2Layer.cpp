@@ -458,6 +458,8 @@ namespace Nox
             m_ContentBrowserPanel.ShowNewAsset(created);
         });
         m_ContentBrowserPanel.SetOpenAssetCallback([this](AssetHandle handle) { OpenAssetV2(handle); });
+        m_ContentBrowserPanel.SetCreateVariantCallback([this](AssetHandle base, const std::filesystem::path& folder) { return CreateVariant(base, folder); });
+        m_ContentBrowserPanel.SetReplaceReferencesCallback([this](AssetHandle from, AssetHandle to) { ReplaceReferences(from, to); });
         m_ContentBrowserPanel.SetCreatePrefabCallback([this](uint64_t dragId, const std::filesystem::path& folder)
         {
             // The hierarchy's drag id of an entity row is the entity's UUID (SceneHierarchyV2Panel::NodeIdForEntity).
@@ -529,6 +531,7 @@ namespace Nox
                 dock->CanClosePanel = nullptr; // (it asks this layer)
             }
         }
+        ExitPrefabMode(); // (asked about before; the level comes back so the editor closes on it)
         m_AssetEditors.CloseAll(); // (while the project's assets are still loaded; their windows are not saved in the layout)
         SaveLayoutFiles();
         AssetPreviewRenderer::Get().Clear();
@@ -629,6 +632,7 @@ namespace Nox
         {
             // The graph and material windows show the project being left: closed while it is still loaded (unsaved edits were
             // asked about before; what is left goes back to the files).
+            ExitPrefabMode(); // (asked about before)
             m_AssetEditors.CloseAll();
             MaterialEdits::Clear(); // (asked about before: what is left belonged to the project being left)
             SaveLayoutFiles(); // the project being left keeps its layout
@@ -860,6 +864,14 @@ namespace Nox
         }
         if (AudioMixer::IsDirty())
             AudioMixer::Save();
+        if (m_PrefabMode.Active)
+        {
+            // Ctrl+S in Prefab Mode saves the prefab, never the level.
+            const bool saved = SavePrefabMode();
+            if (then)
+                then(saved);
+            return;
+        }
         if (m_EditorScenePath.empty())
         {
             SaveSceneAs(std::move(then)); // (never saved: named first, in a dialog that does not stop the editor)
@@ -898,6 +910,13 @@ namespace Nox
                 then(false);
             return;
         }
+        if (m_PrefabMode.Active)
+        {
+            const bool saved = SavePrefabMode(); // (a prefab is saved where it is; Duplicate in the Content Browser copies it)
+            if (then)
+                then(saved);
+            return;
+        }
         // The dialog does not stop the editor (E7); the scene is written when it answers.
         Utility::SaveFileAsync("Nox Scene *.nox\0nox\0", [this, then](std::string chosen)
         {
@@ -909,7 +928,7 @@ namespace Nox
 
     bool EditorV2Layer::SaveSceneTo(std::filesystem::path path)
     {
-        if (!m_ActiveScene || !Project::GetActive() || path.empty())
+        if (!m_ActiveScene || !Project::GetActive() || path.empty() || m_PrefabMode.Active)
             return false;
         m_AssetEditors.EndPreviews();
         if (!path.has_extension())
@@ -953,6 +972,12 @@ namespace Nox
         for (AssetHandle handle : handles)
         {
             const AssetType type = AssetManager::GetAssetType(handle);
+            if (type == AssetType::Prefab && m_PrefabMode.Active && handle == m_PrefabMode.Prefab)
+            {
+                // (an instance of the prefab inside itself would spawn itself without end)
+                Notify(UI::UINotificationSeverity::Warning, "Not placed", "A prefab cannot contain an instance of itself.");
+                continue;
+            }
             if (type == AssetType::Prefab)
             {
                 const AssetMetadata& prefabMetadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
@@ -1672,10 +1697,12 @@ namespace Nox
             m_SceneDirty = true;
             m_HistoryPositionSeen = position;
         }
+        UpdatePrefabMode();
         // The window's title: project, scene, and * while there is something unsaved (as every editor does).
         if (auto win = Application::Get().getWindow(); win && win->getHandle() && Project::GetActive())
         {
-            const std::string scene = m_EditorScenePath.empty() ? std::string("Untitled") : m_EditorScenePath.stem().string();
+            const std::string scene = m_PrefabMode.Active ? "Prefab: " + m_PrefabMode.Name
+                                    : m_EditorScenePath.empty() ? std::string("Untitled") : m_EditorScenePath.stem().string();
             const std::string title = "Nox Editor - " + Project::GetActive()->GetConfig().Name + " - " + scene + (HasUnsavedChanges() ? " *" : "");
             if (title != m_WindowTitleShown)
             {
@@ -1695,7 +1722,7 @@ namespace Nox
 
     bool EditorV2Layer::HasUnsavedChanges(uint32_t scope) const
     {
-        if ((scope & UnsavedScene) && m_SceneDirty)
+        if ((scope & UnsavedScene) && (m_SceneDirty || (m_PrefabMode.Active && m_PrefabMode.ReturnDirty)))
             return true;
         if ((scope & UnsavedMixer) && AudioMixer::IsDirty())
             return true;
@@ -1719,6 +1746,13 @@ namespace Nox
 
     void EditorV2Layer::ConfirmUnsavedChanges(const std::string& action, std::function<void()> proceed, uint32_t scope)
     {
+        // Everything that asks about the scene replaces the level: Prefab Mode is left first (asked about on its own), then the level
+        // waiting behind it is asked about as usual.
+        if (m_PrefabMode.Active && (scope & UnsavedScene))
+        {
+            RequestExitPrefabMode([this, action, proceed, scope]() { ConfirmUnsavedChanges(action, proceed, scope); });
+            return;
+        }
         UILayer* uiLayer = Application::Get().GetUILayer();
         if (!HasUnsavedChanges(scope) || !uiLayer)
         {
@@ -1856,6 +1890,8 @@ namespace Nox
         }
         if (m_ActiveScene && m_ActiveScene != m_EditorScene)
             m_ActiveScene->CollectAssetReferences(referencedAssets);
+        if (m_PrefabMode.ReturnScene) // (the level waits while a prefab is edited: its assets stay)
+            m_PrefabMode.ReturnScene->CollectAssetReferences(referencedAssets);
         AssetPreviewRenderer::Get().CollectAssetReferences(referencedAssets); // what the thumbnails draw right now
         m_ContentBrowserPanel.CollectAssetReferences(referencedAssets);       // textures shown as tile pictures
         if (m_HLODBuild)                                                       // the cell being built waits for its models and prefabs
@@ -1865,6 +1901,11 @@ namespace Nox
 
     void EditorV2Layer::OnScenePlay()
     {
+        if (m_PrefabMode.Active)
+        {
+            Notify(UI::UINotificationSeverity::Info, "Not in Prefab Mode", "Exit Prefab Mode (toolbar) to play the level.");
+            return;
+        }
         CancelHLODBuild("Play");
         m_AssetEditors.EndPreviews(); // (Play copies the scene: without the timeline's poses)
         m_EditorSceneReferencesValid = false;
@@ -2346,6 +2387,11 @@ namespace Nox
 
     void EditorV2Layer::OnSceneSimulate()
     {
+        if (m_PrefabMode.Active)
+        {
+            Notify(UI::UINotificationSeverity::Info, "Not in Prefab Mode", "Exit Prefab Mode (toolbar) to simulate the level.");
+            return;
+        }
         CancelHLODBuild("Simulate");
         m_AssetEditors.EndPreviews();
         m_EditorSceneReferencesValid = false;
@@ -3385,11 +3431,14 @@ namespace Nox
         const bool isSim = m_SceneState == SceneState::Simulate;
         const bool isEdit = m_SceneState == SceneState::Edit;
         const bool isPaused = !isEdit && m_ActiveScene && m_ActiveScene->IsPaused();
+        const bool prefab = m_PrefabMode.Active; // (nothing plays while a prefab is edited: its bar takes the toolbar)
 
         if (m_PlayBtnWrap)
-            m_PlayBtnWrap->Visible = isEdit || isPlay;
+            m_PlayBtnWrap->Visible = !prefab && (isEdit || isPlay);
         if (m_SimulateBtnWrap)
-            m_SimulateBtnWrap->Visible = isEdit || isSim;
+            m_SimulateBtnWrap->Visible = !prefab && (isEdit || isSim);
+        if (m_PrefabBar)
+            m_PrefabBar->Visible = prefab;
         if (m_PauseBtnWrap)
             m_PauseBtnWrap->Visible = !isEdit;
         if (m_StepBtnWrap)
@@ -3406,7 +3455,10 @@ namespace Nox
             m_SimulateBtnIcon->TextureDescriptorSlot = tex ? tex->GetDescriptorIndexSlot() : ~0u;
         }
         if (m_PlaySettingsCogBtn)
+        {
             m_PlaySettingsCogBtn->SetEnabled(isEdit);
+            m_PlaySettingsCogBtn->Visible = !prefab;
+        }
         if (m_PlayNetStatusLabel)
         {
             if (m_PlaySession)
@@ -4230,6 +4282,7 @@ namespace Nox
 
         m_ToolBar = UI::HStack(4.0f, {
             tbLeftSpacer,
+            BuildPrefabBar(),
             m_PlayBtnWrap,
             m_SimulateBtnWrap,
             m_PauseBtnWrap,
@@ -4723,12 +4776,17 @@ namespace Nox
             ConfirmUnsavedChanges("opening " + AssetDisplayName(handle), [this, handle]() { OpenScene(handle); }, UnsavedScene);
             return;
         }
+        if (type == AssetType::Prefab)
+        {
+            OpenPrefabMode(handle);
+            return;
+        }
         // The editor registered for the type (RegisterAssetEditors); one window per asset.
         if (m_AssetEditors.Open(handle) || !AssetManager::IsAssetHandleValid(handle))
             return;
         if (!m_AssetEditors.HasEditorFor(type))
             Notify(UI::UINotificationSeverity::Info, "No editor for " + AssetDisplayName(handle) + " yet",
-                   "NoxEditorV2 opens scenes, materials, graphs, animation clips and timelines so far; the old NoxEditor has the other editors.");
+                   "NoxEditorV2 opens scenes, prefabs, materials, graphs, animation clips and timelines so far; the old NoxEditor has the other editors.");
     }
 
     void EditorV2Layer::RegisterAssetEditors()
@@ -4796,7 +4854,7 @@ namespace Nox
 
         LevelsV2Panel::Hooks levelHooks;
         levelHooks.ActiveScene = [this]() { return m_ActiveScene; };
-        levelHooks.Editing = [this]() { return m_SceneState == SceneState::Edit; };
+        levelHooks.Editing = [this]() { return m_SceneState == SceneState::Edit && !m_PrefabMode.Active; };
         levelHooks.OpenScene = [this]() { return EditorSceneHandle(); };
         levelHooks.Selection = [this]() { return m_Selection.GetEntities(); };
         levelHooks.Save = [this]() { SaveScene(); };
@@ -4809,7 +4867,7 @@ namespace Nox
 
         WorldPartitionV2Panel::Hooks worldHooks;
         worldHooks.ActiveScene = [this]() { return m_ActiveScene; };
-        worldHooks.Editing = [this]() { return m_SceneState == SceneState::Edit; };
+        worldHooks.Editing = [this]() { return m_SceneState == SceneState::Edit && !m_PrefabMode.Active; };
         worldHooks.StreamingSource = [this]()
         {
             // The camera the cells stream around: the primary camera in Play, the editor camera in Simulate; editing, what the
@@ -4842,7 +4900,7 @@ namespace Nox
 
     void EditorV2Layer::StartHLODBuild()
     {
-        if (m_HLODBuild || m_SceneLoad || m_SceneState != SceneState::Edit || !m_EditorScene || !m_EditorScene->IsWorldPartitioned())
+        if (m_HLODBuild || m_SceneLoad || m_SceneState != SceneState::Edit || m_PrefabMode.Active || !m_EditorScene || !m_EditorScene->IsWorldPartitioned())
             return;
         if (m_EditorScenePath.empty())
         {

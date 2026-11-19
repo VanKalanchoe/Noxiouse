@@ -4,6 +4,7 @@
 #include "Panels/RendererSettingsV2Panel.h"
 #include "Panels/SettingsRowsV2.h"
 #include "InspectorWidgetsV2.h"
+#include "Panels/AssetPreviewRenderer.h"
 
 #include <algorithm>
 #include <cctype>
@@ -13,6 +14,7 @@
 #include <type_traits>
 
 #include <glm/gtc/constants.hpp>
+#include <SDL3/SDL_mouse.h>
 
 #include "NoxCore/Animation/AnimationSequence.h"
 #include "NoxCore/Asset/AssetManager.h"
@@ -49,6 +51,39 @@
 
 namespace Nox
 {
+    namespace
+    {
+        // An override's value as text, asset handles shown as the asset's file name.
+        std::string PrettyOverrideValue(const std::string& text)
+        {
+            std::string result;
+            for (size_t i = 0; i < text.size();)
+            {
+                if (!std::isdigit(static_cast<unsigned char>(text[i])))
+                {
+                    result += text[i++];
+                    continue;
+                }
+                size_t end = i;
+                while (end < text.size() && std::isdigit(static_cast<unsigned char>(text[end])))
+                    ++end;
+                const std::string digits = text.substr(i, end - i);
+                i = end;
+                if (digits.size() >= 10 && digits.size() <= 20)
+                {
+                    const AssetHandle handle(std::strtoull(digits.c_str(), nullptr, 10));
+                    if (handle != 0 && AssetManager::IsAssetHandleValid(handle))
+                    {
+                        result += AssetDisplayName(handle);
+                        continue;
+                    }
+                }
+                result += digits;
+            }
+            return result.size() > 120 ? result.substr(0, 117) + "..." : result;
+        }
+    }
+
     namespace
     {
         using CardBuilder = InspectorCardBuilder;
@@ -497,18 +532,23 @@ namespace Nox
             m_ScrollView->AddChild(res.Card);
         };
 
-        // Prefab Instance banner card
+        // Prefab Instance card: where it comes from (a variant: of what), the way out (Unpack), and its overrides -- each one reverted,
+        // applied to its prefab, or (an instance inside another prefab) applied to the outer prefab.
         if (entity.HasComponent<PrefabInstanceComponent>())
         {
             makeCard("Prefab Instance", false, {}, {}, [this, entity](CardBuilder& c) mutable
             {
                 const AssetHandle prefabHandle = entity.GetComponent<PrefabInstanceComponent>().Prefab;
-                c.AddReadonly("Asset", AssetDisplayName(prefabHandle));
+                c.AddReadonly("Asset", AssetDisplayName(prefabHandle, "(missing asset)"));
+                if (const Prefab* prefabAsset = AssetManager::FindLoadedAsset<Prefab>(prefabHandle);
+                    prefabAsset && prefabAsset->Base != 0 && AssetManager::IsAssetHandleValid(prefabAsset->Base))
+                    c.AddReadonly("Variant of", AssetDisplayName(prefabAsset->Base));
                 auto actions = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
                 actions->WidthMode = UI::UISizeMode::Fill;
                 if (m_OnOpenAsset && AssetManager::IsAssetHandleValid(prefabHandle))
                 {
-                    auto openBtn = UI::Button("Open", [this, prefabHandle]() { m_OnOpenAsset(prefabHandle); });
+                    auto openBtn = UI::Button("Open", [this, prefabHandle]() { m_OnOpenAsset(prefabHandle); })
+                        .Tooltip("Prefab Mode: the prefab on its own; Save there updates every instance.");
                     openBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
                     actions->AddChild(openBtn);
                 }
@@ -519,19 +559,106 @@ namespace Nox
                 }).Tooltip("Turn this instance into ordinary entities (nested instances stay instances).");
                 unpackBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
                 actions->AddChild(unpackBtn);
+                auto unpackAllBtn = UI::Button("Unpack Completely", [this, entity]()
+                {
+                    PrefabInstance::UnpackCompletely(*m_Context, entity);
+                    NotifyMutated(true);
+                }).Tooltip("Ordinary entities all the way down: the instances inside it are unpacked too.");
+                unpackAllBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                actions->AddChild(unpackAllBtn);
+                c.AddRow("Actions", actions);
 
-                const auto overrides = PrefabInstance::ListOverrides(*m_Context, entity);
+                // Overrides: what differs from the prefab (worked out from the spawned entities).
+                const std::vector<PrefabInstance::OverrideEntry> overrides = PrefabInstance::ListOverrides(*m_Context, entity);
+                c.AddSubheader("Overrides (" + std::to_string(overrides.size()) + ")",
+                               "What you change on this instance (fields, components, entities) is kept on it as an override. Revert drops it; Apply writes it into the prefab (every instance takes it).");
+                if (overrides.empty())
+                    c.AddStatusNote("Nothing differs from the prefab.");
+                using Kind = PrefabInstance::OverrideEntry::EntryKind;
+                const auto componentName = [](std::string name)
+                {
+                    if (name.size() > 9 && name.compare(name.size() - 9, 9, "Component") == 0)
+                        name.resize(name.size() - 9);
+                    return name;
+                };
+                const bool nested = entity.HasComponent<PrefabNodeComponent>();
+                for (size_t i = 0; i < overrides.size() && i < 64; ++i)
+                {
+                    const PrefabInstance::OverrideEntry& entry = overrides[i];
+                    const std::string target = entry.TargetName.empty() ? std::string("?") : entry.TargetName;
+                    std::string label;
+                    switch (entry.Kind)
+                    {
+                    case Kind::Property: label = target + ": " + componentName(entry.Component) + "." + entry.Field + " = " + PrettyOverrideValue(entry.Value); break;
+                    case Kind::RemovedEntity: label = "- Entity: " + target + " (deleted)"; break;
+                    case Kind::RemovedComponent: label = "- Component: " + target + " / " + componentName(entry.Component); break;
+                    case Kind::AddedComponent: label = "+ Component: " + target + " / " + componentName(entry.Component); break;
+                    case Kind::AddedEntity: label = "+ Entity: " + entry.Name + " (below " + target + ")"; break;
+                    }
+                    auto row = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
+                    row->WidthMode = UI::UISizeMode::Fill;
+                    Ref<UI::UILabel> text(new UI::UILabel(label, 12.5f));
+                    text->WidthMode = UI::UISizeMode::Fill;
+                    text->VAlign = UI::UIAlignment::Center;
+                    text->UseColorOverride = true;
+                    text->ColorOverride = { 0.45f, 0.70f, 1.0f, 1.0f };
+                    text->Tooltip = label;
+                    row->AddChild(text);
+                    // (the entry is copied into each button: the list is worked out again after any of them runs)
+                    auto revert = UI::Button("Revert", [this, entity, entry]() mutable
+                    {
+                        PrefabInstance::RevertOverride(*m_Context, entity, &entry);
+                        NotifyMutated(true);
+                    }).Tooltip("Back to the prefab's value for this one.");
+                    revert->Padding = UI::UIThickness::Symmetric(6.0f, 2.0f);
+                    row->AddChild(revert);
+                    auto apply = UI::Button("Apply", [this, entity, entry]() mutable
+                    {
+                        const AssetHandle applied = entity.GetComponent<PrefabInstanceComponent>().Prefab;
+                        if (PrefabInstance::ApplyOverride(*m_Context, entity, entry))
+                            AssetPreviewRenderer::Get().Invalidate(applied);
+                        NotifyMutated(true);
+                    }).Tooltip("Writes this change into the prefab file now: every instance takes it.");
+                    apply->Padding = UI::UIThickness::Symmetric(6.0f, 2.0f);
+                    row->AddChild(apply);
+                    if (nested)
+                    {
+                        auto outer = UI::Button("Apply to Outer", [this, entity, entry]() mutable
+                        {
+                            Entity outerRoot = m_Context->GetEntityByUUID(entity.GetComponent<PrefabNodeComponent>().Instance);
+                            const AssetHandle applied = outerRoot && outerRoot.HasComponent<PrefabInstanceComponent>() ? outerRoot.GetComponent<PrefabInstanceComponent>().Prefab : AssetHandle(0);
+                            if (PrefabInstance::ApplyOverrideToOuter(*m_Context, entity, entry) && applied != 0)
+                                AssetPreviewRenderer::Get().Invalidate(applied);
+                            NotifyMutated(true);
+                        }).Tooltip("Writes this change into the prefab this instance is part of (its own prefab stays as it is).");
+                        outer->Padding = UI::UIThickness::Symmetric(6.0f, 2.0f);
+                        row->AddChild(outer);
+                    }
+                    c.AddRow("", row);
+                }
+                if (overrides.size() > 64)
+                    c.AddStatusNote("... and " + std::to_string(overrides.size() - 64) + " more (Revert All drops them all).");
+                // An edit to the instance (a field typed, a child added) changes the list: worked out again twice a second while no
+                // mouse button is held (a rebuild in the middle of a drag would end the drag), the card rebuilt when it differs.
+                c.Syncs.push_back([this, id = entity.GetUUID(), builtCount = overrides.size(), frame = 0]() mutable
+                {
+                    if (++frame < 30 || SDL_GetMouseState(nullptr, nullptr) != 0)
+                        return;
+                    frame = 0;
+                    Entity now = m_Context ? m_Context->GetEntityByUUID(id) : Entity();
+                    if (now && now.HasComponent<PrefabInstanceComponent>() && PrefabInstance::ListOverrides(*m_Context, now).size() != builtCount)
+                        m_Dirty = true;
+                });
                 if (!overrides.empty())
                 {
-                    auto revertBtn = UI::Button("Revert All (" + std::to_string(overrides.size()) + ")", [this, entity]()
+                    auto revertAll = UI::Button("Revert All (" + std::to_string(overrides.size()) + ")", [this, entity]()
                     {
                         PrefabInstance::RevertOverride(*m_Context, entity, nullptr);
                         NotifyMutated(true);
                     });
-                    revertBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
-                    actions->AddChild(revertBtn);
+                    revertAll->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                    c.AddRow("", revertAll);
                 }
-                c.AddRow("Actions", actions);
             });
         }
 

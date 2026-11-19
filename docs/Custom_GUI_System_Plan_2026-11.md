@@ -326,7 +326,7 @@ it yet):
 | T1 | Timeline (sequencer), Animation Clip | TimelinePanel, AnimationClipPanel | built (not run on a GPU / not user-tested) |
 | P1 | Profiler, Render Graph | ProfilerPanel, RenderGraphPanel | **built** (below) |
 | D1 | Package Game / Server, Streaming Test World, MCP server menu | EditorLayer dialogs, GamePackager | **built** (below) |
-| F1 | Prefab mode, prefab variants, Replace References | EditorLayer, ContentBrowserPanel | open |
+| F1 | Prefab mode, prefab variants, Replace References | EditorLayer, ContentBrowserPanel | built (not run on a GPU / not user-tested) |
 
 **Design review of the editor (2026-11-20), checked in the code -- not only the graph editor:**
 
@@ -562,6 +562,33 @@ scene's undo history and, saved while previewing, into the scene file (now the s
 once when it ends; the preview ends -- what the targets had comes back -- before the scene is saved, before Play / Simulate, before
 packaging and before a scene undo / redo; it also ends when a track is added or removed, so the new target is in the snapshot).
 Auto-Key waits until no mouse button is held (a gizmo drag keys once, when let go). Checked: syntax check. Not run on a GPU.
+
+**F1 -- Prefab Mode, variants, Replace References (built, not run on a GPU / not user-tested).** `EditorV2Prefab.cpp` (the layer's prefab
+work in a file of its own, E2). Double-click a prefab in the Content Browser (or Open on a Prefab Instance in the Inspector): its entities
+open as a scene of their own, lit by the level's sky and sun as "Preview Environment / Preview Sun (not saved)" entities, the root selected
+and framed; a variant opens as an instance of its base carrying its changes. The toolbar shows "Prefab Mode: <name> (variant) *" with
+Save, Save & Exit and Exit instead of Play / Simulate. Save (Ctrl+S, File > Save Scene and Save Scene As too) writes the `.nprefab` (a
+variant: its changes to its base), reloads the asset, the level's instances keep their own overrides and spawn again, the thumbnail is
+drawn again. Content Browser: a prefab's right-click **Create Variant** ("<Base> Variant" beside its base, name ready to type); any asset's
+**Replace References...** (single selection, not scenes): the project is searched on a worker thread, then a dialog with Search, the other
+assets of its type (click one), what will be rewritten (the open scene, scenes, world cells, prefabs, graphs, timelines, the mixer) and what
+cannot be (materials and meshes are binary: listed to re-pick by hand), Replace / Cancel. Inspector, Prefab Instance card: Asset, Variant of,
+Open / Unpack / Unpack Completely, and **Overrides (n)**, each with Revert, Apply and (an instance inside another prefab) Apply to Outer,
+Revert All.
+Flaws not carried over: Prefab Mode compared the whole prefab's text every 20 frames for its unsaved mark (now its own undo history:
+unsaved = a step since open / save, as the level); leaving it while the level underneath had unsaved changes dropped them on Exit / Quit
+(now quitting, New Scene, opening a scene or project leave Prefab Mode first -- asked about -- and then ask about the level); the level's
+camera was lost (now put back on Exit); the level's history took the instances' respawn after a prefab save as part of the next edit (now
+the level's state, no step); entities created beside the root were dropped silently on save (now saved without them and named in a
+warning); a deleted root only logged an error (now a toast saying Ctrl+Z brings it back); opening another prefab was refused (now the open
+one is left first); a prefab could be dropped into itself (endless spawn: refused); Play could be started from a shortcut or MCP (refused
+with a reason). Replace References wrote the files at once with no list of what changes, never told about binary users, left loaded
+assets on the old asset (a spawned prefab, an open graph or timeline window would save the old one back over the rewrite) and ran in Play
+(the edited scene kept the old asset): now open editors with unsaved edits and the mixer are asked about first (Save / Don't Save), the
+loaded users are read again, the open scene's instances of rewritten prefabs respawn, the open scene's replace is one undo step, and it
+is refused in Play / Simulate, Prefab Mode, while a scene loads or HLODs build. The Inspector's Overrides list is worked out again twice a
+second while no mouse button is held (the old one each frame). Not carried over yet: variants' purple tiles in the Content Browser.
+Checked: syntax check (MCP on and off). Not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and
