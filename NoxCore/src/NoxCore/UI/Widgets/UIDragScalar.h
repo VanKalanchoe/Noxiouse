@@ -34,6 +34,9 @@ namespace Nox::UI
         // Unreal's way of showing a number: Format's decimals at most, the trailing zeros dropped but one ("120.5", "0.0").
         bool TrimZeros = false;
         std::function<void(float)> OnChanged;
+        // When a change is finished: a drag let go, a typed value entered (OnChanged runs on every step of a drag too). For
+        // values that are expensive to apply (a pool made again).
+        std::function<void(float)> OnCommitted;
 
         bool IsEditing() const { return m_Editing; }
         // Being dragged or typed in: whoever mirrors a value into the field leaves it alone meanwhile.

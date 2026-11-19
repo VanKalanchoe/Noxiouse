@@ -319,7 +319,7 @@ it yet):
 | G2 | Graph editor: in-node value widgets, curve editor, bone picker, parameter drag onto the canvas, material graph compile status | same | open |
 | G3 | Graph editor: state machine view (states, transitions, rules) | ThedmdCanvasBackend::DrawStateMachine, the panel's inspector | open |
 | G4 | Graph editor: animation preview (skeletal mesh), audio preview (play, sliders, meter) | the panel's previews | open |
-| R1 | Renderer Settings / Stats / Post Process windows | EditorLayer, PostProcessSettingsUI | open |
+| R1 | Renderer Settings / Stats / Post Process windows | EditorLayer, PostProcessSettingsUI | **built** (below) |
 | M1 | Material Editor (full: graph slot, Custom Lit, lobes, preview sphere) | MaterialEditorPanel | open (V2 has the basic window) |
 | L1 | Levels, World Partition (HLOD) panels | LevelsPanel, WorldPartitionPanel | open |
 | A1 | Audio Mixer | MixerPanel, AudioWidgets | open |
@@ -398,6 +398,35 @@ and gives the unsaved names, Save All and Revert All to the editor's "Save chang
 graph / material types any more. Flaws fixed with it: the material window said "Loading material..." for good when the material was
 still loading when it opened (it was built once); a material deleted while its window was open kept the window; Window > Animation
 Graphs listed the graphs but could not open them. Checked: syntax check. Not run on a GPU.
+
+**R1 -- Renderer Settings, Project Settings, post effects (built, not run on a GPU / not user-tested).** The old editor's "Settings"
+window (1650 lines of ImGui) is two windows now, both under **Window**:
+- **Renderer Settings** (`Panels/RendererSettingsV2Panel`): how this session renders, not saved -- cards View (under the pointer,
+  Debug View, Tonemapping, Exposure Compensation, Auto Exposure, Gamma, IBL Ambient Scale, Camera FOV), Anti-Aliasing and
+  Transparency, DLSS / Upscaling, Shadows (sun cascades, local light atlas, contact shadows), Path Tracing, Ambient Occlusion,
+  Screen-Space Reflections, Raster GI / Fog and Probes, Hybrid Ray Tracing (resolution, shadows, reflections, RTAO, culling, async
+  compute, Diffuse GI with screen probes / ReSTIR GI / DDGI, Direct Lighting with ReSTIR DI / ReGIR), Denoising, Streaming (texture,
+  geometry, virtual texture pools and stats), Post Effects (the editor's; greyed while a scene's Post Process Volume applies),
+  Diagnostics (Nox Stats window, Reset Stats, Save Stats Report, Dump Frame Graph).
+- **Project Settings** (`Panels/ProjectSettingsV2Panel`): what the .nproj keeps, saved at each change -- Start Scene, Render Quality
+  (and what the renderer's settings equal now), the 16 renderer settings saved on top of the preset, Game Window, Physical Surfaces.
+`Panels/SettingsRowsV2`: rows bound to a getter and a setter, read every frame (a preset, the console or MCP changing a setting
+shows at once; the old window was redrawn each frame instead), shown only while a condition holds (`ShowWhen`) or greyed with the
+reason after them (`EnableWhen`); the panels use it from now on. `AddPostProcessSettingsRows` is shared by Renderer Settings and the
+Post Process Volume's Inspector card -- which in V2 had only Enabled / Unbound / Half Extents / Priority, not its effects.
+
+NoxCore with it: a disabled element blocks input to everything inside it (only the clicked widget's own state counted: a greyed
+row's checkbox still toggled); `VeilWhenDisabled` draws a disabled container under a veil (theme token `DisabledVeil`);
+`UIDragScalar::OnCommitted` reports a finished change (a drag let go, a value typed) for settings that are expensive to apply.
+
+Flaws of the old window not carried over: project settings (saved) and session switches (not saved) mixed in one window; settings
+hidden in some states and greyed in others with no rule (now: shown when they apply, greyed with the reason when they cannot);
+renaming a physical surface renamed only the list, so every material using it lost its surface (materials in the asset registry
+and the open scene's Rigid Body 3D surfaces follow now; other scenes keep the old name until opened and changed); the virtual
+texture pool slider used static locals to wait for the release; a debug image of the font atlas at the bottom and the "Stats"
+window's ImGui active id (dropped); Camera FOV and Show physics collider sat in renderer settings (the FOV stays in View; the
+colliders are in the viewport's Show menu already). Checked: syntax check; the headless UI test (22 checks; new: a checkbox in a
+disabled row does not toggle, enabled again it does; a drag changes on every step and commits once). Not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

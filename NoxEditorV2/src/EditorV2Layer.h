@@ -16,6 +16,8 @@
 #include "Panels/InspectorV2Panel.h"
 #include "Panels/OutputLogV2Panel.h"
 #include "Panels/AssetEditorV2.h"
+#include "Panels/ProjectSettingsV2Panel.h"
+#include "Panels/RendererSettingsV2Panel.h"
 #include "Panels/NodeGraph/NodeGraphEditorV2.h"
 #include "EditorCommands.h"
 #include "EditorSelection.h"
@@ -322,6 +324,14 @@ namespace Nox
         // the open windows, asks before one with unsaved edits closes and ends an editor whose window is gone.
         void RegisterAssetEditors();
         AssetEditorManager m_AssetEditors;
+
+        // Window > Renderer Settings (this session's rendering) and Window > Project Settings (what the project keeps); floating
+        // windows, updated while open (R1).
+        RendererSettingsV2Panel m_RendererSettings;
+        ProjectSettingsV2Panel m_ProjectSettings;
+        void OpenToolWindow(const std::string& title, const Ref<UI::UIElement>& root, UI::UIVec2 size);
+        void UpdateToolWindows();
+        void ApplyQualityPreset(int quality);
 
         // What is selected: the editor's, read and changed by every panel, the viewports and the shortcuts (E3).
         EditorSelection m_Selection;

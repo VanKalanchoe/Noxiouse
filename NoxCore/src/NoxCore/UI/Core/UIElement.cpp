@@ -199,6 +199,15 @@ namespace Nox::UI
         if (ClipChildren)
             drawList.PopClipRect();
 
+        // A disabled container (a settings row, a group) that asks for it is veiled as a whole: its children do not know they
+        // are disabled through it (they take no input either way: HitTest stops at a disabled element).
+        if (!IsEnabled() && VeilWhenDisabled && !m_Children.empty())
+        {
+            const UIColor veil = theme.GetToken("DisabledVeil", { 0.09f, 0.10f, 0.12f, 0.55f });
+            drawList.AddRoundedRect({ m_Bounds.Min.x, m_Bounds.Min.y }, { m_Bounds.Max.x, m_Bounds.Max.y }, { veil.r, veil.g, veil.b, veil.a },
+                                    m_CurrentStyle.CornerRadius.ToVec4());
+        }
+
         OnPaintOverlay(drawList, theme);
     }
 
@@ -236,6 +245,10 @@ namespace Nox::UI
 
         if (ClipChildren && !m_Bounds.Contains(pos))
             return nullptr;
+
+        // Disabled: nothing inside it takes input (the press lands on it, and a disabled element ignores it).
+        if (!IsEnabled() && !m_Children.empty())
+            return m_Bounds.Contains(pos) ? this : nullptr;
 
         // Reverse order: last painted child is visually on top.
         for (auto it = m_Children.rbegin(); it != m_Children.rend(); ++it)

@@ -79,6 +79,7 @@ namespace Nox
 {
     namespace
     {
+        void ActivateDockedTab(UI::UIDockSpace& dock, const std::string& title); // (below)
 
         // In <Project>/Saved/Layout (EditorV2Layer::LayoutDirectory).
         // ("2": the layouts saved before the drawer had the Content Browser and the Output Log docked; they start fresh once.)
@@ -624,6 +625,7 @@ namespace Nox
             m_ThumbnailTimer = 0.0f;
         }
         m_Commands.Load(KeyBindingsPath()); // (this project's key bindings)
+        m_ProjectSettings.MarkDirty();       // (its rows read the project that is open)
         m_ContentBrowserPanel.Refresh();
         if (project)
             Notify(UI::UINotificationSeverity::Success, "Project opened", project->GetConfig().Name);
@@ -3608,6 +3610,7 @@ namespace Nox
             m_InspectorPanel.Update();
         }
         m_AssetEditors.Update();
+        UpdateToolWindows();
 
         std::vector<int32_t> selectedIDs;
         for (const Entity& entity : m_Selection.GetEntities())
@@ -4421,6 +4424,18 @@ namespace Nox
                             dock->RemovePanel("Toolbar");
                     }
                 }, false, true, m_ShowToolBar},
+                {"Renderer Settings", "", [this, uiLayer]()
+                {
+                    if (!m_RendererSettings.GetRoot())
+                        m_RendererSettings.BuildUI(&uiLayer->GetContext());
+                    OpenToolWindow("Renderer Settings", m_RendererSettings.GetRoot(), { 470.0f, 720.0f });
+                }, false, true, false, false, "How this session renders: debug views, exposure, DLSS, shadows, ray tracing, GI, denoisers, streaming, post effects (not saved)."},
+                {"Project Settings", "", [this, uiLayer]()
+                {
+                    if (!m_ProjectSettings.GetRoot())
+                        m_ProjectSettings.BuildUI(&uiLayer->GetContext());
+                    OpenToolWindow("Project Settings", m_ProjectSettings.GetRoot(), { 470.0f, 640.0f });
+                }, false, true, false, false, "What the project keeps: start scene, render quality and its saved settings, game window, physical surfaces."},
                 {"Render Graph", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
                 {"Content Browser", m_Commands.ShortcutText("Window.ContentDrawer"), [this]() { ShowPage(DrawerPage::Content); }, false, true, false, false,
                  "In the drawer over the viewport (or its tab, when it is docked in the layout)."},
@@ -4532,6 +4547,91 @@ namespace Nox
         };
         hooks.OpenAsset = [this](AssetHandle handle) { OpenAssetV2(handle); };
         m_AssetEditors.SetHooks(std::move(hooks));
+
+        RendererSettingsV2Panel::Hooks rendererHooks;
+        rendererHooks.Render = m_Renderer;
+        rendererHooks.Camera = &m_EditorCamera;
+        rendererHooks.Hovered = [this]() { return m_HoveredEntity; };
+        rendererHooks.DumpFrameGraph = [this]()
+        {
+            // Next to Nox.log; open the .dot files with GraphViz.
+            const std::filesystem::path directory = std::filesystem::current_path();
+            if (!m_ActiveScene || !m_ActiveScene->DumpSystemGraphs(directory))
+                return false;
+            Notify(UI::UINotificationSeverity::Success, "Frame graph written", (directory / "SceneUpdate.dot").generic_string());
+            return true;
+        };
+        m_RendererSettings.SetHooks(std::move(rendererHooks));
+
+        ProjectSettingsV2Panel::Hooks projectHooks;
+        projectHooks.Render = m_Renderer;
+        projectHooks.ApplyQuality = [this](int quality) { ApplyQualityPreset(quality); };
+        projectHooks.SurfaceRenamed = [this](const std::string& from, const std::string& to)
+        {
+            if (!m_ActiveScene)
+                return;
+            bool changed = false;
+            for (auto [entity, body] : m_ActiveScene->GetAllEntitiesWith<RigidBody3DComponent>().each())
+            {
+                if (body.PhysicalSurface == from)
+                {
+                    body.PhysicalSurface = to;
+                    changed = true;
+                }
+            }
+            if (changed)
+                m_HistoryCheckRequested = true; // (the scene changed: an undo step, and unsaved)
+        };
+        m_ProjectSettings.SetHooks(std::move(projectHooks));
+    }
+
+    void EditorV2Layer::ApplyQualityPreset(int quality)
+    {
+        if (!m_Renderer)
+            return;
+        m_Renderer->ApplyQualityPreset(static_cast<Renderer::RenderQuality>(quality));
+        // An orthographic view stays raster only; the preset's features come back when it is left.
+        if (m_EditorCamera.IsOrthographic())
+        {
+            m_OrthoSaved = { true, m_Renderer->isDLSSEnabled(), m_Renderer->getRayTracingEnabled(), m_Renderer->isPathTracingEnabled() };
+            m_Renderer->setDLSSEnabled(false);
+            m_Renderer->setRayTracingEnabled(false);
+            m_Renderer->setPathTracingEnabled(false);
+        }
+    }
+
+    void EditorV2Layer::OpenToolWindow(const std::string& title, const Ref<UI::UIElement>& root, UI::UIVec2 size)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !uiLayer->GetDockSpaceRef() || !root)
+            return;
+        const auto& dock = uiLayer->GetDockSpaceRef();
+        if (const Ref<UI::UIWindow> window = dock->FindFloatingWindow(title))
+        {
+            if (window->OnActivate)
+                window->OnActivate();
+            return;
+        }
+        if (dock->FindNodeByPanelTitle(title))
+        {
+            ActivateDockedTab(*dock, title);
+            return;
+        }
+        if (dock->HasPanel(title))
+            return; // (torn off into its own OS window)
+        dock->FloatPanel(title, root, { 260.0f, 90.0f }, size, false);
+    }
+
+    void EditorV2Layer::UpdateToolWindows()
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        const auto& dock = uiLayer ? uiLayer->GetDockSpaceRef() : nullptr;
+        if (!dock)
+            return;
+        if (m_RendererSettings.GetRoot() && dock->HasPanel("Renderer Settings"))
+            m_RendererSettings.Update();
+        if (m_ProjectSettings.GetRoot() && dock->HasPanel("Project Settings"))
+            m_ProjectSettings.Update();
     }
 
     std::filesystem::path EditorV2Layer::LayoutDirectory() const

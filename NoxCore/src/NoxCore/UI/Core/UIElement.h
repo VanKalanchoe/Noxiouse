@@ -84,6 +84,9 @@ namespace Nox::UI
         UIVec2 MinSize{ 0.0f, 0.0f };
         UIVec2 MaxSize{ 1e6f, 1e6f };
         float FlexWeight = 1.0f;
+        // Disabled with children: drawn under a veil (theme token DisabledVeil), for containers whose children draw themselves
+        // as enabled (a settings row and its checkbox).
+        bool VeilWhenDisabled = false;
 
         UIAlignment HAlign = UIAlignment::Stretch;
         UIAlignment VAlign = UIAlignment::Stretch;
