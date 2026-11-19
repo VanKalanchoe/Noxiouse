@@ -7,6 +7,7 @@
 #include <SDL3/SDL_scancode.h>
 
 #include "NodeGraphCanvasV2.h"
+#include "StateMachineViewV2.h"
 #include "Panels/InspectorWidgetsV2.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
@@ -326,12 +327,7 @@ namespace Nox
         m_Canvas->Parameters = m_Asset ? &m_Asset->Graph.Parameters : nullptr;
         m_Canvas->OnEdited = [this](bool structural) { OnCanvasEdited(structural); };
         m_Canvas->OnSelectionChanged = [this]() { m_DetailsDirty = true; };
-        m_Canvas->OnOpenNode = [this](uint32_t)
-        {
-            if (Notify)
-                Notify({ UI::UINotificationSeverity::Info, "State machines are not in NoxEditorV2 yet",
-                         "Their states and transitions open in the next step of the port; NoxEditor edits them meanwhile." });
-        };
+        m_Canvas->OnOpenNode = [this](uint32_t nodeId) { m_Path.push_back(nodeId); }; // (shown by the next update's ResolvePath)
         m_Canvas->OnEditValue = [this](uint32_t nodeId, const std::string& property, const UI::UIRect& at) { ShowValuePopup(nodeId, property, at); };
         m_Canvas->SetGraph(m_Asset ? &m_Asset->Graph : nullptr);
 
@@ -341,16 +337,37 @@ namespace Nox
         m_Details->Padding = UI::UIThickness::All(8.0f);
         right->AddChild(m_Details);
 
+        m_StateView = Ref<StateMachineViewV2>(new StateMachineViewV2());
+        m_StateView->Visible = false;
+        m_StateView->OnEdited = [this](bool structural) { OnCanvasEdited(structural); };
+        m_StateView->OnSelectionChanged = [this]() { m_DetailsDirty = true; };
+        m_StateView->OnOpenState = [this](uint32_t state) { m_Path.push_back(state); };
+        m_StateView->FirstParameter = [this]() { return m_Asset && !m_Asset->Graph.Parameters.empty() ? m_Asset->Graph.Parameters.front().Name : std::string(); };
+
+        // The middle: where the window is in the graph (shown below the top), then the canvas or the states view.
+        m_Breadcrumb = Ref<UI::UIStackBox>(new UI::UIStackBox(UI::UIOrientation::Horizontal, 4.0f));
+        m_Breadcrumb->WidthMode = UI::UISizeMode::Fill;
+        m_Breadcrumb->Padding = UI::UIThickness{ 6.0f, 3.0f, 6.0f, 3.0f };
+        m_Breadcrumb->Visible = false;
+        Ref<UI::UIStackBox> middle(new UI::UIStackBox(UI::UIOrientation::Vertical, 0.0f));
+        middle->WidthMode = UI::UISizeMode::Fill;
+        middle->HeightMode = UI::UISizeMode::Fill;
+        middle->AddChild(m_Breadcrumb);
+        middle->AddChild(m_Canvas);
+        middle->AddChild(m_StateView);
+
         Ref<UI::UIStackBox> body(new UI::UIStackBox(UI::UIOrientation::Horizontal, 0.0f));
         body->WidthMode = UI::UISizeMode::Fill;
         body->HeightMode = UI::UISizeMode::Fill;
         body->AddChild(left);
-        body->AddChild(m_Canvas);
+        body->AddChild(middle);
         body->AddChild(right);
         root->AddChild(body);
 
         m_Root = root;
         m_DetailsDirty = m_ParametersDirty = true;
+        m_PathLabels.clear();
+        ResolvePath();
         Update();
         return m_Root;
     }
@@ -367,6 +384,7 @@ namespace Nox
             CommitHistory();
         if (m_ParametersDirty)
             RebuildParameters();
+        ResolvePath();
         if (!m_PreviewSearched)
             FindPreviewMesh();
         if (m_DetailsDirty)
@@ -410,6 +428,7 @@ namespace Nox
         m_RedoStack.clear();
         m_Committed = m_Asset->Graph;
         m_EditPending = false;
+        ResolvePath();
         if (m_Canvas)
             m_Canvas->ReloadGraph();
         RebuildParameters();
@@ -494,6 +513,7 @@ namespace Nox
         m_Dirty = true;
         m_Asset->HasUnsavedEdits = true;
         m_Asset->Recompile();
+        ResolvePath(); // (a state's graph shown lives inside the graph that was replaced: the canvas takes its new address)
         if (m_Canvas)
             m_Canvas->ReloadGraph();
         // The Details and Parameters rows pointed into the graph that was replaced: built again now, before anything uses them.
@@ -606,6 +626,7 @@ namespace Nox
         m_RedoStack.clear();
         m_EditPending = false;
         m_Dirty = false;
+        ResolvePath();
         if (m_Canvas)
             m_Canvas->ReloadGraph();
         m_ParametersDirty = true;
@@ -734,6 +755,11 @@ namespace Nox
         m_Details->AddChild(title);
         if (!m_Asset || !m_Canvas)
             return;
+        if (m_ShownMachine)
+        {
+            BuildMachineDetails(*m_ShownMachine);
+            return;
+        }
         const std::vector<uint32_t>& selection = m_Canvas->GetSelectedNodes();
         if (selection.empty())
         {
@@ -746,7 +772,7 @@ namespace Nox
             m_Details->AddChild(MutedLabel(std::to_string(selection.size()) + " nodes selected."));
             return;
         }
-        NodeGraph& graph = m_Asset->Graph;
+        NodeGraph& graph = m_Canvas->GetGraph() ? *m_Canvas->GetGraph() : m_Asset->Graph; // (a state's graph when one is open)
         GraphNode* node = nullptr;
         for (GraphNode& candidate : graph.Nodes)
             if (candidate.Id == selection.front())
@@ -816,7 +842,7 @@ namespace Nox
             Ref<UI::UIStackBox> row(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
             Ref<UI::UIButton> addPin(new UI::UIButton("+ Pin", [this, nodeId, type, variable]()
             {
-                for (GraphNode& n : m_Asset->Graph.Nodes)
+                for (GraphNode& n : ShownGraph().Nodes)
                 {
                     if (n.Id != nodeId)
                         continue;
@@ -834,8 +860,8 @@ namespace Nox
                 Ref<UI::UIButton> removePin(new UI::UIButton("- Pin", [this, nodeId, type, variable, inputCount = static_cast<uint32_t>(pins.Inputs.size())]()
                 {
                     const uint32_t firstOfLast = inputCount - static_cast<uint32_t>(type->VariableInputs.size());
-                    std::erase_if(m_Asset->Graph.Links, [&](const GraphLink& l) { return l.ToNode == nodeId && l.ToPin >= firstOfLast; });
-                    for (GraphNode& n : m_Asset->Graph.Nodes)
+                    std::erase_if(ShownGraph().Links, [&](const GraphLink& l) { return l.ToNode == nodeId && l.ToPin >= firstOfLast; });
+                    for (GraphNode& n : ShownGraph().Nodes)
                     {
                         if (n.Id != nodeId)
                             continue;
@@ -872,7 +898,7 @@ namespace Nox
     void NodeGraphEditorV2::AddValueEditor(InspectorCardBuilder& builder, uint32_t nodeId, const std::string& key, const std::string& label,
                                            std::function<void()> rebuild)
     {
-        NodeGraph& graph = m_Asset->Graph;
+        NodeGraph& graph = ShownGraph();
         GraphNode* node = nullptr;
         for (GraphNode& candidate : graph.Nodes)
             if (candidate.Id == nodeId)
@@ -886,7 +912,7 @@ namespace Nox
         {
             std::vector<std::string> names;
             int selected = -1;
-            for (const GraphParameter& parameter : graph.Parameters)
+            for (const GraphParameter& parameter : m_Asset->Graph.Parameters) // (the asset's: a state's graph reads them too)
             {
                 if (!type->ParameterType.empty() && type->ParameterType != GraphParameterTypeName(parameter))
                     continue;
@@ -901,7 +927,7 @@ namespace Nox
             }
             builder.AddEnum(label, names, selected, [this, nodeId, names](int index)
             {
-                for (GraphNode& n : m_Asset->Graph.Nodes)
+                for (GraphNode& n : ShownGraph().Nodes)
                     if (n.Id == nodeId && index >= 0 && index < static_cast<int>(names.size()))
                         n.Properties[kParameterReferenceProperty] = names[static_cast<size_t>(index)];
                 MarkEdited(true);
@@ -959,7 +985,7 @@ namespace Nox
             // (the button follows the value: a pick or an undo changes it)
             builder.Syncs.push_back([this, nodeId, key, raw]()
             {
-                for (const GraphNode& n : m_Asset->Graph.Nodes)
+                for (const GraphNode& n : ShownGraph().Nodes)
                     if (n.Id == nodeId)
                         if (const auto found = n.Properties.find(key); found != n.Properties.end())
                             if (const auto* name = std::get_if<std::string>(&found->second))
@@ -978,7 +1004,7 @@ namespace Nox
             // The curve drawn and shaped by hand, then its keys as numbers, + Key and Smooth.
             const auto curveOf = [this, nodeId, key]() -> NodeGraphCurve*
             {
-                for (GraphNode& n : m_Asset->Graph.Nodes)
+                for (GraphNode& n : ShownGraph().Nodes)
                     if (n.Id == nodeId)
                         if (auto found = n.Properties.find(key); found != n.Properties.end())
                             return std::get_if<NodeGraphCurve>(&found->second);
@@ -1049,9 +1075,9 @@ namespace Nox
         if (!ctx || !m_Asset)
             return;
         // A bone opens its picker straight away (the popup would only hold its button).
-        for (const GraphNode& n : m_Asset->Graph.Nodes)
+        for (const GraphNode& n : ShownGraph().Nodes)
             if (n.Id == nodeId)
-                if (const NodeTypeDesc* type = NodeTypeRegistry::Find(m_Asset->Graph.Domain, n.TypeName))
+                if (const NodeTypeDesc* type = NodeTypeRegistry::Find(ShownGraph().Domain, n.TypeName))
                     if (const auto hint = type->PropertyAssetTypeHints.find(key); hint != type->PropertyAssetTypeHints.end() && hint->second == "Bone")
                     {
                         ShowBonePicker(nodeId, key, at);
@@ -1077,7 +1103,7 @@ namespace Nox
         if (!ctx || !m_Asset)
             return;
         std::string current;
-        for (const GraphNode& n : m_Asset->Graph.Nodes)
+        for (const GraphNode& n : ShownGraph().Nodes)
             if (n.Id == nodeId)
                 if (const auto found = n.Properties.find(key); found != n.Properties.end())
                     if (const auto* name = std::get_if<std::string>(&found->second))
@@ -1091,7 +1117,7 @@ namespace Nox
             UI::UIContext* context = ctx;
             NodeGraphEditorV2* self = this;
             context->ClearOverlay(); // (nothing of this lambda is used after: it goes with the popup)
-            for (GraphNode& n : self->m_Asset->Graph.Nodes)
+            for (GraphNode& n : self->ShownGraph().Nodes)
                 if (n.Id == id)
                     n.Properties[property] = chosen;
             self->MarkEdited(true);
@@ -1271,5 +1297,272 @@ namespace Nox
                     "world units), or the surface may be culled while pushed out of its bounds.";
         m_CompileStatus->ColorOverride = wpoWithoutBounds ? UI::UIColor{ 1.0f, 0.80f, 0.30f, 1.0f } : UI::UIColor{ 0.55f, 0.82f, 0.60f, 1.0f };
         m_CompileStatus->Text = text;
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------------------
+
+    NodeGraph& NodeGraphEditorV2::ShownGraph()
+    {
+        return m_Canvas && m_Canvas->GetGraph() ? *m_Canvas->GetGraph() : m_Asset->Graph;
+    }
+
+    void NodeGraphEditorV2::ResolvePath()
+    {
+        if (!m_Asset || !m_Canvas || !m_StateView)
+            return;
+        NodeGraph* graph = &m_Asset->Graph;
+        GraphNode* machine = nullptr;
+        std::vector<std::string> labels{ m_Title };
+        for (size_t i = 0; i < m_Path.size(); ++i)
+        {
+            if (i % 2 == 0)
+            {
+                const auto found = std::find_if(graph->Nodes.begin(), graph->Nodes.end(), [&](const GraphNode& n) { return n.Id == m_Path[i]; });
+                if (found == graph->Nodes.end() || !NodeTypeRegistry::Find(graph->Domain, found->TypeName) ||
+                    !NodeTypeRegistry::Find(graph->Domain, found->TypeName)->OwnsSubGraphs)
+                {
+                    m_Path.resize(i);
+                    break;
+                }
+                machine = &*found;
+                labels.push_back(machine->TypeName);
+            }
+            else
+            {
+                const auto found = std::find_if(machine->SubGraphs.begin(), machine->SubGraphs.end(), [&](const NodeSubGraph& st) { return st.Id == m_Path[i]; });
+                if (found == machine->SubGraphs.end())
+                {
+                    m_Path.resize(i);
+                    break;
+                }
+                graph = &found->Graph;
+                machine = nullptr;
+                labels.push_back(found->Name.empty() ? std::string("State") : found->Name);
+            }
+        }
+        if (m_Path.size() % 2 == 0)
+            machine = nullptr;
+
+        const bool moved = m_Path != m_ShownPath;
+        m_ShownPath = m_Path;
+        if (machine)
+        {
+            m_StateView->SetMachine(machine, m_Asset->Graph.Domain);
+            m_StateView->Visible = true;
+            m_Canvas->Visible = false;
+        }
+        else
+        {
+            m_StateView->SetMachine(nullptr, m_Asset->Graph.Domain);
+            // Another place: shown fresh (framed); the same graph at a new address (undo): the view stays.
+            if (moved)
+                m_Canvas->SetGraph(graph);
+            else if (m_Canvas->GetGraph() != graph)
+                m_Canvas->RebindGraph(graph);
+            m_StateView->Visible = false;
+            m_Canvas->Visible = true;
+        }
+        if (moved || machine != m_ShownMachine)
+            m_DetailsDirty = true;
+        m_ShownMachine = machine;
+        if (moved)
+            ClosePopup(); // (a value popup belongs to the place it was opened in)
+        if (labels != m_PathLabels)
+        {
+            m_PathLabels = std::move(labels);
+            RebuildBreadcrumb();
+        }
+    }
+
+    void NodeGraphEditorV2::RebuildBreadcrumb()
+    {
+        if (!m_Breadcrumb)
+            return;
+        m_Breadcrumb->ClearChildren();
+        m_Breadcrumb->Visible = m_PathLabels.size() > 1;
+        if (!m_Breadcrumb->Visible)
+            return;
+        // Up one level, then every level: a click goes back to it.
+        // (every click here only changes the path: the next update shows it and builds this bar again, never mid-click)
+        Ref<UI::UIButton> up(new UI::UIButton("Up", [this]() { if (!m_Path.empty()) m_Path.pop_back(); }));
+        up->Tooltip = "Back to where this was opened from";
+        up->Padding = UI::UIThickness::Symmetric(8.0f, 2.0f);
+        m_Breadcrumb->AddChild(up);
+        for (size_t k = 0; k < m_PathLabels.size(); ++k)
+        {
+            if (k > 0)
+            {
+                Ref<UI::UILabel> separator = MutedLabel(">", 13.0f);
+                separator->WordWrap = false;
+                separator->WidthMode = UI::UISizeMode::Auto;
+                separator->VAlign = UI::UIAlignment::Center;
+                m_Breadcrumb->AddChild(separator);
+            }
+            if (k + 1 == m_PathLabels.size())
+            {
+                Ref<UI::UILabel> here(new UI::UILabel(m_PathLabels[k], 13.5f));
+                here->VAlign = UI::UIAlignment::Center;
+                m_Breadcrumb->AddChild(here);
+                continue;
+            }
+            Ref<UI::UIButton> level(new UI::UIButton(m_PathLabels[k], [this, k]() { m_Path.resize(k); }));
+            level->Padding = UI::UIThickness::Symmetric(8.0f, 2.0f);
+            m_Breadcrumb->AddChild(level);
+        }
+    }
+
+    void NodeGraphEditorV2::BuildMachineDetails(GraphNode& machine)
+    {
+        Ref<UI::UIStackBox> body(new UI::UIStackBox(UI::UIOrientation::Vertical, 4.0f));
+        body->WidthMode = UI::UISizeMode::Fill;
+        m_Details->AddChild(body);
+        InspectorCardBuilder builder{ body, m_DetailSyncs, [this](bool) { MarkEdited(true); }, UI::UIContext::GetCurrent() };
+        auto edited = [this]() { MarkEdited(true); };
+        const auto stateName = [&machine](uint32_t id) -> std::string
+        {
+            for (const NodeSubGraph& state : machine.SubGraphs)
+                if (state.Id == id)
+                    return state.Name.empty() ? std::string("State") : state.Name;
+            return "?";
+        };
+        const int transitionIndex = m_StateView->SelectedTransition;
+        const uint32_t stateId = m_StateView->SelectedState;
+
+        if (transitionIndex >= 0 && transitionIndex < static_cast<int>(machine.Transitions.size()))
+        {
+            NodeTransition& transition = machine.Transitions[static_cast<size_t>(transitionIndex)];
+            m_Details->AddChild(Ref<UI::UILabel>(new UI::UILabel("Transition: " + stateName(transition.FromState) + " -> " + stateName(transition.ToState), 14.5f)));
+            builder.AddFloat("Blend Time (s)", &transition.Duration, 0.01f, 0.0f, 10.0f, "{:.2f}", edited, "How long the two states blend");
+            builder.AddBool("Ease In/Out", &transition.EaseInOut, edited, "Smooth start and end of the blend (off: linear)");
+            builder.AddBool("At End of State", &transition.AtStateEnd, edited,
+                            "Also waits for the state's animation to end (Unity's Has Exit Time): the blend starts Blend Time before its clips end. "
+                            "With no rules below it fires at the end alone (Jump Start -> Jump Loop). Uncheck Loop on those clips.");
+            builder.AddSubheader(transition.AtStateEnd ? "Rules (all must hold; none: at the end alone)" : "Rules (all must hold)",
+                                 "Parameter, comparison, value: set by the game (Animator.SetFloat ...)");
+            static const std::vector<std::string> kCompareNames{ "==", "!=", ">", ">=", "<", "<=", "is true", "is false" };
+            std::vector<std::string> parameterNames;
+            for (const GraphParameter& parameter : m_Asset->Graph.Parameters)
+                parameterNames.push_back(parameter.Name);
+            const size_t machineIndex = static_cast<size_t>(transitionIndex);
+            for (size_t r = 0; r < transition.Rules.size(); ++r)
+            {
+                TransitionRule& rule = transition.Rules[r];
+                const auto selected = std::find(parameterNames.begin(), parameterNames.end(), rule.Parameter);
+                builder.AddEnum("Rule " + std::to_string(r + 1), parameterNames.empty() ? std::vector<std::string>{ "(no parameters)" } : parameterNames,
+                                selected == parameterNames.end() ? -1 : static_cast<int>(selected - parameterNames.begin()),
+                                [this, &machine, machineIndex, r, parameterNames](int index)
+                {
+                    if (index < 0 || index >= static_cast<int>(parameterNames.size()) || machineIndex >= machine.Transitions.size() ||
+                        r >= machine.Transitions[machineIndex].Rules.size())
+                        return;
+                    TransitionRule& changed = machine.Transitions[machineIndex].Rules[r];
+                    changed.Parameter = parameterNames[static_cast<size_t>(index)];
+                    // The value takes the parameter's kind (a bool / trigger is tested with is true / is false).
+                    for (const GraphParameter& parameter : m_Asset->Graph.Parameters)
+                        if (parameter.Name == changed.Parameter)
+                        {
+                            if (parameter.IsTrigger || std::holds_alternative<bool>(parameter.DefaultValue))
+                            {
+                                if (changed.Compare != TransitionCompare::IsTrue && changed.Compare != TransitionCompare::IsFalse)
+                                    changed.Compare = TransitionCompare::IsTrue;
+                            }
+                            else if (changed.Value.index() != parameter.DefaultValue.index())
+                                changed.Value = std::holds_alternative<int32_t>(parameter.DefaultValue) ? NodeGraphValue(int32_t(0)) : NodeGraphValue(0.0f);
+                        }
+                    MarkEdited(true);
+                    m_DetailsDirty = true;
+                });
+                builder.AddEnum("  Compare", kCompareNames, static_cast<int>(rule.Compare), [this, &rule](int index)
+                {
+                    rule.Compare = static_cast<TransitionCompare>(index);
+                    MarkEdited(true);
+                    m_DetailsDirty = true; // (is true / is false take no value)
+                });
+                if (rule.Compare != TransitionCompare::IsTrue && rule.Compare != TransitionCompare::IsFalse)
+                {
+                    if (auto* real = std::get_if<float>(&rule.Value))
+                        builder.AddFloat("  Value", real, 0.01f, 0.0f, 0.0f, "{:.3f}", edited);
+                    else if (auto* number = std::get_if<int32_t>(&rule.Value))
+                        builder.AddInt32("  Value", number, 0, 0, edited);
+                    else if (auto* flag = std::get_if<bool>(&rule.Value))
+                        builder.AddBool("  Value", flag, edited);
+                }
+                Ref<UI::UIButton> remove(new UI::UIButton("Remove Rule", [this, &machine, machineIndex, r]()
+                {
+                    if (machineIndex < machine.Transitions.size() && r < machine.Transitions[machineIndex].Rules.size())
+                        machine.Transitions[machineIndex].Rules.erase(machine.Transitions[machineIndex].Rules.begin() + static_cast<std::ptrdiff_t>(r));
+                    MarkEdited(true);
+                    m_DetailsDirty = true;
+                }));
+                remove->Padding = UI::UIThickness::Symmetric(8.0f, 2.0f);
+                builder.AddRow("", remove);
+            }
+            Ref<UI::UIStackBox> row(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
+            Ref<UI::UIButton> addRule(new UI::UIButton("+ Add Rule", [this, &machine, machineIndex]()
+            {
+                if (machineIndex < machine.Transitions.size())
+                    machine.Transitions[machineIndex].Rules.push_back({ m_Asset->Graph.Parameters.empty() ? std::string() : m_Asset->Graph.Parameters.front().Name,
+                                                                       TransitionCompare::Greater, 0.0f });
+                MarkEdited(true);
+                m_DetailsDirty = true;
+            }));
+            row->AddChild(addRule);
+            Ref<UI::UIButton> remove(new UI::UIButton("Delete Transition", [this, &machine, machineIndex]()
+            {
+                if (machineIndex < machine.Transitions.size())
+                    machine.Transitions.erase(machine.Transitions.begin() + static_cast<std::ptrdiff_t>(machineIndex));
+                m_StateView->Select(0, -1);
+                MarkEdited(true);
+                m_DetailsDirty = true;
+            }));
+            row->AddChild(remove);
+            builder.AddRow("", row);
+            if (m_Asset->Graph.Parameters.empty())
+                m_Details->AddChild(MutedLabel("No parameters yet: + Add on the left (a Float Speed, a Trigger Jump), then pick it in a rule."));
+            return;
+        }
+
+        NodeSubGraph* state = nullptr;
+        for (NodeSubGraph& candidate : machine.SubGraphs)
+            if (candidate.Id == stateId)
+                state = &candidate;
+        if (state)
+        {
+            m_Details->AddChild(Ref<UI::UILabel>(new UI::UILabel("State", 14.5f)));
+            builder.AddString("Name", &state->Name, "State", [this]() { MarkEdited(true); m_PathLabels.clear(); });
+            const bool entry = StateMachineViewV2::EntryState(machine) == state->Id;
+            if (entry)
+                builder.AddReadonly("Entry", "The machine starts in this state");
+            Ref<UI::UIStackBox> row(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
+            const uint32_t id = state->Id;
+            Ref<UI::UIButton> open(new UI::UIButton("Open State Graph", [this, id]() { m_Path.push_back(id); }));
+            open->Tooltip = "What this state plays (double-click the state too)";
+            row->AddChild(open);
+            if (!entry)
+            {
+                Ref<UI::UIButton> setEntry(new UI::UIButton("Set as Entry State", [this, &machine, id]()
+                {
+                    StateMachineViewV2::SetEntryState(machine, id);
+                    MarkEdited(true);
+                    m_DetailsDirty = true;
+                }));
+                row->AddChild(setEntry);
+            }
+            builder.AddRow("", row);
+            Ref<UI::UIButton> remove(new UI::UIButton("Delete State", [this, &machine, id]()
+            {
+                StateMachineViewV2::DeleteState(machine, id);
+                m_StateView->Select(0, -1);
+                MarkEdited(true);
+                m_DetailsDirty = true;
+            }));
+            remove->Tooltip = "With its transitions (Ctrl+Z brings it back)";
+            builder.AddRow("", remove);
+            builder.AddReadonly("Its Graph", std::to_string(state->Graph.Nodes.size()) + " nodes");
+            return;
+        }
+        m_Details->AddChild(MutedLabel(std::to_string(machine.SubGraphs.size()) + " states, " + std::to_string(machine.Transitions.size()) +
+                                       " transitions.\n\nRight-click: Add State. Drag from a state's round handle onto another state: a transition "
+                                       "(click its middle button to edit its rules). Double-click a state: what it plays. F frames the states."));
     }
 }

@@ -41,6 +41,8 @@ namespace Nox
         NodeGraph* GetGraph() const { return m_Graph; }
         // The graph was replaced (undo / redo): drops what is selected that is gone, keeps the view.
         void ReloadGraph();
+        // The same graph at a new address (the window's whole graph was replaced and this one is inside it): the view stays.
+        void RebindGraph(NodeGraph* graph) { m_Graph = graph; ReloadGraph(); }
         void FrameAll();
         void FrameSelection();
 

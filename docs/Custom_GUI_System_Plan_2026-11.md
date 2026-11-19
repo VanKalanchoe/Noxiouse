@@ -317,7 +317,7 @@ it yet):
 |---|---|---|---|
 | G1 | Graph editor: canvas, window, parameters, node Details | NodeGraphEditorPanel, ThedmdCanvasBackend, NodeGraphPropertyEditor | **built** (below) |
 | G2 | Graph editor: in-node value widgets, curve editor, bone picker, parameter drag onto the canvas, material graph compile status | same | built (not run on a GPU / not user-tested) |
-| G3 | Graph editor: state machine view (states, transitions, rules) | ThedmdCanvasBackend::DrawStateMachine, the panel's inspector | open |
+| G3 | Graph editor: state machine view (states, transitions, rules) | ThedmdCanvasBackend::DrawStateMachine, the panel's inspector | built (not run on a GPU / not user-tested) |
 | G4 | Graph editor: animation preview (skeletal mesh), audio preview (play, sliders, meter) | the panel's previews | open |
 | R1 | Renderer Settings / Stats / Post Process windows | EditorLayer, PostProcessSettingsUI | **built** (below) |
 | M1 | Material Editor (full: graph slot, Custom Lit, lobes, preview sphere) | MaterialEditorPanel | **built** (below) |
@@ -605,6 +605,23 @@ World Position Offset without Max Displacement warning. Flaws not carried over: 
 node as wide as its widgets and changes there did not merge into one undo step per drag; the curve's key rows let a key's x pass its
 neighbour and the keys were re-sorted under the rows (a row then edited another key) -- x is now kept between the neighbours; a popup
 rebuilt from inside its own click (a key added) is built next frame (rebuilding it at once destroyed the button running the click).
+Checked: syntax check. Not run on a GPU.
+
+**G3 -- graph editor: state machines (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/StateMachineViewV2`. Double-click a
+state machine node: its states view replaces the canvas, with a bar above it (Up, then every level -- the graph's name, the machine, the
+state -- a click goes back there). States are boxes (the entry state's header green, the others red; their node count); drag to move,
+double-click (or Details > Open State Graph) opens what the state plays on the canvas, where every node edit works as in the top graph and
+Get nodes read the asset's parameters. Transitions are straight arrows in Unreal's way -- two in opposite directions side by side, a round
+button in the middle with the rule count ("E": at the end of the state alone) --; drag from a state's round handle (its right edge) onto
+another state to add one (it starts with a rule on the first parameter so it does not fire at once); click an arrow or its button to
+select it. Right click: empty space Add State; a state Open State Graph / Set as Entry State / Delete State; a transition Delete
+Transition. Delete removes the selection; F frames the states. Details: a state's Name, Entry, Open State Graph, Set as Entry State,
+Delete State; a transition's Blend Time (s), Ease In/Out, At End of State, its rules (parameter, Compare, Value -- picking a bool or
+trigger parameter switches the comparison to is true, a number parameter gives the value its kind), Remove Rule, + Add Rule, Delete
+Transition. Undo / redo cover all of it (one graph history); an undo while a state's graph is open keeps the view (the canvas takes the
+graph's new address). Flaws not carried over: the old transition wires were routed around boxes with right-angle corners and every
+transition's route recomputed when any box moved (now straight arrows, Unreal's look, no routing); deleting the entry state left a
+dangling entry until the next pick (now another state becomes the entry); a rule kept a float value against a bool parameter.
 Checked: syntax check. Not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of

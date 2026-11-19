@@ -21,6 +21,8 @@ namespace Nox
         class UIStackBox;
     }
     class NodeGraphCanvasV2;
+    class StateMachineViewV2;
+    struct GraphNode;
     struct InspectorCardBuilder;
 
     // One open graph (.nanimgraph / .naudiograph / .nmatgraph) in NoxEditorV2: toolbar, the graph's parameters on the left, the
@@ -80,6 +82,14 @@ namespace Nox
         void SetPreviewMesh(AssetHandle mesh);
         // A material graph compiled as it is on the canvas (microseconds): the error, or what it sets and its parameters.
         void RefreshCompileStatus();
+        // Which graph the window shows (G3): m_Path is node, state, node, state ... from the asset's graph down -- an odd length ends
+        // on a state machine (its states view), an even one on a graph (the canvas). Parts that no longer exist are dropped; the
+        // canvas / states view and the breadcrumb follow. Run every frame and after the graph is replaced (undo, revert, reload).
+        void ResolvePath();
+        void RebuildBreadcrumb();
+        void BuildMachineDetails(GraphNode& machine);
+        // The graph the canvas shows (a state's graph when one is open, else the asset's).
+        NodeGraph& ShownGraph();
 
         AssetHandle m_Handle = 0;
         Ref<NodeGraphAsset> m_Asset;
@@ -95,6 +105,11 @@ namespace Nox
 
         Ref<UI::UIElement> m_Root;
         Ref<NodeGraphCanvasV2> m_Canvas;
+        Ref<StateMachineViewV2> m_StateView;
+        Ref<UI::UIStackBox> m_Breadcrumb;
+        std::vector<uint32_t> m_Path, m_ShownPath;
+        std::vector<std::string> m_PathLabels;
+        GraphNode* m_ShownMachine = nullptr;
         Ref<UI::UIStackBox> m_Details;
         Ref<UI::UIStackBox> m_Parameters;
         Ref<UI::UIButton> m_SaveButton;
