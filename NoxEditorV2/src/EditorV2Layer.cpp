@@ -49,6 +49,7 @@
 #include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Scene/Components.h"
+#include "NoxCore/Scene/HLODBuilder.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/EntityBounds.h"
 #include "NoxCore/Scene/ModelInstance.h"
@@ -691,6 +692,7 @@ namespace Nox
 
     void EditorV2Layer::NewScene()
     {
+        CancelHLODBuild("new scene");
         if (m_SceneState != SceneState::Edit)
             OnSceneStop();
         SaveEditorCameras();
@@ -708,6 +710,7 @@ namespace Nox
 
     void EditorV2Layer::OpenScene(AssetHandle handle)
     {
+        CancelHLODBuild("another scene opened");
         if (handle == 0 || !Project::GetActive())
             return;
         if (m_SceneState != SceneState::Edit)
@@ -1672,7 +1675,7 @@ namespace Nox
 
     void EditorV2Layer::Undo()
     {
-        if (m_SceneState != SceneState::Edit || !m_History.CanUndo())
+        if (m_SceneState != SceneState::Edit || !m_History.CanUndo() || m_HLODBuild) // (an HLOD build reads the scene it started from)
             return;
         const std::string name = m_History.GetUndoName();
         RestoreHistoryState(m_History.StepBack());
@@ -1681,7 +1684,7 @@ namespace Nox
 
     void EditorV2Layer::Redo()
     {
-        if (m_SceneState != SceneState::Edit || !m_History.CanRedo())
+        if (m_SceneState != SceneState::Edit || !m_History.CanRedo() || m_HLODBuild)
             return;
         const std::string name = m_History.GetRedoName();
         RestoreHistoryState(m_History.StepForward());
@@ -1740,11 +1743,14 @@ namespace Nox
             m_ActiveScene->CollectAssetReferences(referencedAssets);
         AssetPreviewRenderer::Get().CollectAssetReferences(referencedAssets); // what the thumbnails draw right now
         m_ContentBrowserPanel.CollectAssetReferences(referencedAssets);       // textures shown as tile pictures
+        if (m_HLODBuild)                                                       // the cell being built waits for its models and prefabs
+            m_HLODBuild->CollectAssetReferences(referencedAssets);
         Project::GetActive()->GetEditorAssetManager()->UnloadUnusedAssets(referencedAssets);
     }
 
     void EditorV2Layer::OnScenePlay()
     {
+        CancelHLODBuild("Play");
         m_EditorSceneReferencesValid = false;
         SetViewMode(EditorViewMode::Perspective);
         if (m_SceneState == SceneState::Simulate)
@@ -2224,6 +2230,7 @@ namespace Nox
 
     void EditorV2Layer::OnSceneSimulate()
     {
+        CancelHLODBuild("Simulate");
         m_EditorSceneReferencesValid = false;
         if (m_SceneState == SceneState::Play)
             OnSceneStop();
@@ -3200,6 +3207,31 @@ namespace Nox
             }
         }
 
+        // A world's loaded cells: the content bounds of each, in green (World Partition window open, Show in Viewport).
+        if (m_WorldPartitionPanel.GetRoot() && m_WorldPartitionPanel.ShowCellsInViewport() && m_ActiveScene && m_ActiveScene->IsWorldPartitioned())
+        {
+            UILayer* ui = Application::Get().GetUILayer();
+            if (ui && ui->GetDockSpaceRef() && ui->GetDockSpaceRef()->HasPanel("World Partition"))
+            {
+                constexpr glm::vec4 kCellColor(0.3f, 0.85f, 0.45f, 0.8f);
+                constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
+                const WorldPartition& world = m_ActiveScene->GetWorldPartition();
+                for (const WorldCellCoord& cell : m_ActiveScene->GetLoadedWorldCells(false))
+                {
+                    const auto info = world.Cells.find(cell);
+                    if (info == world.Cells.end())
+                        continue;
+                    glm::vec3 corners[8];
+                    for (int i = 0; i < 8; ++i)
+                        corners[i] = m_Renderer->ToRenderSpace(glm::dvec3((i & 1) ? info->second.BoundsMax.x : info->second.BoundsMin.x,
+                                                                          (i & 2) ? info->second.BoundsMax.y : info->second.BoundsMin.y,
+                                                                          (i & 4) ? info->second.BoundsMax.z : info->second.BoundsMin.z));
+                    for (const auto& edge : edges)
+                        m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], kCellColor);
+                }
+            }
+        }
+
         if (m_ViewportTools.ShowPhysicsColliders)
         {
             {
@@ -3316,6 +3348,8 @@ namespace Nox
             text = "Building scripts...";
         else if (m_SceneLoad)
             text = "Opening scene...";
+        else if (m_HLODBuild)
+            text = std::format("Building HLODs {:.0f} %: {}", m_HLODBuild->GetProgress() * 100.0f, m_HLODBuild->GetStage());
         else if (const std::string busy = m_ContentBrowserPanel.GetBusyText(); !busy.empty())
             text = busy;
         if (loading > 0 || streaming > 0 || blasBuilds > 0)
@@ -3393,6 +3427,19 @@ namespace Nox
                 m_FocusOnOpen = middle;
                 OpenScene(scene);
             }
+        }
+
+        // Build HLODs: a step a frame; done, the scene is saved (its index names the new HLOD cells).
+        if (m_HLODBuild && m_HLODBuild->Step())
+        {
+            const bool failed = m_HLODBuild->Failed();
+            const size_t built = m_HLODBuild->GetBuiltCount();
+            m_HLODBuild.reset();
+            if (!failed)
+                SaveScene();
+            NOX_CORE_INFO("Build HLODs: {} ({} HLODs)", failed ? "failed (see above)" : "done", built);
+            Notify(failed ? UI::UINotificationSeverity::Error : UI::UINotificationSeverity::Success, failed ? "HLOD build failed" : "HLODs built",
+                   failed ? std::string("See the Output Log.") : std::to_string(built) + " HLODs; the scene was saved.");
         }
 
         m_ScriptBuilder.Update();
@@ -4445,7 +4492,12 @@ namespace Nox
                 {IsPanelDocked("Output Log") ? "Output Log: Back to Drawer" : "Output Log: Dock in Layout", "",
                  [this]() { if (IsPanelDocked("Output Log")) UndockPage(DrawerPage::Log); else DockPage(DrawerPage::Log); }},
                 {"Profiler", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
-                {"World Partition", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
+                {"World Partition", "", [this, uiLayer]()
+                {
+                    if (!m_WorldPartitionPanel.GetRoot())
+                        m_WorldPartitionPanel.BuildUI(&uiLayer->GetContext());
+                    OpenToolWindow("World Partition", m_WorldPartitionPanel.GetRoot(), { 560.0f, 680.0f });
+                }, false, true, false, false, "A world's cells on a map: load and unload them, its settings, HLODs."},
                 {"Levels", "", [this, uiLayer]()
                 {
                     if (!m_LevelsPanel.GetRoot())
@@ -4601,6 +4653,56 @@ namespace Nox
             ShowSaveChangesDialog(text, std::move(save), std::move(dontSave));
         };
         m_LevelsPanel.SetHooks(std::move(levelHooks));
+
+        WorldPartitionV2Panel::Hooks worldHooks;
+        worldHooks.ActiveScene = [this]() { return m_ActiveScene; };
+        worldHooks.Editing = [this]() { return m_SceneState == SceneState::Edit; };
+        worldHooks.StreamingSource = [this]()
+        {
+            // The camera the cells stream around: the primary camera in Play, the editor camera in Simulate; editing, what the
+            // editor camera looks at (where a world opens its cells).
+            glm::dvec3 source = m_SceneState == SceneState::Edit ? m_EditorCamera.GetFocalPoint() : m_EditorCamera.GetPosition();
+            if (m_SceneState == SceneState::Play && m_ActiveScene)
+                if (Entity camera = m_ActiveScene->GetPrimaryCameraEntity(); camera && camera.HasComponent<WorldTransformComponent>())
+                    source = camera.GetComponent<WorldTransformComponent>().GetPosition();
+            return source;
+        };
+        worldHooks.Save = [this]() { SaveScene(); };
+        worldHooks.SceneChanged = [this]() { m_HistoryCheckRequested = true; };
+        worldHooks.BuildHLODs = [this]() { StartHLODBuild(); };
+        worldHooks.RunningBuild = [this]() -> const HLODBuilder* { return m_HLODBuild.get(); };
+        worldHooks.AskSave = [this](const std::string& text, std::function<void()> save, std::function<void()> dontSave)
+        {
+            ShowSaveChangesDialog(text, std::move(save), std::move(dontSave));
+        };
+        m_WorldPartitionPanel.SetHooks(std::move(worldHooks));
+    }
+
+    void EditorV2Layer::CancelHLODBuild(const char* reason)
+    {
+        if (!m_HLODBuild)
+            return;
+        NOX_CORE_WARN("Build HLODs cancelled ({}): the HLODs built so far are imported, the HLOD grid is not written", reason);
+        Notify(UI::UINotificationSeverity::Warning, "HLOD build cancelled", std::string(reason) + ": the HLOD grid was not written.");
+        m_HLODBuild.reset();
+    }
+
+    void EditorV2Layer::StartHLODBuild()
+    {
+        if (m_HLODBuild || m_SceneLoad || m_SceneState != SceneState::Edit || !m_EditorScene || !m_EditorScene->IsWorldPartitioned())
+            return;
+        if (m_EditorScenePath.empty())
+        {
+            Notify(UI::UINotificationSeverity::Warning, "Save the scene first", "Its cells are built from their files.");
+            return;
+        }
+        SaveScene(); // the cells' files are what is built
+        m_HLODBuild = CreateScope<HLODBuilder>(m_EditorScene);
+        if (m_HLODBuild->Failed())
+        {
+            m_HLODBuild.reset();
+            Notify(UI::UINotificationSeverity::Error, "HLOD build not started", "See the Output Log.");
+        }
     }
 
 
@@ -4653,6 +4755,8 @@ namespace Nox
             m_ProjectSettings.Update();
         if (m_LevelsPanel.GetRoot() && dock->HasPanel("Levels"))
             m_LevelsPanel.Update();
+        if (m_WorldPartitionPanel.GetRoot() && dock->HasPanel("World Partition"))
+            m_WorldPartitionPanel.Update();
     }
 
     std::filesystem::path EditorV2Layer::LayoutDirectory() const

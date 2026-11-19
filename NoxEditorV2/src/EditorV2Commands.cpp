@@ -8,6 +8,7 @@
 #include "NoxCore/Core/Input.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Project/Project.h"
+#include "NoxCore/Scene/HLODBuilder.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UIContext.h"
@@ -92,9 +93,9 @@ namespace Nox
 
         // Edit (the level editor's keys: not while the Content Browser, the Output Log or an asset editor has the keyboard).
         add("Edit.Undo", "Undo", "Edit", CommandScope::Level, Chord(SDL_SCANCODE_Z, true), [this]() { Undo(); },
-            [this, editing]() { return editing() && m_History.CanUndo(); });
+            [this, editing]() { return editing() && m_History.CanUndo() && !m_HLODBuild; });
         add("Edit.Redo", "Redo", "Edit", CommandScope::Level, Chord(SDL_SCANCODE_Y, true), [this]() { Redo(); },
-            [this, editing]() { return editing() && m_History.CanRedo(); }, "", Chord(SDL_SCANCODE_Z, true, true));
+            [this, editing]() { return editing() && m_History.CanRedo() && !m_HLODBuild; }, "", Chord(SDL_SCANCODE_Z, true, true));
         add("Edit.Duplicate", "Duplicate", "Edit", CommandScope::Level, Chord(SDL_SCANCODE_D, true),
             [this]() { m_SceneHierarchyPanel.DuplicateSelection(); }, [this, editing]() { return editing() && !m_Selection.IsEmpty(); },
             "Copies of the selected entities, selected.");

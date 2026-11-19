@@ -321,7 +321,7 @@ it yet):
 | G4 | Graph editor: animation preview (skeletal mesh), audio preview (play, sliders, meter) | the panel's previews | open |
 | R1 | Renderer Settings / Stats / Post Process windows | EditorLayer, PostProcessSettingsUI | **built** (below) |
 | M1 | Material Editor (full: graph slot, Custom Lit, lobes, preview sphere) | MaterialEditorPanel | open (V2 has the basic window) |
-| L1 | Levels, World Partition (HLOD) panels | LevelsPanel, WorldPartitionPanel | open |
+| L1 | Levels, World Partition (HLOD) panels | LevelsPanel, WorldPartitionPanel | **built** (below) |
 | A1 | Audio Mixer | MixerPanel, AudioWidgets | open |
 | T1 | Timeline (sequencer), Animation Clip | TimelinePanel, AnimationClipPanel | open |
 | P1 | Profiler, Render Graph | ProfilerPanel, RenderGraphPanel | open |
@@ -437,6 +437,21 @@ the levels change; their values follow the scene every frame. Flaws of the old p
 asks for an undo step now and marks the scene unsaved; a new level's file was written by hand as text (a second copy of the scene
 format) -- the scene serializer writes it; Remove asked "Save and Remove / Remove / Cancel" its own way -- it is the editor's
 Save / Don't Save / Cancel question now. Checked: syntax check. Not run on a GPU.
+
+**L1 part 2 -- World Partition and HLOD builds (built, not run on a GPU / not user-tested).** `Panels/WorldPartitionV2Panel`, Window >
+World Partition: a scene that is not a world shows the conversion (Cell Size, Loading Range, Convert to World Partition); a world
+shows the cards Settings (Loading Range; Cell Size + Apply Cell Size, greyed with "load every cell first" until all are loaded) and
+HLOD (Show HLODs, the HLOD settings, Build HLODs; while a build runs, its progress), the cell counts, the buttons Load Around Camera /
+Load All / Unload All / Load Selected / Unload Selected, Follow Camera, Show in Viewport, and the map (`WorldPartitionMap`: the cells
+coloured by stage, their content bounds, names and entity counts, the camera and its loading range; right / middle drag pans, the
+wheel zooms, click selects (Ctrl adds), a drag box-selects, a double-click loads a cell; the tooltip names the cell under the
+pointer). The layer now builds HLODs (`StartHLODBuild`, a step a frame, the scene saved when done; cancelled by New Scene, opening a
+scene, Play and Simulate; Undo / Redo wait while it runs; its assets are kept loaded; the status bar shows its progress) and draws the
+loaded cells' bounds in the viewport. Flaws not carried over: changing a world setting (loading range, cell size, HLOD settings,
+conversion) was not an edit -- each is an undo step and marks the scene unsaved now; unloading changed cells offered only "Save and
+Unload / Cancel" -- it is the editor's Save / Don't Save / Cancel (Don't Save unloads and drops those cells' changes); the map's colours
+were constants -- theme tokens now (`WorldMapBackground`, `WorldMapGrid`, `WorldCellUnloaded` / `Loading` / `Loaded` / `Activated` /
+`Border` / `Selected` / `Bounds`, `WorldMapCamera`). Checked: syntax check. Not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and
