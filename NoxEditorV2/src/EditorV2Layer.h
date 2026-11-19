@@ -265,6 +265,14 @@ namespace Nox
 
         ScriptBuilder m_ScriptBuilder;
         Scope<StreamingTestWorldGenerator> m_TestWorldGeneration;
+        // File > Package Game / Server, Create > Streaming Test World (EditorV2Dialogs.cpp).
+        void ShowPackageDialog(bool server);
+        void ShowStreamingTestWorldDialog();
+        void CancelStreamingTestWorld();
+        PackageSettings m_PackageSettings;
+        std::string m_PackageOutputText;
+        std::vector<std::function<void()>> m_PackageSyncs;
+        StreamingTestWorldGenerator::Settings m_TestWorldSettings = [] { StreamingTestWorldGenerator::Settings s; s.TargetGigabytes = 2.0f; return s; }();
         std::optional<glm::dvec3> m_FocusOnOpen;
 
         bool m_CreateBasicScene = false;

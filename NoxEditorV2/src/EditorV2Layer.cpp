@@ -3348,6 +3348,8 @@ namespace Nox
             text = "Building scripts...";
         else if (m_SceneLoad)
             text = "Opening scene...";
+        else if (m_TestWorldGeneration)
+            text = std::format("Generating the streaming test world {:.0f} %: {}", m_TestWorldGeneration->GetProgress() * 100.0f, m_TestWorldGeneration->GetStage());
         else if (m_HLODBuild)
             text = std::format("Building HLODs {:.0f} %: {}", m_HLODBuild->GetProgress() * 100.0f, m_HLODBuild->GetStage());
         else if (const std::string busy = m_ContentBrowserPanel.GetBusyText(); !busy.empty())
@@ -4303,8 +4305,10 @@ namespace Nox
                 {"Save Scene", m_Commands.ShortcutText("File.SaveScene"), [this]() { m_Commands.Execute("File.SaveScene"); }},
                 {"Save Scene As...", m_Commands.ShortcutText("File.SaveSceneAs"), [this]() { m_Commands.Execute("File.SaveSceneAs"); }},
                 {"", "", {}, true},
-                {"Package Game...", "", {}, false, false, false, false, "Packaging dialog not yet ported to NoxEditorV2"},
-                {"Package Server...", "", {}, false, false, false, false, "Packaging dialog not yet ported to NoxEditorV2"},
+                {"Package Game...", "", [this]() { ShowPackageDialog(false); }, false, true, false, false,
+                 "A folder that runs the game on its own (the runtime, scripts, shaders and the cooked assets the scenes need)."},
+                {"Package Server...", "", [this]() { ShowPackageDialog(true); }, false, true, false, false,
+                 "A dedicated server build (no window, GPU or sound; clients join with --connect)."},
                 {"", "", {}, true},
                 {"Save Layout", "", [this]()
                 {
@@ -4361,8 +4365,10 @@ namespace Nox
                 }},
                 {"Shapes", "", {}, false, true, false, false, "", std::move(shapeItems)},
                 {"", "", {}, true},
-                {"Streaming Test World...", "", {}, false, false, false, false,
-                 "A world partition larger than RAM and VRAM (settings dialog not yet ported to NoxEditorV2)."}
+                {"Streaming Test World...", "", [this]() { ShowStreamingTestWorldDialog(); }, false, !m_TestWorldGeneration && m_SceneState == SceneState::Edit, false, false,
+                 "A world partition larger than RAM and VRAM (every cell its own terrain mesh and texture), to fly through and see streaming keep up."},
+                {"Cancel Streaming Test World", "", [this]() { CancelStreamingTestWorld(); }, false, m_TestWorldGeneration != nullptr, false, false,
+                 "Stops the generation (what was written stays on disk, unregistered)."}
             };
         });
 

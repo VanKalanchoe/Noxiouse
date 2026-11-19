@@ -487,6 +487,16 @@ drawn that frame; colours were constants (theme tokens `ProfilerBackground`, `Pr
 `ProfilerVram`, `ProfilerRam`, `Profiler*Lane`, `TableBackground`). Not yet: Save / Load use the blocking file dialog (E7). Checked:
 syntax check. Not run on a GPU.
 
+**D1 part 1 -- Package Game / Server, Streaming Test World (built, not run on a GPU / not user-tested).** `EditorV2Dialogs.cpp`:
+File > Package Game... / Package Server... open a dialog (what the target is, Output Folder, Every Scene, Pack Files, Precompiled
+Shaders Only -- greyed for a server --, Self-Contained .NET, the Package button and the result with its warnings; the folder typed is
+kept per target for the session). Create > Streaming Test World... opens the generator's settings (Size on Disk, Cell Size, Loading
+Range, Tile Quads, Props per Cell, World Offset, Texture Size, Folder, Camera Script) with Generate; its progress is in the status bar
+and Create > Cancel Streaming Test World stops it. Flaws not carried over: the test world defaulted to 20 GB on disk although its own
+tooltip says to start at 2 GB (2 GB now); a running generation could only be cancelled from a floating window. Not yet: packaging
+still runs on the main thread (the editor waits, as before -- the cook reads the asset manager, which is not safe from a worker).
+Checked: syntax check. Not run on a GPU.
+
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and
 `Panels/NodeGraph/NodeGraphEditorV2` (the window: Save / Undo / Redo / Frame, Parameters on the left, Details on the right). Opened by
