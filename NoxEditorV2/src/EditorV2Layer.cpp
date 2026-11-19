@@ -3203,6 +3203,8 @@ namespace Nox
             text = "Building scripts...";
         else if (m_SceneLoad)
             text = "Opening scene...";
+        else if (const std::string busy = m_ContentBrowserPanel.GetBusyText(); !busy.empty())
+            text = busy;
         if (loading > 0 || streaming > 0 || blasBuilds > 0)
         {
             std::string background;

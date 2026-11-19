@@ -1,7 +1,10 @@
 #pragma once
 
 #include <filesystem>
+#include <chrono>
 #include <functional>
+#include <future>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -97,6 +100,8 @@ namespace Nox
         void SetNotifyCallback(std::function<void(UI::UINotification)> callback) { m_Notify = std::move(callback); }
         // An element put at the right end of the toolbar (the editor's "Dock in Layout" while the browser is in the drawer).
         void SetToolbarExtra(Ref<UI::UIElement> element) { m_ToolbarExtra = std::move(element); }
+        // What the browser is busy with in the background (the status bar shows it), empty when nothing.
+        std::string GetBusyText() const;
 
     private:
         friend class ContentTileView;
@@ -118,6 +123,12 @@ namespace Nox
         void Duplicate(AssetHandle handle);
         void RequestDelete(std::vector<AssetHandle> handles);
         void ShowReferences(AssetHandle handle);
+        // Who uses assets is looked up on a worker thread (it reads the project's files); the dialog opens when it is known.
+        enum class ReferenceCheckMode : uint8_t { Delete, Show };
+        void StartReferenceCheck(ReferenceCheckMode mode, std::vector<AssetHandle> handles);
+        void FinishReferenceCheck();
+        void ShowDeleteDialog(UI::UIContext& context, const std::vector<AssetHandle>& handles,
+                              const std::vector<std::vector<std::filesystem::path>>& users, const std::unordered_set<AssetHandle>& inScene);
         void MoveAssets(const std::vector<AssetHandle>& handles, const std::filesystem::path& absoluteFolder);
         void CreatePrefabFromDrop(uint64_t dragId, const std::filesystem::path& absoluteFolder);
         void NewFolder();
@@ -173,5 +184,16 @@ namespace Nox
         std::function<void(std::unordered_set<AssetHandle>&)> m_SceneReferences;
         std::function<void(UI::UINotification)> m_Notify;
         AssetHandle m_PendingShow = 0;
+
+        struct ReferenceCheck
+        {
+            ReferenceCheckMode Mode = ReferenceCheckMode::Delete;
+            std::vector<AssetHandle> Handles;
+            std::unordered_set<AssetHandle> InScene;          // what the open scenes use (taken on the main thread)
+            std::future<std::vector<std::vector<std::filesystem::path>>> Users; // per handle
+            UI::UIContext* Context = nullptr;                 // the window it was asked in (the dialog opens there)
+            std::string Name;                                 // the first asset's file name
+        };
+        std::unique_ptr<ReferenceCheck> m_ReferenceCheck;
     };
 }

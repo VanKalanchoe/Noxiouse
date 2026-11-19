@@ -281,6 +281,15 @@ editors are not ported).
 | Small text | -- | Status bar "Ready" 15 px, Output Log lines 15 px (rows 22 px), level chips 14.5, Cmd 15, tile type label 12.5 and brighter |
 | Bottom tabs take space from the viewport | They were docked | Unreal's Content Drawer: the status bar's **Content Drawer** (Ctrl+Space) and **Output Log** (`) tabs slide the page up over the viewport (`EditorCenterArea`, which does not resize the viewport); a click outside, Escape or dragging an asset out closes it; its top edge resizes it. **Dock in Layout** docks a page under the viewport, Window > ... **Back to Drawer** returns it. The default layout has nothing docked at the bottom; the layout file is `EditorV2.2.nlayout` (older ones start fresh once) |
 
+Then (user test: "added a material, delete freezes the program"): Delete first asks which project files use the asset, and
+`EditorAssetManager::FindReferences` read every file that can name an asset -- every cooked mesh too, hundreds of MB for Bistro -- and
+indexed every number and text run in it, on the main thread. Now: `FindReferencesIn` works on a copy of the registry on a worker thread
+(the browser shows the dialog when the answer is there; the status bar says "Looking for what uses ..."); materials and meshes are read
+only for a texture, material graph or material shader (the only assets they carry inside); a file is searched for the handle's digits
+and the asset's file name (case ignored) and only the text around a hit is judged. An offline comparison with the old test gives the
+same answers on handles, longer numbers, upper-case and absolute paths, binary strings and unrelated files; a 300 MB mesh takes 1.9 s
+instead of 5.2 s, and a material's delete does not read meshes at all. Not timed on the user's project.
+
 Checked: syntax check of every touched source with the vendors fetched; the headless test, rebuilt (the old one was lost with the
 container): 15 checks with the real dock space, menus, dropdown, tree view and the real `ContentTileView` / `ContentPathBar` extracted
 from the panel source (menu items and dropdown choices run, the wheel scrolls tiles and tree, a refresh keeps the scroll position, path

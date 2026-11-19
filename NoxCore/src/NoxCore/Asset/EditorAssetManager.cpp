@@ -1,4 +1,6 @@
 #include "EditorAssetManager.h"
+
+#include <functional>
 #include "NoxCore/NodeGraph/NodeGraphAsset.h"
 
 #include <unordered_set>
@@ -1420,10 +1422,11 @@ namespace Nox
 
         // Files that can name assets: the referencing asset types, world cells (scene files that are not assets), the project's scripts
         // and the project file.
-        std::vector<std::pair<std::filesystem::path, AssetHandle>> ReferencingFiles(const AssetRegistry& registry)
+        std::vector<std::pair<std::filesystem::path, AssetHandle>> ReferencingFiles(const AssetRegistry& registry,
+                                                                                   const std::filesystem::path& assetDirectory,
+                                                                                   const std::filesystem::path& projectDirectory)
         {
             std::vector<std::pair<std::filesystem::path, AssetHandle>> files;
-            const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
             for (const auto& [handle, metadata] : registry)
             {
                 if (IsReferencingType(metadata.Type) && !metadata.FilePath.empty())
@@ -1435,40 +1438,118 @@ namespace Nox
                 if (it->is_regular_file(error) && (it->path().extension() == ".cs" || it->path().extension() == ".noxcell"))
                     files.emplace_back(it->path().lexically_relative(assetDirectory), AssetHandle(0));
             }
-            for (const auto& entry : std::filesystem::directory_iterator(Project::GetProjectDirectory(), error))
+            for (const auto& entry : std::filesystem::directory_iterator(projectDirectory, error))
             {
                 if (entry.path().extension() == ".nproj")
                     files.emplace_back(entry.path().lexically_relative(assetDirectory), AssetHandle(0));
             }
             return files;
         }
+
+        std::vector<std::pair<std::filesystem::path, AssetHandle>> ReferencingFiles(const AssetRegistry& registry)
+        {
+            return ReferencingFiles(registry, Project::GetActiveAssetDirectory(), Project::GetProjectDirectory());
+        }
+
+        bool IsReferenceSeparator(const std::string& content, size_t i)
+        {
+            const unsigned char c = static_cast<unsigned char>(content[i]);
+            return c < 0x20 || c > 0x7E || c == '"' || c == '\'' || c == ',' || c == '[' || c == ']' || c == '{' || c == '}' ||
+                   ((c == ':' || c == '-') && i + 1 < content.size() && content[i + 1] == ' ');
+        }
+
+        // Does one file name the asset? The same answer as MentionsAsset(ReadReferenceTokens(file), ...), found by searching the
+        // file for the handle's digits and the asset's file name (case ignored) and judging only the text around each hit --
+        // instead of indexing every number and string of the file (a cooked mesh is mostly binary geometry).
+        bool FileMentionsAsset(const std::filesystem::path& file, AssetHandle handle, const AssetMetadata& metadata)
+        {
+            std::ifstream stream(file, std::ios::binary);
+            if (!stream)
+                return false;
+            const std::string content((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+
+            // The handle: its digits, not part of a longer number.
+            const std::string digits = std::to_string(static_cast<uint64_t>(handle));
+            for (size_t at = content.find(digits); at != std::string::npos; at = content.find(digits, at + 1))
+            {
+                const bool digitBefore = at > 0 && std::isdigit(static_cast<unsigned char>(content[at - 1]));
+                const bool digitAfter = at + digits.size() < content.size() && std::isdigit(static_cast<unsigned char>(content[at + digits.size()]));
+                if (!digitBefore && !digitAfter)
+                    return true;
+            }
+
+            // A path: where the file name appears, the whole token around it read as ReadReferenceTokens would.
+            for (const std::filesystem::path& path : { metadata.FilePath, metadata.SourceFilePath })
+            {
+                const std::string name = NormalizeReferencePath(path.filename().string());
+                if (name.size() < 3)
+                    continue;
+                const auto lower = [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); };
+                const std::boyer_moore_horspool_searcher searcher(name.begin(), name.end(),
+                    [lower](char c) { return std::hash<char>{}(lower(c)); }, [lower](char a, char b) { return lower(a) == lower(b); });
+                for (auto hit = std::search(content.begin(), content.end(), searcher); hit != content.end();
+                     hit = std::search(hit + 1, content.end(), searcher))
+                {
+                    size_t begin = static_cast<size_t>(hit - content.begin());
+                    size_t end = begin + name.size();
+                    while (begin > 0 && !IsReferenceSeparator(content, begin - 1))
+                        --begin;
+                    while (end < content.size() && !IsReferenceSeparator(content, end))
+                        ++end;
+                    ReferenceTokens tokens;
+                    AddPathToken(std::string_view(content).substr(begin, end - begin), tokens);
+                    if (MentionsAsset(tokens, handle, metadata))
+                        return true;
+                }
+            }
+            return false;
+        }
     }
 
-    std::vector<std::filesystem::path> EditorAssetManager::FindReferences(AssetHandle handle) const
+    std::vector<std::filesystem::path> EditorAssetManager::FindReferencesIn(const AssetRegistry& registry, AssetHandle handle,
+                                                                            const std::filesystem::path& assetDirectory,
+                                                                            const std::filesystem::path& projectDirectory)
     {
         std::vector<std::filesystem::path> referencing;
-        const auto found = m_AssetRegistry.find(handle);
-        if (found == m_AssetRegistry.end())
+        const auto found = registry.find(handle);
+        if (found == registry.end())
             return referencing;
         const AssetMetadata& target = found->second;
-        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
-        for (const auto& [file, fileHandle] : ReferencingFiles(m_AssetRegistry))
+        // What a material or a cooked mesh can name inside it: textures, material graphs and shaders (a mesh carries its materials'
+        // fields). Anything else is never in them -- those files are not read for it (a model's meshes are hundreds of MB).
+        const bool embeddable = target.Type == AssetType::Texture2D || target.Type == AssetType::MaterialGraph ||
+                                target.Type == AssetType::MaterialShader;
+        for (const auto& [file, fileHandle] : ReferencingFiles(registry, assetDirectory, projectDirectory))
         {
             if (fileHandle == handle)
                 continue;
-            const auto owner = m_AssetRegistry.find(fileHandle);
-            if ((owner != m_AssetRegistry.end() && OwnsByName(owner->second, target)) ||
-                MentionsAsset(ReadReferenceTokens(assetDirectory / file), handle, target))
+            const auto owner = registry.find(fileHandle);
+            if (owner != registry.end() && OwnsByName(owner->second, target))
+            {
+                referencing.push_back(file);
+                continue;
+            }
+            const AssetType fileType = owner != registry.end() ? owner->second.Type : AssetType::None;
+            const bool carriesMaterials = fileType == AssetType::Material || fileType == AssetType::Mesh || fileType == AssetType::StaticMesh ||
+                                          fileType == AssetType::SkeletalMesh;
+            if (carriesMaterials && !embeddable)
+                continue;
+            if (FileMentionsAsset(assetDirectory / file, handle, target))
                 referencing.push_back(file);
         }
         // Assets made from this one (a model's meshes from its .gltf).
-        for (const auto& [otherHandle, other] : m_AssetRegistry)
+        for (const auto& [otherHandle, other] : registry)
         {
             if (otherHandle != handle && !other.SourceFilePath.empty() && other.SourceFilePath != other.FilePath &&
                 other.SourceFilePath.lexically_normal() == target.FilePath.lexically_normal())
                 referencing.push_back(other.FilePath);
         }
         return referencing;
+    }
+
+    std::vector<std::filesystem::path> EditorAssetManager::FindReferences(AssetHandle handle) const
+    {
+        return FindReferencesIn(m_AssetRegistry, handle, Project::GetActiveAssetDirectory(), Project::GetProjectDirectory());
     }
 
     size_t EditorAssetManager::ReplaceReferences(AssetHandle from, AssetHandle to)

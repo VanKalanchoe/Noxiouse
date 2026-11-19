@@ -87,6 +87,13 @@ namespace Nox
         // from a model belong to its mesh by name. Relative paths of the files that use it (the open scene's unsaved state
         // is the caller's to add). Reads the files: meant for a user's action, not every frame.
         std::vector<std::filesystem::path> FindReferences(AssetHandle handle) const;
+        // The same from a copy of the registry: safe on a worker thread (it reads only `registry` and the files), so the editor
+        // can look while it keeps drawing. Files that cannot name the asset are not read at all (a cooked mesh carries its
+        // materials' textures, never another material), and a file is searched for the asset's handle and file name instead of
+        // being indexed whole.
+        static std::vector<std::filesystem::path> FindReferencesIn(const AssetRegistry& registry, AssetHandle handle,
+                                                                   const std::filesystem::path& assetDirectory,
+                                                                   const std::filesystem::path& projectDirectory);
         // Registered assets nothing uses, by the same rules (scenes are where use starts, so never listed).
         std::vector<AssetHandle> FindUnusedAssets() const;
         // Every asset the roots need, transitively, by the same rules read forwards (what their files name, what a mesh owns by name),

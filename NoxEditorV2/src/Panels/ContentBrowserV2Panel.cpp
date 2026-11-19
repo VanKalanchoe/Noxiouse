@@ -1365,6 +1365,7 @@ namespace Nox
             Notify(UI::UINotificationSeverity::Success, "Import finished", "The model's meshes, materials and textures are in the Content Browser.");
         m_ImportsWereRunning = importing;
 
+        FinishReferenceCheck();
         if (m_TreeDirty)
             RebuildFolderTree();
         if (m_EntriesDirty)
@@ -1742,34 +1743,119 @@ namespace Nox
 
     void ContentBrowserV2Panel::RequestDelete(std::vector<AssetHandle> handles)
     {
+        StartReferenceCheck(ReferenceCheckMode::Delete, std::move(handles));
+    }
+
+    void ContentBrowserV2Panel::ShowReferences(AssetHandle handle)
+    {
+        StartReferenceCheck(ReferenceCheckMode::Show, { handle });
+    }
+
+    void ContentBrowserV2Panel::StartReferenceCheck(ReferenceCheckMode mode, std::vector<AssetHandle> handles)
+    {
         EditorAssetManager* assets = Assets();
         UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        std::erase_if(handles, [assets](AssetHandle handle) { return !assets || !assets->IsAssetHandleValid(handle); });
         if (!assets || !ctx || handles.empty())
             return;
+        if (m_ReferenceCheck)
+        {
+            Notify(UI::UINotificationSeverity::Info, "Still looking", "The project is being searched for what uses " + m_ReferenceCheck->Name + ".");
+            return;
+        }
 
-        // Who still uses them: the project's files, and the open scene (its unsaved state included).
-        std::unordered_set<AssetHandle> inScene;
+        auto check = std::make_unique<ReferenceCheck>();
+        check->Mode = mode;
+        check->Handles = handles;
+        check->Context = ctx;
+        check->Name = assets->GetMetadata(handles.front()).FilePath.filename().string();
+        // The open scene, unsaved changes included: read here, on the main thread.
         if (m_SceneReferences)
-            m_SceneReferences(inScene);
+            m_SceneReferences(check->InScene);
+        // The project's files on a worker thread, from a copy of the registry: the editor keeps drawing meanwhile.
+        check->Users = std::async(std::launch::async,
+            [registry = assets->GetAssetRegistry(), handles, assetDirectory = Project::GetActiveAssetDirectory(), projectDirectory = Project::GetProjectDirectory()]()
+            {
+                std::vector<std::vector<std::filesystem::path>> users;
+                users.reserve(handles.size());
+                for (AssetHandle handle : handles)
+                    users.push_back(EditorAssetManager::FindReferencesIn(registry, handle, assetDirectory, projectDirectory));
+                return users;
+            });
+        m_ReferenceCheck = std::move(check);
+    }
+
+    std::string ContentBrowserV2Panel::GetBusyText() const
+    {
+        return m_ReferenceCheck ? "Looking for what uses " + m_ReferenceCheck->Name + "..." : std::string();
+    }
+
+    void ContentBrowserV2Panel::FinishReferenceCheck()
+    {
+        if (!m_ReferenceCheck || m_ReferenceCheck->Users.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            return;
+        std::unique_ptr<ReferenceCheck> check = std::move(m_ReferenceCheck);
+        const std::vector<std::vector<std::filesystem::path>> users = check->Users.get();
+        EditorAssetManager* assets = Assets();
+        if (!assets || !check->Context)
+            return;
+        // Deleted or moved meanwhile: asked again from what is there now.
+        std::vector<AssetHandle> handles;
+        std::vector<std::vector<std::filesystem::path>> stillUsers;
+        for (size_t i = 0; i < check->Handles.size() && i < users.size(); ++i)
+        {
+            if (assets->IsAssetHandleValid(check->Handles[i]))
+            {
+                handles.push_back(check->Handles[i]);
+                stillUsers.push_back(users[i]);
+            }
+        }
+        if (handles.empty())
+            return;
+
+        if (check->Mode == ReferenceCheckMode::Delete)
+        {
+            ShowDeleteDialog(*check->Context, handles, stillUsers, check->InScene);
+            return;
+        }
+        const AssetHandle handle = handles.front();
+        const std::vector<std::filesystem::path>& found = stillUsers.front();
+        std::string message;
+        if (check->InScene.contains(handle))
+            message += "The open scene\n";
+        for (size_t i = 0; i < found.size() && i < 14; ++i)
+            message += found[i].generic_string() + "\n";
+        if (found.size() > 14)
+            message += "... and " + std::to_string(found.size() - 14) + " more\n";
+        if (message.empty())
+            message = "Nothing in the project uses it.";
+        UI::UIModal::ShowConfirm(*check->Context, "References to " + assets->GetMetadata(handle).FilePath.filename().string(), message, {}, {}, "OK", "Close");
+    }
+
+    void ContentBrowserV2Panel::ShowDeleteDialog(UI::UIContext& context, const std::vector<AssetHandle>& handles,
+                                                 const std::vector<std::vector<std::filesystem::path>>& users, const std::unordered_set<AssetHandle>& inScene)
+    {
+        EditorAssetManager* assets = Assets();
+        if (!assets)
+            return;
         std::string message;
         size_t used = 0;
-        for (AssetHandle handle : handles)
+        for (size_t index = 0; index < handles.size(); ++index)
         {
-            if (!assets->IsAssetHandleValid(handle))
-                continue;
-            const std::vector<std::filesystem::path> users = assets->FindReferences(handle);
+            const AssetHandle handle = handles[index];
+            const std::vector<std::filesystem::path>& fileUsers = users[index];
             const bool sceneUses = inScene.contains(handle);
-            if (users.empty() && !sceneUses)
+            if (fileUsers.empty() && !sceneUses)
                 continue;
             ++used;
             if (used <= 4)
             {
                 message += assets->GetMetadata(handle).FilePath.filename().string() + " is used by ";
                 message += sceneUses ? "the open scene" : "";
-                for (size_t i = 0; i < users.size() && i < 3; ++i)
-                    message += std::string((sceneUses || i > 0) ? ", " : "") + users[i].filename().string();
-                if (users.size() > 3)
-                    message += " and " + std::to_string(users.size() - 3) + " more";
+                for (size_t i = 0; i < fileUsers.size() && i < 3; ++i)
+                    message += std::string((sceneUses || i > 0) ? ", " : "") + fileUsers[i].filename().string();
+                if (fileUsers.size() > 3)
+                    message += " and " + std::to_string(fileUsers.size() - 3) + " more";
                 message += ".\n";
             }
         }
@@ -1777,18 +1863,22 @@ namespace Nox
             ? "Delete " + assets->GetMetadata(handles.front()).FilePath.filename().string() + "?"
             : "Delete " + std::to_string(handles.size()) + " assets?";
         if (used == 0)
-            message = "The file is deleted from the project folder. This cannot be undone.";
+            message = handles.size() == 1 ? "Nothing uses it. The file is deleted from the project folder; this cannot be undone."
+                                          : "Nothing uses them. The files are deleted from the project folder; this cannot be undone.";
         else
             message += "What uses it loses it (a mesh draws without its material, a slot becomes empty). This cannot be undone.";
 
-        UI::UIModal::ShowConfirm(*ctx, title, message, [this, handles]()
+        UI::UIModal::ShowConfirm(context, title, message, [this, handles]()
         {
             EditorAssetManager* manager = Assets();
             if (!manager)
                 return;
             size_t deleted = 0;
             for (AssetHandle handle : handles)
+            {
+                AssetPreviewRenderer::Get().Invalidate(handle);
                 deleted += manager->DeleteAsset(handle) ? 1 : 0;
+            }
             if (m_Tiles)
                 m_Tiles->m_Selected.clear();
             Refresh();
@@ -1796,28 +1886,6 @@ namespace Nox
                    deleted == 1 ? "Asset deleted" : std::to_string(deleted) + " assets deleted",
                    deleted == handles.size() ? std::string() : "Some files could not be deleted (see the Output Log).");
         }, {}, "Delete", "Cancel");
-    }
-
-    void ContentBrowserV2Panel::ShowReferences(AssetHandle handle)
-    {
-        EditorAssetManager* assets = Assets();
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
-        if (!assets || !ctx || !assets->IsAssetHandleValid(handle))
-            return;
-        std::unordered_set<AssetHandle> inScene;
-        if (m_SceneReferences)
-            m_SceneReferences(inScene);
-        const std::vector<std::filesystem::path> users = assets->FindReferences(handle);
-        std::string message;
-        if (inScene.contains(handle))
-            message += "The open scene\n";
-        for (size_t i = 0; i < users.size() && i < 14; ++i)
-            message += users[i].generic_string() + "\n";
-        if (users.size() > 14)
-            message += "... and " + std::to_string(users.size() - 14) + " more\n";
-        if (message.empty())
-            message = "Nothing in the project uses it.";
-        UI::UIModal::ShowConfirm(*ctx, "References to " + assets->GetMetadata(handle).FilePath.filename().string(), message, {}, {}, "OK", "Close");
     }
 
     void ContentBrowserV2Panel::MoveAssets(const std::vector<AssetHandle>& handles, const std::filesystem::path& absoluteFolder)
