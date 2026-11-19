@@ -296,3 +296,6 @@ Facerun/Build/
 Facerun/Intermediate
 Facerun/Assets/StreamingDense
 Facerun/Assets/StreamingTest
+
+# Per-user editor state (layouts, viewport options): written on every exit, like Unreal's Saved/ folder.
+**/Saved/

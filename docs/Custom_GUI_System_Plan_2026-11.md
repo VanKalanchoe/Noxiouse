@@ -307,6 +307,61 @@ from the panel source (menu items and dropdown choices run, the wheel scrolls ti
 bar elision and click, toolbar controls one height). **Not run on a GPU or Windows; the drawer itself (`EditorCenterArea`) is not in the
 headless test** (it lives in EditorV2Layer, which needs the renderer).
 
+#### Porting the rest of NoxEditor to NoxEditorV2 (started 2026-11-19)
+
+Rule for every item: read the old panel first, list what is wrong in it, port the behaviour without the flaws, check it (syntax
+check, the headless test where the code allows it), then the next item. Order (what is used most first; each step says what is not in
+it yet):
+
+| # | Item | Old source | Status |
+|---|---|---|---|
+| G1 | Graph editor: canvas, window, parameters, node Details | NodeGraphEditorPanel, ThedmdCanvasBackend, NodeGraphPropertyEditor | **built** (below) |
+| G2 | Graph editor: in-node value widgets, curve editor, bone picker, parameter drag onto the canvas, material graph compile status | same | open |
+| G3 | Graph editor: state machine view (states, transitions, rules) | ThedmdCanvasBackend::DrawStateMachine, the panel's inspector | open |
+| G4 | Graph editor: animation preview (skeletal mesh), audio preview (play, sliders, meter) | the panel's previews | open |
+| R1 | Renderer Settings / Stats / Post Process windows | EditorLayer, PostProcessSettingsUI | open |
+| M1 | Material Editor (full: graph slot, Custom Lit, lobes, preview sphere) | MaterialEditorPanel | open (V2 has the basic window) |
+| L1 | Levels, World Partition (HLOD) panels | LevelsPanel, WorldPartitionPanel | open |
+| A1 | Audio Mixer | MixerPanel, AudioWidgets | open |
+| T1 | Timeline (sequencer), Animation Clip | TimelinePanel, AnimationClipPanel | open |
+| P1 | Profiler, Render Graph | ProfilerPanel, RenderGraphPanel | open |
+| D1 | Package Game / Server, Streaming Test World, MCP server menu | EditorLayer dialogs, GamePackager | open |
+| F1 | Prefab mode, prefab variants, Replace References | EditorLayer, ContentBrowserPanel | open |
+
+**G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
+`UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and
+`Panels/NodeGraph/NodeGraphEditorV2` (the window: Save / Undo / Redo / Frame, Parameters on the left, Details on the right). Opened by
+double-clicking an animation, audio or material graph in the Content Browser (a floating window, dockable). Pan right / middle drag,
+zoom wheel around the pointer, F frame, Home 100 %; click / Ctrl / Shift / box select, drag to move; wires by dragging pin to pin
+(same type; an untyped reroute takes the type; an input takes one wire); a wire let go on empty canvas opens the node list with what
+fits and connects the pick; right click: node list (search, Enter takes the first, "Get <parameter>" entries) or the node's menu;
+Alt+click a pin cuts its wires; double-click a wire inserts a reroute; Delete, Ctrl+D, Ctrl+C / Ctrl+V, Ctrl+A. Unconnected inputs
+show their value on the node. Details: the node's properties by kind (number / slider with the type's range / choices / bool / vector /
+colour / asset slot by the type's asset hint / text / parameter choice), the input values (or "connected"), + / - Pin for variable
+inputs, properties the type no longer declares listed as kept. Parameters: + Add (Float, Int, Bool, Trigger), name (renaming updates
+every reader and transition rule), default, Delete. History: one step per finished canvas operation; Details value drags merge into
+one step when the mouse button comes up; 200 steps. The asset is recompiled after each structural edit (a playing scene picks it up).
+
+Flaws of the old graph editor, not carried over:
+
+| Old | V2 |
+|---|---|
+| The graph's output node could be deleted (the graph then computes nothing) | Refused, with the reason in the node menu |
+| Missing pin values were filled in while drawing: the asset changed with nothing marked or recompiled | Filled in once when the graph is opened, reported as an edit |
+| Properties edited inside the nodes needed workarounds (combos and popups do not work inside imgui-node-editor nodes; pickers drawn later, "suspended") | Properties in a Details panel with the editor's normal widgets |
+| Keys typed in a graph reached the editor's shortcuts (Delete also deleted the selected entity); fixed by polling "wants input" | Keys go by focus: the graph window is in the editor's panel-focus guard |
+| History by polling each frame for "no mouse button held and no widget active" | The canvas reports each finished operation; only Details drags merge on mouse release |
+| A graph closed with unsaved edits said nothing | A toast says the changes are not saved |
+| A file changed on disk while open: handled (kept as is) | Kept: taken as an undo step, rows rebuilt (they point into the graph), or kept back with a warning when there are unsaved edits |
+
+Changed on purpose: wires are bezier curves (Unreal's look) instead of right-angle routes; hand-shaped routes saved in a file
+(`GraphLink::Route`) are kept in it but not drawn. Not yet (G2-G4): states of a state machine (double-click says so), previews, curve
+editing, the bone picker (bone names are typed), material graph compile status. Checked: syntax check; a headless test of the real
+canvas (17 checks: wires and type checks, replacing a wire, output kept, box select, duplicate, delete, reroute on a wire, node list
+from a right click with search + Enter, node list from a dropped wire) and a picture of its draw list.
+
+Also: `**/Saved/` is ignored (per-user layouts, viewport options, the project thumbnail -- rewritten on every exit, as Unreal's Saved/).
+
 ### Phase 3: Docking & Multi-Viewport
 - Implement `DockSpace` (splitters, tab bars, drag-to-dock preview overlays, layout save/load).
 - Extend `UIPlatformSDL` + `Renderer` to support secondary `SDL_Window*` + `NRI::Swapchain` viewports for torn-off panels and popups.

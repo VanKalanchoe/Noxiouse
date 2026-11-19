@@ -508,6 +508,8 @@ namespace Nox
             {
                 for (const auto& me : m_MaterialEditors)
                     dock->RemovePanel(me.Title);
+                for (const auto& graph : m_GraphEditors)
+                    dock->RemovePanel(graph.Title);
             }
         }
         SaveLayoutFiles();
@@ -3497,6 +3499,7 @@ namespace Nox
             m_InspectorPanel.Update();
         }
         UpdateMaterialEditors();
+        UpdateGraphEditors();
 
         std::vector<int32_t> selectedIDs;
         for (const Entity& entity : m_SceneHierarchyPanel.GetSelectedEntities())
@@ -3616,7 +3619,11 @@ namespace Nox
             if (UILayer* uiLayer = Application::Get().GetUILayer())
             {
                 for (const UI::UIElement* cur = uiLayer->GetContext().GetFocused(); cur && !panelFocused; cur = cur->GetParent())
+                {
                     panelFocused = cur == m_ContentBrowserRoot.get() || cur == m_OutputLogRoot.get();
+                    for (const auto& graph : m_GraphEditors)
+                        panelFocused = panelFocused || (graph.Editor && cur == graph.Editor->GetRoot().get());
+                }
             }
 
             const auto& key = static_cast<const KeyPressedEvent&>(event);
@@ -4532,6 +4539,11 @@ namespace Nox
             OpenScene(handle);
             return;
         }
+        if (type == AssetType::AnimationGraph || type == AssetType::AudioGraph || type == AssetType::MaterialGraph)
+        {
+            OpenGraphEditor(handle);
+            return;
+        }
         if (type != AssetType::Material)
         {
             Notify(UI::UINotificationSeverity::Info, "No editor for " + AssetDisplayName(handle) + " yet",
@@ -4596,6 +4608,59 @@ namespace Nox
         state.Dirty = true;
         m_MaterialEditors.push_back(std::move(state));
         UpdateMaterialEditors();
+    }
+
+    void EditorV2Layer::OpenGraphEditor(AssetHandle handle)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !uiLayer->GetDockSpaceRef())
+            return;
+        const auto& dock = uiLayer->GetDockSpaceRef();
+        // Already open: brought to the front.
+        for (GraphEditorWindow& open : m_GraphEditors)
+        {
+            if (open.Editor && open.Editor->GetHandle() == handle)
+            {
+                if (open.Window && open.Window->GetParent() && open.Window->OnActivate)
+                    open.Window->OnActivate();
+                return;
+            }
+        }
+        auto editor = std::make_unique<NodeGraphEditorV2>(handle);
+        if (!editor->IsValid())
+        {
+            Notify(UI::UINotificationSeverity::Error, "Graph not opened", AssetDisplayName(handle) + " could not be loaded -- see the Output Log.");
+            return;
+        }
+        editor->Notify = [this](UI::UINotification note) { Notify(note.Severity, std::move(note.Title), std::move(note.Message)); };
+        std::string title = "Graph: " + editor->GetTitle();
+        const Ref<UI::UIElement> root = editor->BuildUI();
+        const float offset = static_cast<float>((m_GraphEditors.size() % 5) * 28);
+        Ref<UI::UIWindow> window = dock->FloatPanel(title, root, { 220.0f + offset, 90.0f + offset }, { 1180.0f, 700.0f }, false);
+        m_GraphEditors.push_back({ std::move(editor), std::move(title), std::move(window) });
+    }
+
+    void EditorV2Layer::UpdateGraphEditors()
+    {
+        if (m_GraphEditors.empty())
+            return;
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        const auto& dock = uiLayer ? uiLayer->GetDockSpaceRef() : nullptr;
+        // Closed windows (floating gone, not docked) end their editor; unsaved changes are said, not lost silently.
+        std::erase_if(m_GraphEditors, [&](GraphEditorWindow& open)
+        {
+            const bool floating = open.Window && open.Window->GetParent() != nullptr;
+            const bool docked = dock && dock->FindNodeByPanelTitle(open.Title) != nullptr;
+            if (floating || docked)
+                return false;
+            if (open.Editor && open.Editor->IsDirty())
+                Notify(UI::UINotificationSeverity::Warning, open.Editor->GetTitle() + " closed without saving",
+                       "Its changes are in the open graph until the editor closes or the file is reloaded; open it again and press Save to keep them.");
+            return true;
+        });
+        for (GraphEditorWindow& open : m_GraphEditors)
+            if (open.Editor)
+                open.Editor->Update();
     }
 
     void EditorV2Layer::UpdateMaterialEditors()

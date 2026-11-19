@@ -15,6 +15,7 @@
 #include "Panels/ContentBrowserV2Panel.h"
 #include "Panels/InspectorV2Panel.h"
 #include "Panels/OutputLogV2Panel.h"
+#include "Panels/NodeGraph/NodeGraphEditorV2.h"
 #include "Panels/SceneHierarchyV2Panel.h"
 #include "ProjectManager/ProcessLauncher.h"
 #include "ScriptBuilder.h"
@@ -297,6 +298,16 @@ namespace Nox
         uint64_t m_LastScriptBuildNotified = 0;
         void OpenAssetV2(AssetHandle handle);
         void UpdateMaterialEditors();
+        // Animation, audio and material graphs: one window each (NodeGraphEditorV2), floating until docked.
+        void OpenGraphEditor(AssetHandle handle);
+        void UpdateGraphEditors();
+        struct GraphEditorWindow
+        {
+            std::unique_ptr<NodeGraphEditorV2> Editor;
+            std::string Title;
+            Ref<UI::UIWindow> Window;
+        };
+        std::vector<GraphEditorWindow> m_GraphEditors;
 
         struct MaterialEditorState
         {
