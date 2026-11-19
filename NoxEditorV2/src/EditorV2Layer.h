@@ -45,6 +45,11 @@
 #include "NoxCore/UI/Layout/UIWindow.h"
 #include "NoxCore/UI/Widgets/UIMenu.h"
 
+namespace Nox::Mcp
+{
+    class McpEditor;
+}
+
 namespace Nox
 {
     class Renderer;
@@ -269,6 +274,15 @@ namespace Nox
         void ShowPackageDialog(bool server);
         void ShowStreamingTestWorldDialog();
         void CancelStreamingTestWorld();
+        // The MCP server (EditorV2Mcp.cpp; NoxEditor's tools through Mcp::EditorContext). An MCP edit names the next undo step.
+        std::string m_HistoryExternalStep;
+#if NOX_WITH_MCP
+        void CreateMcpServer();
+        void UpdateMcpServer();
+        void DestroyMcpServer();
+        std::vector<UI::UIMenuItem> BuildMcpMenu();
+        std::unique_ptr<Mcp::McpEditor> m_Mcp;
+#endif
         PackageSettings m_PackageSettings;
         std::string m_PackageOutputText;
         std::vector<std::function<void()>> m_PackageSyncs;

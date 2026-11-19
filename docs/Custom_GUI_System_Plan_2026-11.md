@@ -325,7 +325,7 @@ it yet):
 | A1 | Audio Mixer | MixerPanel, AudioWidgets | **built** (below) |
 | T1 | Timeline (sequencer), Animation Clip | TimelinePanel, AnimationClipPanel | open |
 | P1 | Profiler, Render Graph | ProfilerPanel, RenderGraphPanel | **built** (below) |
-| D1 | Package Game / Server, Streaming Test World, MCP server menu | EditorLayer dialogs, GamePackager | open |
+| D1 | Package Game / Server, Streaming Test World, MCP server menu | EditorLayer dialogs, GamePackager | **built** (below) |
 | F1 | Prefab mode, prefab variants, Replace References | EditorLayer, ContentBrowserPanel | open |
 
 **Design review of the editor (2026-11-20), checked in the code -- not only the graph editor:**
@@ -496,6 +496,19 @@ and Create > Cancel Streaming Test World stops it. Flaws not carried over: the t
 tooltip says to start at 2 GB (2 GB now); a running generation could only be cancelled from a floating window. Not yet: packaging
 still runs on the main thread (the editor waits, as before -- the cook reads the asset manager, which is not safe from a worker).
 Checked: syntax check. Not run on a GPU.
+
+**D1 part 2 -- the MCP server in NoxEditorV2 (built, not run / not user-tested).** NoxEditorV2 compiles NoxEditor's MCP tools
+(`NoxEditor/src/Mcp`, one copy -- not a second one; they reach the editor only through `Mcp::EditorContext`) and fills the context
+from its own layer (`EditorV2Mcp.cpp`): scene, mode, selection (the E3 service), viewport capture, edits as named undo steps (V2's
+`EditorHistory::FrameInfo::ExternalStep`), shapes, save, undo / redo, scene snapshots, Play (its options for that Play only) /
+Simulate / Stop / Pause, the camera, script builds, material and asset refreshes, graphs (`ApplyGraph` opens the graph's editor window
+and applies the graph there: `NodeGraphEditorV2::ApplyExternalEdit`, one undo step, compiled, saved) and packaging. `McpEditor` got a
+menu API without ImGui (`GetMenuState`, `SetEnabled`, `SetAccess`, `ConnectCommand`, `JsonConfig`, `RotateToken`; NoxEditor's ImGui
+menu stays as it was); Tools > MCP Server in V2 is built from it (Enabled, the server's state, Clients may: read / write / execute,
+Copy connect command (Claude Code), Copy JSON config, Rotate token -- the copies go to the clipboard and are never logged). Same
+settings and token as NoxEditor (`<Project>/.nox/mcp.ini`, `.nox/mcp-token`; port 8765). Not yet: runtime_call finds no game -- V2's
+multiplayer Play does not start the players' MCP servers. Checked: syntax check of every MCP source against V2's headers with
+NOX_WITH_MCP=1. Not run.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

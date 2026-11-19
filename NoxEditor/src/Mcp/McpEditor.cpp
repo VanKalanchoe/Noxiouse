@@ -254,6 +254,59 @@ namespace Nox::Mcp
         }
     }
 
+    McpEditor::MenuState McpEditor::GetMenuState() const
+    {
+        MenuState state;
+        state.Enabled = m_Enabled && m_Enabled->Get();
+        state.Running = m_Server.IsRunning();
+        state.Ready = state.Running && !m_Token.empty();
+        state.Initialized = m_Initialized;
+        state.Url = Url();
+        state.Calls = m_Server.GetCallCount();
+        state.Problem = m_Problem;
+        state.Access = m_Access ? m_Access->Get() : 0;
+        return state;
+    }
+
+    void McpEditor::SetEnabled(bool enabled)
+    {
+        if (m_Enabled)
+            m_Enabled->Set(enabled);
+    }
+
+    void McpEditor::SetAccess(int32_t access)
+    {
+        if (m_Access)
+            m_Access->Set(access);
+    }
+
+    const char* McpEditor::AccessName(int32_t access)
+    {
+        return AccessLabel(access);
+    }
+
+    std::string McpEditor::ConnectCommand() const
+    {
+        if (!m_Server.IsRunning() || m_Token.empty())
+            return {};
+        return std::format("claude mcp add --transport http nox {} --header \"Authorization: Bearer {}\"", Url(), m_Token);
+    }
+
+    std::string McpEditor::JsonConfig() const
+    {
+        if (!m_Server.IsRunning() || m_Token.empty())
+            return {};
+        const Json config{ { "mcpServers", Json{ { "nox", Json{ { "type", "http" }, { "url", Url() },
+                                                                { "headers", Json{ { "Authorization", "Bearer " + m_Token } } } } } } } };
+        return config.dump(2);
+    }
+
+    void McpEditor::RotateToken()
+    {
+        if (m_Initialized)
+            Console::Get().Execute("mcp.RotateToken");
+    }
+
     void McpEditor::DrawMenu()
     {
         if (!ImGui::BeginMenu("MCP Server"))

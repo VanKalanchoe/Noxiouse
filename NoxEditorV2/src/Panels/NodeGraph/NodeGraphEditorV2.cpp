@@ -358,6 +358,19 @@ namespace Nox
             Notify({ UI::UINotificationSeverity::Success, "Graph saved", found->second.FilePath.generic_string() });
     }
 
+    bool NodeGraphEditorV2::ApplyExternalEdit(NodeGraph replacement)
+    {
+        if (!m_Asset)
+            return false;
+        if (m_EditPending)
+            CommitHistory();
+        m_UndoStack.push_back(m_Asset->Graph);
+        m_RedoStack.clear();
+        RestoreGraph(std::move(replacement)); // (marks it edited, recompiles, rebuilds the rows)
+        Save();
+        return !m_Dirty;
+    }
+
     bool NodeGraphEditorV2::RevertToDisk()
     {
         if (!m_Asset)

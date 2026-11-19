@@ -1,4 +1,7 @@
 #include "EditorV2Layer.h"
+#if NOX_WITH_MCP
+#include "McpEditor.h"
+#endif
 #include "Panels/AssetPreviewRenderer.h"
 #include "Panels/InspectorWidgetsV2.h"
 #include "Panels/MaterialEditorV2.h"
@@ -495,6 +498,9 @@ namespace Nox
 
         RegisterCommands();
         RegisterAssetEditors();
+#if NOX_WITH_MCP
+        CreateMcpServer();
+#endif
         LoadViewportPrefs(); // the project's (Saved/Layout)
         BuildUI(true);
     }
@@ -506,6 +512,9 @@ namespace Nox
             SDL_ShowCursor();
             m_CursorHidden = false;
         }
+#if NOX_WITH_MCP
+        DestroyMcpServer(); // (first: its calls reach into the editor)
+#endif
         EndMultiplayerPlay();
         SaveEditorCameras();
         ScriptEngine::Shutdown();
@@ -1558,6 +1567,8 @@ namespace Nox
         frame.AssetsLoading = Project::GetActive()->GetEditorAssetManager()->GetLoadingCount() > 0;
         if (Entity watched = m_Selection.GetPrimary())
             frame.Watched = watched.GetUUID();
+        frame.ExternalStep = std::move(m_HistoryExternalStep); // (an MCP edit this frame: one step with its name)
+        m_HistoryExternalStep.clear();
         m_History.Update(m_ActiveScene, frame);
         UpdateSceneDirtyState();
     }
@@ -3386,6 +3397,9 @@ namespace Nox
         if (!Project::GetActive())
             return;
 
+#if NOX_WITH_MCP
+        UpdateMcpServer(); // (the tool calls that came in run here, at the start of the frame)
+#endif
         if (m_ResetLayoutRequested)
         {
             // Here, between frames: the menu that asked for it is gone and no UI event is being dispatched.
@@ -4373,11 +4387,9 @@ namespace Nox
         });
 
 #if NOX_WITH_MCP
-        menuBar->AddDynamicMenu("Tools", []() -> std::vector<UI::UIMenuItem>
+        menuBar->AddDynamicMenu("Tools", [this]() -> std::vector<UI::UIMenuItem>
         {
-            return {
-                {"MCP Server (not yet wired in V2)", "", {}, false, false, false, true}
-            };
+            return { {"MCP Server", "", {}, false, true, false, false, "", BuildMcpMenu()} };
         });
 #endif
 

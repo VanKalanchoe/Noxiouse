@@ -31,6 +31,27 @@ namespace Nox::Mcp
         // Inside a menu (Tools): the MCP Server sub-menu.
         void DrawMenu();
 
+        // The same, for a menu that is not ImGui's (NoxEditorV2): what the menu shows and what its items do.
+        struct MenuState
+        {
+            bool Enabled = false;
+            bool Running = false;
+            bool Ready = false;       // running with a token: the connect texts can be copied
+            bool Initialized = false; // a project is open (the token can be rotated)
+            std::string Url;
+            size_t Calls = 0;
+            std::string Problem;      // why it is not running while enabled
+            int32_t Access = 0;       // 0 read, 1 write, 2 execute
+        };
+        MenuState GetMenuState() const;
+        void SetEnabled(bool enabled);
+        void SetAccess(int32_t access);
+        static const char* AccessName(int32_t access);
+        // The texts the copy items put on the clipboard (they hold the token: never logged); empty when not ready.
+        std::string ConnectCommand() const;
+        std::string JsonConfig() const;
+        void RotateToken();
+
     private:
         void Initialize(); // once a project is open
         void Apply();      // starts, stops or restarts the server as the variables say

@@ -97,6 +97,8 @@ namespace Nox
         // Every editor window closes now (the project changes, the layout is reset, the editor ends); asked about before.
         void CloseAll();
 
+        // The open editor of the asset (null: none open).
+        AssetEditorV2* Find(AssetHandle handle) const;
         bool HasUnsaved() const;
         // "the graph UAL_Locomotion", one per editor with unsaved edits.
         std::vector<std::string> UnsavedNames() const;

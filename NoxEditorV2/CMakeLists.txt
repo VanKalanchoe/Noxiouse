@@ -18,6 +18,12 @@ target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/
 
 if(NOX_WITH_MCP)
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOX_WITH_MCP=1)
+    # The editor's MCP tools are NoxEditor's (one copy, not a second one): they reach the editor only through Mcp::EditorContext,
+    # which EditorV2Layer fills (EditorV2Mcp.cpp). Their "GamePackager.h" / "ScriptDiagnostics.h" resolve to this editor's own.
+    file(GLOB NOX_EDITOR_MCP_FILES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/*.cpp" "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/*.h")
+    target_sources(${PROJECT_NAME} PRIVATE ${NOX_EDITOR_MCP_FILES})
+    target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp")
+    target_link_libraries(${PROJECT_NAME} PRIVATE NoxMcp)
 else()
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOX_WITH_MCP=0)
 endif()

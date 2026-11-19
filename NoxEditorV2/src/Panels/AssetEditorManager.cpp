@@ -156,6 +156,14 @@ namespace Nox
         m_Open.clear(); // (edits not saved by now go back to the files: the caller asked)
     }
 
+    AssetEditorV2* AssetEditorManager::Find(AssetHandle handle) const
+    {
+        for (const OpenEditor& open : m_Open)
+            if (open.Editor->GetHandle() == handle)
+                return open.Editor.get();
+        return nullptr;
+    }
+
     bool AssetEditorManager::HasUnsaved() const
     {
         return std::any_of(m_Open.begin(), m_Open.end(), [](const OpenEditor& open) { return open.Editor->IsDirty(); });

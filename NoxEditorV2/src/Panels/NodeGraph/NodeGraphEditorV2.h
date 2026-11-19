@@ -41,6 +41,8 @@ namespace Nox
         // Drops the unsaved edits: the graph is the file's again (and recompiled). False when the file could not be read (the
         // edits stay, the window says why).
         bool RevertToDisk() override;
+        // A whole graph from outside the window (MCP's set_graph): one undo step here, compiled, saved. False: not written.
+        bool ApplyExternalEdit(NodeGraph replacement);
 
         AssetHandle GetHandle() const override { return m_Handle; }
         const std::string& GetName() const override { return m_Title; }
