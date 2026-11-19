@@ -4483,7 +4483,15 @@ namespace Nox
                         m_ProjectSettings.BuildUI(&uiLayer->GetContext());
                     OpenToolWindow("Project Settings", m_ProjectSettings.GetRoot(), { 470.0f, 640.0f });
                 }, false, true, false, false, "What the project keeps: start scene, render quality and its saved settings, game window, physical surfaces."},
-                {"Render Graph", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
+                {"Render Graph", "", [this, uiLayer]()
+                {
+                    if (!m_RenderGraphPanel.GetRoot())
+                    {
+                        m_RenderGraphPanel.SetRenderer(m_Renderer);
+                        m_RenderGraphPanel.BuildUI(&uiLayer->GetContext());
+                    }
+                    OpenToolWindow("Render Graph", m_RenderGraphPanel.GetRoot(), { 1000.0f, 700.0f });
+                }, false, true, false, false, "The frame's passes, resources, validation and a texture inspector; culling and LOD switches."},
                 {"Content Browser", m_Commands.ShortcutText("Window.ContentDrawer"), [this]() { ShowPage(DrawerPage::Content); }, false, true, false, false,
                  "In the drawer over the viewport (or its tab, when it is docked in the layout)."},
                 {"Output Log", m_Commands.ShortcutText("Window.OutputLogCommand"), [this]() { ShowPage(DrawerPage::Log); }},
@@ -4491,7 +4499,12 @@ namespace Nox
                  [this]() { if (IsPanelDocked("Content Browser")) UndockPage(DrawerPage::Content); else DockPage(DrawerPage::Content); }},
                 {IsPanelDocked("Output Log") ? "Output Log: Back to Drawer" : "Output Log: Dock in Layout", "",
                  [this]() { if (IsPanelDocked("Output Log")) UndockPage(DrawerPage::Log); else DockPage(DrawerPage::Log); }},
-                {"Profiler", "", {}, false, false, false, false, "Panel not yet ported to NoxEditorV2"},
+                {"Profiler", "", [this, uiLayer]()
+                {
+                    if (!m_ProfilerPanel.GetRoot())
+                        m_ProfilerPanel.BuildUI(&uiLayer->GetContext());
+                    OpenToolWindow("Profiler", m_ProfilerPanel.GetRoot(), { 1100.0f, 680.0f });
+                }, false, true, false, false, "Frame times, the frame's timeline per thread and GPU queue, scopes, spikes and captures."},
                 {"World Partition", "", [this, uiLayer]()
                 {
                     if (!m_WorldPartitionPanel.GetRoot())
@@ -4764,6 +4777,9 @@ namespace Nox
             m_WorldPartitionPanel.Update();
         if (m_MixerPanel.GetRoot() && dock->HasPanel("Mixer"))
             m_MixerPanel.Update();
+        // (every frame: closed, it stops the profiler keeping frames)
+        m_ProfilerPanel.Update(m_ProfilerPanel.GetRoot() && dock->HasPanel("Profiler"));
+        m_RenderGraphPanel.Update(m_RenderGraphPanel.GetRoot() && dock->HasPanel("Render Graph")); // (closed: no report is made)
     }
 
     std::filesystem::path EditorV2Layer::LayoutDirectory() const

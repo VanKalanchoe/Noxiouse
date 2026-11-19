@@ -324,7 +324,7 @@ it yet):
 | L1 | Levels, World Partition (HLOD) panels | LevelsPanel, WorldPartitionPanel | **built** (below) |
 | A1 | Audio Mixer | MixerPanel, AudioWidgets | **built** (below) |
 | T1 | Timeline (sequencer), Animation Clip | TimelinePanel, AnimationClipPanel | open |
-| P1 | Profiler, Render Graph | ProfilerPanel, RenderGraphPanel | open |
+| P1 | Profiler, Render Graph | ProfilerPanel, RenderGraphPanel | **built** (below) |
 | D1 | Package Game / Server, Streaming Test World, MCP server menu | EditorLayer dialogs, GamePackager | open |
 | F1 | Prefab mode, prefab variants, Replace References | EditorLayer, ContentBrowserPanel | open |
 
@@ -468,6 +468,24 @@ rename applied only on Enter (also when the field is left now); undo / redo did 
 reflections play into left them on a bus that no longer existed (they go to Master); Delete Bus asked in a popup without saying it
 can be undone; the meter colours were constants (theme tokens `MeterBackground`, `MeterLow`, `MeterLoud`, `MeterClip`, `FaderTrack`,
 `FaderKnob`). Checked: syntax check. Not run on a GPU.
+
+**P1 -- Profiler and Render Graph (built, not run on a GPU / not user-tested).** `Panels/ProfilerV2Panel`, Window > Profiler: Pause /
+Record, Follow, Clear, Save, Load (a capture shows instead of the live frames until Close Capture), Recent Frames / Spikes (n), the
+spike threshold, Memory; the picked frame's line (frame / CPU / GPU ms, VRAM / RAM, dropped scopes, an uncalibrated GPU clock); the
+frame graph (click a frame), the memory graph, the timeline (GPU graphics / async compute / transfer tracks, the main thread first,
+then the other threads; wheel zooms around the pointer, drag pans, Shift+wheel scrolls the lanes, click marks a scope, double-click
+zooms to it; tooltips with duration, start, thread, depth and source line) and the scope table (filter, Marked / Unmark, click a header
+to sort, a row to mark). Frames are kept only while the window is open and not paused (the layer tells it every frame).
+`Panels/RenderGraphV2Panel`, Window > Render Graph: the graph, culling and LOD switches (Validation, Parallel Recording,
+Synchronization, Export .dot, Instance / Occlusion Culling, Meshlet Frustum, Freeze Culling View, LOD Error, Full Detail, Pipeline
+Statistics) with the frame's counts and rates; tabs Passes (click a pass: its reads and writes), Resources (lifetime bars; click Inspect),
+Validation (n) and Inspector (mip, depth curve, exposure, channels; the texel value under the pointer). The report is made only while
+the window is open; closing it ends an inspection. `Panels/TableViewV2`: a table drawn in one element (rows filled each frame,
+click reports row and column) for live tables. NoxCore: `UITabPanel::SetTabTitle`. Flaws not carried over: the profiler started and
+stopped keeping frames inside its ImGui draw; the render graph left a texture inspection running when the window closed only if it had
+drawn that frame; colours were constants (theme tokens `ProfilerBackground`, `ProfilerFrameGood` / `Slow` / `Bad`, `ProfilerGpu`,
+`ProfilerVram`, `ProfilerRam`, `Profiler*Lane`, `TableBackground`). Not yet: Save / Load use the blocking file dialog (E7). Checked:
+syntax check. Not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

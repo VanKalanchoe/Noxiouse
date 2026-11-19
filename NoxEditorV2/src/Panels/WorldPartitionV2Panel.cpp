@@ -11,6 +11,7 @@
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Scene/HLODBuilder.h"
 #include "NoxCore/Scene/Scene.h"
+#include "NoxCore/Renderer/Font.h"
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Core/UITheme.h"

@@ -27,6 +27,8 @@ namespace Nox::UI
         size_t GetTabCount() const { return m_Tabs.size(); }
 
         const std::string& GetTabTitle(size_t index) const;
+        // (Not for a dock space's tabs: it finds its panels by title.)
+        void SetTabTitle(size_t index, const std::string& title);
         Ref<UIElement> GetTabContent(size_t index) const;
 
         const Ref<UIStackBox>& GetTabBar() const { return m_TabBar; }

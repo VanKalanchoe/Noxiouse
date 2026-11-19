@@ -18,6 +18,7 @@
 #include "NoxCore/Audio/SpatialAudio.h"
 #include "NoxCore/Core/UUID.h"
 #include "NoxCore/Project/Project.h"
+#include "NoxCore/Renderer/Font.h"
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Core/UITheme.h"

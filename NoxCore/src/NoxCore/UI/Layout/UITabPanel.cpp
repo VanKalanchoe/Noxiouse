@@ -287,6 +287,15 @@ namespace Nox::UI
         return index < m_Tabs.size() ? m_Tabs[index].Title : kEmpty;
     }
 
+    void UITabPanel::SetTabTitle(size_t index, const std::string& title)
+    {
+        if (index >= m_Tabs.size())
+            return;
+        m_Tabs[index].Title = title;
+        if (m_Tabs[index].Button)
+            m_Tabs[index].Button->SetText(title);
+    }
+
     Ref<UIElement> UITabPanel::GetTabContent(size_t index) const
     {
         return index < m_Tabs.size() ? m_Tabs[index].Content : nullptr;
