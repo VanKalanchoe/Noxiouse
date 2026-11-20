@@ -689,7 +689,11 @@ draws up to four channels per key and shares the track lanes' time axis and scro
 `UISearchPicker::Show`: a popup list with a search field, under its anchor (above it when there is more room), rows filtered by label
 or detail as typed, the current one highlighted, an optional None row, at most MaxShown rows built with a "Showing n of m" note, Enter
 picks the first row, a click outside or Escape closes -- the inspector's asset picker (`ShowSearchableAssetPicker`) is now this.
-Headless UI test: 59 checks pass (24 new for these four).
+`UIDrawerHost`: a main element with a drawer sliding up over it from the bottom (covers instead of resizing, as Unreal's Content
+Drawer), a grip on its top edge (HeightFraction within MinFraction..MaxFraction, `OnResized`), one page at a time (`SetPage`), `Open`
+animated, `CloseNow`, `DrawerRect`, clicks on the drawer never reach what is behind -- the editor's centre area (dock space + Content
+Browser / Output Log drawer) is now this; its three classes are gone.
+Headless UI test: 66 checks pass (31 new for these five).
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

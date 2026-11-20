@@ -62,6 +62,7 @@
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneSerializer.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
+#include "NoxCore/UI/Layout/UIDrawerHost.h"
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Core/UILayer.h"
@@ -183,138 +184,6 @@ namespace Nox
             std::string m_Label;
             std::function<void()> m_OnClick;
             bool m_Hovered = false;
-        };
-
-        // The drawer's top edge: drag it to make the drawer taller or shorter.
-        class DrawerGrip final : public UI::UIElement
-        {
-        public:
-            explicit DrawerGrip(std::function<void(float dy)> onDrag)
-                : m_OnDrag(std::move(onDrag))
-            {
-                HitTestMode = UI::UIHitTestMode::Self;
-                WidthMode = UI::UISizeMode::Fill;
-                HeightMode = UI::UISizeMode::Fixed;
-                FixedSize = { 0.0f, 6.0f };
-                Tooltip = "Drag to resize the drawer";
-            }
-
-            UI::UICursorShape GetCursorShape(const UI::UIVec2&) const override { return UI::UICursorShape::ResizeNS; }
-            bool OnPointerDown(const UI::UIPointerEvent& e) override
-            {
-                if (e.Button != 1)
-                    return false;
-                m_Dragging = true;
-                m_LastY = e.Position.y;
-                if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
-                    ctx->CancelPendingDrag();
-                return true;
-            }
-            bool OnPointerMove(const UI::UIPointerEvent& e) override
-            {
-                if (!m_Dragging)
-                    return false;
-                if (m_OnDrag)
-                    m_OnDrag(e.Position.y - m_LastY);
-                m_LastY = e.Position.y;
-                return true;
-            }
-            bool OnPointerUp(const UI::UIPointerEvent&) override
-            {
-                m_Dragging = false;
-                return true;
-            }
-            bool OnPointerEnter(const UI::UIPointerEvent&) override { m_Hovered = true; return false; }
-            bool OnPointerLeave(const UI::UIPointerEvent&) override { m_Hovered = false; return false; }
-
-        protected:
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
-            {
-                const UI::UIRect& b = GetBounds();
-                const UI::UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
-                const UI::UIColor line = (m_Hovered || m_Dragging) ? accent : theme.GetToken("Border", { 0.20f, 0.235f, 0.32f, 1.0f });
-                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Min.y + ((m_Hovered || m_Dragging) ? 2.0f : 1.0f) }, line);
-                const float cx = b.Center().x;
-                d.AddRoundedRect({ cx - 18.0f, b.Min.y + 2.0f }, { cx + 18.0f, b.Min.y + 4.0f }, { line.r, line.g, line.b, 0.9f }, glm::vec4(1.0f));
-            }
-
-        private:
-            std::function<void(float)> m_OnDrag;
-            bool m_Dragging = false;
-            bool m_Hovered = false;
-            float m_LastY = 0.0f;
-        };
-
-        // The drawer: the page (Content Browser or Output Log) on the panel colour, a shadow over what it covers.
-        class DrawerFrame final : public UI::UIStackBox
-        {
-        public:
-            DrawerFrame()
-                : UI::UIStackBox(UI::UIOrientation::Vertical, 0.0f)
-            {
-                WidthMode = UI::UISizeMode::Fill;
-                HeightMode = UI::UISizeMode::Fill;
-                HitTestMode = UI::UIHitTestMode::Self; // its empty parts take the pointer too (nothing behind it gets a click)
-            }
-
-        protected:
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
-            {
-                const UI::UIRect& b = GetBounds();
-                d.AddRoundedRect(b.Min, b.Max, theme.GetToken("Surface0", { 0.094f, 0.11f, 0.149f, 1.0f }), glm::vec4(0.0f), 0.0f, {},
-                                 { 0.0f, 0.0f, 0.0f, 0.55f }, { 0.0f, -4.0f }, 18.0f);
-            }
-        };
-
-        // The editor between the menu bar and the status bar: the dock space, and the drawer sliding up over it from the bottom
-        // (it covers the viewport instead of resizing it, as Unreal's Content Drawer does).
-        class EditorCenterArea final : public UI::UIElement
-        {
-        public:
-            EditorCenterArea(const Ref<UI::UIElement>& dock, const Ref<UI::UIElement>& drawer)
-                : m_Dock(dock), m_Drawer(drawer)
-            {
-                WidthMode = UI::UISizeMode::Fill;
-                HeightMode = UI::UISizeMode::Fill;
-                AddChild(dock);
-                AddChild(drawer);
-                drawer->Visible = false;
-            }
-
-            bool Open = false;
-            float HeightFraction = 0.42f;
-            float Openness = 0.0f; // 0 closed .. 1 open (animated)
-
-            UI::UIRect DrawerRect() const { return m_Drawer && m_Drawer->Visible ? m_Drawer->GetBounds() : UI::UIRect{}; }
-
-        protected:
-            UI::UIVec2 ComputeDesiredSize() override
-            {
-                m_Dock->Measure();
-                m_Drawer->Measure();
-                return { 100.0f, 100.0f };
-            }
-
-            void OnUpdate(float dt) override
-            {
-                const float target = Open ? 1.0f : 0.0f;
-                Openness += (target - Openness) * (1.0f - std::exp(-std::max(0.0f, dt) / 0.045f));
-                if (std::abs(target - Openness) < 0.01f)
-                    Openness = target;
-                m_Drawer->Visible = Openness > 0.0f;
-            }
-
-            void ArrangeChildren(const UI::UIRect& rect) override
-            {
-                m_Dock->Arrange(rect);
-                const float eased = 1.0f - (1.0f - Openness) * (1.0f - Openness);
-                const float height = std::floor(rect.Height() * std::clamp(HeightFraction, 0.15f, 0.9f) * eased);
-                m_Drawer->Arrange({ { rect.Min.x, rect.Max.y - height }, { rect.Max.x, rect.Max.y } });
-            }
-
-        private:
-            Ref<UI::UIElement> m_Dock;
-            Ref<UI::UIElement> m_Drawer;
         };
 
         // The status bar's right side: the log's warnings and errors since its last Clear; a click opens the Output Log.
@@ -3675,8 +3544,7 @@ namespace Nox
         if (UILayer* uiLayer = Application::Get().GetUILayer(); uiLayer && IsDrawerOpen())
         {
             const UI::UIContext& ui = uiLayer->GetContext();
-            const auto* area = static_cast<const EditorCenterArea*>(m_CenterArea.get());
-            if (ui.IsDragging() && area && !area->DrawerRect().Contains(ui.GetLastMousePos()))
+            if (ui.IsDragging() && m_CenterArea && !m_CenterArea->DrawerRect().Contains(ui.GetLastMousePos()))
                 CloseDrawer();
         }
         const bool contentDocked = IsPanelDocked("Content Browser"), logDocked = IsPanelDocked("Output Log");
@@ -3919,10 +3787,9 @@ namespace Nox
             {
                 const UI::UIContext& ui = uiLayer->GetContext();
                 const UI::UIVec2 pos = ui.GetLastMousePos();
-                const auto* area = static_cast<const EditorCenterArea*>(m_CenterArea.get());
                 const bool onTab = (m_ContentDrawerTab && m_ContentDrawerTab->GetBounds().Contains(pos)) ||
                                    (m_LogDrawerTab && m_LogDrawerTab->GetBounds().Contains(pos));
-                if (!ui.GetOverlay() && area && !area->DrawerRect().Contains(pos) && !onTab)
+                if (!ui.GetOverlay() && m_CenterArea && !m_CenterArea->DrawerRect().Contains(pos) && !onTab)
                     CloseDrawer();
             }
         }
@@ -4327,22 +4194,10 @@ namespace Nox
                               besideBrowser ? "Content Browser" : "Viewports", 0.30f);
         }
 
-        Ref<DrawerFrame> drawer(new DrawerFrame());
-        drawer->AddChild(Ref<UI::UIElement>(new DrawerGrip([this](float dy)
-        {
-            auto* area = static_cast<EditorCenterArea*>(m_CenterArea.get());
-            if (!area || area->GetBounds().Height() < 1.0f)
-                return;
-            m_DrawerFraction = std::clamp(m_DrawerFraction - dy / area->GetBounds().Height(), 0.15f, 0.9f);
-            area->HeightFraction = m_DrawerFraction;
-        })));
-        m_DrawerHost = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 0.0f);
-        m_DrawerHost->WidthMode = UI::UISizeMode::Fill;
-        m_DrawerHost->HeightMode = UI::UISizeMode::Fill;
-        drawer->AddChild(m_DrawerHost);
-        Ref<EditorCenterArea> center(new EditorCenterArea(uiLayer->GetDockSpaceRef(), drawer));
-        center->HeightFraction = m_DrawerFraction;
-        m_CenterArea = center;
+        // The dock space with the drawer sliding up over it (UI::UIDrawerHost); dragging its top edge keeps the height for the session.
+        m_CenterArea = Ref<UI::UIDrawerHost>(new UI::UIDrawerHost(uiLayer->GetDockSpaceRef()));
+        m_CenterArea->HeightFraction = m_DrawerFraction;
+        m_CenterArea->OnResized = [this](float fraction) { m_DrawerFraction = fraction; };
         m_DrawerPage = DrawerPage::None;
 
         // Status bar: the drawer's tabs and what runs on the left, the log's warnings / errors on the right; toasts stack above it
@@ -4984,8 +4839,7 @@ namespace Nox
 
     bool EditorV2Layer::IsDrawerOpen() const
     {
-        const auto* area = static_cast<const EditorCenterArea*>(m_CenterArea.get());
-        return area && area->Open;
+        return m_CenterArea && m_CenterArea->Open;
     }
 
     void EditorV2Layer::ShowPage(DrawerPage page)
@@ -5017,27 +4871,21 @@ namespace Nox
 
     void EditorV2Layer::OpenDrawer(DrawerPage page)
     {
-        auto* area = static_cast<EditorCenterArea*>(m_CenterArea.get());
-        if (!area || !m_DrawerHost || page == DrawerPage::None || IsPanelDocked(PageTitle(static_cast<int>(page))))
+        if (!m_CenterArea || page == DrawerPage::None || IsPanelDocked(PageTitle(static_cast<int>(page))))
             return;
         Ref<UI::UIElement> root = page == DrawerPage::Content ? m_ContentBrowserRoot : m_OutputLogRoot;
         if (!root)
             return;
-        if (m_DrawerPage != page || m_DrawerHost->GetChildren().empty() || m_DrawerHost->GetChildren().front() != root)
-        {
-            m_DrawerHost->ClearChildren();
-            m_DrawerHost->AddChild(root);
-            root->Visible = true;
-        }
+        m_CenterArea->SetPage(root);
         m_DrawerPage = page;
-        area->HeightFraction = m_DrawerFraction;
-        area->Open = true;
+        m_CenterArea->HeightFraction = m_DrawerFraction;
+        m_CenterArea->Open = true;
     }
 
     void EditorV2Layer::CloseDrawer()
     {
-        if (auto* area = static_cast<EditorCenterArea*>(m_CenterArea.get()))
-            area->Open = false;
+        if (m_CenterArea)
+            m_CenterArea->Open = false;
     }
 
     void EditorV2Layer::DockPage(DrawerPage page)
@@ -5055,12 +4903,10 @@ namespace Nox
         // Out of the drawer (closed at once: the page is needed in the dock now).
         if (m_DrawerPage == page)
         {
-            if (m_DrawerHost)
-                m_DrawerHost->ClearChildren();
-            if (auto* area = static_cast<EditorCenterArea*>(m_CenterArea.get()))
+            if (m_CenterArea)
             {
-                area->Open = false;
-                area->Openness = 0.0f;
+                m_CenterArea->SetPage({});
+                m_CenterArea->CloseNow();
             }
             m_DrawerPage = DrawerPage::None;
         }

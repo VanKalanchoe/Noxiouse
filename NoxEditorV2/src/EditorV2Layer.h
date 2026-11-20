@@ -59,6 +59,7 @@ namespace Nox
     namespace UI
     {
         class UIDockSpace;
+        class UIDrawerHost;
         class UIElement;
         class UIImage;
         class UILabel;
@@ -433,8 +434,7 @@ namespace Nox
         OutputLogV2Panel m_OutputLogPanel;
         Ref<UI::UIElement> m_ContentBrowserRoot;
         Ref<UI::UIElement> m_OutputLogRoot;
-        Ref<UI::UIElement> m_CenterArea;      // the dock space with the drawer over it
-        Ref<UI::UIElement> m_DrawerHost;      // where the drawer's page goes
+        Ref<UI::UIDrawerHost> m_CenterArea;   // the dock space with the drawer over it
         Ref<UI::UIElement> m_ContentDockButton, m_LogDockButton;
         Ref<UI::UIElement> m_ContentDrawerTab, m_LogDrawerTab; // in the status bar
         DrawerPage m_DrawerPage = DrawerPage::None;
