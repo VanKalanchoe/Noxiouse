@@ -686,7 +686,10 @@ still during a drag, zero lines, the range written in a corner), `Keys` (edit so
 curve's own interpolation), `AddOnDoubleClick`, `OnChanging` (each drag step) / `OnKeyCountChanged` (a key added or removed) --
 replaces the node graph's `CurveEditView`; the default stays the old 0..1 editor. The Timeline's curves view stays in the editor: it
 draws up to four channels per key and shares the track lanes' time axis and scroll, which a one-curve widget does not have.
-Headless UI test: 52 checks pass (17 new for these three).
+`UISearchPicker::Show`: a popup list with a search field, under its anchor (above it when there is more room), rows filtered by label
+or detail as typed, the current one highlighted, an optional None row, at most MaxShown rows built with a "Showing n of m" note, Enter
+picks the first row, a click outside or Escape closes -- the inspector's asset picker (`ShowSearchableAssetPicker`) is now this.
+Headless UI test: 59 checks pass (24 new for these four).
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

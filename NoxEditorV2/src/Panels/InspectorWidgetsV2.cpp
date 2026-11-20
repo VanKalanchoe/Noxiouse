@@ -21,6 +21,7 @@
 #include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "Panels/AssetPreviewRenderer.h"
+#include "NoxCore/UI/Widgets/UISearchPicker.h"
 #include "NoxCore/UI/Widgets/UIIconButton.h"
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UIContext.h"
@@ -53,194 +54,6 @@ namespace Nox
             button->OnClickAt = std::move(onOpen);
             return button;
         }
-
-        constexpr size_t kMaxVisiblePickerOptions = 60;
-
-        class UIAssetPickerBackdrop final : public UI::UIAnchorBox
-        {
-        public:
-            UIAssetPickerBackdrop(
-                UI::UIContext* context,
-                const UI::UIRect& anchorRect,
-                bool alignRight,
-                std::string emptyLabel,
-                AssetHandle currentHandle,
-                std::vector<AssetPickerOption> options,
-                std::function<void(AssetHandle)> onPick)
-                : m_Context(context)
-                , m_AnchorRect(anchorRect)
-                , m_AlignRight(alignRight)
-                , m_EmptyLabel(std::move(emptyLabel))
-                , m_CurrentHandle(currentHandle)
-                , m_Options(std::move(options))
-                , m_OnPick(std::move(onPick))
-            {
-                HitTestMode = UI::UIHitTestMode::Self;
-
-                m_Popup = Ref<UI::UIStackBox>(new UI::UIStackBox(UI::UIOrientation::Vertical, 6.0f));
-                m_Popup->StyleClass = "MenuPopup";
-                m_Popup->DrawBackground = true;
-                m_Popup->HitTestMode = UI::UIHitTestMode::Self;
-                m_Popup->WidthMode = UI::UISizeMode::Fixed;
-                m_Popup->FixedSize.x = std::max(270.0f, std::min(360.0f, anchorRect.Width() + 70.0f));
-                m_Popup->HeightMode = UI::UISizeMode::Auto;
-                m_Popup->Padding = UI::UIThickness::All(8.0f);
-
-                m_SearchInput = UI::MakeUI<UI::UITextInput>("", "Filter assets...");
-                m_SearchInput->WidthMode = UI::UISizeMode::Fill;
-                m_SearchInput->OnChanged = [this](const std::string& q)
-                {
-                    RebuildList(q);
-                };
-                m_Popup->AddChild(m_SearchInput);
-
-                m_Scroll = UI::MakeUI<UI::UIScrollView>();
-                m_Scroll->WidthMode = UI::UISizeMode::Fill;
-                m_Scroll->HeightMode = UI::UISizeMode::Auto;
-                m_Scroll->ChildSpacing = 2.0f;
-                m_Popup->AddChild(m_Scroll);
-
-                AddChild(m_Popup);
-                RebuildList("");
-            }
-
-            void FocusSearch()
-            {
-                if (m_Context && m_SearchInput)
-                    m_Context->SetFocus(m_SearchInput.get());
-            }
-
-            bool OnPointerDown(const UI::UIPointerEvent& e) override
-            {
-                if (AnyChildContains(e.Position))
-                    return true; // on the popup: its row acts on the release
-                if ((e.Button == 1 || e.Button == 3) && m_Context)
-                {
-                    m_Context->ClearOverlay();
-                    return true;
-                }
-                return false;
-            }
-
-        protected:
-            void ArrangeChildren(const UI::UIRect& contentRect) override
-            {
-                if (!m_Popup || !m_Popup->Visible)
-                    return;
-
-                constexpr float kMargin = 6.0f;
-                const float maxPopupH = std::max(140.0f, std::min(340.0f, contentRect.Height() - kMargin * 2.0f));
-                const float headerReserve = 52.0f;
-                m_Scroll->MaxSize.y = std::max(60.0f, maxPopupH - headerReserve);
-
-                const UI::UIVec2 desired = m_Popup->Measure();
-                const float w = std::min(desired.x, std::max(180.0f, contentRect.Width() - kMargin * 2.0f));
-                float h = std::min(desired.y, maxPopupH);
-
-                const float spaceBelow = contentRect.Max.y - kMargin - (m_AnchorRect.Max.y + 3.0f);
-                const float spaceAbove = (m_AnchorRect.Min.y - 3.0f) - (contentRect.Min.y + kMargin);
-                float y = m_AnchorRect.Max.y + 3.0f;
-                if (h > spaceBelow && spaceAbove > spaceBelow)
-                {
-                    h = std::min(h, std::max(100.0f, spaceAbove));
-                    y = m_AnchorRect.Min.y - 3.0f - h;
-                }
-                else
-                {
-                    y = std::clamp(y, contentRect.Min.y + kMargin, std::max(contentRect.Min.y + kMargin, contentRect.Max.y - h - kMargin));
-                }
-
-                float x = m_AlignRight ? (m_AnchorRect.Max.x - w) : m_AnchorRect.Min.x;
-                x = std::clamp(x, contentRect.Min.x + kMargin, std::max(contentRect.Min.x + kMargin, contentRect.Max.x - w - kMargin));
-
-                m_Scroll->MaxSize.y = std::max(60.0f, h - headerReserve);
-                m_Popup->Arrange({ { x, y }, { x + w, y + h } });
-            }
-
-        private:
-            void RebuildList(const std::string& query)
-            {
-                m_Scroll->ClearChildren();
-                m_Scroll->ScrollOffsetY = 0.0f;
-
-                const std::string filter = ToLowerStr(query);
-
-                auto addOptionButton = [this](const std::string& label, const std::string& detail, AssetHandle handle)
-                {
-                    const bool isCurrent = (handle == m_CurrentHandle);
-                    auto row = UI::Button(detail.empty() ? label : (label + "   " + detail), [this, handle]()
-                    {
-                        auto cb = m_OnPick;
-                        if (m_Context)
-                            m_Context->ClearOverlay();
-                        if (cb)
-                            cb(handle);
-                    });
-                    row->StyleClass = "MenuItem";
-                    if (isCurrent)
-                        row->StyleVariant = "primary";
-                    row->WidthMode = UI::UISizeMode::Fill;
-                    row->HeightMode = UI::UISizeMode::Auto;
-                    row->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
-                    if (!detail.empty())
-                        row->Tooltip = detail;
-                    m_Scroll->AddChild(row);
-                };
-
-                if (filter.empty())
-                    addOptionButton(m_EmptyLabel, "", AssetHandle(0));
-
-                size_t shown = 0;
-                size_t totalMatches = 0;
-                for (const AssetPickerOption& opt : m_Options)
-                {
-                    if (!filter.empty())
-                    {
-                        const std::string labelL = ToLowerStr(opt.Label);
-                        const std::string detailL = ToLowerStr(opt.Detail);
-                        if (labelL.find(filter) == std::string::npos && detailL.find(filter) == std::string::npos)
-                            continue;
-                    }
-                    ++totalMatches;
-                    if (shown < kMaxVisiblePickerOptions)
-                    {
-                        addOptionButton(opt.Label, opt.Detail, opt.Handle);
-                        ++shown;
-                    }
-                }
-
-                if (totalMatches == 0 && !filter.empty())
-                {
-                    auto emptyNote = UI::Label("No matching assets");
-                    emptyNote->FontSizeOverride = 13.5f;
-                    emptyNote->UseColorOverride = true;
-                    emptyNote->ColorOverride = { 0.58f, 0.64f, 0.74f, 1.0f };
-                    emptyNote->Padding = UI::UIThickness::Symmetric(8.0f, 6.0f);
-                    m_Scroll->AddChild(emptyNote);
-                }
-                else if (totalMatches > shown)
-                {
-                    auto moreNote = UI::Label(
-                        "Showing " + std::to_string(shown) + " of " + std::to_string(totalMatches) + " — type to narrow");
-                    moreNote->FontSizeOverride = 13.0f;
-                    moreNote->UseColorOverride = true;
-                    moreNote->ColorOverride = { 0.58f, 0.64f, 0.74f, 1.0f };
-                    moreNote->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
-                    m_Scroll->AddChild(moreNote);
-                }
-            }
-
-            UI::UIContext* m_Context = nullptr;
-            UI::UIRect m_AnchorRect{};
-            bool m_AlignRight = false;
-            std::string m_EmptyLabel;
-            AssetHandle m_CurrentHandle = 0;
-            std::vector<AssetPickerOption> m_Options;
-            std::function<void(AssetHandle)> m_OnPick;
-            Ref<UI::UIStackBox> m_Popup;
-            Ref<UI::UITextInput> m_SearchInput;
-            Ref<UI::UIScrollView> m_Scroll;
-        };
 
         // Custom-painted component card header with vector chevron, bold title, and optional actions button.
         class CardHeaderButton final : public UI::UIElement
@@ -447,17 +260,18 @@ namespace Nox
         std::function<void(AssetHandle)> onPick,
         bool alignRight)
     {
-        Ref<UIAssetPickerBackdrop> backdrop(new UIAssetPickerBackdrop(
-            &context,
-            triggerBounds,
-            alignRight,
-            emptyLabel,
-            currentHandle,
-            std::move(options),
-            std::move(onPick)
-        ));
-        context.SetOverlay(backdrop);
-        backdrop->FocusSearch();
+        // The library's searchable popup (UI::UISearchPicker) over the assets; Id is the handle.
+        std::vector<UI::UISearchPickerOption> rows;
+        rows.reserve(options.size());
+        for (AssetPickerOption& option : options)
+            rows.push_back({ std::move(option.Label), std::move(option.Detail), static_cast<uint64_t>(option.Handle) });
+        UI::UISearchPickerSettings settings;
+        settings.Placeholder = "Filter assets...";
+        settings.NoneLabel = emptyLabel;
+        settings.NoMatches = "No matching assets";
+        settings.AlignRight = alignRight;
+        UI::UISearchPicker::Show(context, triggerBounds, std::move(rows), static_cast<uint64_t>(currentHandle),
+                                 [onPick = std::move(onPick)](uint64_t id) { if (onPick) onPick(AssetHandle(id)); }, std::move(settings));
     }
 
     EntityActiveSwitch::EntityActiveSwitch(bool active, std::function<void(bool)> onChanged)
