@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include "Panels/SettingsRowsV2.h"
+#include "NoxCore/UI/Widgets/UIPropertyRows.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Core/Window.h"
 #include "NoxCore/Project/Project.h"
@@ -66,12 +66,12 @@ namespace Nox
         Renderer* r = m_Hooks.Render;
         if (!config || !r)
             return m_Root;
-        SettingsRowsV2 rows(m_Body, context);
+        UI::UIPropertyRows rows(m_Body, context);
         rows.Note("Saved in the project file at each change.");
 
         // ---- Maps ----
         {
-            SettingsRowsV2 maps = rows.Section("Maps", true, &m_Expanded);
+            UI::UIPropertyRows maps = rows.Section("Maps", true, &m_Expanded);
             // The list is read when the row is made; a scene saved later shows after the panel is opened again.
             const auto scenes = Scenes();
             std::vector<std::string> names{ "(none: an empty scene)" };
@@ -103,7 +103,7 @@ namespace Nox
 
         // ---- Rendering ----
         {
-            SettingsRowsV2 rendering = rows.Section("Rendering", true, &m_Expanded);
+            UI::UIPropertyRows rendering = rows.Section("Rendering", true, &m_Expanded);
             std::vector<std::string> names{ std::string("Auto (") + Renderer::GetQualityName(r->GetRecommendedQuality()) + " for this GPU)" };
             for (Renderer::RenderQuality quality : kQualities)
                 names.push_back(Renderer::GetQualityName(quality));
@@ -191,7 +191,7 @@ namespace Nox
 
         // ---- Packaged game ----
         {
-            SettingsRowsV2 game = rows.Section("Packaged Game", false, &m_Expanded);
+            UI::UIPropertyRows game = rows.Section("Packaged Game", false, &m_Expanded);
             static const char* modes[] = { "Windowed", "Borderless", "Fullscreen" };
             game.Choice("Game Window", { modes[0], modes[1], modes[2] },
                 []() { const ProjectConfig* c = Config(); return c ? static_cast<int>(ParseWindowMode(c->WindowMode)) : 1; },
@@ -202,7 +202,7 @@ namespace Nox
 
         // ---- Physics ----
         {
-            SettingsRowsV2 physics = rows.Section("Physical Surfaces", false, &m_Expanded,
+            UI::UIPropertyRows physics = rows.Section("Physical Surfaces", false, &m_Expanded,
                 "Unreal's Physical Surface types: materials (Material editor) and bodies (Rigid Body 3D) pick one; footstep notifies play a sound per surface.");
             physics.Note("Rename a surface in its field (Enter or click away applies it); materials and the open scene's bodies that use it follow.");
             m_Surfaces = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 3.0f);

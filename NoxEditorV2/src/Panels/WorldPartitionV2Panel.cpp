@@ -7,7 +7,7 @@
 
 #include <SDL3/SDL_keyboard.h>
 
-#include "Panels/SettingsRowsV2.h"
+#include "NoxCore/UI/Widgets/UIPropertyRows.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Scene/HLODBuilder.h"
 #include "NoxCore/Scene/Scene.h"
@@ -386,7 +386,7 @@ namespace Nox
         m_Body->ClearChildren();
         m_Map = nullptr;
         const Ref<Scene> scene = m_Hooks.ActiveScene ? m_Hooks.ActiveScene() : nullptr;
-        SettingsRowsV2 rows(m_Body, m_Context);
+        UI::UIPropertyRows rows(m_Body, m_Context);
         if (!scene)
         {
             rows.Note("No scene");
@@ -411,7 +411,7 @@ namespace Nox
                       "next save.");
             rows.Note("Each root entity goes into one cell. A model placed as one instance would stream as one piece: split it first "
                       "(Inspector > Model Instance > Split Into Separate Entities).");
-            SettingsRowsV2 convert = rows.Group();
+            UI::UIPropertyRows convert = rows.Group();
             convert.Drag("Cell Size (m)", [fields]() { return fields->CellSize; }, [fields](float v) { fields->CellSize = v; }, 1.0f, 8.0f, 4096.0f, "{:.0f}");
             convert.Drag("Loading Range (m)", [fields]() { return fields->LoadingRange; }, [fields](float v) { fields->LoadingRange = v; }, 1.0f, 8.0f, 16384.0f, "{:.0f}");
             convert.Button("Convert to World Partition", [this, getScene, fields]()
@@ -429,7 +429,7 @@ namespace Nox
 
         // ---- Settings ----
         {
-            SettingsRowsV2 settings = rows.Section("Settings", false, &m_Expanded);
+            UI::UIPropertyRows settings = rows.Section("Settings", false, &m_Expanded);
             settings.Drag("Loading Range (m)", [getScene]() { Ref<Scene> s = getScene(); return s ? s->GetWorldPartition().Settings.LoadingRange : 0.0f; },
                 [this, getScene, fields](float v)
                 {
@@ -451,7 +451,7 @@ namespace Nox
                         return false;
                 return true;
             };
-            SettingsRowsV2 size = settings.Group();
+            UI::UIPropertyRows size = settings.Group();
             size.Drag("Cell Size (m)", [fields]() { return fields->CellSize; }, [fields](float v) { fields->CellSize = v; }, 1.0f, 8.0f, 4096.0f, "{:.0f}");
             size.Button("Apply Cell Size", [this, getScene, fields]()
             {
@@ -494,7 +494,7 @@ namespace Nox
         }
         else
         {
-            SettingsRowsV2 hlod = rows.Section("HLOD", false, &m_Expanded,
+            UI::UIPropertyRows hlod = rows.Section("HLOD", false, &m_Expanded,
                 "Unreal's World Partition HLODs: every cell's static meshes merged, simplified and baked into one mesh, shown while the cell is out.");
             hlod.Check("Show HLODs", [getScene]() { Ref<Scene> s = getScene(); return s && s->GetShowHLODs(); },
                        [getScene](bool v) { if (Ref<Scene> s = getScene()) s->SetShowHLODs(v); },
@@ -512,7 +512,7 @@ namespace Nox
                         }
                 return hlods ? std::to_string(hlods) + " HLODs in " + std::to_string(cells) + " HLOD cells" : std::string("No HLODs built yet");
             });
-            SettingsRowsV2 build = hlod.Group();
+            UI::UIPropertyRows build = hlod.Group();
             const auto settingRow = [&build, getScene, this](const std::string& label, float WorldPartitionSettings::*field, float speed, float min, float max,
                                                             const char* format, const std::string& tooltip)
             {

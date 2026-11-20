@@ -3,7 +3,7 @@
 
 #include <format>
 
-#include "Panels/SettingsRowsV2.h"
+#include "NoxCore/UI/Widgets/UIPropertyRows.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
@@ -34,7 +34,7 @@ namespace Nox
 
         auto content = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
         content->WidthMode = UI::UISizeMode::Fill;
-        SettingsRowsV2 rows(content, context);
+        UI::UIPropertyRows rows(content, context);
         rows.Note(server ? "A dedicated server (Unreal's server target): the runtime named <Project>Server -- it starts as a dedicated server, no "
                            "window, GPU or sound, its console takes the server's commands -- with the scenes' cooked assets but no textures, fonts, "
                            "sound clips, baked acoustics or shaders. Clients join it with --connect=<its address>."
@@ -99,7 +99,7 @@ namespace Nox
         UI::UIContext* context = &uiLayer->GetContext();
         auto content = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
         content->WidthMode = UI::UISizeMode::Fill;
-        SettingsRowsV2 rows(content, context);
+        UI::UIPropertyRows rows(content, context);
         StreamingTestWorldGenerator::Settings* s = &m_TestWorldSettings;
         rows.Note("A world of N x N cells, each with its own terrain mesh and texture (nothing shared), so its data is larger than RAM and VRAM. "
                   "It is written into the project as cooked assets and opened.");

@@ -9,7 +9,7 @@
 #include <SDL3/SDL_scancode.h>
 
 #include "Panels/InspectorWidgetsV2.h"
-#include "Panels/SettingsRowsV2.h"
+#include "NoxCore/UI/Widgets/UIPropertyRows.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Audio/AudioDSP.h"
@@ -523,7 +523,7 @@ namespace Nox
         box->Padding = UI::UIThickness::All(10.0f);
         box->FixedSize = { 440.0f, 0.0f };
         // (its rows follow the settings while the popup is up: their syncs are part of the overlay, and stop with it)
-        SettingsRowsV2 rows(box, m_Context);
+        UI::UIPropertyRows rows(box, m_Context);
         AudioReflectionSettings* r = &AudioMixer::GetData().Reflections;
         const auto changed = [this]() { Changed(false); };
         rows.Check("Reflections", [r]() { return r->Enabled; }, [r, changed](bool v) { r->Enabled = v; changed(); },
@@ -808,7 +808,7 @@ namespace Nox
             return;
         const uint64_t id = bus->Id;
         const bool isMaster = id == kAudioBusMaster;
-        SettingsRowsV2 rows(Ref<UI::UIStackBox>(&into), m_Context);
+        UI::UIPropertyRows rows(Ref<UI::UIStackBox>(&into), m_Context);
         const auto findBus = [id]() { return AudioMixer::GetData().FindBus(id); };
 
         rows.Header("Bus");
@@ -908,7 +908,7 @@ namespace Nox
                 });
             card.Card->Tooltip = info.Description;
             into.AddChild(card.Card);
-            SettingsRowsV2 effectRows(card.Body, m_Context);
+            UI::UIPropertyRows effectRows(card.Body, m_Context);
 
             auto actions = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
             Ref<UI::UIButton> onOff(new UI::UIButton("Bypass", [this, findEffect]() { if (AudioMixerEffect* e = findEffect()) { e->Bypass = !e->Bypass; Changed(false); } }));

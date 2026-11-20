@@ -6,7 +6,7 @@
 
 #include "Panels/AssetPreviewRenderer.h"
 #include "Panels/InspectorWidgetsV2.h"
-#include "Panels/SettingsRowsV2.h"
+#include "NoxCore/UI/Widgets/UIPropertyRows.h"
 #include "NoxCore/Animation/AnimPose.h"
 #include "NoxCore/Animation/AnimationSequence.h"
 #include "NoxCore/Animation/Skeleton.h"
@@ -485,7 +485,7 @@ namespace Nox
         auto box = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
         box->Padding = UI::UIThickness::All(10.0f);
         box->FixedSize = { 460.0f, 0.0f };
-        SettingsRowsV2 rows(box, context);
+        UI::UIPropertyRows rows(box, context);
         rows.Header("Play Sound: " + n->Name);
         const auto changed = [this]() { Edited(); };
         InspectorCardBuilder slots{ box, {}, context };
@@ -509,7 +509,7 @@ namespace Nox
             rows.String("Bone", &n->Bone, "(the entity)", changed, "No preview skeleton: type the bone's name.");
         rows.Check("Trace Surface", [n]() { return n->TraceSurface; }, [n, changed](bool v) { n->TraceSurface = v; changed(); },
                    "A ray goes down from the bone; the physical surface it hits picks the sound from the list below. No hit, or no sound for that surface: Sound.");
-        SettingsRowsV2 trace = rows.Group();
+        UI::UIPropertyRows trace = rows.Group();
         rows.ShowWhen(trace.GetBody(), [n]() { return n->TraceSurface; });
         trace.Drag("Trace Distance (m)", [n]() { return n->TraceDistance; }, [n, changed](float v) { n->TraceDistance = v; changed(); }, 0.01f, 0.0f, 10.0f, "{:.2f}",
                    "How far below the bone the ground may be (the ray is this + 0.2 m long).");

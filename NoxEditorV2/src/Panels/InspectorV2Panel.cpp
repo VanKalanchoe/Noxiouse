@@ -2,7 +2,7 @@
 
 #include "EditorSelection.h"
 #include "Panels/RendererSettingsV2Panel.h"
-#include "Panels/SettingsRowsV2.h"
+#include "NoxCore/UI/Widgets/UIPropertyRows.h"
 #include "InspectorWidgetsV2.h"
 #include "Panels/AssetPreviewRenderer.h"
 
@@ -2382,7 +2382,7 @@ namespace Nox
                          c.AddInt32("Priority", &comp.Priority, -100, 100);
                          // The volume's effects (the same rows as Renderer Settings > Post Effects); they were missing here.
                          c.AddSubheader("Effects", "What this volume applies (saved with the scene; it replaces the editor's Renderer Settings post effects while it applies).");
-                         SettingsRowsV2 rows(c.Body, c.Context);
+                         UI::UIPropertyRows rows(c.Body, c.Context);
                          AddPostProcessSettingsRows(rows, comp.Settings, [mutate = c.OnMutate]() { if (mutate) mutate(false); });
                      });
         }

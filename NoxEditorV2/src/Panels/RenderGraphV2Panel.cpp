@@ -7,7 +7,7 @@
 #include <string_view>
 #include <unordered_map>
 
-#include "Panels/SettingsRowsV2.h"
+#include "NoxCore/UI/Widgets/UIPropertyRows.h"
 #include "Panels/TableViewV2.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/RenderGraph/RGFrameReport.h"
@@ -105,8 +105,8 @@ namespace Nox
 
         // ---- Header: switches and the frame's counts ----
         {
-            SettingsRowsV2 rows(root, context);
-            SettingsRowsV2 header = rows.Section("Graph, Culling and LOD", true, nullptr);
+            UI::UIPropertyRows rows(root, context);
+            UI::UIPropertyRows header = rows.Section("Graph, Culling and LOD", true, nullptr);
             header.Check("Validation", [graph]() { return graph->IsValidationEnabled(); }, [graph](bool v) { graph->SetValidationEnabled(v); });
             header.Check("Parallel Recording", [r]() { return r->isParallelCommandRecording(); }, [r](bool v) { r->setParallelCommandRecording(v); });
             header.Choice("Synchronization", { "Blanket", "Precise" }, [graph]() { return graph->GetSynchronization() == RGSynchronization::Precise ? 1 : 0; },
@@ -252,7 +252,7 @@ namespace Nox
             auto page = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
             page->WidthMode = UI::UISizeMode::Fill;
             page->HeightMode = UI::UISizeMode::Fill;
-            SettingsRowsV2 rows(page, context);
+            UI::UIPropertyRows rows(page, context);
             rows.Check("Show resources unused this frame", [this]() { return m_ShowUnusedResources; }, [this](bool v) { m_ShowUnusedResources = v; });
             Ref<TableViewV2> table(new TableViewV2());
             table->Columns = { { "Resource", 3.0f }, { "Kind", 1.2f }, { "Size", 1.4f }, { "Format", 1.0f }, { "Memory", 1.0f }, { "Lifetime", 2.2f }, { "GPU Object", 0.9f }, { "", 0.9f } };
@@ -358,7 +358,7 @@ namespace Nox
             auto page = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
             page->WidthMode = UI::UISizeMode::Fill;
             page->HeightMode = UI::UISizeMode::Fill;
-            SettingsRowsV2 rows(page, context);
+            UI::UIPropertyRows rows(page, context);
             rows.Text([r]()
             {
                 const Renderer::TextureInspection& inspection = r->getTextureInspection();
@@ -380,7 +380,7 @@ namespace Nox
                 return key.Format != NRI::ImageFormat::R32SINT && key.Format != NRI::ImageFormat::R32G32_UINT && key.Format != NRI::ImageFormat::R32G32B32A32_UINT &&
                        key.Usage != NRI::TextureUsage::DepthStencilAttachment;
             };
-            SettingsRowsV2 floats = rows.Group();
+            UI::UIPropertyRows floats = rows.Group();
             floats.Check("Depth Curve", [r]() { return r->getTextureInspection().DepthCurve; }, [edit](bool v) { edit([v](Renderer::TextureInspection& i) { i.DepthCurve = v; }); },
                          "Reverse-Z curve: depth kept in a colour format (the Hi-Z pyramid) reads as black otherwise");
             floats.Slider("Exposure (stops)", [this]() { return m_ExposureStops; },

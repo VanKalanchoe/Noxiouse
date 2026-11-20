@@ -5,7 +5,7 @@
 #include <cstdio>
 
 #include "Panels/InspectorWidgetsV2.h"
-#include "Panels/SettingsRowsV2.h"
+#include "NoxCore/UI/Widgets/UIPropertyRows.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Asset/TextureStreamer.h"
 #include "NoxCore/Core/Application.h"
@@ -40,20 +40,20 @@ namespace Nox
         }
 
         // A uint32 the renderer hands out by reference, as a whole-number row.
-        void RefInt(SettingsRowsV2& rows, const std::string& label, uint32_t* value, int min, int max, const std::string& tooltip = {})
+        void RefInt(UI::UIPropertyRows& rows, const std::string& label, uint32_t* value, int min, int max, const std::string& tooltip = {})
         {
             rows.Int(label, [value]() { return static_cast<int>(*value); }, [value](int v) { *value = static_cast<uint32_t>(v); }, min, max, tooltip);
         }
-        void RefFloat(SettingsRowsV2& rows, const std::string& label, float* value, float min, float max, const char* format, const std::string& tooltip = {})
+        void RefFloat(UI::UIPropertyRows& rows, const std::string& label, float* value, float min, float max, const char* format, const std::string& tooltip = {})
         {
             rows.Slider(label, [value]() { return *value; }, [value](float v) { *value = v; }, min, max, format, tooltip);
         }
-        void RefBool(SettingsRowsV2& rows, const std::string& label, bool* value, const std::string& tooltip = {})
+        void RefBool(UI::UIPropertyRows& rows, const std::string& label, bool* value, const std::string& tooltip = {})
         {
             rows.Check(label, [value]() { return *value; }, [value](bool v) { *value = v; }, tooltip);
         }
         // A choice between fixed values (resolutions, tile sizes).
-        void ValueChoice(SettingsRowsV2& rows, const std::string& label, std::vector<uint32_t> values, std::function<uint32_t()> get,
+        void ValueChoice(UI::UIPropertyRows& rows, const std::string& label, std::vector<uint32_t> values, std::function<uint32_t()> get,
                          std::function<void(uint32_t)> set, const std::string& tooltip = {})
         {
             std::vector<std::string> names;
@@ -69,14 +69,14 @@ namespace Nox
         }
     }
 
-    void AddPostProcessSettingsRows(SettingsRowsV2& rows, PostProcessSettings& post, std::function<void()> changed)
+    void AddPostProcessSettingsRows(UI::UIPropertyRows& rows, PostProcessSettings& post, std::function<void()> changed)
     {
         PostProcessSettings* p = &post;
         auto check = [&rows, p, changed](const std::string& label, bool PostProcessSettings::*field, const std::string& tooltip)
         {
             return rows.Check(label, [p, field]() { return p->*field; }, [p, field, changed](bool v) { p->*field = v; if (changed) changed(); }, tooltip);
         };
-        auto slider = [p, changed](SettingsRowsV2& into, const std::string& label, float PostProcessSettings::*field, float min, float max,
+        auto slider = [p, changed](UI::UIPropertyRows& into, const std::string& label, float PostProcessSettings::*field, float min, float max,
                                    const char* format, const std::string& tooltip = {})
         {
             return into.Slider(label, [p, field]() { return p->*field; }, [p, field, changed](float v) { p->*field = v; if (changed) changed(); },
@@ -86,7 +86,7 @@ namespace Nox
         check("Outlines", &PostProcessSettings::Outlines,
               "Lines where the depth jumps (silhouettes) or the surface turns (creases), drawn before anti-aliasing so TAA / DLSS smooth "
               "them. The colour multiplies the image: black is ink, a colour tints the edge.");
-        SettingsRowsV2 outlines = rows.Group();
+        UI::UIPropertyRows outlines = rows.Group();
         outlines.Color3("Color", &post.OutlineColor, changed);
         slider(outlines, "Thickness (px)", &PostProcessSettings::OutlineThickness, 0.5f, 8.0f, "{:.1f}");
         slider(outlines, "Depth Sensitivity", &PostProcessSettings::OutlineDepthSensitivity, 0.0f, 1.0f, "{:.2f}",
@@ -102,7 +102,7 @@ namespace Nox
 
         check("Bloom", &PostProcessSettings::Bloom,
               "Bright light bleeding into its surroundings (a blur chain over the whole image, blended in by Intensity; no threshold, as in UE).");
-        SettingsRowsV2 bloom = rows.Group();
+        UI::UIPropertyRows bloom = rows.Group();
         slider(bloom, "Intensity", &PostProcessSettings::BloomIntensity, 0.0f, 0.3f, "{:.3f}");
         slider(bloom, "Radius", &PostProcessSettings::BloomRadius, 0.25f, 3.0f, "{:.2f}");
         slider(bloom, "Lens Flares", &PostProcessSettings::LensFlares, 0.0f, 2.0f, "{:.2f}",
@@ -111,7 +111,7 @@ namespace Nox
 
         check("Depth of Field", &PostProcessSettings::DepthOfField,
               "A thin lens: sharp at Focus Distance, blurred before and behind it by the f-number (smaller: more blur) and the camera's field of view.");
-        SettingsRowsV2 dof = rows.Group();
+        UI::UIPropertyRows dof = rows.Group();
         dof.Drag("Focus Distance (m)", [p]() { return p->FocusDistanceMeters; }, [p, changed](float v) { p->FocusDistanceMeters = v; if (changed) changed(); },
                  0.05f, 0.05f, 10000.0f, "{:.2f}");
         slider(dof, "F-Stop", &PostProcessSettings::FStop, 0.7f, 32.0f, "f/{:.1f}");
@@ -119,7 +119,7 @@ namespace Nox
         rows.ShowWhen(dof.GetBody(), [p]() { return p->DepthOfField; });
 
         check("Motion Blur", &PostProcessSettings::MotionBlur, "Along each pixel's motion (camera and objects) over the open shutter.");
-        SettingsRowsV2 motion = rows.Group();
+        UI::UIPropertyRows motion = rows.Group();
         slider(motion, "Shutter", &PostProcessSettings::MotionBlurShutter, 0.0f, 1.0f, "{:.2f}");
         slider(motion, "Max Blur (px)", &PostProcessSettings::MotionBlurMaxPixels, 4.0f, 96.0f, "{:.0f}");
         rows.ShowWhen(motion.GetBody(), [p]() { return p->MotionBlur; });
@@ -157,12 +157,12 @@ namespace Nox
         Renderer* r = m_Hooks.Render;
         if (!r)
             return m_Root;
-        SettingsRowsV2 rows(body, context);
+        UI::UIPropertyRows rows(body, context);
         Hooks hooks = m_Hooks;
 
         // ---- View ----
         {
-            SettingsRowsV2 view = rows.Section("View", true, &m_Expanded);
+            UI::UIPropertyRows view = rows.Section("View", true, &m_Expanded);
             view.Text([hooks]()
             {
                 Entity hovered = hooks.Hovered ? hooks.Hovered() : Entity{};
@@ -209,7 +209,7 @@ namespace Nox
 
         // ---- Anti-Aliasing and Transparency ----
         {
-            SettingsRowsV2 aa = rows.Section("Anti-Aliasing and Transparency", false, &m_Expanded);
+            UI::UIPropertyRows aa = rows.Section("Anti-Aliasing and Transparency", false, &m_Expanded);
             const auto pathTracing = [r]() { return r->isPathTracingEnabled(); };
             const auto dlssActive = [r]() { return r->isDLSSSupported() && r->isDLSSEnabled() && r->getUpscaleMode() != NRI::UpscaleMode::Off; };
 
@@ -217,7 +217,7 @@ namespace Nox
                 "Transmissive materials (glass) show the scene behind them bent by their IOR and thickness and blurred by their roughness. "
                 "Off: transmission only makes them see-through.");
             aa.EnableWhen(refraction, [=]() { return !pathTracing(); }, []() { return std::string("the path tracer refracts itself"); });
-            SettingsRowsV2 glass = aa.Group();
+            UI::UIPropertyRows glass = aa.Group();
             Ref<UI::UIElement> rtGlass = glass.Check("Ray Traced Glass", [r]() { return r->getRTRefractionEnabled(); }, [r](bool v) { r->setRTRefractionEnabled(v); },
                 "Smooth glass traces what is behind it like the path tracer (in at the surface, out at the mesh's far side), so objects off "
                 "screen or hidden behind others show too. Rough glass keeps the screen-space refraction. Needs ray tracing.");
@@ -228,7 +228,7 @@ namespace Nox
                 "popping as the camera moves. Not used with ray tracing (hybrid sorts glass and traces through it) or by the path tracer.");
             aa.EnableWhen(oit, [=]() { return !pathTracing() && !r->getRayTracingEnabled(); },
                           [=]() { return std::string(pathTracing() ? "path tracer" : "raster only: ray tracing is on"); });
-            SettingsRowsV2 oitRows = aa.Group();
+            UI::UIPropertyRows oitRows = aa.Group();
             oitRows.Choice("Method", { "Weighted Blended", "AVBOIT" }, [r]() { return static_cast<int>(r->getOITMethod()); },
                 [r](int v) { r->setOITMethod(static_cast<Renderer::OITMethod>(v)); },
                 "Weighted Blended: each layer weighted by a fixed curve of its distance; cheap, overlapping layers average out. AVBOIT "
@@ -259,13 +259,13 @@ namespace Nox
 
         // ---- DLSS ----
         {
-            SettingsRowsV2 dlss = rows.Section("DLSS / Upscaling", false, &m_Expanded);
+            UI::UIPropertyRows dlss = rows.Section("DLSS / Upscaling", false, &m_Expanded);
             if (!r->isDLSSSupported())
                 dlss.Note("Not supported (Streamline / NGX unavailable on this GPU or driver).", kWarn);
             else
             {
                 dlss.Check("DLSS", [r]() { return r->isDLSSEnabled(); }, [r](bool v) { r->setDLSSEnabled(v); });
-                SettingsRowsV2 on = dlss.Group();
+                UI::UIPropertyRows on = dlss.Group();
                 on.Choice("Mode", { "Off", "DLAA (no upscale, best quality)", "Quality", "Balanced", "Performance", "Ultra Performance" },
                     [r]() { return static_cast<int>(r->getUpscaleMode()); }, [r](int v) { r->setUpscaleMode(static_cast<NRI::UpscaleMode>(v)); },
                     "Also the ray tracing resolution: every ray traced effect runs at the render resolution and DLSS upscales the result. "
@@ -290,11 +290,11 @@ namespace Nox
 
         // ---- Shadows ----
         {
-            SettingsRowsV2 sh = rows.Section("Shadows", false, &m_Expanded);
+            UI::UIPropertyRows sh = rows.Section("Shadows", false, &m_Expanded);
             sh.Check("Shadows", [r]() { return r->getShadowsEnabled(); }, [r](bool v) { r->setShadowsEnabled(v); },
                      "Every shadow, whatever renders it (Unreal's Show > Shadows). Off: lights shine everywhere they reach. The path tracer "
                      "always traces its shadows.");
-            SettingsRowsV2 all = sh.Group();
+            UI::UIPropertyRows all = sh.Group();
             sh.EnableWhen(all.GetBody(), [r]() { return r->getShadowsEnabled(); });
             const auto rtAvailable = [r]() { return r->getRayTracingEnabled() && r->getRayTracingShadows(); };
             const auto fallback = [r]() { return std::string(r->getRayTracingEnabled() ? "shadow maps: Ray Tracing Shadows off" : "shadow maps: ray tracing off"); };
@@ -305,7 +305,7 @@ namespace Nox
                 "Ray Tracing Shadows are on -- otherwise shadow maps). Shadow Maps: cascaded shadow maps.");
             // (Not greyed: the choice stays; the note says what runs instead.)
             all.Text([=]() { return r->getSunShadowMode() == Renderer::SunShadowMode::RayTraced && !rtAvailable() ? "Sun: " + fallback() : std::string(); }, kWarn);
-            SettingsRowsV2 csm = all.Group();
+            UI::UIPropertyRows csm = all.Group();
             all.ShowWhen(csm.GetBody(), [=]() { return r->getSunShadowMode() == Renderer::SunShadowMode::ShadowMaps || !rtAvailable(); });
             ValueChoice(csm, "Resolution", { 1024, 2048, 4096 }, [r]() { return r->getShadowMapResolution(); }, [r](uint32_t v) { r->setShadowMapResolution(v); },
                         "Texels per side of each cascade.");
@@ -336,7 +336,7 @@ namespace Nox
                 "Spot, point, rect and disc lights. Ray Traced: shadow rays in the lighting. Shadow Maps: the most important lights get "
                 "shadow maps in one atlas, sized by how big they are on screen.");
             all.Text([=]() { return r->getLocalShadowMode() == Renderer::LocalShadowMode::RayTraced && !rtAvailable() ? "Local lights: " + fallback() : std::string(); }, kWarn);
-            SettingsRowsV2 local = all.Group();
+            UI::UIPropertyRows local = all.Group();
             all.ShowWhen(local.GetBody(), [=]() { return r->getLocalShadowMode() == Renderer::LocalShadowMode::ShadowMaps || !rtAvailable(); });
             local.Int("Shadowed Lights", [r]() { return static_cast<int>(r->getLocalShadowMaxLights()); }, [r](int v) { r->setLocalShadowMaxLights(static_cast<uint32_t>(v)); },
                       1, static_cast<int>(Renderer::MaxLocalShadowLights));
@@ -349,7 +349,7 @@ namespace Nox
             all.Check("Contact Shadows", [r]() { return r->getContactShadowsEnabled(); }, [r](bool v) { r->setContactShadowsEnabled(v); },
                       "A short ray towards the light per pixel through the depth buffer (UE's contact shadows): small shadows a shadow map "
                       "misses. Only on lights shadowed by shadow maps.");
-            SettingsRowsV2 contact = all.Group();
+            UI::UIPropertyRows contact = all.Group();
             all.ShowWhen(contact.GetBody(), [r]() { return r->getContactShadowsEnabled(); });
             contact.Slider("Length (m)", [r]() { return WorldUnits::ToMeters(r->getContactShadowLength()); },
                            [r](float v) { r->setContactShadowLength(WorldUnits::FromMeters(v)); }, 0.01f, 2.0f, "{:.2f}");
@@ -358,14 +358,14 @@ namespace Nox
 
         // ---- Path Tracing ----
         {
-            SettingsRowsV2 pt = rows.Section("Path Tracing", false, &m_Expanded);
+            UI::UIPropertyRows pt = rows.Section("Path Tracing", false, &m_Expanded);
             pt.Check("Path Tracing", [r]() { return r->isPathTracingEnabled(); }, [r](bool v) { r->setPathTracingEnabled(v); },
                      "Unified light transport: the whole image path traced (the ground truth to compare against).");
-            SettingsRowsV2 on = pt.Group();
+            UI::UIPropertyRows on = pt.Group();
             pt.ShowWhen(on.GetBody(), [r]() { return r->isPathTracingEnabled(); });
             on.Check("ReSTIR PT", [r]() { return r->getReSTIRPTEnabled(); }, [r](bool v) { r->setReSTIRPTEnabled(v); },
                      "RTXDI's ReSTIR PT reservoir resampling instead of the plain path tracer's accumulation (1 candidate combined via RIS).");
-            SettingsRowsV2 restir = on.Group();
+            UI::UIPropertyRows restir = on.Group();
             on.ShowWhen(restir.GetBody(), [r]() { return r->getReSTIRPTEnabled(); });
             restir.Check("Temporal Resampling (experimental)", [r]() { return r->getReSTIRPTTemporalEnabled(); }, [r](bool v) { r->setReSTIRPTTemporalEnabled(v); },
                          "Reuses last frame's path. Known issue: the lighting rotates even with a still camera -- for testing only.");
@@ -374,7 +374,7 @@ namespace Nox
             RefInt(restir, "NEE Light Samples", &r->getReSTIRPTNumNeeSamples(), 0, 8, "Light samples per bounce surface; 0: no next-event estimation.");
             on.Check("ReSTIR DI / GI With the Path Tracer", [r]() { return r->getPathTracerUsesRTXDI(); }, [r](bool v) { r->setPathTracerUsesRTXDI(v); },
                      "RTXPT-style hybrid: RTXDI ReSTIR DI / GI run first and the path tracer uses their primary-surface lighting.");
-            SettingsRowsV2 hybrid = on.Group();
+            UI::UIPropertyRows hybrid = on.Group();
             on.ShowWhen(hybrid.GetBody(), [r]() { return r->getPathTracerUsesRTXDI(); });
             hybrid.Choice("PT Diffuse GI", { "Off (path tracer only)", "ReSTIR GI (primary diffuse indirect)" },
                 [r]() { return r->getDiffuseGIMode() == 2 ? 1 : 0; },
@@ -392,7 +392,7 @@ namespace Nox
         // ---- Raster effects (not with the path tracer) ----
         const auto notPathTracing = [r]() { return !r->isPathTracingEnabled(); };
         {
-            SettingsRowsV2 ao = rows.Section("Ambient Occlusion", false, &m_Expanded);
+            UI::UIPropertyRows ao = rows.Section("Ambient Occlusion", false, &m_Expanded);
             rows.ShowWhen(ao.GetBody(), notPathTracing);
             ao.Note("RTAO is under Hybrid Ray Tracing; both feed the same occlusion (one at a time).");
             ao.Check("SSAO", [r]() { return r->getSSAOEnabled(); }, [r](bool v) { r->setSSAOEnabled(v); }, "Screen-space ambient occlusion. Turning RTAO on turns it off.");
@@ -401,24 +401,24 @@ namespace Nox
                 "Classic: random points in a hemisphere tested against the depth buffer. GTAO (UE5's): the horizon on both sides of a few "
                 "slices per pixel -- closer to RTAO for the same radius.");
             ao.ShowWhen(method, [r]() { return r->getSSAOEnabled(); });
-            SettingsRowsV2 gtao = ao.Group();
+            UI::UIPropertyRows gtao = ao.Group();
             ao.ShowWhen(gtao.GetBody(), [r]() { return r->getSSAOEnabled() && r->getSSAOMethod() == Renderer::SSAOMethod::GTAO; });
             gtao.Int("Slices", [r]() { return static_cast<int>(r->getGTAOSlices()); }, [r](int v) { r->setGTAOSlices(static_cast<uint32_t>(v)); }, 1, 4);
             gtao.Int("Steps per Side", [r]() { return static_cast<int>(r->getGTAOSteps()); }, [r](int v) { r->setGTAOSteps(static_cast<uint32_t>(v)); }, 2, 12);
-            SettingsRowsV2 shared = ao.Group();
+            UI::UIPropertyRows shared = ao.Group();
             ao.ShowWhen(shared.GetBody(), [r]() { return r->getSSAOEnabled() || r->getRTAOEnabled(); });
             shared.Slider("Radius (cm)", [r]() { return WorldUnits::ToCentimeters(r->getSSAORadius()); }, [r](float v) { r->setSSAORadius(WorldUnits::FromCentimeters(v)); },
                           1.0f, 200.0f, "{:.1f}");
             shared.Slider("Power", [r]() { return r->getSSAOPower(); }, [r](float v) { r->setSSAOPower(v); }, 0.5f, 4.0f, "{:.2f}");
         }
         {
-            SettingsRowsV2 ssr = rows.Section("Screen-Space Reflections", false, &m_Expanded);
+            UI::UIPropertyRows ssr = rows.Section("Screen-Space Reflections", false, &m_Expanded);
             rows.ShowWhen(ssr.GetBody(), notPathTracing);
             ssr.Check("Screen-Space Reflections", [r]() { return r->getSSREnabled(); }, [r](bool v) { r->setSSREnabled(v); },
                       "The mirror reflection marched through the depth buffer; where it finds nothing the probes / environment show. Runs "
                       "wherever ray traced reflections do not; with them on, they take precedence.");
             ssr.Text([r]() { return r->getSSREnabled() && r->getRayTracingEnabled() && r->getRayTracingReflections() ? std::string("Not used now: ray traced reflections run.") : std::string(); }, kWarn);
-            SettingsRowsV2 on = ssr.Group();
+            UI::UIPropertyRows on = ssr.Group();
             ssr.ShowWhen(on.GetBody(), [r]() { return r->getSSREnabled(); });
             on.Drag("Max Distance (m)", [r]() { return WorldUnits::ToMeters(r->getSSRMaxDistance()); }, [r](float v) { r->setSSRMaxDistance(WorldUnits::FromMeters(v)); },
                     0.5f, 0.5f, 1000.0f, "{:.1f}");
@@ -430,13 +430,13 @@ namespace Nox
                       "Surfaces up to this roughness get SSR (fading over the last 0.15); rougher ones keep the reflection probes.");
         }
         {
-            SettingsRowsV2 gi = rows.Section("Raster GI, Fog and Probes", false, &m_Expanded);
+            UI::UIPropertyRows gi = rows.Section("Raster GI, Fog and Probes", false, &m_Expanded);
             rows.ShowWhen(gi.GetBody(), notPathTracing);
             gi.Check("Raster Probe Volume (Diffuse GI)", [r]() { return r->getDiffuseGIMode() == 4; },
                      [r](bool v) { r->setDiffuseGIMode(v ? 4u : 0u); r->setDDGIEnabled(false); },
                      "Diffuse light from around without ray tracing: probes capture what surrounds them once and are lit again every frame. "
                      "Without an Irradiance Volume entity the probes cover the whole scene.");
-            SettingsRowsV2 probe = gi.Group();
+            UI::UIPropertyRows probe = gi.Group();
             gi.ShowWhen(probe.GetBody(), [r]() { return r->getDiffuseGIMode() == 4; });
             probe.Int("Captures per Frame", [r]() { return static_cast<int>(r->getIrradianceProbesPerFrame()); },
                       [r](int v) { r->setIrradianceProbesPerFrame(static_cast<uint32_t>(v)); }, 1, static_cast<int>(shaderio::MaxIrradianceProbesPerFrame));
@@ -454,7 +454,7 @@ namespace Nox
             gi.Check("Screen-Space GI (SSGI)", [r]() { return r->getSSGIEnabled(); }, [r](bool v) { r->setSSGIEnabled(v); },
                      "A few rays per pixel through the depth buffer: the light bouncing off what is on screen, denoised over frames. Not used "
                      "with the RT GI modes.");
-            SettingsRowsV2 ssgi = gi.Group();
+            UI::UIPropertyRows ssgi = gi.Group();
             gi.ShowWhen(ssgi.GetBody(), [r]() { return r->getSSGIEnabled(); });
             ssgi.Int("Rays per Pixel", [r]() { return static_cast<int>(r->getSSGIRays()); }, [r](int v) { r->setSSGIRays(static_cast<uint32_t>(v)); }, 1, 8);
             ssgi.Int("Steps per Ray", [r]() { return static_cast<int>(r->getSSGISteps()); }, [r](int v) { r->setSSGISteps(static_cast<uint32_t>(v)); }, 4, 64);
@@ -464,7 +464,7 @@ namespace Nox
             gi.Check("Volumetric Fog", [r]() { return r->getVolumetricFogEnabled(); }, [r](bool v) { r->setVolumetricFogEnabled(v); },
                      "The Environment Light's Height Fog as a volume, lit by the sun and point / spot lights with their shadows (light "
                      "shafts). Needs the Height Fog on.");
-            SettingsRowsV2 fog = gi.Group();
+            UI::UIPropertyRows fog = gi.Group();
             gi.ShowWhen(fog.GetBody(), [r]() { return r->getVolumetricFogEnabled(); });
             fog.Drag("Distance (m)", [r]() { return WorldUnits::ToMeters(r->getVolumetricFogDistance()); },
                      [r](float v) { r->setVolumetricFogDistance(WorldUnits::FromMeters(v)); }, 1.0f, 1.0f, 1000.0f, "{:.0f}");
@@ -485,10 +485,10 @@ namespace Nox
 
         // ---- Hybrid Ray Tracing ----
         {
-            SettingsRowsV2 rt = rows.Section("Hybrid Ray Tracing", false, &m_Expanded);
+            UI::UIPropertyRows rt = rows.Section("Hybrid Ray Tracing", false, &m_Expanded);
             rows.ShowWhen(rt.GetBody(), notPathTracing);
             rt.Check("Hybrid Ray Tracing", [r]() { return r->getRayTracingEnabled(); }, [r](bool v) { r->setRayTracingEnabled(v); });
-            SettingsRowsV2 on = rt.Group();
+            UI::UIPropertyRows on = rt.Group();
             rt.ShowWhen(on.GetBody(), [r]() { return r->getRayTracingEnabled(); });
             const auto rrActive = [r]()
             {
@@ -513,7 +513,7 @@ namespace Nox
                      "Real rays for ambient occlusion (turns SSAO off); same radius and power settings.");
             on.Check("Ray Tracing Culling", [r]() { return r->getRayTracingCulling(); }, [r](bool v) { r->setRayTracingCulling(v); },
                      "Leaves far, small objects out of what rays can hit (Unreal's ray tracing culling).");
-            SettingsRowsV2 cull = on.Group();
+            UI::UIPropertyRows cull = on.Group();
             on.ShowWhen(cull.GetBody(), [r]() { return r->getRayTracingCulling(); });
             cull.Drag("Culling Radius (m)", [r]() { return WorldUnits::ToMeters(r->getRayTracingCullRadius()); },
                       [r](float v) { r->setRayTracingCullRadius(WorldUnits::FromMeters(v)); }, 1.0f, 0.0f, 100000.0f, "{:.0f}");
@@ -538,7 +538,7 @@ namespace Nox
                 "Off: constant or cubemap IBL. DDGI: an irradiance probe grid. ReSTIR GI: screen-space reservoir resampling. Screen Probes: "
                 "Lumen's final gather (DDGI underneath for the second bounce) -- the default of every preset.");
 
-            SettingsRowsV2 screen = on.Group();
+            UI::UIPropertyRows screen = on.Group();
             on.ShowWhen(screen.GetBody(), [r]() { return r->getDiffuseGIMode() == 3; });
             screen.Text([r]() { const NRI::Extent2D p = r->getScreenProbeCounts(); return Format("Screen probes: %ux%u (%u probes, 64 rays each)", p.width, p.height, p.width * p.height); }, kInfo);
             uint32_t* tile = &r->getScreenProbeTileSize();
@@ -548,7 +548,7 @@ namespace Nox
             RefInt(screen, "Temporal Frames", &r->getScreenProbeMaxHistory(), 1, 64, "Frames accumulated at most per pixel.");
             screen.Button("Reset Screen Probe History", [r]() { r->resetScreenProbeHistory(); });
 
-            SettingsRowsV2 restir = on.Group();
+            UI::UIPropertyRows restir = on.Group();
             on.ShowWhen(restir.GetBody(), [r]() { return r->isReSTIRGIRequested(); });
             restir.Note("ReSTIR GI (RTXDI)", kGood);
             RefFloat(restir, "Spatial Radius (px)", &r->getReSTIRGISpatialRadius(), 4.0f, 64.0f, "{:.1f}");
@@ -562,7 +562,7 @@ namespace Nox
             Ref<UI::UIElement> strengthRow = restir.Slider("Boiling Filter Strength", [strength]() { return *strength; }, [strength](float v) { *strength = v; }, 0.0f, 1.0f, "{:.2f}");
             restir.ShowWhen(strengthRow, [boiling]() { return *boiling; });
 
-            SettingsRowsV2 ddgi = on.Group();
+            UI::UIPropertyRows ddgi = on.Group();
             on.ShowWhen(ddgi.GetBody(), [r]() { return r->getDiffuseGIMode() == 1 || r->getDiffuseGIMode() == 3 || r->getDebugMode() == 17; });
             ddgi.Text([r]()
             {
@@ -571,7 +571,7 @@ namespace Nox
             }, kInfo);
             bool* follow = &r->getDDGIFollowCamera();
             RefBool(ddgi, "Follow Camera", follow, "The probe volume is centred on the camera and scrolls with it in whole cells. Off: a fixed grid.");
-            SettingsRowsV2 following = ddgi.Group();
+            UI::UIPropertyRows following = ddgi.Group();
             ddgi.ShowWhen(following.GetBody(), [follow]() { return *follow; });
             {
                 InspectorCardBuilder vecs{ following.GetBody(), {}, context };
@@ -588,7 +588,7 @@ namespace Nox
                 const glm::vec3 last = first * std::pow(std::max(r->getDDGICascadeScale(), 1.5f), static_cast<float>(cascades - 1));
                 return Format("Around the camera: %.0f x %.0f x %.0f m fine, %.0f x %.0f x %.0f m in all", first.x, first.y, first.z, last.x, last.y, last.z);
             });
-            SettingsRowsV2 fixedGrid = ddgi.Group();
+            UI::UIPropertyRows fixedGrid = ddgi.Group();
             ddgi.ShowWhen(fixedGrid.GetBody(), [follow]() { return !*follow; });
             {
                 InspectorCardBuilder vecs{ fixedGrid.GetBody(), {}, context };
@@ -611,7 +611,7 @@ namespace Nox
                 [r]() { return static_cast<int>(r->getDirectLightingMode()); }, [r](int v) { r->setDirectLightingMode(static_cast<uint32_t>(v)); },
                 "Every light: each with its own shadow ray per pixel -- exact, noise-free, the cost grows with the lights reaching a pixel. "
                 "ReSTIR DI: one light per pixel resampled from all of them, then denoised (UE5's MegaLights idea).");
-            SettingsRowsV2 di = on.Group();
+            UI::UIPropertyRows di = on.Group();
             on.ShowWhen(di.GetBody(), [r]() { return r->getDirectLightingMode() == 1; });
             RefInt(di, "Local Light Samples", &r->getReSTIRDINumLocalLightSamples(), 1, 16);
             RefInt(di, "Infinite Light Samples", &r->getReSTIRDINumInfiniteLightSamples(), 1, 2);
@@ -622,7 +622,7 @@ namespace Nox
             RefFloat(di, "Depth Threshold", &r->getReSTIRDIDepthThreshold(), 0.01f, 0.5f, "{:.2f}");
             bool* regir = &r->getReGIREnabled();
             RefBool(di, "ReGIR (world-space light grid)", regir, "Power-weighted local-light candidates baked into a world-space grid.");
-            SettingsRowsV2 grid = di.Group();
+            UI::UIPropertyRows grid = di.Group();
             di.ShowWhen(grid.GetBody(), [regir]() { return *regir; });
             RefFloat(grid, "Cell Size (m)", &r->getReGIRCellSize(), 0.1f, 8.0f, "{:.2f}");
             {
@@ -635,7 +635,7 @@ namespace Nox
 
         // ---- Denoising ----
         {
-            SettingsRowsV2 dn = rows.Section("Denoising", false, &m_Expanded);
+            UI::UIPropertyRows dn = rows.Section("Denoising", false, &m_Expanded);
             const auto hybrid = [r]() { return !r->isPathTracingEnabled() && r->getRayTracingEnabled(); };
             Ref<UI::UIElement> sigma = dn.Check("NRD SIGMA (shadows)", [r]() { return r->getNRDShadowsEnabled(); }, [r](bool v) { r->setNRDShadowsEnabled(v); },
                 "Penumbra filtering for the RT shadow mask; works with DLSS-SR and DLSS-RR. Off: raw 1 spp shadows.");
@@ -664,7 +664,7 @@ namespace Nox
 
         // ---- Streaming ----
         {
-            SettingsRowsV2 st = rows.Section("Streaming", false, &m_Expanded);
+            UI::UIPropertyRows st = rows.Section("Streaming", false, &m_Expanded);
             st.Header("Textures");
             st.Text([]()
             {
@@ -722,11 +722,11 @@ namespace Nox
 
         // ---- Post effects (the editor's) ----
         {
-            SettingsRowsV2 post = rows.Section("Post Effects", false, &m_Expanded,
+            UI::UIPropertyRows post = rows.Section("Post Effects", false, &m_Expanded,
                 "The editor's own, used while no Post Process Volume in the scene applies. Not saved: a volume's settings are what is saved "
                 "with the scene and ships (Unreal's Post Process Volume).");
             post.Text([r]() { return r->HasScenePostProcess() ? std::string("A Post Process Volume in the scene applies now: edit its settings in the Inspector.") : std::string(); }, kWarn);
-            SettingsRowsV2 effects = post.Group();
+            UI::UIPropertyRows effects = post.Group();
             AddPostProcessSettingsRows(effects, r->getPostEffects());
             post.EnableWhen(effects.GetBody(), [r]() { return !r->HasScenePostProcess(); });
             post.Note("Not saved: add a Post Process Volume to the scene to keep these and ship them with the game.");
@@ -734,7 +734,7 @@ namespace Nox
 
         // ---- Diagnostics ----
         {
-            SettingsRowsV2 diag = rows.Section("Diagnostics", false, &m_Expanded);
+            UI::UIPropertyRows diag = rows.Section("Diagnostics", false, &m_Expanded);
 #if NOX_PROFILE_STATS
             diag.Check("Nox Stats Window (F3)",
                 []() { StatsOverlayLayer* stats = Application::Get().GetLayer<StatsOverlayLayer>(); return stats && stats->IsVisible(); },

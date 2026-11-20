@@ -10,7 +10,7 @@
 #include <SDL3/SDL_scancode.h>
 
 #include "Panels/InspectorWidgetsV2.h"
-#include "Panels/SettingsRowsV2.h"
+#include "NoxCore/UI/Widgets/UIPropertyRows.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/TimelineImporter.h"
@@ -1138,7 +1138,7 @@ namespace Nox
         m_DetailsTrack = SelectedTrack;
         m_DetailsKey = SelectedKey;
         m_DetailsKeyCount = timeline && SelectedTrack >= 0 && SelectedTrack < static_cast<int>(timeline->Tracks.size()) ? timeline->Tracks[static_cast<size_t>(SelectedTrack)].Keys.size() : 0;
-        SettingsRowsV2 rows(m_Details, Context());
+        UI::UIPropertyRows rows(m_Details, Context());
         if (!timeline || SelectedTrack < 0 || SelectedTrack >= static_cast<int>(timeline->Tracks.size()))
         {
             rows.Note("Select a key to edit it.");

@@ -17,14 +17,14 @@ namespace Nox
     {
         class UIContext;
         class UIElement;
+        class UIPropertyRows;
     }
     class EditorCamera;
     class Renderer;
-    class SettingsRowsV2;
 
     // The post-process rows (PostProcessSettings): Renderer Settings shows the editor's copy, a Post Process Volume's Inspector card
     // its own. `changed` after each edit.
-    void AddPostProcessSettingsRows(SettingsRowsV2& rows, PostProcessSettings& post, std::function<void()> changed = {});
+    void AddPostProcessSettingsRows(UI::UIPropertyRows& rows, PostProcessSettings& post, std::function<void()> changed = {});
 
     // Window > Renderer Settings: how this session renders (debug views, exposure, anti-aliasing, DLSS, shadows, ray tracing, GI,
     // denoisers, streaming pools, the editor's post effects). Not saved: what a project keeps is in Project Settings (the render

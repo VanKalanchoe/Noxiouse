@@ -412,7 +412,7 @@ window (1650 lines of ImGui) is two windows now, both under **Window**:
   Diagnostics (Nox Stats window, Reset Stats, Save Stats Report, Dump Frame Graph).
 - **Project Settings** (`Panels/ProjectSettingsV2Panel`): what the .nproj keeps, saved at each change -- Start Scene, Render Quality
   (and what the renderer's settings equal now), the 16 renderer settings saved on top of the preset, Game Window, Physical Surfaces.
-`Panels/SettingsRowsV2`: rows bound to a getter and a setter, read every frame (a preset, the console or MCP changing a setting
+`Panels/SettingsRowsV2` (now `UI::UIPropertyRows` in the UI library): rows bound to a getter and a setter, read every frame (a preset, the console or MCP changing a setting
 shows at once; the old window was redrawn each frame instead), shown only while a condition holds (`ShowWhen`) or greyed with the
 reason after them (`EnableWhen`); the panels use it from now on. `AddPostProcessSettingsRows` is shared by Renderer Settings and the
 Post Process Volume's Inspector card -- which in V2 had only Enabled / Unbound / Half Extents / Priority, not its effects.
@@ -693,7 +693,14 @@ picks the first row, a click outside or Escape closes -- the inspector's asset p
 Drawer), a grip on its top edge (HeightFraction within MinFraction..MaxFraction, `OnResized`), one page at a time (`SetPage`), `Open`
 animated, `CloseNow`, `DrawerRect`, clicks on the drawer never reach what is behind -- the editor's centre area (dock space + Content
 Browser / Output Log drawer) is now this; its three classes are gone.
-Headless UI test: 66 checks pass (31 new for these five).
+`UIPropertyRows` (was the editor's `SettingsRowsV2`, moved whole): rows bound to a getter and a setter, refreshed by OnSync (Check,
+Slider, Drag, Int, Choice, Color3 / Color4, String, Text, Note, Button, Header, Separator, `Row` for any editor), `Section` (a
+collapsible card whose open state is kept by title), `Group`, `ShowWhen`, `EnableWhen` with the reason next to the editor; with it
+`UIPropertyRow` (the label column a third of the row, 76-150 px) and `UICollapsibleCard` (chevron + title header, an optional "..."
+menu). The label, subheader and reason colours are theme tokens PropertyLabel / PropertySubheader / PropertyReason with the old values
+as fallbacks. Every settings panel uses it; the inspector's `InspectorCardBuilder` and `CreateCollapsibleCard` build their rows and
+cards with it (their row, header and card classes are gone; the pointer-and-OnMutate rows stay the inspector's).
+Headless UI test: 75 checks pass (40 new for these six).
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and
