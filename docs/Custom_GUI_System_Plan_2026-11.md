@@ -684,8 +684,10 @@ MeterClip, `Source` read each frame, dB tooltip -- replaces the Mixer's strip me
 `UICurveEditor` (was a 0..1 demo widget): now also `Range::FitKeys` (any values, the view follows the keys with a margin and holds
 still during a drag, zero lines, the range written in a corner), `Keys` (edit someone else's vector), `Evaluator` (draw with the
 curve's own interpolation), `AddOnDoubleClick`, `OnChanging` (each drag step) / `OnKeyCountChanged` (a key added or removed) --
-replaces the node graph's `CurveEditView`; the default stays the old 0..1 editor. The Timeline's curves view stays in the editor: it
-draws up to four channels per key and shares the track lanes' time axis and scroll, which a one-curve widget does not have.
+replaces the node graph's `CurveEditView`; the default stays the old 0..1 editor. `UIChannelCurves`: up to four value channels over
+time on one graph (sampled curves, key dots, playhead, zero line, range), click a dot to select its key, drag its value, Shift also its
+time (SnapTime), OnChanging / OnChanged; the data read through functions, colours theme tokens Curve* -- the Timeline's curves view is
+now this.
 `UISearchPicker::Show`: a popup list with a search field, under its anchor (above it when there is more room), rows filtered by label
 or detail as typed, the current one highlighted, an optional None row, at most MaxShown rows built with a "Showing n of m" note, Enter
 picks the first row, a click outside or Escape closes -- the inspector's asset picker (`ShowSearchableAssetPicker`) is now this.
@@ -711,7 +713,7 @@ with a scope filter (the first bound command the filter allows that can run now)
 `ResetToDefault`, `Load` / `Save` of the keys that differ from the defaults, `UIKeyChord::ToString` / `Parse` / `TypesText`. The
 editor's `EditorCommandList` is now only its three scopes (Global / Level / Viewport) and its file header on top of it. In NoxUI the
 chord holds a `UIKey` (names from `GetKeyName`; all 84 keys round-trip).
-Headless UI test: 82 checks pass (47 new for these seven); the node-graph canvas test still passes its 17; the command-list test its 20.
+Headless UI test: 90 checks pass (55 new for these eight); the node-graph canvas test still passes its 17; the command-list test its 20.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

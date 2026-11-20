@@ -10,6 +10,7 @@
 #include <SDL3/SDL_scancode.h>
 
 #include "Panels/InspectorWidgetsV2.h"
+#include "NoxCore/UI/Widgets/UIChannelCurves.h"
 #include "NoxCore/UI/Widgets/UIPropertyRows.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/Material.h"
@@ -360,161 +361,6 @@ namespace Nox
             bool m_Moved = false;
         };
 
-        // The selected track's values over time; drag a key's dot up or down (Shift: also its time).
-        class CurvesView final : public UI::UIElement
-        {
-        public:
-            explicit CurvesView(TimelineEditorV2* editor) : m_Editor(editor)
-            {
-                HitTestMode = UI::UIHitTestMode::Self;
-                WidthMode = UI::UISizeMode::Fill;
-                HeightMode = UI::UISizeMode::Fixed;
-                FixedSize = { 0.0f, 150.0f };
-                Tooltip = "The selected track's values. Drag a key's dot up / down to change its value (Shift: also its time).";
-            }
-            bool OnPointerDown(const UI::UIPointerEvent& e) override
-            {
-                TimelineTrack* track = Track();
-                if (e.Button != 1 || !track)
-                    return false;
-                const int components = TimelineEvaluation::GetComponentCount(*track);
-                m_Key = -1;
-                float best = 8.0f;
-                for (int k = 0; k < static_cast<int>(track->Keys.size()); ++k)
-                    for (int c = 0; c < components; ++c)
-                    {
-                        const UI::UIVec2 p = ToScreen(track->Keys[static_cast<size_t>(k)].Time, track->Keys[static_cast<size_t>(k)].Value[c]);
-                        const float distance = std::hypot(p.x - e.Position.x, p.y - e.Position.y);
-                        if (distance < best)
-                        {
-                            best = distance;
-                            m_Key = k;
-                            m_Component = c;
-                        }
-                    }
-                if (m_Key >= 0)
-                    m_Editor->SelectedKey = m_Key;
-                return true;
-            }
-            bool OnPointerMove(const UI::UIPointerEvent& e) override
-            {
-                TimelineTrack* track = Track();
-                const Timeline* timeline = m_Editor->GetTimeline();
-                if (m_Key < 0 || !track || !timeline || m_Key >= static_cast<int>(track->Keys.size()))
-                    return true;
-                const UI::UIRect b = GetBounds();
-                TimelineKey& key = track->Keys[static_cast<size_t>(m_Key)];
-                key.Value[m_Component] = m_Low + (1.0f - (std::clamp(e.Position.y, b.Min.y, b.Max.y) - b.Min.y) / b.Height()) * (m_High - m_Low);
-                if (e.Modifiers & UI::UIMod::Shift)
-                    key.Time = SnapTime(std::clamp((e.Position.x - b.Min.x) / b.Width() * std::max(timeline->Duration, 0.01f), 0.0f, timeline->Duration));
-                m_Editor->Changing();
-                return true;
-            }
-            bool OnPointerUp(const UI::UIPointerEvent&) override
-            {
-                if (m_Key >= 0)
-                {
-                    if (TimelineTrack* track = Track())
-                        TimelineEvaluation::SortKeys(*track);
-                    m_Editor->Edited();
-                }
-                m_Key = -1;
-                return true;
-            }
-
-        protected:
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme&) override
-            {
-                const UI::UIRect b = GetBounds();
-                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, { 0.11f, 0.11f, 0.13f, 1.0f });
-                const Timeline* timeline = m_Editor->GetTimeline();
-                TimelineTrack* track = Track();
-                const glm::vec4 dim{ 0.55f, 0.57f, 0.62f, 1.0f };
-                if (!timeline || !track)
-                {
-                    d.AddText("Select a track to see its curves.", nullptr, { b.Min.x + 8.0f, b.Min.y + 8.0f }, 13.0f, dim);
-                    return;
-                }
-                const int components = TimelineEvaluation::GetComponentCount(*track);
-                if (components == 0 || track->Keys.empty())
-                {
-                    d.AddText(components == 0 ? "This track has no values." : "No keys yet.", nullptr, { b.Min.x + 8.0f, b.Min.y + 8.0f }, 13.0f, dim);
-                    return;
-                }
-                const float duration = std::max(timeline->Duration, 0.01f);
-                constexpr int kSamples = 160;
-                if (m_Key < 0) // (the range holds still while a key is dragged)
-                {
-                    float low = FLT_MAX, high = -FLT_MAX;
-                    for (int i = 0; i <= kSamples; ++i)
-                    {
-                        const glm::vec4 value = TimelineEvaluation::Evaluate(*track, duration * i / kSamples);
-                        for (int c = 0; c < components; ++c)
-                        {
-                            low = std::min(low, value[c]);
-                            high = std::max(high, value[c]);
-                        }
-                    }
-                    for (const TimelineKey& key : track->Keys)
-                        for (int c = 0; c < components; ++c)
-                        {
-                            low = std::min(low, key.Value[c]);
-                            high = std::max(high, key.Value[c]);
-                        }
-                    if (high - low < 1e-3f)
-                    {
-                        low -= 0.5f;
-                        high += 0.5f;
-                    }
-                    const float margin = (high - low) * 0.1f;
-                    m_Low = low - margin;
-                    m_High = high + margin;
-                    m_Duration = duration;
-                }
-                d.PushClipRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y });
-                const glm::vec4 colors[3] = { { 0.9f, 0.31f, 0.31f, 1.0f }, { 0.35f, 0.82f, 0.35f, 1.0f }, { 0.35f, 0.55f, 1.0f, 1.0f } };
-                if (m_Low < 0.0f && m_High > 0.0f)
-                {
-                    const UI::UIVec2 zero = ToScreen(0.0f, 0.0f);
-                    d.AddRoundedRect({ b.Min.x, zero.y }, { b.Max.x, zero.y + 1.0f }, { 0.31f, 0.31f, 0.35f, 1.0f });
-                }
-                const float playhead = b.Min.x + std::clamp(m_Editor->Time / duration, 0.0f, 1.0f) * b.Width();
-                d.AddRoundedRect({ playhead - 0.75f, b.Min.y }, { playhead + 0.75f, b.Max.y }, { 1.0f, 0.31f, 0.24f, 0.8f });
-                for (int c = 0; c < components; ++c)
-                    for (int i = 0; i <= kSamples; ++i)
-                    {
-                        const float time = duration * i / kSamples;
-                        const UI::UIVec2 p = ToScreen(time, TimelineEvaluation::Evaluate(*track, time)[c]);
-                        d.AddRoundedRect({ p.x - 1.0f, p.y - 1.0f }, { p.x + 1.0f, p.y + 1.0f }, components == 1 ? glm::vec4(0.9f, 0.9f, 0.9f, 1.0f) : colors[c]);
-                    }
-                for (int k = 0; k < static_cast<int>(track->Keys.size()); ++k)
-                    for (int c = 0; c < components; ++c)
-                    {
-                        const UI::UIVec2 p = ToScreen(track->Keys[static_cast<size_t>(k)].Time, track->Keys[static_cast<size_t>(k)].Value[c]);
-                        const bool selected = k == m_Editor->SelectedKey;
-                        const float r = selected ? 5.0f : 4.0f;
-                        d.AddRoundedRect({ p.x - r, p.y - r }, { p.x + r, p.y + r }, selected ? glm::vec4(1.0f, 0.78f, 0.27f, 1.0f) : (components == 1 ? glm::vec4(0.9f, 0.9f, 0.9f, 1.0f) : colors[c]), glm::vec4(r));
-                    }
-                d.AddText(std::format("{:.3g} .. {:.3g}", m_Low, m_High), nullptr, { b.Min.x + 4.0f, b.Min.y + 2.0f }, 11.5f, { 0.63f, 0.63f, 0.63f, 1.0f });
-                d.PopClipRect();
-            }
-
-        private:
-            TimelineTrack* Track() const
-            {
-                Timeline* timeline = m_Editor->GetTimeline();
-                const int t = m_Editor->SelectedTrack;
-                return timeline && t >= 0 && t < static_cast<int>(timeline->Tracks.size()) ? &timeline->Tracks[static_cast<size_t>(t)] : nullptr;
-            }
-            UI::UIVec2 ToScreen(float time, float value) const
-            {
-                const UI::UIRect b = GetBounds();
-                return { b.Min.x + time / std::max(m_Duration, 0.01f) * b.Width(), b.Min.y + (1.0f - (value - m_Low) / std::max(m_High - m_Low, 1e-6f)) * b.Height() };
-            }
-            TimelineEditorV2* m_Editor = nullptr;
-            int m_Key = -1, m_Component = 0;
-            float m_Low = 0.0f, m_High = 1.0f, m_Duration = 1.0f;
-        };
 
     }
 
@@ -1118,7 +964,42 @@ namespace Nox
         });
 
         root->AddChild(Ref<TracksView>(new TracksView(this)));
-        Ref<CurvesView> curvesView(new CurvesView(this));
+        // The selected track's values over time (UI::UIChannelCurves): drag a key's dot up or down (Shift: also its time).
+        Ref<UI::UIChannelCurves> curvesView(new UI::UIChannelCurves());
+        curvesView->Tooltip = "The selected track's values. Drag a key's dot up / down to change its value (Shift: also its time).";
+        const auto selectedTrack = [this]() -> TimelineTrack*
+        {
+            Timeline* timeline = GetTimeline();
+            return timeline && SelectedTrack >= 0 && SelectedTrack < static_cast<int>(timeline->Tracks.size()) ? &timeline->Tracks[static_cast<size_t>(SelectedTrack)]
+                                                                                                                : nullptr;
+        };
+        curvesView->ChannelCount = [selectedTrack]() { const TimelineTrack* t = selectedTrack(); return t ? TimelineEvaluation::GetComponentCount(*t) : -1; };
+        curvesView->KeyCount = [selectedTrack]() { const TimelineTrack* t = selectedTrack(); return t ? static_cast<int>(t->Keys.size()) : 0; };
+        curvesView->KeyTime = [selectedTrack](int k) { return selectedTrack()->Keys[static_cast<size_t>(k)].Time; };
+        curvesView->KeyValue = [selectedTrack](int k, int c) { return selectedTrack()->Keys[static_cast<size_t>(k)].Value[c]; };
+        curvesView->Evaluate = [selectedTrack](float time, int c) { const TimelineTrack* t = selectedTrack(); return t ? TimelineEvaluation::Evaluate(*t, time)[c] : 0.0f; };
+        curvesView->SetKey = [selectedTrack](int k, int c, float time, float value)
+        {
+            if (TimelineTrack* t = selectedTrack(); t && k < static_cast<int>(t->Keys.size()))
+            {
+                t->Keys[static_cast<size_t>(k)].Time = time;
+                t->Keys[static_cast<size_t>(k)].Value[c] = value;
+            }
+        };
+        curvesView->Duration = [this]() { const Timeline* timeline = GetTimeline(); return timeline ? timeline->Duration : 1.0f; };
+        curvesView->Playhead = [this]() { return Time; };
+        curvesView->SelectedKey = [this]() { return SelectedKey; };
+        curvesView->SnapTime = [](float time) { return SnapTime(time); };
+        curvesView->OnSelectKey = [this](int key) { SelectedKey = key; };
+        curvesView->OnChanging = [this]() { Changing(); };
+        curvesView->OnChanged = [this, selectedTrack]()
+        {
+            if (TimelineTrack* t = selectedTrack())
+                TimelineEvaluation::SortKeys(*t);
+            Edited();
+        };
+        curvesView->NothingText = "Select a track to see its curves.";
+        curvesView->NoValuesText = "This track has no values.";
         m_Curves = curvesView;
         root->AddChild(curvesView);
         UI::AppendSync(*root, [this]() { m_Curves->Visible = m_ShowCurves; });
