@@ -19,6 +19,7 @@
 #include "NoxCore/Core/UUID.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
+#include "NoxCore/UI/Widgets/UILevelMeter.h"
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Core/UITheme.h"
@@ -45,11 +46,6 @@ namespace Nox
         constexpr float kFaderMaxDb = 12.0f;
         constexpr glm::vec4 kOverride{ 0.95f, 0.55f, 0.15f, 1.0f };
 
-        float MeterFraction(float linear)
-        {
-            return std::clamp((AudioDSP::LinearToDb(linear) - kMinDb) / (kMaxDb - kMinDb), 0.0f, 1.0f);
-        }
-
         glm::vec4 Token(const UI::UITheme& theme, const char* name, const UI::UIColor& fallback)
         {
             const UI::UIColor c = theme.GetToken(name, fallback);
@@ -57,58 +53,6 @@ namespace Nox
         }
 
         std::string DbText(float db) { char t[32]; std::snprintf(t, sizeof(t), db <= kFaderMinDb ? "-inf dB" : "%.1f dB", db); return t; }
-
-        // Two bars (left, right): RMS filled, the peak a line; a tick every 12 dB. Colours: theme tokens MeterLow / MeterLoud / MeterClip.
-        class MixerMeter final : public UI::UIElement
-        {
-        public:
-            explicit MixerMeter(uint64_t bus) : m_Bus(bus) { HitTestMode = UI::UIHitTestMode::Self; }
-
-        protected:
-            UI::UIVec2 ComputeDesiredSize() override { return { 22.0f, 120.0f }; }
-            void OnUpdate(float) override
-            {
-                m_Meter = AudioMixer::GetMeter(m_Bus);
-                char text[160];
-                std::snprintf(text, sizeof(text), "Peak L %.1f dB / R %.1f dB\nRMS L %.1f dB / R %.1f dB\nTicks every 12 dB from 0 dB down",
-                              AudioDSP::LinearToDb(m_Meter.PeakLeft), AudioDSP::LinearToDb(m_Meter.PeakRight),
-                              AudioDSP::LinearToDb(m_Meter.RmsLeft), AudioDSP::LinearToDb(m_Meter.RmsRight));
-                Tooltip = text;
-            }
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
-            {
-                const UI::UIRect b = GetBounds();
-                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, Token(theme, "MeterBackground", { 0.08f, 0.08f, 0.09f, 1.0f }));
-                const glm::vec4 low = Token(theme, "MeterLow", { 0.27f, 0.78f, 0.35f, 1.0f });
-                const glm::vec4 loud = Token(theme, "MeterLoud", { 0.90f, 0.78f, 0.24f, 1.0f });
-                const glm::vec4 clip = Token(theme, "MeterClip", { 0.90f, 0.24f, 0.20f, 1.0f });
-                const auto color = [&](float fraction)
-                {
-                    const float db = kMinDb + fraction * (kMaxDb - kMinDb);
-                    return db > -0.5f ? clip : db > -12.0f ? loud : low;
-                };
-                const float barWidth = (b.Width() - 3.0f) * 0.5f;
-                const float values[2][2] = { { m_Meter.RmsLeft, m_Meter.PeakLeft }, { m_Meter.RmsRight, m_Meter.PeakRight } };
-                for (int channel = 0; channel < 2; ++channel)
-                {
-                    const float x0 = b.Min.x + 1.0f + static_cast<float>(channel) * (barWidth + 1.0f);
-                    const float rms = MeterFraction(values[channel][0]);
-                    const float peak = MeterFraction(values[channel][1]);
-                    d.AddRoundedRect({ x0, b.Max.y - rms * b.Height() }, { x0 + barWidth, b.Max.y }, color(rms));
-                    if (peak > 0.0f)
-                        d.AddRoundedRect({ x0, b.Max.y - peak * b.Height() - 1.0f }, { x0 + barWidth, b.Max.y - peak * b.Height() + 1.0f }, color(peak));
-                }
-                for (float db = 0.0f; db >= kMinDb; db -= 12.0f)
-                {
-                    const float y = b.Min.y + b.Height() * (1.0f - (db - kMinDb) / (kMaxDb - kMinDb));
-                    d.AddRoundedRect({ b.Min.x, y }, { b.Min.x + 3.0f, y + 1.0f }, { 0.63f, 0.63f, 0.67f, 0.63f });
-                }
-            }
-
-        private:
-            uint64_t m_Bus = 0;
-            AudioBusMeter m_Meter;
-        };
 
         // A vertical fader in dB: drag up / down (Shift: finer), double-click 0 dB, right-click its menu.
         class MixerFader final : public UI::UIElement
@@ -765,7 +709,15 @@ namespace Nox
             auto meterRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
             meterRow->WidthMode = UI::UISizeMode::Fill;
             meterRow->HeightMode = UI::UISizeMode::Fill;
-            Ref<MixerMeter> meter(new MixerMeter(id));
+            // The bus's level: RMS filled, the peak a line, a tick every 12 dB (UI::UILevelMeter).
+            Ref<UI::UILevelMeter> meter(new UI::UILevelMeter(UI::UIOrientation::Vertical));
+            meter->MinDb = kMinDb;
+            meter->MaxDb = kMaxDb;
+            meter->Source = [id]()
+            {
+                const AudioBusMeter m = AudioMixer::GetMeter(id);
+                return UI::UILevelMeter::Values{ m.RmsLeft, m.RmsRight, m.PeakLeft, m.PeakRight };
+            };
             meter->HeightMode = UI::UISizeMode::Fill;
             meterRow->AddChild(meter);
             Ref<MixerFader> fader(new MixerFader());

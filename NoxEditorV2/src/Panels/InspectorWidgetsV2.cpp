@@ -21,6 +21,7 @@
 #include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "Panels/AssetPreviewRenderer.h"
+#include "NoxCore/UI/Widgets/UIIconButton.h"
 #include "NoxCore/UI/Core/UIBuilder.h"
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
@@ -41,6 +42,18 @@ namespace Nox
 {
     namespace
     {
+        // The "..." button of a card or row (opens a menu under itself).
+        Ref<UI::UIIconButton> MakeMoreButton(std::function<void(const UI::UIRect&)> onOpen, std::string tooltip)
+        {
+            Ref<UI::UIIconButton> button(new UI::UIIconButton([](UI::UIDrawList& drawList, const UI::UIRect& b, const UI::UIColor& color)
+            {
+                UI::Icons::DrawMoreDots(drawList, b.Center(), 12.0f, color, true);
+            }, std::move(tooltip)));
+            button->FixedSize = { 24.0f, 22.0f };
+            button->OnClickAt = std::move(onOpen);
+            return button;
+        }
+
         constexpr size_t kMaxVisiblePickerOptions = 60;
 
         class UIAssetPickerBackdrop final : public UI::UIAnchorBox
@@ -291,108 +304,8 @@ namespace Nox
             bool m_Expanded = true;
         };
 
-        class CardMoreButton final : public UI::UIElement
-        {
-        public:
-            explicit CardMoreButton(std::function<void(const UI::UIRect&)> onOpen, std::string tooltip = "Component options")
-                : m_OnOpen(std::move(onOpen))
-            {
-                DrawBackground = false;
-                HitTestMode = UI::UIHitTestMode::Self;
-                WidthMode = UI::UISizeMode::Fixed;
-                HeightMode = UI::UISizeMode::Fixed;
-                FixedSize = { 24.0f, 22.0f };
-                Tooltip = std::move(tooltip);
-            }
-
-            bool OnPointerUp(const UI::UIPointerEvent& e) override
-            {
-                if (e.Button == 1 && IsEnabled() && GetBounds().Contains(e.Position))
-                {
-                    if (m_OnOpen)
-                        m_OnOpen(GetBounds());
-                    return true;
-                }
-                return false;
-            }
-
-        protected:
-            UI::UIVec2 ComputeDesiredSize() override { return FixedSize; }
-
-            void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override
-            {
-                const UI::UIRect& b = GetBounds();
-                const bool hovered = UI::HasState(GetState(), UI::UIState::Hovered);
-                if (hovered)
-                {
-                    drawList.AddRoundedRect(
-                        b.Min, b.Max,
-                        theme.GetToken("Surface2", { 0.18f, 0.21f, 0.28f, 1.0f }),
-                        glm::vec4(4.0f)
-                    );
-                }
-                const UI::UIColor dotCol = hovered
-                    ? theme.GetToken("Text", { 0.94f, 0.96f, 0.98f, 1.0f })
-                    : theme.GetToken("TextMuted", { 0.62f, 0.67f, 0.76f, 1.0f });
-                UI::Icons::DrawMoreDots(drawList, { (b.Min.x + b.Max.x) * 0.5f, (b.Min.y + b.Max.y) * 0.5f }, 12.0f, dotCol, true);
-            }
-
-        private:
-            std::function<void(const UI::UIRect&)> m_OnOpen;
-        };
 
         // A small chevron that opens and closes what is under its row (a material's properties under its slot).
-        class ExpandToggleButton final : public UI::UIElement
-        {
-        public:
-            ExpandToggleButton(bool expanded, std::function<void(bool)> onToggle, std::string tooltip)
-                : m_Expanded(expanded), m_OnToggle(std::move(onToggle))
-            {
-                DrawBackground = false;
-                HitTestMode = UI::UIHitTestMode::Self;
-                WidthMode = UI::UISizeMode::Fixed;
-                HeightMode = UI::UISizeMode::Fixed;
-                FixedSize = { 22.0f, 24.0f };
-                Tooltip = std::move(tooltip);
-            }
-
-            bool OnPointerUp(const UI::UIPointerEvent& e) override
-            {
-                if (e.Button == 1 && IsEnabled() && GetBounds().Contains(e.Position))
-                {
-                    m_Expanded = !m_Expanded;
-                    if (m_OnToggle)
-                        m_OnToggle(m_Expanded);
-                    return true;
-                }
-                return false;
-            }
-
-        protected:
-            UI::UIVec2 ComputeDesiredSize() override { return FixedSize; }
-
-            void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override
-            {
-                const UI::UIRect& b = GetBounds();
-                const bool hovered = UI::HasState(GetState(), UI::UIState::Hovered);
-                if (hovered || m_Expanded)
-                {
-                    drawList.AddRoundedRect(
-                        b.Min, b.Max,
-                        theme.GetToken("Surface2", { 0.18f, 0.21f, 0.28f, 1.0f }),
-                        glm::vec4(4.0f)
-                    );
-                }
-                const UI::UIColor color = (hovered || m_Expanded)
-                    ? theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f })
-                    : theme.GetToken("TextMuted", { 0.62f, 0.67f, 0.76f, 1.0f });
-                UI::Icons::DrawChevron(drawList, b.Center(), 8.0f, m_Expanded, color, 1.7f);
-            }
-
-        private:
-            bool m_Expanded = false;
-            std::function<void(bool)> m_OnToggle;
-        };
 
         // A property row: its name on the left, its editor on the right. The name column is a third of the row, but never
         // narrower than 76 px nor wider than 150 px -- a wide Inspector gives the extra room to the values (three number
@@ -647,7 +560,7 @@ namespace Nox
 
         if (onReset || (removable && onRemove))
         {
-            auto moreBtn = Ref<CardMoreButton>(new CardMoreButton([onReset, removable, onRemove](const UI::UIRect& b)
+            auto moreBtn = MakeMoreButton([onReset, removable, onRemove](const UI::UIRect& b)
             {
                 UI::UIContext* curCtx = UI::UIContext::GetCurrent();
                 if (!curCtx)
@@ -662,7 +575,7 @@ namespace Nox
                     items.push_back({ "Remove Component", "", onRemove });
                 }
                 UI::UIMenuPopup::ShowPopupMenu(*curCtx, b, std::move(items), true);
-            }));
+            }, "Component options");
             headerRow->AddChild(moreBtn);
         }
 
@@ -673,12 +586,24 @@ namespace Nox
 
     Ref<UI::UIElement> CreateExpandToggle(bool expanded, std::function<void(bool)> onToggle, const std::string& tooltip)
     {
-        return Ref<UI::UIElement>(new ExpandToggleButton(expanded, std::move(onToggle), tooltip));
+        // A chevron that opens or closes something: the accent colour while open or under the pointer.
+        Ref<UI::UIIconButton> button(new UI::UIIconButton({}, tooltip));
+        UI::UIIconButton* raw = button.get(); // (its Active is the open state)
+        button->DrawIcon = [raw](UI::UIDrawList& drawList, const UI::UIRect& b, const UI::UIColor& color)
+        {
+            UI::Icons::DrawChevron(drawList, b.Center(), 8.0f, raw->Active, color, 1.7f);
+        };
+        button->FixedSize = { 22.0f, 24.0f };
+        button->Toggle = true;
+        button->Active = expanded;
+        button->ActiveStyle = UI::UIIconButton::ActiveLook::Tint;
+        button->OnToggled = std::move(onToggle);
+        return button;
     }
 
     Ref<UI::UIElement> CreateMoreButton(std::function<void(const UI::UIRect&)> onOpen, const std::string& tooltip)
     {
-        return Ref<UI::UIElement>(new CardMoreButton(std::move(onOpen), tooltip));
+        return MakeMoreButton(std::move(onOpen), tooltip);
     }
 
     void InspectorCardBuilder::AddRow(const std::string& labelText, const Ref<UI::UIElement>& editor, const std::string& tooltip)

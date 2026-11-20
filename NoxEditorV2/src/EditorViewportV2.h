@@ -12,6 +12,7 @@
 #include "NoxCore/Renderer/EditorCamera.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
+#include "NoxCore/UI/Widgets/UIIconButton.h"
 #include "NoxCore/UI/Core/UIElement.h"
 
 namespace Nox
@@ -53,22 +54,14 @@ namespace Nox
         Cogwheel
     };
 
-    // Crisp SDF vector icon button (used for Godot-style slim toolbars and cogwheel menus).
-    class UIVectorIconButton : public UI::UIElement
+    // An icon button (UI::UIIconButton) showing one of the editor's vector icons: the viewport's tools, the cogwheel menus.
+    class UIVectorIconButton : public UI::UIIconButton
     {
     public:
         explicit UIVectorIconButton(EditorIconKind icon, std::string tooltip = {}, std::function<void()> onClick = {});
 
         EditorIconKind Icon = EditorIconKind::SelectArrow;
-        bool Active = false;
         float IconScale = 1.0f;
-        std::function<void()> OnClick;
-
-        bool OnPointerUp(const UI::UIPointerEvent& e) override;
-
-    protected:
-        UI::UIVec2 ComputeDesiredSize() override;
-        void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override;
     };
 
     struct ViewportToolState

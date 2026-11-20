@@ -673,6 +673,16 @@ same bit by chance). Headless UI test: 35 checks pass (13 new: OnSync once a fra
 next frame, OnKey's key and modifiers, Shift+Tab, GetCurrentModifiers, held buttons, a modal button that stays disabled and ignores
 clicks until Enabled holds). Not run in the editor on a GPU.
 
+**Editor widgets moved into the UI library (built; checked by the headless UI test, not user-tested).** In `Nox::UI` and NoxUI
+alike. `UIIconButton`: a small icon-only button (icon from a texture or a `DrawIcon` function drawn in the state's colour: theme tokens
+TextMuted / Text / Accent), `Active` (Fill: accent fill and border; Tint: soft fill, accent icon), `Toggle` (`OnToggled`), `OnClickAt`
+(its bounds, for a menu under it), Enter / Space when focused -- replaces the editor's toolbar Play / Simulate / Pause / Step button
+class, the inspector's "..." and chevron-toggle classes, and is the base of `UIVectorIconButton` (which only adds the editor's vector
+icons). `UILevelMeter`: an audio meter, left and right, linear levels mapped over MinDb..MaxDb, RMS fill with a peak line or a peak
+fill, vertical with dB ticks or horizontal with the dB written on the bars, theme tokens MeterBackground / MeterLow / MeterLoud /
+MeterClip, `Source` read each frame, dB tooltip -- replaces the Mixer's strip meter and the audio graph preview's voice meter.
+Headless UI test: 45 checks pass (10 new for these two).
+
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and
 `Panels/NodeGraph/NodeGraphEditorV2` (the window: Save / Undo / Redo / Frame, Parameters on the left, Details on the right). Opened by

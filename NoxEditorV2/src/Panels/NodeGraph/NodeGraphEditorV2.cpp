@@ -22,6 +22,7 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/MaterialGraph.h"
+#include "NoxCore/UI/Widgets/UILevelMeter.h"
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Layout/UILayout.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
@@ -215,43 +216,6 @@ namespace Nox
             int m_Dragged = -1;
             glm::vec2 m_Low{ 0.0f }, m_High{ 1.0f };
             std::chrono::steady_clock::time_point m_LastClick{};
-        };
-
-        // A voice's output level, left and right: bars over -60 .. 0 dB, red at 0 dB and above, the dB written on them.
-        class LevelMeter final : public UI::UIElement
-        {
-        public:
-            explicit LevelMeter(std::function<glm::vec2()> peak) : m_Peak(std::move(peak))
-            {
-                HitTestMode = UI::UIHitTestMode::None;
-                WidthMode = UI::UISizeMode::Fill;
-                HeightMode = UI::UISizeMode::Fixed;
-                FixedSize = { 0.0f, 34.0f };
-            }
-
-        protected:
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
-            {
-                const UI::UIRect b = GetBounds();
-                const glm::vec2 peak = m_Peak ? m_Peak() : glm::vec2(0.0f);
-                for (int channel = 0; channel < 2; ++channel)
-                {
-                    const float level = channel == 0 ? peak.x : peak.y;
-                    const float db = 20.0f * std::log10(std::max(level, 1e-6f));
-                    const float fill = std::clamp((db + 60.0f) / 60.0f, 0.0f, 1.0f);
-                    const float top = b.Min.y + static_cast<float>(channel) * 17.0f;
-                    const UI::UIVec2 min{ b.Min.x, top }, max{ b.Max.x, top + 15.0f };
-                    d.AddRoundedRect(min, max, theme.GetToken("Background", { 0.063f, 0.075f, 0.106f, 1.0f }), glm::vec4(3.0f));
-                    if (fill > 0.0f)
-                        d.AddRoundedRect(min, { min.x + (max.x - min.x) * fill, max.y }, level >= 1.0f ? UI::UIColor{ 0.9f, 0.25f, 0.2f, 1.0f } : UI::UIColor{ 0.3f, 0.75f, 0.35f, 1.0f },
-                                         glm::vec4(3.0f));
-                    const std::string text = std::string(channel == 0 ? "L" : "R") + (level > 1e-6f ? std::format("  {:.1f} dB", db) : std::string());
-                    d.AddText(text, nullptr, { min.x + 6.0f, top + 1.0f }, 11.5f, { 0.95f, 0.96f, 1.0f, 0.95f });
-                }
-            }
-
-        private:
-            std::function<glm::vec2()> m_Peak;
         };
 
         Ref<UI::UILabel> MutedLabel(const std::string& text, float size = 13.0f)
@@ -1692,7 +1656,21 @@ namespace Nox
                 statusRaw->Text = !m_AudioError.empty() ? "Cannot play: " + m_AudioError : !m_AudioProgram ? std::string("Loading...") : std::string();
             });
             controls->AddChild(status);
-            m_PreviewBox->AddChild(Ref<LevelMeter>(new LevelMeter([this]() { return m_AudioVoice != 0 ? AudioEngine::GetVoicePeak(m_AudioVoice) : glm::vec2(0.0f); })));
+            // The voice's output level, left and right: bars over -60 .. 0 dB, red at 0 dB and above, the dB written on them.
+            Ref<UI::UILevelMeter> meter(new UI::UILevelMeter(UI::UIOrientation::Horizontal));
+            meter->MinDb = -60.0f;
+            meter->MaxDb = 0.0f;
+            meter->LoudDb = meter->ClipDb = 0.0f;
+            meter->HitTestMode = UI::UIHitTestMode::None;
+            meter->AutoTooltip = false;
+            meter->HeightMode = UI::UISizeMode::Fixed;
+            meter->FixedSize = { 0.0f, 32.0f };
+            meter->Source = [this]()
+            {
+                const glm::vec2 peak = m_AudioVoice != 0 ? AudioEngine::GetVoicePeak(m_AudioVoice) : glm::vec2(0.0f);
+                return UI::UILevelMeter::Values{ 0.0f, 0.0f, peak.x, peak.y };
+            };
+            m_PreviewBox->AddChild(meter);
         }
         else
         {

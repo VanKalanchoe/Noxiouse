@@ -248,66 +248,12 @@ namespace Nox
     }
 
     UIVectorIconButton::UIVectorIconButton(EditorIconKind icon, std::string tooltip, std::function<void()> onClick)
-        : Icon(icon), OnClick(std::move(onClick))
+        : UI::UIIconButton({}, std::move(tooltip), std::move(onClick)), Icon(icon)
     {
-        StyleClass = "Button";
-        DrawBackground = false;
-        HitTestMode = UI::UIHitTestMode::Self;
-        Focusable = true;
-        Tooltip = std::move(tooltip);
-        WidthMode = UI::UISizeMode::Fixed;
-        HeightMode = UI::UISizeMode::Fixed;
-        FixedSize = { 26.0f, 24.0f };
-        VAlign = UI::UIAlignment::Center;
-    }
-
-    bool UIVectorIconButton::OnPointerUp(const UI::UIPointerEvent& e)
-    {
-        if (e.Button == 1 && IsEnabled() && GetBounds().Contains(e.Position))
+        DrawIcon = [this](UI::UIDrawList& drawList, const UI::UIRect& b, const UI::UIColor& color)
         {
-            if (OnClick)
-                OnClick();
-            return true;
-        }
-        return UIElement::OnPointerUp(e);
-    }
-
-    UI::UIVec2 UIVectorIconButton::ComputeDesiredSize()
-    {
-        return FixedSize;
-    }
-
-    void UIVectorIconButton::OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme)
-    {
-        const UI::UIRect& b = GetBounds();
-        const UI::UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
-        const bool hovered = UI::HasState(GetState(), UI::UIState::Hovered);
-        const bool pressed = UI::HasState(GetState(), UI::UIState::Pressed);
-
-        if (Active)
-        {
-            drawList.AddRoundedRect(
-                b.Min, b.Max,
-                { accent.r, accent.g, accent.b, hovered ? 0.36f : 0.26f },
-                glm::vec4(4.0f),
-                1.0f,
-                { accent.r, accent.g, accent.b, 0.85f }
-            );
-        }
-        else if (hovered || pressed)
-        {
-            drawList.AddRoundedRect(
-                b.Min, b.Max,
-                { 1.0f, 1.0f, 1.0f, pressed ? 0.16f : 0.10f },
-                glm::vec4(4.0f)
-            );
-        }
-
-        const glm::vec4 iconColor = Active
-            ? glm::vec4{ 0.62f, 0.82f, 1.0f, 1.0f }
-            : (hovered ? glm::vec4{ 0.96f, 0.97f, 0.99f, 1.0f } : glm::vec4{ 0.78f, 0.82f, 0.88f, 1.0f });
-        const glm::vec2 center = (b.Min + b.Max) * 0.5f;
-        DrawVectorIcon(drawList, Icon, center, iconColor, IconScale);
+            DrawVectorIcon(drawList, Icon, (b.Min + b.Max) * 0.5f, color, IconScale);
+        };
     }
 
     float ViewportToolState::LocationSnapWorldUnits() const

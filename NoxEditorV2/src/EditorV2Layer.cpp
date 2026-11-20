@@ -3444,15 +3444,15 @@ namespace Nox
         if (m_StepBtnWrap)
             m_StepBtnWrap->Visible = !isEdit && isPaused;
 
-        if (m_PlayBtnIcon)
+        if (m_PlayBtnWrap)
         {
             const Ref<Texture2D>& tex = isPlay ? m_IconStop : m_IconPlay;
-            m_PlayBtnIcon->TextureDescriptorSlot = tex ? tex->GetDescriptorIndexSlot() : ~0u;
+            m_PlayBtnWrap->TextureSlot = tex ? tex->GetDescriptorIndexSlot() : ~0u;
         }
-        if (m_SimulateBtnIcon)
+        if (m_SimulateBtnWrap)
         {
             const Ref<Texture2D>& tex = isSim ? m_IconStop : m_IconSimulate;
-            m_SimulateBtnIcon->TextureDescriptorSlot = tex ? tex->GetDescriptorIndexSlot() : ~0u;
+            m_SimulateBtnWrap->TextureSlot = tex ? tex->GetDescriptorIndexSlot() : ~0u;
         }
         if (m_PlaySettingsCogBtn)
         {
@@ -4150,83 +4150,10 @@ namespace Nox
             m_ViewportSlotRoots[index] = root;
         }
 
-        // Sleek Godot-style Play / Simulate / Pause / Step Toolbar (icon-only buttons matching viewport tools)
-        class UIToolbarIconButton final : public UI::UIElement
+        // Play / Simulate / Pause / Step: icon buttons with the toolbar's textures.
+        const auto makeToolbarIconBtn = [](const Ref<Texture2D>& icon, const std::string& tip, std::function<void()> onClick)
         {
-        public:
-            UIToolbarIconButton(const Ref<Texture2D>& icon, std::string tooltip, std::function<void()> onClick, Ref<UI::UIImage>& outImg)
-                : OnClick(std::move(onClick))
-            {
-                DrawBackground = false;
-                HitTestMode = UI::UIHitTestMode::Self;
-                Focusable = true;
-                Tooltip = std::move(tooltip);
-                WidthMode = UI::UISizeMode::Fixed;
-                HeightMode = UI::UISizeMode::Fixed;
-                FixedSize = { 30.0f, 30.0f };
-                VAlign = UI::UIAlignment::Center;
-                Padding = UI::UIThickness::All(1.0f);
-
-                m_Image = UI::MakeUI<UI::UIImage>(icon ? icon->GetDescriptorIndexSlot() : ~0u, UI::UIVec2{ 28.0f, 28.0f });
-                m_Image->WidthMode = UI::UISizeMode::Fill;
-                m_Image->HeightMode = UI::UISizeMode::Fill;
-                m_Image->HitTestMode = UI::UIHitTestMode::None;
-                AddChild(m_Image);
-                outImg = m_Image;
-            }
-
-            bool Active = false;
-            std::function<void()> OnClick;
-
-            bool OnPointerUp(const UI::UIPointerEvent& e) override
-            {
-                if (e.Button == 1 && IsEnabled() && GetBounds().Contains(e.Position))
-                {
-                    if (OnClick)
-                        OnClick();
-                    return true;
-                }
-                return UIElement::OnPointerUp(e);
-            }
-
-        protected:
-            UI::UIVec2 ComputeDesiredSize() override { return FixedSize; }
-
-            void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override
-            {
-                const UI::UIRect& b = GetBounds();
-                const UI::UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
-                const bool hovered = UI::HasState(GetState(), UI::UIState::Hovered);
-                const bool pressed = UI::HasState(GetState(), UI::UIState::Pressed);
-
-                if (Active)
-                {
-                    drawList.AddRoundedRect(
-                        b.Min, b.Max,
-                        { accent.r, accent.g, accent.b, hovered ? 0.36f : 0.26f },
-                        glm::vec4(4.0f),
-                        1.0f,
-                        { accent.r, accent.g, accent.b, 0.85f }
-                    );
-                }
-                else if (hovered || pressed)
-                {
-                    drawList.AddRoundedRect(
-                        b.Min, b.Max,
-                        { 1.0f, 1.0f, 1.0f, pressed ? 0.16f : 0.10f },
-                        glm::vec4(4.0f)
-                    );
-                }
-            }
-
-        private:
-            Ref<UI::UIImage> m_Image;
-        };
-
-        auto makeToolbarIconBtn = [](const Ref<Texture2D>& icon, const std::string& tip,
-                                     std::function<void()> onClick, Ref<UI::UIImage>& outImg) -> Ref<UI::UIElement>
-        {
-            return Ref<UI::UIElement>(new UIToolbarIconButton(icon, tip, std::move(onClick), outImg));
+            return UI::UIIconButton::FromTexture(icon ? icon->GetDescriptorIndexSlot() : ~0u, tip, std::move(onClick));
         };
 
         m_PlayBtnWrap = makeToolbarIconBtn(m_IconPlay, "Play / Stop (Esc)", [this]()
@@ -4235,7 +4162,7 @@ namespace Nox
                 OnSceneStop();
             else
                 OnScenePlay();
-        }, m_PlayBtnIcon);
+        });
 
         m_SimulateBtnWrap = makeToolbarIconBtn(m_IconSimulate, "Simulate / Stop", [this]()
         {
@@ -4243,22 +4170,20 @@ namespace Nox
                 OnSceneStop();
             else
                 OnSceneSimulate();
-        }, m_SimulateBtnIcon);
+        });
 
-        Ref<UI::UIImage> pauseImg;
         m_PauseBtnWrap = makeToolbarIconBtn(m_IconPause, "Pause / Resume", [this]()
         {
             if (m_SceneState != SceneState::Edit && m_ActiveScene)
                 m_ActiveScene->SetPaused(!m_ActiveScene->IsPaused());
             RefreshToolBar();
-        }, pauseImg);
+        });
 
-        Ref<UI::UIImage> stepImg;
         m_StepBtnWrap = makeToolbarIconBtn(m_IconStep, "Step one frame", [this]()
         {
             if (m_SceneState != SceneState::Edit && m_ActiveScene)
                 m_ActiveScene->Step();
-        }, stepImg);
+        });
 
         m_PlaySettingsCogBtn = UI::MakeUI<UIVectorIconButton>(
             EditorIconKind::Cogwheel,

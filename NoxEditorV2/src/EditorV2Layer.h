@@ -350,12 +350,10 @@ namespace Nox
         Ref<Texture2D> m_IconStep;
 
         Ref<UI::UIStackBox> m_ToolBar;
-        Ref<UI::UIElement> m_PlayBtnWrap;
-        Ref<UI::UIElement> m_SimulateBtnWrap;
-        Ref<UI::UIElement> m_PauseBtnWrap;
-        Ref<UI::UIElement> m_StepBtnWrap;
-        Ref<UI::UIImage> m_PlayBtnIcon;
-        Ref<UI::UIImage> m_SimulateBtnIcon;
+        Ref<UI::UIIconButton> m_PlayBtnWrap;
+        Ref<UI::UIIconButton> m_SimulateBtnWrap;
+        Ref<UI::UIIconButton> m_PauseBtnWrap;
+        Ref<UI::UIIconButton> m_StepBtnWrap;
         Ref<UIVectorIconButton> m_PlaySettingsCogBtn;
         Ref<UI::UILabel> m_PlayNetStatusLabel;
         Ref<UI::UIElement> m_PrefabBar;       // the toolbar in Prefab Mode: the prefab's name, Save, Save & Exit, Exit
