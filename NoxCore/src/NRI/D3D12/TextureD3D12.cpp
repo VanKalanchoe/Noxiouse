@@ -141,7 +141,7 @@ namespace NRI
         {
             uint32_t blocksX = (std::max(curWidth, 1u) + blockSize - 1) / blockSize;
             uint32_t blocksY = (std::max(curHeight, 1u) + blockSize - 1) / blockSize;
-            uint32_t rowPitch = reg.rowPitch != 0 ? reg.rowPitch : (blocksX * blockBytes + 255) & ~255u; // 256-byte pitch alignment
+            uint32_t rowPitch = (blocksX * blockBytes + 255) & ~255u; // 256-byte pitch alignment
 
             D3D12_TEXTURE_COPY_LOCATION src{};
             src.pResource = bufferD3D12->getNativeBuffer();
@@ -184,7 +184,7 @@ namespace NRI
         for (const auto& reg : regions)
         {
             uint32_t blocksX = (reg.width + blockSize - 1) / blockSize;
-            uint32_t rowPitch = (blocksX * blockBytes + 255) & ~255u;
+            uint32_t rowPitch = reg.rowPitch != 0 ? reg.rowPitch : (blocksX * blockBytes + 255) & ~255u;
 
             D3D12_TEXTURE_COPY_LOCATION src{};
             src.pResource = bufferD3D12->getNativeBuffer();
