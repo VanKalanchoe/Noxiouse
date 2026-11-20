@@ -5,6 +5,7 @@
 #include <cstdio>
 
 #include "Panels/InspectorWidgetsV2.h"
+#include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Widgets/UIPropertyRows.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Asset/TextureStreamer.h"
@@ -27,9 +28,9 @@ namespace Nox
 {
     namespace
     {
-        constexpr glm::vec4 kGood{ 0.40f, 0.85f, 0.55f, 1.0f };
-        constexpr glm::vec4 kInfo{ 0.45f, 0.78f, 1.0f, 1.0f };
-        constexpr glm::vec4 kWarn{ 1.0f, 0.62f, 0.25f, 1.0f };
+        constexpr UI::UIThemeToken kGood{ "StatusGood", { 0.40f, 0.85f, 0.55f, 1.0f } };
+        constexpr UI::UIThemeToken kInfo{ "StatusInfo", { 0.45f, 0.78f, 1.0f, 1.0f } };
+        constexpr UI::UIThemeToken kWarn{ "StatusWarning", { 1.0f, 0.62f, 0.25f, 1.0f } };
         constexpr double kMB = 1024.0 * 1024.0;
 
         std::string Format(const char* format, auto... args)

@@ -38,15 +38,15 @@ namespace Nox
         // Pin colours by type (Unreal's convention: the type tells the socket), the same as NoxEditor's canvas.
         UIColor PinColor(const std::string& type)
         {
-            if (type == "Pose")    return { 0.78f, 0.55f, 0.95f, 1.0f };
-            if (type == "Float")   return { 0.55f, 0.85f, 0.55f, 1.0f };
-            if (type == "Bool")    return { 0.85f, 0.45f, 0.45f, 1.0f };
-            if (type == "Int")     return { 0.40f, 0.85f, 0.85f, 1.0f };
-            if (type == "Vector2") return { 0.95f, 0.85f, 0.35f, 1.0f };
-            if (type == "Audio")   return { 0.40f, 0.60f, 1.00f, 1.0f };
-            if (type == "Trigger") return { 0.95f, 0.95f, 0.95f, 1.0f };
-            if (type == "Value")   return { 0.45f, 0.82f, 0.74f, 1.0f }; // a material graph's values
-            return { 0.75f, 0.75f, 0.78f, 1.0f };
+            if (type == "Pose")    return UI::ThemeColor("PinPose", { 0.78f, 0.55f, 0.95f, 1.0f });
+            if (type == "Float")   return UI::ThemeColor("PinFloat", { 0.55f, 0.85f, 0.55f, 1.0f });
+            if (type == "Bool")    return UI::ThemeColor("PinBool", { 0.85f, 0.45f, 0.45f, 1.0f });
+            if (type == "Int")     return UI::ThemeColor("PinInt", { 0.40f, 0.85f, 0.85f, 1.0f });
+            if (type == "Vector2") return UI::ThemeColor("PinVector2", { 0.95f, 0.85f, 0.35f, 1.0f });
+            if (type == "Audio")   return UI::ThemeColor("PinAudio", { 0.40f, 0.60f, 1.00f, 1.0f });
+            if (type == "Trigger") return UI::ThemeColor("PinTrigger", { 0.95f, 0.95f, 0.95f, 1.0f });
+            if (type == "Value")   return UI::ThemeColor("PinValue", { 0.45f, 0.82f, 0.74f, 1.0f }); // a material graph's values
+            return UI::ThemeColor("PinDefault", { 0.75f, 0.75f, 0.78f, 1.0f });
         }
 
         // A node's header by its category; categories without a colour of their own get a steady one from their name.
@@ -272,7 +272,7 @@ namespace Nox
             {
                 layout.Known = false;
                 layout.Title = node.TypeName + " (unknown)";
-                layout.Header = { 0.5f, 0.2f, 0.2f, 1.0f };
+                layout.Header = UI::ThemeColor("NodeHeaderError", { 0.5f, 0.2f, 0.2f, 1.0f });
                 layout.Size = { std::max(kMinWidth, UI::UILabel::MeasureText(layout.Title, nullptr, kTitleFont).x + 24.0f), kHeader + kRow + kBottom };
                 m_Layouts.emplace(node.Id, std::move(layout));
                 continue;
@@ -284,7 +284,7 @@ namespace Nox
             if (const auto found = node.Properties.find(kParameterReferenceProperty); found != node.Properties.end())
                 if (const auto* name = std::get_if<std::string>(&found->second); name && !name->empty())
                     layout.Title = node.TypeName + ": " + *name;
-            layout.Header = node.Id == m_Graph->OutputNode ? UIColor{ 0.22f, 0.53f, 0.35f, 1.0f } : CategoryColor(type->Category);
+            layout.Header = node.Id == m_Graph->OutputNode ? UI::ThemeColor("NodeHeaderOutput", { 0.22f, 0.53f, 0.35f, 1.0f }) : CategoryColor(type->Category);
 
             float inputWidth = 0.0f, outputWidth = 0.0f;
             for (const NodePinDesc& pin : layout.Inputs)
@@ -1089,7 +1089,7 @@ namespace Nox
         content->FixedSize = { 300.0f, 0.0f };
         Ref<UI::UILabel> heading(new UI::UILabel(fromPin.Valid() ? "Nodes for a " + (wireType.empty() ? std::string("wire") : wireType + " wire") : "Add Node", 13.0f));
         heading->UseColorOverride = true;
-        heading->ColorOverride = { 0.62f, 0.66f, 0.74f, 1.0f };
+        heading->ColorOverride = UI::ThemeColor("TextMuted", { 0.62f, 0.66f, 0.74f, 1.0f });
         content->AddChild(heading);
         Ref<UI::UITextInput> search(new UI::UITextInput("", "Search nodes..."));
         search->WidthMode = UI::UISizeMode::Fill;
@@ -1153,7 +1153,7 @@ namespace Nox
                     category = entry.Category;
                     Ref<UI::UILabel> header(new UI::UILabel(category, 12.0f));
                     header->UseColorOverride = true;
-                    header->ColorOverride = { 0.55f, 0.60f, 0.70f, 1.0f };
+                    header->ColorOverride = UI::ThemeColor("TextMuted", { 0.55f, 0.60f, 0.70f, 1.0f });
                     header->Margin = UI::UIThickness{ 4.0f, 6.0f, 0.0f, 2.0f };
                     listRaw->AddChild(header);
                 }
@@ -1168,7 +1168,7 @@ namespace Nox
             {
                 Ref<UI::UILabel> none(new UI::UILabel("No node matches", 13.0f));
                 none->UseColorOverride = true;
-                none->ColorOverride = { 0.55f, 0.60f, 0.70f, 1.0f };
+                none->ColorOverride = UI::ThemeColor("TextMuted", { 0.55f, 0.60f, 0.70f, 1.0f });
                 listRaw->AddChild(none);
             }
         };
@@ -1254,7 +1254,7 @@ namespace Nox
             if (!lit)
                 color.a = 0.8f;
             wire(GraphToScreen(PinPosition(*from, *fromLayout, link.FromPin, true)), GraphToScreen(PinPosition(*to, *toLayout, link.ToPin, false)),
-                 static_cast<int>(i) == m_SelectedLink ? UIColor{ 1.0f, 1.0f, 1.0f, 1.0f } : color, (lit ? 3.0f : 2.2f) * std::max(m_View.Zoom, 0.6f));
+                 static_cast<int>(i) == m_SelectedLink ? UI::ThemeColor("WireSelected", { 1.0f, 1.0f, 1.0f, 1.0f }) : color, (lit ? 3.0f : 2.2f) * std::max(m_View.Zoom, 0.6f));
         }
 
         const bool showText = m_View.Zoom >= 0.45f;
@@ -1262,7 +1262,7 @@ namespace Nox
         {
             const UIColor color = PinColor(type);
             const float r = kPinRadius * m_View.Zoom * (hovered ? 1.3f : 1.0f);
-            const UIColor fill = connected ? color : UIColor{ 0.08f, 0.10f, 0.14f, 1.0f };
+            const UIColor fill = connected ? color : UI::ThemeColor("PinUnconnected", { 0.08f, 0.10f, 0.14f, 1.0f });
             if (type == "Trigger")
             {
                 // An arrow pointing right (an event, like an execution pin).
@@ -1317,16 +1317,16 @@ namespace Nox
             }
 
             const float radius = 8.0f * m_View.Zoom;
-            d.AddRoundedRect(min, max, { 0.11f, 0.13f, 0.18f, 0.97f }, glm::vec4(radius), isSelected ? 2.0f : 1.0f,
+            d.AddRoundedRect(min, max, UI::ThemeColor("NodeBody", { 0.11f, 0.13f, 0.18f, 0.97f }), glm::vec4(radius), isSelected ? 2.0f : 1.0f,
                              isSelected ? accent : (isHovered ? UIColor{ border.r + 0.12f, border.g + 0.12f, border.b + 0.14f, 1.0f } : border),
-                             { 0.0f, 0.0f, 0.0f, 0.45f }, { 0.0f, 4.0f * m_View.Zoom }, 12.0f * m_View.Zoom);
+                             UI::ThemeColor("NodeShadow", { 0.0f, 0.0f, 0.0f, 0.45f }), { 0.0f, 4.0f * m_View.Zoom }, 12.0f * m_View.Zoom);
             d.AddRoundedRect(min, { max.x, min.y + kHeader * m_View.Zoom }, layout->Header, { radius, radius, 0.0f, 0.0f });
             if (showText)
             {
                 const float titleSize = kTitleFont * m_View.Zoom;
                 const UIVec2 titleExtent = UI::UILabel::MeasureText(layout->Title, nullptr, titleSize);
                 d.PushClipRect(min, { max.x - 6.0f * m_View.Zoom, min.y + kHeader * m_View.Zoom });
-                d.AddText(layout->Title, nullptr, { min.x + 10.0f * m_View.Zoom, min.y + (kHeader * m_View.Zoom - titleExtent.y) * 0.5f }, titleSize, { 1.0f, 1.0f, 1.0f, 0.96f });
+                d.AddText(layout->Title, nullptr, { min.x + 10.0f * m_View.Zoom, min.y + (kHeader * m_View.Zoom - titleExtent.y) * 0.5f }, titleSize, UI::ThemeColor("NodeTitle", { 1.0f, 1.0f, 1.0f, 0.96f }));
                 d.PopClipRect();
             }
 
@@ -1340,7 +1340,7 @@ namespace Nox
                 if (!showText)
                     continue;
                 const UIVec2 extent = UI::UILabel::MeasureText(pin.Name, nullptr, pinSize);
-                d.AddText(pin.Name, nullptr, { p.x + 12.0f * m_View.Zoom, p.y - extent.y * 0.5f }, pinSize, { 0.86f, 0.88f, 0.92f, 1.0f });
+                d.AddText(pin.Name, nullptr, { p.x + 12.0f * m_View.Zoom, p.y - extent.y * 0.5f }, pinSize, UI::ThemeColor("PinLabel", { 0.86f, 0.88f, 0.92f, 1.0f }));
                 // An input without a wire shows the value it uses, in a field it can be changed in.
                 if (!connected)
                     if (const auto literal = node->Properties.find(pin.Name); literal != node->Properties.end())
@@ -1352,7 +1352,7 @@ namespace Nox
                         const bool fieldHovered = field.Contains(m_DragLast) && m_Drag == Drag::None;
                         const bool fieldActive = m_Drag == Drag::Value && m_ValueDrag.Node == node->Id && m_ValueDrag.Property == pin.Name;
                         d.AddRoundedRect(field.Min, field.Max, { 1.0f, 1.0f, 1.0f, fieldActive ? 0.14f : fieldHovered ? 0.10f : 0.05f }, glm::vec4(3.0f * m_View.Zoom));
-                        d.AddText(text.empty() ? std::string("...") : text, nullptr, textPos, pinSize, fieldHovered || fieldActive ? UIColor{ 0.95f, 0.96f, 1.0f, 1.0f } : muted);
+                        d.AddText(text.empty() ? std::string("...") : text, nullptr, textPos, pinSize, fieldHovered || fieldActive ? UI::ThemeColor("PinValueHovered", { 0.95f, 0.96f, 1.0f, 1.0f }) : muted);
                         m_ValueHits.push_back({ node->Id, pin.Name, field });
                     }
             }
@@ -1364,7 +1364,7 @@ namespace Nox
                 if (!showText)
                     continue;
                 const UIVec2 extent = UI::UILabel::MeasureText(pin.Name, nullptr, pinSize);
-                d.AddText(pin.Name, nullptr, { p.x - 12.0f * m_View.Zoom - extent.x, p.y - extent.y * 0.5f }, pinSize, { 0.86f, 0.88f, 0.92f, 1.0f });
+                d.AddText(pin.Name, nullptr, { p.x - 12.0f * m_View.Zoom - extent.x, p.y - extent.y * 0.5f }, pinSize, UI::ThemeColor("PinLabel", { 0.86f, 0.88f, 0.92f, 1.0f }));
             }
             if (showText)
             {
@@ -1377,7 +1377,7 @@ namespace Nox
                 if (node->Id == m_Graph->OutputNode)
                 {
                     const UIVec2 extent = UI::UILabel::MeasureText("OUTPUT", nullptr, 10.0f * m_View.Zoom);
-                    d.AddText("OUTPUT", nullptr, { max.x - extent.x - 8.0f * m_View.Zoom, min.y - extent.y - 2.0f * m_View.Zoom }, 10.0f * m_View.Zoom, { 0.45f, 0.85f, 0.55f, 1.0f });
+                    d.AddText("OUTPUT", nullptr, { max.x - extent.x - 8.0f * m_View.Zoom, min.y - extent.y - 2.0f * m_View.Zoom }, 10.0f * m_View.Zoom, UI::ThemeColor("NodeOutputTag", { 0.45f, 0.85f, 0.55f, 1.0f }));
                 }
             }
         }
@@ -1392,7 +1392,7 @@ namespace Nox
                 const UIVec2 pinPos = GraphToScreen(PinPosition(*node, *layout, m_WireFrom.Pin, m_WireFrom.Output));
                 UIColor color = PinColor(PinType(m_WireFrom));
                 if (m_HoveredPin.Valid())
-                    color = CanConnect(m_WireFrom, m_HoveredPin, nullptr, nullptr) ? UIColor{ 0.45f, 0.90f, 0.50f, 1.0f } : UIColor{ 0.95f, 0.35f, 0.35f, 1.0f };
+                    color = CanConnect(m_WireFrom, m_HoveredPin, nullptr, nullptr) ? UI::ThemeColor("WireValid", { 0.45f, 0.90f, 0.50f, 1.0f }) : UI::ThemeColor("WireInvalid", { 0.95f, 0.35f, 0.35f, 1.0f });
                 if (m_WireFrom.Output)
                     wire(pinPos, m_DragLast, color, 2.5f * std::max(m_View.Zoom, 0.6f));
                 else

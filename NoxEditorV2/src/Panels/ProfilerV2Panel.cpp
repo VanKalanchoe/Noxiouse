@@ -57,7 +57,7 @@ namespace Nox
         glm::vec4 ScopeColor(uint32_t scopeId, bool isWait, bool gpu)
         {
             if (isWait)
-                return { 0.43f, 0.43f, 0.43f, 1.0f };
+                return UI::ThemeColor("ProfilerWait", { 0.43f, 0.43f, 0.43f, 1.0f });
             const uint32_t hash = (scopeId + 1u) * 2654435761u;
             return Hsv(static_cast<float>(hash % 360u) / 360.0f, gpu ? 0.45f : 0.55f, gpu ? 0.85f : 0.75f);
         }
@@ -190,8 +190,8 @@ namespace Nox
                 for (double reference : { 1000.0 / 60.0, 1000.0 / 30.0 })
                 {
                     const float y = toY(reference);
-                    d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + 1.0f }, { 1.0f, 1.0f, 1.0f, 0.16f });
-                    d.AddText(reference < 20.0 ? "60 fps" : "30 fps", nullptr, { b.Min.x + 2.0f, y - 14.0f }, kText, { 1.0f, 1.0f, 1.0f, 0.35f });
+                    d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + 1.0f }, UI::ThemeColor("ProfilerFrameLine", { 1.0f, 1.0f, 1.0f, 0.16f }));
+                    d.AddText(reference < 20.0 ? "60 fps" : "30 fps", nullptr, { b.Min.x + 2.0f, y - 14.0f }, kText, UI::ThemeColor("ProfilerFrameLineText", { 1.0f, 1.0f, 1.0f, 0.35f }));
                 }
                 const glm::vec4 good = Token(theme, "ProfilerFrameGood", { 0.35f, 0.75f, 0.39f, 1.0f });
                 const glm::vec4 slow = Token(theme, "ProfilerFrameSlow", { 0.86f, 0.75f, 0.27f, 1.0f });
@@ -211,7 +211,7 @@ namespace Nox
                         d.AddRoundedRect({ x0, y - 1.0f }, { x1 + 1.0f, y + 1.0f }, gpu);
                     }
                     if (static_cast<int32_t>(i) == selected)
-                        d.AddRoundedRect({ x0 - 1.0f, b.Min.y }, { x1 + 1.0f, b.Max.y }, glm::vec4(0.0f), glm::vec4(0.0f), 1.0f, { 1.0f, 1.0f, 1.0f, 0.86f });
+                        d.AddRoundedRect({ x0 - 1.0f, b.Min.y }, { x1 + 1.0f, b.Max.y }, glm::vec4(0.0f), glm::vec4(0.0f), 1.0f, UI::ThemeColor("ProfilerFrameSelection", { 1.0f, 1.0f, 1.0f, 0.86f }));
                 }
             }
 
@@ -222,7 +222,7 @@ namespace Nox
                     maxMB = std::max({ maxMB, m_State->Frame(i).VramMB, m_State->Frame(i).RamMB });
                 if (maxMB <= 0.0f)
                 {
-                    d.AddText("No memory figures yet", nullptr, { b.Min.x + 4.0f, b.Min.y + 4.0f }, kText, { 1.0f, 1.0f, 1.0f, 0.4f });
+                    d.AddText("No memory figures yet", nullptr, { b.Min.x + 4.0f, b.Min.y + 4.0f }, kText, UI::ThemeColor("ProfilerEmptyText", { 1.0f, 1.0f, 1.0f, 0.4f }));
                     return;
                 }
                 maxMB *= 1.1f;
@@ -237,7 +237,7 @@ namespace Nox
                         const float y = b.Max.y - std::min(mb / maxMB, 1.0f) * (b.Height() - 2.0f);
                         d.AddRoundedRect({ x - std::max(slot * 0.5f, 0.75f), y - 1.0f }, { x + std::max(slot * 0.5f, 0.75f), y + 1.0f }, colors[series]);
                     }
-                d.AddText(std::format("{:.0f} MB", maxMB), nullptr, { b.Min.x + 2.0f, b.Min.y }, kText, { 1.0f, 1.0f, 1.0f, 0.35f });
+                d.AddText(std::format("{:.0f} MB", maxMB), nullptr, { b.Min.x + 2.0f, b.Min.y }, kText, UI::ThemeColor("ProfilerFrameLineText", { 1.0f, 1.0f, 1.0f, 0.35f }));
                 d.AddText("VRAM", nullptr, { b.Min.x + 2.0f, b.Max.y - 14.0f }, kText, colors[0]);
                 d.AddText("RAM", nullptr, { b.Min.x + 40.0f, b.Max.y - 14.0f }, kText, colors[1]);
             }
@@ -371,8 +371,8 @@ namespace Nox
             const UI::UIRect b = GetBounds();
             State& s = *m_State;
             d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, Token(theme, "ProfilerBackground", { 0.10f, 0.10f, 0.11f, 1.0f }));
-            const glm::vec4 text{ 0.88f, 0.89f, 0.92f, 1.0f };
-            const glm::vec4 dim{ 0.55f, 0.57f, 0.62f, 1.0f };
+            const glm::vec4 text = UI::ThemeColor("ProfilerText", { 0.88f, 0.89f, 0.92f, 1.0f });
+            const glm::vec4 dim = UI::ThemeColor("TextMuted", { 0.55f, 0.57f, 0.62f, 1.0f });
             const uint32_t frameCount = s.FrameCount();
             const int32_t selected = s.HasSelection ? s.FindFrame(s.SelectedFrame) : -1;
             m_Hovered.Valid = false;
@@ -487,14 +487,14 @@ namespace Nox
                 const State::ScopeDetails details = s.Scope(scope.ScopeId);
                 d.AddRoundedRect({ x0, y0 }, { x1, y1 }, ScopeColor(scope.ScopeId, !gpu && details.IsWait, gpu));
                 if (scope.ScopeId == s.HighlightScope)
-                    d.AddRoundedRect({ x0, y0 }, { x1, y1 }, glm::vec4(0.0f), glm::vec4(0.0f), 2.0f, { 1.0f, 1.0f, 1.0f, 1.0f });
+                    d.AddRoundedRect({ x0, y0 }, { x1, y1 }, glm::vec4(0.0f), glm::vec4(0.0f), 2.0f, UI::ThemeColor("ProfilerScopeSelected", { 1.0f, 1.0f, 1.0f, 1.0f }));
                 x0 = std::max(x0, trackX);
                 x1 = std::min(x1, trackX + trackWidth);
                 if (x1 - x0 > 24.0f)
                 {
                     d.PushClipRect({ x0, y0 }, { x1, y1 });
                     d.AddText(std::string(details.Name) + " " + FormatDuration(static_cast<double>(scope.EndNs - scope.StartNs)), nullptr, { x0 + 3.0f, y0 + 2.0f },
-                              kText, { 0.06f, 0.06f, 0.06f, 1.0f });
+                              kText, UI::ThemeColor("ProfilerScopeText", { 0.06f, 0.06f, 0.06f, 1.0f }));
                     d.PopClipRect();
                 }
                 if (pointerIn && m_Pointer.x >= x0 && m_Pointer.x < x1 && m_Pointer.y >= y0 && m_Pointer.y < y1)
@@ -603,10 +603,10 @@ namespace Nox
                 m_Scroll = std::clamp(m_Scroll, 0.0f, std::max(0.0f, static_cast<float>(m_Rows.size()) * kRow - (b.Height() - kRow)));
 
                 static constexpr const char* kHeaders[6] = { "Scope", "Track", "Calls", "Total (ms)", "Max (ms)", "% of frame" };
-                const glm::vec4 text{ 0.86f, 0.88f, 0.92f, 1.0f };
-                const glm::vec4 dim{ 0.55f, 0.57f, 0.62f, 1.0f };
+                const glm::vec4 text = UI::ThemeColor("ProfilerTableText", { 0.86f, 0.88f, 0.92f, 1.0f });
+                const glm::vec4 dim = UI::ThemeColor("TextMuted", { 0.55f, 0.57f, 0.62f, 1.0f });
                 d.PushClipRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y });
-                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Min.y + kRow }, { 1.0f, 1.0f, 1.0f, 0.05f });
+                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Min.y + kRow }, UI::ThemeColor("TableHeader", { 1.0f, 1.0f, 1.0f, 0.05f }));
                 for (int column = 0; column < 6; ++column)
                 {
                     std::string header = kHeaders[column];
@@ -622,9 +622,9 @@ namespace Nox
                         continue;
                     const Row& row = m_Rows[i];
                     if (row.ScopeId == s.HighlightScope)
-                        d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, { 0.30f, 0.45f, 0.75f, 0.45f });
+                        d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, UI::ThemeColor("TableRowSelected", { 0.30f, 0.45f, 0.75f, 0.45f }));
                     else if (i % 2)
-                        d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, { 1.0f, 1.0f, 1.0f, 0.03f });
+                        d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, UI::ThemeColor("TableRowAlternate", { 1.0f, 1.0f, 1.0f, 0.03f }));
                     const double reference = row.Track != 0 ? frame.GpuMs : frameMs;
                     const std::string cells[6] = {
                         s.Scope(row.ScopeId).Name,

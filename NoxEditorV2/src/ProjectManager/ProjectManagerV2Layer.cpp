@@ -9,6 +9,7 @@
 #include <SDL3/SDL_video.h>
 
 #include "EditorV2Layer.h"
+#include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/Asset/TextureImporter.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Window.h"
@@ -182,9 +183,9 @@ namespace Nox
 
         m_ProjectList->ClearChildren();
         const std::string needle = ToLower(m_SearchFilter);
-        const UI::UIColor muted = { 0.58f, 0.62f, 0.69f, 1.0f };
-        const UI::UIColor accent = { 0.26f, 0.53f, 0.96f, 1.0f };
-        const UI::UIColor missingRed = { 0.84f, 0.31f, 0.33f, 1.0f };
+        const UI::UIColor muted = UI::ThemeColor("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+        const UI::UIColor accent = UI::ThemeColor("Accent", { 0.26f, 0.53f, 0.96f, 1.0f });
+        const UI::UIColor missingRed = UI::ThemeColor("StatusError", { 0.84f, 0.31f, 0.33f, 1.0f });
 
         int shown = 0;
         for (const Entry& entry : m_Projects)
@@ -212,7 +213,7 @@ namespace Nox
                     .Fill()
                     .Align(UI::UIAlignment::Center, UI::UIAlignment::Center);
                 initialLabel->UseColorOverride = true;
-                initialLabel->ColorOverride = { 0.78f, 0.84f, 0.94f, 1.0f };
+                initialLabel->ColorOverride = UI::ThemeColor("ProjectInitial", { 0.78f, 0.84f, 0.94f, 1.0f });
                 auto placeholder = UI::VStack(0.0f, { initialLabel })
                     .FixedSize(128.0f, 72.0f)
                     .Style("Card")
@@ -351,8 +352,8 @@ namespace Nox
         if (!uiLayer)
             return;
 
-        const UI::UIColor muted = { 0.58f, 0.62f, 0.69f, 1.0f };
-        const UI::UIColor errorRed = { 0.92f, 0.36f, 0.38f, 1.0f };
+        const UI::UIColor muted = UI::ThemeColor("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+        const UI::UIColor errorRed = UI::ThemeColor("StatusError", { 0.92f, 0.36f, 0.38f, 1.0f });
 
         auto subtitle = UI::Label("Open a project or make a new one. Every game is its own project: its own folder, assets, scenes and C# scripts.")
             .FillWidth();
@@ -448,7 +449,7 @@ namespace Nox
                     .Fill()
                     .Align(UI::UIAlignment::Center, UI::UIAlignment::Center);
                 fallbackLabel->UseColorOverride = true;
-                fallbackLabel->ColorOverride = { 0.78f, 0.84f, 0.94f, 1.0f };
+                fallbackLabel->ColorOverride = UI::ThemeColor("ProjectInitial", { 0.78f, 0.84f, 0.94f, 1.0f });
                 auto fallbackBox = UI::VStack(0.0f, { fallbackLabel })
                     .Style("Card")
                     .Background(true)

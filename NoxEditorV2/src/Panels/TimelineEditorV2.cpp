@@ -202,32 +202,32 @@ namespace Nox
             void OnPaint(UI::UIDrawList& d, const UI::UITheme&) override
             {
                 const UI::UIRect b = GetBounds();
-                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, { 0.09f, 0.09f, 0.11f, 1.0f });
+                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, UI::ThemeColor("TimelineBackground", { 0.09f, 0.09f, 0.11f, 1.0f }));
                 Timeline* timeline = m_Editor->GetTimeline();
                 if (!timeline)
                 {
-                    d.AddText("Loading...", nullptr, { b.Min.x + 8.0f, b.Min.y + 8.0f }, 13.0f, { 0.6f, 0.6f, 0.65f, 1.0f });
+                    d.AddText("Loading...", nullptr, { b.Min.x + 8.0f, b.Min.y + 8.0f }, 13.0f, UI::ThemeColor("TextMuted", { 0.6f, 0.6f, 0.65f, 1.0f }));
                     return;
                 }
                 const float duration = std::max(timeline->Duration, 0.01f);
                 const float laneLeft = LaneLeft(), laneRight = TimeToX(duration);
                 const Entity player = m_Editor->GetPlayer();
-                const glm::vec4 text{ 0.86f, 0.88f, 0.92f, 1.0f };
-                const glm::vec4 dim{ 0.55f, 0.57f, 0.62f, 1.0f };
+                const glm::vec4 text = UI::ThemeColor("TimelineText", { 0.86f, 0.88f, 0.92f, 1.0f });
+                const glm::vec4 dim = UI::ThemeColor("TextMuted", { 0.55f, 0.57f, 0.62f, 1.0f });
                 m_ScrollY = std::clamp(m_ScrollY, 0.0f, std::max(0.0f, static_cast<float>(timeline->Tracks.size()) * kLane - (b.Height() - kRuler)));
                 d.PushClipRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y });
 
                 // Ruler.
                 d.PushClipRect({ b.Min.x + kLabelWidth, b.Min.y }, { b.Max.x, b.Max.y });
-                d.AddRoundedRect({ laneLeft, b.Min.y }, { laneRight, b.Min.y + kRuler }, { 0.16f, 0.16f, 0.18f, 1.0f });
+                d.AddRoundedRect({ laneLeft, b.Min.y }, { laneRight, b.Min.y + kRuler }, UI::ThemeColor("TimelineRuler", { 0.16f, 0.16f, 0.18f, 1.0f }));
                 const float step = PixelsPerSecond() >= 200.0f ? 0.1f : (PixelsPerSecond() >= 60.0f ? 0.5f : 1.0f);
                 for (float time = 0.0f; time <= duration + 1e-4f; time += step)
                 {
                     const float x = TimeToX(time);
                     const bool major = std::fmod(time + 1e-4f, 1.0f) < 2e-4f;
-                    d.AddRoundedRect({ x, b.Min.y + (major ? 4.0f : 12.0f) }, { x + 1.0f, b.Min.y + kRuler }, { 0.59f, 0.59f, 0.59f, 1.0f });
+                    d.AddRoundedRect({ x, b.Min.y + (major ? 4.0f : 12.0f) }, { x + 1.0f, b.Min.y + kRuler }, UI::ThemeColor("TimelineTick", { 0.59f, 0.59f, 0.59f, 1.0f }));
                     if (major)
-                        d.AddText(std::format("{:.0f}", time), nullptr, { x + 2.0f, b.Min.y + 1.0f }, 11.5f, { 0.78f, 0.78f, 0.78f, 1.0f });
+                        d.AddText(std::format("{:.0f}", time), nullptr, { x + 2.0f, b.Min.y + 1.0f }, 11.5f, UI::ThemeColor("TimelineTickText", { 0.78f, 0.78f, 0.78f, 1.0f }));
                 }
                 d.PopClipRect();
 
@@ -241,18 +241,18 @@ namespace Nox
                     const bool selected = static_cast<int>(t) == m_Editor->SelectedTrack;
                     // Label column.
                     d.PushClipRect({ b.Min.x, std::max(top, b.Min.y + kRuler) }, { b.Min.x + kLabelWidth, top + kLane });
-                    d.AddRoundedRect({ b.Min.x + 4.0f, top + 5.0f }, { b.Min.x + 18.0f, top + 19.0f }, track.Muted ? glm::vec4(0.25f, 0.25f, 0.28f, 1.0f) : glm::vec4(0.35f, 0.62f, 0.95f, 1.0f),
+                    d.AddRoundedRect({ b.Min.x + 4.0f, top + 5.0f }, { b.Min.x + 18.0f, top + 19.0f }, track.Muted ? UI::ThemeColor("TimelineMuted", { 0.25f, 0.25f, 0.28f, 1.0f }) : UI::ThemeColor("TimelineMuteBox", { 0.35f, 0.62f, 0.95f, 1.0f }),
                                      glm::vec4(3.0f));
                     d.AddText(TrackName(track, player), nullptr, { b.Min.x + 24.0f, top + 5.0f }, 12.5f,
-                              selected ? glm::vec4(1.0f, 0.8f, 0.4f, 1.0f) : (track.Muted ? dim : text));
-                    d.AddRoundedRect({ b.Min.x + kLabelWidth - 70.0f, top + 3.0f }, { b.Min.x + kLabelWidth - 34.0f, top + kLane - 3.0f }, { 0.24f, 0.26f, 0.32f, 1.0f }, glm::vec4(3.0f));
+                              selected ? UI::ThemeColor("TimelineTrackSelected", { 1.0f, 0.8f, 0.4f, 1.0f }) : (track.Muted ? dim : text));
+                    d.AddRoundedRect({ b.Min.x + kLabelWidth - 70.0f, top + 3.0f }, { b.Min.x + kLabelWidth - 34.0f, top + kLane - 3.0f }, UI::ThemeColor("TimelineKeyButton", { 0.24f, 0.26f, 0.32f, 1.0f }), glm::vec4(3.0f));
                     d.AddText("Key", nullptr, { b.Min.x + kLabelWidth - 64.0f, top + 5.0f }, 12.0f, text);
-                    d.AddRoundedRect({ b.Min.x + kLabelWidth - 30.0f, top + 3.0f }, { b.Min.x + kLabelWidth - 6.0f, top + kLane - 3.0f }, { 0.32f, 0.20f, 0.20f, 1.0f }, glm::vec4(3.0f));
+                    d.AddRoundedRect({ b.Min.x + kLabelWidth - 30.0f, top + 3.0f }, { b.Min.x + kLabelWidth - 6.0f, top + kLane - 3.0f }, UI::ThemeColor("TimelineRemoveButton", { 0.32f, 0.20f, 0.20f, 1.0f }), glm::vec4(3.0f));
                     d.AddText("X", nullptr, { b.Min.x + kLabelWidth - 22.0f, top + 5.0f }, 12.0f, text);
                     d.PopClipRect();
 
                     d.PushClipRect({ b.Min.x + kLabelWidth, std::max(top, b.Min.y + kRuler) }, { b.Max.x, top + kLane });
-                    d.AddRoundedRect({ laneLeft, top + 1.0f }, { laneRight, top + kLane - 1.0f }, selected ? glm::vec4(0.20f, 0.20f, 0.25f, 1.0f) : glm::vec4(0.14f, 0.14f, 0.16f, 1.0f));
+                    d.AddRoundedRect({ laneLeft, top + 1.0f }, { laneRight, top + kLane - 1.0f }, selected ? UI::ThemeColor("TimelineLaneSelected", { 0.20f, 0.20f, 0.25f, 1.0f }) : UI::ThemeColor("TimelineLane", { 0.14f, 0.14f, 0.16f, 1.0f }));
                     if (track.Property == TimelineProperty::Audio)
                         for (size_t k = 0; k < track.Keys.size(); ++k)
                         {
@@ -271,7 +271,7 @@ namespace Nox
                             if (k + 1 < track.Keys.size())
                                 end = std::min(end, track.Keys[k + 1].Time);
                             const float x0 = TimeToX(section.Time), x1 = TimeToX(end);
-                            d.AddRoundedRect({ x0, top + 3.0f }, { x1, top + kLane - 4.0f }, section.Asset != 0 ? glm::vec4(0.24f, 0.47f, 0.35f, 0.8f) : glm::vec4(0.43f, 0.24f, 0.24f, 0.8f), glm::vec4(3.0f));
+                            d.AddRoundedRect({ x0, top + 3.0f }, { x1, top + kLane - 4.0f }, section.Asset != 0 ? UI::ThemeColor("TimelineAudioSection", { 0.24f, 0.47f, 0.35f, 0.8f }) : UI::ThemeColor("TimelineAudioSectionMissing", { 0.43f, 0.24f, 0.24f, 0.8f }), glm::vec4(3.0f));
                             d.PushClipRect({ x0, top }, { x1, top + kLane });
                             d.AddText(section.Asset != 0 ? AssetManager::GetMetadata(section.Asset).FilePath.stem().string() : std::string("(no sound)"), nullptr, { x0 + 9.0f, top + 5.0f }, 11.5f, text);
                             d.PopClipRect();
@@ -280,10 +280,10 @@ namespace Nox
                     {
                         const float x = TimeToX(track.Keys[k].Time), y = top + kLane * 0.5f;
                         const bool keySelected = selected && static_cast<int>(k) == m_Editor->SelectedKey;
-                        const glm::vec4 color = keySelected ? glm::vec4(1.0f, 0.78f, 0.27f, 1.0f)
-                                              : track.Property == TimelineProperty::Event ? glm::vec4(0.47f, 0.78f, 1.0f, 1.0f)
-                                              : track.Property == TimelineProperty::CameraCut ? glm::vec4(0.78f, 0.55f, 1.0f, 1.0f) : glm::vec4(0.86f, 0.86f, 0.86f, 1.0f);
-                        d.AddRoundedRect({ x - 5.0f, y - 5.0f }, { x + 5.0f, y + 5.0f }, color, glm::vec4(2.0f), 1.0f, { 0.08f, 0.08f, 0.08f, 1.0f });
+                        const glm::vec4 color = keySelected ? UI::ThemeColor("TimelineKeySelected", { 1.0f, 0.78f, 0.27f, 1.0f })
+                                              : track.Property == TimelineProperty::Event ? UI::ThemeColor("TimelineKeyEvent", { 0.47f, 0.78f, 1.0f, 1.0f })
+                                              : track.Property == TimelineProperty::CameraCut ? UI::ThemeColor("TimelineKeyCameraCut", { 0.78f, 0.55f, 1.0f, 1.0f }) : UI::ThemeColor("TimelineKey", { 0.86f, 0.86f, 0.86f, 1.0f });
+                        d.AddRoundedRect({ x - 5.0f, y - 5.0f }, { x + 5.0f, y + 5.0f }, color, glm::vec4(2.0f), 1.0f, UI::ThemeColor("TimelineKeyBorder", { 0.08f, 0.08f, 0.08f, 1.0f }));
                     }
                     d.PopClipRect();
                 }
@@ -293,8 +293,8 @@ namespace Nox
                 // Playhead.
                 d.PushClipRect({ b.Min.x + kLabelWidth, b.Min.y }, { b.Max.x, b.Max.y });
                 const float playhead = TimeToX(std::clamp(m_Editor->Time, 0.0f, duration));
-                d.AddRoundedRect({ playhead - 1.0f, b.Min.y }, { playhead + 1.0f, b.Max.y }, { 1.0f, 0.31f, 0.24f, 1.0f });
-                d.AddRoundedRect({ playhead - 5.0f, b.Min.y }, { playhead + 5.0f, b.Min.y + 8.0f }, { 1.0f, 0.31f, 0.24f, 1.0f }, glm::vec4(0.0f, 0.0f, 5.0f, 5.0f));
+                d.AddRoundedRect({ playhead - 1.0f, b.Min.y }, { playhead + 1.0f, b.Max.y }, UI::ThemeColor("TimelinePlayhead", { 1.0f, 0.31f, 0.24f, 1.0f }));
+                d.AddRoundedRect({ playhead - 5.0f, b.Min.y }, { playhead + 5.0f, b.Min.y + 8.0f }, UI::ThemeColor("TimelinePlayhead", { 1.0f, 0.31f, 0.24f, 1.0f }), glm::vec4(0.0f, 0.0f, 5.0f, 5.0f));
                 d.PopClipRect();
                 d.PopClipRect();
             }

@@ -8,6 +8,7 @@
 
 #include "Panels/AssetPreviewRenderer.h"
 #include "Panels/InspectorWidgetsV2.h"
+#include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Asset/PrefabImporter.h"
@@ -64,7 +65,7 @@ namespace Nox
         Ref<UI::UILabel> label(new UI::UILabel("", 14.0f));
         label->VAlign = UI::UIAlignment::Center;
         label->UseColorOverride = true;
-        label->ColorOverride = { 0.45f, 0.70f, 1.0f, 1.0f };
+        label->ColorOverride = UI::ThemeColor("PrefabText", { 0.45f, 0.70f, 1.0f, 1.0f });
         label->Tooltip = "Prefab Mode: the prefab's entities on their own. The level comes back on Exit.";
         m_PrefabBarLabel = label;
         bar->AddChild(label);

@@ -116,8 +116,8 @@ namespace Nox
             {
                 const UI::UIRect& b = GetBounds();
                 const UI::UIVec2 dot{ b.Min.x + 12.0f, b.Center().y };
-                const UI::UIColor ready{ 0.36f, 0.80f, 0.46f, 1.0f };
-                const UI::UIColor busy{ 0.96f, 0.70f, 0.26f, 1.0f };
+                const UI::UIColor ready = UI::ThemeColor("StatusGood", { 0.36f, 0.80f, 0.46f, 1.0f });
+                const UI::UIColor busy = UI::ThemeColor("StatusBusy", { 0.96f, 0.70f, 0.26f, 1.0f });
                 if (Busy)
                 {
                     const float pulse = 0.5f + 0.5f * std::sin(m_Time * 5.0f);
@@ -170,7 +170,7 @@ namespace Nox
                 const UI::UIRect& b = GetBounds();
                 const UI::UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
                 if (Active || m_Hovered)
-                    d.AddRoundedRect(b.Min, b.Max, Active ? UI::UIColor{ accent.r, accent.g, accent.b, 0.22f } : UI::UIColor{ 1.0f, 1.0f, 1.0f, 0.06f }, glm::vec4(4.0f));
+                    d.AddRoundedRect(b.Min, b.Max, Active ? UI::UIColor{ accent.r, accent.g, accent.b, 0.22f } : UI::ThemeColor("StatusTabFill", { 1.0f, 1.0f, 1.0f, 0.06f }), glm::vec4(4.0f));
                 if (Active)
                     d.AddRoundedRect({ b.Min.x + 6.0f, b.Max.y - 2.0f }, { b.Max.x - 6.0f, b.Max.y }, accent, glm::vec4(1.0f));
                 const UI::UIColor text = (Active || m_Hovered) ? theme.GetToken("Text", { 0.92f, 0.93f, 0.95f, 1.0f })
@@ -215,11 +215,11 @@ namespace Nox
             {
                 const UI::UIRect& b = GetBounds();
                 if (m_Hovered)
-                    d.AddRoundedRect(b.Min, b.Max, { 1.0f, 1.0f, 1.0f, 0.06f }, glm::vec4(4.0f));
+                    d.AddRoundedRect(b.Min, b.Max, UI::ThemeColor("StatusCountsFill", { 1.0f, 1.0f, 1.0f, 0.06f }), glm::vec4(4.0f));
                 const UI::UIColor muted = theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
                 const size_t warnings = m_Log.GetWarningCount(), errors = m_Log.GetErrorCount();
-                const UI::UIColor warnColor = warnings > 0 ? UI::UIColor{ 0.96f, 0.74f, 0.28f, 1.0f } : muted;
-                const UI::UIColor errorColor = errors > 0 ? UI::UIColor{ 0.95f, 0.38f, 0.38f, 1.0f } : muted;
+                const UI::UIColor warnColor = warnings > 0 ? UI::ThemeColor("StatusWarning", { 0.96f, 0.74f, 0.28f, 1.0f }) : muted;
+                const UI::UIColor errorColor = errors > 0 ? UI::ThemeColor("StatusError", { 0.95f, 0.38f, 0.38f, 1.0f }) : muted;
                 const std::string errorText = std::to_string(errors);
                 const std::string warnText = std::to_string(warnings);
                 const float errorW = UI::UILabel::MeasureText(errorText, nullptr, kFont).x;
@@ -3009,7 +3009,7 @@ namespace Nox
                 const auto ground = graph.FootGround.find(probe.Bone);
                 if (ground == graph.FootGround.end() || !ground->second.Hit)
                 {
-                    line(start, end, glm::vec4(1.0f, 0.25f, 0.2f, 1.0f));
+                    line(start, end, UI::ThemeColor("DebugFootNoGround", { 1.0f, 0.25f, 0.2f, 1.0f }));
                     continue;
                 }
                 const glm::vec3 hit = glm::vec3(world * glm::vec4(ground->second.Point, 1.0f));
@@ -3173,8 +3173,8 @@ namespace Nox
                         }
                     }
                 };
-                sphere(source.Spatialization.MinDistance, glm::vec4(0.55f, 0.85f, 1.0f, 0.9f));
-                sphere(source.Spatialization.MaxDistance, glm::vec4(0.2f, 0.4f, 1.0f, 0.7f));
+                sphere(source.Spatialization.MinDistance, UI::ThemeColor("AudioMinDistance", { 0.55f, 0.85f, 1.0f, 0.9f }));
+                sphere(source.Spatialization.MaxDistance, UI::ThemeColor("AudioMaxDistance", { 0.2f, 0.4f, 1.0f, 0.7f }));
             }
 
             constexpr glm::vec4 kVolumeColor(1.0f, 0.55f, 0.1f, 0.9f);
@@ -3927,7 +3927,7 @@ namespace Nox
         m_SceneLoadTitleLabel = UI::Label("Opening scene...").Get();
         m_SceneLoadStageLabel = UI::Label("").Get();
         m_SceneLoadStageLabel->UseColorOverride = true;
-        m_SceneLoadStageLabel->ColorOverride = { 0.72f, 0.76f, 0.82f, 1.0f };
+        m_SceneLoadStageLabel->ColorOverride = UI::ThemeColor("SceneLoadText", { 0.72f, 0.76f, 0.82f, 1.0f });
 
         auto progressTrack = UI::MakeUI<UI::UIElement>();
         progressTrack->WidthMode = UI::UISizeMode::Fixed;
@@ -4062,7 +4062,7 @@ namespace Nox
 
         m_PlayNetStatusLabel = UI::Label("").VAlign(UI::UIAlignment::Center).Margin(6.0f, 0.0f);
         m_PlayNetStatusLabel->UseColorOverride = true;
-        m_PlayNetStatusLabel->ColorOverride = { 0.72f, 0.78f, 0.86f, 1.0f };
+        m_PlayNetStatusLabel->ColorOverride = UI::ThemeColor("PlayNetStatus", { 0.72f, 0.78f, 0.86f, 1.0f });
         m_PlayNetStatusLabel->Visible = false;
 
         auto tbLeftSpacer = UI::MakeUI<UI::UIElement>();
@@ -4525,7 +4525,7 @@ namespace Nox
 
         m_FpsLabel = UI::Label("FPS: --.-").VAlign(UI::UIAlignment::Center).Margin(10.0f, 0.0f);
         m_FpsLabel->UseColorOverride = true;
-        m_FpsLabel->ColorOverride = { 0.72f, 0.76f, 0.82f, 1.0f };
+        m_FpsLabel->ColorOverride = UI::ThemeColor("FpsText", { 0.72f, 0.76f, 0.82f, 1.0f });
         menuBar->AddChild(m_FpsLabel);
 
         uiLayer->SetRoot(

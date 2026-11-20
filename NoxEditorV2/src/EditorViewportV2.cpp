@@ -1166,8 +1166,8 @@ namespace Nox
             return;
         dir /= len;
         const glm::vec2 across(-dir.y * 9.0f, dir.x * 9.0f);
-        const glm::vec4 yellow{ 1.0f, 0.88f, 0.27f, 1.0f };
-        const glm::vec4 casing{ 0.0f, 0.0f, 0.0f, 0.63f };
+        const glm::vec4 yellow = UI::ThemeColor("ViewportMeasure", { 1.0f, 0.88f, 0.27f, 1.0f });
+        const glm::vec4 casing = UI::ThemeColor("ViewportMeasureCasing", { 0.0f, 0.0f, 0.0f, 0.63f });
 
         DrawLine(drawList, a, b, 4.0f, casing);
         DrawLine(drawList, a, b, 2.0f, yellow);
@@ -1180,7 +1180,7 @@ namespace Nox
         const glm::vec2 middle = (a + b) * 0.5f;
         const glm::vec2 boxMin(middle.x - textSize.x * 0.5f - 5.0f, middle.y - textSize.y * 0.5f - 3.0f);
         const glm::vec2 boxMax(middle.x + textSize.x * 0.5f + 5.0f, middle.y + textSize.y * 0.5f + 3.0f);
-        drawList.AddRoundedRect(boxMin, boxMax, { 0.0f, 0.0f, 0.0f, 0.78f }, glm::vec4(3.0f));
+        drawList.AddRoundedRect(boxMin, boxMax, UI::ThemeColor("ViewportMeasureLabelBackground", { 0.0f, 0.0f, 0.0f, 0.78f }), glm::vec4(3.0f));
         drawList.AddText(text, nullptr, { boxMin.x + 5.0f, boxMin.y + 3.0f }, fontSize, yellow);
     }
 
@@ -1220,8 +1220,8 @@ namespace Nox
             UI::UIVec2 screen{};
             if (ProjectPoint(cursor, vp, screen))
             {
-                DrawCircleRing(drawList, screen, 6.0f, 3.0f, { 0.0f, 0.0f, 0.0f, 0.78f });
-                DrawCircleRing(drawList, screen, 6.0f, 1.5f, { 1.0f, 0.88f, 0.27f, 1.0f });
+                DrawCircleRing(drawList, screen, 6.0f, 3.0f, UI::ThemeColor("ViewportMeasurePointCasing", { 0.0f, 0.0f, 0.0f, 0.78f }));
+                DrawCircleRing(drawList, screen, 6.0f, 1.5f, UI::ThemeColor("ViewportMeasure", { 1.0f, 0.88f, 0.27f, 1.0f }));
             }
         }
     }
@@ -1268,11 +1268,11 @@ namespace Nox
 
         const GizmoPart activeHighlight = m_Ctx.Tools->GizmoUsing ? m_ActiveGizmo : m_HoveredGizmo;
         const glm::vec4 baseColors[3] = {
-            { 0.92f, 0.28f, 0.28f, 1.0f },
-            { 0.43f, 0.78f, 0.28f, 1.0f },
-            { 0.28f, 0.54f, 0.94f, 1.0f }
+            UI::ThemeColor("GizmoAxisX", { 0.92f, 0.28f, 0.28f, 1.0f }),
+            UI::ThemeColor("GizmoAxisY", { 0.43f, 0.78f, 0.28f, 1.0f }),
+            UI::ThemeColor("GizmoAxisZ", { 0.28f, 0.54f, 0.94f, 1.0f })
         };
-        const glm::vec4 highlightCol{ 1.0f, 0.86f, 0.25f, 1.0f };
+        const glm::vec4 highlightCol = UI::ThemeColor("GizmoHighlight", { 1.0f, 0.86f, 0.25f, 1.0f });
         const GizmoPart axisParts[3] = { GizmoPart::AxisX, GizmoPart::AxisY, GizmoPart::AxisZ };
 
         if (m_Ctx.Tools->GizmoMode == ViewportGizmoMode::Rotate)
@@ -1329,7 +1329,7 @@ namespace Nox
                     UI::UIVec2 startScr{}, prevScr{};
                     bool hasStart = ProjectPoint(origin + u * radius, vp, startScr);
                     if (hasStart)
-                        DrawLine(drawList, oScr, startScr, 1.8f, { 1.0f, 0.86f, 0.25f, 0.75f });
+                        DrawLine(drawList, oScr, startScr, 1.8f, UI::ThemeColor("GizmoRotateGuide", { 1.0f, 0.86f, 0.25f, 0.75f }));
 
                     bool hasPrev = false;
                     UI::UIVec2 endScr{};
@@ -1340,22 +1340,22 @@ namespace Nox
                         UI::UIVec2 curScr{};
                         const bool ok = ProjectPoint(pW, vp, curScr);
                         if (ok && hasPrev)
-                            DrawLine(drawList, prevScr, curScr, 4.0f, { 1.0f, 0.86f, 0.25f, 0.90f });
+                            DrawLine(drawList, prevScr, curScr, 4.0f, UI::ThemeColor("GizmoRotateArc", { 1.0f, 0.86f, 0.25f, 0.90f }));
                         if (ok)
                             endScr = curScr;
                         prevScr = curScr;
                         hasPrev = ok;
                     }
                     if (hasPrev)
-                        DrawLine(drawList, oScr, endScr, 1.8f, { 1.0f, 0.86f, 0.25f, 0.95f });
+                        DrawLine(drawList, oScr, endScr, 1.8f, UI::ThemeColor("GizmoRotateGuideActive", { 1.0f, 0.86f, 0.25f, 0.95f }));
 
                     char degBuf[32];
                     std::snprintf(degBuf, sizeof(degBuf), "%+.1f deg", m_DragRotateAppliedDeg);
                     const UI::UIVec2 labelPos{ oScr.x + 14.0f, oScr.y - 24.0f };
                     const UI::UIVec2 textSize = UI::UILabel::MeasureText(degBuf, nullptr, 13.0f);
                     drawList.AddRoundedRect(labelPos - glm::vec2(5.0f, 3.0f), labelPos + textSize + glm::vec2(5.0f, 3.0f),
-                                            { 0.08f, 0.09f, 0.11f, 0.85f }, glm::vec4(4.0f));
-                    drawList.AddText(degBuf, nullptr, labelPos, 13.0f, { 1.0f, 0.88f, 0.30f, 1.0f });
+                                            UI::ThemeColor("GizmoLabelBackground", { 0.08f, 0.09f, 0.11f, 0.85f }), glm::vec4(4.0f));
+                    drawList.AddText(degBuf, nullptr, labelPos, 13.0f, UI::ThemeColor("GizmoLabelText", { 1.0f, 0.88f, 0.30f, 1.0f }));
                 }
             }
             return;
@@ -1399,7 +1399,7 @@ namespace Nox
             if (!ProjectPoint(origin + axes[a] * scale, vp, endScr))
                 continue;
 
-            DrawLine(drawList, oScr + glm::vec2(1.0f), endScr + glm::vec2(1.0f), thick + 0.8f, { 0.0f, 0.0f, 0.0f, 0.4f });
+            DrawLine(drawList, oScr + glm::vec2(1.0f), endScr + glm::vec2(1.0f), thick + 0.8f, UI::ThemeColor("GizmoShadow", { 0.0f, 0.0f, 0.0f, 0.4f }));
             DrawLine(drawList, oScr, endScr, thick, col);
 
             if (m_Ctx.Tools->GizmoMode == ViewportGizmoMode::Translate)
@@ -1419,7 +1419,7 @@ namespace Nox
         }
 
         const bool centerLit = (activeHighlight == GizmoPart::FreeCenter);
-        const glm::vec4 centerCol = centerLit ? highlightCol : glm::vec4{ 0.95f, 0.95f, 0.95f, 0.92f };
+        const glm::vec4 centerCol = centerLit ? highlightCol : UI::ThemeColor("GizmoCenter", { 0.95f, 0.95f, 0.95f, 0.92f });
         if (m_Ctx.Tools->GizmoMode == ViewportGizmoMode::Translate)
             DrawCircleFill(drawList, oScr, centerLit ? 5.5f : 4.2f, centerCol);
         else
@@ -1458,9 +1458,9 @@ namespace Nox
             const char* Name;
         };
         AxisDraw axes[3] = {
-            { 0, view * glm::vec3(1, 0, 0), { 0.886f, 0.290f, 0.290f, 1.0f }, "X" },
-            { 1, view * glm::vec3(0, 1, 0), { 0.431f, 0.769f, 0.282f, 1.0f }, "Y" },
-            { 2, view * glm::vec3(0, 0, 1), { 0.290f, 0.525f, 0.910f, 1.0f }, "Z" }
+            { 0, view * glm::vec3(1, 0, 0), UI::ThemeColor("AxisIndicatorX", { 0.886f, 0.290f, 0.290f, 1.0f }), "X" },
+            { 1, view * glm::vec3(0, 1, 0), UI::ThemeColor("AxisIndicatorY", { 0.431f, 0.769f, 0.282f, 1.0f }), "Y" },
+            { 2, view * glm::vec3(0, 0, 1), UI::ThemeColor("AxisIndicatorZ", { 0.290f, 0.525f, 0.910f, 1.0f }), "Z" }
         };
         std::sort(std::begin(axes), std::end(axes), [](const AxisDraw& a, const AxisDraw& c) { return a.InView.z < c.InView.z; });
 
@@ -1468,13 +1468,13 @@ namespace Nox
         {
             const glm::vec2 end(center.x + ax.InView.x * kLength, center.y - ax.InView.y * kLength);
             const bool isHovered = (ax.Index == m_HoveredAxisIdx);
-            DrawLine(drawList, center + glm::vec2(1.0f), end + glm::vec2(1.0f), 2.0f, { 0.0f, 0.0f, 0.0f, 0.43f });
+            DrawLine(drawList, center + glm::vec2(1.0f), end + glm::vec2(1.0f), 2.0f, UI::ThemeColor("AxisIndicatorShadow", { 0.0f, 0.0f, 0.0f, 0.43f }));
             DrawLine(drawList, center, end, 2.0f, ax.Color);
 
             if (isHovered)
                 DrawCircleFill(drawList, end, kLabelRadius, ax.Color);
             else
-                DrawCircleFill(drawList, end, kLabelRadius - 1.5f, { 0.078f, 0.078f, 0.086f, 0.67f });
+                DrawCircleFill(drawList, end, kLabelRadius - 1.5f, UI::ThemeColor("AxisIndicatorLabelBackground", { 0.078f, 0.078f, 0.086f, 0.67f }));
 
             constexpr float fontSize = 12.0f;
             const UI::UIVec2 tSize = UI::UILabel::MeasureText(ax.Name, nullptr, fontSize);
@@ -1493,8 +1493,8 @@ namespace Nox
             const UI::UIVec2 size = UI::UILabel::MeasureText(text, nullptr, fontSize);
             const glm::vec2 textPos(center.x + kLength + 22.0f, b.Max.y - 24.0f);
             drawList.AddRoundedRect({ textPos.x - 5.0f, textPos.y - 3.0f }, { textPos.x + size.x + 5.0f, textPos.y + size.y + 3.0f },
-                                    { 0.078f, 0.078f, 0.086f, 0.67f }, glm::vec4(3.0f));
-            drawList.AddText(text, nullptr, textPos, fontSize, { 0.88f, 0.88f, 0.88f, 1.0f });
+                                    UI::ThemeColor("AxisIndicatorLabelBackground", { 0.078f, 0.078f, 0.086f, 0.67f }), glm::vec4(3.0f));
+            drawList.AddText(text, nullptr, textPos, fontSize, UI::ThemeColor("AxisIndicatorLabelText", { 0.88f, 0.88f, 0.88f, 1.0f }));
         }
     }
 
@@ -1516,8 +1516,8 @@ namespace Nox
                 std::max(m_Ctx.Tools->BoxSelectStart.x, m_Ctx.Tools->BoxSelectEnd.x),
                 std::max(m_Ctx.Tools->BoxSelectStart.y, m_Ctx.Tools->BoxSelectEnd.y)
             );
-            drawList.AddRoundedRect(pMin, pMax, { 0.90f, 0.55f, 0.12f, 0.16f }, glm::vec4(0.0f),
-                                    1.5f, { 1.0f, 0.63f, 0.16f, 0.86f });
+            drawList.AddRoundedRect(pMin, pMax, UI::ThemeColor("ViewportBoxSelect", { 0.90f, 0.55f, 0.12f, 0.16f }), glm::vec4(0.0f),
+                                    1.5f, UI::ThemeColor("ViewportBoxSelectBorder", { 1.0f, 0.63f, 0.16f, 0.86f }));
         }
         DrawMeasureOverlay(drawList);
         DrawAxisIndicator(drawList);
@@ -1530,7 +1530,7 @@ namespace Nox
                 { 0.0f, 0.0f, 0.0f, 0.0f },
                 glm::vec4(0.0f),
                 2.0f,
-                { 1.0f, 0.667f, 0.157f, 1.0f }
+                UI::ThemeColor("ViewportActiveFrame", { 1.0f, 0.667f, 0.157f, 1.0f })
             );
         }
         drawList.PopClipRect();
@@ -1569,17 +1569,17 @@ namespace Nox
 
             struct AxisDraw { glm::vec3 InView; glm::vec4 Color; const char* Name; };
             AxisDraw axes[3] = {
-                { view * glm::vec3(1, 0, 0), { 0.886f, 0.290f, 0.290f, 1.0f }, "X" },
-                { view * glm::vec3(0, 1, 0), { 0.431f, 0.769f, 0.282f, 1.0f }, "Y" },
-                { view * glm::vec3(0, 0, 1), { 0.290f, 0.525f, 0.910f, 1.0f }, "Z" }
+                { view * glm::vec3(1, 0, 0), UI::ThemeColor("AxisIndicatorX", { 0.886f, 0.290f, 0.290f, 1.0f }), "X" },
+                { view * glm::vec3(0, 1, 0), UI::ThemeColor("AxisIndicatorY", { 0.431f, 0.769f, 0.282f, 1.0f }), "Y" },
+                { view * glm::vec3(0, 0, 1), UI::ThemeColor("AxisIndicatorZ", { 0.290f, 0.525f, 0.910f, 1.0f }), "Z" }
             };
             std::sort(std::begin(axes), std::end(axes), [](const AxisDraw& a, const AxisDraw& c) { return a.InView.z < c.InView.z; });
             for (const AxisDraw& ax : axes)
             {
                 const glm::vec2 end(center.x + ax.InView.x * kLength, center.y - ax.InView.y * kLength);
-                DrawLine(drawList, center + glm::vec2(1.0f), end + glm::vec2(1.0f), 2.0f, { 0.0f, 0.0f, 0.0f, 0.43f });
+                DrawLine(drawList, center + glm::vec2(1.0f), end + glm::vec2(1.0f), 2.0f, UI::ThemeColor("AxisIndicatorShadow", { 0.0f, 0.0f, 0.0f, 0.43f }));
                 DrawLine(drawList, center, end, 2.0f, ax.Color);
-                DrawCircleFill(drawList, end, kLabelRadius - 1.5f, { 0.078f, 0.078f, 0.086f, 0.67f });
+                DrawCircleFill(drawList, end, kLabelRadius - 1.5f, UI::ThemeColor("AxisIndicatorLabelBackground", { 0.078f, 0.078f, 0.086f, 0.67f }));
                 const UI::UIVec2 tSize = UI::UILabel::MeasureText(ax.Name, nullptr, 11.5f);
                 drawList.AddText(ax.Name, nullptr, { end.x - tSize.x * 0.5f, end.y - tSize.y * 0.5f }, 11.5f, ax.Color);
             }
@@ -1594,8 +1594,8 @@ namespace Nox
                 const UI::UIVec2 size = UI::UILabel::MeasureText(text, nullptr, 13.0f);
                 const glm::vec2 textPos(center.x + kLength + 22.0f, b.Max.y - 24.0f);
                 drawList.AddRoundedRect({ textPos.x - 5.0f, textPos.y - 3.0f }, { textPos.x + size.x + 5.0f, textPos.y + size.y + 3.0f },
-                                        { 0.078f, 0.078f, 0.086f, 0.67f }, glm::vec4(3.0f));
-                drawList.AddText(text, nullptr, textPos, 13.0f, { 0.88f, 0.88f, 0.88f, 1.0f });
+                                        UI::ThemeColor("AxisIndicatorLabelBackground", { 0.078f, 0.078f, 0.086f, 0.67f }), glm::vec4(3.0f));
+                drawList.AddText(text, nullptr, textPos, 13.0f, UI::ThemeColor("AxisIndicatorLabelText", { 0.88f, 0.88f, 0.88f, 1.0f }));
             }
         }
 
@@ -1622,9 +1622,9 @@ namespace Nox
                 if (toScreen(centre, centreScr))
                 {
                     const glm::vec4 cols[3] = {
-                        { 0.90f, 0.24f, 0.24f, 0.86f },
-                        { 0.31f, 0.82f, 0.31f, 0.86f },
-                        { 0.27f, 0.47f, 0.94f, 0.86f }
+                        UI::ThemeColor("SelectionAxisX", { 0.90f, 0.24f, 0.24f, 0.86f }),
+                        UI::ThemeColor("SelectionAxisY", { 0.31f, 0.82f, 0.31f, 0.86f }),
+                        UI::ThemeColor("SelectionAxisZ", { 0.27f, 0.47f, 0.94f, 0.86f })
                     };
                     const float length = std::min(b.Width(), b.Height()) * 0.09f;
                     const float probe = WorldUnits::FromMeters(0.01f);
@@ -1642,7 +1642,7 @@ namespace Nox
                         DrawLine(drawList, centreScr, end, 2.0f, cols[axis]);
                         DrawCircleFill(drawList, end, 3.2f, cols[axis]);
                     }
-                    DrawCircleFill(drawList, centreScr, 3.0f, { 1.0f, 1.0f, 1.0f, 0.8f });
+                    DrawCircleFill(drawList, centreScr, 3.0f, UI::ThemeColor("SelectionCenter", { 1.0f, 1.0f, 1.0f, 0.8f }));
                 }
             }
         }
@@ -1664,8 +1664,8 @@ namespace Nox
         const UI::UIVec2 textSize = UI::UILabel::MeasureText(viewLabel, nullptr, 13.0f);
         const glm::vec2 lMin(b.Min.x + 8.0f, b.Min.y + 8.0f);
         drawList.AddRoundedRect(lMin, { lMin.x + textSize.x + 12.0f, lMin.y + textSize.y + 6.0f },
-                                { 0.0f, 0.0f, 0.0f, 0.63f }, glm::vec4(3.0f));
-        drawList.AddText(viewLabel, nullptr, { lMin.x + 6.0f, lMin.y + 3.0f }, 13.0f, { 0.90f, 0.90f, 0.90f, 1.0f });
+                                UI::ThemeColor("ViewportLabelBackground", { 0.0f, 0.0f, 0.0f, 0.63f }), glm::vec4(3.0f));
+        drawList.AddText(viewLabel, nullptr, { lMin.x + 6.0f, lMin.y + 3.0f }, 13.0f, UI::ThemeColor("ViewportLabelText", { 0.90f, 0.90f, 0.90f, 1.0f }));
 
         drawList.PopClipRect();
     }

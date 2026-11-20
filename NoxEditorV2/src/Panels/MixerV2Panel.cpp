@@ -44,7 +44,7 @@ namespace Nox
         constexpr float kMaxDb = 6.0f;
         constexpr float kFaderMinDb = AudioDSP::kSilenceDb;
         constexpr float kFaderMaxDb = 12.0f;
-        constexpr glm::vec4 kOverride{ 0.95f, 0.55f, 0.15f, 1.0f };
+        constexpr UI::UIThemeToken kOverride{ "MixerOverride", { 0.95f, 0.55f, 0.15f, 1.0f } };
 
         glm::vec4 Token(const UI::UITheme& theme, const char* name, const UI::UIColor& fallback)
         {
@@ -112,7 +112,7 @@ namespace Nox
                 const float cx = (b.Min.x + b.Max.x) * 0.5f;
                 d.AddRoundedRect({ cx - 2.0f, b.Min.y }, { cx + 2.0f, b.Max.y }, Token(theme, "FaderTrack", { 0.16f, 0.16f, 0.18f, 1.0f }), glm::vec4(2.0f));
                 const float zero = b.Min.y + b.Height() * (1.0f - (0.0f - kFaderMinDb) / (kFaderMaxDb - kFaderMinDb));
-                d.AddRoundedRect({ b.Min.x + 4.0f, zero }, { b.Max.x - 4.0f, zero + 1.0f }, { 0.6f, 0.6f, 0.65f, 0.7f });
+                d.AddRoundedRect({ b.Min.x + 4.0f, zero }, { b.Max.x - 4.0f, zero + 1.0f }, UI::ThemeColor("FaderZeroLine", { 0.6f, 0.6f, 0.65f, 0.7f }));
                 const float value = Get ? Get() : 0.0f;
                 const float y = b.Min.y + b.Height() * (1.0f - (value - kFaderMinDb) / (kFaderMaxDb - kFaderMinDb));
                 const bool overridden = Overridden && Overridden();
@@ -181,7 +181,7 @@ namespace Nox
         {
             Ref<UI::UILabel> label(new UI::UILabel(text, size));
             label->UseColorOverride = true;
-            label->ColorOverride = { 0.60f, 0.64f, 0.72f, 1.0f };
+            label->ColorOverride = UI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
             label->VAlign = UI::UIAlignment::Center;
             return label;
         }
@@ -402,7 +402,7 @@ namespace Nox
         row->AddChild(field);
         auto dot = Muted("in snapshot", 12.0f);
         dot->UseColorOverride = true;
-        dot->ColorOverride = { kOverride.r, kOverride.g, kOverride.b, kOverride.a };
+        dot->ColorOverride = kOverride.Get();
         dot->Tooltip = "The snapshot being edited sets this value (right-click: Remove from Snapshot)";
         row->AddChild(dot);
         row->OnContext = [this, key, resetValue](const UI::UIVec2& at)
@@ -660,7 +660,7 @@ namespace Nox
 
         auto status = Muted("");
         status->UseColorOverride = true;
-        status->ColorOverride = { 0.95f, 0.65f, 0.3f, 1.0f };
+        status->ColorOverride = UI::ThemeColor("StatusWarning", { 0.95f, 0.65f, 0.3f, 1.0f });
         status->WordWrap = true;
         status->WidthMode = UI::UISizeMode::Fill;
         into.AddChild(status);
@@ -941,7 +941,7 @@ namespace Nox
                     char text[48];
                     std::snprintf(text, sizeof(text), "Gain reduction now: -%.1f dB", AudioMixer::GetEffectGainReduction(id, static_cast<uint32_t>(index)));
                     return std::string(text);
-                }, { 0.95f, 0.7f, 0.3f, 1.0f });
+                }, UI::ThemeColor("StatusWarning", { 0.95f, 0.7f, 0.3f, 1.0f }));
             if (info.Sidechain)
             {
                 Ref<UI::UIButton> key(new UI::UIButton(BusName(data, effect.Sidechain)));

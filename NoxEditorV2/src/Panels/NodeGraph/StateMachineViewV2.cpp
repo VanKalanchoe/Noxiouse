@@ -513,12 +513,12 @@ namespace Nox
                 continue;
             const bool selected = static_cast<int>(i) == SelectedTransition;
             const bool hovered = static_cast<int>(i) == m_HoveredTransition;
-            const UIColor color = selected ? UIColor{ 1.0f, 0.69f, 0.2f, 1.0f } : hovered ? UIColor{ 0.2f, 0.69f, 1.0f, 1.0f } : UIColor{ 0.78f, 0.78f, 0.80f, 1.0f };
+            const UIColor color = selected ? UI::ThemeColor("TransitionSelected", { 1.0f, 0.69f, 0.2f, 1.0f }) : hovered ? UI::ThemeColor("TransitionHovered", { 0.2f, 0.69f, 1.0f, 1.0f }) : UI::ThemeColor("Transition", { 0.78f, 0.78f, 0.80f, 1.0f });
             arrow(from, to, color, (selected || hovered ? 2.6f : 1.8f) * z);
             const UIVec2 middle = (from + to) * 0.5f;
             const float r = kButtonRadius * z;
             const NodeTransition& transition = m_Machine->Transitions[i];
-            d.AddRoundedRect(middle - UIVec2{ r }, middle + UIVec2{ r }, { 0.12f, 0.14f, 0.19f, 1.0f }, glm::vec4(r), 1.5f * z, color);
+            d.AddRoundedRect(middle - UIVec2{ r }, middle + UIVec2{ r }, UI::ThemeColor("TransitionMarker", { 0.12f, 0.14f, 0.19f, 1.0f }), glm::vec4(r), 1.5f * z, color);
             if (m_View.Zoom >= 0.5f)
             {
                 const std::string count = transition.AtStateEnd && transition.Rules.empty() ? std::string("E") : std::to_string(transition.Rules.size());
@@ -535,7 +535,7 @@ namespace Nox
                     const Box box = BoxOf(state);
                     const UIVec2 start = GraphToScreen({ box.Max.x, (box.Min.y + kHeader + box.Max.y) * 0.5f });
                     const bool valid = m_HoveredState != 0 && m_HoveredState != m_DragState;
-                    arrow(start, m_DragLast, valid ? UIColor{ 0.45f, 0.9f, 0.5f, 1.0f } : accent, 2.2f * z);
+                    arrow(start, m_DragLast, valid ? UI::ThemeColor("WireValid", { 0.45f, 0.9f, 0.5f, 1.0f }) : accent, 2.2f * z);
                 }
 
         // States.
@@ -551,24 +551,24 @@ namespace Nox
             const bool hovered = state.Id == m_HoveredState;
             const bool isEntry = state.Id == entry;
             const float radius = 8.0f * m_View.Zoom;
-            d.AddRoundedRect(min, max, { 0.11f, 0.13f, 0.18f, 0.97f }, glm::vec4(radius), selected ? 2.0f : 1.0f,
+            d.AddRoundedRect(min, max, UI::ThemeColor("NodeBody", { 0.11f, 0.13f, 0.18f, 0.97f }), glm::vec4(radius), selected ? 2.0f : 1.0f,
                              selected ? accent : (hovered ? UIColor{ border.r + 0.12f, border.g + 0.12f, border.b + 0.14f, 1.0f } : border),
-                             { 0.0f, 0.0f, 0.0f, 0.45f }, { 0.0f, 4.0f * m_View.Zoom }, 12.0f * m_View.Zoom);
-            d.AddRoundedRect(min, { max.x, min.y + kHeader * m_View.Zoom }, isEntry ? UIColor{ 0.22f, 0.53f, 0.35f, 1.0f } : UIColor{ 0.59f, 0.24f, 0.24f, 1.0f },
+                             UI::ThemeColor("NodeShadow", { 0.0f, 0.0f, 0.0f, 0.45f }), { 0.0f, 4.0f * m_View.Zoom }, 12.0f * m_View.Zoom);
+            d.AddRoundedRect(min, { max.x, min.y + kHeader * m_View.Zoom }, isEntry ? UI::ThemeColor("StateHeaderEntry", { 0.22f, 0.53f, 0.35f, 1.0f }) : UI::ThemeColor("StateHeader", { 0.59f, 0.24f, 0.24f, 1.0f }),
                              { radius, radius, 0.0f, 0.0f });
             if (showText)
             {
                 const std::string name = state.Name.empty() ? std::string("State") : state.Name;
                 const float size = kTitleFont * m_View.Zoom;
                 const UIVec2 extent = UI::UILabel::MeasureText(name, nullptr, size);
-                d.AddText(name, nullptr, { min.x + 10.0f * m_View.Zoom, min.y + (kHeader * m_View.Zoom - extent.y) * 0.5f }, size, { 1.0f, 1.0f, 1.0f, 0.96f });
+                d.AddText(name, nullptr, { min.x + 10.0f * m_View.Zoom, min.y + (kHeader * m_View.Zoom - extent.y) * 0.5f }, size, UI::ThemeColor("NodeTitle", { 1.0f, 1.0f, 1.0f, 0.96f }));
                 const std::string info = std::to_string(state.Graph.Nodes.size()) + (state.Graph.Nodes.size() == 1 ? " node" : " nodes") + (isEntry ? "   entry" : "");
                 d.AddText(info, nullptr, { min.x + 10.0f * m_View.Zoom, min.y + (kHeader + 5.0f) * m_View.Zoom }, 11.5f * m_View.Zoom, muted);
             }
             // The handle transitions are dragged out of.
             const UIVec2 handle = GraphToScreen({ box.Max.x, (box.Min.y + kHeader + box.Max.y) * 0.5f });
             const float r = kHandleRadius * z;
-            d.AddRoundedRect(handle - UIVec2{ r }, handle + UIVec2{ r }, { 0.08f, 0.10f, 0.14f, 1.0f }, glm::vec4(r), 1.6f * z, { 0.9f, 0.9f, 0.9f, 1.0f });
+            d.AddRoundedRect(handle - UIVec2{ r }, handle + UIVec2{ r }, UI::ThemeColor("StateHandle", { 0.08f, 0.10f, 0.14f, 1.0f }), glm::vec4(r), 1.6f * z, UI::ThemeColor("StateHandleBorder", { 0.9f, 0.9f, 0.9f, 1.0f }));
         }
         if (m_Machine->SubGraphs.empty())
             d.AddText("No states: right-click > Add State.", nullptr, b.Min + UIVec2{ 12.0f, 12.0f }, 13.5f, muted);

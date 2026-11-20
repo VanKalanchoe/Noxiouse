@@ -45,7 +45,7 @@ namespace Nox
         {
             Ref<UI::UILabel> label(new UI::UILabel(text, size));
             label->UseColorOverride = true;
-            label->ColorOverride = { 0.60f, 0.64f, 0.72f, 1.0f };
+            label->ColorOverride = UI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
             label->VAlign = UI::UIAlignment::Center;
             return label;
         }
@@ -385,7 +385,7 @@ namespace Nox
         auto unsaved = Muted("");
         Ref<UI::UILabel> unsavedRef = unsaved;
         unsavedRef->UseColorOverride = true;
-        unsavedRef->ColorOverride = { 1.0f, 0.75f, 0.3f, 1.0f };
+        unsavedRef->ColorOverride = UI::ThemeColor("StatusWarning", { 1.0f, 0.75f, 0.3f, 1.0f });
         m_Body->AddChild(unsavedRef);
         UI::AppendSync(*unsavedRef, [this, unsavedRef = unsavedRef.get(), getScene]()
         {
@@ -476,7 +476,7 @@ namespace Nox
         auto error = Muted("");
         Ref<UI::UILabel> errorRef = error;
         errorRef->UseColorOverride = true;
-        errorRef->ColorOverride = { 1.0f, 0.6f, 0.3f, 1.0f };
+        errorRef->ColorOverride = UI::ThemeColor("StatusError", { 1.0f, 0.6f, 0.3f, 1.0f });
         errorRef->WordWrap = true;
         errorRef->WidthMode = UI::UISizeMode::Fill;
         content->AddChild(errorRef);

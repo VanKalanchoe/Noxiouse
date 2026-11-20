@@ -214,8 +214,8 @@ namespace Nox
         const float knobY = y0 + (trackH - knobSize) * 0.5f;
         const float knobX = Checked ? (tMax.x - knobSize - 3.0f) : (tMin.x + 3.0f);
         const UI::UIColor knobColor = Checked
-            ? UI::UIColor{ 0.96f, 0.98f, 1.0f, 1.0f }
-            : UI::UIColor{ 0.60f, 0.65f, 0.75f, 1.0f };
+            ? UI::ThemeColor("SwitchKnobOn", { 0.96f, 0.98f, 1.0f, 1.0f })
+            : UI::ThemeColor("SwitchKnobOff", { 0.60f, 0.65f, 0.75f, 1.0f });
         drawList.AddRoundedRect(
             { knobX, knobY },
             { knobX + knobSize, knobY + knobSize },
@@ -525,7 +525,7 @@ namespace Nox
         auto lbl = UI::Label(value);
         lbl->FontSizeOverride = 14.5f;
         lbl->UseColorOverride = true;
-        lbl->ColorOverride = { 0.64f, 0.70f, 0.80f, 1.0f };
+        lbl->ColorOverride = UI::ThemeColor("InspectorReadonlyValue", { 0.64f, 0.70f, 0.80f, 1.0f });
         AddRow(label, lbl);
     }
 
@@ -614,7 +614,7 @@ namespace Nox
             line->WidthMode = UI::UISizeMode::Fill;
             auto label = UI::Label("Unsaved changes", 13.0f);
             label->UseColorOverride = true;
-            label->ColorOverride = { 0.95f, 0.65f, 0.3f, 1.0f };
+            label->ColorOverride = UI::ThemeColor("StatusWarning", { 0.95f, 0.65f, 0.3f, 1.0f });
             label->VAlign = UI::UIAlignment::Center;
             line->AddChild(label);
             auto save = UI::Button("Save", [handle]() { MaterialEdits::Save(handle); });
@@ -980,9 +980,9 @@ namespace Nox
                 const Ref<NodeGraphAsset> graphAsset = AssetManager::GetAsset<NodeGraphAsset>(currentGraph);
                 const MaterialGraphProgram program = graphAsset ? CompileMaterialGraph(graphAsset->Graph) : MaterialGraphProgram{};
                 if (!graphAsset)
-                    c.AddStatusNote("Graph asset not loaded in project Assets.", { 0.95f, 0.75f, 0.25f, 1.0f });
+                    c.AddStatusNote("Graph asset not loaded in project Assets.", UI::ThemeColor("StatusWarning", { 0.95f, 0.75f, 0.25f, 1.0f }));
                 else if (!program.Valid)
-                    c.AddStatusNote("Graph compile error: " + program.Error, { 0.95f, 0.35f, 0.30f, 1.0f });
+                    c.AddStatusNote("Graph compile error: " + program.Error, UI::ThemeColor("StatusError", { 0.95f, 0.35f, 0.30f, 1.0f }));
                 else
                 {
                     for (const MaterialGraphParameter& param : program.Parameters)
@@ -1059,7 +1059,7 @@ namespace Nox
                                 auto lbl = UI::Label(AssetDisplayName(param.DefaultTexture) + " (default)");
                                 lbl->FontSizeOverride = 14.0f;
                                 lbl->UseColorOverride = true;
-                                lbl->ColorOverride = { 0.56f, 0.62f, 0.72f, 1.0f };
+                                lbl->ColorOverride = UI::ThemeColor("TextMuted", { 0.56f, 0.62f, 0.72f, 1.0f });
                                 paramRow->AddChild(lbl);
                             }
                         }

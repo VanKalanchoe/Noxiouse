@@ -204,12 +204,12 @@ namespace Nox
         m_SubheaderLabel = UI::Label("");
         m_SubheaderLabel->FontSizeOverride = 13.5f;
         m_SubheaderLabel->UseColorOverride = true;
-        m_SubheaderLabel->ColorOverride = { 0.58f, 0.64f, 0.74f, 1.0f };
+        m_SubheaderLabel->ColorOverride = UI::ThemeColor("TextMuted", { 0.58f, 0.64f, 0.74f, 1.0f });
 
         m_SelectionBadge = UI::Label("");
         m_SelectionBadge->FontSizeOverride = 13.5f;
         m_SelectionBadge->UseColorOverride = true;
-        m_SelectionBadge->ColorOverride = { 0.45f, 0.72f, 0.98f, 1.0f };
+        m_SelectionBadge->ColorOverride = UI::ThemeColor("InspectorSelectionBadge", { 0.45f, 0.72f, 0.98f, 1.0f });
         m_SelectionBadge->Visible = false;
 
         m_FilterBar = UI::MakeUI<UI::UISearchBar>("Filter components & properties...");
@@ -233,13 +233,13 @@ namespace Nox
         emptyTitle->FontSizeOverride = 17.0f;
         emptyTitle->HAlign = UI::UIAlignment::Center;
         emptyTitle->UseColorOverride = true;
-        emptyTitle->ColorOverride = { 0.78f, 0.82f, 0.90f, 1.0f };
+        emptyTitle->ColorOverride = UI::ThemeColor("InspectorEmptyTitle", { 0.78f, 0.82f, 0.90f, 1.0f });
 
         auto emptyHint = UI::Label("Select an entity in Scene Hierarchy or the Viewport.");
         emptyHint->FontSizeOverride = 14.0f;
         emptyHint->HAlign = UI::UIAlignment::Center;
         emptyHint->UseColorOverride = true;
-        emptyHint->ColorOverride = { 0.54f, 0.59f, 0.68f, 1.0f };
+        emptyHint->ColorOverride = UI::ThemeColor("TextMuted", { 0.54f, 0.59f, 0.68f, 1.0f });
 
         m_EmptyState = UI::VStack(4.0f, { emptyTitle, emptyHint }).Fill();
         m_EmptyState->VAlign = UI::UIAlignment::Center;
@@ -476,8 +476,8 @@ namespace Nox
                 subText += "   •   Inactive";
             m_SubheaderLabel->Text = subText;
             m_SubheaderLabel->ColorOverride = inactive
-                ? UI::UIColor{ 0.86f, 0.56f, 0.42f, 1.0f }
-                : UI::UIColor{ 0.58f, 0.64f, 0.74f, 1.0f };
+                ? UI::ThemeColor("InspectorInactive", { 0.86f, 0.56f, 0.42f, 1.0f })
+                : UI::ThemeColor("TextMuted", { 0.58f, 0.64f, 0.74f, 1.0f });
             m_SubheaderLabel->Visible = true;
         }
 
@@ -597,7 +597,7 @@ namespace Nox
                     text->WidthMode = UI::UISizeMode::Fill;
                     text->VAlign = UI::UIAlignment::Center;
                     text->UseColorOverride = true;
-                    text->ColorOverride = { 0.45f, 0.70f, 1.0f, 1.0f };
+                    text->ColorOverride = UI::ThemeColor("PrefabText", { 0.45f, 0.70f, 1.0f, 1.0f });
                     text->Tooltip = label;
                     row->AddChild(text);
                     // (the entry is copied into each button: the list is worked out again after any of them runs)
@@ -965,7 +965,7 @@ namespace Nox
                                  : ("No mesh slots (" + std::to_string(meshMaterials->size()) + " total)"));
                              rangeLbl->FontSizeOverride = 14.0f;
                              rangeLbl->UseColorOverride = true;
-                             rangeLbl->ColorOverride = { 0.62f, 0.68f, 0.78f, 1.0f };
+                             rangeLbl->ColorOverride = UI::ThemeColor("TextMuted", { 0.62f, 0.68f, 0.78f, 1.0f });
                              rangeLbl->WidthMode = UI::UISizeMode::Fill;
                              rangeLbl->FlexWeight = 1.0f;
                              rangeRow->AddChild(rangeLbl);
@@ -1550,7 +1550,7 @@ namespace Nox
                                  auto errLabel = UI::Label("Class not found in loaded script assembly");
                                  errLabel->FontSizeOverride = 13.0f;
                                  errLabel->UseColorOverride = true;
-                                 errLabel->ColorOverride = { 0.90f, 0.34f, 0.38f, 1.0f };
+                                 errLabel->ColorOverride = UI::ThemeColor("StatusError", { 0.90f, 0.34f, 0.38f, 1.0f });
                                  c.Body->AddChild(errLabel);
                                  continue;
                              }

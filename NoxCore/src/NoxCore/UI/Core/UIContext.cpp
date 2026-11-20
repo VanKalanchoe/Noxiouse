@@ -66,6 +66,20 @@ namespace Nox::UI
         m_Theme = UITheme::CreateDefault();
     }
 
+    UIContext::~UIContext()
+    {
+        if (s_LastDrawn == this)
+            s_LastDrawn = nullptr;
+        if (s_Current == this)
+            s_Current = nullptr;
+    }
+
+    UIColor ThemeColor(std::string_view token, const UIColor& fallback)
+    {
+        const UIContext* context = UIContext::s_Current ? UIContext::s_Current : UIContext::s_LastDrawn;
+        return context && context->GetTheme() ? context->GetTheme()->GetToken(token, fallback) : fallback;
+    }
+
     void UIContext::SetRoot(const Ref<UIElement>& root)
     {
         m_Root = root;
@@ -571,6 +585,7 @@ namespace Nox::UI
     void UIContext::UpdateAndRender(UIDrawList& drawList, const UIVec2& viewportSize, float dt)
     {
         ScopedCurrentContext currentGuard(s_Current, this);
+        s_LastDrawn = this;
         if (m_Theme)
             m_Theme->PollHotReload();
 

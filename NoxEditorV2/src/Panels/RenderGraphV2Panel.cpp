@@ -7,6 +7,7 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Widgets/UIPropertyRows.h"
 #include "Panels/TableViewV2.h"
 #include "NoxCore/Profiling/Profiler.h"
@@ -69,9 +70,9 @@ namespace Nox
             if (bytes >= 1024) return std::format("{:.1f} KB", static_cast<double>(bytes) / 1024.0);
             return std::format("{} B", bytes);
         }
-        constexpr glm::vec4 kCulled{ 0.5f, 0.5f, 0.5f, 1.0f };
-        constexpr glm::vec4 kGroup{ 0.55f, 0.75f, 1.0f, 1.0f };
-        constexpr glm::vec4 kWarning{ 1.0f, 0.7f, 0.3f, 1.0f };
+        constexpr UI::UIThemeToken kCulled{ "RenderGraphCulled", { 0.5f, 0.5f, 0.5f, 1.0f } };
+        constexpr UI::UIThemeToken kGroup{ "RenderGraphGroup", { 0.55f, 0.75f, 1.0f, 1.0f } };
+        constexpr UI::UIThemeToken kWarning{ "StatusWarning", { 1.0f, 0.7f, 0.3f, 1.0f } };
     }
 
     void RenderGraphV2Panel::Update(bool shown)
@@ -143,7 +144,7 @@ namespace Nox
                     text += std::format(" | {} draws/s | {} tris/s", FormatRate(draws * 1000.0 / frameMs), FormatRate(static_cast<double>(r->getVisibleTriangleCount()) * 1000.0 / frameMs));
                 }
                 return text;
-            }, { 0.80f, 0.83f, 0.89f, 1.0f });
+            }, UI::ThemeColor("RenderGraphStats", { 0.80f, 0.83f, 0.89f, 1.0f }));
             rows.Text([graph]()
             {
                 const RGFrameReport& report = graph->GetReport();
@@ -291,7 +292,7 @@ namespace Nox
                             row.BarColumn = 5;
                             row.BarBegin = static_cast<float>(resource.FirstPass) / passCount;
                             row.BarEnd = static_cast<float>(resource.LastPass + 1) / passCount;
-                            row.BarColor = resource.Kind == RGResourceKind::Transient ? glm::vec4(0.43f, 0.75f, 0.35f, 1.0f) : glm::vec4(0.86f, 0.59f, 0.27f, 1.0f);
+                            row.BarColor = resource.Kind == RGResourceKind::Transient ? UI::ThemeColor("RenderGraphTransient", { 0.43f, 0.75f, 0.35f, 1.0f }) : UI::ThemeColor("RenderGraphPersistent", { 0.86f, 0.59f, 0.27f, 1.0f });
                             if (resource.FirstPass < report.Passes.size() && resource.LastPass < report.Passes.size())
                                 row.Tooltip = std::format("{} -> {}", report.Passes[resource.FirstPass].Name, report.Passes[resource.LastPass].Name);
                         }
@@ -366,7 +367,7 @@ namespace Nox
                     return std::string("Pick a texture with Inspect in the Resources tab.");
                 const RGTextureKey& key = r->getInspectedTextureKey();
                 return std::format("{} [{}]  {}x{} {}", inspection.Name, inspection.Occurrence, key.Width, key.Height, FormatName(key.Format));
-            }, { 0.86f, 0.88f, 0.92f, 1.0f });
+            }, UI::ThemeColor("RenderGraphInspectText", { 0.86f, 0.88f, 0.92f, 1.0f }));
             const auto inspecting = [r]() { return !r->getTextureInspection().Name.empty(); };
             const auto edit = [r](auto change) { Renderer::TextureInspection inspection = r->getTextureInspection(); change(inspection); r->setTextureInspection(inspection); };
             Ref<UI::UIElement> stop = rows.Button("Stop", [r]() { r->setTextureInspection({}); });

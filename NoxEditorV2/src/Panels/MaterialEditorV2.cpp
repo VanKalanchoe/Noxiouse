@@ -41,7 +41,7 @@ namespace Nox
         bar->AddChild(save);
         auto status = UI::Label("", 13.0f);
         status->UseColorOverride = true;
-        status->ColorOverride = { 0.58f, 0.64f, 0.74f, 1.0f };
+        status->ColorOverride = UI::ThemeColor("TextMuted", { 0.58f, 0.64f, 0.74f, 1.0f });
         status->VAlign = UI::UIAlignment::Center;
         m_Status = status;
         bar->AddChild(status);

@@ -41,11 +41,11 @@ namespace Nox
         }
 
         constexpr const char* kGroupNames[] = { "Errors", "Warnings", "Messages", "Verbose" };
-        const UIColor kGroupColors[] = {
-            { 0.94f, 0.36f, 0.36f, 1.0f },
-            { 0.95f, 0.72f, 0.28f, 1.0f },
-            { 0.86f, 0.88f, 0.92f, 1.0f },
-            { 0.56f, 0.60f, 0.68f, 1.0f },
+        constexpr UI::UIThemeToken kGroupColors[] = {
+            { "LogError", { 0.94f, 0.36f, 0.36f, 1.0f } },
+            { "LogWarning", { 0.95f, 0.72f, 0.28f, 1.0f } },
+            { "LogMessage", { 0.86f, 0.88f, 0.92f, 1.0f } },
+            { "LogVerbose", { 0.56f, 0.60f, 0.68f, 1.0f } },
         };
 
         std::string ToLower(std::string_view text)
@@ -326,9 +326,9 @@ namespace Nox
                 if (selected)
                     d.AddRoundedRect({ b.Min.x + 2.0f, y }, { b.Max.x - 2.0f, y + kRow }, { accent.r, accent.g, accent.b, 0.26f });
                 else if (i == m_HoveredRow)
-                    d.AddRoundedRect({ b.Min.x + 2.0f, y }, { b.Max.x - 2.0f, y + kRow }, { 1.0f, 1.0f, 1.0f, 0.04f });
+                    d.AddRoundedRect({ b.Min.x + 2.0f, y }, { b.Max.x - 2.0f, y + kRow }, UI::ThemeColor("LogRowHover", { 1.0f, 1.0f, 1.0f, 0.04f }));
                 else if (group <= 1)
-                    d.AddRoundedRect({ b.Min.x + 2.0f, y }, { b.Max.x - 2.0f, y + kRow }, { kGroupColors[group].r, kGroupColors[group].g, kGroupColors[group].b, 0.07f });
+                    d.AddRoundedRect({ b.Min.x + 2.0f, y }, { b.Max.x - 2.0f, y + kRow }, { kGroupColors[group].Get().r, kGroupColors[group].Get().g, kGroupColors[group].Get().b, 0.07f });
 
                 const float textY = y + (kRow - kFont * 1.2f) * 0.5f;
                 const bool firstLine = row.Begin == 0;
@@ -528,7 +528,7 @@ namespace Nox
 
         m_Suggestions = Ref<UI::UILabel>(new UI::UILabel("", 14.0f));
         m_Suggestions->UseColorOverride = true;
-        m_Suggestions->ColorOverride = { 0.62f, 0.68f, 0.78f, 1.0f };
+        m_Suggestions->ColorOverride = UI::ThemeColor("LogSuggestions", { 0.62f, 0.68f, 0.78f, 1.0f });
         m_Suggestions->Margin = UI::UIThickness{ 50.0f, 4.0f, 8.0f, 0.0f };
         m_Suggestions->Visible = false;
 

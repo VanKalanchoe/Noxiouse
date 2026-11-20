@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/UI/Core/UITheme.h"
 #include "NoxCore/UI/Rendering/UIDrawList.h"
@@ -82,9 +83,9 @@ namespace Nox
             Fill(m_Rows);
         m_Scroll = std::clamp(m_Scroll, 0.0f, std::max(0.0f, static_cast<float>(m_Rows.size()) * kRow - (b.Height() - kRow)));
 
-        const glm::vec4 dim{ 0.55f, 0.57f, 0.62f, 1.0f };
+        const glm::vec4 dim = UI::ThemeColor("TextMuted", { 0.55f, 0.57f, 0.62f, 1.0f });
         d.PushClipRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y });
-        d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Min.y + kRow }, { 1.0f, 1.0f, 1.0f, 0.05f });
+        d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Min.y + kRow }, UI::ThemeColor("TableHeader", { 1.0f, 1.0f, 1.0f, 0.05f }));
         for (int column = 0; column < static_cast<int>(Columns.size()); ++column)
             d.AddText(Columns[static_cast<size_t>(column)].Title, nullptr, { ColumnX(column) + 4.0f, b.Min.y + 3.0f }, kText, dim);
         d.PushClipRect({ b.Min.x, b.Min.y + kRow }, { b.Max.x, b.Max.y });
@@ -95,16 +96,16 @@ namespace Nox
                 continue;
             const Row& row = m_Rows[i];
             if (row.Highlight)
-                d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, { 0.30f, 0.45f, 0.75f, 0.45f });
+                d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, UI::ThemeColor("TableRowSelected", { 0.30f, 0.45f, 0.75f, 0.45f }));
             else if (i % 2)
-                d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, { 1.0f, 1.0f, 1.0f, 0.03f });
+                d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, UI::ThemeColor("TableRowAlternate", { 1.0f, 1.0f, 1.0f, 0.03f }));
             for (int column = 0; column < static_cast<int>(row.Cells.size()) && column < static_cast<int>(Columns.size()); ++column)
             {
                 const float x0 = ColumnX(column), x1 = ColumnX(column + 1);
                 if (column == row.BarColumn)
                 {
                     const float width = x1 - x0 - 8.0f;
-                    d.AddRoundedRect({ x0 + 4.0f, y + 4.0f }, { x1 - 4.0f, y + kRow - 4.0f }, { 0.24f, 0.24f, 0.24f, 0.47f });
+                    d.AddRoundedRect({ x0 + 4.0f, y + 4.0f }, { x1 - 4.0f, y + kRow - 4.0f }, UI::ThemeColor("TableBarTrack", { 0.24f, 0.24f, 0.24f, 0.47f }));
                     const float a = x0 + 4.0f + width * row.BarBegin, c = std::max(x0 + 4.0f + width * row.BarEnd, a + 2.0f);
                     d.AddRoundedRect({ a, y + 4.0f }, { c, y + kRow - 4.0f }, row.BarColor);
                     continue;

@@ -76,7 +76,7 @@ namespace Nox
         {
             Ref<UI::UILabel> label(new UI::UILabel(text, size));
             label->UseColorOverride = true;
-            label->ColorOverride = { 0.60f, 0.64f, 0.72f, 1.0f };
+            label->ColorOverride = UI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
             label->VAlign = UI::UIAlignment::Center;
             return label;
         }
@@ -113,7 +113,7 @@ namespace Nox
             void OnPaint(UI::UIDrawList& d, const UI::UITheme&) override
             {
                 const UI::UIRect b = GetBounds();
-                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, { 0.10f, 0.10f, 0.12f, 1.0f }, glm::vec4(3.0f));
+                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, UI::ThemeColor("ClipTimelineBackground", { 0.10f, 0.10f, 0.12f, 1.0f }), glm::vec4(3.0f));
                 const AnimationSequence* clip = Clip(m_Clip);
                 if (!clip)
                     return;
@@ -123,19 +123,19 @@ namespace Nox
                 const float rangeEnd = m_Editor->RangeEnd > rangeStart ? std::min(m_Editor->RangeEnd, duration) : duration;
                 if (rangeStart > 0.0f || rangeEnd < duration)
                 {
-                    d.AddRoundedRect({ toX(rangeStart), b.Min.y }, { toX(rangeEnd), b.Max.y }, { 0.31f, 0.63f, 1.0f, 0.2f });
-                    d.AddRoundedRect({ toX(rangeStart) - 1.0f, b.Min.y }, { toX(rangeStart) + 1.0f, b.Max.y }, { 0.31f, 0.63f, 1.0f, 1.0f });
-                    d.AddRoundedRect({ toX(rangeEnd) - 1.0f, b.Min.y }, { toX(rangeEnd) + 1.0f, b.Max.y }, { 0.31f, 0.63f, 1.0f, 1.0f });
+                    d.AddRoundedRect({ toX(rangeStart), b.Min.y }, { toX(rangeEnd), b.Max.y }, UI::ThemeColor("ClipRange", { 0.31f, 0.63f, 1.0f, 0.2f }));
+                    d.AddRoundedRect({ toX(rangeStart) - 1.0f, b.Min.y }, { toX(rangeStart) + 1.0f, b.Max.y }, UI::ThemeColor("ClipRangeEdge", { 0.31f, 0.63f, 1.0f, 1.0f }));
+                    d.AddRoundedRect({ toX(rangeEnd) - 1.0f, b.Min.y }, { toX(rangeEnd) + 1.0f, b.Max.y }, UI::ThemeColor("ClipRangeEdge", { 0.31f, 0.63f, 1.0f, 1.0f }));
                 }
                 for (const AnimationNotify& notify : clip->Notifies)
                 {
                     const float x = toX(notify.Time);
                     d.AddRoundedRect({ x - 1.0f, b.Min.y + 4.0f }, { x + 1.0f, b.Max.y - 4.0f },
-                                     notify.SyncMarker ? glm::vec4(0.35f, 0.86f, 0.55f, 1.0f) : glm::vec4(1.0f, 0.75f, 0.24f, 1.0f));
+                                     notify.SyncMarker ? UI::ThemeColor("NotifySyncMarker", { 0.35f, 0.86f, 0.55f, 1.0f }) : UI::ThemeColor("Notify", { 1.0f, 0.75f, 0.24f, 1.0f }));
                 }
                 const float x = toX(m_Editor->Cursor);
-                d.AddRoundedRect({ x - 1.5f, b.Min.y }, { x + 1.5f, b.Max.y }, { 1.0f, 1.0f, 1.0f, 0.95f });
-                d.AddText(std::format("{:.3f} s", m_Editor->Cursor), nullptr, { b.Min.x + 6.0f, b.Min.y + 10.0f }, 12.0f, { 0.85f, 0.87f, 0.92f, 0.8f });
+                d.AddRoundedRect({ x - 1.5f, b.Min.y }, { x + 1.5f, b.Max.y }, UI::ThemeColor("ClipCursor", { 1.0f, 1.0f, 1.0f, 0.95f }));
+                d.AddText(std::format("{:.3f} s", m_Editor->Cursor), nullptr, { b.Min.x + 6.0f, b.Min.y + 10.0f }, 12.0f, UI::ThemeColor("ClipCursorText", { 0.85f, 0.87f, 0.92f, 0.8f }));
             }
 
         private:
@@ -309,7 +309,7 @@ namespace Nox
         controls->AddChild(mesh);
         auto meshNote = Muted("", 12.5f);
         meshNote->UseColorOverride = true;
-        meshNote->ColorOverride = { 1.0f, 0.7f, 0.3f, 1.0f };
+        meshNote->ColorOverride = UI::ThemeColor("StatusWarning", { 1.0f, 0.7f, 0.3f, 1.0f });
         controls->AddChild(meshNote);
         previewRow->AddChild(controls);
         root->AddChild(previewRow);

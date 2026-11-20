@@ -273,7 +273,7 @@ namespace Nox
         intro->WordWrap = true;
         intro->WidthMode = UI::UISizeMode::Fill;
         intro->UseColorOverride = true;
-        intro->ColorOverride = { 0.60f, 0.64f, 0.72f, 1.0f };
+        intro->ColorOverride = UI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
         root->AddChild(intro);
 
         Ref<UI::UIButton> resetAll(new UI::UIButton("Reset All to Defaults", [this]()

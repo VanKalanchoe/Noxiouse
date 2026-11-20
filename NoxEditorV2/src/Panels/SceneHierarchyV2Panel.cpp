@@ -59,18 +59,18 @@ namespace Nox
         UI::UIColor EntityLabelColor(Entity entity)
         {
             if (entity.HasComponent<PrefabInstanceComponent>() || entity.HasComponent<PrefabNodeComponent>())
-                return { 0.48f, 0.74f, 1.00f, 1.0f };
+                return UI::ThemeColor("EntityPrefab", { 0.48f, 0.74f, 1.00f, 1.0f });
             if (entity.HasComponent<CameraComponent>())
-                return { 0.42f, 0.85f, 0.98f, 1.0f };
+                return UI::ThemeColor("EntityCamera", { 0.42f, 0.85f, 0.98f, 1.0f });
             if (entity.HasComponent<DirectionalLightComponent>() || entity.HasComponent<PointLightComponent>() ||
                 entity.HasComponent<SpotLightComponent>() || entity.HasComponent<RectLightComponent>() ||
                 entity.HasComponent<DiscLightComponent>() || entity.HasComponent<EnvironmentLightComponent>())
-                return { 0.96f, 0.82f, 0.36f, 1.0f };
+                return UI::ThemeColor("EntityLight", { 0.96f, 0.82f, 0.36f, 1.0f });
             if (entity.HasComponent<AudioSourceComponent>() || entity.HasComponent<AudioListenerComponent>())
-                return { 0.46f, 0.88f, 0.65f, 1.0f };
+                return UI::ThemeColor("EntityAudio", { 0.46f, 0.88f, 0.65f, 1.0f });
             if (entity.HasComponent<MeshComponent>() || entity.HasComponent<ModelInstanceComponent>())
-                return { 0.74f, 0.84f, 0.98f, 1.0f };
-            return { 0.84f, 0.87f, 0.93f, 1.0f };
+                return UI::ThemeColor("EntityMesh", { 0.74f, 0.84f, 0.98f, 1.0f });
+            return UI::ThemeColor("EntityDefault", { 0.84f, 0.87f, 0.93f, 1.0f });
         }
     }
 
@@ -328,7 +328,7 @@ namespace Nox
 
         m_CountLabel = UI::Label("0 entities");
         m_CountLabel->UseColorOverride = true;
-        m_CountLabel->ColorOverride = { 0.58f, 0.62f, 0.69f, 1.0f };
+        m_CountLabel->ColorOverride = UI::ThemeColor("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
 
         auto footer = UI::HStack(8.0f, { m_CountLabel }).FillWidth();
         footer->HeightMode = UI::UISizeMode::Auto;
@@ -803,7 +803,7 @@ namespace Nox
             node.IsVisibleInHierarchy = node.IsVisible;
             node.IsDimmed = contents.empty();
             node.Draggable = true;
-            node.TagColor = { 0.90f, 0.72f, 0.30f, 1.0f };
+            node.TagColor = UI::ThemeColor("HierarchyTag", { 0.90f, 0.72f, 0.30f, 1.0f });
 
             const bool selfMatches = !filtering || (ToLower(node.Label).find(needle) != std::string::npos);
             bool anyChildMatches = false;

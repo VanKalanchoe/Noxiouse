@@ -62,7 +62,7 @@ namespace Nox
         {
             Ref<UI::UILabel> label(new UI::UILabel(text, size));
             label->UseColorOverride = true;
-            label->ColorOverride = { 0.60f, 0.64f, 0.72f, 1.0f };
+            label->ColorOverride = UI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
             label->WordWrap = true;
             label->WidthMode = UI::UISizeMode::Fill;
             return label;
@@ -1142,7 +1142,7 @@ namespace Nox
         m_CompileStatus->UseColorOverride = true;
         if (!program.Valid)
         {
-            m_CompileStatus->ColorOverride = { 1.0f, 0.45f, 0.40f, 1.0f };
+            m_CompileStatus->ColorOverride = UI::ThemeColor("StatusError", { 1.0f, 0.45f, 0.40f, 1.0f });
             m_CompileStatus->Text = "Does not compile: " + program.Error;
             return;
         }
@@ -1163,7 +1163,7 @@ namespace Nox
         if (wpoWithoutBounds)
             text += "\nWorld Position Offset: set Max World Position Offset Displacement on the Material Output (how far it moves the surface, "
                     "world units), or the surface may be culled while pushed out of its bounds.";
-        m_CompileStatus->ColorOverride = wpoWithoutBounds ? UI::UIColor{ 1.0f, 0.80f, 0.30f, 1.0f } : UI::UIColor{ 0.55f, 0.82f, 0.60f, 1.0f };
+        m_CompileStatus->ColorOverride = wpoWithoutBounds ? UI::ThemeColor("StatusWarning", { 1.0f, 0.80f, 0.30f, 1.0f }) : UI::ThemeColor("StatusGood", { 0.55f, 0.82f, 0.60f, 1.0f });
         m_CompileStatus->Text = text;
     }
 
@@ -1559,7 +1559,7 @@ namespace Nox
             UI::AppendSync(*notifyRaw, [this, notifyRaw]()
             {
                 notifyRaw->Text = m_PreviewNotifyAge < 1.5f ? "Notify: " + m_PreviewNotify : std::string();
-                notifyRaw->ColorOverride = { 1.0f, 0.75f, 0.25f, 1.0f };
+                notifyRaw->ColorOverride = UI::ThemeColor("StatusWarning", { 1.0f, 0.75f, 0.25f, 1.0f });
             });
             m_PreviewBox->AddChild(notify);
         }

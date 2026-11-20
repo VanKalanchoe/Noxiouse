@@ -57,26 +57,26 @@ namespace Nox
         // texture red, level orange, animation turquoise, sound blue), so the line under a tile tells the kind at a glance.
         switch (type)
         {
-        case AssetType::Scene:             return { "Scene",          { 0.96f, 0.58f, 0.18f, 1.0f } };
-        case AssetType::Texture2D:         return { "Texture",        { 0.88f, 0.32f, 0.30f, 1.0f } };
-        case AssetType::MeshSource:        return { "Model File",     { 0.55f, 0.66f, 0.72f, 1.0f } };
-        case AssetType::Mesh:              return { "Skeletal Mesh",  { 0.90f, 0.40f, 0.74f, 1.0f } };
-        case AssetType::SkeletalMesh:      return { "Skeletal Mesh",  { 0.90f, 0.40f, 0.74f, 1.0f } };
-        case AssetType::StaticMesh:        return { "Static Mesh",    { 0.20f, 0.76f, 0.90f, 1.0f } };
-        case AssetType::Material:          return { "Material",       { 0.40f, 0.80f, 0.34f, 1.0f } };
-        case AssetType::MaterialGraph:     return { "Material Graph", { 0.62f, 0.88f, 0.42f, 1.0f } };
-        case AssetType::MaterialShader:    return { "Material Shader",{ 0.78f, 0.82f, 0.32f, 1.0f } };
-        case AssetType::Skeleton:          return { "Skeleton",       { 0.88f, 0.80f, 0.58f, 1.0f } };
-        case AssetType::AnimationSequence: return { "Animation",      { 0.22f, 0.86f, 0.72f, 1.0f } };
-        case AssetType::AnimationGraph:    return { "Anim Graph",     { 0.52f, 0.58f, 0.98f, 1.0f } };
-        case AssetType::Prefab:            return { "Prefab",         { 0.32f, 0.58f, 1.00f, 1.0f } };
-        case AssetType::Timeline:          return { "Timeline",       { 0.98f, 0.78f, 0.28f, 1.0f } };
-        case AssetType::Font:              return { "Font",           { 0.74f, 0.76f, 0.82f, 1.0f } };
-        case AssetType::AudioClip:         return { "Sound",          { 0.38f, 0.72f, 1.00f, 1.0f } };
-        case AssetType::AudioGraph:        return { "Audio Graph",    { 0.54f, 0.68f, 1.00f, 1.0f } };
-        case AssetType::AudioMixer:        return { "Audio Mixer",    { 0.60f, 0.64f, 0.84f, 1.0f } };
-        case AssetType::AcousticData:      return { "Acoustic Data",  { 0.44f, 0.78f, 0.82f, 1.0f } };
-        default:                           return { "File",           { 0.62f, 0.66f, 0.74f, 1.0f } };
+        case AssetType::Scene:             return { "Scene",          UI::ThemeColor("AssetScene", { 0.96f, 0.58f, 0.18f, 1.0f }) };
+        case AssetType::Texture2D:         return { "Texture",        UI::ThemeColor("AssetTexture", { 0.88f, 0.32f, 0.30f, 1.0f }) };
+        case AssetType::MeshSource:        return { "Model File",     UI::ThemeColor("AssetModelFile", { 0.55f, 0.66f, 0.72f, 1.0f }) };
+        case AssetType::Mesh:              return { "Skeletal Mesh",  UI::ThemeColor("AssetSkeletalMesh", { 0.90f, 0.40f, 0.74f, 1.0f }) };
+        case AssetType::SkeletalMesh:      return { "Skeletal Mesh",  UI::ThemeColor("AssetSkeletalMesh", { 0.90f, 0.40f, 0.74f, 1.0f }) };
+        case AssetType::StaticMesh:        return { "Static Mesh",    UI::ThemeColor("AssetStaticMesh", { 0.20f, 0.76f, 0.90f, 1.0f }) };
+        case AssetType::Material:          return { "Material",       UI::ThemeColor("AssetMaterial", { 0.40f, 0.80f, 0.34f, 1.0f }) };
+        case AssetType::MaterialGraph:     return { "Material Graph", UI::ThemeColor("AssetMaterialGraph", { 0.62f, 0.88f, 0.42f, 1.0f }) };
+        case AssetType::MaterialShader:    return { "Material Shader",UI::ThemeColor("AssetMaterialShader", { 0.78f, 0.82f, 0.32f, 1.0f }) };
+        case AssetType::Skeleton:          return { "Skeleton",       UI::ThemeColor("AssetSkeleton", { 0.88f, 0.80f, 0.58f, 1.0f }) };
+        case AssetType::AnimationSequence: return { "Animation",      UI::ThemeColor("AssetAnimation", { 0.22f, 0.86f, 0.72f, 1.0f }) };
+        case AssetType::AnimationGraph:    return { "Anim Graph",     UI::ThemeColor("AssetAnimGraph", { 0.52f, 0.58f, 0.98f, 1.0f }) };
+        case AssetType::Prefab:            return { "Prefab",         UI::ThemeColor("AssetPrefab", { 0.32f, 0.58f, 1.00f, 1.0f }) };
+        case AssetType::Timeline:          return { "Timeline",       UI::ThemeColor("AssetTimeline", { 0.98f, 0.78f, 0.28f, 1.0f }) };
+        case AssetType::Font:              return { "Font",           UI::ThemeColor("AssetFont", { 0.74f, 0.76f, 0.82f, 1.0f }) };
+        case AssetType::AudioClip:         return { "Sound",          UI::ThemeColor("AssetSound", { 0.38f, 0.72f, 1.00f, 1.0f }) };
+        case AssetType::AudioGraph:        return { "Audio Graph",    UI::ThemeColor("AssetAudioGraph", { 0.54f, 0.68f, 1.00f, 1.0f }) };
+        case AssetType::AudioMixer:        return { "Audio Mixer",    UI::ThemeColor("AssetAudioMixer", { 0.60f, 0.64f, 0.84f, 1.0f }) };
+        case AssetType::AcousticData:      return { "Acoustic Data",  UI::ThemeColor("AssetAcousticData", { 0.44f, 0.78f, 0.82f, 1.0f }) };
+        default:                           return { "File",           UI::ThemeColor("AssetFile", { 0.62f, 0.66f, 0.74f, 1.0f }) };
         }
     }
 
@@ -160,7 +160,7 @@ namespace Nox
             // A lit sphere.
             const float r = s * 0.38f;
             d.AddRoundedRectGradient(c - UIVec2{ r }, c + UIVec2{ r }, color, Darker(color, 0.30f), glm::vec4(r));
-            Disc(d, { c.x - r * 0.35f, c.y - r * 0.38f }, r * 0.22f, { 1.0f, 1.0f, 1.0f, 0.55f });
+            Disc(d, { c.x - r * 0.35f, c.y - r * 0.38f }, r * 0.22f, UI::ThemeColor("AssetIconHighlight", { 1.0f, 1.0f, 1.0f, 0.55f }));
             break;
         }
         case AssetType::Texture2D:
@@ -289,8 +289,8 @@ namespace Nox
 
     namespace
     {
-        const UIColor kFolderColor{ 0.86f, 0.70f, 0.38f, 1.0f };
-        const UIColor kScriptColor{ 0.44f, 0.62f, 0.95f, 1.0f };
+        constexpr UI::UIThemeToken kFolderColor{ "ContentFolder", { 0.86f, 0.70f, 0.38f, 1.0f } };
+        constexpr UI::UIThemeToken kScriptColor{ "ContentScript", { 0.44f, 0.62f, 0.95f, 1.0f } };
 
         constexpr const char* kFilterNames[] = { "All Types", "Meshes", "Materials", "Textures", "Prefabs", "Scenes", "Animation", "Audio", "Scripts" };
 
@@ -400,7 +400,7 @@ namespace Nox
                 const Placed& p = m_Placed[i];
                 const bool last = p.Index + 1 == static_cast<int>(m_Segments.size());
                 if (p.Index == m_Hovered && !last)
-                    d.AddRoundedRect({ p.X0, b.Min.y + 3.0f }, { p.X1, b.Max.y - 3.0f }, { 1.0f, 1.0f, 1.0f, 0.08f }, glm::vec4(3.0f));
+                    d.AddRoundedRect({ p.X0, b.Min.y + 3.0f }, { p.X1, b.Max.y - 3.0f }, UI::ThemeColor("BreadcrumbHover", { 1.0f, 1.0f, 1.0f, 0.08f }), glm::vec4(3.0f));
                 const std::string& label = m_Segments[static_cast<size_t>(p.Index)];
                 const UIVec2 size = UI::UILabel::MeasureText(label, nullptr, kFont);
                 d.AddText(label, nullptr, { p.X0 + kPad, cy - size.y * 0.5f }, kFont, last || p.Index == m_Hovered ? text : muted);
@@ -985,10 +985,10 @@ namespace Nox
         {
             if (hovered || selected || dropTarget)
             {
-                const UIColor fill = dropTarget ? UIColor{ accent.r, accent.g, accent.b, 0.28f } : selected ? UIColor{ accent.r, accent.g, accent.b, 0.22f } : UIColor{ 1.0f, 1.0f, 1.0f, 0.05f };
+                const UIColor fill = dropTarget ? UIColor{ accent.r, accent.g, accent.b, 0.28f } : selected ? UIColor{ accent.r, accent.g, accent.b, 0.22f } : UI::ThemeColor("ContentTileFill", { 1.0f, 1.0f, 1.0f, 0.05f });
                 d.AddRoundedRect(r.Min, r.Max, fill, glm::vec4(6.0f), (selected || dropTarget) ? 1.5f : 0.0f, accent);
             }
-            DrawFolderIcon(d, { r.Center().x, r.Min.y + ThumbSize * 0.52f }, ThumbSize * 0.62f, hovered ? UIColor{ 0.95f, 0.80f, 0.48f, 1.0f } : kFolderColor);
+            DrawFolderIcon(d, { r.Center().x, r.Min.y + ThumbSize * 0.52f }, ThumbSize * 0.62f, hovered ? UI::ThemeColor("ContentFolderHovered", { 0.95f, 0.80f, 0.48f, 1.0f }) : kFolderColor);
             const float nameTop = r.Min.y + ThumbSize + 6.0f;
             const std::string name = UI::UILabel::ElideText(entry.Name, nullptr, kNameSize, r.Width() - 8.0f);
             const UIVec2 size = UI::UILabel::MeasureText(name, nullptr, kNameSize);
@@ -1283,7 +1283,7 @@ namespace Nox
 
         m_Footer = Ref<UI::UILabel>(new UI::UILabel("", 13.0f));
         m_Footer->UseColorOverride = true;
-        m_Footer->ColorOverride = { 0.60f, 0.64f, 0.72f, 1.0f };
+        m_Footer->ColorOverride = UI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
         m_Footer->Margin = UI::UIThickness{ 10.0f, 3.0f, 10.0f, 4.0f };
 
         Ref<UI::UIStackBox> root(new UI::UIStackBox(UI::UIOrientation::Vertical, 0.0f));
@@ -1942,7 +1942,7 @@ namespace Nox
         };
         auto state = std::make_shared<State>();
         auto content = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-        const auto note = [&content](const std::string& text, glm::vec4 color = { 0.72f, 0.76f, 0.84f, 1.0f })
+        const auto note = [&content](const std::string& text, glm::vec4 color = UI::ThemeColor("ContentNote", { 0.72f, 0.76f, 0.84f, 1.0f }))
         {
             Ref<UI::UILabel> ref(new UI::UILabel(text, 13.0f));
             ref->WordWrap = true;
@@ -1982,9 +1982,9 @@ namespace Nox
                 text += kept[i] + "\n";
             if (kept.size() > 6)
                 text += "... and " + std::to_string(kept.size() - 6) + " more\n";
-            note(text, { 0.95f, 0.78f, 0.45f, 1.0f });
+            note(text, UI::ThemeColor("StatusWarning", { 0.95f, 0.78f, 0.45f, 1.0f }));
         }
-        note("Open asset editors with unsaved changes are asked about first; loaded assets that use it are read again.", { 0.6f, 0.64f, 0.72f, 1.0f });
+        note("Open asset editors with unsaved changes are asked about first; loaded assets that use it are read again.", UI::ThemeColor("TextMuted", { 0.6f, 0.64f, 0.72f, 1.0f }));
 
         // The candidates: every other asset of its type, filtered by the search; the picked one highlighted.
         UI::UIStackBox* listRaw = list.get();
@@ -2321,7 +2321,7 @@ namespace Nox
             label->WordWrap = true;
             label->WidthMode = UI::UISizeMode::Fill;
             label->UseColorOverride = true;
-            label->ColorOverride = { 0.62f, 0.66f, 0.74f, 1.0f };
+            label->ColorOverride = UI::ThemeColor("TextMuted", { 0.62f, 0.66f, 0.74f, 1.0f });
             content->AddChild(label);
         };
         auto row = [&content](const std::string& name, const Ref<UI::UIElement>& editor)

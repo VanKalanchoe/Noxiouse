@@ -246,8 +246,8 @@ namespace Nox
                     d.AddRoundedRect({ ba.x, ba.y }, { std::max(bb.x, ba.x + 1.0f), std::max(bb.y, ba.y + 1.0f) }, glm::vec4(0.0f), glm::vec4(0.0f), 1.0f, bounds);
                     if (c.x - a.x > 70.0f && c.y - a.y > 34.0f)
                     {
-                        d.AddText(WorldGrid::CellName(cell), nullptr, { a.x + 4.0f, a.y + 3.0f }, 12.0f, { 0.9f, 0.9f, 0.92f, 0.86f });
-                        d.AddText(std::to_string(info->second.Entities) + " entities", nullptr, { a.x + 4.0f, a.y + 17.0f }, 12.0f, { 0.9f, 0.9f, 0.92f, 0.7f });
+                        d.AddText(WorldGrid::CellName(cell), nullptr, { a.x + 4.0f, a.y + 3.0f }, 12.0f, UI::ThemeColor("WorldCellName", { 0.9f, 0.9f, 0.92f, 0.86f }));
+                        d.AddText(std::to_string(info->second.Entities) + " entities", nullptr, { a.x + 4.0f, a.y + 17.0f }, 12.0f, UI::ThemeColor("WorldCellCount", { 0.9f, 0.9f, 0.92f, 0.7f }));
                     }
                 }
             }
@@ -263,7 +263,7 @@ namespace Nox
             {
                 const UI::UIVec2 a = ToScreen(m_BoxStart);
                 d.AddRoundedRect({ std::min(a.x, m_Pointer.x), std::min(a.y, m_Pointer.y) }, { std::max(a.x, m_Pointer.x), std::max(a.y, m_Pointer.y) },
-                                 { 1.0f, 1.0f, 1.0f, 0.06f }, glm::vec4(0.0f), 1.0f, { 1.0f, 1.0f, 1.0f, 0.7f });
+                                 UI::ThemeColor("WorldMapBoxFill", { 1.0f, 1.0f, 1.0f, 0.06f }), glm::vec4(0.0f), 1.0f, UI::ThemeColor("WorldMapBoxBorder", { 1.0f, 1.0f, 1.0f, 0.7f }));
             }
             d.PopClipRect();
         }
@@ -481,7 +481,7 @@ namespace Nox
                 char text[256];
                 std::snprintf(text, sizeof(text), "Building HLODs: %.0f %%  %s", build->GetProgress() * 100.0f, build->GetStage().c_str());
                 return std::string(text);
-            }, { 0.45f, 0.78f, 1.0f, 1.0f });
+            }, UI::ThemeColor("StatusInfo", { 0.45f, 0.78f, 1.0f, 1.0f }));
         }
         else
         {
@@ -558,7 +558,7 @@ namespace Nox
             else
                 std::snprintf(text, sizeof(text), "%zu cells, %zu loaded, %zu loading, %zu entities in cells", cells, activated, loading, entities);
             return std::string(text);
-        }, { 0.85f, 0.88f, 0.94f, 1.0f });
+        }, UI::ThemeColor("WorldPartitionSummary", { 0.85f, 0.88f, 0.94f, 1.0f }));
         if (!editing)
             rows.Note("Play / Simulate: cells stream around the camera and streaming sources.");
 
