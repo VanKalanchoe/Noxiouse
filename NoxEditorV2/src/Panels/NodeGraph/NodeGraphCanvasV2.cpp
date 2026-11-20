@@ -304,8 +304,8 @@ namespace Nox
         }
     }
 
-    UIVec2 NodeGraphCanvasV2::GraphToScreen(const UIVec2& p) const { return GetBounds().Min + m_Pan + p * m_Zoom; }
-    UIVec2 NodeGraphCanvasV2::ScreenToGraph(const UIVec2& p) const { return (p - GetBounds().Min - m_Pan) / m_Zoom; }
+    UIVec2 NodeGraphCanvasV2::GraphToScreen(const UIVec2& p) const { return m_View.ToScreen(GetBounds(), p); }
+    UIVec2 NodeGraphCanvasV2::ScreenToGraph(const UIVec2& p) const { return m_View.ToGraph(GetBounds(), p); }
 
     UIVec2 NodeGraphCanvasV2::PinPosition(const GraphNode& node, const NodeLayout& layout, uint32_t pin, bool output) const
     {
@@ -352,7 +352,7 @@ namespace Nox
     {
         if (!m_Graph)
             return {};
-        const float reach = std::max(8.0f, kPinRadius * m_Zoom + 4.0f);
+        const float reach = std::max(8.0f, kPinRadius * m_View.Zoom + 4.0f);
         PinRef best;
         float bestDistance = reach;
         for (const GraphNode& node : m_Graph->Nodes)
@@ -392,7 +392,7 @@ namespace Nox
                 continue;
             const UIVec2 p0 = GraphToScreen(PinPosition(*from, *fromLayout, link.FromPin, true));
             const UIVec2 p3 = GraphToScreen(PinPosition(*to, *toLayout, link.ToPin, false));
-            const float tangent = std::max(40.0f * m_Zoom, std::abs(p3.x - p0.x) * 0.5f);
+            const float tangent = std::max(40.0f * m_View.Zoom, std::abs(p3.x - p0.x) * 0.5f);
             const UIVec2 p1 = p0 + UIVec2{ tangent, 0.0f }, p2 = p3 - UIVec2{ tangent, 0.0f };
             UIVec2 previous = p0;
             for (int s = 1; s <= 24; ++s)
@@ -658,9 +658,7 @@ namespace Nox
         }
         if (min.x > max.x)
             return;
-        const UIVec2 size = max - min + UIVec2{ 120.0f };
-        m_Zoom = std::clamp(std::min(b.Width() / size.x, b.Height() / size.y), 0.3f, 1.25f);
-        m_Pan = b.Size() * 0.5f - (min + max) * 0.5f * m_Zoom;
+        m_View.Fit(b, min, max, 0.3f, 1.25f, 0.0f, 60.0f);
     }
 
     // ------------------------------------------------------------------------------------------------------------------------------
@@ -820,11 +818,11 @@ namespace Nox
         switch (m_Drag)
         {
         case Drag::Pan:
-            m_Pan += e.Position - m_DragLast;
+            m_View.Pan += e.Position - m_DragLast;
             break;
         case Drag::Nodes:
         {
-            const UIVec2 delta = (e.Position - m_DragStart) / m_Zoom;
+            const UIVec2 delta = (e.Position - m_DragStart) / m_View.Zoom;
             for (const auto& [id, origin] : m_DragOrigins)
                 if (GraphNode* node = FindNode(id))
                     node->EditorPosition = origin + glm::vec2(delta);
@@ -960,9 +958,7 @@ namespace Nox
         // Zoom around the pointer: the point under it stays under it.
         const UI::UIContext* ctx = UI::UIContext::GetCurrent();
         const UIVec2 pointer = ctx ? ctx->GetLastMousePos() : GetBounds().Center();
-        const UIVec2 before = ScreenToGraph(pointer);
-        m_Zoom = std::clamp(m_Zoom * std::pow(1.15f, e.ScrollDelta.y), 0.2f, 2.5f);
-        m_Pan = pointer - GetBounds().Min - before * m_Zoom;
+        m_View.ZoomAt(GetBounds(), pointer, e.ScrollDelta.y);
         return true;
     }
 
@@ -1011,9 +1007,7 @@ namespace Nox
             return true;
         case SDL_SCANCODE_HOME:
         {
-            const UIVec2 center = ScreenToGraph(GetBounds().Center());
-            m_Zoom = 1.0f;
-            m_Pan = GetBounds().Size() * 0.5f - center;
+            m_View.ResetZoom(GetBounds());
             return true;
         }
         case SDL_SCANCODE_ESCAPE:
@@ -1228,17 +1222,7 @@ namespace Nox
         m_ValueHits.clear();
 
         // Grid: fine lines every 16 units, stronger every 128.
-        for (const auto& [step, alpha] : { std::pair{ 16.0f, 0.025f }, std::pair{ 128.0f, 0.05f } })
-        {
-            const float px = step * m_Zoom;
-            if (px < 8.0f)
-                continue;
-            const UIColor line{ 1.0f, 1.0f, 1.0f, alpha };
-            for (float x = b.Min.x + std::fmod(m_Pan.x, px) - (m_Pan.x < 0 ? 0.0f : px); x < b.Max.x; x += px)
-                d.AddRoundedRect({ x, b.Min.y }, { x + 1.0f, b.Max.y }, line);
-            for (float y = b.Min.y + std::fmod(m_Pan.y, px) - (m_Pan.y < 0 ? 0.0f : px); y < b.Max.y; y += px)
-                d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + 1.0f }, line);
-        }
+        m_View.PaintGrid(d, b);
 
         if (!m_Graph)
         {
@@ -1249,7 +1233,7 @@ namespace Nox
 
         auto wire = [&](const UIVec2& p0, const UIVec2& p3, const UIColor& color, float width)
         {
-            const float tangent = std::max(40.0f * m_Zoom, std::abs(p3.x - p0.x) * 0.5f);
+            const float tangent = std::max(40.0f * m_View.Zoom, std::abs(p3.x - p0.x) * 0.5f);
             d.AddBezier(p0, p0 + UIVec2{ tangent, 0.0f }, p3 - UIVec2{ tangent, 0.0f }, p3, width, color);
         };
 
@@ -1270,30 +1254,30 @@ namespace Nox
             if (!lit)
                 color.a = 0.8f;
             wire(GraphToScreen(PinPosition(*from, *fromLayout, link.FromPin, true)), GraphToScreen(PinPosition(*to, *toLayout, link.ToPin, false)),
-                 static_cast<int>(i) == m_SelectedLink ? UIColor{ 1.0f, 1.0f, 1.0f, 1.0f } : color, (lit ? 3.0f : 2.2f) * std::max(m_Zoom, 0.6f));
+                 static_cast<int>(i) == m_SelectedLink ? UIColor{ 1.0f, 1.0f, 1.0f, 1.0f } : color, (lit ? 3.0f : 2.2f) * std::max(m_View.Zoom, 0.6f));
         }
 
-        const bool showText = m_Zoom >= 0.45f;
+        const bool showText = m_View.Zoom >= 0.45f;
         auto drawPin = [&](const UIVec2& center, const std::string& type, bool connected, bool hovered)
         {
             const UIColor color = PinColor(type);
-            const float r = kPinRadius * m_Zoom * (hovered ? 1.3f : 1.0f);
+            const float r = kPinRadius * m_View.Zoom * (hovered ? 1.3f : 1.0f);
             const UIColor fill = connected ? color : UIColor{ 0.08f, 0.10f, 0.14f, 1.0f };
             if (type == "Trigger")
             {
                 // An arrow pointing right (an event, like an execution pin).
                 const float w = r * 1.2f, h = r;
-                UI::Icons::DrawSegment(d, { center.x - w, center.y - h }, { center.x + w * 0.4f, center.y - h }, 1.6f * m_Zoom, color);
-                UI::Icons::DrawSegment(d, { center.x + w * 0.4f, center.y - h }, { center.x + w, center.y }, 1.6f * m_Zoom, color);
-                UI::Icons::DrawSegment(d, { center.x + w, center.y }, { center.x + w * 0.4f, center.y + h }, 1.6f * m_Zoom, color);
-                UI::Icons::DrawSegment(d, { center.x + w * 0.4f, center.y + h }, { center.x - w, center.y + h }, 1.6f * m_Zoom, color);
-                UI::Icons::DrawSegment(d, { center.x - w, center.y + h }, { center.x - w, center.y - h }, 1.6f * m_Zoom, color);
+                UI::Icons::DrawSegment(d, { center.x - w, center.y - h }, { center.x + w * 0.4f, center.y - h }, 1.6f * m_View.Zoom, color);
+                UI::Icons::DrawSegment(d, { center.x + w * 0.4f, center.y - h }, { center.x + w, center.y }, 1.6f * m_View.Zoom, color);
+                UI::Icons::DrawSegment(d, { center.x + w, center.y }, { center.x + w * 0.4f, center.y + h }, 1.6f * m_View.Zoom, color);
+                UI::Icons::DrawSegment(d, { center.x + w * 0.4f, center.y + h }, { center.x - w, center.y + h }, 1.6f * m_View.Zoom, color);
+                UI::Icons::DrawSegment(d, { center.x - w, center.y + h }, { center.x - w, center.y - h }, 1.6f * m_View.Zoom, color);
                 if (connected)
                     d.AddRoundedRect({ center.x - w * 0.5f, center.y - h * 0.5f }, { center.x + w * 0.3f, center.y + h * 0.5f }, color);
                 return;
             }
             const float corner = type == "Audio" ? 1.0f : type == "Pose" ? r * 0.45f : r;
-            d.AddRoundedRect(center - UIVec2{ r }, center + UIVec2{ r }, fill, glm::vec4(corner), 1.6f * m_Zoom, color);
+            d.AddRoundedRect(center - UIVec2{ r }, center + UIVec2{ r }, fill, glm::vec4(corner), 1.6f * m_View.Zoom, color);
         };
         auto isConnected = [this](uint32_t node, uint32_t pin, bool output)
         {
@@ -1327,26 +1311,26 @@ namespace Nox
                 const std::string type = layout->Outputs.front().Type;
                 const UIVec2 center = (min + max) * 0.5f;
                 if (isSelected)
-                    d.AddRoundedRect(center - UIVec2{ 9.0f * m_Zoom }, center + UIVec2{ 9.0f * m_Zoom }, { accent.r, accent.g, accent.b, 0.35f }, glm::vec4(9.0f * m_Zoom));
+                    d.AddRoundedRect(center - UIVec2{ 9.0f * m_View.Zoom }, center + UIVec2{ 9.0f * m_View.Zoom }, { accent.r, accent.g, accent.b, 0.35f }, glm::vec4(9.0f * m_View.Zoom));
                 drawPin(center, type, true, isHovered);
                 continue;
             }
 
-            const float radius = 8.0f * m_Zoom;
+            const float radius = 8.0f * m_View.Zoom;
             d.AddRoundedRect(min, max, { 0.11f, 0.13f, 0.18f, 0.97f }, glm::vec4(radius), isSelected ? 2.0f : 1.0f,
                              isSelected ? accent : (isHovered ? UIColor{ border.r + 0.12f, border.g + 0.12f, border.b + 0.14f, 1.0f } : border),
-                             { 0.0f, 0.0f, 0.0f, 0.45f }, { 0.0f, 4.0f * m_Zoom }, 12.0f * m_Zoom);
-            d.AddRoundedRect(min, { max.x, min.y + kHeader * m_Zoom }, layout->Header, { radius, radius, 0.0f, 0.0f });
+                             { 0.0f, 0.0f, 0.0f, 0.45f }, { 0.0f, 4.0f * m_View.Zoom }, 12.0f * m_View.Zoom);
+            d.AddRoundedRect(min, { max.x, min.y + kHeader * m_View.Zoom }, layout->Header, { radius, radius, 0.0f, 0.0f });
             if (showText)
             {
-                const float titleSize = kTitleFont * m_Zoom;
+                const float titleSize = kTitleFont * m_View.Zoom;
                 const UIVec2 titleExtent = UI::UILabel::MeasureText(layout->Title, nullptr, titleSize);
-                d.PushClipRect(min, { max.x - 6.0f * m_Zoom, min.y + kHeader * m_Zoom });
-                d.AddText(layout->Title, nullptr, { min.x + 10.0f * m_Zoom, min.y + (kHeader * m_Zoom - titleExtent.y) * 0.5f }, titleSize, { 1.0f, 1.0f, 1.0f, 0.96f });
+                d.PushClipRect(min, { max.x - 6.0f * m_View.Zoom, min.y + kHeader * m_View.Zoom });
+                d.AddText(layout->Title, nullptr, { min.x + 10.0f * m_View.Zoom, min.y + (kHeader * m_View.Zoom - titleExtent.y) * 0.5f }, titleSize, { 1.0f, 1.0f, 1.0f, 0.96f });
                 d.PopClipRect();
             }
 
-            const float pinSize = kPinFont * m_Zoom;
+            const float pinSize = kPinFont * m_View.Zoom;
             for (uint32_t i = 0; i < layout->Inputs.size(); ++i)
             {
                 const NodePinDesc& pin = layout->Inputs[i];
@@ -1356,18 +1340,18 @@ namespace Nox
                 if (!showText)
                     continue;
                 const UIVec2 extent = UI::UILabel::MeasureText(pin.Name, nullptr, pinSize);
-                d.AddText(pin.Name, nullptr, { p.x + 12.0f * m_Zoom, p.y - extent.y * 0.5f }, pinSize, { 0.86f, 0.88f, 0.92f, 1.0f });
+                d.AddText(pin.Name, nullptr, { p.x + 12.0f * m_View.Zoom, p.y - extent.y * 0.5f }, pinSize, { 0.86f, 0.88f, 0.92f, 1.0f });
                 // An input without a wire shows the value it uses, in a field it can be changed in.
                 if (!connected)
                     if (const auto literal = node->Properties.find(pin.Name); literal != node->Properties.end())
                     {
                         const std::string text = ShortValue(literal->second);
-                        const UIVec2 textPos{ p.x + 12.0f * m_Zoom + extent.x + 8.0f * m_Zoom, p.y - extent.y * 0.5f };
+                        const UIVec2 textPos{ p.x + 12.0f * m_View.Zoom + extent.x + 8.0f * m_View.Zoom, p.y - extent.y * 0.5f };
                         const UIVec2 textSize = UI::UILabel::MeasureText(text.empty() ? std::string("...") : text, nullptr, pinSize);
-                        const UI::UIRect field{ textPos - UIVec2{ 4.0f * m_Zoom, 2.0f * m_Zoom }, textPos + textSize + UIVec2{ 4.0f * m_Zoom, 2.0f * m_Zoom } };
+                        const UI::UIRect field{ textPos - UIVec2{ 4.0f * m_View.Zoom, 2.0f * m_View.Zoom }, textPos + textSize + UIVec2{ 4.0f * m_View.Zoom, 2.0f * m_View.Zoom } };
                         const bool fieldHovered = field.Contains(m_DragLast) && m_Drag == Drag::None;
                         const bool fieldActive = m_Drag == Drag::Value && m_ValueDrag.Node == node->Id && m_ValueDrag.Property == pin.Name;
-                        d.AddRoundedRect(field.Min, field.Max, { 1.0f, 1.0f, 1.0f, fieldActive ? 0.14f : fieldHovered ? 0.10f : 0.05f }, glm::vec4(3.0f * m_Zoom));
+                        d.AddRoundedRect(field.Min, field.Max, { 1.0f, 1.0f, 1.0f, fieldActive ? 0.14f : fieldHovered ? 0.10f : 0.05f }, glm::vec4(3.0f * m_View.Zoom));
                         d.AddText(text.empty() ? std::string("...") : text, nullptr, textPos, pinSize, fieldHovered || fieldActive ? UIColor{ 0.95f, 0.96f, 1.0f, 1.0f } : muted);
                         m_ValueHits.push_back({ node->Id, pin.Name, field });
                     }
@@ -1380,7 +1364,7 @@ namespace Nox
                 if (!showText)
                     continue;
                 const UIVec2 extent = UI::UILabel::MeasureText(pin.Name, nullptr, pinSize);
-                d.AddText(pin.Name, nullptr, { p.x - 12.0f * m_Zoom - extent.x, p.y - extent.y * 0.5f }, pinSize, { 0.86f, 0.88f, 0.92f, 1.0f });
+                d.AddText(pin.Name, nullptr, { p.x - 12.0f * m_View.Zoom - extent.x, p.y - extent.y * 0.5f }, pinSize, { 0.86f, 0.88f, 0.92f, 1.0f });
             }
             if (showText)
             {
@@ -1388,12 +1372,12 @@ namespace Nox
                 if (type && type->OwnsSubGraphs)
                 {
                     const std::string states = std::to_string(node->SubGraphs.size()) + (node->SubGraphs.size() == 1 ? " state" : " states") + "  (double-click)";
-                    d.AddText(states, nullptr, { min.x + 10.0f * m_Zoom, max.y - (kRow + kBottom - 4.0f) * m_Zoom }, pinSize, muted);
+                    d.AddText(states, nullptr, { min.x + 10.0f * m_View.Zoom, max.y - (kRow + kBottom - 4.0f) * m_View.Zoom }, pinSize, muted);
                 }
                 if (node->Id == m_Graph->OutputNode)
                 {
-                    const UIVec2 extent = UI::UILabel::MeasureText("OUTPUT", nullptr, 10.0f * m_Zoom);
-                    d.AddText("OUTPUT", nullptr, { max.x - extent.x - 8.0f * m_Zoom, min.y - extent.y - 2.0f * m_Zoom }, 10.0f * m_Zoom, { 0.45f, 0.85f, 0.55f, 1.0f });
+                    const UIVec2 extent = UI::UILabel::MeasureText("OUTPUT", nullptr, 10.0f * m_View.Zoom);
+                    d.AddText("OUTPUT", nullptr, { max.x - extent.x - 8.0f * m_View.Zoom, min.y - extent.y - 2.0f * m_View.Zoom }, 10.0f * m_View.Zoom, { 0.45f, 0.85f, 0.55f, 1.0f });
                 }
             }
         }
@@ -1410,9 +1394,9 @@ namespace Nox
                 if (m_HoveredPin.Valid())
                     color = CanConnect(m_WireFrom, m_HoveredPin, nullptr, nullptr) ? UIColor{ 0.45f, 0.90f, 0.50f, 1.0f } : UIColor{ 0.95f, 0.35f, 0.35f, 1.0f };
                 if (m_WireFrom.Output)
-                    wire(pinPos, m_DragLast, color, 2.5f * std::max(m_Zoom, 0.6f));
+                    wire(pinPos, m_DragLast, color, 2.5f * std::max(m_View.Zoom, 0.6f));
                 else
-                    wire(m_DragLast, pinPos, color, 2.5f * std::max(m_Zoom, 0.6f));
+                    wire(m_DragLast, pinPos, color, 2.5f * std::max(m_View.Zoom, 0.6f));
             }
         }
         if (m_Drag == Drag::Box && m_DragMoved)
@@ -1422,8 +1406,7 @@ namespace Nox
         }
 
         // Where the view is.
-        const std::string zoom = std::format("{:.0f} %", m_Zoom * 100.0f);
-        d.AddText(zoom, nullptr, { b.Max.x - UI::UILabel::MeasureText(zoom, nullptr, 12.0f).x - 10.0f, b.Max.y - 20.0f }, 12.0f, muted);
+        m_View.PaintZoomLabel(d, b, theme);
         d.PopClipRect();
     }
 }

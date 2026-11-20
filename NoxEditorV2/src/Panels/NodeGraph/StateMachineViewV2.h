@@ -6,6 +6,7 @@
 #include <string>
 
 #include "NoxCore/NodeGraph/NodeGraph.h"
+#include "NoxCore/UI/Widgets/UIPanZoom.h"
 #include "NoxCore/UI/Core/UIElement.h"
 
 namespace Nox
@@ -78,8 +79,7 @@ namespace Nox
 
         GraphNode* m_Machine = nullptr;
         std::string m_Domain;
-        UI::UIVec2 m_Pan{ 0.0f };
-        float m_Zoom = 1.0f;
+        UI::UIPanZoom m_View{ {}, 1.0f, 0.25f, 2.5f }; // pan and zoom (wheel: 0.25 .. 2.5)
         bool m_NeedsFrame = true;
 
         enum class Drag : uint8_t { None, Pan, State, Transition };

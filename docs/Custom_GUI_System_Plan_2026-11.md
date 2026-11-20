@@ -700,7 +700,11 @@ collapsible card whose open state is kept by title), `Group`, `ShowWhen`, `Enabl
 menu). The label, subheader and reason colours are theme tokens PropertyLabel / PropertySubheader / PropertyReason with the old values
 as fallbacks. Every settings panel uses it; the inspector's `InspectorCardBuilder` and `CreateCollapsibleCard` build their rows and
 cards with it (their row, header and card classes are gone; the pointer-and-OnMutate rows stay the inspector's).
-Headless UI test: 75 checks pass (40 new for these six).
+`UIPanZoom`: the pan and zoom of a canvas as a value (ToScreen / ToGraph, `ZoomAt` keeps the point under the pointer, `Fit` with a
+margin in pixels or graph units and its own zoom limits, `ResetZoom`, `PaintGrid`, `PaintZoomLabel`) -- the node graph canvas and the
+state machine view hold one instead of their own pan / zoom code. Composition, not a base class: each canvas keeps its own drag
+handling. The World Partition map stays as it is (a view centre and units per pixel, fitted on its first paint, following the camera).
+Headless UI test: 81 checks pass (46 new for these seven); the node-graph canvas test still passes its 17.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

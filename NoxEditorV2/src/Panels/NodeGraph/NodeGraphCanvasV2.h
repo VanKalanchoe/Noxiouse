@@ -10,6 +10,7 @@
 
 #include "NoxCore/NodeGraph/NodeGraph.h"
 #include "NoxCore/NodeGraph/NodeType.h"
+#include "NoxCore/UI/Widgets/UIPanZoom.h"
 #include "NoxCore/UI/Core/UIElement.h"
 
 namespace Nox
@@ -134,8 +135,7 @@ namespace Nox
         uint32_t m_HoveredNode = 0;
         PinRef m_HoveredPin;
 
-        UI::UIVec2 m_Pan{ 0.0f };
-        float m_Zoom = 1.0f;
+        UI::UIPanZoom m_View;                 // pan and zoom (wheel: 0.2 .. 2.5)
         bool m_NeedsFrame = true;
 
         // Where each value on a node is drawn (screen space, refilled each paint; the top node's last).

@@ -129,8 +129,8 @@ namespace Nox
         return { state.EditorPosition, UIVec2(state.EditorPosition) + UIVec2{ width, kBoxHeight } };
     }
 
-    UIVec2 StateMachineViewV2::GraphToScreen(const UIVec2& p) const { return GetBounds().Min + m_Pan + p * m_Zoom; }
-    UIVec2 StateMachineViewV2::ScreenToGraph(const UIVec2& p) const { return (p - GetBounds().Min - m_Pan) / m_Zoom; }
+    UIVec2 StateMachineViewV2::GraphToScreen(const UIVec2& p) const { return m_View.ToScreen(GetBounds(), p); }
+    UIVec2 StateMachineViewV2::ScreenToGraph(const UIVec2& p) const { return m_View.ToGraph(GetBounds(), p); }
 
     bool StateMachineViewV2::ArrowOf(size_t index, UIVec2& from, UIVec2& to) const
     {
@@ -168,7 +168,7 @@ namespace Nox
             if (other.FromState == transition.ToState && other.ToState == transition.FromState)
                 opposite = true;
         }
-        const float offset = ((opposite ? 6.0f : 0.0f) + 10.0f * static_cast<float>(lane)) * std::max(m_Zoom, 0.5f);
+        const float offset = ((opposite ? 6.0f : 0.0f) + 10.0f * static_cast<float>(lane)) * std::max(m_View.Zoom, 0.5f);
         const UIVec2 shift = side * offset;
         from = BoxEdge(minA, maxA, centerB) + shift;
         to = BoxEdge(minB, maxB, centerA) + shift;
@@ -197,7 +197,7 @@ namespace Nox
         {
             const Box box = BoxOf(*it);
             const UIVec2 handle = GraphToScreen({ box.Max.x, (box.Min.y + kHeader + box.Max.y) * 0.5f });
-            if (glm::length(handle - screen) <= (kHandleRadius + 3.0f) * std::max(m_Zoom, 0.6f))
+            if (glm::length(handle - screen) <= (kHandleRadius + 3.0f) * std::max(m_View.Zoom, 0.6f))
                 return it->Id;
         }
         return 0;
@@ -214,7 +214,7 @@ namespace Nox
             UIVec2 from, to;
             if (!ArrowOf(i, from, to))
                 continue;
-            const float button = glm::length((from + to) * 0.5f - screen) - kButtonRadius * std::max(m_Zoom, 0.6f);
+            const float button = glm::length((from + to) * 0.5f - screen) - kButtonRadius * std::max(m_View.Zoom, 0.6f);
             const float distance = std::min(SegmentDistance(screen, from, to), std::max(button, 0.0f));
             if (distance < best)
             {
@@ -233,8 +233,8 @@ namespace Nox
         m_NeedsFrame = false;
         if (m_Machine->SubGraphs.empty())
         {
-            m_Zoom = 1.0f;
-            m_Pan = { b.Width() * 0.3f, b.Height() * 0.4f };
+            m_View.Zoom = 1.0f;
+            m_View.Pan = { b.Width() * 0.3f, b.Height() * 0.4f };
             return;
         }
         UIVec2 min{ 1e9f }, max{ -1e9f };
@@ -244,9 +244,7 @@ namespace Nox
             min = glm::min(min, box.Min);
             max = glm::max(max, box.Max);
         }
-        const UIVec2 size = glm::max(max - min, UIVec2{ 1.0f });
-        m_Zoom = std::clamp(std::min((b.Width() - 120.0f) / size.x, (b.Height() - 120.0f) / size.y), 0.3f, 1.5f);
-        m_Pan = UIVec2{ b.Width(), b.Height() } * 0.5f - (min + size * 0.5f) * m_Zoom;
+        m_View.Fit(b, min, max, 0.3f, 1.5f, 60.0f);
     }
 
     void StateMachineViewV2::AddState(const UIVec2& screen)
@@ -375,12 +373,12 @@ namespace Nox
         switch (m_Drag)
         {
         case Drag::Pan:
-            m_Pan += e.Position - m_DragLast;
+            m_View.Pan += e.Position - m_DragLast;
             break;
         case Drag::State:
             for (NodeSubGraph& state : m_Machine->SubGraphs)
                 if (state.Id == m_DragState)
-                    state.EditorPosition = m_DragOrigin + glm::vec2((e.Position - m_DragStart) / m_Zoom);
+                    state.EditorPosition = m_DragOrigin + glm::vec2((e.Position - m_DragStart) / m_View.Zoom);
             break;
         case Drag::Transition:
             m_HoveredState = StateAt(e.Position);
@@ -441,9 +439,7 @@ namespace Nox
     {
         const UI::UIContext* ctx = UI::UIContext::GetCurrent();
         const UIVec2 pointer = ctx ? ctx->GetLastMousePos() : GetBounds().Center();
-        const UIVec2 before = ScreenToGraph(pointer);
-        m_Zoom = std::clamp(m_Zoom * std::pow(1.15f, e.ScrollDelta.y), 0.25f, 2.5f);
-        m_Pan = pointer - GetBounds().Min - before * m_Zoom;
+        m_View.ZoomAt(GetBounds(), pointer, e.ScrollDelta.y);
         return true;
     }
 
@@ -486,23 +482,13 @@ namespace Nox
         const UIColor muted = theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
         d.AddRoundedRect(b.Min, b.Max, theme.GetToken("Background", { 0.063f, 0.075f, 0.106f, 1.0f }));
         d.PushClipRect(b.Min, b.Max);
-        for (const auto& [step, alpha] : { std::pair{ 16.0f, 0.025f }, std::pair{ 128.0f, 0.05f } })
-        {
-            const float px = step * m_Zoom;
-            if (px < 8.0f)
-                continue;
-            const UIColor line{ 1.0f, 1.0f, 1.0f, alpha };
-            for (float x = b.Min.x + std::fmod(m_Pan.x, px) - (m_Pan.x < 0 ? 0.0f : px); x < b.Max.x; x += px)
-                d.AddRoundedRect({ x, b.Min.y }, { x + 1.0f, b.Max.y }, line);
-            for (float y = b.Min.y + std::fmod(m_Pan.y, px) - (m_Pan.y < 0 ? 0.0f : px); y < b.Max.y; y += px)
-                d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + 1.0f }, line);
-        }
+        m_View.PaintGrid(d, b);
         if (!m_Machine)
         {
             d.PopClipRect();
             return;
         }
-        const float z = std::max(m_Zoom, 0.6f);
+        const float z = std::max(m_View.Zoom, 0.6f);
         const auto arrow = [&](const UIVec2& from, const UIVec2& to, const UIColor& color, float width)
         {
             UIVec2 direction = to - from;
@@ -533,7 +519,7 @@ namespace Nox
             const float r = kButtonRadius * z;
             const NodeTransition& transition = m_Machine->Transitions[i];
             d.AddRoundedRect(middle - UIVec2{ r }, middle + UIVec2{ r }, { 0.12f, 0.14f, 0.19f, 1.0f }, glm::vec4(r), 1.5f * z, color);
-            if (m_Zoom >= 0.5f)
+            if (m_View.Zoom >= 0.5f)
             {
                 const std::string count = transition.AtStateEnd && transition.Rules.empty() ? std::string("E") : std::to_string(transition.Rules.size());
                 const UIVec2 extent = UI::UILabel::MeasureText(count, nullptr, 10.0f * z);
@@ -554,7 +540,7 @@ namespace Nox
 
         // States.
         const uint32_t entry = EntryState(*m_Machine);
-        const bool showText = m_Zoom >= 0.4f;
+        const bool showText = m_View.Zoom >= 0.4f;
         for (const NodeSubGraph& state : m_Machine->SubGraphs)
         {
             const Box box = BoxOf(state);
@@ -564,20 +550,20 @@ namespace Nox
             const bool selected = state.Id == SelectedState;
             const bool hovered = state.Id == m_HoveredState;
             const bool isEntry = state.Id == entry;
-            const float radius = 8.0f * m_Zoom;
+            const float radius = 8.0f * m_View.Zoom;
             d.AddRoundedRect(min, max, { 0.11f, 0.13f, 0.18f, 0.97f }, glm::vec4(radius), selected ? 2.0f : 1.0f,
                              selected ? accent : (hovered ? UIColor{ border.r + 0.12f, border.g + 0.12f, border.b + 0.14f, 1.0f } : border),
-                             { 0.0f, 0.0f, 0.0f, 0.45f }, { 0.0f, 4.0f * m_Zoom }, 12.0f * m_Zoom);
-            d.AddRoundedRect(min, { max.x, min.y + kHeader * m_Zoom }, isEntry ? UIColor{ 0.22f, 0.53f, 0.35f, 1.0f } : UIColor{ 0.59f, 0.24f, 0.24f, 1.0f },
+                             { 0.0f, 0.0f, 0.0f, 0.45f }, { 0.0f, 4.0f * m_View.Zoom }, 12.0f * m_View.Zoom);
+            d.AddRoundedRect(min, { max.x, min.y + kHeader * m_View.Zoom }, isEntry ? UIColor{ 0.22f, 0.53f, 0.35f, 1.0f } : UIColor{ 0.59f, 0.24f, 0.24f, 1.0f },
                              { radius, radius, 0.0f, 0.0f });
             if (showText)
             {
                 const std::string name = state.Name.empty() ? std::string("State") : state.Name;
-                const float size = kTitleFont * m_Zoom;
+                const float size = kTitleFont * m_View.Zoom;
                 const UIVec2 extent = UI::UILabel::MeasureText(name, nullptr, size);
-                d.AddText(name, nullptr, { min.x + 10.0f * m_Zoom, min.y + (kHeader * m_Zoom - extent.y) * 0.5f }, size, { 1.0f, 1.0f, 1.0f, 0.96f });
+                d.AddText(name, nullptr, { min.x + 10.0f * m_View.Zoom, min.y + (kHeader * m_View.Zoom - extent.y) * 0.5f }, size, { 1.0f, 1.0f, 1.0f, 0.96f });
                 const std::string info = std::to_string(state.Graph.Nodes.size()) + (state.Graph.Nodes.size() == 1 ? " node" : " nodes") + (isEntry ? "   entry" : "");
-                d.AddText(info, nullptr, { min.x + 10.0f * m_Zoom, min.y + (kHeader + 5.0f) * m_Zoom }, 11.5f * m_Zoom, muted);
+                d.AddText(info, nullptr, { min.x + 10.0f * m_View.Zoom, min.y + (kHeader + 5.0f) * m_View.Zoom }, 11.5f * m_View.Zoom, muted);
             }
             // The handle transitions are dragged out of.
             const UIVec2 handle = GraphToScreen({ box.Max.x, (box.Min.y + kHeader + box.Max.y) * 0.5f });
@@ -586,8 +572,7 @@ namespace Nox
         }
         if (m_Machine->SubGraphs.empty())
             d.AddText("No states: right-click > Add State.", nullptr, b.Min + UIVec2{ 12.0f, 12.0f }, 13.5f, muted);
-        const std::string zoom = std::format("{:.0f} %", m_Zoom * 100.0f);
-        d.AddText(zoom, nullptr, { b.Max.x - UI::UILabel::MeasureText(zoom, nullptr, 12.0f).x - 10.0f, b.Max.y - 20.0f }, 12.0f, muted);
+        m_View.PaintZoomLabel(d, b, theme);
         d.PopClipRect();
     }
 }
