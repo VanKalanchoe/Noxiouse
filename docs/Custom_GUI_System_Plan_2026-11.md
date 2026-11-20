@@ -681,7 +681,12 @@ class, the inspector's "..." and chevron-toggle classes, and is the base of `UIV
 icons). `UILevelMeter`: an audio meter, left and right, linear levels mapped over MinDb..MaxDb, RMS fill with a peak line or a peak
 fill, vertical with dB ticks or horizontal with the dB written on the bars, theme tokens MeterBackground / MeterLow / MeterLoud /
 MeterClip, `Source` read each frame, dB tooltip -- replaces the Mixer's strip meter and the audio graph preview's voice meter.
-Headless UI test: 45 checks pass (10 new for these two).
+`UICurveEditor` (was a 0..1 demo widget): now also `Range::FitKeys` (any values, the view follows the keys with a margin and holds
+still during a drag, zero lines, the range written in a corner), `Keys` (edit someone else's vector), `Evaluator` (draw with the
+curve's own interpolation), `AddOnDoubleClick`, `OnChanging` (each drag step) / `OnKeyCountChanged` (a key added or removed) --
+replaces the node graph's `CurveEditView`; the default stays the old 0..1 editor. The Timeline's curves view stays in the editor: it
+draws up to four channels per key and shares the track lanes' time axis and scroll, which a one-curve widget does not have.
+Headless UI test: 52 checks pass (17 new for these three).
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

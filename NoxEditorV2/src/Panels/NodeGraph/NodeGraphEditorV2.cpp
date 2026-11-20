@@ -22,6 +22,7 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/MaterialGraph.h"
+#include "NoxCore/UI/Widgets/UICurveEditor.h"
 #include "NoxCore/UI/Widgets/UILevelMeter.h"
 #include "NoxCore/UI/Core/UIContext.h"
 #include "NoxCore/UI/Layout/UILayout.h"
@@ -56,167 +57,6 @@ namespace Nox
                     RenameParameterReferences(state.Graph, oldName, newName);
             }
         }
-
-        // A curve (x -> y) to see and shape: key dots dragged (kept between their neighbours), a double-click adds a key there, a
-        // right click on a key removes it. The range follows the keys (held still while one is dragged).
-        class CurveEditView final : public UI::UIElement
-        {
-        public:
-            CurveEditView(std::function<NodeGraphCurve*()> curve, std::function<void()> changing, std::function<void()> reshaped)
-                : m_Curve(std::move(curve)), m_Changing(std::move(changing)), m_Reshaped(std::move(reshaped))
-            {
-                HitTestMode = UI::UIHitTestMode::Self;
-                WidthMode = UI::UISizeMode::Fill;
-                HeightMode = UI::UISizeMode::Fixed;
-                FixedSize = { 0.0f, 120.0f };
-                Tooltip = "Drag a key; double-click to add one; right-click a key to remove it.";
-            }
-            bool OnPointerDown(const UI::UIPointerEvent& e) override
-            {
-                NodeGraphCurve* curve = m_Curve();
-                if (!curve)
-                    return true;
-                if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
-                    ctx->CancelPendingDrag();
-                const int key = KeyAt(*curve, e.Position);
-                if (e.Button == 3 && key >= 0)
-                {
-                    curve->Keys.erase(curve->Keys.begin() + key);
-                    m_Reshaped();
-                    return true;
-                }
-                if (e.Button != 1)
-                    return false;
-                const auto now = std::chrono::steady_clock::now();
-                const bool quick = now - m_LastClick < std::chrono::milliseconds(350);
-                m_LastClick = now;
-                if (key >= 0)
-                {
-                    m_Dragged = key;
-                    return true;
-                }
-                if (quick)
-                {
-                    const glm::vec2 point = ToCurve(e.Position);
-                    const auto at = std::upper_bound(curve->Keys.begin(), curve->Keys.end(), point.x, [](float x, const glm::vec2& k) { return x < k.x; });
-                    curve->Keys.insert(at, point);
-                    m_Reshaped();
-                }
-                return true;
-            }
-            bool OnPointerMove(const UI::UIPointerEvent& e) override
-            {
-                NodeGraphCurve* curve = m_Curve();
-                if (m_Dragged < 0 || !curve || m_Dragged >= static_cast<int>(curve->Keys.size()))
-                    return true;
-                glm::vec2 point = ToCurve(e.Position);
-                const size_t i = static_cast<size_t>(m_Dragged);
-                if (i > 0)
-                    point.x = std::max(point.x, curve->Keys[i - 1].x);
-                if (i + 1 < curve->Keys.size())
-                    point.x = std::min(point.x, curve->Keys[i + 1].x);
-                curve->Keys[i] = point;
-                m_Changing();
-                return true;
-            }
-            bool OnPointerUp(const UI::UIPointerEvent&) override
-            {
-                m_Dragged = -1;
-                return true;
-            }
-
-        protected:
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
-            {
-                const UI::UIRect b = GetBounds();
-                d.AddRoundedRect(b.Min, b.Max, theme.GetToken("Background", { 0.063f, 0.075f, 0.106f, 1.0f }), glm::vec4(4.0f), 1.0f,
-                                 theme.GetToken("Border", { 0.20f, 0.235f, 0.32f, 1.0f }));
-                NodeGraphCurve* curve = m_Curve();
-                if (!curve)
-                    return;
-                if (m_Dragged < 0)
-                {
-                    // The keys' range with a margin (one key, or all at one height: a unit around them).
-                    glm::vec2 low(0.0f), high(1.0f);
-                    if (!curve->Keys.empty())
-                    {
-                        low = high = curve->Keys.front();
-                        for (const glm::vec2& key : curve->Keys)
-                        {
-                            low = glm::min(low, key);
-                            high = glm::max(high, key);
-                        }
-                    }
-                    for (int axis = 0; axis < 2; ++axis)
-                        if (high[axis] - low[axis] < 1e-4f)
-                        {
-                            low[axis] -= 0.5f;
-                            high[axis] += 0.5f;
-                        }
-                    const glm::vec2 margin = (high - low) * 0.12f;
-                    m_Low = low - margin;
-                    m_High = high + margin;
-                }
-                d.PushClipRect(b.Min, b.Max);
-                const UI::UIColor axisColor{ 1.0f, 1.0f, 1.0f, 0.10f };
-                if (m_Low.y < 0.0f && m_High.y > 0.0f)
-                {
-                    const float y = ToScreen({ 0.0f, 0.0f }).y;
-                    d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + 1.0f }, axisColor);
-                }
-                if (m_Low.x < 0.0f && m_High.x > 0.0f)
-                {
-                    const float x = ToScreen({ 0.0f, 0.0f }).x;
-                    d.AddRoundedRect({ x, b.Min.y }, { x + 1.0f, b.Max.y }, axisColor);
-                }
-                const UI::UIColor line = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
-                constexpr int kSamples = 96;
-                UI::UIVec2 previous = ToScreen({ m_Low.x, curve->Evaluate(m_Low.x) });
-                for (int s = 1; s <= kSamples; ++s)
-                {
-                    const float x = m_Low.x + (m_High.x - m_Low.x) * static_cast<float>(s) / kSamples;
-                    const UI::UIVec2 point = ToScreen({ x, curve->Evaluate(x) });
-                    d.AddBezier(previous, previous, point, point, 2.0f, line);
-                    previous = point;
-                }
-                for (size_t i = 0; i < curve->Keys.size(); ++i)
-                {
-                    const UI::UIVec2 p = ToScreen(curve->Keys[i]);
-                    const float r = static_cast<int>(i) == m_Dragged ? 5.5f : 4.5f;
-                    d.AddRoundedRect(p - UI::UIVec2{ r }, p + UI::UIVec2{ r }, { 1.0f, 0.82f, 0.35f, 1.0f }, glm::vec4(r), 1.0f, { 0.05f, 0.05f, 0.05f, 1.0f });
-                }
-                d.AddText(std::format("x {:.3g} .. {:.3g}   y {:.3g} .. {:.3g}", m_Low.x, m_High.x, m_Low.y, m_High.y), nullptr, { b.Min.x + 6.0f, b.Min.y + 4.0f },
-                          11.0f, theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f }));
-                d.PopClipRect();
-            }
-
-        private:
-            UI::UIVec2 ToScreen(const glm::vec2& p) const
-            {
-                const UI::UIRect b = GetBounds();
-                const glm::vec2 t = (p - m_Low) / glm::max(m_High - m_Low, glm::vec2(1e-6f));
-                return { b.Min.x + t.x * b.Width(), b.Max.y - t.y * b.Height() };
-            }
-            glm::vec2 ToCurve(const UI::UIVec2& p) const
-            {
-                const UI::UIRect b = GetBounds();
-                const glm::vec2 t{ (p.x - b.Min.x) / std::max(b.Width(), 1.0f), (b.Max.y - p.y) / std::max(b.Height(), 1.0f) };
-                return m_Low + glm::clamp(t, 0.0f, 1.0f) * (m_High - m_Low);
-            }
-            int KeyAt(const NodeGraphCurve& curve, const UI::UIVec2& p) const
-            {
-                for (size_t i = 0; i < curve.Keys.size(); ++i)
-                    if (glm::length(ToScreen(curve.Keys[i]) - p) <= 7.0f)
-                        return static_cast<int>(i);
-                return -1;
-            }
-
-            std::function<NodeGraphCurve*()> m_Curve;
-            std::function<void()> m_Changing, m_Reshaped;
-            int m_Dragged = -1;
-            glm::vec2 m_Low{ 0.0f }, m_High{ 1.0f };
-            std::chrono::steady_clock::time_point m_LastClick{};
-        };
 
         Ref<UI::UILabel> MutedLabel(const std::string& text, float size = 13.0f)
         {
@@ -1015,7 +855,19 @@ namespace Nox
                 return nullptr;
             };
             builder.AddSubheader(label, "x (what comes in) -> y (what goes out)");
-            Ref<CurveEditView> view(new CurveEditView(curveOf, [this]() { MarkEdited(true); }, [this, rebuild]() { MarkEdited(true); if (rebuild) rebuild(); }));
+            // The curve to see and shape (UI::UICurveEditor over the node's keys): drag a key, double-click to add one, right-click a key
+            // to remove it; the view follows the keys.
+            Ref<UI::UICurveEditor> view(new UI::UICurveEditor({}));
+            view->RangeMode = UI::UICurveEditor::Range::FitKeys;
+            view->AddOnDoubleClick = true;
+            view->Keys = [curveOf]() -> std::vector<UI::UIVec2>* { NodeGraphCurve* c = curveOf(); return c ? &c->Keys : nullptr; };
+            view->Evaluator = [curveOf](float x) { const NodeGraphCurve* c = curveOf(); return c ? c->Evaluate(x) : 0.0f; };
+            view->OnChanging = [this]() { MarkEdited(true); };
+            view->OnKeyCountChanged = [this, rebuild]() { MarkEdited(true); if (rebuild) rebuild(); };
+            view->HeightMode = UI::UISizeMode::Fixed;
+            view->FixedSize = { 0.0f, 120.0f };
+            view->Padding = UI::UIThickness::All(4.0f);
+            view->Tooltip = "Drag a key; double-click to add one; right-click a key to remove it.";
             builder.Body->AddChild(view);
             NodeGraphCurve* curve = curveOf();
             for (size_t k = 0; curve && k < curve->Keys.size(); ++k)
