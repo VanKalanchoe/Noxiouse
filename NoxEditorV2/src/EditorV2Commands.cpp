@@ -75,7 +75,7 @@ namespace Nox
             command.Label = label;
             command.Category = category;
             command.Description = description;
-            command.Scope = scope;
+            command.Scope = static_cast<uint32_t>(scope);
             command.DefaultKey = key;
             command.DefaultAltKey = altKey;
             command.Execute = std::move(run);
@@ -319,8 +319,8 @@ namespace Nox
             auto label = UI::Label(command.Label, 13.5f);
             label->WidthMode = UI::UISizeMode::Fill;
             label->VAlign = UI::UIAlignment::Center;
-            const char* scope = command.Scope == CommandScope::Global ? "anywhere in the editor"
-                              : command.Scope == CommandScope::Viewport ? "the pointer over a viewport, the level editor has the keyboard"
+            const char* scope = static_cast<CommandScope>(command.Scope) == CommandScope::Global ? "anywhere in the editor"
+                              : static_cast<CommandScope>(command.Scope) == CommandScope::Viewport ? "the pointer over a viewport, the level editor has the keyboard"
                                                                         : "the level editor (viewport, Scene Hierarchy, Inspector) has the keyboard";
             label->Tooltip = (command.Description.empty() ? std::string() : command.Description + "\n") + "Works when: " + scope;
             row->AddChild(label);
