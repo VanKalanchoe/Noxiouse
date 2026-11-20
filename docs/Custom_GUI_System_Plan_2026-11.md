@@ -639,7 +639,8 @@ Not run on a GPU.
 
 **E10 -- UI text from a glyph cache (built, not run on a GPU / not user-tested).** `UI/Rendering/UIGlyphCache` (CPU) and
 `Renderer/RendererGlyphAtlas.cpp` (GPU). Text up to 48 px is no longer shrunk from the 40 px MSDF atlas: each glyph is rasterized by
-stb_truetype (the copy ImGui ships, compiled static) at the size it is shown -- sizes in steps of 1/2 px, the pen's x in steps of 1/4 px
+FreeType (first stb_truetype; against a 16x-supersampled reference FreeType is within 0.025 per pixel, stb_truetype was off by up
+to 0.25) at the size it is shown -- sizes in steps of 1/2 px, the pen's x in steps of 1/4 px
 (the glyph rasterized with that offset) -- into one 2048 x 2048 R8 coverage atlas, and drawn as a quad on whole pixels (baselines snapped)
 that reads its texel per pixel (`UI_PRIM_GLYPH_BITMAP`). Layout (advances, kerning, line height, MeasureText) is unchanged: still the
 font's metrics, so nothing moves. Larger text, and world text (Renderer2D / TextComponent), keep the MSDF. New glyphs go into shelves;
@@ -649,7 +650,7 @@ copied before its submission and the CPU waits for that copy. A full atlas: what
 is emptied after the frame (the GPU finishes first). Engine changes for it: `NRI::ImageFormat::R8_UNORM` (appended: the enum's values are
 in cooked files), `TextureRegionUpload::rowPitch` (Vulkan read staging rows tightly packed, D3D12 at 256-byte pitch -- a glyph upload
 gives the pitch, so both read the same layout), `Font::GetFontBytes` / `GetCacheId`. Checked offline: the real `UIGlyphCache` with
-AddText's placement against the old path rebuilt on the CPU (msdfgen at 40 px/em, range 2, 8-bit, one bilinear tap, the shader's
+AddText's placement against the old path rebuilt on the CPU (the reference: FreeType at the exact sub-pixel position) (msdfgen at 40 px/em, range 2, 8-bit, one bilinear tap, the shader's
 formula), both against exact area coverage at the same position -- per-pixel error as a share of the text's contrast: "Ready" at 13 px
 old rms 0.017 / max 0.36, new 0.006 / 0.12; 12.5-13.5 px lines old max 0.44-0.49, new 0.12; 9.4 px (a graph at 75 %) old 0.048 / 0.58,
 new 0.009 / 0.15; 6.25 px (50 %) old 0.044 / 0.63, new 0.009 / 0.20 (the new path's error is only the quarter-pixel pen and half-pixel

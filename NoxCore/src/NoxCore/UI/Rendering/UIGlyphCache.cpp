@@ -7,19 +7,32 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Renderer/Font.h"
 
-// stb_truetype (the copy Dear ImGui ships), compiled static into this file: ImGui compiles its own static copy, so neither sees the other.
-#define STBTT_STATIC
-#define STB_TRUETYPE_IMPLEMENTATION
-#include "imstb_truetype.h"
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_OUTLINE_H
 
 namespace Nox::UI
 {
+    struct UIGlyphCache::Library
+    {
+        FT_Library Handle = nullptr;
+        ~Library()
+        {
+            if (Handle)
+                FT_Done_FreeType(Handle);
+        }
+    };
+
     struct UIGlyphCache::FontFace
     {
-        std::vector<uint8_t> Bytes; // (stb_truetype reads the file in place: kept as long as the face)
-        stbtt_fontinfo Info{};
-        bool Valid = false;
+        std::vector<uint8_t> Bytes; // (FreeType reads the file in place: kept as long as the face)
+        FT_Face Face = nullptr;
         uint32_t Index = 0;         // a small number for the glyph keys
+        ~FontFace()
+        {
+            if (Face)
+                FT_Done_Face(Face);
+        }
     };
 
     UIGlyphCache& UIGlyphCache::Get()
@@ -29,11 +42,19 @@ namespace Nox::UI
     }
 
     UIGlyphCache::UIGlyphCache()
-        : m_Pixels(static_cast<size_t>(kAtlasSize) * kAtlasSize, 0)
+        : m_Library(std::make_unique<Library>()), m_Pixels(static_cast<size_t>(kAtlasSize) * kAtlasSize, 0)
     {
+        if (FT_Init_FreeType(&m_Library->Handle) != 0)
+        {
+            m_Library->Handle = nullptr;
+            NOX_CORE_ERROR("UI text: FreeType could not be initialized; text is drawn from the distance field");
+        }
     }
 
-    UIGlyphCache::~UIGlyphCache() = default;
+    UIGlyphCache::~UIGlyphCache()
+    {
+        m_Faces.clear(); // (faces before the library)
+    }
 
     float UIGlyphCache::QuantizeSize(float pixelSize)
     {
@@ -48,13 +69,11 @@ namespace Nox::UI
         auto face = std::make_unique<FontFace>();
         face->Bytes = font.GetFontBytes();
         face->Index = static_cast<uint32_t>(m_Faces.size());
-        if (!face->Bytes.empty())
-        {
-            const int offset = stbtt_GetFontOffsetForIndex(face->Bytes.data(), 0);
-            face->Valid = offset >= 0 && stbtt_InitFont(&face->Info, face->Bytes.data(), offset) != 0;
-        }
-        if (!face->Valid)
-            NOX_CORE_WARN("UI text: a font could not be read by stb_truetype; its text is drawn from the distance field");
+        if (m_Library->Handle && !face->Bytes.empty() &&
+            FT_New_Memory_Face(m_Library->Handle, face->Bytes.data(), static_cast<FT_Long>(face->Bytes.size()), 0, &face->Face) != 0)
+            face->Face = nullptr;
+        if (!face->Face || !FT_IS_SCALABLE(face->Face))
+            NOX_CORE_WARN("UI text: a font could not be read as an outline font; its text is drawn from the distance field");
         FontFace* raw = face.get();
         m_Faces.emplace(font.GetCacheId(), std::move(face));
         return raw;
@@ -65,7 +84,7 @@ namespace Nox::UI
         if (m_TextureSlot == ~0u || pixelSize <= 0.0f || pixelSize > kMaxPixelSize)
             return nullptr;
         FontFace* face = FaceOf(font);
-        if (!face || !face->Valid)
+        if (!face || !face->Face || !FT_IS_SCALABLE(face->Face))
             return nullptr;
         const float size = QuantizeSize(pixelSize);
         const uint32_t sizeStep = static_cast<uint32_t>(size * 2.0f);
@@ -77,21 +96,32 @@ namespace Nox::UI
         if (m_ResetRequested)
             return nullptr; // (full: nothing new until the atlas is emptied between frames)
 
-        // Rasterized now: the font's scale for this pixel height (ascender to descender, as the distance-field layout uses), the
-        // pen offset as a sub-pixel shift.
-        const int glyphIndex = stbtt_FindGlyphIndex(&face->Info, static_cast<int>(codepoint));
-        const float scale = stbtt_ScaleForPixelHeight(&face->Info, size);
-        const float shift = static_cast<float>(phase) / static_cast<float>(kSubpixelPhases);
-        int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-        stbtt_GetGlyphBitmapBoxSubpixel(&face->Info, glyphIndex, scale, scale, shift, 0.0f, &x0, &y0, &x1, &y1);
+        // The size: `size` pixels from ascender to descender (the font's hhea metrics, as the distance-field layout uses), as an em
+        // size in 26.6 fixed point at 72 dpi (1 point = 1 pixel). Unhinted (the layout's advances are unhinted too), the outline moved
+        // right by the pen's phase before it is rendered. (FreeType's coverage is exact area coverage: against a 16x-supersampled
+        // reference it is within 0.025 per pixel; stb_truetype, used first, was off by up to 0.25.)
+        FT_Face ftFace = face->Face;
+        const double heightUnits = static_cast<double>(ftFace->ascender) - static_cast<double>(ftFace->descender);
+        if (heightUnits <= 0.0)
+            return nullptr;
+        const double emPixels = size * static_cast<double>(ftFace->units_per_EM) / heightUnits;
+        if (FT_Set_Char_Size(ftFace, 0, static_cast<FT_F26Dot6>(std::lround(emPixels * 64.0)), 72, 72) != 0)
+            return nullptr;
+        const FT_UInt glyphIndex = FT_Get_Char_Index(ftFace, codepoint);
+        if (FT_Load_Glyph(ftFace, glyphIndex, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP) != 0 || ftFace->glyph->format != FT_GLYPH_FORMAT_OUTLINE)
+            return nullptr;
+        FT_Outline_Translate(&ftFace->glyph->outline, static_cast<FT_Pos>(phase * 64 / kSubpixelPhases), 0);
+        if (FT_Render_Glyph(ftFace->glyph, FT_RENDER_MODE_NORMAL) != 0)
+            return nullptr;
+        const FT_Bitmap& bitmap = ftFace->glyph->bitmap;
         Glyph glyph;
-        const int width = x1 - x0, height = y1 - y0;
-        if (width <= 0 || height <= 0)
+        const uint32_t width = bitmap.width, height = bitmap.rows;
+        if (width == 0 || height == 0 || bitmap.pixel_mode != FT_PIXEL_MODE_GRAY)
             return &m_Glyphs.emplace(key, glyph).first->second; // (nothing to draw: a space)
 
         // A place on the current shelf, or a new shelf below it; a texel of empty border around it (linear sampling never reaches
         // a neighbour).
-        const uint32_t paddedW = static_cast<uint32_t>(width) + 2, paddedH = static_cast<uint32_t>(height) + 2;
+        const uint32_t paddedW = width + 2, paddedH = height + 2;
         if (paddedW > kAtlasSize || paddedH > kAtlasSize)
             return nullptr;
         if (m_CursorX + paddedW > kAtlasSize)
@@ -112,8 +142,8 @@ namespace Nox::UI
 
         for (uint32_t row = 0; row < paddedH; ++row)
             std::memset(&m_Pixels[static_cast<size_t>(ay + row) * kAtlasSize + ax], 0, paddedW);
-        stbtt_MakeGlyphBitmapSubpixel(&face->Info, &m_Pixels[static_cast<size_t>(ay + 1) * kAtlasSize + ax + 1], width, height,
-                                      static_cast<int>(kAtlasSize), scale, scale, shift, 0.0f, glyphIndex);
+        for (uint32_t row = 0; row < height; ++row)
+            std::memcpy(&m_Pixels[static_cast<size_t>(ay + 1 + row) * kAtlasSize + ax + 1], bitmap.buffer + static_cast<ptrdiff_t>(row) * bitmap.pitch, width);
         if (!m_Pending.empty() && m_Pending.back().Y == ay && m_Pending.back().X + m_Pending.back().W == ax)
         {
             m_Pending.back().W += paddedW;
@@ -123,12 +153,12 @@ namespace Nox::UI
             m_Pending.push_back({ ax, ay, paddedW, paddedH });
 
         const float texel = 1.0f / static_cast<float>(kAtlasSize);
-        glyph.X0 = static_cast<int16_t>(x0);
-        glyph.Y0 = static_cast<int16_t>(y0);
+        glyph.X0 = static_cast<int16_t>(ftFace->glyph->bitmap_left);
+        glyph.Y0 = static_cast<int16_t>(-ftFace->glyph->bitmap_top);
         glyph.W = static_cast<uint16_t>(width);
         glyph.H = static_cast<uint16_t>(height);
-        glyph.UV = { static_cast<float>(ax + 1) * texel, static_cast<float>(ay + 1) * texel,
-                     static_cast<float>(ax + 1 + static_cast<uint32_t>(width)) * texel, static_cast<float>(ay + 1 + static_cast<uint32_t>(height)) * texel };
+        glyph.UV = glm::vec4(static_cast<float>(ax + 1) * texel, static_cast<float>(ay + 1) * texel,
+                             static_cast<float>(ax + 1 + width) * texel, static_cast<float>(ay + 1 + height) * texel);
         return &m_Glyphs.emplace(key, glyph).first->second;
     }
 

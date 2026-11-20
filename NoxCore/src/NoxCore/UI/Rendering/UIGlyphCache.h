@@ -15,7 +15,7 @@ namespace Nox
 namespace Nox::UI
 {
     // Screen text at the size it is shown (Unreal Slate's font cache, Dear ImGui 1.92's dynamic fonts): each glyph is rasterized
-    // once per pixel size and sub-pixel phase by stb_truetype into one 8-bit coverage atlas, and drawn texel for pixel. A multi-
+    // once per pixel size and sub-pixel phase by FreeType into one 8-bit coverage atlas, and drawn texel for pixel. A multi-
     // channel distance field shrunk from a large atlas cannot do this: below its size the distance range covers less than a pixel
     // and edges go wavy, and nothing snaps to the pixel grid. Text above kMaxPixelSize keeps the distance field (it scales).
     //
@@ -69,9 +69,11 @@ namespace Nox::UI
 
     private:
         UIGlyphCache();
+        struct Library;
         struct FontFace;
         FontFace* FaceOf(const Font& font);
 
+        std::unique_ptr<Library> m_Library;
         std::unordered_map<uint64_t, std::unique_ptr<FontFace>> m_Faces; // by Font::GetCacheId
         std::unordered_map<uint64_t, Glyph> m_Glyphs;                    // by face, size step, phase, codepoint
         std::vector<uint8_t> m_Pixels;
