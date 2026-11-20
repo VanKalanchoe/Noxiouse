@@ -703,14 +703,15 @@ cards with it (their row, header and card classes are gone; the pointer-and-OnMu
 `UIPanZoom`: the pan and zoom of a canvas as a value (ToScreen / ToGraph, `ZoomAt` keeps the point under the pointer, `Fit` with a
 margin in pixels or graph units and its own zoom limits, `ResetZoom`, `PaintGrid`, `PaintZoomLabel`) -- the node graph canvas and the
 state machine view hold one instead of their own pan / zoom code. Composition, not a base class: each canvas keeps its own drag
-handling. The World Partition map stays as it is (a view centre and units per pixel, fitted on its first paint, following the camera).
+handling. The World Partition map holds one too (`CenterOn` for following the camera, `Fit` on its first paint, the wheel at 1/0.85 a
+notch within 1e-7..1000 px per world unit, as before).
 `UICommandList` (UI/Core; was the editor's `EditorCommandList`, moved): `UICommand` (id, label, category, description, a `Scope`
 number the application gives a meaning, two default and two bound `UIKeyChord`s, Execute / CanExecute), `ShortcutText`, `FindForKey`
 with a scope filter (the first bound command the filter allows that can run now), `Bind` (takes the key from its old owner),
 `ResetToDefault`, `Load` / `Save` of the keys that differ from the defaults, `UIKeyChord::ToString` / `Parse` / `TypesText`. The
 editor's `EditorCommandList` is now only its three scopes (Global / Level / Viewport) and its file header on top of it. In NoxUI the
 chord holds a `UIKey` (names from `GetKeyName`; all 84 keys round-trip).
-Headless UI test: 81 checks pass (46 new for these seven); the node-graph canvas test still passes its 17; the command-list test its 20.
+Headless UI test: 82 checks pass (47 new for these seven); the node-graph canvas test still passes its 17; the command-list test its 20.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

@@ -10,7 +10,7 @@ namespace Nox::UI
     class UIDrawList;
     class UITheme;
 
-    // The pan and zoom of a canvas (a node graph, a state machine): graph units to screen pixels, screen = bounds.Min + Pan + p * Zoom.
+    // The pan and zoom of a canvas (a node graph, a state machine, a map): graph units to screen pixels, screen = bounds.Min + Pan + p * Zoom.
     // A canvas keeps one and draws through it; the wheel zooms around the pointer (ZoomAt: the point under it stays under it),
     // Fit frames a box, PaintGrid draws the background grid and PaintZoomLabel the "100 %" in the corner.
     struct UIPanZoom
@@ -38,6 +38,8 @@ namespace Nox::UI
             Zoom = std::clamp(std::min((bounds.Width() - marginPixels * 2.0f) / size.x, (bounds.Height() - marginPixels * 2.0f) / size.y), minZoom, maxZoom);
             Pan = bounds.Size() * 0.5f - (min + max) * 0.5f * Zoom;
         }
+        // The graph point `p` in the middle of the view, the zoom kept (a map following the camera).
+        void CenterOn(const UIRect& bounds, const UIVec2& p) { Pan = bounds.Size() * 0.5f - p * Zoom; }
         // Zoom 1 around the graph point now in the middle of the view.
         void ResetZoom(const UIRect& bounds)
         {

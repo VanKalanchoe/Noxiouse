@@ -7,6 +7,7 @@
 
 #include <SDL3/SDL_keyboard.h>
 
+#include "NoxCore/UI/Widgets/UIPanZoom.h"
 #include "NoxCore/UI/Widgets/UIPropertyRows.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Scene/HLODBuilder.h"
@@ -77,7 +78,7 @@ namespace Nox
             HitTestMode = UI::UIHitTestMode::Self;
             ClipChildren = true;
         }
-        void FitNextPaint() { m_UnitsPerPixel = 0.0f; }
+        void FitNextPaint() { m_NeedsFit = true; }
 
         bool OnPointerDown(const UI::UIPointerEvent& e) override
         {
@@ -115,7 +116,7 @@ namespace Nox
             m_Pointer = e.Position;
             if (m_Panning)
             {
-                m_ViewCenter -= glm::vec2(delta.x, delta.y) * m_UnitsPerPixel;
+                m_View.Pan += delta;
                 if (FollowCamera)
                     *FollowCamera = false;
             }
@@ -141,7 +142,7 @@ namespace Nox
                 Selection->clear();
             const glm::vec2 end = ToWorld(e.Position);
             const glm::vec2 low = glm::min(m_BoxStart, end), high = glm::max(m_BoxStart, end);
-            if (glm::length(high - low) / m_UnitsPerPixel < 4.0f)
+            if (glm::length(high - low) * m_View.Zoom < 4.0f)
             {
                 if (const WorldCellCoord* cell = CellAt(e.Position))
                     Selection->insert(*cell);
@@ -160,11 +161,9 @@ namespace Nox
 
         bool OnMouseWheel(const UI::UIPointerEvent& e) override
         {
-            if (m_UnitsPerPixel <= 0.0f)
+            if (m_NeedsFit)
                 return true;
-            const glm::vec2 before = ToWorld(e.Position);
-            m_UnitsPerPixel = std::clamp(m_UnitsPerPixel * std::pow(0.85f, e.ScrollDelta.y), 1e-3f, 1e7f);
-            m_ViewCenter += before - ToWorld(e.Position);
+            m_View.ZoomAt(GetBounds(), e.Position, e.ScrollDelta.y, 1.0f / 0.85f);
             if (FollowCamera)
                 *FollowCamera = false;
             return true;
@@ -186,7 +185,7 @@ namespace Nox
             const glm::dvec3 camera = GetCamera ? GetCamera() : glm::dvec3(0.0);
             const std::vector<WorldCellCoord> cells = AllCells(*scene);
 
-            if (m_UnitsPerPixel <= 0.0f)
+            if (m_NeedsFit)
             {
                 glm::vec2 low(camera.x, camera.z), high = low;
                 for (const WorldCellCoord& cell : cells)
@@ -198,15 +197,15 @@ namespace Nox
                 }
                 low -= glm::vec2(range);
                 high += glm::vec2(range);
-                m_ViewCenter = (low + high) * 0.5f;
-                m_UnitsPerPixel = std::max({ (high.x - low.x) / b.Width(), (high.y - low.y) / b.Height(), 1e-3f });
+                m_View.Fit(b, low, high, m_View.MinZoom, m_View.MaxZoom);
+                m_NeedsFit = false;
             }
             if (FollowCamera && *FollowCamera)
-                m_ViewCenter = glm::vec2(camera.x, camera.z);
+                m_View.CenterOn(b, { static_cast<float>(camera.x), static_cast<float>(camera.z) });
 
             d.PushClipRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y });
             const glm::vec4 gridColor = Token(theme, "WorldMapGrid", { 0.19f, 0.19f, 0.22f, 1.0f });
-            if (cellSize / m_UnitsPerPixel >= 12.0f)
+            if (cellSize * m_View.Zoom >= 12.0f)
             {
                 const glm::vec2 low = ToWorld(b.Min), high = ToWorld(b.Max);
                 for (float x = std::floor(low.x / cellSize) * cellSize; x <= high.x; x += cellSize)
@@ -256,7 +255,7 @@ namespace Nox
             // The camera and its loading range (a circle: a rounded rect as round as it is wide).
             const glm::vec4 cameraColor = Token(theme, "WorldMapCamera", { 1.0f, 0.43f, 0.24f, 1.0f });
             const UI::UIVec2 cam = ToScreen({ static_cast<float>(camera.x), static_cast<float>(camera.z) });
-            const float radius = range / m_UnitsPerPixel;
+            const float radius = range * m_View.Zoom;
             d.AddRoundedRect({ cam.x - radius, cam.y - radius }, { cam.x + radius, cam.y + radius }, glm::vec4(0.0f), glm::vec4(radius), 1.5f, cameraColor);
             d.AddRoundedRect({ cam.x - 4.0f, cam.y - 4.0f }, { cam.x + 4.0f, cam.y + 4.0f }, cameraColor, glm::vec4(4.0f));
 
@@ -270,23 +269,15 @@ namespace Nox
         }
 
     private:
-        UI::UIVec2 Center() const { const UI::UIRect b = GetBounds(); return { (b.Min.x + b.Max.x) * 0.5f, (b.Min.y + b.Max.y) * 0.5f }; }
-        UI::UIVec2 ToScreen(const glm::vec2& world) const
-        {
-            const UI::UIVec2 c = Center();
-            return { c.x + (world.x - m_ViewCenter.x) / m_UnitsPerPixel, c.y + (world.y - m_ViewCenter.y) / m_UnitsPerPixel };
-        }
-        glm::vec2 ToWorld(const UI::UIVec2& screen) const
-        {
-            const UI::UIVec2 c = Center();
-            return { m_ViewCenter.x + (screen.x - c.x) * m_UnitsPerPixel, m_ViewCenter.y + (screen.y - c.y) * m_UnitsPerPixel };
-        }
+        // World x / z to the map and back (UI::UIPanZoom: zoom is pixels per world unit).
+        UI::UIVec2 ToScreen(const glm::vec2& world) const { return m_View.ToScreen(GetBounds(), world); }
+        glm::vec2 ToWorld(const UI::UIVec2& screen) const { return m_View.ToGraph(GetBounds(), screen); }
 
         // The smallest cell under the point.
         const WorldCellCoord* CellAt(const UI::UIVec2& screen)
         {
             Ref<Scene> scene = GetScene ? GetScene() : nullptr;
-            if (!scene || m_UnitsPerPixel <= 0.0f)
+            if (!scene || m_NeedsFit)
                 return nullptr;
             const float cellSize = WorldUnits::FromMeters(scene->GetWorldPartition().Settings.CellSize);
             const glm::vec2 point = ToWorld(screen);
@@ -325,8 +316,8 @@ namespace Nox
             Tooltip = std::move(text);
         }
 
-        glm::vec2 m_ViewCenter{ 0.0f };
-        float m_UnitsPerPixel = 0.0f; // 0: fitted on the next paint
+        UI::UIPanZoom m_View{ {}, 1.0f, 1e-7f, 1e3f }; // pixels per world unit within 1e-7 .. 1000 (the wheel: 1/0.85 a notch)
+        bool m_NeedsFit = true;                         // fitted to the cells and the camera on the next paint
         bool m_Panning = false;
         bool m_Boxing = false;
         glm::vec2 m_BoxStart{ 0.0f };
