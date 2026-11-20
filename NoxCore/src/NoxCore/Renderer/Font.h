@@ -26,6 +26,10 @@ namespace Nox
         Ref<Texture2D> GetAtlasTexture() const { return m_AtlasTexture; }
         // False when the file was not a font: drawing with it draws nothing.
         bool IsValid() const { return m_AtlasTexture != nullptr; }
+        // The font file itself (the UI's glyph cache rasterizes small text from it at the exact size shown) and an id no other
+        // font object ever has (a freed font's address can come back for another).
+        const std::vector<uint8_t>& GetFontBytes() const { return m_FontBytes; }
+        uint64_t GetCacheId() const { return m_CacheId; }
 
         static AssetType GetStaticType() { return AssetType::Font; }
         AssetType GetType() const override { return GetStaticType(); }
@@ -38,6 +42,8 @@ namespace Nox
 
         MSDFData* m_Data;
         Ref<Texture2D> m_AtlasTexture;
+        std::vector<uint8_t> m_FontBytes;
+        uint64_t m_CacheId = 0;
         static Ref<Font> s_DefaultFont;
     };
 }

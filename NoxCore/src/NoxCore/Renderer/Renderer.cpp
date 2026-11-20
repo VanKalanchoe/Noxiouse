@@ -30,6 +30,7 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/Hash.h"
+#include "NoxCore/UI/Rendering/UIGlyphCache.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Utils/PlatformUtils.h"
 #include "Passes/FrameGraphResources.h"
@@ -674,6 +675,9 @@ namespace Nox
 
 
         m_uiRenderer.reset();
+        UI::UIGlyphCache::Get().SetTextureSlot(~0u); // (its atlas goes with the device: text falls back to the distance field)
+        UI::UIGlyphCache::Get().Reset();
+        m_glyphAtlas = nullptr;
         Font::ReleaseDefault();
         m_device->shutdown(); // needed for texture to not remove imguitexture
         m_renderer2D.reset();
@@ -6176,6 +6180,7 @@ namespace Nox
             if (m_uiRenderer)
             {
                 m_uiRenderer->BeginFrame();
+                uploadGlyphAtlas(); // (glyphs the UI rasterized for this frame: copied before it draws)
                 m_uiRenderer->Upload(frameIndex);
             }
         }
@@ -6229,6 +6234,7 @@ namespace Nox
         }
 
         m_renderer2D->EndFrame();
+        resetGlyphAtlasIfFull();
 
         frameIndex = (frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
         m_sceneFrameCounter++;

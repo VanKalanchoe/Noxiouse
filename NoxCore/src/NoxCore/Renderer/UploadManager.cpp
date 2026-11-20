@@ -62,9 +62,10 @@ namespace Nox
     }
 
     void UploadManager::CopyToTextureRegion(const StagingSpan& source, uint64_t sourceOffset, NRI::Texture2D& destination, uint32_t x, uint32_t y,
-                                            uint32_t width, uint32_t height)
+                                            uint32_t width, uint32_t height, uint32_t rowPitch)
     {
-        const NRI::TextureRegionUpload region{ .stagingOffset = source.offset + sourceOffset, .x = x, .y = y, .width = width, .height = height };
+        const NRI::TextureRegionUpload region{ .stagingOffset = source.offset + sourceOffset, .x = x, .y = y, .width = width, .height = height,
+                                               .rowPitch = rowPitch };
         destination.recordRegionUploads(recording(), *source.buffer, std::span<const NRI::TextureRegionUpload>(&region, 1));
     }
 

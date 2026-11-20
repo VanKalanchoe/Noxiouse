@@ -46,7 +46,10 @@ namespace NRI
         BC6H_UF16,
         BC6H_SF16,
         BC7_UNorm,
-        BC7_UNorm_SRGB
+        BC7_UNorm_SRGB,
+
+        // Appended (the values above are stored in cooked files): one 8-bit channel (UI glyph coverage).
+        R8_UNORM
     };
     
     enum class TextureLayout : uint8_t
@@ -95,6 +98,9 @@ namespace NRI
         uint32_t y = 0;
         uint32_t width = 0;
         uint32_t height = 0;
+        // Bytes from one row's start to the next in staging; 0: the backend's default (Vulkan: tightly packed; D3D12: rows padded
+        // to 256 bytes). Set it (a multiple of 256) for an upload both read the same way.
+        uint32_t rowPitch = 0;
     };
 
     // Bytes per texel, or per 4x4 block for the BC formats (blockSize 4). False for the formats without a fixed texel size here
@@ -110,6 +116,7 @@ namespace NRI
         case ImageFormat::RGB8:
         case ImageFormat::SRGB8: return false;
         case ImageFormat::R16_SFLOAT: outBlockBytes = 2; break;
+        case ImageFormat::R8_UNORM: outBlockBytes = 1; break;
         case ImageFormat::R32G32_UINT:
         case ImageFormat::R32G32_SFLOAT:
         case ImageFormat::R16G16B16A16_SFLOAT: outBlockBytes = 8; break;

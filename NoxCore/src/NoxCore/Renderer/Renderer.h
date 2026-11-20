@@ -2807,5 +2807,10 @@ namespace Nox
         float m_cameraFOV = 30.0f;
         bool m_useImGui = true;
         std::unique_ptr<UI::UIRenderer> m_uiRenderer;
+        // The UI glyph cache's atlas (RendererGlyphAtlas.cpp): R8, created on first use. uploadGlyphAtlas copies the glyphs rasterized
+        // since the last call (true when it recorded copies); resetGlyphAtlasIfFull empties a full atlas between frames.
+        Ref<Texture2D> m_glyphAtlas;
+        bool uploadGlyphAtlas();
+        void resetGlyphAtlasIfFull();
     };
 }

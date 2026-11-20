@@ -3872,7 +3872,8 @@ enum UIPrimitiveType : uint32_t
     UI_PRIM_ROUNDED_RECT  = 0u,
     UI_PRIM_TEXTURED_QUAD = 1u,
     UI_PRIM_MSDF_GLYPH    = 2u,
-    UI_PRIM_CUBIC_BEZIER  = 3u
+    UI_PRIM_CUBIC_BEZIER  = 3u,
+    UI_PRIM_GLYPH_BITMAP  = 4u  // a glyph from the UI glyph cache: 8-bit coverage, drawn texel for pixel (UIGlyphCache)
 };
 
 struct UIClipRect

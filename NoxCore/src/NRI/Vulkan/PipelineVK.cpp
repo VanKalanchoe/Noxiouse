@@ -1285,6 +1285,7 @@ namespace NRI
         case ImageFormat::R32G32_UINT: return vk::Format::eR32G32Uint;
         case ImageFormat::R32G32B32A32_UINT: return vk::Format::eR32G32B32A32Uint;
         case ImageFormat::R16_SFLOAT: return vk::Format::eR16Sfloat;
+        case ImageFormat::R8_UNORM: return vk::Format::eR8Unorm;
         case ImageFormat::R32_SFLOAT: return vk::Format::eR32Sfloat;
         case ImageFormat::R10G10B10A2_UNORM: return vk::Format::eA2B10G10R10UnormPack32;
         case ImageFormat::R16G16_SFLOAT: return vk::Format::eR16G16Sfloat;

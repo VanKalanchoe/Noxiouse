@@ -341,6 +341,7 @@ it yet):
 | E7 | File dialogs block: the main loop spins until the dialog returns | Utility::OpenFile / SaveFile | the editor stops drawing (and streaming, previews) while a dialog is open | asynchronous dialogs (SDL's callback) with the result delivered next frame -- **built** (below) |
 | E8 | Colours written into widgets instead of theme tokens (my new panels included) | UI widgets, panels | a theme change does not reach them | move to theme tokens when each panel is touched |
 | E9 | Two editors with copied code (AssetPreviewRenderer, EditorHistory, ScriptBuilder, GamePackager live twice) | NoxEditor, NoxEditorV2 | fixes made twice or only once | shared editor code in one place; NoxEditor retired when V2 has everything |
+| E10 | UI text drawn from one 40 px MSDF atlas at every size (distance range 2) | UIDrawList::AddText, UIPrimitives.slang | 12-14 px text has wavy edges (the range covers under a pixel), zoomed-out graph text breaks apart; ImGui text is visibly cleaner | a glyph cache per pixel size, as Slate and ImGui do -- **fixed** (below) |
 
 Order from here: E3 selection service, E4 command system and E6 asset-editor registry first (every panel ported after them uses them,
 instead of being ported twice), E2 split while doing so, then the graph editor's G2-G4 and the panels below. E5 and E7 when they are
@@ -635,6 +636,25 @@ while it plays with Reset (back to following the graph's default) and Fire for t
 window stops the sound. Flaws not carried over: the animation preview showed triggers as a tick box that stayed on (now Fire, true for
 one update); its time step was the UI's frame time (now the real time since the last update, at most 0.1 s). Checked: syntax check.
 Not run on a GPU.
+
+**E10 -- UI text from a glyph cache (built, not run on a GPU / not user-tested).** `UI/Rendering/UIGlyphCache` (CPU) and
+`Renderer/RendererGlyphAtlas.cpp` (GPU). Text up to 48 px is no longer shrunk from the 40 px MSDF atlas: each glyph is rasterized by
+stb_truetype (the copy ImGui ships, compiled static) at the size it is shown -- sizes in steps of 1/2 px, the pen's x in steps of 1/4 px
+(the glyph rasterized with that offset) -- into one 2048 x 2048 R8 coverage atlas, and drawn as a quad on whole pixels (baselines snapped)
+that reads its texel per pixel (`UI_PRIM_GLYPH_BITMAP`). Layout (advances, kerning, line height, MeasureText) is unchanged: still the
+font's metrics, so nothing moves. Larger text, and world text (Renderer2D / TextComponent), keep the MSDF. New glyphs go into shelves;
+the Renderer copies each run of glyphs added side by side (only their texels: never what a frame in flight reads) on the transfer queue
+before the frame that draws them (the frame waits for the copy); a floating window's glyphs, painted after the main frame's copies, are
+copied before its submission and the CPU waits for that copy. A full atlas: what it cannot hold that frame is drawn from the MSDF, and it
+is emptied after the frame (the GPU finishes first). Engine changes for it: `NRI::ImageFormat::R8_UNORM` (appended: the enum's values are
+in cooked files), `TextureRegionUpload::rowPitch` (Vulkan read staging rows tightly packed, D3D12 at 256-byte pitch -- a glyph upload
+gives the pitch, so both read the same layout), `Font::GetFontBytes` / `GetCacheId`. Checked offline: the real `UIGlyphCache` with
+AddText's placement against the old path rebuilt on the CPU (msdfgen at 40 px/em, range 2, 8-bit, one bilinear tap, the shader's
+formula), both against exact area coverage at the same position -- per-pixel error as a share of the text's contrast: "Ready" at 13 px
+old rms 0.017 / max 0.36, new 0.006 / 0.12; 12.5-13.5 px lines old max 0.44-0.49, new 0.12; 9.4 px (a graph at 75 %) old 0.048 / 0.58,
+new 0.009 / 0.15; 6.25 px (50 %) old 0.044 / 0.63, new 0.009 / 0.20 (the new path's error is only the quarter-pixel pen and half-pixel
+size steps). Syntax check of the changed files; the Vulkan backend and Renderer.cpp could not be checked here (no Vulkan / RTXDI headers
+in the container). Not run on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

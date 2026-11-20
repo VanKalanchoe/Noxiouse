@@ -16,6 +16,7 @@ namespace NRI
         case ImageFormat::RGBA8: return DXGI_FORMAT_R8G8B8A8_UNORM;
         case ImageFormat::SRGBA8: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
         case ImageFormat::R16_SFLOAT: return DXGI_FORMAT_R16_FLOAT;
+        case ImageFormat::R8_UNORM: return DXGI_FORMAT_R8_UNORM;
         case ImageFormat::R32_SFLOAT: return DXGI_FORMAT_R32_FLOAT;
         case ImageFormat::R10G10B10A2_UNORM: return DXGI_FORMAT_R10G10B10A2_UNORM;
         case ImageFormat::R16G16: return DXGI_FORMAT_R16G16_UNORM;
@@ -140,7 +141,7 @@ namespace NRI
         {
             uint32_t blocksX = (std::max(curWidth, 1u) + blockSize - 1) / blockSize;
             uint32_t blocksY = (std::max(curHeight, 1u) + blockSize - 1) / blockSize;
-            uint32_t rowPitch = (blocksX * blockBytes + 255) & ~255u; // 256-byte pitch alignment
+            uint32_t rowPitch = reg.rowPitch != 0 ? reg.rowPitch : (blocksX * blockBytes + 255) & ~255u; // 256-byte pitch alignment
 
             D3D12_TEXTURE_COPY_LOCATION src{};
             src.pResource = bufferD3D12->getNativeBuffer();

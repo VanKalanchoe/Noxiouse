@@ -24,6 +24,8 @@ namespace Nox
 
 namespace Nox::UI
 {
+    class UIGlyphCache;
+
     // Collects resolution-independent 2D SDF UI primitives for one viewport frame.
     // Coordinates are in output pixels with origin at top-left (x right, y down).
     class UIDrawList
@@ -67,6 +69,10 @@ namespace Nox::UI
 
     private:
         uint32_t CurrentClipIndex() const { return m_ClipStack.empty() ? 0u : m_ClipStack.back(); }
+        enum class GlyphCacheResult : uint8_t { Drawn, Missing };
+        // One glyph from the glyph cache at the pen (snapped to the pixel grid); Missing: draw it from the distance field.
+        GlyphCacheResult DrawCachedGlyph(UIGlyphCache& cache, const Font& font, float fontSizePx, uint32_t codepoint, double penX,
+                                         double baselineY, const glm::vec4& color);
 
         std::vector<shaderio::UIPrimitive> m_Primitives;
         std::vector<shaderio::UIClipRect> m_ClipRects;

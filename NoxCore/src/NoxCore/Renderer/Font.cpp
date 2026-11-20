@@ -1,6 +1,7 @@
 #include "Font.h"
 #include "NoxCore/Core/VirtualFileSystem.h"
 
+#include <atomic>
 #include <fstream>
 
 #undef INFINITE
@@ -64,6 +65,9 @@ namespace Nox
 
     void Font::Load(const std::vector<uint8_t>& fontData, const std::string& name)
     {
+        static std::atomic<uint64_t> s_NextCacheId{ 1 };
+        m_CacheId = s_NextCacheId.fetch_add(1);
+        m_FontBytes = fontData;
         msdfgen::FreetypeHandle* ft = msdfgen::initializeFreetype();
         NOX_CORE_ASSERT(ft, "Freetype initialization failed!");
 

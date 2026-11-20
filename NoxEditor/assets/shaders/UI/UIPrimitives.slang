@@ -231,6 +231,14 @@ float4 fragMain(UIVSOutput input, uniform UIPushConstants pc) : SV_TARGET0
         const float opacity = clamp(pxRange * (sd - 0.5) + 0.5, 0.0, 1.0);
         outColor = float4(prim.color0.rgb, prim.color0.a * opacity);
     }
+    else if (prim.type == uint(UIPrimitiveType.UI_PRIM_GLYPH_BITMAP))
+    {
+        // The glyph rasterized at this size and pen offset, its quad on whole pixels: each pixel reads its own texel's coverage.
+        Texture2D atlas = Texture2D.Handle(uint2(pc.imageHeapIndexOffset + prim.textureIndex, 0));
+        SamplerState samp = SamplerState.Handle(uint2(uint(SamplerIndex.SAMPLER_LINEAR_CLAMP), 0));
+        const float coverage = atlas.Sample(samp, input.uv).r;
+        outColor = float4(prim.color0.rgb, prim.color0.a * coverage);
+    }
     else if (prim.type == uint(UIPrimitiveType.UI_PRIM_CUBIC_BEZIER))
     {
         const float d = sdCubicBezierApprox(input.pixelPos,

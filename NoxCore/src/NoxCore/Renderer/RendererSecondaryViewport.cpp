@@ -60,6 +60,10 @@ namespace Nox
         // guarded by the main swapchain's fences, which do not cover this window's submissions.)
         uploads.Reset();
         const UI::UIBatch batch = m_uiRenderer->UploadDrawList(uploads, drawList, slot);
+        // Glyphs this window rasterized while it was painted (after the main frame's copies went out): copied now, and this submission,
+        // which waits on no upload, follows them -- the CPU waits for the copy (only when new glyphs appeared, a few kilobytes).
+        if (uploadGlyphAtlas())
+            m_uploads.GetTimeline().wait(m_uploads.Flush());
 
         cmd.begin(0);
         applyCommandBufferBaseline(cmd);

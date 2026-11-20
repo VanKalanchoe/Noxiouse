@@ -21,6 +21,7 @@ namespace NRI
         case ImageFormat::SRGBA8: return vk::Format::eR8G8B8A8Srgb;
             
         case ImageFormat::R16_SFLOAT: return vk::Format::eR16Sfloat;
+        case ImageFormat::R8_UNORM: return vk::Format::eR8Unorm;
         case ImageFormat::R32_SFLOAT: return vk::Format::eR32Sfloat;
         case ImageFormat::R10G10B10A2_UNORM: return vk::Format::eA2B10G10R10UnormPack32;
         case ImageFormat::R16G16: return vk::Format::eR16G16Unorm;
@@ -303,12 +304,15 @@ namespace NRI
         vk::raii::CommandBuffer& cb = static_cast<CommandBufferVK&>(cmdBuffer).getNativeBuffer(0);
         const vk::raii::Buffer& source = static_cast<BufferVK&>(stagingBuffer).getNativeBuffer();
 
+        uint32_t blockBytes = 4, blockSize = 1;
+        imageFormatBlock(m_desc.format, blockBytes, blockSize);
         std::vector<vk::BufferImageCopy> copies;
         copies.reserve(regions.size());
         for (const TextureRegionUpload& region : regions)
         {
             copies.push_back(vk::BufferImageCopy{
                 .bufferOffset = region.stagingOffset,
+                .bufferRowLength = region.rowPitch != 0 ? region.rowPitch / blockBytes * blockSize : 0, // (in texels; 0: tightly packed)
                 .imageSubresource = { .aspectMask = vk::ImageAspectFlagBits::eColor, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
                 .imageOffset = { static_cast<int32_t>(region.x), static_cast<int32_t>(region.y), 0 },
                 .imageExtent = { region.width, region.height, 1 }
