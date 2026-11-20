@@ -117,6 +117,7 @@ namespace Nox
         {
             std::unique_ptr<AssetEditorV2> Editor;
             std::string Title;
+            Ref<UI::UIElement> Root; // (its syncs are dropped before the editor goes: the window can show for one more frame)
         };
         static void CloseWindow(const std::string& title);
         OpenEditor* FindByTitle(const std::string& title);

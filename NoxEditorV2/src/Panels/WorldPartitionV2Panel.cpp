@@ -136,7 +136,7 @@ namespace Nox
             Ref<Scene> scene = GetScene ? GetScene() : nullptr;
             if (!scene)
                 return true;
-            const bool ctrl = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
+            const bool ctrl = (e.Modifiers & UI::UIMod::Ctrl) != 0;
             if (!ctrl)
                 Selection->clear();
             const glm::vec2 end = ToWorld(e.Position);
@@ -379,17 +379,14 @@ namespace Nox
             m_Rebuild = false;
             Rebuild();
         }
-        for (const auto& sync : m_Syncs)
-            sync();
     }
 
     void WorldPartitionV2Panel::Rebuild()
     {
-        m_Syncs.clear();
         m_Body->ClearChildren();
         m_Map = nullptr;
         const Ref<Scene> scene = m_Hooks.ActiveScene ? m_Hooks.ActiveScene() : nullptr;
-        SettingsRowsV2 rows(m_Body, &m_Syncs, m_Context);
+        SettingsRowsV2 rows(m_Body, m_Context);
         if (!scene)
         {
             rows.Note("No scene");
@@ -607,7 +604,7 @@ namespace Nox
                 s->LoadWorldCells(std::vector<WorldCellCoord>(m_Selection.begin(), m_Selection.end()));
         });
         Ref<UI::UIButton> unloadSelected = addButton("Unload Selected", [this]() { RequestUnload(std::vector<WorldCellCoord>(m_Selection.begin(), m_Selection.end())); });
-        m_Syncs.push_back([this, loadSelected, unloadSelected]()
+        UI::AppendSync(*toolbar, [this, loadSelected, unloadSelected]() // (on their row: it holds them anyway)
         {
             loadSelected->SetEnabled(!m_Selection.empty());
             unloadSelected->SetEnabled(!m_Selection.empty());
@@ -623,7 +620,7 @@ namespace Nox
         options->AddChild(follow);
         options->AddChild(show);
         m_Body->AddChild(options);
-        m_Syncs.push_back([this, follow]() { follow->Checked = m_FollowCamera; }); // (panning the map turns it off)
+        UI::AppendSync(*options, [this, follow]() { follow->Checked = m_FollowCamera; }); // (panning the map turns it off)
 
         Ref<WorldPartitionMap> map(new WorldPartitionMap());
         map->GetScene = getScene;

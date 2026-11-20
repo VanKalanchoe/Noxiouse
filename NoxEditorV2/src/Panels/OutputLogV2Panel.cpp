@@ -195,8 +195,8 @@ namespace Nox
                 return true;
             }
             const uint64_t sequence = SequenceOf(row);
-            const SDL_Keymod mods = SDL_GetModState();
-            if ((mods & SDL_KMOD_SHIFT) != 0 && m_Panel.m_SelectionAnchor != 0)
+            const uint16_t mods = e.Modifiers;
+            if ((mods & UI::UIMod::Shift) != 0 && m_Panel.m_SelectionAnchor != 0)
             {
                 const uint64_t from = std::min(sequence, m_Panel.m_SelectionAnchor), to = std::max(sequence, m_Panel.m_SelectionAnchor);
                 selected.clear();
@@ -207,7 +207,7 @@ namespace Nox
                         selected.push_back(s);
                 }
             }
-            else if ((mods & SDL_KMOD_CTRL) != 0)
+            else if ((mods & UI::UIMod::Ctrl) != 0)
             {
                 const auto it = std::lower_bound(selected.begin(), selected.end(), sequence);
                 if (it != selected.end() && *it == sequence)
@@ -248,7 +248,7 @@ namespace Nox
 
         bool OnKeyDown(const UI::UIKeyEvent& e) override
         {
-            const bool ctrl = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
+            const bool ctrl = (e.Modifiers & UI::UIMod::Ctrl) != 0;
             if (ctrl && e.KeyCode == SDL_SCANCODE_C)
             {
                 m_Panel.CopyLines(true);

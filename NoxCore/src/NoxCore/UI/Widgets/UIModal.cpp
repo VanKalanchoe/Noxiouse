@@ -226,6 +226,12 @@ namespace Nox::UI
             button->Padding = UIThickness::Symmetric(14.0f, 6.0f);
             if (it->Primary)
                 button->StyleVariant = "primary";
+            if (it->Enabled)
+            {
+                UIButton* raw = button.get();
+                button->SetEnabled(it->Enabled());
+                button->OnSync = [raw, enabled = it->Enabled]() { raw->SetEnabled(enabled()); };
+            }
             btnRow->AddChild(button);
         }
         card->AddChild(btnRow);

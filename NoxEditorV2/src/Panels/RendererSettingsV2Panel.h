@@ -50,7 +50,6 @@ namespace Nox
     private:
         Hooks m_Hooks;
         Ref<UI::UIElement> m_Root;
-        std::vector<std::function<void()>> m_Syncs;
         std::unordered_map<std::string, bool> m_Expanded;
         glm::vec3 m_FogAlbedo{ 1.0f };
     };

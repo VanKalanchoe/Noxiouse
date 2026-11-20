@@ -75,9 +75,9 @@ namespace Nox::UI
             return "<Unbound>";
 
         std::string out;
-        if (mods & SDL_KMOD_CTRL) out += "Ctrl+";
-        if (mods & SDL_KMOD_SHIFT) out += "Shift+";
-        if (mods & SDL_KMOD_ALT) out += "Alt+";
+        if (mods & UIMod::Ctrl) out += "Ctrl+";
+        if (mods & UIMod::Shift) out += "Shift+";
+        if (mods & UIMod::Alt) out += "Alt+";
 
         const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(keyCode));
         out += (name && name[0] != '\0') ? name : "Key";

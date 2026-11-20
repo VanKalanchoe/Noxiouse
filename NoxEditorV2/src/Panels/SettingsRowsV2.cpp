@@ -57,15 +57,14 @@ namespace Nox
         }
     }
 
-    SettingsRowsV2::SettingsRowsV2(Ref<UI::UIStackBox> body, std::vector<std::function<void()>>* syncs, UI::UIContext* context)
-        : m_Body(std::move(body)), m_Syncs(syncs), m_Context(context)
+    SettingsRowsV2::SettingsRowsV2(Ref<UI::UIStackBox> body, UI::UIContext* context)
+        : m_Body(std::move(body)), m_Context(context)
     {
     }
 
     Ref<UI::UIElement> SettingsRowsV2::AddRow(const std::string& label, const Ref<UI::UIElement>& editor, const std::string& tooltip)
     {
-        std::vector<std::function<void()>> unused;
-        InspectorCardBuilder builder{ m_Body, unused, {}, m_Context };
+        InspectorCardBuilder builder{ m_Body, {}, m_Context };
         builder.AddRow(label, editor, tooltip);
         return m_Body->GetChildren().back();
     }
@@ -85,7 +84,7 @@ namespace Nox
         if (!tooltip.empty())
             card.Card->Tooltip = tooltip;
         m_Body->AddChild(card.Card);
-        return SettingsRowsV2(card.Body, m_Syncs, m_Context);
+        return SettingsRowsV2(card.Body, m_Context);
     }
 
     SettingsRowsV2 SettingsRowsV2::Group()
@@ -94,7 +93,7 @@ namespace Nox
         box->WidthMode = UI::UISizeMode::Fill;
         box->Padding = UI::UIThickness{ 14.0f, 0.0f, 0.0f, 0.0f };
         m_Body->AddChild(box);
-        return SettingsRowsV2(box, m_Syncs, m_Context);
+        return SettingsRowsV2(box, m_Context);
     }
 
     Ref<UI::UIElement> SettingsRowsV2::Check(const std::string& label, std::function<bool()> get, std::function<void(bool)> set, const std::string& tooltip)
@@ -102,7 +101,7 @@ namespace Nox
         auto box = UI::CheckBox("", get ? get() : false, [set](bool value) { if (set) set(value); });
         Ref<UI::UICheckBox> check = box;
         Ref<UI::UIElement> row = AddRow(label, ValueBox(check, false), tooltip);
-        m_Syncs->push_back([check, get]()
+        UI::AppendSync(*check, [check = check.get(), get]()
         {
             if (get && !UI::HasState(check->GetState(), UI::UIState::Pressed))
                 check->Checked = get();
@@ -118,7 +117,7 @@ namespace Nox
         if (!tooltip.empty())
             field->Tooltip = tooltip + "\n(drag across it, or click to type a value)";
         Ref<UI::UIElement> row = AddRow(label, ValueBox(field, true), tooltip);
-        m_Syncs->push_back([field, get]()
+        UI::AppendSync(*field, [field = field.get(), get]()
         {
             if (get && !field->IsInteracting())
                 field->Value = get();
@@ -134,7 +133,7 @@ namespace Nox
         field->Max = max;
         field->Format = format;
         Ref<UI::UIElement> row = AddRow(label, ValueBox(field, true), tooltip);
-        m_Syncs->push_back([field, get]()
+        UI::AppendSync(*field, [field = field.get(), get]()
         {
             if (get && !field->IsInteracting())
                 field->Value = get();
@@ -157,7 +156,7 @@ namespace Nox
         field->Format = "{:.0f}";
         field->Step = 1.0f;
         Ref<UI::UIElement> row = AddRow(label, ValueBox(field, true), tooltip);
-        m_Syncs->push_back([field, get]()
+        UI::AppendSync(*field, [field = field.get(), get]()
         {
             if (get && !field->IsInteracting())
                 field->Value = static_cast<float>(get());
@@ -170,7 +169,7 @@ namespace Nox
     {
         auto dropdown = UI::MakeUI<UI::UIDropdown>(m_Context, std::move(items), get ? get() : 0, [set](int index) { if (set) set(index); });
         Ref<UI::UIElement> row = AddRow(label, ValueBox(dropdown, true), tooltip);
-        m_Syncs->push_back([dropdown, get]()
+        UI::AppendSync(*dropdown, [dropdown = dropdown.get(), get]()
         {
             if (get && dropdown->GetSelectedIndex() != get())
                 dropdown->SetSelectedIndex(get(), false);
@@ -180,7 +179,7 @@ namespace Nox
 
     Ref<UI::UIElement> SettingsRowsV2::Color3(const std::string& label, glm::vec3* target, std::function<void()> onChange, const std::string& tooltip)
     {
-        InspectorCardBuilder builder{ m_Body, *m_Syncs, {}, m_Context };
+        InspectorCardBuilder builder{ m_Body, {}, m_Context };
         builder.AddColor3(label, target, std::move(onChange));
         Ref<UI::UIElement> row = m_Body->GetChildren().back();
         if (!tooltip.empty())
@@ -191,7 +190,7 @@ namespace Nox
     Ref<UI::UIElement> SettingsRowsV2::String(const std::string& label, std::string* target, const std::string& placeholder,
                                               std::function<void()> onChange, const std::string& tooltip)
     {
-        InspectorCardBuilder builder{ m_Body, *m_Syncs, {}, m_Context };
+        InspectorCardBuilder builder{ m_Body, {}, m_Context };
         builder.AddString(label, target, placeholder, std::move(onChange), tooltip);
         return m_Body->GetChildren().back();
     }
@@ -205,7 +204,7 @@ namespace Nox
         ref->WordWrap = true;
         ref->WidthMode = UI::UISizeMode::Fill;
         m_Body->AddChild(ref);
-        m_Syncs->push_back([ref, text]()
+        UI::AppendSync(*ref, [ref = ref.get(), text]()
         {
             if (text)
             {
@@ -241,23 +240,21 @@ namespace Nox
 
     Ref<UI::UIElement> SettingsRowsV2::Header(const std::string& title, const std::string& tooltip)
     {
-        std::vector<std::function<void()>> unused;
-        InspectorCardBuilder builder{ m_Body, unused, {}, m_Context };
+        InspectorCardBuilder builder{ m_Body, {}, m_Context };
         builder.AddSubheader(title, tooltip);
         return m_Body->GetChildren().back();
     }
 
     Ref<UI::UIElement> SettingsRowsV2::Separator()
     {
-        std::vector<std::function<void()>> unused;
-        InspectorCardBuilder builder{ m_Body, unused, {}, m_Context };
+        InspectorCardBuilder builder{ m_Body, {}, m_Context };
         builder.AddSeparator();
         return m_Body->GetChildren().back();
     }
 
     void SettingsRowsV2::ShowWhen(const Ref<UI::UIElement>& element, Cond when)
     {
-        m_Syncs->push_back([element, when]()
+        UI::AppendSync(*element, [element = element.get(), when]()
         {
             const bool show = !when || when();
             if (element->Visible != show)
@@ -269,7 +266,7 @@ namespace Nox
     {
         UI::UILabel* reasonLabel = ReasonLabelOf(element.get());
         element->VeilWhenDisabled = true;
-        m_Syncs->push_back([element, when, reason, reasonLabel]()
+        UI::AppendSync(*element, [element = element.get(), when, reason, reasonLabel]()
         {
             const bool enabled = !when || when();
             if (element->IsEnabled() != enabled)

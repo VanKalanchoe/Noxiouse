@@ -119,14 +119,32 @@ namespace Nox::UI
         UIVec2 Position{ 0.0f, 0.0f };
         UIVec2 Delta{ 0.0f, 0.0f };
         UIVec2 ScrollDelta{ 0.0f, 0.0f };
-        int Button = 0; // 0 = Left, 1 = Right, 2 = Middle
+        int Button = 0;          // UIMouseButton: 1 = Left, 2 = Middle, 3 = Right (0: none, a move or the wheel)
+        uint16_t Modifiers = 0;  // UIMod bits held when it happened
         bool Handled = false;
     };
+
+    // Modifier keys in UI events and UIContext::GetCurrentModifiers (the same values as NoxUI's, whatever the platform's are).
+    namespace UIMod
+    {
+        inline constexpr uint16_t None  = 0;
+        inline constexpr uint16_t Shift = 1 << 0;
+        inline constexpr uint16_t Ctrl  = 1 << 1;
+        inline constexpr uint16_t Alt   = 1 << 2;
+        inline constexpr uint16_t Super = 1 << 3;
+    }
+
+    namespace UIMouseButton
+    {
+        inline constexpr int Left   = 1;
+        inline constexpr int Middle = 2;
+        inline constexpr int Right  = 3;
+    }
 
     struct UIKeyEvent
     {
         int KeyCode = 0;
-        uint16_t Modifiers = 0;
+        uint16_t Modifiers = 0; // UIMod bits
         bool Repeat = false;
         bool Handled = false;
     };

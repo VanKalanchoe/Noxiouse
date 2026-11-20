@@ -740,7 +740,7 @@ namespace Nox
             if (mutate) mutate(false);
         });
         AddRow(label, cb, tooltip);
-        Syncs.push_back([cb, target]()
+        UI::AppendSync(*Raw(cb), [cb = Raw(cb), target]()
         {
             if (!UI::HasState(cb->GetState(), UI::UIState::Pressed))
                 cb->Checked = *target;
@@ -761,7 +761,7 @@ namespace Nox
         drag->Max = maxV;
         drag->Format = fmt;
         AddRow(label, drag, tooltip);
-        Syncs.push_back([drag, target]()
+        UI::AppendSync(*Raw(drag), [drag = Raw(drag), target]()
         {
             if (!drag->IsInteracting())
                 drag->Value = *target;
@@ -793,7 +793,7 @@ namespace Nox
         if (!tooltip.empty())
             slider->Tooltip = tooltip;
         AddRow(label, slider, tooltip);
-        Syncs.push_back([slider, target]()
+        UI::AppendSync(*Raw(slider), [slider = Raw(slider), target]()
         {
             if (!slider->IsInteracting())
                 slider->Value = *target;
@@ -817,7 +817,7 @@ namespace Nox
         drag->Min = static_cast<float>(minV);
         drag->Max = static_cast<float>(maxV);
         AddRow(label, drag, tooltip);
-        Syncs.push_back([drag, target]()
+        UI::AppendSync(*Raw(drag), [drag = Raw(drag), target]()
         {
             if (!drag->IsInteracting())
                 drag->Value = static_cast<float>(*target);
@@ -841,7 +841,7 @@ namespace Nox
         drag->Min = static_cast<float>(minV);
         drag->Max = static_cast<float>(maxV);
         AddRow(label, drag, tooltip);
-        Syncs.push_back([drag, target]()
+        UI::AppendSync(*Raw(drag), [drag = Raw(drag), target]()
         {
             if (!drag->IsInteracting())
                 drag->Value = static_cast<float>(*target);
@@ -864,7 +864,7 @@ namespace Nox
         drag->Min = minWorld / unit.Factor;
         drag->Max = maxWorld / unit.Factor;
         AddRow(label + " (" + unit.Suffix + rateSuffix + ")", drag, tooltip);
-        Syncs.push_back([drag, worldValue, factor = unit.Factor]()
+        UI::AppendSync(*Raw(drag), [drag = Raw(drag), worldValue, factor = unit.Factor]()
         {
             if (!drag->IsInteracting())
                 drag->Value = *worldValue / factor;
@@ -883,7 +883,7 @@ namespace Nox
                 if (mutate) mutate(false);
             });
         AddRow(label, vec, tooltip);
-        Syncs.push_back([vec, target]()
+        UI::AppendSync(*Raw(vec), [vec = Raw(vec), target]()
         {
             if (!vec->IsEditing())
                 vec->SetValue({ target->x, target->y, 0.0f, 0.0f }, false);
@@ -903,7 +903,7 @@ namespace Nox
                 if (mutate) mutate(false);
             });
         AddRow(label, vec, tooltip);
-        Syncs.push_back([vec, target]()
+        UI::AppendSync(*Raw(vec), [vec = Raw(vec), target]()
         {
             if (!vec->IsEditing())
                 vec->SetValue(glm::vec4(*target, 0.0f), false);
@@ -925,7 +925,7 @@ namespace Nox
                 if (mutate) mutate(false);
             });
         AddRow(label + " (" + unit.Suffix + ")", vec, tooltip);
-        Syncs.push_back([vec, worldVec, factor = unit.Factor]()
+        UI::AppendSync(*Raw(vec), [vec = Raw(vec), worldVec, factor = unit.Factor]()
         {
             if (!vec->IsEditing())
                 vec->SetValue(glm::vec4(*worldVec / factor, 0.0f), false);
@@ -946,7 +946,7 @@ namespace Nox
         color->ShowAlpha = false;
         color->WidthMode = UI::UISizeMode::Fill;
         AddRow(label, color);
-        Syncs.push_back([color, target]()
+        UI::AppendSync(*Raw(color), [color = Raw(color), target]()
         {
             const UI::UIColor cur = color->GetColor();
             if (std::abs(cur.r - target->r) > 1e-4f || std::abs(cur.g - target->g) > 1e-4f || std::abs(cur.b - target->b) > 1e-4f)
@@ -965,7 +965,7 @@ namespace Nox
             });
         color->WidthMode = UI::UISizeMode::Fill;
         AddRow(label, color);
-        Syncs.push_back([color, target]()
+        UI::AppendSync(*Raw(color), [color = Raw(color), target]()
         {
             if (glm::length(color->GetColor() - *target) > 1e-4f)
                 color->SetColor(*target, false);
@@ -984,7 +984,7 @@ namespace Nox
             if (mutate) mutate(false);
         };
         AddRow(label, input, tooltip);
-        Syncs.push_back([input, target]()
+        UI::AppendSync(*Raw(input), [input = Raw(input), target]()
         {
             if (!UI::HasState(input->GetState(), UI::UIState::Focused) && input->Text != *target)
                 input->Text = *target;
@@ -1101,7 +1101,7 @@ namespace Nox
             line->AddChild(revert);
             Ref<UI::UIStackBox> lineRef = line;
             c.Body->AddChild(lineRef);
-            c.Syncs.push_back([lineRef, handle]() { lineRef->Visible = MaterialEdits::IsUnsaved(handle); });
+            UI::AppendSync(*lineRef, [line = lineRef.get(), handle]() { line->Visible = MaterialEdits::IsUnsaved(handle); });
         }
 
         auto notifySaved = [handle]() { NotifyMaterialEdited(handle); };
@@ -1273,7 +1273,7 @@ namespace Nox
             bool layersOpen = expandedSections.contains(layersKey) ? expandedSections[layersKey] : false;
             auto layersCard = CreateCollapsibleCard("Material Layers", layersOpen,
                 [&expandedSections, layersKey](bool next) { expandedSections[layersKey] = next; }, false, {}, {});
-            InspectorCardBuilder lc{ layersCard.Body, c.Syncs, c.OnMutate, c.Context };
+            InspectorCardBuilder lc{ layersCard.Body, c.OnMutate, c.Context };
             lc.AddSubheader("Clear Coat");
             lc.AddSlider("Clear Coat", &data.ClearcoatFactor, 0.0f, 1.0f, notifySaved);
             lc.AddSlider("Coat Roughness", &data.ClearcoatRoughnessFactor, 0.0f, 1.0f, notifySaved);
@@ -1298,7 +1298,7 @@ namespace Nox
         bool uvOpen = expandedSections.contains(uvKey) ? expandedSections[uvKey] : false;
         auto uvCard = CreateCollapsibleCard("UV Channels", uvOpen,
             [&expandedSections, uvKey](bool next) { expandedSections[uvKey] = next; }, false, {}, {});
-        InspectorCardBuilder uvc{ uvCard.Body, c.Syncs, c.OnMutate, c.Context };
+        InspectorCardBuilder uvc{ uvCard.Body, c.OnMutate, c.Context };
         for (int ch = 0; ch < MaxMaterialUVChannels; ++ch)
         {
             MaterialUVChannel& channel = data.UVChannels[ch];

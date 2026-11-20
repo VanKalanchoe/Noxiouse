@@ -42,7 +42,6 @@ namespace Nox
         Ref<UI::UIElement> m_Status;
         Ref<UI::UIElement> m_Preview;
         std::unordered_map<std::string, bool> m_ExpandedSections;
-        std::vector<std::function<void()>> m_Syncs;
         bool m_Rebuild = true;
     };
 }

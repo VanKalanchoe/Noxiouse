@@ -34,8 +34,7 @@ namespace Nox
 
         auto content = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
         content->WidthMode = UI::UISizeMode::Fill;
-        m_PackageSyncs.clear();
-        SettingsRowsV2 rows(content, &m_PackageSyncs, context);
+        SettingsRowsV2 rows(content, context);
         rows.Note(server ? "A dedicated server (Unreal's server target): the runtime named <Project>Server -- it starts as a dedicated server, no "
                            "window, GPU or sound, its console takes the server's commands -- with the scenes' cooked assets but no textures, fonts, "
                            "sound clips, baked acoustics or shaders. Clients join it with --connect=<its address>."
@@ -89,8 +88,6 @@ namespace Nox
         package->Tooltip = "Saves the scene, then cooks and copies (the editor waits until it is done).";
         content->AddChild(package);
         content->AddChild(resultRef);
-        for (const auto& sync : m_PackageSyncs) // (once: the rows' states are set; the dialog changes them itself)
-            sync();
         UI::UIModal::ShowCustom(*context, server ? "Package Server" : "Package Game", content, { { "Close", {} } }, 640.0f);
     }
 
@@ -102,8 +99,7 @@ namespace Nox
         UI::UIContext* context = &uiLayer->GetContext();
         auto content = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
         content->WidthMode = UI::UISizeMode::Fill;
-        m_PackageSyncs.clear();
-        SettingsRowsV2 rows(content, &m_PackageSyncs, context);
+        SettingsRowsV2 rows(content, context);
         StreamingTestWorldGenerator::Settings* s = &m_TestWorldSettings;
         rows.Note("A world of N x N cells, each with its own terrain mesh and texture (nothing shared), so its data is larger than RAM and VRAM. "
                   "It is written into the project as cooked assets and opened.");
@@ -143,8 +139,6 @@ namespace Nox
         generate->HAlign = UI::UIAlignment::Start;
         content->AddChild(generate);
         content->AddChild(errorRef);
-        for (const auto& sync : m_PackageSyncs)
-            sync();
         UI::UIModal::ShowCustom(*context, "Streaming Test World", content, { { "Cancel", {} } }, 560.0f);
     }
 

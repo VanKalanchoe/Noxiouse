@@ -157,6 +157,23 @@ namespace Nox::UI
         }
     }
 
+    void UIElement::SyncRecursive()
+    {
+        if (OnSync)
+            OnSync();
+        // (a snapshot: a sync that breaks the rule and changes the children does not invalidate the walk)
+        const std::vector<Ref<UIElement>> children = m_Children;
+        for (const auto& child : children)
+            child->SyncRecursive();
+    }
+
+    void UIElement::ClearSyncsRecursive()
+    {
+        OnSync = nullptr;
+        for (const auto& child : m_Children)
+            child->ClearSyncsRecursive();
+    }
+
     void UIElement::UpdateStylesRecursive(const UITheme& theme, float dt)
     {
         if (!Visible)

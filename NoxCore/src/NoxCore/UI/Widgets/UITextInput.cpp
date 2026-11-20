@@ -38,7 +38,7 @@ namespace Nox::UI
             const uint64_t now = SDL_GetTicks();
             const bool doubleClick = (now - m_LastClickTicks) < 350;
             m_LastClickTicks = now;
-            const bool modClick = (SDL_GetModState() & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0;
+            const bool modClick = (e.Modifiers & (UIMod::Shift | UIMod::Ctrl)) != 0;
 
             if ((doubleClick || modClick) && !Text.empty())
             {
@@ -73,7 +73,7 @@ namespace Nox::UI
         m_Cursor = std::min(m_Cursor, Text.size());
         m_BlinkTimer = 0.0f;
 
-        if (e.KeyCode == SDL_SCANCODE_A && (SDL_GetModState() & SDL_KMOD_CTRL) != 0)
+        if (e.KeyCode == SDL_SCANCODE_A && (e.Modifiers & UIMod::Ctrl) != 0)
         {
             m_SelectAll = !Text.empty();
             m_Cursor = Text.size();

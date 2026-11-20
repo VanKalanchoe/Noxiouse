@@ -125,12 +125,7 @@ namespace Nox
             preview->TextureDescriptorSlot = sphere ? sphere->GetDescriptorIndexSlot() : ~0u;
         }
         if (!m_Rebuild)
-        {
-            for (const auto& sync : m_Syncs)
-                sync();
-            return;
-        }
-        m_Syncs.clear();
+            return; // (the rows follow the material themselves: UIElement::OnSync)
         m_Body->ClearChildren();
         Ref<Material> material = AssetManager::GetAsset<Material>(m_Handle);
         if (!material)
@@ -143,7 +138,7 @@ namespace Nox
         }
         m_Rebuild = false;
         UILayer* uiLayer = Application::Get().GetUILayer();
-        InspectorCardBuilder builder{ m_Body, m_Syncs, {}, uiLayer ? &uiLayer->GetContext() : nullptr };
+        InspectorCardBuilder builder{ m_Body, {}, uiLayer ? &uiLayer->GetContext() : nullptr };
         PopulateMaterialPropertiesUI(m_Handle, material->GetData(), builder, m_ExpandedSections,
             {
                 [this](AssetHandle child) { if (OpenAsset) OpenAsset(child); },

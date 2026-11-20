@@ -65,7 +65,7 @@ namespace Nox
         // Hundredths of a second (Ctrl: free).
         float SnapTime(float time)
         {
-            return (SDL_GetModState() & SDL_KMOD_CTRL) ? time : std::round(time * 100.0f) / 100.0f;
+            return (UI::UIContext::GetCurrentModifiers() & UI::UIMod::Ctrl) ? time : std::round(time * 100.0f) / 100.0f;
         }
 
         std::string TrackName(const TimelineTrack& track, Entity player)
@@ -95,13 +95,13 @@ namespace Nox
 
             bool OnMouseWheel(const UI::UIPointerEvent& e) override
             {
-                if (SDL_GetModState() & SDL_KMOD_SHIFT)
+                if (e.Modifiers & UI::UIMod::Shift)
                     m_ScrollY = std::max(0.0f, m_ScrollY - e.ScrollDelta.y * kLane * 2.0f);
                 else
                     m_ScrollX = std::max(0.0f, m_ScrollX - (e.ScrollDelta.y + e.ScrollDelta.x) * 60.0f);
                 return true;
             }
-            bool OnKeyDown(const UI::UIKeyEvent& e) override { return m_Editor->HandleKey(e.KeyCode); }
+            bool OnKeyDown(const UI::UIKeyEvent& e) override { return m_Editor->HandleKey(e); }
 
             bool OnPointerDown(const UI::UIPointerEvent& e) override
             {
@@ -405,7 +405,7 @@ namespace Nox
                 const UI::UIRect b = GetBounds();
                 TimelineKey& key = track->Keys[static_cast<size_t>(m_Key)];
                 key.Value[m_Component] = m_Low + (1.0f - (std::clamp(e.Position.y, b.Min.y, b.Max.y) - b.Min.y) / b.Height()) * (m_High - m_Low);
-                if (SDL_GetModState() & SDL_KMOD_SHIFT)
+                if (e.Modifiers & UI::UIMod::Shift)
                     key.Time = SnapTime(std::clamp((e.Position.x - b.Min.x) / b.Width() * std::max(timeline->Duration, 0.01f), 0.0f, timeline->Duration));
                 m_Editor->Changing();
                 return true;
@@ -516,16 +516,6 @@ namespace Nox
             float m_Low = 0.0f, m_High = 1.0f, m_Duration = 1.0f;
         };
 
-        // The window's root: keys typed in it that its children leave (Ctrl+S, Ctrl+Z, Ctrl+Y, Delete) come here.
-        class TimelineRoot final : public UI::UIStackBox
-        {
-        public:
-            explicit TimelineRoot(std::function<bool(int)> onKey) : UI::UIStackBox(UI::UIOrientation::Vertical, 6.0f), m_OnKey(std::move(onKey)) {}
-            bool OnKeyDown(const UI::UIKeyEvent& e) override { return m_OnKey && m_OnKey(e.KeyCode); }
-
-        private:
-            std::function<bool(int)> m_OnKey;
-        };
     }
 
     TimelineEditorV2::TimelineEditorV2(AssetHandle timeline, Hooks hooks)
@@ -607,10 +597,11 @@ namespace Nox
         m_Committed = Capture();
     }
 
-    bool TimelineEditorV2::HandleKey(int keyCode)
+    bool TimelineEditorV2::HandleKey(const UI::UIKeyEvent& e)
     {
-        const SDL_Keymod mods = SDL_GetModState();
-        if (keyCode == SDL_SCANCODE_DELETE && !(mods & SDL_KMOD_CTRL))
+        const int keyCode = e.KeyCode;
+        const uint16_t mods = e.Modifiers;
+        if (keyCode == SDL_SCANCODE_DELETE && !(mods & UI::UIMod::Ctrl))
         {
             Timeline* timeline = GetTimeline();
             if (!timeline || SelectedTrack < 0 || SelectedTrack >= static_cast<int>(timeline->Tracks.size()))
@@ -623,12 +614,12 @@ namespace Nox
             Edited();
             return true;
         }
-        if (!(mods & SDL_KMOD_CTRL))
+        if (!(mods & UI::UIMod::Ctrl))
             return false;
         switch (keyCode)
         {
         case SDL_SCANCODE_S: Save(); return true;
-        case SDL_SCANCODE_Z: if (mods & SDL_KMOD_SHIFT) Redo(); else Undo(); return true;
+        case SDL_SCANCODE_Z: if (mods & UI::UIMod::Shift) Redo(); else Undo(); return true;
         case SDL_SCANCODE_Y: Redo(); return true;
         default: return false;
         }
@@ -923,7 +914,7 @@ namespace Nox
     void TimelineEditorV2::AutoKey(Timeline& timeline, Scene& scene, Entity player)
     {
         // Not while a mouse button is held (a gizmo drag): the key goes in once the move is done.
-        if (SDL_GetMouseState(nullptr, nullptr) != 0)
+        if (UI::UIContext::IsMouseButtonHeld())
             return;
         bool keyed = false;
         for (TimelineTrack& track : timeline.Tracks)
@@ -1040,9 +1031,10 @@ namespace Nox
 
     Ref<UI::UIElement> TimelineEditorV2::BuildUI()
     {
-        m_Syncs.clear();
         UI::UIContext* context = Context();
-        Ref<TimelineRoot> root(new TimelineRoot([this](int key) { return HandleKey(key); }));
+        // The window's root: keys typed in it that its children leave (Ctrl+S, Ctrl+Z, Ctrl+Y, Delete) come here.
+        auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
+        root->OnKey = [this](const UI::UIKeyEvent& e) { return HandleKey(e); };
         root->WidthMode = UI::UISizeMode::Fill;
         root->HeightMode = UI::UISizeMode::Fill;
         root->StyleClass = "Surface";
@@ -1099,7 +1091,7 @@ namespace Nox
         statusRef->WordWrap = true;
         statusRef->WidthMode = UI::UISizeMode::Fill;
         root->AddChild(statusRef);
-        m_Syncs.push_back([this, save, undo, redo, play, timeRef, duration, loop, preview, autoKey, curves, zoom, addTrack, statusRef]()
+        UI::AppendSync(*root, [this, save, undo, redo, play, timeRef, duration, loop, preview, autoKey, curves, zoom, addTrack, statusRef]()
         {
             const Timeline* timeline = GetTimeline();
             save->SetEnabled(m_Dirty);
@@ -1129,7 +1121,7 @@ namespace Nox
         Ref<CurvesView> curvesView(new CurvesView(this));
         m_Curves = curvesView;
         root->AddChild(curvesView);
-        m_Syncs.push_back([this]() { m_Curves->Visible = m_ShowCurves; });
+        UI::AppendSync(*root, [this]() { m_Curves->Visible = m_ShowCurves; });
 
         m_Details = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
         m_Details->WidthMode = UI::UISizeMode::Fill;
@@ -1141,13 +1133,12 @@ namespace Nox
 
     void TimelineEditorV2::RebuildDetails()
     {
-        m_DetailSyncs.clear();
         m_Details->ClearChildren();
         Timeline* timeline = GetTimeline();
         m_DetailsTrack = SelectedTrack;
         m_DetailsKey = SelectedKey;
         m_DetailsKeyCount = timeline && SelectedTrack >= 0 && SelectedTrack < static_cast<int>(timeline->Tracks.size()) ? timeline->Tracks[static_cast<size_t>(SelectedTrack)].Keys.size() : 0;
-        SettingsRowsV2 rows(m_Details, &m_DetailSyncs, Context());
+        SettingsRowsV2 rows(m_Details, Context());
         if (!timeline || SelectedTrack < 0 || SelectedTrack >= static_cast<int>(timeline->Tracks.size()))
         {
             rows.Note("Select a key to edit it.");
@@ -1167,7 +1158,7 @@ namespace Nox
         };
         const auto pickChildTimeline = [this, trackIndex, &rows]()
         {
-            InspectorCardBuilder slot{ m_Details, m_DetailSyncs, {}, Context() };
+            InspectorCardBuilder slot{ m_Details, {}, Context() };
             Timeline* t = GetTimeline();
             const AssetHandle child = t ? static_cast<AssetHandle>(std::strtoull(t->Tracks[static_cast<size_t>(trackIndex)].Parameter.c_str(), nullptr, 10)) : AssetHandle(0);
             slot.AddAssetSlot("Child Timeline", child, { AssetType::Timeline }, [this, trackIndex](AssetHandle picked)
@@ -1253,7 +1244,7 @@ namespace Nox
             break;
         case TimelineProperty::Audio:
         {
-            InspectorCardBuilder slot{ m_Details, m_DetailSyncs, {}, Context() };
+            InspectorCardBuilder slot{ m_Details, {}, Context() };
             if (TimelineKey* k = key())
                 slot.AddAssetSlot("Sound", k->Asset, { AssetType::AudioClip, AssetType::AudioGraph }, [this, key](AssetHandle picked) { if (TimelineKey* now = key()) { now->Asset = picked; Edited(); } });
             component("Length (s, 0: whole sound)", 0, 0.01f, 0.0f, 3600.0f, "{:.2f}");
@@ -1283,8 +1274,6 @@ namespace Nox
         {
             if (AssetManager::IsAssetHandleValid(m_Handle))
                 AssetManager::RequestAsset(m_Handle);
-            for (const auto& sync : m_Syncs)
-                sync();
             return;
         }
         if (!m_HaveCommitted)
@@ -1346,15 +1335,11 @@ namespace Nox
             StopPreviewAudio();
 
         // A finished change is one history step: taken when no mouse button is held.
-        if (m_ChangePending && SDL_GetMouseState(nullptr, nullptr) == 0)
+        if (m_ChangePending && !UI::UIContext::IsMouseButtonHeld())
             CommitHistory();
 
         const size_t keyCount = SelectedTrack >= 0 && SelectedTrack < static_cast<int>(timeline->Tracks.size()) ? timeline->Tracks[static_cast<size_t>(SelectedTrack)].Keys.size() : 0;
         if (m_Details && (SelectedTrack != m_DetailsTrack || SelectedKey != m_DetailsKey || keyCount != m_DetailsKeyCount))
             RebuildDetails();
-        for (const auto& sync : m_Syncs)
-            sync();
-        for (const auto& sync : m_DetailSyncs)
-            sync();
     }
 }

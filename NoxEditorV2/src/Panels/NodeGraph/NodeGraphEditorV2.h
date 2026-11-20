@@ -19,6 +19,7 @@ namespace Nox
     namespace UI
     {
         class UIButton;
+        class UIContext;
         class UIElement;
         class UILabel;
         class UIStackBox;
@@ -71,7 +72,7 @@ namespace Nox
         void RebuildDetails();
         void RebuildParameters();
         void RefreshToolbar();
-        bool HandleKey(int keyCode);
+        bool HandleKey(const UI::UIKeyEvent& e);
         void FollowDiskChanges();
         // One value's editor (a node property or an input's value), in Details or in the popup beside a node: by what it holds and
         // what the node type declares (range, choices, asset kind, bone, curve, parameter). `rebuild`: what to build again when the
@@ -82,6 +83,8 @@ namespace Nox
         // A bone property: the preview skeleton's bones (searchable, by depth) or a name typed.
         void ShowBonePicker(uint32_t nodeId, const std::string& key, const UI::UIRect& at);
         void ClosePopup();
+        // Shows a popup again next frame (UIContext::Defer): unless ClosePopup ran meanwhile or the editor is gone.
+        void DeferPopup(std::function<void()> show);
         // The skeletal mesh bone pickers list the bones of (found from the graph's clips; picked in the bone picker otherwise).
         void FindPreviewMesh();
         void SetPreviewMesh(AssetHandle mesh);
@@ -132,11 +135,10 @@ namespace Nox
         Ref<UI::UILabel> m_CompileStatus;    // a material graph's compile status under the toolbar
         bool m_CompileStatusDirty = true;
         // An open popup's rows run while it is open (they point into the graph): dropped when it closes or the graph is replaced.
-        std::shared_ptr<std::vector<std::function<void()>>> m_PopupSyncs;
-        std::shared_ptr<const bool> m_PopupOpen;
-        std::function<void()> m_DeferredPopup; // a popup built again next frame (its shape changed from inside one of its clicks)
+        std::shared_ptr<const bool> m_PopupOpen;                                    // our popup is the overlay (ClosePopup closes it)
+        UI::UIContext* m_PopupContext = nullptr;                                    // the context it is the overlay of
+        std::shared_ptr<uint32_t> m_PopupGeneration = std::make_shared<uint32_t>(0); // bumped by ClosePopup; DeferPopup checks it
         Ref<UI::UIStackBox> m_PreviewBox;
-        std::vector<std::function<void()>> m_PreviewSyncs;
         bool m_PreviewDirty = true;
         std::unique_ptr<AnimationGraphInstance> m_AnimPreview;
         bool m_AnimPlaying = true;
@@ -153,8 +155,6 @@ namespace Nox
         AssetHandle m_PreviewMesh = 0;
         AssetHandle m_PreviewSkeleton = 0;
         bool m_PreviewSearched = false;
-        std::vector<std::function<void()>> m_DetailSyncs;
-        std::vector<std::function<void()>> m_ParameterSyncs;
         bool m_DetailsDirty = true;
         bool m_ParametersDirty = true;
     };

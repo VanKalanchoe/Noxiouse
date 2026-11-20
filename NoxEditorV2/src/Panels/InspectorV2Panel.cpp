@@ -430,8 +430,6 @@ namespace Nox
                 m_NameInput->Text = tag;
         }
 
-        for (const auto& fn : m_SyncCallbacks)
-            fn();
     }
 
     void InspectorV2Panel::RebuildContent()
@@ -439,7 +437,6 @@ namespace Nox
         if (!m_ScrollView || !m_HeaderBox || !m_EmptyState)
             return;
 
-        m_SyncCallbacks.clear();
         m_ScrollView->ClearChildren();
 
         if (!m_Primary || !m_Context)
@@ -523,7 +520,6 @@ namespace Nox
 
             CardBuilder builder{
                 res.Body,
-                m_SyncCallbacks,
                 [this](bool rebuild) { NotifyMutated(rebuild); },
                 ctx
             };
@@ -640,9 +636,9 @@ namespace Nox
                     c.AddStatusNote("... and " + std::to_string(overrides.size() - 64) + " more (Revert All drops them all).");
                 // An edit to the instance (a field typed, a child added) changes the list: worked out again twice a second while no
                 // mouse button is held (a rebuild in the middle of a drag would end the drag), the card rebuilt when it differs.
-                c.Syncs.push_back([this, id = entity.GetUUID(), builtCount = overrides.size(), frame = 0]() mutable
+                UI::AppendSync(*c.Body, [this, id = entity.GetUUID(), builtCount = overrides.size(), frame = 0]() mutable
                 {
-                    if (++frame < 30 || SDL_GetMouseState(nullptr, nullptr) != 0)
+                    if (++frame < 30 || UI::UIContext::IsMouseButtonHeld())
                         return;
                     frame = 0;
                     Entity now = m_Context ? m_Context->GetEntityByUUID(id) : Entity();
@@ -725,7 +721,7 @@ namespace Nox
                                  NotifyMutated(false);
                              });
                          c.AddRow(std::string("Position (") + unit.Suffix + ")", posEdit);
-                         c.Syncs.push_back([posEdit, entity, factor = unit.Factor]() mutable
+                         UI::AppendSync(*Raw(posEdit), [posEdit = Raw(posEdit), entity, factor = unit.Factor]() mutable
                          {
                              if (!entity || posEdit->IsEditing())
                                  return;
@@ -755,7 +751,7 @@ namespace Nox
                                  NotifyMutated(false);
                              });
                          c.AddRow("Rotation (deg)", rotEdit);
-                         c.Syncs.push_back([rotEdit, entity]() mutable
+                         UI::AppendSync(*Raw(rotEdit), [rotEdit = Raw(rotEdit), entity]() mutable
                          {
                              if (!entity || rotEdit->IsEditing())
                                  return;
@@ -784,7 +780,7 @@ namespace Nox
                                  NotifyMutated(false);
                              });
                          c.AddRow("Scale", scaleEdit);
-                         c.Syncs.push_back([scaleEdit, entity]() mutable
+                         UI::AppendSync(*Raw(scaleEdit), [scaleEdit = Raw(scaleEdit), entity]() mutable
                          {
                              if (!entity || scaleEdit->IsEditing())
                                  return;
@@ -1031,11 +1027,11 @@ namespace Nox
                                  inlineBody->DrawBackground = true;
                                  inlineBody->Padding = UI::UIThickness::All(8.0f);
                                  inlineBody->Visible = inlineOpen;
-                                 fillInline = [this, handle, slotMaterial, body = inlineBody, syncs = &c.Syncs, mutate = c.OnMutate, uiContext = c.Context]()
+                                 fillInline = [this, handle, slotMaterial, body = inlineBody, mutate = c.OnMutate, uiContext = c.Context]()
                                  {
                                      if (!body->GetChildren().empty())
                                          return;
-                                     InspectorCardBuilder inlineBuilder{ body, *syncs, mutate, uiContext };
+                                     InspectorCardBuilder inlineBuilder{ body, mutate, uiContext };
                                      PopulateMaterialPropertiesUI(handle, slotMaterial->GetData(), inlineBuilder, m_ExpandedCards,
                                          { m_OnOpenAsset, [this]() { m_Dirty = true; }, true });
                                  };
@@ -2030,7 +2026,7 @@ namespace Nox
                              NotifyMutated(false);
                          });
                          c.AddRow("Looping", loopCb);
-                         c.Syncs.push_back([loopCb, entity]() mutable
+                         UI::AppendSync(*Raw(loopCb), [loopCb = Raw(loopCb), entity]() mutable
                          {
                              if (entity && entity.HasComponent<AnimatorComponent>() && !UI::HasState(loopCb->GetState(), UI::UIState::Pressed))
                                  loopCb->Checked = entity.GetComponent<AnimatorComponent>().Animator.IsLooping();
@@ -2046,7 +2042,7 @@ namespace Nox
                          speedDrag->Min = 0.0f;
                          speedDrag->Max = 10.0f;
                          c.AddRow("Speed", speedDrag);
-                         c.Syncs.push_back([speedDrag, entity]() mutable
+                         UI::AppendSync(*Raw(speedDrag), [speedDrag = Raw(speedDrag), entity]() mutable
                          {
                              if (entity && entity.HasComponent<AnimatorComponent>() &&
                                  !speedDrag->IsInteracting())
@@ -2144,7 +2140,7 @@ namespace Nox
                              [entity](float t) mutable { entity.GetComponent<AnimatorComponent>().Animator.SetCurrentTime(t); });
                          timeSlider->WidthMode = UI::UISizeMode::Fill;
                          c.AddRow("Time (Ticks)", timeSlider);
-                         c.Syncs.push_back([timeSlider, entity]() mutable
+                         UI::AppendSync(*Raw(timeSlider), [timeSlider = Raw(timeSlider), entity]() mutable
                          {
                              if (entity && entity.HasComponent<AnimatorComponent>() && !UI::HasState(timeSlider->GetState(), UI::UIState::Pressed))
                                  timeSlider->Value = entity.GetComponent<AnimatorComponent>().Animator.GetCurrentAnimationTime();
@@ -2386,7 +2382,7 @@ namespace Nox
                          c.AddInt32("Priority", &comp.Priority, -100, 100);
                          // The volume's effects (the same rows as Renderer Settings > Post Effects); they were missing here.
                          c.AddSubheader("Effects", "What this volume applies (saved with the scene; it replaces the editor's Renderer Settings post effects while it applies).");
-                         SettingsRowsV2 rows(c.Body, &c.Syncs, c.Context);
+                         SettingsRowsV2 rows(c.Body, c.Context);
                          AddPostProcessSettingsRows(rows, comp.Settings, [mutate = c.OnMutate]() { if (mutate) mutate(false); });
                      });
         }

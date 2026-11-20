@@ -190,7 +190,7 @@ namespace Nox::UI
         float perPixel = Speed;
         if (ShowFill && HasRange())
             perPixel = (Max - Min) / std::max(60.0f, GetBounds().Width());
-        if ((SDL_GetModState() & SDL_KMOD_SHIFT) != 0)
+        if ((e.Modifiers & UIMod::Shift) != 0)
             perPixel *= 0.1f;
 
         m_ScrubValue += e.Delta.x * perPixel;
@@ -234,7 +234,7 @@ namespace Nox::UI
         m_Cursor = std::min(m_Cursor, m_EditText.size());
         m_BlinkTimer = 0.0f;
 
-        if (e.KeyCode == SDL_SCANCODE_A && (SDL_GetModState() & SDL_KMOD_CTRL) != 0)
+        if (e.KeyCode == SDL_SCANCODE_A && (e.Modifiers & UIMod::Ctrl) != 0)
         {
             m_SelectAll = true;
             m_Cursor = m_EditText.size();

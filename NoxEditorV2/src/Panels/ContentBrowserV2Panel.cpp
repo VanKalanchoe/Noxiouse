@@ -625,9 +625,8 @@ namespace Nox
                 ctx->SetFocus(this); // F2, Delete, Enter, Ctrl+A, Backspace act on the tiles
 
             const int index = TileAt(e.Position);
-            const SDL_Keymod mods = SDL_GetModState();
-            const bool ctrl = (mods & SDL_KMOD_CTRL) != 0;
-            const bool shift = (mods & SDL_KMOD_SHIFT) != 0;
+            const bool ctrl = (e.Modifiers & UI::UIMod::Ctrl) != 0;
+            const bool shift = (e.Modifiers & UI::UIMod::Shift) != 0;
 
             if (e.Button == 3) // right button: the menu of what is under the pointer
             {
@@ -755,7 +754,7 @@ namespace Nox
 
         bool OnMouseWheel(const UI::UIPointerEvent& e) override
         {
-            if ((SDL_GetModState() & SDL_KMOD_CTRL) != 0)
+            if ((e.Modifiers & UI::UIMod::Ctrl) != 0)
             {
                 // Ctrl + wheel: tile size, as in Unreal.
                 ThumbSize = std::clamp(ThumbSize + e.ScrollDelta.y * 12.0f, 56.0f, 224.0f);
@@ -780,7 +779,7 @@ namespace Nox
                 }
                 return false;
             }
-            const bool ctrl = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
+            const bool ctrl = (e.Modifiers & UI::UIMod::Ctrl) != 0;
             switch (e.KeyCode)
             {
             case SDL_SCANCODE_DELETE:
@@ -1987,30 +1986,9 @@ namespace Nox
         }
         note("Open asset editors with unsaved changes are asked about first; loaded assets that use it are read again.", { 0.6f, 0.64f, 0.72f, 1.0f });
 
-        // Replace (only once something is picked) and Cancel, at the bottom of the content: a dialog button cannot wait for a choice.
-        auto buttons = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 8.0f);
-        buttons->HAlign = UI::UIAlignment::End;
-        UI::UIContext* ctx = &context;
-        Ref<UI::UIButton> cancel(new UI::UIButton("Cancel", [ctx]() { ctx->ClearOverlay(); }));
-        Ref<UI::UIButton> replace(new UI::UIButton("Replace", [this, ctx, state, from]()
-        {
-            const AssetHandle to = state->Picked;
-            ctx->ClearOverlay(); // (this button goes with the dialog: copied first)
-            if (to != 0 && m_ReplaceReferences)
-                m_ReplaceReferences(from, to);
-        }));
-        replace->StyleVariant = "primary";
-        replace->SetEnabled(false);
-        for (const Ref<UI::UIButton>& button : { cancel, replace })
-        {
-            button->Padding = UI::UIThickness::Symmetric(14.0f, 6.0f);
-            buttons->AddChild(button);
-        }
-
         // The candidates: every other asset of its type, filtered by the search; the picked one highlighted.
         UI::UIStackBox* listRaw = list.get();
-        UI::UIButton* replaceRaw = replace.get();
-        auto rebuild = [this, state, from, type, listRaw, replaceRaw]()
+        auto rebuild = [this, state, from, type, listRaw]()
         {
             EditorAssetManager* manager = Assets();
             listRaw->ClearChildren();
@@ -2033,13 +2011,12 @@ namespace Nox
             std::sort(candidates.begin(), candidates.end());
             for (const auto& [path, candidate] : candidates)
             {
-                Ref<UI::UIButton> row(new UI::UIButton(path, [state, candidate, replaceRaw]()
+                Ref<UI::UIButton> row(new UI::UIButton(path, [state, candidate]()
                 {
                     // (restyled, not rebuilt: rebuilding would destroy the button running this)
                     state->Picked = candidate;
                     for (const auto& [button, handle] : state->Rows)
                         button->StyleVariant = handle == candidate ? "primary" : "";
-                    replaceRaw->SetEnabled(true);
                 }));
                 row->WidthMode = UI::UISizeMode::Fill;
                 row->StyleVariant = candidate == state->Picked ? "primary" : "";
@@ -2051,7 +2028,6 @@ namespace Nox
                 Ref<UI::UILabel> none(new UI::UILabel(state->Filter.empty() ? "No other asset of this type." : "Nothing matches the search.", 13.0f));
                 listRaw->AddChild(none);
             }
-            replaceRaw->SetEnabled(state->Picked != 0);
         };
         search->OnChanged = [state, rebuild](const std::string& text)
         {
@@ -2059,8 +2035,14 @@ namespace Nox
             rebuild();
         };
         rebuild();
-        content->AddChild(buttons);
-        UI::UIModal::ShowCustom(context, "Replace References to " + fromMetadata.FilePath.filename().string(), content, {}, 560.0f);
+        // Replace: clickable once something is picked (the modal checks it every frame).
+        auto replace = [this, state, from]()
+        {
+            if (state->Picked != 0 && m_ReplaceReferences)
+                m_ReplaceReferences(from, state->Picked);
+        };
+        UI::UIModal::ShowCustom(context, "Replace References to " + fromMetadata.FilePath.filename().string(), content,
+                                { { "Replace", replace, true, [state]() { return state->Picked != 0; } }, { "Cancel", {} } }, 560.0f);
     }
 
     void ContentBrowserV2Panel::MoveAssets(const std::vector<AssetHandle>& handles, const std::filesystem::path& absoluteFolder)

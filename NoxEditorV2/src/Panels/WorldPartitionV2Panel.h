@@ -61,7 +61,6 @@ namespace Nox
         Ref<UI::UIElement> m_Root;
         Ref<UI::UIStackBox> m_Body;
         Ref<UI::UIElement> m_Map; // (a WorldPartitionMap, defined in the .cpp)
-        std::vector<std::function<void()>> m_Syncs;
         std::unordered_map<std::string, bool> m_Expanded;
         uint64_t m_Signature = 0;
         bool m_Rebuild = true;

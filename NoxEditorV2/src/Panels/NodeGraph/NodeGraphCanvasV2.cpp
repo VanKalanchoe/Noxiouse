@@ -118,9 +118,9 @@ namespace Nox
             return reader;
         }
 
-        bool Ctrl() { return (SDL_GetModState() & SDL_KMOD_CTRL) != 0; }
-        bool Shift() { return (SDL_GetModState() & SDL_KMOD_SHIFT) != 0; }
-        bool Alt() { return (SDL_GetModState() & SDL_KMOD_ALT) != 0; }
+        bool Ctrl() { return (UI::UIContext::GetCurrentModifiers() & UI::UIMod::Ctrl) != 0; }
+        bool Shift() { return (UI::UIContext::GetCurrentModifiers() & UI::UIMod::Shift) != 0; }
+        bool Alt() { return (UI::UIContext::GetCurrentModifiers() & UI::UIMod::Alt) != 0; }
 
         UIVec2 BezierPoint(const UIVec2& p0, const UIVec2& p1, const UIVec2& p2, const UIVec2& p3, float t)
         {

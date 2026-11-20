@@ -40,6 +40,8 @@ namespace Nox::UI
             std::string Label;
             std::function<void()> OnClick;
             bool Primary = false;
+            // Clickable only while this holds (checked every frame): a Replace that waits until something is picked.
+            std::function<bool()> Enabled;
         };
         static void ShowCustom(UIContext& context, std::string title, const Ref<UIElement>& content, std::vector<Button> buttons,
                                float width = 460.0f);

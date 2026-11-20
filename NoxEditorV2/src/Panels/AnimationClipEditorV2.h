@@ -65,10 +65,5 @@ namespace Nox
 
         Ref<UI::UIElement> m_Root;
         Ref<UI::UIStackBox> m_Notifies;
-        std::vector<std::function<void()>> m_Syncs;
-        // An open popup's rows (run while it is open).
-        std::shared_ptr<std::vector<std::function<void()>>> m_PopupSyncs;
-        std::shared_ptr<const bool> m_PopupOpen;
-        std::vector<std::function<void()>> m_NotifySyncs;
     };
 }

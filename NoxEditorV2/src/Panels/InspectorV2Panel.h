@@ -82,7 +82,6 @@ namespace Nox
         Ref<UI::UIStackBox> m_EmptyState;
 
         std::unordered_map<std::string, bool> m_ExpandedCards;
-        std::vector<std::function<void()>> m_SyncCallbacks;
 
         std::function<void()> m_OnSceneMutated;
         std::function<void()> m_OnTagChanged;

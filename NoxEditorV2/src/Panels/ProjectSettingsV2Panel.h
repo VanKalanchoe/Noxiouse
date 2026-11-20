@@ -51,7 +51,6 @@ namespace Nox
         Ref<UI::UIStackBox> m_Body;
         Ref<UI::UIStackBox> m_Surfaces;
         std::vector<Ref<UI::UITextInput>> m_SurfaceFields; // index i: surface i (none for "Default")
-        std::vector<std::function<void()>> m_Syncs;
         std::unordered_map<std::string, bool> m_Expanded;
         bool m_Rebuild = false;
         bool m_SurfacesDirty = false;

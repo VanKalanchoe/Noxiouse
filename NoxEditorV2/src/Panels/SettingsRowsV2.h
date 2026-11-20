@@ -23,13 +23,14 @@ namespace Nox
     // built once, not every frame. A row can be shown only while a condition holds (ShowWhen) and greyed out with the reason
     // next to it while another does not (EnableWhen) -- the old panels' BeginDisabled / "(why)" text.
     //
-    // Sync() runs the rows' updates; call it once a frame while the panel is visible.
+    // Each row follows its value through the UI's per-element sync (UIElement::OnSync): nothing to run by hand, nothing left running
+    // after the rows are gone.
     class SettingsRowsV2
     {
     public:
         using Cond = std::function<bool()>;
 
-        SettingsRowsV2(Ref<UI::UIStackBox> body, std::vector<std::function<void()>>* syncs, UI::UIContext* context);
+        SettingsRowsV2(Ref<UI::UIStackBox> body, UI::UIContext* context);
 
         // A collapsible card (open state kept in `expanded` by title, so a rebuild keeps it); its rows go into the returned builder.
         SettingsRowsV2 Section(const std::string& title, bool openByDefault, std::unordered_map<std::string, bool>* expanded,
@@ -71,7 +72,6 @@ namespace Nox
         Ref<UI::UIElement> AddRow(const std::string& label, const Ref<UI::UIElement>& editor, const std::string& tooltip);
 
         Ref<UI::UIStackBox> m_Body;
-        std::vector<std::function<void()>>* m_Syncs = nullptr;
         UI::UIContext* m_Context = nullptr;
     };
 }

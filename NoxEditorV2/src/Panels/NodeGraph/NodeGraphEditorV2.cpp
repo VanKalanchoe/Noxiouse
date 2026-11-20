@@ -56,18 +56,6 @@ namespace Nox
             }
         }
 
-        // The window's root: keys typed in it that its children leave (Ctrl+S, Ctrl+Z ...) come here.
-        class GraphWindowRoot final : public UI::UIStackBox
-        {
-        public:
-            explicit GraphWindowRoot(std::function<bool(int)> onKey)
-                : UI::UIStackBox(UI::UIOrientation::Vertical, 0.0f), m_OnKey(std::move(onKey)) {}
-            bool OnKeyDown(const UI::UIKeyEvent& e) override { return m_OnKey && m_OnKey(e.KeyCode); }
-
-        private:
-            std::function<bool(int)> m_OnKey;
-        };
-
         // A curve (x -> y) to see and shape: key dots dragged (kept between their neighbours), a double-click adds a key there, a
         // right click on a key removes it. The range follows the keys (held still while one is dragged).
         class CurveEditView final : public UI::UIElement
@@ -303,6 +291,7 @@ namespace Nox
         // had not taken is what the file holds now.
         Notify = nullptr; // (whoever listened may be going away too)
         StopAudioPreview(); // (closing the window stops what it plays)
+        ClosePopup(); // (its rows call into this editor)
         if (m_Asset && (m_Dirty || m_Asset->DiskGraph))
             RevertToDisk();
         if (m_Asset)
@@ -311,7 +300,9 @@ namespace Nox
 
     Ref<UI::UIElement> NodeGraphEditorV2::BuildUI()
     {
-        Ref<GraphWindowRoot> root(new GraphWindowRoot([this](int key) { return HandleKey(key); }));
+        // The window's root: keys typed in it that its children leave (Ctrl+S, Ctrl+Z ...) come here.
+        auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 0.0f);
+        root->OnKey = [this](const UI::UIKeyEvent& e) { return HandleKey(e); };
         root->WidthMode = UI::UISizeMode::Fill;
         root->HeightMode = UI::UISizeMode::Fill;
         root->StyleClass = "Surface";
@@ -435,7 +426,7 @@ namespace Nox
             return;
         FollowDiskChanges();
         // A finished edit is one history step: a value dragged in Details is finished when the mouse button comes up.
-        if (m_EditPending && SDL_GetMouseState(nullptr, nullptr) == 0)
+        if (m_EditPending && !UI::UIContext::IsMouseButtonHeld())
             CommitHistory();
         if (m_ParametersDirty)
             RebuildParameters();
@@ -444,19 +435,6 @@ namespace Nox
             FindPreviewMesh();
         if (m_DetailsDirty)
             RebuildDetails();
-        for (const auto& sync : m_DetailSyncs)
-            sync();
-        if (m_DeferredPopup)
-        {
-            std::function<void()> show = std::move(m_DeferredPopup);
-            m_DeferredPopup = nullptr;
-            show();
-        }
-        if (m_PopupSyncs && m_PopupOpen && *m_PopupOpen)
-            for (const auto& sync : *m_PopupSyncs)
-                sync();
-        else
-            m_PopupSyncs.reset();
         if (m_CompileStatusDirty)
             RefreshCompileStatus();
         if (m_PreviewBox)
@@ -467,8 +445,6 @@ namespace Nox
                 UpdateAudioPreview();
             else
                 UpdateAnimationPreview();
-            for (const auto& sync : m_PreviewSyncs)
-                sync();
         }
         RefreshToolbar();
     }
@@ -523,15 +499,14 @@ namespace Nox
         }
     }
 
-    bool NodeGraphEditorV2::HandleKey(int keyCode)
+    bool NodeGraphEditorV2::HandleKey(const UI::UIKeyEvent& e)
     {
-        const SDL_Keymod mods = SDL_GetModState();
-        if ((mods & SDL_KMOD_CTRL) == 0)
+        if ((e.Modifiers & UI::UIMod::Ctrl) == 0)
             return false;
-        switch (keyCode)
+        switch (e.KeyCode)
         {
         case SDL_SCANCODE_S: Save(); return true;
-        case SDL_SCANCODE_Z: if (mods & SDL_KMOD_SHIFT) Redo(); else Undo(); return true;
+        case SDL_SCANCODE_Z: if (e.Modifiers & UI::UIMod::Shift) Redo(); else Undo(); return true;
         case SDL_SCANCODE_Y: Redo(); return true;
         default: return false;
         }
@@ -706,7 +681,6 @@ namespace Nox
     {
         m_ParametersDirty = false;
         m_PreviewDirty = true; // (the preview lists the parameters too)
-        m_ParameterSyncs.clear();
         if (!m_Parameters)
             return;
         m_Parameters->ClearChildren();
@@ -774,7 +748,7 @@ namespace Nox
                 payload.Text = m_Asset->Graph.Parameters[index].Name;
                 return payload;
             };
-            InspectorCardBuilder builder{ card, m_ParameterSyncs, [this](bool) { MarkEdited(true); }, UI::UIContext::GetCurrent() };
+            InspectorCardBuilder builder{ card, [this](bool) { MarkEdited(true); }, UI::UIContext::GetCurrent() };
             auto lastName = std::make_shared<std::string>(parameter.Name);
             builder.AddString("Name", &parameter.Name, "Name", [this, index, lastName]()
             {
@@ -814,7 +788,6 @@ namespace Nox
     void NodeGraphEditorV2::RebuildDetails()
     {
         m_DetailsDirty = false;
-        m_DetailSyncs.clear();
         if (!m_Details)
             return;
         m_Details->ClearChildren();
@@ -860,7 +833,7 @@ namespace Nox
         Ref<UI::UIStackBox> body(new UI::UIStackBox(UI::UIOrientation::Vertical, 4.0f));
         body->WidthMode = UI::UISizeMode::Fill;
         m_Details->AddChild(body);
-        InspectorCardBuilder builder{ body, m_DetailSyncs, [this](bool) { MarkEdited(true); }, UI::UIContext::GetCurrent() };
+        InspectorCardBuilder builder{ body, [this](bool) { MarkEdited(true); }, UI::UIContext::GetCurrent() };
         const uint32_t nodeId = node->Id;
         auto addProperty = [&](const std::string& key, const std::string& label)
         {
@@ -1050,7 +1023,7 @@ namespace Nox
             UI::UIButton* raw = pick.get();
             pick->OnClick = [this, nodeId, key, raw]() { ShowBonePicker(nodeId, key, raw->GetBounds()); };
             // (the button follows the value: a pick or an undo changes it)
-            builder.Syncs.push_back([this, nodeId, key, raw]()
+            UI::AppendSync(*raw, [this, nodeId, key, raw]()
             {
                 for (const GraphNode& n : ShownGraph().Nodes)
                     if (n.Id == nodeId)
@@ -1128,12 +1101,29 @@ namespace Nox
 
     void NodeGraphEditorV2::ClosePopup()
     {
-        m_DeferredPopup = nullptr;
-        if (m_PopupOpen && *m_PopupOpen)
-            if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
-                ctx->ClearOverlay();
-        m_PopupSyncs.reset();
+        ++*m_PopupGeneration; // (a popup asked to show again is not shown: it belonged to what is closing)
+        if (m_PopupOpen && *m_PopupOpen && m_PopupContext) // (still up: its context is alive -- the flag drops with the popup)
+            m_PopupContext->ClearOverlay();
         m_PopupOpen.reset();
+        m_PopupContext = nullptr;
+    }
+
+    void NodeGraphEditorV2::DeferPopup(std::function<void()> show)
+    {
+        // Next frame, not from inside the click that changed the popup's shape (that would destroy the button running it); skipped
+        // when the popup was closed meanwhile or the editor is gone.
+        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        if (!ctx)
+        {
+            show();
+            return;
+        }
+        ctx->Defer([token = std::weak_ptr<uint32_t>(m_PopupGeneration), generation = *m_PopupGeneration, show = std::move(show)]()
+        {
+            const std::shared_ptr<uint32_t> alive = token.lock();
+            if (alive && *alive == generation)
+                show();
+        });
     }
 
     void NodeGraphEditorV2::ShowValuePopup(uint32_t nodeId, const std::string& key, const UI::UIRect& at)
@@ -1153,14 +1143,10 @@ namespace Nox
         Ref<UI::UIStackBox> box(new UI::UIStackBox(UI::UIOrientation::Vertical, 4.0f));
         box->Padding = UI::UIThickness::All(10.0f);
         box->FixedSize = { 340.0f, 0.0f };
-        auto syncs = std::make_shared<std::vector<std::function<void()>>>();
-        InspectorCardBuilder builder{ box, *syncs, [this](bool) { MarkEdited(true); }, ctx };
-        // (built again next frame, not from inside the click that changed its shape: that would destroy the button running it)
-        AddValueEditor(builder, nodeId, key, key, [this, nodeId, key, at]() { m_DeferredPopup = [this, nodeId, key, at]() { ShowValuePopup(nodeId, key, at); }; });
-        for (const auto& sync : *syncs)
-            sync();
-        m_PopupSyncs = syncs;
+        InspectorCardBuilder builder{ box, [this](bool) { MarkEdited(true); }, ctx };
+        AddValueEditor(builder, nodeId, key, key, [this, nodeId, key, at]() { DeferPopup([this, nodeId, key, at]() { ShowValuePopup(nodeId, key, at); }); });
         m_PopupOpen = UI::UIPopup::Show(*ctx, at, box);
+        m_PopupContext = ctx;
         m_DetailsDirty = true; // (Details shows the same value: built again so both point at it)
     }
 
@@ -1197,16 +1183,15 @@ namespace Nox
         const Skeleton* skeleton = m_PreviewSkeleton != 0 ? AssetManager::FindLoadedAsset<Skeleton>(m_PreviewSkeleton) : nullptr;
         if (m_PreviewSkeleton != 0 && !skeleton)
             AssetManager::RequestAsset(m_PreviewSkeleton);
-        auto syncs = std::make_shared<std::vector<std::function<void()>>>();
         if (!skeleton)
         {
             box->AddChild(MutedLabel(m_PreviewSkeleton != 0 ? "The preview skeleton is loading: open the picker again in a moment."
                                                              : "No preview mesh: pick the skeletal mesh this graph animates to list its bones, or type the bone's name below."));
-            InspectorCardBuilder slot{ box, *syncs, {}, ctx };
+            InspectorCardBuilder slot{ box, {}, ctx };
             slot.AddAssetSlot("Preview Mesh", m_PreviewMesh, { AssetType::Mesh }, [this, nodeId, key, at](AssetHandle mesh)
             {
                 SetPreviewMesh(mesh);
-                m_DeferredPopup = [this, nodeId, key, at]() { ShowBonePicker(nodeId, key, at); }; // (next frame: this slot goes with the popup)
+                DeferPopup([this, nodeId, key, at]() { ShowBonePicker(nodeId, key, at); }); // (next frame: this slot goes with the popup)
             });
         }
         else
@@ -1278,8 +1263,8 @@ namespace Nox
         typed->WidthMode = UI::UISizeMode::Fill;
         typed->OnSubmit = [choose](const std::string& text) { choose(text); };
         box->AddChild(typed);
-        m_PopupSyncs = syncs;
         m_PopupOpen = UI::UIPopup::Show(*ctx, at, box);
+        m_PopupContext = ctx;
     }
 
     void NodeGraphEditorV2::FindPreviewMesh()
@@ -1483,7 +1468,7 @@ namespace Nox
         Ref<UI::UIStackBox> body(new UI::UIStackBox(UI::UIOrientation::Vertical, 4.0f));
         body->WidthMode = UI::UISizeMode::Fill;
         m_Details->AddChild(body);
-        InspectorCardBuilder builder{ body, m_DetailSyncs, [this](bool) { MarkEdited(true); }, UI::UIContext::GetCurrent() };
+        InspectorCardBuilder builder{ body, [this](bool) { MarkEdited(true); }, UI::UIContext::GetCurrent() };
         auto edited = [this]() { MarkEdited(true); };
         const auto stateName = [&machine](uint32_t id) -> std::string
         {
@@ -1663,7 +1648,6 @@ namespace Nox
     void NodeGraphEditorV2::RebuildPreview()
     {
         m_PreviewDirty = false;
-        m_PreviewSyncs.clear();
         m_PreviewImage = nullptr;
         if (!m_PreviewBox || !m_Asset)
             return;
@@ -1692,7 +1676,7 @@ namespace Nox
                 else
                     m_AudioWanted = true;
             };
-            m_PreviewSyncs.push_back([this, playRaw]()
+            UI::AppendSync(*playRaw, [this, playRaw]()
             {
                 const char* text = m_AudioWanted ? "Stop" : "Play";
                 if (playRaw->GetText() != text)
@@ -1703,7 +1687,7 @@ namespace Nox
             Ref<UI::UILabel> status = MutedLabel("", 12.5f);
             status->VAlign = UI::UIAlignment::Center;
             UI::UILabel* statusRaw = status.get();
-            m_PreviewSyncs.push_back([this, statusRaw]()
+            UI::AppendSync(*statusRaw, [this, statusRaw]()
             {
                 statusRaw->Text = !m_AudioError.empty() ? "Cannot play: " + m_AudioError : !m_AudioProgram ? std::string("Loading...") : std::string();
             });
@@ -1719,7 +1703,7 @@ namespace Nox
             controls->AddChild(mesh);
             Ref<UI::UIButton> play = smallButton("Pause", [this]() { m_AnimPlaying = !m_AnimPlaying; }, "Plays / holds the playheads");
             UI::UIButton* playRaw = play.get();
-            m_PreviewSyncs.push_back([this, playRaw]()
+            UI::AppendSync(*playRaw, [this, playRaw]()
             {
                 const char* text = m_AnimPlaying ? "Pause" : "Play";
                 if (playRaw->GetText() != text)
@@ -1742,7 +1726,7 @@ namespace Nox
             m_PreviewBox->AddChild(image);
             Ref<UI::UILabel> notify = MutedLabel("", 12.5f);
             UI::UILabel* notifyRaw = notify.get();
-            m_PreviewSyncs.push_back([this, notifyRaw]()
+            UI::AppendSync(*notifyRaw, [this, notifyRaw]()
             {
                 notifyRaw->Text = m_PreviewNotifyAge < 1.5f ? "Notify: " + m_PreviewNotify : std::string();
                 notifyRaw->ColorOverride = { 1.0f, 0.75f, 0.25f, 1.0f };
@@ -1757,7 +1741,7 @@ namespace Nox
         Ref<UI::UIStackBox> rowsBox(new UI::UIStackBox(UI::UIOrientation::Vertical, 3.0f));
         rowsBox->WidthMode = UI::UISizeMode::Fill;
         m_PreviewBox->AddChild(rowsBox);
-        InspectorCardBuilder rows{ rowsBox, m_PreviewSyncs, {}, ctx };
+        InspectorCardBuilder rows{ rowsBox, {}, ctx };
         for (const GraphParameter& parameter : parameters)
         {
             const std::string name = parameter.Name;
@@ -1816,7 +1800,7 @@ namespace Nox
             {
                 Ref<UI::UICheckBox> box(new UI::UICheckBox("", false, [apply](bool on) { apply(on); }));
                 UI::UICheckBox* boxRaw = box.get();
-                rows.Syncs.push_back([boxRaw, current]() { const NodeGraphValue v = current(); boxRaw->Checked = std::holds_alternative<bool>(v) && std::get<bool>(v); });
+                UI::AppendSync(*boxRaw, [boxRaw, current]() { const NodeGraphValue v = current(); boxRaw->Checked = std::holds_alternative<bool>(v) && std::get<bool>(v); });
                 rows.AddRow(name, box);
             }
             else
@@ -1828,7 +1812,7 @@ namespace Nox
                 }));
                 drag->Format = isInt ? "{:.0f}" : "{:.3f}";
                 UI::UIDragScalar* dragRaw = drag.get();
-                rows.Syncs.push_back([dragRaw, current]() { if (!dragRaw->IsInteracting()) dragRaw->Value = NodeGraphValueToFloat(current()); });
+                UI::AppendSync(*dragRaw, [dragRaw, current]() { if (!dragRaw->IsInteracting()) dragRaw->Value = NodeGraphValueToFloat(current()); });
                 rows.AddRow(name, drag);
             }
             if (audio)
@@ -1846,7 +1830,7 @@ namespace Nox
                     }
                 }, "Changed here for the preview only: back to the default set in Parameters");
                 UI::UIButton* resetRaw = reset.get();
-                rows.Syncs.push_back([this, resetRaw, name]() { resetRaw->Visible = m_AudioValues.contains(name); });
+                UI::AppendSync(*resetRaw, [this, resetRaw, name]() { resetRaw->Visible = m_AudioValues.contains(name); });
                 rows.AddRow("", reset);
             }
         }

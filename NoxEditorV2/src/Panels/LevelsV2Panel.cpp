@@ -112,13 +112,10 @@ namespace Nox
             m_Rebuild = false;
             Rebuild();
         }
-        for (const auto& sync : m_Syncs)
-            sync();
     }
 
     void LevelsV2Panel::Rebuild()
     {
-        m_Syncs.clear();
         m_Body->ClearChildren();
         const Ref<Scene> scene = m_Hooks.ActiveScene ? m_Hooks.ActiveScene() : nullptr;
         if (!scene)
@@ -179,7 +176,7 @@ namespace Nox
             row->AddChild(FixedWidth(Muted(""), 150.0f));
             row->AddChild(FixedWidth(Muted(""), 70.0f));
             m_Body->AddChild(row);
-            m_Syncs.push_back([current, getScene]() { if (Ref<Scene> s = getScene()) current->Checked = s->GetCurrentLevel() == 0; });
+            UI::AppendSync(*row, [current, getScene]() { if (Ref<Scene> s = getScene()) current->Checked = s->GetCurrentLevel() == 0; });
         }
 
         for (const Scene::SubLevel& subLevel : scene->GetSubLevels())
@@ -283,7 +280,7 @@ namespace Nox
             row->AddChild(FixedWidth(remove, 70.0f));
             m_Body->AddChild(row);
 
-            m_Syncs.push_back([=]()
+            UI::AppendSync(*row, [=]() // (on the row: what it updates is inside it)
             {
                 const Scene::SubLevel* now = find();
                 if (!now)
@@ -374,7 +371,7 @@ namespace Nox
             Changed();
         }));
         actions->AddChild(move);
-        m_Syncs.push_back([this, move, getScene]()
+        UI::AppendSync(*actions, [this, move, getScene]()
         {
             const bool any = m_Hooks.Selection && !m_Hooks.Selection().empty();
             move->SetEnabled(any);
@@ -390,7 +387,7 @@ namespace Nox
         unsavedRef->UseColorOverride = true;
         unsavedRef->ColorOverride = { 1.0f, 0.75f, 0.3f, 1.0f };
         m_Body->AddChild(unsavedRef);
-        m_Syncs.push_back([this, unsavedRef, getScene]()
+        UI::AppendSync(*unsavedRef, [this, unsavedRef = unsavedRef.get(), getScene]()
         {
             const Ref<Scene> s = getScene();
             const bool warn = s && !s->GetSubLevels().empty() && (!m_Hooks.OpenScene || m_Hooks.OpenScene() == 0);

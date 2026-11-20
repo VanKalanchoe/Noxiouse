@@ -230,7 +230,6 @@ namespace Nox
 
     Ref<UI::UIElement> AnimationClipEditorV2::BuildUI()
     {
-        m_Syncs.clear();
         auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
         root->WidthMode = UI::UISizeMode::Fill;
         root->HeightMode = UI::UISizeMode::Fill;
@@ -247,7 +246,7 @@ namespace Nox
         auto info = Muted("");
         bar->AddChild(info);
         root->AddChild(bar);
-        m_Syncs.push_back([this, save, info]()
+        UI::AppendSync(*bar, [this, save, info]()
         {
             save->SetEnabled(m_Dirty);
             save->StyleVariant = m_Dirty ? "primary" : "";
@@ -314,7 +313,7 @@ namespace Nox
         controls->AddChild(meshNote);
         previewRow->AddChild(controls);
         root->AddChild(previewRow);
-        m_Syncs.push_back([this, image, play, loop, speed, mesh, meshNote]()
+        UI::AppendSync(*previewRow, [this, image, play, loop, speed, mesh, meshNote]()
         {
             Texture2D* frame = m_PreviewMesh != 0 ? AssetPreviewRenderer::Get().GetAnimationPreview(m_PreviewMesh, m_PreviewSkeleton, m_Clip, Cursor, 256) : nullptr;
             image->TextureDescriptorSlot = frame ? frame->GetDescriptorIndexSlot() : ~0u;
@@ -338,7 +337,7 @@ namespace Nox
         auto rangeText = Muted("");
         rangeRow->AddChild(rangeText);
         root->AddChild(rangeRow);
-        m_Syncs.push_back([this, rangeText]()
+        UI::AppendSync(*rangeRow, [this, rangeText]()
         {
             const AnimationSequence* clip = Clip(m_Clip);
             const float duration = clip ? clip->Duration : 0.0f;
@@ -382,7 +381,6 @@ namespace Nox
 
     void AnimationClipEditorV2::RebuildNotifies()
     {
-        m_NotifySyncs.clear();
         m_Notifies->ClearChildren();
         AnimationSequence* clip = Clip(m_Clip);
         if (!clip)
@@ -454,7 +452,7 @@ namespace Nox
                 }
             })));
             m_Notifies->AddChild(row);
-            m_NotifySyncs.push_back([notify, time, name, applyName, sync, sound]()
+            UI::AppendSync(*row, [notify, time, name, applyName, sync, sound]()
             {
                 AnimationNotify* n = notify();
                 if (!n)
@@ -487,11 +485,10 @@ namespace Nox
         auto box = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
         box->Padding = UI::UIThickness::All(10.0f);
         box->FixedSize = { 460.0f, 0.0f };
-        auto syncs = std::make_shared<std::vector<std::function<void()>>>();
-        SettingsRowsV2 rows(box, syncs.get(), context);
+        SettingsRowsV2 rows(box, context);
         rows.Header("Play Sound: " + n->Name);
         const auto changed = [this]() { Edited(); };
-        InspectorCardBuilder slots{ box, *syncs, {}, context };
+        InspectorCardBuilder slots{ box, {}, context };
         slots.AddAssetSlot("Sound", n->Sound, { AssetType::AudioClip, AssetType::AudioGraph }, [n, changed](AssetHandle sound) { n->Sound = sound; changed(); });
         // The bone it plays at: the preview skeleton's bones, or typed.
         std::vector<std::string> bones{ "(the entity)" };
@@ -522,7 +519,7 @@ namespace Nox
             trace.Choice("Surface " + std::to_string(s + 1), surfaces,
                 [n, s, surfaces]() { if (s >= n->SurfaceSounds.size()) return 0; const auto f = std::find(surfaces.begin(), surfaces.end(), n->SurfaceSounds[s].Surface); return f == surfaces.end() ? 0 : static_cast<int>(f - surfaces.begin()); },
                 [n, s, surfaces, changed](int i) { if (s < n->SurfaceSounds.size()) { n->SurfaceSounds[s].Surface = surfaces[static_cast<size_t>(i)]; changed(); } });
-            InspectorCardBuilder sound{ trace.GetBody(), *syncs, {}, context };
+            InspectorCardBuilder sound{ trace.GetBody(), {}, context };
             sound.AddAssetSlot("  Sound", n->SurfaceSounds[s].Sound, { AssetType::AudioClip, AssetType::AudioGraph },
                 [n, s, changed](AssetHandle h) { if (s < n->SurfaceSounds.size()) { n->SurfaceSounds[s].Sound = h; changed(); } });
         }
@@ -531,11 +528,8 @@ namespace Nox
         rows.Drag("Pitch Variation", [n]() { return n->PitchVariation; }, [n, changed](float v) { n->PitchVariation = v; changed(); }, 0.005f, 0.0f, 0.5f, "+/- {:.3f}",
                   "Each play's pitch is random within this (0.05: +/- 5 %): no two footsteps alike.");
         rows.Button("Remove Sound", [n, changed, context]() { n->Sound = 0; n->SurfaceSounds.clear(); changed(); context->ClearOverlay(); });
-        for (const auto& sync : *syncs)
-            sync();
-        // Its rows follow the notify while the popup is open, and stop when it closes (they point at this notify).
-        m_PopupSyncs = syncs;
-        m_PopupOpen = UI::UIPopup::Show(*context, anchor, box);
+        // (its rows follow the notify while the popup is up, and stop with it: their syncs are part of the overlay)
+        UI::UIPopup::Show(*context, anchor, box);
     }
 
     void AnimationClipEditorV2::Update()
@@ -610,14 +604,5 @@ namespace Nox
 
         if (m_Notifies && clip->Notifies.size() != m_NotifyCount)
             RebuildNotifies();
-        for (const auto& sync : m_Syncs)
-            sync();
-        for (const auto& sync : m_NotifySyncs)
-            sync();
-        if (m_PopupSyncs && m_PopupOpen && *m_PopupOpen)
-            for (const auto& sync : *m_PopupSyncs)
-                sync();
-        else
-            m_PopupSyncs.reset();
     }
 }

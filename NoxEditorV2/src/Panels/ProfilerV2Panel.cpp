@@ -260,7 +260,7 @@ namespace Nox
 
             bool OnMouseWheel(const UI::UIPointerEvent& e) override
             {
-                if (SDL_GetModState() & SDL_KMOD_SHIFT)
+                if (e.Modifiers & UI::UIMod::Shift)
                 {
                     m_ScrollY = std::max(0.0f, m_ScrollY - e.ScrollDelta.y * 40.0f); // Shift+wheel: up / down through the lanes
                     return true;
@@ -752,7 +752,6 @@ namespace Nox
     const Ref<UI::UIElement>& ProfilerV2Panel::BuildUI(UI::UIContext* context)
     {
         m_Context = context;
-        m_Syncs.clear();
         auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
         root->WidthMode = UI::UISizeMode::Fill;
         root->HeightMode = UI::UISizeMode::Fill;
@@ -831,7 +830,7 @@ namespace Nox
         root->AddChild(tableBar);
         root->AddChild(Ref<ScopeTable>(new ScopeTable(s)));
 
-        m_Syncs.push_back([this, s, closeCapture, pause, follow, clear, save, threshold, source, memoryGraph, messageRef, infoRef, markedRef, unmark]()
+        UI::AppendSync(*root, [this, s, closeCapture, pause, follow, clear, save, threshold, source, memoryGraph, messageRef, infoRef, markedRef, unmark]()
         {
             const bool capture = s->Capture != nullptr;
             closeCapture->Visible = capture;
@@ -887,8 +886,6 @@ namespace Nox
         if (m_State->Follow && (!m_State->Paused || m_State->Source == FrameSource::Spikes) && !m_State->Capture)
             m_State->FollowNewest();
 #endif
-        for (const auto& sync : m_Syncs)
-            sync();
     }
 
     void ProfilerV2Panel::SaveCapture()

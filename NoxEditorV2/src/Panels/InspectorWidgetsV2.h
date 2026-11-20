@@ -95,10 +95,17 @@ namespace Nox
 
     // Two-column property row builder with live two-way sync callbacks. The editors it makes keep copies of what they call
     // (OnMutate), never a pointer to the builder: builders are locals of the function that fills a card.
+    // The element a Ref or a UI builder holds, by raw pointer: a sync (UIElement::OnSync) lives in the element itself, so it must not
+    // hold a Ref to it.
+    template <typename Holder>
+    auto* Raw(const Holder& holder)
+    {
+        return holder.operator->();
+    }
+
     struct InspectorCardBuilder
     {
         Ref<UI::UIStackBox> Body;
-        std::vector<std::function<void()>>& Syncs;
         std::function<void(bool)> OnMutate;
         UI::UIContext* Context = nullptr;
 

@@ -61,8 +61,7 @@ namespace Nox::UI
             const bool dblClick = (now - m_LastClickTicks) < 400;
             m_LastClickTicks = now;
 
-            const SDL_Keymod mods = SDL_GetModState();
-            const bool modClick = (mods & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0;
+            const bool modClick = (e.Modifiers & (UIMod::Shift | UIMod::Ctrl)) != 0;
 
             if (modClick || dblClick)
             {
@@ -106,7 +105,7 @@ namespace Nox::UI
             return UIElement::OnKeyDown(e);
 
         m_BlinkTimer = 0.0f;
-        if (e.KeyCode == SDL_SCANCODE_A && (SDL_GetModState() & SDL_KMOD_CTRL) != 0)
+        if (e.KeyCode == SDL_SCANCODE_A && (e.Modifiers & UIMod::Ctrl) != 0)
         {
             m_SelectAll = true;
             m_Cursor = m_EditText.size();

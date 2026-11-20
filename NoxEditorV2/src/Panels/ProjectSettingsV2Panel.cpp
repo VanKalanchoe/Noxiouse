@@ -43,7 +43,6 @@ namespace Nox
     const Ref<UI::UIElement>& ProjectSettingsV2Panel::BuildUI(UI::UIContext* context)
     {
         m_Context = context;
-        m_Syncs.clear();
         m_SurfaceFields.clear();
         m_Rebuild = false;
         // The root stays (it is in a window); built again, only what is in it changes.
@@ -67,7 +66,7 @@ namespace Nox
         Renderer* r = m_Hooks.Render;
         if (!config || !r)
             return m_Root;
-        SettingsRowsV2 rows(m_Body, &m_Syncs, context);
+        SettingsRowsV2 rows(m_Body, context);
         rows.Note("Saved in the project file at each change.");
 
         // ---- Maps ----
@@ -318,7 +317,5 @@ namespace Nox
                     CommitSurface(i, field->Text);
             }
         }
-        for (const auto& sync : m_Syncs)
-            sync();
     }
 }

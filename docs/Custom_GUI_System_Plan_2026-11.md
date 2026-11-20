@@ -342,6 +342,7 @@ it yet):
 | E8 | Colours written into widgets instead of theme tokens (my new panels included) | UI widgets, panels | a theme change does not reach them | move to theme tokens when each panel is touched |
 | E9 | Two editors with copied code (AssetPreviewRenderer, EditorHistory, ScriptBuilder, GamePackager live twice) | NoxEditor, NoxEditorV2 | fixes made twice or only once | shared editor code in one place; NoxEditor retired when V2 has everything |
 | E10 | UI text drawn from one 40 px MSDF atlas at every size (distance range 2) | UIDrawList::AddText, UIPrimitives.slang | 12-14 px text has wavy edges (the range covers under a pixel), zoomed-out graph text breaks apart; ImGui text is visibly cleaner | a glyph cache per pixel size, as Slate and ImGui do -- **fixed** (below) |
+| E11 | Panels kept lists of update callbacks the layer had to call each frame; widgets read the keyboard and mouse from SDL themselves; a key handler meant a subclass; a dialog button could not wait for a choice | InspectorWidgetsV2, SettingsRowsV2, every ported panel, UISlider / UITextInput / ... | callbacks that outlived their widgets, the UI tied to SDL, a class per key handler, hand-built button rows | core hooks in the UI library (OnSync, Defer, OnKey, UIMod, held-button state, modal button Enabled) -- **fixed** (below) |
 
 Order from here: E3 selection service, E4 command system and E6 asset-editor registry first (every panel ported after them uses them,
 instead of being ported twice), E2 split while doing so, then the graph editor's G2-G4 and the panels below. E5 and E7 when they are
@@ -656,6 +657,21 @@ old rms 0.017 / max 0.36, new 0.006 / 0.12; 12.5-13.5 px lines old max 0.44-0.49
 new 0.009 / 0.15; 6.25 px (50 %) old 0.044 / 0.63, new 0.009 / 0.20 (the new path's error is only the quarter-pixel pen and half-pixel
 size steps). Syntax check of the changed files; the Vulkan backend and Renderer.cpp could not be checked here (no Vulkan / RTXDI headers
 in the container). Not run on a GPU.
+
+**E11 -- core UI hooks (built; checked by the headless UI test, not user-tested).** In `Nox::UI` and the NoxUI library alike:
+`UIElement::OnSync` (a function the context calls on every element each frame before layout, hidden ones too: a widget showing a value
+it does not own refreshes itself; `AppendSync` chains several; capture the element by raw pointer, never a Ref to itself or a parent),
+`UIElement::ClearSyncsRecursive` (an asset editor drops them before what they read is destroyed), `UIContext::Defer` (runs at the next
+frame's start: a click that rebuilds the list it is in), `UIElement::OnKey` (a key handler without a subclass), `UIMod` bits on
+pointer and key events and `UIContext::GetCurrentModifiers` / `IsMouseButtonHeld` (no widget reads SDL any more), and
+`UIModal::Button::Enabled` (a button enabled only while it holds, checked each frame). The editor moved onto them: the update lists in
+InspectorWidgetsV2 (`InspectorCardBuilder`), SettingsRowsV2 and the Renderer Settings, Project Settings, World Partition, Levels,
+Mixer, Profiler, Render Graph, Material, Animation Clip, Timeline and node graph editors are gone; the Timeline, node graph and Mixer
+roots use OnKey; the Replace References dialog uses an Enabled Replace button; the content browser, output log, World Partition, Mixer
+and Profiler read modifiers from their events. Fixed on the way: Shift+Tab compared the SDL Shift bit with the UI's modifier bits (the
+same bit by chance). Headless UI test: 35 checks pass (13 new: OnSync once a frame and on hidden elements, AppendSync, Defer once at the
+next frame, OnKey's key and modifiers, Shift+Tab, GetCurrentModifiers, held buttons, a modal button that stays disabled and ignores
+clicks until Enabled holds). Not run in the editor on a GPU.
 
 **G1 -- graph editor (built, not run on a GPU / not user-tested).** `Panels/NodeGraph/NodeGraphCanvasV2` (the canvas, in the look of
 `UI::UINodeGraph`: rounded nodes with a category-coloured header and a shadow, bezier wires in their type's colour, a grid) and

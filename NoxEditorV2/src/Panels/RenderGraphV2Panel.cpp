@@ -87,13 +87,10 @@ namespace Nox
             return;
         }
         m_WasShown = true;
-        for (const auto& sync : m_Syncs)
-            sync();
     }
 
     const Ref<UI::UIElement>& RenderGraphV2Panel::BuildUI(UI::UIContext* context)
     {
-        m_Syncs.clear();
         auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
         root->WidthMode = UI::UISizeMode::Fill;
         root->HeightMode = UI::UISizeMode::Fill;
@@ -108,7 +105,7 @@ namespace Nox
 
         // ---- Header: switches and the frame's counts ----
         {
-            SettingsRowsV2 rows(root, &m_Syncs, context);
+            SettingsRowsV2 rows(root, context);
             SettingsRowsV2 header = rows.Section("Graph, Culling and LOD", true, nullptr);
             header.Check("Validation", [graph]() { return graph->IsValidationEnabled(); }, [graph](bool v) { graph->SetValidationEnabled(v); });
             header.Check("Parallel Recording", [r]() { return r->isParallelCommandRecording(); }, [r](bool v) { r->setParallelCommandRecording(v); });
@@ -228,7 +225,7 @@ namespace Nox
             accessesRef->WordWrap = true;
             accessesRef->WidthMode = UI::UISizeMode::Fill;
             page->AddChild(accessesRef);
-            m_Syncs.push_back([this, graph, accessesRef]()
+            UI::AppendSync(*page, [this, graph, accessesRef]()
             {
                 const RGFrameReport& report = graph->GetReport();
                 if (m_SelectedPass >= report.Passes.size())
@@ -255,7 +252,7 @@ namespace Nox
             auto page = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
             page->WidthMode = UI::UISizeMode::Fill;
             page->HeightMode = UI::UISizeMode::Fill;
-            SettingsRowsV2 rows(page, &m_Syncs, context);
+            SettingsRowsV2 rows(page, context);
             rows.Check("Show resources unused this frame", [this]() { return m_ShowUnusedResources; }, [this](bool v) { m_ShowUnusedResources = v; });
             Ref<TableViewV2> table(new TableViewV2());
             table->Columns = { { "Resource", 3.0f }, { "Kind", 1.2f }, { "Size", 1.4f }, { "Format", 1.0f }, { "Memory", 1.0f }, { "Lifetime", 2.2f }, { "GPU Object", 0.9f }, { "", 0.9f } };
@@ -335,7 +332,7 @@ namespace Nox
             labelRef->WordWrap = true;
             labelRef->WidthMode = UI::UISizeMode::Fill;
             scroll->AddChild(labelRef);
-            m_Syncs.push_back([graph, labelRef]()
+            UI::AppendSync(*scroll, [graph, labelRef]()
             {
                 const RGFrameReport& report = graph->GetReport();
                 std::string text = !graph->IsValidationEnabled() ? "Validation is off." : report.ValidationMessages.empty() ? "No issues this frame." : "";
@@ -361,7 +358,7 @@ namespace Nox
             auto page = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
             page->WidthMode = UI::UISizeMode::Fill;
             page->HeightMode = UI::UISizeMode::Fill;
-            SettingsRowsV2 rows(page, &m_Syncs, context);
+            SettingsRowsV2 rows(page, context);
             rows.Text([r]()
             {
                 const Renderer::TextureInspection& inspection = r->getTextureInspection();
@@ -440,7 +437,7 @@ namespace Nox
             rows.Text([r, inspecting]() { return inspecting() && !r->getInspectionImage() ? std::string("Not available this frame (culled or not produced by the current pipeline).") : std::string(); }, kWarning);
             tabs->AddTab("Inspector", page);
         }
-        m_Syncs.push_back([tabs, graph]()
+        UI::AppendSync(*root, [tabs, graph]()
         {
             const std::string title = std::format("Validation ({})", graph->GetReport().ValidationMessages.size());
             if (tabs->GetTabCount() > 2 && tabs->GetTabTitle(2) != title)

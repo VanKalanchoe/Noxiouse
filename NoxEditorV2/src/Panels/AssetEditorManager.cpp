@@ -80,7 +80,7 @@ namespace Nox
         const Ref<UI::UIElement> root = editor->BuildUI();
         const float offset = static_cast<float>((m_Open.size() % 5) * 28);
         dock->FloatPanel(title, root, { 220.0f + offset, 90.0f + offset }, editor->GetDefaultSize(), false);
-        m_Open.push_back({ std::move(editor), std::move(title) });
+        m_Open.push_back({ std::move(editor), std::move(title), root });
         return true;
     }
 
@@ -101,6 +101,8 @@ namespace Nox
                 if (UILayer* uiLayer = Application::Get().GetUILayer(); uiLayer && uiLayer->GetViewportManager())
                     uiLayer->GetViewportManager()->ClosePanel(open.Title);
             open.Editor->EndPreview();
+            if (open.Root)
+                open.Root->ClearSyncsRecursive();
             if (open.Editor->IsDirty() && !assetGone)
                 Say(UI::UINotificationSeverity::Warning, open.Editor->GetName() + ": unsaved changes dropped",
                     "Its window closed without the Save question; the asset is the file's version again.");
@@ -155,6 +157,8 @@ namespace Nox
         for (const OpenEditor& open : m_Open)
         {
             open.Editor->EndPreview();
+            if (open.Root)
+                open.Root->ClearSyncsRecursive();
             CloseWindow(open.Title);
         }
         m_Open.clear(); // (edits not saved by now go back to the files: the caller asked)

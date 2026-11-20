@@ -32,7 +32,6 @@ namespace Nox
     private:
         Renderer* m_Renderer = nullptr;
         Ref<UI::UIElement> m_Root;
-        std::vector<std::function<void()>> m_Syncs;
         uint32_t m_SelectedPass = ~0u;
         bool m_ShowUnusedResources = false;
         float m_ExposureStops = 0.0f;

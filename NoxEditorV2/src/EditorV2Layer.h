@@ -311,7 +311,6 @@ namespace Nox
 #endif
         PackageSettings m_PackageSettings;
         std::string m_PackageOutputText;
-        std::vector<std::function<void()>> m_PackageSyncs;
         StreamingTestWorldGenerator::Settings m_TestWorldSettings = [] { StreamingTestWorldGenerator::Settings s; s.TargetGigabytes = 2.0f; return s; }();
         std::optional<glm::dvec3> m_FocusOnOpen;
 

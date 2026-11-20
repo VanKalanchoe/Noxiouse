@@ -105,13 +105,26 @@ namespace Nox::UI
         virtual bool OnPointerUp(const UIPointerEvent& e) { return OnMouseUp ? OnMouseUp(e) : false; }
         virtual bool OnPointerMove(const UIPointerEvent&) { return false; }
         virtual bool OnMouseWheel(const UIPointerEvent&) { return false; }
-        virtual bool OnKeyDown(const UIKeyEvent&) { return false; }
+        virtual bool OnKeyDown(const UIKeyEvent& e) { return OnKey ? OnKey(e) : false; }
         virtual bool OnTextInput(std::string_view) { return false; }
         // The keyboard focus came to the element or left it (a field applies what was typed when it leaves).
         virtual void OnFocusChanged(bool /*focused*/) {}
 
         std::function<bool(const UIPointerEvent&)> OnMouseDown;
         std::function<bool(const UIPointerEvent&)> OnMouseUp;
+        // A key pressed while the element or one inside it has the keyboard (an element that overrides OnKeyDown decides itself):
+        // a window's own shortcuts (Ctrl+S, Ctrl+Z) without a subclass.
+        std::function<bool(const UIKeyEvent&)> OnKey;
+        // Run once a frame by the context while the element is in its tree -- hidden ones too, so a sync can show its element again --
+        // before layout: an element following a value (a field showing a setting changed elsewhere, a button enabled while something
+        // holds). No list of updates to keep and no stale ones after the element is gone. It must not add or remove elements (use
+        // UIContext::Defer for that).
+        std::function<void()> OnSync;
+        // OnSync of this element and everything inside it (the context calls it on its root and overlay each frame).
+        void SyncRecursive();
+        // Drops every OnSync in this element and below (what they read is going away before the elements do: an editor closed
+        // while its window still shows for a frame).
+        void ClearSyncsRecursive();
 
         // Drag & drop callbacks
         std::function<std::optional<UIDragPayload>()> OnDragStart;
@@ -142,6 +155,18 @@ namespace Nox::UI
         UIStyleBox m_CurrentStyle{};
         bool m_HasResolvedStyle = false;
     };
+
+    // Adds `sync` to the element's OnSync, after what it runs already. The function lives in the element: capture the element by raw
+    // pointer, never by Ref (a Ref to itself would keep it alive for ever).
+    inline void AppendSync(UIElement& element, std::function<void()> sync)
+    {
+        if (!element.OnSync)
+        {
+            element.OnSync = std::move(sync);
+            return;
+        }
+        element.OnSync = [first = std::move(element.OnSync), second = std::move(sync)]() { first(); second(); };
+    }
 
     template <typename T, typename... Args>
     Ref<T> MakeUI(Args&&... args)

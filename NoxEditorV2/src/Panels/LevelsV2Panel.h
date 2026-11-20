@@ -56,7 +56,6 @@ namespace Nox
         Ref<UI::UIElement> m_Root;
         Ref<UI::UIStackBox> m_Body;
         Ref<UI::UILabel> m_Message;
-        std::vector<std::function<void()>> m_Syncs;
         uint64_t m_Signature = 0;
         bool m_Rebuild = true;
     };

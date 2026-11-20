@@ -451,7 +451,7 @@ namespace Nox::UI
             else
                 cur = std::clamp(cur + (e.KeyCode == SDL_SCANCODE_UP ? -1 : 1), 0, static_cast<int>(m_FlatRows.size()) - 1);
             const uint64_t nextId = m_FlatRows[cur].Node->Id;
-            const bool shift = (e.Modifiers & SDL_KMOD_SHIFT) != 0;
+            const bool shift = (e.Modifiers & UIMod::Shift) != 0;
             if (OnRowClick)
                 OnRowClick(nextId, false, shift);
             else

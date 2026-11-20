@@ -139,7 +139,6 @@ namespace Nox
 
     const Ref<UI::UIElement>& RendererSettingsV2Panel::BuildUI(UI::UIContext* context)
     {
-        m_Syncs.clear();
         auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 0.0f);
         root->WidthMode = UI::UISizeMode::Fill;
         root->HeightMode = UI::UISizeMode::Fill;
@@ -158,7 +157,7 @@ namespace Nox
         Renderer* r = m_Hooks.Render;
         if (!r)
             return m_Root;
-        SettingsRowsV2 rows(body, &m_Syncs, context);
+        SettingsRowsV2 rows(body, context);
         Hooks hooks = m_Hooks;
 
         // ---- View ----
@@ -475,7 +474,7 @@ namespace Nox
             fog.Slider("Extinction Scale", [r]() { return r->getVolumetricFogExtinctionScale(); }, [r](float v) { r->setVolumetricFogExtinctionScale(v); },
                        0.0f, 10.0f, "{:.2f}");
             glm::vec3* albedo = &m_FogAlbedo;
-            m_Syncs.push_back([r, albedo]() { *albedo = r->getVolumetricFogAlbedo(); }); // (before the colour row's own sync)
+            UI::AppendSync(*fog.GetBody(), [r, albedo]() { *albedo = r->getVolumetricFogAlbedo(); }); // (the section's sync runs before its rows')
             fog.Color3("Albedo", albedo, [r, albedo]() { r->setVolumetricFogAlbedo(*albedo); });
             fog.Check("Point / Spot Lights", [r]() { return r->getVolumetricFogLocalLights(); }, [r](bool v) { r->setVolumetricFogLocalLights(v); });
 
@@ -575,8 +574,7 @@ namespace Nox
             SettingsRowsV2 following = ddgi.Group();
             ddgi.ShowWhen(following.GetBody(), [follow]() { return *follow; });
             {
-                std::vector<std::function<void()>>* syncs = &m_Syncs;
-                InspectorCardBuilder vecs{ following.GetBody(), *syncs, {}, context };
+                InspectorCardBuilder vecs{ following.GetBody(), {}, context };
                 vecs.AddVec3("Probe Spacing (m)", &r->getDDGISpacingMeters(), 0.05f, {}, "Between the probes of the first (finest) cascade.");
             }
             RefInt(following, "Cascades", &r->getDDGICascadeSetting(), 1, 4);
@@ -593,7 +591,7 @@ namespace Nox
             SettingsRowsV2 fixedGrid = ddgi.Group();
             ddgi.ShowWhen(fixedGrid.GetBody(), [follow]() { return !*follow; });
             {
-                InspectorCardBuilder vecs{ fixedGrid.GetBody(), m_Syncs, {}, context };
+                InspectorCardBuilder vecs{ fixedGrid.GetBody(), {}, context };
                 vecs.AddVec3("Grid Origin", &r->getDDGIGridOrigin(), 0.1f);
                 vecs.AddVec3("Grid Spacing", &r->getDDGIGridSpacing(), 0.05f);
             }
@@ -628,7 +626,7 @@ namespace Nox
             di.ShowWhen(grid.GetBody(), [regir]() { return *regir; });
             RefFloat(grid, "Cell Size (m)", &r->getReGIRCellSize(), 0.1f, 8.0f, "{:.2f}");
             {
-                InspectorCardBuilder vecs{ grid.GetBody(), m_Syncs, {}, context };
+                InspectorCardBuilder vecs{ grid.GetBody(), {}, context };
                 vecs.AddVec3("Grid Center", &r->getReGIRGridCenter(), 0.5f);
             }
             RefFloat(grid, "Cell Jitter", &r->getReGIRSamplingJitter(), 0.0f, 1.0f, "{:.2f}",
@@ -753,7 +751,5 @@ namespace Nox
 
     void RendererSettingsV2Panel::Update()
     {
-        for (const auto& sync : m_Syncs)
-            sync();
     }
 }

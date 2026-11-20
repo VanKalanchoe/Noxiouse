@@ -66,7 +66,6 @@ namespace Nox
         UI::UIContext* m_Context = nullptr;
         Ref<UI::UIElement> m_Root;
         std::shared_ptr<State> m_State = std::make_shared<State>();
-        std::vector<std::function<void()>> m_Syncs;
         std::string m_Message;
     };
 }

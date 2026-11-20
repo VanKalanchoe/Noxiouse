@@ -73,7 +73,7 @@ namespace Nox
         void Changing() { m_LastPreviewTime = -1.0f; m_ChangePending = true; }
         void AddKeyAtPlayhead(int trackIndex);
         void RemoveTrack(int trackIndex);
-        bool HandleKey(int keyCode);
+        bool HandleKey(const UI::UIKeyEvent& e);
 
     private:
         Entity FindPlayer(Scene& scene, Entity selected);
@@ -136,8 +136,6 @@ namespace Nox
         Ref<UI::UIElement> m_Root;
         Ref<UI::UIStackBox> m_Details;
         Ref<UI::UIElement> m_Curves;
-        std::vector<std::function<void()>> m_Syncs;
-        std::vector<std::function<void()>> m_DetailSyncs;
         int m_DetailsTrack = -2, m_DetailsKey = -2;
         size_t m_DetailsKeyCount = 0;
     };

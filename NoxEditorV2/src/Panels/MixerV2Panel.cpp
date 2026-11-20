@@ -143,7 +143,7 @@ namespace Nox
             {
                 if (!m_Dragging || !Get || !Set)
                     return false;
-                const float perPixel = (kFaderMaxDb - kFaderMinDb) / std::max(GetBounds().Height(), 40.0f) * ((SDL_GetModState() & SDL_KMOD_SHIFT) ? 0.2f : 1.0f);
+                const float perPixel = (kFaderMaxDb - kFaderMinDb) / std::max(GetBounds().Height(), 40.0f) * ((e.Modifiers & UI::UIMod::Shift) ? 0.2f : 1.0f);
                 Set(std::clamp(Get() - (e.Position.y - m_LastY) * perPixel, kFaderMinDb, kFaderMaxDb));
                 m_LastY = e.Position.y;
                 return true;
@@ -233,17 +233,6 @@ namespace Nox
             float m_ContentWidth = 0.0f;
         };
 
-        // The panel's root: keys typed in it that its children leave (Ctrl+Z, Ctrl+Y) come here.
-        class MixerRoot final : public UI::UIStackBox
-        {
-        public:
-            explicit MixerRoot(std::function<bool(int)> onKey) : UI::UIStackBox(UI::UIOrientation::Vertical, 6.0f), m_OnKey(std::move(onKey)) {}
-            bool OnKeyDown(const UI::UIKeyEvent& e) override { return m_OnKey && m_OnKey(e.KeyCode); }
-
-        private:
-            std::function<bool(int)> m_OnKey;
-        };
-
         Ref<UI::UILabel> Muted(const std::string& text, float size = 13.0f)
         {
             Ref<UI::UILabel> label(new UI::UILabel(text, size));
@@ -290,7 +279,9 @@ namespace Nox
     const Ref<UI::UIElement>& MixerV2Panel::BuildUI(UI::UIContext* context)
     {
         m_Context = context;
-        Ref<MixerRoot> root(new MixerRoot([this](int key) { return HandleKey(key); }));
+        // Keys typed in the panel that its children leave (Ctrl+Z, Ctrl+Y) come to its root.
+        Ref<UI::UIStackBox> root(new UI::UIStackBox(UI::UIOrientation::Vertical, 6.0f));
+        root->OnKey = [this](const UI::UIKeyEvent& e) { return HandleKey(e); };
         root->WidthMode = UI::UISizeMode::Fill;
         root->HeightMode = UI::UISizeMode::Fill;
         root->StyleClass = "Surface";
@@ -304,17 +295,16 @@ namespace Nox
         return m_Root;
     }
 
-    bool MixerV2Panel::HandleKey(int keyCode)
+    bool MixerV2Panel::HandleKey(const UI::UIKeyEvent& e)
     {
-        const SDL_Keymod mods = SDL_GetModState();
-        if ((mods & SDL_KMOD_CTRL) == 0)
+        if ((e.Modifiers & UI::UIMod::Ctrl) == 0)
             return false;
-        if (keyCode == SDL_SCANCODE_Z)
+        if (e.KeyCode == SDL_SCANCODE_Z)
         {
-            (mods & SDL_KMOD_SHIFT) ? Redo() : Undo();
+            (e.Modifiers & UI::UIMod::Shift) ? Redo() : Undo();
             return true;
         }
-        if (keyCode == SDL_SCANCODE_Y)
+        if (e.KeyCode == SDL_SCANCODE_Y)
         {
             Redo();
             return true;
@@ -379,13 +369,6 @@ namespace Nox
             m_Rebuild = false;
             Rebuild();
         }
-        for (const auto& sync : m_Syncs)
-            sync();
-        if (m_PopupSyncs && m_PopupOpen && *m_PopupOpen)
-            for (const auto& sync : *m_PopupSyncs)
-                sync();
-        else
-            m_PopupSyncs.reset();
         // One history step per finished change: taken once no mouse button is held (a fader drag is one step).
         if (!m_HaveCommitted)
         {
@@ -393,7 +376,7 @@ namespace Nox
             m_HaveCommitted = true;
             m_PendingChange = false;
         }
-        else if (m_PendingChange && SDL_GetMouseState(nullptr, nullptr) == 0)
+        else if (m_PendingChange && !UI::UIContext::IsMouseButtonHeld())
             CommitHistory();
     }
 
@@ -441,7 +424,6 @@ namespace Nox
 
     void MixerV2Panel::Rebuild()
     {
-        m_Syncs.clear();
         m_Body->ClearChildren();
         BuildToolbar(*m_Body);
         BuildSnapshots(*m_Body);
@@ -490,7 +472,7 @@ namespace Nox
                 { "Remove from Snapshot", "", [this, key]() { AudioMixer::ClearOverride(key); m_PendingChange = true; }, false, AudioMixer::IsOverridden(key) },
             });
         };
-        m_Syncs.push_back([field, dot, key]()
+        UI::AppendSync(*row, [field, dot, key]() // (on the row: it holds both)
         {
             if (!field->IsInteracting())
                 field->Value = AudioMixer::GetValue(key);
@@ -559,7 +541,7 @@ namespace Nox
         auto file = Muted("");
         bar->AddChild(file);
         into.AddChild(bar);
-        m_Syncs.push_back([this, save, undo, redo, headphones, voices, file]()
+        UI::AppendSync(*bar, [this, save, undo, redo, headphones, voices, file]() // (on the bar: it holds them)
         {
             save->SetEnabled(AudioMixer::IsDirty() && !AudioMixer::GetPath().empty());
             save->StyleVariant = AudioMixer::IsDirty() ? "primary" : "";
@@ -596,9 +578,8 @@ namespace Nox
         auto box = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
         box->Padding = UI::UIThickness::All(10.0f);
         box->FixedSize = { 440.0f, 0.0f };
-        // The popup's rows sync while it is open (their own list: the popup lives apart from the panel's rows).
-        auto syncs = std::make_shared<std::vector<std::function<void()>>>();
-        SettingsRowsV2 rows(box, syncs.get(), m_Context);
+        // (its rows follow the settings while the popup is up: their syncs are part of the overlay, and stop with it)
+        SettingsRowsV2 rows(box, m_Context);
         AudioReflectionSettings* r = &AudioMixer::GetData().Reflections;
         const auto changed = [this]() { Changed(false); };
         rows.Check("Reflections", [r]() { return r->Enabled; }, [r, changed](bool v) { r->Enabled = v; changed(); },
@@ -641,9 +622,7 @@ namespace Nox
                           probes.ListenerInside ? "inside one" : "outside them", stats.ListenerReverb ? "yes" : "no", stats.PathingVoices);
             return std::string(text);
         });
-        // The panel's frame runs the popup's rows while it is open; closed, they stop (they were added on every opening).
-        m_PopupSyncs = syncs;
-        m_PopupOpen = UI::UIPopup::Show(*m_Context, anchor, box);
+        UI::UIPopup::Show(*m_Context, anchor, box);
     }
 
     void MixerV2Panel::BuildSnapshots(UI::UIStackBox& into)
@@ -741,7 +720,7 @@ namespace Nox
         status->WordWrap = true;
         status->WidthMode = UI::UISizeMode::Fill;
         into.AddChild(status);
-        m_Syncs.push_back([status]()
+        UI::AppendSync(*Raw(status), [status = Raw(status)]()
         {
             const AudioMixerData& d = AudioMixer::GetData();
             const int32_t snapshot = AudioMixer::GetEditedSnapshot();
@@ -847,7 +826,7 @@ namespace Nox
                 strip->AddChild(Muted("(no effects)", 12.0f));
             strips->AddChild(strip);
 
-            m_Syncs.push_back([id, volume, db, reduction, mute, solo, bypass]()
+            UI::AppendSync(*strip, [id, volume, db, reduction, mute, solo, bypass]() // (on the strip: it holds them)
             {
                 const AudioMixerBus* b = AudioMixer::GetData().FindBus(id);
                 if (!b)
@@ -877,7 +856,7 @@ namespace Nox
             return;
         const uint64_t id = bus->Id;
         const bool isMaster = id == kAudioBusMaster;
-        SettingsRowsV2 rows(Ref<UI::UIStackBox>(&into), &m_Syncs, m_Context);
+        SettingsRowsV2 rows(Ref<UI::UIStackBox>(&into), m_Context);
         const auto findBus = [id]() { return AudioMixer::GetData().FindBus(id); };
 
         rows.Header("Bus");
@@ -905,9 +884,9 @@ namespace Nox
                 Changed(false);
             };
             field->OnSubmit = [apply](const std::string&) { apply(); };
-            InspectorCardBuilder builder{ Ref<UI::UIStackBox>(&into), m_Syncs, {}, m_Context };
+            InspectorCardBuilder builder{ Ref<UI::UIStackBox>(&into), {}, m_Context };
             builder.AddRow("Name", field, "Scripts name buses by this (Audio.SetBusVolume(\"Music\", 0.5f)).");
-            m_Syncs.push_back([field, apply]()
+            UI::AppendSync(*field, [field = field.get(), apply]()
             {
                 if (!UI::HasState(field->GetState(), UI::UIState::Focused))
                     apply();
@@ -977,7 +956,7 @@ namespace Nox
                 });
             card.Card->Tooltip = info.Description;
             into.AddChild(card.Card);
-            SettingsRowsV2 effectRows(card.Body, &m_Syncs, m_Context);
+            SettingsRowsV2 effectRows(card.Body, m_Context);
 
             auto actions = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
             Ref<UI::UIButton> onOff(new UI::UIButton("Bypass", [this, findEffect]() { if (AudioMixerEffect* e = findEffect()) { e->Bypass = !e->Bypass; Changed(false); } }));
@@ -997,7 +976,7 @@ namespace Nox
             actions->AddChild(up);
             actions->AddChild(down);
             card.Body->AddChild(actions);
-            m_Syncs.push_back([onOff, findEffect]()
+            UI::AppendSync(*actions, [onOff, findEffect]() // (on its row: it holds the button)
             {
                 const AudioMixerEffect* e = findEffect();
                 onOff->StyleVariant = e && e->Bypass ? "primary" : "";
@@ -1025,12 +1004,12 @@ namespace Nox
                         [&d, id](const AudioMixerBus& candidate) { return candidate.Id != id && !d.WouldLoop(candidate.Id, id); },
                         [this, findEffect](uint64_t chosen) { if (AudioMixerEffect* target = findEffect()) { target->Sidechain = chosen; Changed(true); } }));
                 };
-                InspectorCardBuilder builder{ card.Body, m_Syncs, {}, m_Context };
+                InspectorCardBuilder builder{ card.Body, {}, m_Context };
                 builder.AddRow("Sidechain", key, "Listen to another bus instead of this one (None): a compressor keyed by Voice turns this bus down while someone speaks.");
             }
             if (info.ImpulseResponse)
             {
-                InspectorCardBuilder builder{ card.Body, m_Syncs, {}, m_Context };
+                InspectorCardBuilder builder{ card.Body, {}, m_Context };
                 builder.AddAssetSlot("Impulse Response", effect.Impulse, { AssetType::AudioClip },
                     [this, findEffect](AssetHandle clip) { if (AudioMixerEffect* e = findEffect()) { e->Impulse = clip; Changed(true); } });
             }
@@ -1168,7 +1147,7 @@ namespace Nox
                     [&d, id](const AudioMixerBus& candidate) { return candidate.Id != id && !d.WouldLoop(candidate.Id, id); },
                     [this, id](uint64_t chosen) { if (AudioMixerBus* target = AudioMixer::GetData().FindBus(id)) { target->Duck.Source = chosen; Changed(true); } }));
             };
-            InspectorCardBuilder builder{ Ref<UI::UIStackBox>(&into), m_Syncs, {}, m_Context };
+            InspectorCardBuilder builder{ Ref<UI::UIStackBox>(&into), {}, m_Context };
             builder.AddRow("Duck When", source);
             if (bus->Duck.Source != 0)
             {

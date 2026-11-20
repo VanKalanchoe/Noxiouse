@@ -1,5 +1,6 @@
 #include "UIContext.h"
 
+#include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_keycode.h>
 #include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_scancode.h>
@@ -291,7 +292,7 @@ namespace Nox::UI
                 return true;
             }
 
-            UIPointerEvent ev{ pos, delta, {}, 0, false };
+            UIPointerEvent ev{ pos, delta, {}, 0, s_Modifiers, false };
             const bool handled = m_Captured->OnPointerMove(ev);
             UpdateSystemCursor(pos);
             return handled;
@@ -301,7 +302,7 @@ namespace Nox::UI
         bool handled = false;
         if (m_Hovered)
         {
-            UIPointerEvent ev{ pos, delta, {}, 0, false };
+            UIPointerEvent ev{ pos, delta, {}, 0, s_Modifiers, false };
             for (UIElement* cur = m_Hovered.get(); cur != nullptr; cur = cur->GetParent())
             {
                 if (cur->OnPointerMove(ev))
@@ -358,7 +359,7 @@ namespace Nox::UI
             m_DragActive = false;
         }
 
-        UIPointerEvent ev{ pos, {}, {}, button, false };
+        UIPointerEvent ev{ pos, {}, {}, button, s_Modifiers, false };
         for (UIElement* cur = hovered.get(); cur != nullptr; cur = cur->GetParent())
         {
             if (cur->OnPointerDown(ev))
@@ -408,7 +409,7 @@ namespace Nox::UI
         if (captured)
         {
             captured->SetStateFlag(UIState::Pressed, false);
-            UIPointerEvent ev{ pos, {}, {}, button, false };
+            UIPointerEvent ev{ pos, {}, {}, button, s_Modifiers, false };
             handled = captured->OnPointerUp(ev);
         }
 
@@ -423,7 +424,7 @@ namespace Nox::UI
         if (!target)
             return false;
 
-        UIPointerEvent ev{ m_LastMousePos, {}, scrollDelta, 0, false };
+        UIPointerEvent ev{ m_LastMousePos, {}, scrollDelta, 0, s_Modifiers, false };
         for (UIElement* cur = target.get(); cur != nullptr; cur = cur->GetParent())
         {
             if (cur->OnMouseWheel(ev))
@@ -466,7 +467,7 @@ namespace Nox::UI
 
             if (!focusables.empty())
             {
-                const bool reverse = (mods & SDL_KMOD_SHIFT) != 0;
+                const bool reverse = (mods & UIMod::Shift) != 0;
                 int currentIdx = -1;
                 for (int i = 0; i < static_cast<int>(focusables.size()); ++i)
                 {
@@ -518,10 +519,28 @@ namespace Nox::UI
         return false;
     }
 
+    namespace
+    {
+        uint16_t ToUIModifiers(uint32_t sdlMods)
+        {
+            uint16_t mods = UIMod::None;
+            if (sdlMods & SDL_KMOD_SHIFT) mods |= UIMod::Shift;
+            if (sdlMods & SDL_KMOD_CTRL) mods |= UIMod::Ctrl;
+            if (sdlMods & SDL_KMOD_ALT) mods |= UIMod::Alt;
+            if (sdlMods & SDL_KMOD_GUI) mods |= UIMod::Super;
+            return mods;
+        }
+    }
+
     void UIContext::OnEvent(Event& event)
     {
         ScopedCurrentContext currentGuard(s_Current, this);
         DropDetachedInput();
+        s_Modifiers = ToUIModifiers(SDL_GetModState());
+        if (event.GetEventType() == EventType::MouseButtonPressed)
+            s_ButtonsHeld |= 1u << static_cast<MouseButtonPressedEvent&>(event).GetMouseButton();
+        else if (event.GetEventType() == EventType::MouseButtonReleased)
+            s_ButtonsHeld &= ~(1u << static_cast<MouseButtonReleasedEvent&>(event).GetMouseButton());
         EventDispatcher dispatcher(event);
         dispatcher.Dispatch<MouseMovedEvent>([this](MouseMovedEvent& e)
         {
@@ -541,7 +560,7 @@ namespace Nox::UI
         });
         dispatcher.Dispatch<KeyPressedEvent>([this](KeyPressedEvent& e)
         {
-            return DispatchKeyDown(e.GetKeyCode(), static_cast<uint16_t>(e.GetModifiers()), e.IsRepeat());
+            return DispatchKeyDown(e.GetKeyCode(), ToUIModifiers(e.GetModifiers()), e.IsRepeat());
         });
         dispatcher.Dispatch<TextInputEvent>([this](TextInputEvent& e)
         {
@@ -557,8 +576,21 @@ namespace Nox::UI
 
         drawList.Clear(viewportSize);
         m_ViewportSize = viewportSize;
+
+        // What callbacks put off to this frame (they may rebuild what called them), then every element's sync.
+        if (!m_Deferred.empty())
+        {
+            std::vector<std::function<void()>> deferred = std::move(m_Deferred);
+            m_Deferred.clear();
+            for (std::function<void()>& action : deferred)
+                if (action)
+                    action();
+        }
         if (!m_Root || !m_Theme)
             return;
+        m_Root->SyncRecursive();
+        if (m_Overlay)
+            m_Overlay->SyncRecursive();
 
         // Styles first: layout reads them (font sizes, paddings). An element made this frame -- a panel rebuilt, a section
         // opened -- would otherwise be measured with the default style, drawn there for one frame and jump into place on the
