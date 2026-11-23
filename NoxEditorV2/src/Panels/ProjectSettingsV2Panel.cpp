@@ -2,18 +2,18 @@
 
 #include <algorithm>
 
-#include "NoxCore/UI/Widgets/UIPropertyRows.h"
+#include <NoxUI/Widgets/UIPropertyRows.h>
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Core/Window.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Project/ProjectRendererSettings.h"
 #include "NoxCore/Renderer/Renderer.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
-#include "NoxCore/UI/Layout/UILayout.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
-#include "NoxCore/UI/Widgets/UITextInput.h"
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIScrollView.h>
+#include <NoxUI/Widgets/UITextInput.h>
 
 namespace Nox
 {
@@ -40,25 +40,25 @@ namespace Nox
                                                            Renderer::RenderQuality::RayTracedAll, Renderer::RenderQuality::RasterAll };
     }
 
-    const Ref<UI::UIElement>& ProjectSettingsV2Panel::BuildUI(UI::UIContext* context)
+    const Ref<NoxUI::UIElement>& ProjectSettingsV2Panel::BuildUI(NoxUI::UIContext* context)
     {
         m_Context = context;
         m_SurfaceFields.clear();
         m_Rebuild = false;
         // The root stays (it is in a window); built again, only what is in it changes.
-        Ref<UI::UIStackBox> root = m_Root ? Ref<UI::UIStackBox>(static_cast<UI::UIStackBox*>(m_Root.get())) : UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 0.0f);
+        Ref<NoxUI::UIStackBox> root = m_Root ? Ref<NoxUI::UIStackBox>(static_cast<NoxUI::UIStackBox*>(m_Root.get())) : Ref<NoxUI::UIStackBox>(NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 0.0f));
         root->ClearChildren();
-        root->WidthMode = UI::UISizeMode::Fill;
-        root->HeightMode = UI::UISizeMode::Fill;
+        root->WidthMode = NoxUI::UISizeMode::Fill;
+        root->HeightMode = NoxUI::UISizeMode::Fill;
         root->StyleClass = "Surface";
         root->DrawBackground = true;
-        auto scroll = UI::MakeUI<UI::UIScrollView>();
-        scroll->WidthMode = UI::UISizeMode::Fill;
-        scroll->HeightMode = UI::UISizeMode::Fill;
+        auto scroll = NoxUI::MakeUI<NoxUI::UIScrollView>();
+        scroll->WidthMode = NoxUI::UISizeMode::Fill;
+        scroll->HeightMode = NoxUI::UISizeMode::Fill;
         root->AddChild(scroll);
-        m_Body = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-        m_Body->WidthMode = UI::UISizeMode::Fill;
-        m_Body->Padding = UI::UIThickness::All(8.0f);
+        m_Body = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 6.0f);
+        m_Body->WidthMode = NoxUI::UISizeMode::Fill;
+        m_Body->Padding = NoxUI::UIThickness::All(8.0f);
         scroll->AddChild(m_Body);
         m_Root = root;
 
@@ -66,12 +66,12 @@ namespace Nox
         Renderer* r = m_Hooks.Render;
         if (!config || !r)
             return m_Root;
-        UI::UIPropertyRows rows(m_Body, context);
+        NoxUI::UIPropertyRows rows(m_Body, context);
         rows.Note("Saved in the project file at each change.");
 
         // ---- Maps ----
         {
-            UI::UIPropertyRows maps = rows.Section("Maps", true, &m_Expanded);
+            NoxUI::UIPropertyRows maps = rows.Section("Maps", true, &m_Expanded);
             // The list is read when the row is made; a scene saved later shows after the panel is opened again.
             const auto scenes = Scenes();
             std::vector<std::string> names{ "(none: an empty scene)" };
@@ -103,7 +103,7 @@ namespace Nox
 
         // ---- Rendering ----
         {
-            UI::UIPropertyRows rendering = rows.Section("Rendering", true, &m_Expanded);
+            NoxUI::UIPropertyRows rendering = rows.Section("Rendering", true, &m_Expanded);
             std::vector<std::string> names{ std::string("Auto (") + Renderer::GetQualityName(r->GetRecommendedQuality()) + " for this GPU)" };
             for (Renderer::RenderQuality quality : kQualities)
                 names.push_back(Renderer::GetQualityName(quality));
@@ -191,7 +191,7 @@ namespace Nox
 
         // ---- Packaged game ----
         {
-            UI::UIPropertyRows game = rows.Section("Packaged Game", false, &m_Expanded);
+            NoxUI::UIPropertyRows game = rows.Section("Packaged Game", false, &m_Expanded);
             static const char* modes[] = { "Windowed", "Borderless", "Fullscreen" };
             game.Choice("Game Window", { modes[0], modes[1], modes[2] },
                 []() { const ProjectConfig* c = Config(); return c ? static_cast<int>(ParseWindowMode(c->WindowMode)) : 1; },
@@ -202,11 +202,11 @@ namespace Nox
 
         // ---- Physics ----
         {
-            UI::UIPropertyRows physics = rows.Section("Physical Surfaces", false, &m_Expanded,
+            NoxUI::UIPropertyRows physics = rows.Section("Physical Surfaces", false, &m_Expanded,
                 "Unreal's Physical Surface types: materials (Material editor) and bodies (Rigid Body 3D) pick one; footstep notifies play a sound per surface.");
             physics.Note("Rename a surface in its field (Enter or click away applies it); materials and the open scene's bodies that use it follow.");
-            m_Surfaces = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 3.0f);
-            m_Surfaces->WidthMode = UI::UISizeMode::Fill;
+            m_Surfaces = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 3.0f);
+            m_Surfaces->WidthMode = NoxUI::UISizeMode::Fill;
             physics.GetBody()->AddChild(m_Surfaces);
             RebuildSurfaces();
         }
@@ -226,22 +226,22 @@ namespace Nox
         std::vector<std::string>& surfaces = config->PhysicalSurfaces;
         for (size_t i = 0; i < surfaces.size(); ++i)
         {
-            auto row = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-            row->WidthMode = UI::UISizeMode::Fill;
+            auto row = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+            row->WidthMode = NoxUI::UISizeMode::Fill;
             if (i == 0)
             {
-                auto label = UI::Label("Default  (a surface without one; always there)", 13.5f);
+                auto label = NoxUI::Label("Default  (a surface without one; always there)", 13.5f);
                 row->AddChild(label);
                 m_SurfaceFields.push_back(nullptr);
                 m_Surfaces->AddChild(row);
                 continue;
             }
-            auto field = UI::MakeUI<UI::UITextInput>();
+            auto field = NoxUI::MakeUI<NoxUI::UITextInput>();
             field->Text = surfaces[i];
-            field->WidthMode = UI::UISizeMode::Fill;
+            field->WidthMode = NoxUI::UISizeMode::Fill;
             field->OnSubmit = [this, i](const std::string& text) { CommitSurface(i, text); };
             row->AddChild(field);
-            Ref<UI::UIButton> remove(new UI::UIButton("Remove", [this, i]()
+            Ref<NoxUI::UIButton> remove(new NoxUI::UIButton("Remove", [this, i]()
             {
                 ProjectConfig* c = Config();
                 if (!c || i >= c->PhysicalSurfaces.size())
@@ -255,7 +255,7 @@ namespace Nox
             m_SurfaceFields.push_back(field);
             m_Surfaces->AddChild(row);
         }
-        Ref<UI::UIButton> add(new UI::UIButton("Add Surface", [this]()
+        Ref<NoxUI::UIButton> add(new NoxUI::UIButton("Add Surface", [this]()
         {
             ProjectConfig* c = Config();
             if (!c)
@@ -267,7 +267,7 @@ namespace Nox
             Project::SaveActive();
             m_SurfacesDirty = true;
         }));
-        add->HAlign = UI::UIAlignment::Start;
+        add->HAlign = NoxUI::UIAlignment::Start;
         m_Surfaces->AddChild(add);
     }
 
@@ -312,8 +312,8 @@ namespace Nox
         {
             for (size_t i = 1; i < m_SurfaceFields.size() && i < config->PhysicalSurfaces.size(); ++i)
             {
-                const Ref<UI::UITextInput>& field = m_SurfaceFields[i];
-                if (field && !UI::HasState(field->GetState(), UI::UIState::Focused) && field->Text != config->PhysicalSurfaces[i])
+                const Ref<NoxUI::UITextInput>& field = m_SurfaceFields[i];
+                if (field && !NoxUI::HasState(field->GetState(), NoxUI::UIState::Focused) && field->Text != config->PhysicalSurfaces[i])
                     CommitSurface(i, field->Text);
             }
         }

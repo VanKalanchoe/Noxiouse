@@ -608,13 +608,13 @@ namespace Nox
         float Pitch = 1.0f;    // playback rate (an audio graph's Wave Players and oscillators follow it)
         bool Loop = false;     // (clips; a graph loops by itself)
         bool PlayOnStart = true;
-        uint64_t Bus = kAudioBusSFX; // the mixer bus it plays into, by id (AudioMixer.h)
+        uint64_t Bus = NoxAudio::kAudioBusSFX; // the mixer bus it plays into, by id (AudioMixer.h)
         bool Spatial = true;
         AudioSpatialSettings Spatialization; // Min / Max Distance, attenuation curve, Doppler
         std::unordered_map<std::string, NodeGraphValue> GraphParameters; // overrides of the graph's defaults (saved)
 
         // Runtime only.
-        AudioVoiceHandle Voice = 0;
+        NoxAudio::AudioVoiceHandle Voice = 0;
         bool PendingPlay = false; // asked to play while its sound was still loading: plays once it is in
         AudioVoiceEnvironment Environment; // where Audio Volumes put it now (blending toward where they want it)
         std::unordered_map<std::string, NodeGraphValue> RuntimeParameters; // what scripts set (over the overrides), for this Play session
@@ -644,7 +644,7 @@ namespace Nox
         float MaxSpeed = 8.0f;     // m/s: full volume
         float PitchVariation = 0.05f; // +/- random pitch per hit (no two hits alike)
         float Cooldown = 0.08f;    // seconds: this body plays no new impact sooner (a bounce's several contacts are one hit)
-        uint64_t Bus = kAudioBusSFX;
+        uint64_t Bus = NoxAudio::kAudioBusSFX;
         AudioSpatialSettings Spatialization; // Min / Max Distance, curve, occlusion...
 
         // Runtime only.
@@ -678,7 +678,7 @@ namespace Nox
     {
         glm::vec3 HalfExtents{ WorldUnits::FromMeters(5.0f), WorldUnits::FromMeters(2.5f), WorldUnits::FromMeters(5.0f) };
         int32_t Priority = 0;
-        uint64_t ReverbBus = kAudioBusReverb; // the mixer bus 3D sounds inside send to (0: none)
+        uint64_t ReverbBus = NoxAudio::kAudioBusReverb; // the mixer bus 3D sounds inside send to (0: none)
         float ReverbSend = 0.5f;              // linear
         float InteriorVolume = 0.5f;          // linear
         float InteriorLowPass = 2000.0f;      // Hz (20000: none)

@@ -15,12 +15,13 @@
 #include "NoxCore/Scene/Components.h"
 #include "NoxCore/Scene/Entity.h"
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIStackBox;
     }
+
+namespace Nox
+{
     class Scene;
 
     // A timeline (.ntimeline, the sequencer) in its own window (T1). Toolbar: Save, Undo / Redo, Play / Pause, back to the start,
@@ -49,9 +50,9 @@ namespace Nox
         const std::string& GetName() const override { return m_Name; }
         const char* GetKind() const override { return "timeline"; }
         std::string GetWindowTitle() const override { return "Timeline: " + m_Name; }
-        UI::UIVec2 GetDefaultSize() const override { return { 1000.0f, 520.0f }; }
+        NoxUI::UIVec2 GetDefaultSize() const override { return { 1000.0f, 520.0f }; }
 
-        Ref<UI::UIElement> BuildUI() override;
+        Ref<NoxUI::UIElement> BuildUI() override;
         void Update() override;
         bool IsDirty() const override { return m_Dirty; }
         void Save() override;
@@ -73,7 +74,7 @@ namespace Nox
         void Changing() { m_LastPreviewTime = -1.0f; m_ChangePending = true; }
         void AddKeyAtPlayhead(int trackIndex);
         void RemoveTrack(int trackIndex);
-        bool HandleKey(const UI::UIKeyEvent& e);
+        bool HandleKey(const NoxUI::UIKeyEvent& e);
 
     private:
         Entity FindPlayer(Scene& scene, Entity selected);
@@ -81,7 +82,7 @@ namespace Nox
         void StopPreviewAudio();
         void AutoKey(Timeline& timeline, Scene& scene, Entity player);
         std::optional<glm::vec4> ReadTargetValue(Scene& scene, Entity player, const TimelineTrack& track);
-        void ShowAddTrackMenu(const UI::UIRect& anchor);
+        void ShowAddTrackMenu(const NoxUI::UIRect& anchor);
         void RebuildDetails();
         void CommitHistory();
         void Undo();
@@ -133,9 +134,9 @@ namespace Nox
         std::optional<Snapshot> m_Snapshot;
         std::unordered_map<uint64_t, TimelineAudioVoice> m_PreviewAudio;
 
-        Ref<UI::UIElement> m_Root;
-        Ref<UI::UIStackBox> m_Details;
-        Ref<UI::UIElement> m_Curves;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UIStackBox> m_Details;
+        Ref<NoxUI::UIElement> m_Curves;
         int m_DetailsTrack = -2, m_DetailsKey = -2;
         size_t m_DetailsKeyCount = 0;
     };

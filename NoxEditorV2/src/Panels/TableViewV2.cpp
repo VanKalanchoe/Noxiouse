@@ -2,10 +2,10 @@
 
 #include <algorithm>
 
-#include "NoxCore/UI/Core/UIContext.h"
+#include <NoxUI/Core/UIContext.h>
 #include "NoxCore/Renderer/Font.h"
-#include "NoxCore/UI/Core/UITheme.h"
-#include "NoxCore/UI/Rendering/UIDrawList.h"
+#include <NoxUI/Core/UITheme.h>
+#include <NoxUI/Rendering/UIDrawList.h>
 
 namespace Nox
 {
@@ -17,9 +17,9 @@ namespace Nox
 
     TableViewV2::TableViewV2()
     {
-        HitTestMode = UI::UIHitTestMode::Self;
-        WidthMode = UI::UISizeMode::Fill;
-        HeightMode = UI::UISizeMode::Fill;
+        HitTestMode = NoxUI::UIHitTestMode::Self;
+        WidthMode = NoxUI::UISizeMode::Fill;
+        HeightMode = NoxUI::UISizeMode::Fill;
     }
 
     float TableViewV2::ColumnX(int column) const
@@ -30,7 +30,7 @@ namespace Nox
         float before = 0.0f;
         for (int i = 0; i < column && i < static_cast<int>(Columns.size()); ++i)
             before += Columns[static_cast<size_t>(i)].Weight;
-        const UI::UIRect b = GetBounds();
+        const NoxUI::UIRect b = GetBounds();
         return b.Min.x + b.Width() * (total > 0.0f ? before / total : 0.0f);
     }
 
@@ -48,13 +48,13 @@ namespace Nox
         return y >= GetBounds().Min.y + kRow && row >= 0 && row < static_cast<int>(m_Rows.size()) ? row : -1;
     }
 
-    bool TableViewV2::OnMouseWheel(const UI::UIPointerEvent& e)
+    bool TableViewV2::OnMouseWheel(const NoxUI::UIPointerEvent& e)
     {
         m_Scroll = std::max(0.0f, m_Scroll - e.ScrollDelta.y * 3.0f * kRow);
         return true;
     }
 
-    bool TableViewV2::OnPointerUp(const UI::UIPointerEvent& e)
+    bool TableViewV2::OnPointerUp(const NoxUI::UIPointerEvent& e)
     {
         if (e.Button != 1)
             return false;
@@ -66,26 +66,26 @@ namespace Nox
         return true;
     }
 
-    bool TableViewV2::OnPointerMove(const UI::UIPointerEvent& e)
+    bool TableViewV2::OnPointerMove(const NoxUI::UIPointerEvent& e)
     {
         const int row = RowAt(e.Position.y);
         Tooltip = row >= 0 ? m_Rows[static_cast<size_t>(row)].Tooltip : std::string();
         return true;
     }
 
-    void TableViewV2::OnPaint(UI::UIDrawList& d, const UI::UITheme& theme)
+    void TableViewV2::OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme)
     {
-        const UI::UIRect b = GetBounds();
-        const UI::UIColor background = theme.GetToken("TableBackground", { 0.10f, 0.10f, 0.11f, 1.0f });
+        const NoxUI::UIRect b = GetBounds();
+        const NoxUI::UIColor background = theme.GetToken("TableBackground", { 0.10f, 0.10f, 0.11f, 1.0f });
         d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, { background.r, background.g, background.b, background.a });
         m_Rows.clear();
         if (Fill)
             Fill(m_Rows);
         m_Scroll = std::clamp(m_Scroll, 0.0f, std::max(0.0f, static_cast<float>(m_Rows.size()) * kRow - (b.Height() - kRow)));
 
-        const glm::vec4 dim = UI::ThemeColor("TextMuted", { 0.55f, 0.57f, 0.62f, 1.0f });
+        const glm::vec4 dim = NoxUI::ThemeColor("TextMuted", { 0.55f, 0.57f, 0.62f, 1.0f });
         d.PushClipRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y });
-        d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Min.y + kRow }, UI::ThemeColor("TableHeader", { 1.0f, 1.0f, 1.0f, 0.05f }));
+        d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Min.y + kRow }, NoxUI::ThemeColor("TableHeader", { 1.0f, 1.0f, 1.0f, 0.05f }));
         for (int column = 0; column < static_cast<int>(Columns.size()); ++column)
             d.AddText(Columns[static_cast<size_t>(column)].Title, nullptr, { ColumnX(column) + 4.0f, b.Min.y + 3.0f }, kText, dim);
         d.PushClipRect({ b.Min.x, b.Min.y + kRow }, { b.Max.x, b.Max.y });
@@ -96,16 +96,16 @@ namespace Nox
                 continue;
             const Row& row = m_Rows[i];
             if (row.Highlight)
-                d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, UI::ThemeColor("TableRowSelected", { 0.30f, 0.45f, 0.75f, 0.45f }));
+                d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, NoxUI::ThemeColor("TableRowSelected", { 0.30f, 0.45f, 0.75f, 0.45f }));
             else if (i % 2)
-                d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, UI::ThemeColor("TableRowAlternate", { 1.0f, 1.0f, 1.0f, 0.03f }));
+                d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, NoxUI::ThemeColor("TableRowAlternate", { 1.0f, 1.0f, 1.0f, 0.03f }));
             for (int column = 0; column < static_cast<int>(row.Cells.size()) && column < static_cast<int>(Columns.size()); ++column)
             {
                 const float x0 = ColumnX(column), x1 = ColumnX(column + 1);
                 if (column == row.BarColumn)
                 {
                     const float width = x1 - x0 - 8.0f;
-                    d.AddRoundedRect({ x0 + 4.0f, y + 4.0f }, { x1 - 4.0f, y + kRow - 4.0f }, UI::ThemeColor("TableBarTrack", { 0.24f, 0.24f, 0.24f, 0.47f }));
+                    d.AddRoundedRect({ x0 + 4.0f, y + 4.0f }, { x1 - 4.0f, y + kRow - 4.0f }, NoxUI::ThemeColor("TableBarTrack", { 0.24f, 0.24f, 0.24f, 0.47f }));
                     const float a = x0 + 4.0f + width * row.BarBegin, c = std::max(x0 + 4.0f + width * row.BarEnd, a + 2.0f);
                     d.AddRoundedRect({ a, y + 4.0f }, { c, y + kRow - 4.0f }, row.BarColor);
                     continue;

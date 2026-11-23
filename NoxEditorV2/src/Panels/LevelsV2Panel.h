@@ -7,17 +7,18 @@
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Scene/Entity.h"
-#include "NoxCore/UI/Core/UITypes.h"
+#include <NoxUI/Core/UITypes.h>
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIContext;
         class UIElement;
         class UIStackBox;
         class UILabel;
     }
+
+namespace Nox
+{
     class Scene;
 
     // Window > Levels (Unreal's Levels window): the persistent level (the open scene) and its sub-levels -- other scenes edited
@@ -39,23 +40,23 @@ namespace Nox
         };
 
         void SetHooks(Hooks hooks) { m_Hooks = std::move(hooks); }
-        const Ref<UI::UIElement>& BuildUI(UI::UIContext* context);
-        const Ref<UI::UIElement>& GetRoot() const { return m_Root; }
+        const Ref<NoxUI::UIElement>& BuildUI(NoxUI::UIContext* context);
+        const Ref<NoxUI::UIElement>& GetRoot() const { return m_Root; }
         void Update();
 
     private:
         uint64_t Signature() const;
         void Rebuild();
         void ShowNewLevelDialog();
-        void ShowPlacement(AssetHandle level, const UI::UIRect& anchor);
+        void ShowPlacement(AssetHandle level, const NoxUI::UIRect& anchor);
         bool CreateLevel(Scene& scene, const std::string& name, std::string& message);
         void Changed() const;
 
         Hooks m_Hooks;
-        UI::UIContext* m_Context = nullptr;
-        Ref<UI::UIElement> m_Root;
-        Ref<UI::UIStackBox> m_Body;
-        Ref<UI::UILabel> m_Message;
+        NoxUI::UIContext* m_Context = nullptr;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UIStackBox> m_Body;
+        Ref<NoxUI::UILabel> m_Message;
         uint64_t m_Signature = 0;
         bool m_Rebuild = true;
     };

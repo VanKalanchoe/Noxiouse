@@ -30,13 +30,162 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/Hash.h"
-#include "NoxCore/UI/Rendering/UIGlyphCache.h"
+#include <NoxUI/Rendering/UIGlyphCache.h>
 #include "NoxCore/Profiling/Profiler.h"
+#include <NoxTasks/JobSystem.h>
 #include "NoxCore/Utils/PlatformUtils.h"
 #include "Passes/FrameGraphResources.h"
 
+#include <imgui_impl_sdl3.h>
+#include <NRIHPP/imgui_impl_noxrhi.h>
+#include <NoxUI/Backends/noxui_impl_noxrhi.h>
+
 namespace Nox
 {
+    namespace
+    {
+        void NoxRHILogCallback(NriLogLevel level, const char* message, void*)
+        {
+            if (!message)
+                return;
+            switch (level)
+            {
+            case NRI_LOG_INFO:  NOX_CORE_INFO("[NoxRHI] {}", message); break;
+            case NRI_LOG_WARN:  NOX_CORE_WARN("[NoxRHI] {}", message); break;
+            case NRI_LOG_ERROR: NOX_CORE_ERROR("[NoxRHI] {}", message); break;
+            }
+        }
+
+        void NoxRGLogCallback(nri::RGLogLevel level, std::string_view message, void*)
+        {
+            switch (level)
+            {
+            case nri::RGLogLevel::Info:  NOX_CORE_INFO("[RenderGraph] {}", message); break;
+            case nri::RGLogLevel::Warn:  NOX_CORE_WARN("[RenderGraph] {}", message); break;
+            case nri::RGLogLevel::Error: NOX_CORE_ERROR("[RenderGraph] {}", message); break;
+            }
+        }
+
+        class NoxTasksRGDispatcher final : public nri::RGTaskDispatcher
+        {
+        public:
+            uint32_t GetWorkerCount() const override
+            {
+                return std::max(1u, NoxTasks::JobSystem::Get().GetWorkerCount());
+            }
+
+            void RunTasks(std::string_view name, std::span<const uint32_t> exclusiveMasks,
+                          const std::function<void(uint32_t index)>& task) override
+            {
+                (void)name;
+                const uint32_t count = static_cast<uint32_t>(exclusiveMasks.size());
+                if (count <= 1)
+                {
+                    if (count == 1)
+                        task(0);
+                    return;
+                }
+                // Run non-conflicting chunks in parallel via NoxTasks::JobSystem, serializing only conflicting exclusive masks.
+                bool anyExclusive = false;
+                for (uint32_t m : exclusiveMasks)
+                {
+                    if (m != 0) { anyExclusive = true; break; }
+                }
+                if (!anyExclusive)
+                {
+                    NoxTasks::JobSystem::Get().Dispatch(count, 1, [&](uint32_t i)
+                    {
+                        task(i);
+                    });
+                    return;
+                }
+                for (uint32_t i = 0; i < count; ++i)
+                    task(i);
+            }
+        };
+
+        NoxTasksRGDispatcher& GetRGTaskDispatcher()
+        {
+            static NoxTasksRGDispatcher s_Dispatcher;
+            return s_Dispatcher;
+        }
+
+        nri::RGProfilerHooks MakeRGProfilerHooks()
+        {
+            nri::RGProfilerHooks hooks{};
+#if NOX_PROFILING_ENABLED
+            hooks.RegisterNamedScope = [](const char* name, void*) -> uint32_t
+            {
+                return Profiler::Get().RegisterNamedScope(name ? name : "");
+            };
+            hooks.BeginGpuFrame = [](uint32_t frameSlot, void*)
+            {
+                Profiler::Get().BeginGpuFrame(frameSlot);
+            };
+            hooks.RecordGpuFrameBegin = [](nri::CommandBuffer& cmd, void*)
+            {
+                Profiler::Get().RecordGpuFrameBegin(cmd);
+            };
+            hooks.RecordGpuFrameEnd = [](nri::CommandBuffer& cmd, void*)
+            {
+                Profiler::Get().RecordGpuFrameEnd(cmd);
+            };
+            hooks.EndGpuFrame = [](std::span<void* const> chunkContexts, void*)
+            {
+                std::vector<GpuScopeContext> moved;
+                moved.reserve(chunkContexts.size());
+                for (void* raw : chunkContexts)
+                {
+                    if (raw)
+                        moved.push_back(std::move(*static_cast<GpuScopeContext*>(raw)));
+                }
+                Profiler::Get().EndGpuFrame(moved);
+            };
+            hooks.CreateChunkContext = [](void*) -> void*
+            {
+                return new GpuScopeContext();
+            };
+            hooks.DestroyChunkContext = [](void* chunkContext, void*)
+            {
+                delete static_cast<GpuScopeContext*>(chunkContext);
+            };
+            hooks.SetChunkContextAsyncCompute = [](void* chunkContext, bool asyncCompute, void*)
+            {
+                if (chunkContext)
+                    static_cast<GpuScopeContext*>(chunkContext)->SetAsyncCompute(asyncCompute);
+            };
+            hooks.BeginCpuZone = [](uint32_t scopeId, const char*, void*)
+            {
+                Profiler::Get().BeginCpuScope(scopeId);
+            };
+            hooks.EndCpuZone = [](uint32_t scopeId, void*)
+            {
+                Profiler::Get().EndCpuScope(scopeId);
+            };
+            hooks.BeginGpuZone = [](void* chunkContext, nri::CommandBuffer& cmd, uint32_t scopeId, const char*, void*)
+            {
+                if (chunkContext)
+                    Profiler::Get().BeginGpuScope(*static_cast<GpuScopeContext*>(chunkContext), cmd, scopeId);
+            };
+            hooks.EndGpuZone = [](void* chunkContext, nri::CommandBuffer& cmd, void*)
+            {
+                if (chunkContext)
+                    Profiler::Get().EndGpuScope(*static_cast<GpuScopeContext*>(chunkContext), cmd);
+            };
+            hooks.BeginGpuStatistics = [](void* chunkContext, nri::CommandBuffer& cmd, uint32_t scopeId, void*)
+            {
+                if (chunkContext)
+                    Profiler::Get().BeginGpuStatistics(*static_cast<GpuScopeContext*>(chunkContext), cmd, scopeId);
+            };
+            hooks.EndGpuStatistics = [](void* chunkContext, nri::CommandBuffer& cmd, void*)
+            {
+                if (chunkContext)
+                    Profiler::Get().EndGpuStatistics(*static_cast<GpuScopeContext*>(chunkContext), cmd);
+            };
+#endif
+            return hooks;
+        }
+    }
     AssetHandle FindTextureAsset(const std::string& texturePath)
     {
         if (texturePath.empty())
@@ -125,7 +274,7 @@ namespace Nox
         uint64_t bytes = 0;
         if (s_Instance)
         {
-            for (const NRI::MemoryHeapStats& heap : s_Instance->m_memoryHeapStats)
+            for (const nri::MemoryHeapStats& heap : s_Instance->m_memoryHeapStats)
             {
                 if (heap.deviceLocal)
                     bytes += heap.allocationBytes;
@@ -139,7 +288,7 @@ namespace Nox
         uint64_t usage = 0;
         if (s_Instance)
         {
-            for (const NRI::MemoryHeapStats& heap : s_Instance->m_memoryHeapStats)
+            for (const nri::MemoryHeapStats& heap : s_Instance->m_memoryHeapStats)
             {
                 if (heap.deviceLocal)
                     usage += heap.usage;
@@ -385,10 +534,10 @@ namespace Nox
 
         s_Instance = this;
 
-        NRI::GraphicsAPI api = NRI::GraphicsAPI::Vulkan;
+        nri::GraphicsAPI api = NRI_GRAPHICS_API_VULKAN;
 #ifdef _WIN32
         if (Application::Get().GetSpecification().CommandLineArgs.WantsD3D12())
-            api = NRI::GraphicsAPI::D3D12;
+            api = NRI_GRAPHICS_API_D3D12;
 #endif
         // Start-up phases timed for the log (docs/Backlog_2026.md R11): the device (Streamline / NGX, Vulkan), then the pipelines.
         const auto startupBegin = std::chrono::steady_clock::now();
@@ -396,18 +545,28 @@ namespace Nox
         {
             return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - from).count();
         };
-        m_device = NRI::Device::create(api, *m_window);
+        nriSetLogCallback(&NoxRHILogCallback, nullptr);
+        nri::DeviceDesc deviceDesc{};
+        deviceDesc.api = api;
+        deviceDesc.window = m_window->GetNativeWindowHandle();
+        deviceDesc.enableStreamline = true;
+        deviceDesc.logCallback = &NoxRHILogCallback;
+        m_device = nri::createDevice(deviceDesc);
         NOX_CORE_ASSERT(m_device, "Failed to create NRI device");
+        if (nri::isUpscalerSupported(m_device, NRI_UPSCALER_TYPE_DLSS_SR))
+            m_dlssSR = nri::createUpscaler(m_device, NRI_UPSCALER_TYPE_DLSS_SR);
+        if (nri::isUpscalerSupported(m_device, NRI_UPSCALER_TYPE_DLSS_RR))
+            m_dlssRR = nri::createUpscaler(m_device, NRI_UPSCALER_TYPE_DLSS_RR);
         const double deviceMs = millisecondsSince(startupBegin);
 
         // Staging for every upload, right after the device: startup already uploads (textures, IBL inputs). A ring on
         // the transfer queue that streamed loads fill over several frames; oversized uploads get their own buffer.
-        m_uploads.Init(*m_device, 128ull * 1024 * 1024);
+        m_uploads.Init(m_device, 128ull * 1024 * 1024);
 
 #if NOX_PROFILING_ENABLED
-        m_gpuProfiler = m_device->createGpuProfiler(MAX_FRAMES_IN_FLIGHT);
-        Profiler::Get().SetGpuProfiler(m_gpuProfiler.get());
-        if (!m_gpuProfiler->isSupported())
+        m_gpuProfiler = nri::createGpuProfiler(m_device, MAX_FRAMES_IN_FLIGHT);
+        Profiler::Get().SetGpuProfiler(&m_gpuProfiler);
+        if (!m_gpuProfiler.isSupported())
             NOX_CORE_WARN("GPU timestamp queries are not supported on the render queue; GPU timings are unavailable");
 #endif
 
@@ -438,7 +597,7 @@ namespace Nox
                                     "VisibilityBuffer", "EditorStableDepth", "SelectionMask", "Material_PBR_Mesh" })
             watchShader(std::string("assets/shaders/") + shader + ".slang", "CustomLit", [this]()
             {
-                if ((m_customLitStatus.ShaderCount > 0 || m_customLitStatus.GraphCount > 0) && m_shaderCompiler->canCompile() &&
+                if ((m_customLitStatus.ShaderCount > 0 || m_customLitStatus.GraphCount > 0) && m_shaderCompiler.canCompile() &&
                     !m_customLitBuild) // (a running build has the new text)
                 {
                     createCustomLitPipelines(true);
@@ -533,9 +692,9 @@ namespace Nox
         m_pickerStagingBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
         for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
-            m_pickerStagingBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+            m_pickerStagingBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = maxPickerBufferSize,
-                .usage = NRI::BufferUsage::Staging
+                .usage = NRI_BUFFER_USAGE_STAGING
             }));
         }
         m_raycastBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
@@ -543,80 +702,77 @@ namespace Nox
         for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
             // Host visible and reached through its address: the CPU writes the rays, the shader the distances, the CPU reads them.
-            m_raycastBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+            m_raycastBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = sizeof(shaderio::EditorRay) * shaderio::EDITOR_RAYCAST_MAX,
-                .usage = NRI::BufferUsage::Uniform
+                .usage = NRI_BUFFER_USAGE_UNIFORM
             }));
         }
         m_pickerDepthStagingBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
         for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
-            m_pickerDepthStagingBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+            m_pickerDepthStagingBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = 1024, // up to a 9 x 9 block of floats
-                .usage = NRI::BufferUsage::Staging
+                .usage = NRI_BUFFER_USAGE_STAGING
             }));
         }
         m_pickerReadbackRequests.resize(MAX_FRAMES_IN_FLIGHT);
 
         for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
-            m_inspectionProbeBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+            m_inspectionProbeBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = sizeof(float) * 4,
-                .usage = NRI::BufferUsage::Staging
+                .usage = NRI_BUFFER_USAGE_STAGING
             }));
         }
         m_inspectionProbePending.resize(MAX_FRAMES_IN_FLIGHT, 0);
 
         for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
-            m_cullViewBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+            m_cullViewBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = sizeof(shaderio::CullView),
-                .usage = NRI::BufferUsage::Storage
+                .usage = NRI_BUFFER_USAGE_STORAGE
             }));
-            m_cullStatsBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+            m_cullStatsBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = sizeof(shaderio::CullCounts),
-                .usage = NRI::BufferUsage::Staging
+                .usage = NRI_BUFFER_USAGE_STAGING
             }));
-            m_mipFeedbackReadback.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+            m_mipFeedbackReadback.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = MipFeedbackBytes,
-                .usage = NRI::BufferUsage::Staging
+                .usage = NRI_BUFFER_USAGE_STAGING
             }));
-            m_clusterStatsReadback.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+            m_clusterStatsReadback.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = sizeof(shaderio::ClusterStats),
-                .usage = NRI::BufferUsage::Staging
+                .usage = NRI_BUFFER_USAGE_STAGING
             }));
-            m_blasCompactionQueryPools.emplace_back(m_device->createQueryPool(NRI::QueryPoolDesc{
-                .type = NRI::QueryType::AccelerationStructureCompactedSize,
+            m_blasCompactionQueryPools.emplace_back(m_device.createQueryPool(nri::QueryPoolDesc{
+                .type = NRI_QUERY_TYPE_AS_COMPACTED_SIZE,
                 .capacity = BlasCompactionQueriesPerFrame
             }));
         }
-        m_mipFeedbackBuffer = m_device->createBuffer(NRI::BufferDesc{
+        m_mipFeedbackBuffer = m_device.createBuffer(nri::BufferDesc{
             .size = MipFeedbackBytes,
-            .usage = NRI::BufferUsage::StorageStatic
+            .usage = NRI_BUFFER_USAGE_STORAGE_STATIC
         });
-        m_clusterStatsBuffer = m_device->createBuffer(NRI::BufferDesc{
+        m_clusterStatsBuffer = m_device.createBuffer(nri::BufferDesc{
             .size = sizeof(shaderio::ClusterStats),
-            .usage = NRI::BufferUsage::StorageStatic
+            .usage = NRI_BUFFER_USAGE_STORAGE_STATIC
         });
-        m_geometryFeedbackBuffer = m_device->createBuffer(NRI::BufferDesc{
+        m_geometryFeedbackBuffer = m_device.createBuffer(nri::BufferDesc{
             .size = sizeof(shaderio::GeometryStreamingFeedback),
-            .usage = NRI::BufferUsage::StorageStatic
+            .usage = NRI_BUFFER_USAGE_STORAGE_STATIC
         });
         for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
-            m_geometryFeedbackReadback.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+            m_geometryFeedbackReadback.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = sizeof(shaderio::GeometryStreamingFeedback),
-                .usage = NRI::BufferUsage::Staging
+                .usage = NRI_BUFFER_USAGE_STAGING
             }));
         }
 
-        if (!m_useImGui)
-            m_uiRenderer = std::make_unique<UI::UIRenderer>(*m_device, *m_shaderCompiler, m_fileWatcher);
-
         m_renderer2D = std::make_unique<Renderer2D>(isEditor, RendererContext
                                                     {
-                                                        *m_device,
-                                                        *m_shaderCompiler,
+                                                        m_device,
+                                                        m_shaderCompiler,
                                                         m_fileWatcher,
                                                         m_whiteTexture,
                                                         [this]()
@@ -624,7 +780,7 @@ namespace Nox
                                                             return beginSingleTimeCommands();
                                                         },
 
-                                                        [this](std::unique_ptr<NRI::CommandBuffer>&& commandBuffer)
+                                                        [this](nri::CommandBuffer&& commandBuffer)
                                                         {
                                                             endSingleTimeCommands(std::move(commandBuffer));
                                                         }
@@ -649,7 +805,7 @@ namespace Nox
         // Release queued assets while the instance is still reachable: a Mesh destructor calls Renderer::UnloadMesh,
         // which asserts on s_Instance and queues its geometry, so this drains in rounds -- clearing the vector in place
         // would push into it while its elements are being destroyed.
-        m_device->waitIdle();
+        m_device.waitIdle();
         // Page and tile reads write into staging: done before anything goes.
         m_geometryStreamer.Shutdown();
         m_virtualTextures.Shutdown();
@@ -669,17 +825,20 @@ namespace Nox
 
         if (s_Instance == this) s_Instance = nullptr;
 
-        m_device->waitIdle();
+        m_device.waitIdle();
         // Before the descriptor heap and device go away.
         m_renderGraph.ReleaseResources();
 
 
-        m_uiRenderer.reset();
-        UI::UIGlyphCache::Get().SetTextureSlot(~0u); // (its atlas goes with the device: text falls back to the distance field)
-        UI::UIGlyphCache::Get().Reset();
+        ShutdownNoxUI();
+        shutdownImGui();
+        NoxUI::UIGlyphCache::Get().SetTextureID(NoxUI::kInvalidTextureID);
+        NoxUI::UIGlyphCache::Get().Reset();
         m_glyphAtlas = nullptr;
         Font::ReleaseDefault();
-        m_device->shutdown(); // needed for texture to not remove imguitexture
+        m_denoiser.reset();
+        m_dlssRR.reset();
+        m_dlssSR.reset();
         m_renderer2D.reset();
         // Cleanup Vulkan resources here
     }
@@ -696,7 +855,8 @@ namespace Nox
         createCompiler();
         // The forward shader is the slowest module by far (~13 s) and many pipelines use it (transparent lit, AVBOIT, probe
         // captures, extra views): it starts compiling first, so it is done by the time they need it instead of being picked at random.
-        m_device->precompileShaderModules({ "assets/shaders/Material_TransparentLit_Mesh.slang" }, *m_shaderCompiler);
+        const std::array<std::string_view, 1> precompileSources = { "assets/shaders/Material_TransparentLit_Mesh.slang" };
+        m_device.precompileShaderModules(precompileSources, m_shaderCompiler.handle());
         createUnlitPipeline(false);
         createTransparentLitPipeline(false);
         if (m_isEditor) createWireframePipeline(false);
@@ -755,18 +915,21 @@ namespace Nox
         createReSTIRPTPipelines(false);
         // The pipelines above were handed to worker threads where their shaders were cached (PipelineVK): all done before anything
         // draws, those that need the shader compiler built here (with this progress window still up).
-        m_device->finishPipelineBuilds();
+        m_device.finishPipelineBuilds();
 
         createCommandPool();
         createUniformBuffers();
         createSelectedEntityIDBuffers();
         createDescriptorHeaps();
-        m_renderGraph.Initialize(*m_device, *m_resourceHeap, MAX_FRAMES_IN_FLIGHT);
+        m_renderGraph.Initialize(m_device, m_resourceHeap, MAX_FRAMES_IN_FLIGHT);
+        m_renderGraph.SetLogCallback(&NoxRGLogCallback, nullptr);
+        m_renderGraph.SetTaskDispatcher(&GetRGTaskDispatcher());
+        m_renderGraph.SetProfilerHooks(MakeRGProfilerHooks());
         // A compute queue's command buffer binds the heaps only (no raster state on that queue).
-        m_renderGraph.SetCommandBufferSetup([this](NRI::CommandBuffer& cmd, NRI::QueueType queue)
+        m_renderGraph.SetCommandBufferSetup([this](nri::CommandBuffer& cmd, nri::QueueType queue)
         {
-            if (queue == NRI::QueueType::Compute)
-                cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+            if (queue == NRI_QUEUE_COMPUTE)
+                cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
             else
                 applyCommandBufferBaseline(cmd);
         });
@@ -780,8 +943,8 @@ namespace Nox
         createRTAOPipeline(false);
         createSSAOKernel();
         // NRD keeps size-dependent internal state; its textures are render graph resources.
-        if (m_renderSize.width > 0 && m_renderSize.height > 0)
-            m_device->initNRD(m_renderSize.width, m_renderSize.height);
+        if (m_renderSize.width > 0 && m_renderSize.height > 0 && nri::isDenoiserAvailable(m_device))
+            m_denoiser = nri::createDenoiser(m_device, { .width = m_renderSize.width, .height = m_renderSize.height });
         // ReSTIR GI/DI static data, ReSTIR PT context
         m_lightPDFMipLevels = static_cast<uint32_t>(log2(static_cast<double>(m_lightPDFTextureSize)));
         createRTXDINeighborOffsets();
@@ -789,7 +952,7 @@ namespace Nox
 
 
         // Allocate baseline capacities for dynamic GPU buffers so vectors are NEVER empty
-        m_gpuScene.Initialize(*m_device, MAX_FRAMES_IN_FLIGHT);
+        m_gpuScene.Initialize(m_device, MAX_FRAMES_IN_FLIGHT);
 
         m_DrawListBufferCapacity = sizeof(uint32_t) * 1024;
         createDrawListBuffers(m_DrawListBufferCapacity);
@@ -805,14 +968,14 @@ namespace Nox
         // ~5 s of compiling there (on every start after a shader change).
         createProceduralSkyPipelines();
         {
-            NRI::PipelineDesc gridDesc{};
-            gridDesc.type = NRI::PipelineType::Compute;
-            gridDesc.shaders.push_back({ NRI::ShaderStage::Compute, "buildMain", "assets/shaders/EmissiveLightGrid.slang" });
-            m_emissiveGridPipeline = m_device->createPipeline(gridDesc, *m_shaderCompiler);
+            nri::PipelineDesc gridDesc{};
+            gridDesc.type = NRI_PIPELINE_COMPUTE;
+            gridDesc.shaders.push_back({ NRI_SHADER_STAGE_COMPUTE, "buildMain", "assets/shaders/EmissiveLightGrid.slang" });
+            m_emissiveGridPipeline = m_device.createPipeline(gridDesc, m_shaderCompiler.handle());
             gridDesc.shaders.front().entryPoint = "trianglesMain";
-            m_emissiveTrianglesPipeline = m_device->createPipeline(gridDesc, *m_shaderCompiler);
+            m_emissiveTrianglesPipeline = m_device.createPipeline(gridDesc, m_shaderCompiler.handle());
             gridDesc.shaders.front().entryPoint = "scanMain";
-            m_emissiveScanPipeline = m_device->createPipeline(gridDesc, *m_shaderCompiler);
+            m_emissiveScanPipeline = m_device.createPipeline(gridDesc, m_shaderCompiler.handle());
         }
         createGeometryStreamingPipelines();
 
@@ -838,7 +1001,7 @@ namespace Nox
         }
         */
 
-        m_device->waitIdle();
+        m_device.waitIdle();
 
         cleanupSwapChain();
         createSwapChain();
@@ -855,7 +1018,12 @@ namespace Nox
 
         // Output-resolution graph targets follow the new swapchain size by themselves.
         if (m_renderSize.width > 0 && m_renderSize.height > 0)
-            m_device->initNRD(m_renderSize.width, m_renderSize.height);
+        {
+            if (m_denoiser)
+                m_denoiser.resize(m_renderSize.width, m_renderSize.height);
+            else if (nri::isDenoiserAvailable(m_device))
+                m_denoiser = nri::createDenoiser(m_device, { .width = m_renderSize.width, .height = m_renderSize.height });
+        }
         m_renderGraph.ResetHistory(NRDHistoryKey);
         m_pathTracerSampleCount = 0;
     }
@@ -864,8 +1032,13 @@ namespace Nox
     {
         int width = 0, height = 0;
         m_window->getSizeInPixels(width, height);
-        m_swapChain = m_device->createSwapchain(NRI::SwapchainDesc{static_cast<uint32_t>(width), static_cast<uint32_t>(height), m_vSync});
-        m_swapChainExtent = m_swapChain->getExtent();
+        nri::SwapchainDesc scDesc{};
+        scDesc.width = static_cast<uint32_t>(width);
+        scDesc.height = static_cast<uint32_t>(height);
+        scDesc.vsync = m_vSync;
+        scDesc.window = m_window->GetNativeWindowHandle();
+        m_swapChain = nri::createSwapchain(m_device, scDesc);
+        m_swapChainExtent = m_swapChain.getExtent();
     }
 
     void Renderer::setVSync(bool enabled)
@@ -877,7 +1050,7 @@ namespace Nox
         }
     }
 
-    void Renderer::onViewportSizeChange(NRI::Extent2D size)
+    void Renderer::onViewportSizeChange(nri::Extent2D size)
     {
         // Debounced -- see m_viewportResizePending's declaration in Renderer.h for why this no longer
         // calls applyRenderResolution() synchronously. EditorLayer.cpp calls this every frame the ImGui
@@ -914,7 +1087,7 @@ namespace Nox
             uint32_t DiffuseGI = 3;   // 0 IBL, 1 DDGI, 2 ReSTIR GI, 3 screen probes (DDGI underneath), 4 raster probe volume
             uint32_t ScreenProbeTile = 16; // pixels per screen probe
             uint32_t DirectLighting = 0; // 0 the loop (a shadow ray per light in range), 1 ReSTIR DI (one resampled light per pixel)
-            NRI::UpscaleMode Upscale = NRI::UpscaleMode::Quality;
+            nri::UpscalerMode Upscale = NRI_UPSCALER_MODE_QUALITY;
             bool RTRefraction = false; // smooth glass traced (H3); else the screen-space refraction only
             uint32_t RTDivisor = 1;    // ray tracing resolution: 1 every pixel, 2 one of each 2 x 2 block
             uint32_t ShadowRayLights = 0; // the shadow-ray budget a pixel (strongest lights); 0 every light
@@ -939,12 +1112,12 @@ namespace Nox
             case Renderer::RenderQuality::Low:
                 preset.RTReflections = false;
                 preset.ScreenProbeTile = 24;
-                preset.Upscale = NRI::UpscaleMode::Performance;
+                preset.Upscale = NRI_UPSCALER_MODE_PERFORMANCE;
                 preset.RTDivisor = 2;
                 preset.ShadowRayLights = 4;
                 break;
             case Renderer::RenderQuality::Medium:
-                preset.Upscale = NRI::UpscaleMode::Balanced;
+                preset.Upscale = NRI_UPSCALER_MODE_BALANCED;
                 preset.ShadowRayLights = 8;
                 break;
             case Renderer::RenderQuality::High:
@@ -1000,7 +1173,7 @@ namespace Nox
         setNRDShadowsEnabled(true);
         setRayTracingReflections(preset.RTReflections);
         if (preset.RTReflections)
-            setNRDReflectionDenoiser(NRI::NRDReflectionDenoiser::REBLUR);
+            setNRDReflectionDenoiser(Nox::NRDReflectionDenoiser::REBLUR);
         if (preset.RTAO)
             setRTAOEnabled(true);
         else
@@ -1010,10 +1183,10 @@ namespace Nox
         setDDGIEnabled(preset.DiffuseGI == 1 || preset.DiffuseGI == 3);
         m_screenProbeTileSize = preset.ScreenProbeTile;
         if (preset.DiffuseGI == 2)
-            setNRDGIDenoiser(NRI::NRDDiffuseDenoiser::REBLUR);
+            setNRDGIDenoiser(Nox::NRDDiffuseDenoiser::REBLUR);
         setDirectLightingMode(preset.DirectLighting);
         if (preset.DirectLighting == 1)
-            setNRDDIDenoiser(NRI::NRDDiffuseDenoiser::REBLUR);
+            setNRDDIDenoiser(Nox::NRDDiffuseDenoiser::REBLUR);
         if (isDLSSSupported())
         {
             setDLSSEnabled(true);
@@ -1076,9 +1249,8 @@ namespace Nox
         uint64_t budget = m_memoryBudget.GetDeviceBudget();
         if (budget == 0 && m_device)
         {
-            std::vector<NRI::MemoryHeapStats> heaps;
-            m_device->getMemoryStats(heaps);
-            for (const NRI::MemoryHeapStats& heap : heaps)
+            std::vector<nri::MemoryHeapStats> heaps = m_device.getMemoryStats();
+            for (const nri::MemoryHeapStats& heap : heaps)
             {
                 if (heap.deviceLocal)
                     budget = std::max(budget, heap.budget);
@@ -1088,7 +1260,7 @@ namespace Nox
         int rung = gigabytes <= 0.0 ? 1 : gigabytes < 6.5 ? 0 : gigabytes < 10.0 ? 1 : 2;
         // The cost grows with the pixels: without DLSS every ray traced effect runs at the output's size, so a rung lower; above
         // 1440p (4K) the same, unless the card has the memory of the top rung's twice over.
-        const NRI::Extent2D output = getOutputSize();
+        const nri::Extent2D output = getOutputSize();
         const uint64_t pixels = static_cast<uint64_t>(output.width) * output.height;
         if (!isDLSSSupported())
             --rung;
@@ -1179,7 +1351,7 @@ namespace Nox
         m_pendingRenderResolutionUpdate = true;
     }
 
-    void Renderer::setUpscaleMode(NRI::UpscaleMode mode)
+    void Renderer::setUpscaleMode(nri::UpscalerMode mode)
     {
         if (m_dlssMode == mode) return;
         m_dlssMode = mode;
@@ -1202,24 +1374,24 @@ namespace Nox
             if (enabled)
             {
                 bool anyDisabled = false;
-                if (m_nrdReflectionDenoiser != NRI::NRDReflectionDenoiser::Off)
+                if (m_nrdReflectionDenoiser != Nox::NRDReflectionDenoiser::Off)
                 {
-                    m_nrdReflectionDenoiser = NRI::NRDReflectionDenoiser::Off;
+                    m_nrdReflectionDenoiser = Nox::NRDReflectionDenoiser::Off;
                     anyDisabled = true;
                 }
-                if (m_nrdGIDenoiser != NRI::NRDDiffuseDenoiser::Off)
+                if (m_nrdGIDenoiser != Nox::NRDDiffuseDenoiser::Off)
                 {
-                    m_nrdGIDenoiser = NRI::NRDDiffuseDenoiser::Off;
+                    m_nrdGIDenoiser = Nox::NRDDiffuseDenoiser::Off;
                     anyDisabled = true;
                 }
-                if (m_nrdDIDenoiser != NRI::NRDDiffuseDenoiser::Off)
+                if (m_nrdDIDenoiser != Nox::NRDDiffuseDenoiser::Off)
                 {
-                    m_nrdDIDenoiser = NRI::NRDDiffuseDenoiser::Off;
+                    m_nrdDIDenoiser = Nox::NRDDiffuseDenoiser::Off;
                     anyDisabled = true;
                 }
-                if (m_nrdPTDenoiser != NRI::NRDDiffuseDenoiser::Off)
+                if (m_nrdPTDenoiser != Nox::NRDDiffuseDenoiser::Off)
                 {
-                    m_nrdPTDenoiser = NRI::NRDDiffuseDenoiser::Off;
+                    m_nrdPTDenoiser = Nox::NRDDiffuseDenoiser::Off;
                     anyDisabled = true;
                 }
                 if (anyDisabled)
@@ -1231,7 +1403,7 @@ namespace Nox
         }
     }
 
-    void Renderer::setNRDReflectionDenoiser(NRI::NRDReflectionDenoiser mode)
+    void Renderer::setNRDReflectionDenoiser(Nox::NRDReflectionDenoiser mode)
     {
         if (m_nrdReflectionDenoiser != mode)
         {
@@ -1239,7 +1411,7 @@ namespace Nox
             m_renderGraph.ResetHistory(NRDHistoryKey);
 
             // Mutual Exclusion: NRD REBLUR/RELAX conflicts with DLSS Ray Reconstruction
-            if (mode != NRI::NRDReflectionDenoiser::Off && m_dlssRayReconstructionEnabled)
+            if (mode != Nox::NRDReflectionDenoiser::Off && m_dlssRayReconstructionEnabled)
             {
                 m_dlssRayReconstructionEnabled = false;
                 m_renderGraph.ResetHistory(DLSSHistoryKey);
@@ -1250,14 +1422,14 @@ namespace Nox
         }
     }
 
-    void Renderer::setNRDGIDenoiser(NRI::NRDDiffuseDenoiser mode)
+    void Renderer::setNRDGIDenoiser(Nox::NRDDiffuseDenoiser mode)
     {
         if (m_nrdGIDenoiser != mode)
         {
             m_nrdGIDenoiser = mode;
             m_renderGraph.ResetHistory(NRDHistoryKey);
 
-            if (mode != NRI::NRDDiffuseDenoiser::Off && m_dlssRayReconstructionEnabled)
+            if (mode != Nox::NRDDiffuseDenoiser::Off && m_dlssRayReconstructionEnabled)
             {
                 m_dlssRayReconstructionEnabled = false;
                 m_renderGraph.ResetHistory(DLSSHistoryKey);
@@ -1268,14 +1440,14 @@ namespace Nox
         }
     }
 
-    void Renderer::setNRDDIDenoiser(NRI::NRDDiffuseDenoiser mode)
+    void Renderer::setNRDDIDenoiser(Nox::NRDDiffuseDenoiser mode)
     {
         if (m_nrdDIDenoiser != mode)
         {
             m_nrdDIDenoiser = mode;
             m_renderGraph.ResetHistory(NRDHistoryKey);
 
-            if (mode != NRI::NRDDiffuseDenoiser::Off && m_dlssRayReconstructionEnabled)
+            if (mode != Nox::NRDDiffuseDenoiser::Off && m_dlssRayReconstructionEnabled)
             {
                 m_dlssRayReconstructionEnabled = false;
                 m_renderGraph.ResetHistory(DLSSHistoryKey);
@@ -1286,14 +1458,14 @@ namespace Nox
         }
     }
 
-    void Renderer::setNRDPTDenoiser(NRI::NRDDiffuseDenoiser mode)
+    void Renderer::setNRDPTDenoiser(Nox::NRDDiffuseDenoiser mode)
     {
         if (m_nrdPTDenoiser != mode)
         {
             m_nrdPTDenoiser = mode;
             m_renderGraph.ResetHistory(NRDHistoryKey);
 
-            if (mode != NRI::NRDDiffuseDenoiser::Off && m_dlssRayReconstructionEnabled)
+            if (mode != Nox::NRDDiffuseDenoiser::Off && m_dlssRayReconstructionEnabled)
             {
                 m_dlssRayReconstructionEnabled = false;
                 m_renderGraph.ResetHistory(DLSSHistoryKey);
@@ -1306,27 +1478,33 @@ namespace Nox
 
     void Renderer::applyRenderResolution()
     {
-        NRI::Extent2D outputSize = m_isEditor ? m_viewportSize : m_swapChainExtent;
+        nri::Extent2D outputSize = m_isEditor ? m_viewportSize : m_swapChainExtent;
         if (outputSize.width == 0 || outputSize.height == 0)
             return;
 
         // While DLSS is disabled we always render 1:1 regardless of the remembered mode, so turning
         // it back on later doesn't require the user to also re-pick a mode.
-        NRI::UpscaleMode effectiveMode = m_dlssEnabled ? m_dlssMode : NRI::UpscaleMode::Off;
+        nri::UpscalerMode effectiveMode = m_dlssEnabled ? m_dlssMode : NRI_UPSCALER_MODE_OFF;
         const bool useRayReconstruction = m_dlssRayReconstructionEnabled &&
-            m_device->isDLSSRayReconstructionSupported() && m_rrGuidesPipeline;
-        auto optimal = m_device->getDLSSOptimalRenderSize(effectiveMode, outputSize, useRayReconstruction);
-        m_renderSize = (optimal.size.width > 0 && optimal.size.height > 0) ? optimal.size : outputSize;
+            isDLSSRayReconstructionSupported() && m_rrGuidesPipeline;
+        nri::Extent2D optimalSize = outputSize;
+        if (effectiveMode != NRI_UPSCALER_MODE_OFF)
+        {
+            const nri::Upscaler& up = (useRayReconstruction && m_dlssRR) ? m_dlssRR : m_dlssSR;
+            if (up)
+                optimalSize = up.getOptimalSettings(effectiveMode, outputSize).renderSize;
+        }
+        m_renderSize = (optimalSize.width > 0 && optimalSize.height > 0) ? optimalSize : outputSize;
 
 #if NOX_PROFILE_STATS
         // Timings measured at the previous resolution / upscale mode are not comparable anymore.
         Profiler::Get().ResetStats();
 #endif
 
-        m_device->waitIdle();
+        m_device.waitIdle();
         // The game's final image is in the bindless heap: the old one leaves it before the new one is registered.
         if ((!m_isEditor || !m_useImGui) && m_sceneResource)
-            m_resourceHeap->unregisterTexture(m_sceneResource->GetDescriptorIndexSlot());
+            m_resourceHeap.unregisterTexture(m_sceneResource->GetDescriptorIndexSlot());
         createSceneResources();
 
         // Graph-owned targets and histories follow the new sizes; with the GPU idle, drop the old-size ones right away
@@ -1335,14 +1513,15 @@ namespace Nox
 
 
         m_renderGraph.ResetAllHistory();
-        m_device->initNRD(m_renderSize.width, m_renderSize.height);
+        if (m_denoiser)
+            m_denoiser.resize(m_renderSize.width, m_renderSize.height);
+        else if (nri::isDenoiserAvailable(m_device))
+            m_denoiser = nri::createDenoiser(m_device, { .width = m_renderSize.width, .height = m_renderSize.height });
         createReSTIRPTContext();
         m_pathTracerSampleCount = 0;
 
-        // NGX's internal DLSS feature is fixed-size once created; it must be explicitly freed here
-        // so it gets recreated at the new resolution on the next evaluate, otherwise evaluate silently
-        // no-ops forever once our tagged resources no longer match the size it was created with.
-        m_device->resetDLSSViewport();
+        if (m_dlssSR) m_dlssSR.resetViewport();
+        if (m_dlssRR) m_dlssRR.resetViewport();
     }
 
     void Renderer::applyPendingRenderResolutionIfNeeded()
@@ -1370,107 +1549,106 @@ namespace Nox
 
     void Renderer::createShadowMaskPipeline(bool forceCompile)
     {
-        m_shadowMaskPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::ShadowMask, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
+        m_shadowMaskPipeline = m_device.createPipeline(rayTracingPassDesc(RayTracingPass::ShadowMask, m_rayTracingGraphMasks, forceCompile), m_shaderCompiler.handle());
     }
 
     void Renderer::createNRDGuidesPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::R32_SFLOAT, NRI::ImageFormat::R10G10B10A2_UNORM }; // view Z, normal + roughness
-        for (const auto& [stage, entryPoint] : { std::pair{ NRI::ShaderStage::Task, "taskMain" }, std::pair{ NRI::ShaderStage::Mesh, "meshMain" },
-                                                 std::pair{ NRI::ShaderStage::Fragment, "fragMain" } })
+        desc.colorFormats = { NRI_FORMAT_R32_SFLOAT, NRI_FORMAT_R10G10B10A2_UNORM }; // view Z, normal + roughness
+        for (const auto& [stage, entryPoint] : { std::pair{ NRI_SHADER_STAGE_TASK, "taskMain" }, std::pair{ NRI_SHADER_STAGE_MESH, "meshMain" },
+                                                 std::pair{ NRI_SHADER_STAGE_FRAGMENT, "fragMain" } })
             desc.shaders.push_back({ .stage = stage, .entryPoint = entryPoint, .sourcePath = "assets/shaders/NRDGuides.slang" });
-        m_nrdGuidesPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_nrdGuidesPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createReflectionPipeline(bool forceCompile)
     {
-        m_reflectionPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::Reflection, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
+        m_reflectionPipeline = m_device.createPipeline(rayTracingPassDesc(RayTracingPass::Reflection, m_rayTracingGraphMasks, forceCompile), m_shaderCompiler.handle());
     }
 
     void Renderer::bakePathTracerShaderTable()
     {
-        // Bake Shader Binding Table using RTXPT / NVRHI ShaderTable::bake replication (for the pipeline in use: created here, or swapped
-        // in by installRayTracingPassPipelines).
-        uint32_t handleSize = m_pathTracerPipeline->getShaderGroupHandleSize();
-        if (handleSize == 0) handleSize = m_device->getShaderGroupHandleSize();
-        uint32_t baseAlignment = m_pathTracerPipeline->getShaderGroupBaseAlignment();
-        if (baseAlignment == 0) baseAlignment = m_device->getShaderGroupBaseAlignment();
+        uint32_t handleSize = nriGetPipelineShaderGroupHandleSize(m_pathTracerPipeline.handle());
+        if (handleSize == 0) handleSize = nriGetDeviceShaderGroupHandleSize(m_device.handle());
+        uint32_t baseAlignment = nriGetPipelineShaderGroupBaseAlignment(m_pathTracerPipeline.handle());
+        if (baseAlignment == 0) baseAlignment = nriGetDeviceShaderGroupBaseAlignment(m_device.handle());
+
+        uint32_t missCount = 0;
+        const uint32_t* missIndices = nriGetPipelineMissGroupIndices(m_pathTracerPipeline.handle(), &missCount);
+        uint32_t hitCount = 0;
+        const uint32_t* hitIndices = nriGetPipelineHitGroupIndices(m_pathTracerPipeline.handle(), &hitCount);
 
         const uint32_t numRayGen = 1;
-        const uint32_t numMiss = static_cast<uint32_t>(m_pathTracerPipeline->getMissShaderGroupIndices().size());
-        const uint32_t numHit = static_cast<uint32_t>(m_pathTracerPipeline->getHitShaderGroupIndices().size());
         const uint32_t numCallable = 0;
 
-        const uint64_t sbtSize = NRI::calculateShaderTableSize(numRayGen, numMiss, numHit, numCallable, baseAlignment);
+        const uint64_t sbtSize = nriCalculateShaderTableSize(numRayGen, missCount, hitCount, numCallable, baseAlignment);
 
-        m_pathTracerSBTBuffer = m_device->createBuffer(NRI::BufferDesc{
+        m_pathTracerSBTBuffer = m_device.createBuffer(nri::BufferDesc{
             .size = sbtSize,
-            .usage = NRI::BufferUsage::ShaderBindingTable
+            .usage = NRI_BUFFER_USAGE_SHADER_BINDING_TABLE
         });
 
-        uint8_t* mappedCpuVA = static_cast<uint8_t*>(m_pathTracerSBTBuffer->map(0, sbtSize));
-        uint64_t gpuVA = m_pathTracerSBTBuffer->getDeviceAddress();
+        uint8_t* mappedCpuVA = static_cast<uint8_t*>(m_pathTracerSBTBuffer.map(0, sbtSize));
+        uint64_t gpuVA = m_pathTracerSBTBuffer.getDeviceAddress();
 
-        const std::vector<uint8_t>& handles = m_pathTracerPipeline->getShaderGroupHandles();
+        uint32_t handlesByteSize = 0;
+        const uint8_t* handles = nriGetPipelineShaderGroupHandles(m_pathTracerPipeline.handle(), &handlesByteSize);
 
-        NRI::bakeShaderTable(
+        nriBakeShaderTable(
             mappedCpuVA,
             gpuVA,
-            handles.data(),
+            handles,
             handleSize,
             baseAlignment,
-            m_pathTracerPipeline->getRayGenShaderGroupIndex(),
-            m_pathTracerPipeline->getMissShaderGroupIndices(),
-            m_pathTracerPipeline->getHitShaderGroupIndices(),
-            {},
-            m_pathTracerSBTState
+            static_cast<int32_t>(nriGetPipelineRayGenGroupIndex(m_pathTracerPipeline.handle())),
+            missIndices, missCount,
+            hitIndices, hitCount,
+            nullptr, 0,
+            &m_pathTracerSBTState
         );
 
-
-
-
-        m_pathTracerSBTBuffer->unmap();
+        m_pathTracerSBTBuffer.unmap();
     }
 
     void Renderer::createPathTracerPipeline(bool forceCompile)
     {
-        m_pathTracerPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::PathTracer, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
+        m_pathTracerPipeline = m_device.createPipeline(rayTracingPassDesc(RayTracingPass::PathTracer, m_rayTracingGraphMasks, forceCompile), m_shaderCompiler.handle());
         bakePathTracerShaderTable();
 
-        NRI::PipelineDesc environmentDesc{};
-        environmentDesc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc environmentDesc{};
+        environmentDesc.type = NRI_PIPELINE_COMPUTE;
         environmentDesc.forceCompile = forceCompile;
-        environmentDesc.shaders.push_back({ NRI::ShaderStage::Compute, "buildMain", "assets/shaders/PathTracer/EnvironmentImportance.slang" });
-        m_ptEnvironmentBuildPipeline = m_device->createPipeline(environmentDesc, *m_shaderCompiler);
+        environmentDesc.shaders.push_back({ NRI_SHADER_STAGE_COMPUTE, "buildMain", "assets/shaders/PathTracer/EnvironmentImportance.slang" });
+        m_ptEnvironmentBuildPipeline = m_device.createPipeline(environmentDesc, m_shaderCompiler.handle());
         environmentDesc.shaders.front().entryPoint = "reduceMain";
-        m_ptEnvironmentReducePipeline = m_device->createPipeline(environmentDesc, *m_shaderCompiler);
+        m_ptEnvironmentReducePipeline = m_device.createPipeline(environmentDesc, m_shaderCompiler.handle());
 
         watchShader("assets/shaders/PathTracer/PathTracerRayGen.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
         watchShader("assets/shaders/PathTracer/PathTracerMiss.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
         watchShader("assets/shaders/PathTracer/PathTracerHit.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
         watchShader("assets/shaders/PathTracer/PathTracerAnyHit.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
 
-        NRI::PipelineDesc decodeDesc{};
-        decodeDesc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc decodeDesc{};
+        decodeDesc.type = NRI_PIPELINE_COMPUTE;
         decodeDesc.forceCompile = forceCompile;
         decodeDesc.shaders.push_back({
-            .stage = NRI::ShaderStage::Compute,
+            .stage = NRI_SHADER_STAGE_COMPUTE,
             .entryPoint = "compMain",
             .sourcePath = "assets/shaders/YCoCgDecodeInPlace.slang"
         });
-        m_ycocgDecodePipeline = m_device->createPipeline(decodeDesc, *m_shaderCompiler);
+        m_ycocgDecodePipeline = m_device.createPipeline(decodeDesc, m_shaderCompiler.handle());
 
-        NRI::PipelineDesc compositeDesc{};
-        compositeDesc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc compositeDesc{};
+        compositeDesc.type = NRI_PIPELINE_COMPUTE;
         compositeDesc.forceCompile = forceCompile;
         compositeDesc.shaders.push_back({
-            .stage = NRI::ShaderStage::Compute,
+            .stage = NRI_SHADER_STAGE_COMPUTE,
             .entryPoint = "compositeMain",
             .sourcePath = "assets/shaders/PTComposite.slang"
         });
-        m_ptCompositePipeline = m_device->createPipeline(compositeDesc, *m_shaderCompiler);
+        m_ptCompositePipeline = m_device.createPipeline(compositeDesc, m_shaderCompiler.handle());
 
 
     }
@@ -1586,14 +1764,14 @@ namespace Nox
         }
 
         uint64_t offsetsBufferSize = sizeof(floatOffsets);
-        m_restirGINeighborOffsetsBuffer = m_device->createBuffer(NRI::BufferDesc{
+        m_restirGINeighborOffsetsBuffer = m_device.createBuffer(nri::BufferDesc{
             .size = offsetsBufferSize,
-            .usage = NRI::BufferUsage::Storage
+            .usage = NRI_BUFFER_USAGE_STORAGE
         });
 
-        void* mapped = m_restirGINeighborOffsetsBuffer->map(0, offsetsBufferSize);
+        void* mapped = m_restirGINeighborOffsetsBuffer.map(0, offsetsBufferSize);
         memcpy(mapped, floatOffsets, offsetsBufferSize);
-        m_restirGINeighborOffsetsBuffer->unmap();
+        m_restirGINeighborOffsetsBuffer.unmap();
     }
 
     void Renderer::createSSAOKernel()
@@ -1616,13 +1794,13 @@ namespace Nox
         }
 
         const uint64_t kernelBufferSize = sizeof(glm::vec4) * kernel.size();
-        m_ssaoKernelBuffer = m_device->createBuffer(NRI::BufferDesc{
+        m_ssaoKernelBuffer = m_device.createBuffer(nri::BufferDesc{
             .size = kernelBufferSize,
-            .usage = NRI::BufferUsage::Storage
+            .usage = NRI_BUFFER_USAGE_STORAGE
         });
-        void* mapped = m_ssaoKernelBuffer->map(0, kernelBufferSize);
+        void* mapped = m_ssaoKernelBuffer.map(0, kernelBufferSize);
         memcpy(mapped, kernel.data(), kernelBufferSize);
-        m_ssaoKernelBuffer->unmap();
+        m_ssaoKernelBuffer.unmap();
     }
 
     void Renderer::setReSTIRPTTemporalEnabled(bool enabled)
@@ -1657,90 +1835,90 @@ namespace Nox
     {
         // 1. Initial Sampling Pipeline (ResamplingMode::None -- generates + RIS-combines numInitialSamples full paths per pixel, no
         // temporal/spatial reuse yet)
-        m_restirPTInitialPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::ReSTIRPTInitial, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
+        m_restirPTInitialPipeline = m_device.createPipeline(rayTracingPassDesc(RayTracingPass::ReSTIRPTInitial, m_rayTracingGraphMasks, forceCompile), m_shaderCompiler.handle());
 
         // 2. Final Shading Pipeline
         {
-            NRI::PipelineDesc desc{};
+            nri::PipelineDesc desc{};
             desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.colorFormats = {NRI_FORMAT_R16G16B16A16_SFLOAT};
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
+                .stage = NRI_SHADER_STAGE_TASK,
                 .entryPoint = "taskMain",
                 .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTFinalShading.slang"
             });
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
+                .stage = NRI_SHADER_STAGE_MESH,
                 .entryPoint = "meshMain",
                 .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTFinalShading.slang"
             });
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
+                .stage = NRI_SHADER_STAGE_FRAGMENT,
                 .entryPoint = "fragMain",
                 .sourcePath = "assets/shaders/RTXDI/PT/ReSTIRPTFinalShading.slang"
             });
-            m_restirPTFinalShadingPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            m_restirPTFinalShadingPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
 
         // 3. Temporal Resampling Pipeline (RandomReplay/hybrid-shift reconnection against last frame's
         // finalized reservoir) -- runs between Initial Sampling and Final Shading whenever the context's
         // resampling mode is Temporal (or TemporalAndSpatial once Spatial exists).
-        m_restirPTTemporalPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::ReSTIRPTTemporal, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
+        m_restirPTTemporalPipeline = m_device.createPipeline(rayTracingPassDesc(RayTracingPass::ReSTIRPTTemporal, m_rayTracingGraphMasks, forceCompile), m_shaderCompiler.handle());
     }
 
     void Renderer::createDDGIPipelines(bool forceCompile)
     {
         // 1. Radiance Pipeline
-        m_ddgiRadiancePipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::DDGIRadiance, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
+        m_ddgiRadiancePipeline = m_device.createPipeline(rayTracingPassDesc(RayTracingPass::DDGIRadiance, m_rayTracingGraphMasks, forceCompile), m_shaderCompiler.handle());
 
         // 2. Blend Irradiance Pipeline (compute: one workgroup per probe)
         {
-            NRI::PipelineDesc desc{};
-            desc.type = NRI::PipelineType::Compute;
+            nri::PipelineDesc desc{};
+            desc.type = NRI_PIPELINE_COMPUTE;
             desc.forceCompile = forceCompile;
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain", .sourcePath = "assets/shaders/DDGIBlendIrradiance.slang" });
-            m_ddgiBlendIrradiancePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "computeMain", .sourcePath = "assets/shaders/DDGIBlendIrradiance.slang" });
+            m_ddgiBlendIrradiancePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
 
         // 3. Blend Distance Pipeline (compute: one workgroup per probe)
         {
-            NRI::PipelineDesc desc{};
-            desc.type = NRI::PipelineType::Compute;
+            nri::PipelineDesc desc{};
+            desc.type = NRI_PIPELINE_COMPUTE;
             desc.forceCompile = forceCompile;
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain", .sourcePath = "assets/shaders/DDGIBlendDistance.slang" });
-            m_ddgiBlendDistancePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "computeMain", .sourcePath = "assets/shaders/DDGIBlendDistance.slang" });
+            m_ddgiBlendDistancePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
 
         // 3b. Probe relocation (one texel per probe: its offset in cells)
         {
-            NRI::PipelineDesc desc{};
+            nri::PipelineDesc desc{};
             desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/DDGIRelocation.slang" });
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/DDGIRelocation.slang" });
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/DDGIRelocation.slang" });
-            m_ddgiRelocationPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            desc.colorFormats = {NRI_FORMAT_R16G16B16A16_SFLOAT};
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/DDGIRelocation.slang" });
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = "assets/shaders/DDGIRelocation.slang" });
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = "assets/shaders/DDGIRelocation.slang" });
+            m_ddgiRelocationPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
 
         // 4. Debug Spheres Pipeline (Rendered in Forward 3D pass into the HDR scene + entity ID targets)
         {
-            NRI::PipelineDesc desc{};
+            nri::PipelineDesc desc{};
             desc.forceCompile = true;
             desc.colorFormats = {
-                NRI::ImageFormat::R16G16B16A16_SFLOAT,
-                NRI::ImageFormat::R32SINT
+                NRI_FORMAT_R16G16B16A16_SFLOAT,
+                NRI_FORMAT_R32_SINT
             };
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
+                .stage = NRI_SHADER_STAGE_MESH,
                 .entryPoint = "meshMain",
                 .sourcePath = "assets/shaders/DDGIProbeSpheres.slang"
             });
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
+                .stage = NRI_SHADER_STAGE_FRAGMENT,
                 .entryPoint = "fragMain",
                 .sourcePath = "assets/shaders/DDGIProbeSpheres.slang"
             });
-            m_ddgiDebugSpheresPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            m_ddgiDebugSpheresPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
     }
 
@@ -1749,14 +1927,14 @@ namespace Nox
         // Compute dispatches over their own targets (ScreenProbeCommon.slang), so they can run on the async compute queue.
         auto create = [&](const std::string& source)
         {
-            NRI::PipelineDesc desc{};
-            desc.type = NRI::PipelineType::Compute;
+            nri::PipelineDesc desc{};
+            desc.type = NRI_PIPELINE_COMPUTE;
             desc.forceCompile = forceCompile;
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain", .sourcePath = source });
-            return m_device->createPipeline(desc, *m_shaderCompiler);
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "computeMain", .sourcePath = source });
+            return m_device.createPipeline(desc, m_shaderCompiler.handle());
         };
         m_screenProbePlacePipeline = create("assets/shaders/ScreenProbePlace.slang");
-        m_screenProbeTracePipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::ScreenProbeTrace, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
+        m_screenProbeTracePipeline = m_device.createPipeline(rayTracingPassDesc(RayTracingPass::ScreenProbeTrace, m_rayTracingGraphMasks, forceCompile), m_shaderCompiler.handle());
         m_screenProbeIrradiancePipeline = create("assets/shaders/ScreenProbeIrradiance.slang");
         m_screenProbeFilterPipeline = create("assets/shaders/ScreenProbeFilter.slang");
         m_screenProbeIntegratePipeline = create("assets/shaders/ScreenProbeIntegrate.slang");
@@ -1764,20 +1942,20 @@ namespace Nox
 
     void Renderer::createRTUpsamplePipelines(bool forceCompile)
     {
-        const NRI::ImageFormat formats[3] = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16_SFLOAT, NRI::ImageFormat::R16_SFLOAT };
+        const nri::ImageFormat formats[3] = { NRI_FORMAT_R16G16B16A16_SFLOAT, NRI_FORMAT_R16G16_SFLOAT, NRI_FORMAT_R16_SFLOAT };
         for (uint32_t i = 0; i < 3; ++i)
         {
-            NRI::PipelineDesc desc{};
+            nri::PipelineDesc desc{};
             desc.forceCompile = forceCompile;
             desc.colorFormats = { formats[i] };
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/RTUpsample.slang" });
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/RTUpsample.slang" });
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/RTUpsample.slang" });
-            m_rtUpsamplePipelines[i] = m_device->createPipeline(desc, *m_shaderCompiler);
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/RTUpsample.slang" });
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = "assets/shaders/RTUpsample.slang" });
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = "assets/shaders/RTUpsample.slang" });
+            m_rtUpsamplePipelines[i] = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
     }
 
-    NRI::Extent2D Renderer::getScreenProbeCounts() const
+    nri::Extent2D Renderer::getScreenProbeCounts() const
     {
         const uint32_t tile = std::clamp(m_screenProbeTileSize, 4u, 64u);
         return { (m_renderSize.width + tile - 1) / tile, (m_renderSize.height + tile - 1) / tile };
@@ -1786,52 +1964,52 @@ namespace Nox
     void Renderer::createReSTIRGIPipelines(bool forceCompile)
     {
         // 1. Initial Candidate Generation Pipeline
-        m_restirGIInitialPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::ReSTIRGIInitial, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
+        m_restirGIInitialPipeline = m_device.createPipeline(rayTracingPassDesc(RayTracingPass::ReSTIRGIInitial, m_rayTracingGraphMasks, forceCompile), m_shaderCompiler.handle());
 
         // 2. Temporal Resampling Pipeline
         {
-            NRI::PipelineDesc desc{};
+            nri::PipelineDesc desc{};
             desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.colorFormats = {NRI_FORMAT_R16G16B16A16_SFLOAT};
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
+                .stage = NRI_SHADER_STAGE_TASK,
                 .entryPoint = "taskMain",
                 .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGITemporal.slang"
             });
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
+                .stage = NRI_SHADER_STAGE_MESH,
                 .entryPoint = "meshMain",
                 .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGITemporal.slang"
             });
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
+                .stage = NRI_SHADER_STAGE_FRAGMENT,
                 .entryPoint = "fragMain",
                 .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGITemporal.slang"
             });
-            m_restirGITemporalPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            m_restirGITemporalPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
 
         // 3. Spatial Resampling Pipeline
         {
-            NRI::PipelineDesc desc{};
+            nri::PipelineDesc desc{};
             desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.colorFormats = {NRI_FORMAT_R16G16B16A16_SFLOAT};
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
+                .stage = NRI_SHADER_STAGE_TASK,
                 .entryPoint = "taskMain",
                 .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGISpatial.slang"
             });
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
+                .stage = NRI_SHADER_STAGE_MESH,
                 .entryPoint = "meshMain",
                 .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGISpatial.slang"
             });
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
+                .stage = NRI_SHADER_STAGE_FRAGMENT,
                 .entryPoint = "fragMain",
                 .sourcePath = "assets/shaders/RTXDI/GI/ReSTIRGISpatial.slang"
             });
-            m_restirGISpatialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            m_restirGISpatialPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
     }
 
@@ -1839,134 +2017,153 @@ namespace Nox
     {
         // -1a. Light PDF Mip 0 Write Pipeline (feeds RTXDI_PresampleLocalLights)
         {
-            NRI::PipelineDesc desc{};
-            desc.type = NRI::PipelineType::Compute;
+            nri::PipelineDesc desc{};
+            desc.type = NRI_PIPELINE_COMPUTE;
             desc.forceCompile = forceCompile;
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Compute,
+                .stage = NRI_SHADER_STAGE_COMPUTE,
                 .entryPoint = "compMain",
                 .sourcePath = "assets/shaders/RTXDI/Presampling/ReSTIRDIWriteLightPDF.slang"
             });
-            m_restirDIWriteLightPDFPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            m_restirDIWriteLightPDFPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
 
         // -1b. Light PDF Mip Chain Reduce Pipeline (sum-reduction, dispatched once per mip level)
         {
-            NRI::PipelineDesc desc{};
-            desc.type = NRI::PipelineType::Compute;
+            nri::PipelineDesc desc{};
+            desc.type = NRI_PIPELINE_COMPUTE;
             desc.forceCompile = forceCompile;
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Compute,
+                .stage = NRI_SHADER_STAGE_COMPUTE,
                 .entryPoint = "compMain",
                 .sourcePath = "assets/shaders/RTXDI/Presampling/ReSTIRDIReduceLightPDFMip.slang"
             });
-            m_restirDIReduceLightPDFMipPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            m_restirDIReduceLightPDFMipPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
 
         // 0a. RIS Presample Pipeline (plain 1D compute, no G-buffer -- see shaderIO.h comment)
         {
-            NRI::PipelineDesc desc{};
-            desc.type = NRI::PipelineType::Compute;
+            nri::PipelineDesc desc{};
+            desc.type = NRI_PIPELINE_COMPUTE;
             desc.forceCompile = forceCompile;
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Compute,
+                .stage = NRI_SHADER_STAGE_COMPUTE,
                 .entryPoint = "compMain",
                 .sourcePath = "assets/shaders/RTXDI/Presampling/ReSTIRDIPresample.slang"
             });
-            m_restirDIPresamplePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            m_restirDIPresamplePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
 
         // 0b. ReGIR Presample Pipeline (plain 1D compute)
         {
-            NRI::PipelineDesc desc{};
-            desc.type = NRI::PipelineType::Compute;
+            nri::PipelineDesc desc{};
+            desc.type = NRI_PIPELINE_COMPUTE;
             desc.forceCompile = forceCompile;
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Compute,
+                .stage = NRI_SHADER_STAGE_COMPUTE,
                 .entryPoint = "compMain",
                 .sourcePath = "assets/shaders/RTXDI/Presampling/ReSTIRDIPresampleReGIR.slang"
             });
-            m_restirDIPresampleReGIRPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            m_restirDIPresampleReGIRPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
 
         // 1. Initial Sampling Pipeline
         {
-            NRI::PipelineDesc desc{};
+            nri::PipelineDesc desc{};
             desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.colorFormats = {NRI_FORMAT_R16G16B16A16_SFLOAT};
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
+                .stage = NRI_SHADER_STAGE_TASK,
                 .entryPoint = "taskMain",
                 .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDIInitial.slang"
             });
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
+                .stage = NRI_SHADER_STAGE_MESH,
                 .entryPoint = "meshMain",
                 .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDIInitial.slang"
             });
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
+                .stage = NRI_SHADER_STAGE_FRAGMENT,
                 .entryPoint = "fragMain",
                 .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDIInitial.slang"
             });
-            m_restirDIInitialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            m_restirDIInitialPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
 
         // 2. Temporal Resampling Pipeline
         {
-            NRI::PipelineDesc desc{};
+            nri::PipelineDesc desc{};
             desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.colorFormats = {NRI_FORMAT_R16G16B16A16_SFLOAT};
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
+                .stage = NRI_SHADER_STAGE_TASK,
                 .entryPoint = "taskMain",
                 .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDITemporal.slang"
             });
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
+                .stage = NRI_SHADER_STAGE_MESH,
                 .entryPoint = "meshMain",
                 .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDITemporal.slang"
             });
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
+                .stage = NRI_SHADER_STAGE_FRAGMENT,
                 .entryPoint = "fragMain",
                 .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDITemporal.slang"
             });
-            m_restirDITemporalPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            m_restirDITemporalPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
 
         // 3. Spatial Resampling Pipeline
         {
-            NRI::PipelineDesc desc{};
+            nri::PipelineDesc desc{};
             desc.forceCompile = forceCompile;
-            desc.colorFormats = {NRI::ImageFormat::R16G16B16A16_SFLOAT};
+            desc.colorFormats = {NRI_FORMAT_R16G16B16A16_SFLOAT};
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Task,
+                .stage = NRI_SHADER_STAGE_TASK,
                 .entryPoint = "taskMain",
                 .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDISpatial.slang"
             });
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Mesh,
+                .stage = NRI_SHADER_STAGE_MESH,
                 .entryPoint = "meshMain",
                 .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDISpatial.slang"
             });
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Fragment,
+                .stage = NRI_SHADER_STAGE_FRAGMENT,
                 .entryPoint = "fragMain",
                 .sourcePath = "assets/shaders/RTXDI/DI/ReSTIRDISpatial.slang"
             });
-            m_restirDISpatialPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+            m_restirDISpatialPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
 
         // 4. Final Shading Pipeline
-        m_restirDIFinalShadingPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::ReSTIRDIFinalShading, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
+        m_restirDIFinalShadingPipeline = m_device.createPipeline(rayTracingPassDesc(RayTracingPass::ReSTIRDIFinalShading, m_rayTracingGraphMasks, forceCompile), m_shaderCompiler.handle());
     }
 
     void Renderer::createCompiler()
     {
-        m_shaderCompiler = NRI::CreateSlangCompiler();
+        m_shaderCompiler = nri::createSlangCompiler();
         if (m_device)
-            m_shaderCompiler->setTargetAPI(m_device->getAPI());
+            m_shaderCompiler.setTargetAPI(m_device.getAPI());
+        static constexpr std::array<std::string_view, 16> kSearchPaths = {
+            "../NoxCore/src/NoxCore/Renderer",
+            "shaders",
+            "../shaders",
+            "../../shaders",
+            "assets/shaders",
+            "../assets/shaders",
+            "../../assets/shaders",
+            "../NoxCore/vendors/RTXDI/Include",
+            "../../NoxCore/vendors/RTXDI/Include",
+            "../../../NoxCore/vendors/RTXDI/Include",
+            "../NoxCore/vendors/RTXDI/Include/Rtxdi",
+            "../../NoxCore/vendors/RTXDI/Include/Rtxdi",
+            "../../../NoxCore/vendors/RTXDI/Include/Rtxdi",
+            "../NoxCore/vendors/RTXDI/shaders",
+            "../../NoxCore/vendors/RTXDI/shaders",
+            "../../../NoxCore/vendors/RTXDI/shaders"
+        };
+        m_shaderCompiler.setSearchPaths(kSearchPaths);
     }
 
     void Renderer::watchShader(const std::filesystem::path& path, const std::string& pipelineKey, std::function<void()> reloadFn)
@@ -1980,293 +2177,293 @@ namespace Nox
 
     void Renderer::createUnlitPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
 
         desc.colorFormats =
         {
-            NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            NRI::ImageFormat::R32SINT
+            NRI_FORMAT_R16G16B16A16_SFLOAT,
+            NRI_FORMAT_R32_SINT
         };
         // notes i had to split task from mesh because of i think drawid otherwise weird flickering and not showing up correctly
         // might be a slang issue could change in the future fuck nvidia not testing slang
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
+            .stage = NRI_SHADER_STAGE_TASK,
             .entryPoint = "taskMain",
             .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
+            .stage = NRI_SHADER_STAGE_MESH,
             .entryPoint = "meshMain",
             .sourcePath = "assets/shaders/Material_PBR_Mesh.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
+            .stage = NRI_SHADER_STAGE_FRAGMENT,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/Material_Unlit_Mesh.slang"
         });
-        m_unlitPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_unlitPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
 
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32SINT };
+        desc.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT, NRI_FORMAT_R16G16B16A16_SFLOAT, NRI_FORMAT_R32_SINT };
         desc.shaders.back().entryPoint = "fragMainOIT";
-        m_unlitOITPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_unlitOITPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createTransparentLitPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
 
         desc.colorFormats =
         {
-            NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            NRI::ImageFormat::R32SINT
+            NRI_FORMAT_R16G16B16A16_SFLOAT,
+            NRI_FORMAT_R32_SINT
         };
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
+            .stage = NRI_SHADER_STAGE_TASK,
             .entryPoint = "taskMain",
             .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
+            .stage = NRI_SHADER_STAGE_MESH,
             .entryPoint = "meshMain",
             .sourcePath = "assets/shaders/Material_PBR_Mesh.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
+            .stage = NRI_SHADER_STAGE_FRAGMENT,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/Material_TransparentLit_Mesh.slang"
         });
-        m_transparentLitPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_transparentLitPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
 
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32SINT };
+        desc.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT, NRI_FORMAT_R16G16B16A16_SFLOAT, NRI_FORMAT_R32_SINT };
         desc.shaders.back().entryPoint = "fragMainOIT";
-        m_transparentLitOITPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_transparentLitOITPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createWireframePipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32SINT };
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Material_PBR_Mesh.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/Wireframe.slang" });
-        m_wireframePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT, NRI_FORMAT_R32_SINT };
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Material_PBR_Mesh.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = "assets/shaders/Wireframe.slang" });
+        m_wireframePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createPresentPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.colorFormats = {
-            NRI::ImageFormat::Surface
+            NRI_FORMAT_SURFACE
         };
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Vertex,
+            .stage = NRI_SHADER_STAGE_VERTEX,
             .entryPoint = "vertMain",
             .sourcePath = "assets/shaders/present.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
+            .stage = NRI_SHADER_STAGE_FRAGMENT,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/present.slang"
         });
-        m_presentPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_presentPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createComputePipeline()
     {
-        /*NRI::PipelineDesc computeDesc
+        /*nri::PipelineDesc computeDesc
         {
-            .type = NRI::PipelineType::Compute,
+            .type = NRI_PIPELINE_COMPUTE,
             .shaders = {
                 {
-                    .stage = NRI::ShaderStage::Compute,
+                    .stage = NRI_SHADER_STAGE_COMPUTE,
                     .entryPoint = "compMain",
                     .bytecode = readFile("../../shaders/slang.spv")
                 }
             }
         };
     
-        m_computePipeline = m_device->createPipeline(computeDesc);*/
+        m_computePipeline = m_device.createPipeline(computeDesc);*/
     }
 
     void Renderer::createLightShapesPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.colorFormats =
         {
-            NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            NRI::ImageFormat::R32SINT
+            NRI_FORMAT_R16G16B16A16_SFLOAT,
+            NRI_FORMAT_R32_SINT
         };
-        for (auto [stage, entryPoint] : { std::pair{ NRI::ShaderStage::Task, "taskMain" }, std::pair{ NRI::ShaderStage::Mesh, "meshMain" },
-                                          std::pair{ NRI::ShaderStage::Fragment, "fragMain" } })
+        for (auto [stage, entryPoint] : { std::pair{ NRI_SHADER_STAGE_TASK, "taskMain" }, std::pair{ NRI_SHADER_STAGE_MESH, "meshMain" },
+                                          std::pair{ NRI_SHADER_STAGE_FRAGMENT, "fragMain" } })
             desc.shaders.push_back({ .stage = stage, .entryPoint = entryPoint, .sourcePath = "assets/shaders/LightShapes.slang" });
-        m_lightShapesPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_lightShapesPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createSkyboxPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
 
         desc.colorFormats =
         {
-            NRI::ImageFormat::R16G16B16A16_SFLOAT,
-            NRI::ImageFormat::R32SINT
+            NRI_FORMAT_R16G16B16A16_SFLOAT,
+            NRI_FORMAT_R32_SINT
         };
 
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
+            .stage = NRI_SHADER_STAGE_TASK,
             .entryPoint = "taskMain",
             .sourcePath = "assets/shaders/Skybox.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
+            .stage = NRI_SHADER_STAGE_MESH,
             .entryPoint = "meshMain",
             .sourcePath = "assets/shaders/Skybox.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
+            .stage = NRI_SHADER_STAGE_FRAGMENT,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/Skybox.slang"
         });
 
-        m_skyboxPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_skyboxPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createOutlinePipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.colorFormats = {
-            NRI::ImageFormat::Surface
+            NRI_FORMAT_SURFACE
         };
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
+            .stage = NRI_SHADER_STAGE_TASK,
             .entryPoint = "taskMain",
             .sourcePath = "assets/shaders/Outline.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
+            .stage = NRI_SHADER_STAGE_MESH,
             .entryPoint = "meshMain",
             .sourcePath = "assets/shaders/Outline.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
+            .stage = NRI_SHADER_STAGE_FRAGMENT,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/Outline.slang"
         });
-        m_outlinePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_outlinePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createSelectionMaskPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::R16_SFLOAT };
+        desc.colorFormats = { NRI_FORMAT_R16_SFLOAT };
         // The visibility pass's task stage (LOD cut, meshlet culling); SelectionMask.slang projects without the jitter.
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/SelectionMask.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/SelectionMask.slang" });
-        m_selectionMaskPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = "assets/shaders/SelectionMask.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = "assets/shaders/SelectionMask.slang" });
+        m_selectionMaskPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createStableEntityDepthPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::R32SINT };
+        desc.colorFormats = { NRI_FORMAT_R32_SINT };
         // The visibility pass's task stage (LOD cut, meshlet culling); EditorStableDepth.slang projects without the jitter.
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/EditorStableDepth.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/EditorStableDepth.slang" });
-        m_stableEntityDepthPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = "assets/shaders/EditorStableDepth.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = "assets/shaders/EditorStableDepth.slang" });
+        m_stableEntityDepthPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createCommandPool()
     {
-        m_commandAllocator = m_device->createCommandAllocator(NRI::CommandBufferReset::PerCommandBuffer);
+        m_commandAllocator = m_device.createCommandAllocator(NRI_COMMAND_BUFFER_RESET_PER_COMMAND_BUFFER);
     }
 
     void Renderer::createSceneResources()
     {
         // The final LDR image outlives the frame (the editor's ImGui viewport shows it), so it stays renderer-owned and
         // is imported into the render graph; every other render target is a graph resource.
-        m_sceneResource = m_device->createTexture(NRI::TextureDesc{
+        m_sceneResource = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc{
             .width = m_isEditor ? m_viewportSize.width : m_swapChainExtent.width,
             .height = m_isEditor ? m_viewportSize.height : m_swapChainExtent.height,
             .mipLevels = 1,
             .sampleCount = 1,
-            .usage = NRI::TextureUsage::ColorAttachment,
-            .format = NRI::ImageFormat::Surface,
+            .usage = NRI_TEXTURE_USAGE_COLOR_ATTACHMENT,
+            .format = NRI_FORMAT_SURFACE,
             .directFormat = UINT32_MAX
-        });
+        }));
 
         if (!m_isEditor)
         {
-            m_resourceHeap->registerTexture(*m_sceneResource);
-            uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
+            m_resourceHeap.registerTexture(*m_sceneResource);
+            uniformData.imageHeapIndexOffset = m_resourceHeap.getImageHeapIndexOffset();
             uniformData.finalImageIndex = m_sceneResource->GetDescriptorIndexSlot();
         }
     }
 
     void Renderer::createVisibilityPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = {NRI::ImageFormat::R32G32_UINT};
+        desc.colorFormats = {NRI_FORMAT_R32G32_UINT};
 
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
+            .stage = NRI_SHADER_STAGE_TASK,
             .entryPoint = "taskMain",
             .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
+            .stage = NRI_SHADER_STAGE_MESH,
             .entryPoint = "meshMain",
             .sourcePath = "assets/shaders/VisibilityBuffer.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
+            .stage = NRI_SHADER_STAGE_FRAGMENT,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/VisibilityBuffer.slang"
         });
 
-        m_visibilityPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_visibilityPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createComputeSkinningPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
         desc.forceCompile = forceCompile;
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Compute,
+            .stage = NRI_SHADER_STAGE_COMPUTE,
             .entryPoint = "compMain",
             .sourcePath = "assets/shaders/ComputeSkinning.slang"
         });
-        m_computeSkinningPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_computeSkinningPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
-    NRI::PipelineDesc Renderer::gbufferPipelineDesc(const std::string& source, bool writeVelocity)
+    nri::PipelineDesc Renderer::gbufferPipelineDesc(const std::string& source, bool writeVelocity)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.colorFormats = {
-            NRI::ImageFormat::RGBA8, // 0: SV_Target0 (Albedo)
-            NRI::ImageFormat::R16G16B16A16_SFLOAT, // 1: SV_Target1 (Normal)
-            NRI::ImageFormat::RGBA8, // 2: SV_Target2 (Material)
-            NRI::ImageFormat::R16G16B16A16_SFLOAT, // 3: SV_Target3 (Emission)
-            NRI::ImageFormat::R32SINT, // 4: SV_Target4 (Entity ID)
-            NRI::ImageFormat::R32G32B32A32_UINT, // 5: SV_Target5 (Lobes)
-            NRI::ImageFormat::RGBA8, // 6: SV_Target6 (Specular)
-            NRI::ImageFormat::R32G32_SFLOAT // 7: SV_Target7 (Velocity)
+            NRI_FORMAT_RGBA8, // 0: SV_Target0 (Albedo)
+            NRI_FORMAT_R16G16B16A16_SFLOAT, // 1: SV_Target1 (Normal)
+            NRI_FORMAT_RGBA8, // 2: SV_Target2 (Material)
+            NRI_FORMAT_R16G16B16A16_SFLOAT, // 3: SV_Target3 (Emission)
+            NRI_FORMAT_R32_SINT, // 4: SV_Target4 (Entity ID)
+            NRI_FORMAT_R32G32B32A32_UINT, // 5: SV_Target5 (Lobes)
+            NRI_FORMAT_RGBA8, // 6: SV_Target6 (Specular)
+            NRI_FORMAT_R32G32_SFLOAT // 7: SV_Target7 (Velocity)
         };
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = source });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = source });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = source });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = source });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = source });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = source });
         // Native raster frames do not need motion vectors. A matching seven-target variant avoids both
         // the RG32F attachment bandwidth and the per-pixel reprojection work in that case.
         if (!writeVelocity)
@@ -2279,90 +2476,90 @@ namespace Nox
 
     void Renderer::createGBufferPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc = gbufferPipelineDesc("assets/shaders/GBufferMaterial.slang", true);
+        nri::PipelineDesc desc = gbufferPipelineDesc("assets/shaders/GBufferMaterial.slang", true);
         desc.forceCompile = forceCompile;
-        m_gbufferPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_gbufferPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc = gbufferPipelineDesc("assets/shaders/GBufferMaterial.slang", false);
         desc.forceCompile = forceCompile;
-        m_gbufferPipelineNoVelocity = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_gbufferPipelineNoVelocity = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createDeferredLightingPipeline(bool forceCompile)
     {
-        m_deferredLightingPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::DeferredLighting, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
+        m_deferredLightingPipeline = m_device.createPipeline(rayTracingPassDesc(RayTracingPass::DeferredLighting, m_rayTracingGraphMasks, forceCompile), m_shaderCompiler.handle());
     }
 
     void Renderer::createSSAOPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = {NRI::ImageFormat::R16_SFLOAT};
+        desc.colorFormats = {NRI_FORMAT_R16_SFLOAT};
 
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
+            .stage = NRI_SHADER_STAGE_TASK,
             .entryPoint = "taskMain",
             .sourcePath = "assets/shaders/SSAO.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
+            .stage = NRI_SHADER_STAGE_MESH,
             .entryPoint = "meshMain",
             .sourcePath = "assets/shaders/SSAO.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
+            .stage = NRI_SHADER_STAGE_FRAGMENT,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/SSAO.slang"
         });
 
-        m_ssaoPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_ssaoPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
 
         // GTAO (RS3): the same target and the same blur after it.
-        for (NRI::ShaderStageDesc& stage : desc.shaders)
+        for (nri::ShaderStageDesc& stage : desc.shaders)
             stage.sourcePath = "assets/shaders/GTAO.slang";
-        m_gtaoPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_gtaoPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createSSAOBlurPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = {NRI::ImageFormat::R16_SFLOAT};
+        desc.colorFormats = {NRI_FORMAT_R16_SFLOAT};
 
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
+            .stage = NRI_SHADER_STAGE_TASK,
             .entryPoint = "taskMain",
             .sourcePath = "assets/shaders/SSAOBlur.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
+            .stage = NRI_SHADER_STAGE_MESH,
             .entryPoint = "meshMain",
             .sourcePath = "assets/shaders/SSAOBlur.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
+            .stage = NRI_SHADER_STAGE_FRAGMENT,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/SSAOBlur.slang"
         });
 
-        m_ssaoBlurPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_ssaoBlurPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createRTAOPipeline(bool forceCompile)
     {
-        m_rtaoPipeline = m_device->createPipeline(rayTracingPassDesc(RayTracingPass::RTAO, m_rayTracingGraphMasks, forceCompile), *m_shaderCompiler);
+        m_rtaoPipeline = m_device.createPipeline(rayTracingPassDesc(RayTracingPass::RTAO, m_rayTracingGraphMasks, forceCompile), m_shaderCompiler.handle());
     }
 
     void Renderer::createTextureInspectPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
         desc.forceCompile = forceCompile;
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Compute,
+            .stage = NRI_SHADER_STAGE_COMPUTE,
             .entryPoint = "compMain",
             .sourcePath = "assets/shaders/TextureInspect.slang"
         });
-        m_textureInspectPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_textureInspectPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createInstanceCullingPipelines(bool forceCompile)
@@ -2370,129 +2567,129 @@ namespace Nox
         constexpr std::array<const char*, 5> EntryPoints = { "cullMain", "countMain", "offsetMain", "writeMain", "lateMain" };
         for (size_t index = 0; index < EntryPoints.size(); ++index)
         {
-            NRI::PipelineDesc desc{};
-            desc.type = NRI::PipelineType::Compute;
+            nri::PipelineDesc desc{};
+            desc.type = NRI_PIPELINE_COMPUTE;
             desc.forceCompile = forceCompile;
             desc.shaders.push_back({
-                .stage = NRI::ShaderStage::Compute,
+                .stage = NRI_SHADER_STAGE_COMPUTE,
                 .entryPoint = EntryPoints[index],
                 .sourcePath = "assets/shaders/InstanceCulling.slang"
             });
-            m_instanceCullingPipelines[index] = m_device->createPipeline(desc, *m_shaderCompiler);
+            m_instanceCullingPipelines[index] = m_device.createPipeline(desc, m_shaderCompiler.handle());
         }
     }
 
     void Renderer::createRRGuidesPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
         desc.forceCompile = forceCompile;
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Compute,
+            .stage = NRI_SHADER_STAGE_COMPUTE,
             .entryPoint = "guidesMain",
             .sourcePath = "assets/shaders/RRGuides.slang"
         });
-        m_rrGuidesPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_rrGuidesPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createTAAPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
         desc.forceCompile = forceCompile;
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain", .sourcePath = "assets/shaders/TAA.slang" });
-        m_taaPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "computeMain", .sourcePath = "assets/shaders/TAA.slang" });
+        m_taaPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createHiZBuildPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
         desc.forceCompile = forceCompile;
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Compute,
+            .stage = NRI_SHADER_STAGE_COMPUTE,
             .entryPoint = "buildMain",
             .sourcePath = "assets/shaders/HiZBuild.slang"
         });
-        m_hiZBuildPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_hiZBuildPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createPostProcessPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = {NRI::ImageFormat::Surface};
+        desc.colorFormats = {NRI_FORMAT_SURFACE};
 
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
+            .stage = NRI_SHADER_STAGE_TASK,
             .entryPoint = "taskMain",
             .sourcePath = "assets/shaders/PostProcess.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
+            .stage = NRI_SHADER_STAGE_MESH,
             .entryPoint = "meshMain",
             .sourcePath = "assets/shaders/PostProcess.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
+            .stage = NRI_SHADER_STAGE_FRAGMENT,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/PostProcess.slang"
         });
 
-        m_postProcessPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_postProcessPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createAutoExposurePipelines(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
         desc.forceCompile = forceCompile;
-        desc.shaders.push_back({ NRI::ShaderStage::Compute, "buildMain", "assets/shaders/AutoExposure.slang" });
-        m_autoExposureBuildPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.push_back({ NRI_SHADER_STAGE_COMPUTE, "buildMain", "assets/shaders/AutoExposure.slang" });
+        m_autoExposureBuildPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.front().entryPoint = "reduceMain";
-        m_autoExposureReducePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_autoExposureReducePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.front().entryPoint = "adaptMain";
-        m_autoExposureAdaptPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_autoExposureAdaptPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createColorPyramidPipelines(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
         desc.forceCompile = forceCompile;
-        desc.shaders.push_back({ NRI::ShaderStage::Compute, "copyMain", "assets/shaders/ColorPyramid.slang" });
-        m_colorPyramidCopyPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.push_back({ NRI_SHADER_STAGE_COMPUTE, "copyMain", "assets/shaders/ColorPyramid.slang" });
+        m_colorPyramidCopyPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.front().entryPoint = "downsampleMain";
-        m_colorPyramidDownsamplePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_colorPyramidDownsamplePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createParticlePipeline(bool forceCompile)
     {
         // Mesh + fragment, over the HDR scene only (no depth attachment: the fragments test the scene depth themselves).
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT };
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Particles.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/Particles.slang" });
-        m_particlePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT };
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Particles.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = "assets/shaders/Particles.slang" });
+        m_particlePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
 
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT };
+        desc.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT, NRI_FORMAT_R16G16B16A16_SFLOAT };
         desc.shaders.back().entryPoint = "fragMainOIT";
-        m_particleOITPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_particleOITPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
 
-        desc.colorFormats = { NRI::ImageFormat::R32G32_SFLOAT };
+        desc.colorFormats = { NRI_FORMAT_R32G32_SFLOAT };
         desc.shaders.back().entryPoint = "fragMainMotion";
-        m_particleMotionPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_particleMotionPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createOITCompositePipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT };
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Vertex, .entryPoint = "vertMain", .sourcePath = "assets/shaders/OITComposite.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/OITComposite.slang" });
-        m_oitCompositePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT };
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_VERTEX, .entryPoint = "vertMain", .sourcePath = "assets/shaders/OITComposite.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = "assets/shaders/OITComposite.slang" });
+        m_oitCompositePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::SubmitParticles(const ParticleBatchSettings& settings, std::span<const shaderio::GpuParticle> particles)
@@ -2547,11 +2744,11 @@ namespace Nox
             m_particleBufferCapacity = std::max<uint64_t>(required * 2, sizeof(shaderio::GpuParticle) * 4096);
             for (uint32_t slot = 0; slot < MAX_FRAMES_IN_FLIGHT; ++slot)
             {
-                std::unique_ptr<NRI::Buffer> buffer = m_device->createBuffer(NRI::BufferDesc{
+                nri::Buffer buffer = m_device.createBuffer(nri::BufferDesc{
                     .size = m_particleBufferCapacity,
-                    .usage = NRI::BufferUsage::Storage
+                    .usage = NRI_BUFFER_USAGE_STORAGE
                 });
-                m_particleBuffersMapped.push_back(buffer->map(0, m_particleBufferCapacity));
+                m_particleBuffersMapped.push_back(buffer.map(0, m_particleBufferCapacity));
                 m_particleBuffers.push_back(std::move(buffer));
             }
         }
@@ -2578,7 +2775,7 @@ namespace Nox
             return upload.Texture;
         }
 
-        Ref<Texture2D> textureResource = m_device->createTexture(NRI::TextureDesc
+        Ref<Texture2D> textureResource = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc
             {
                 .width = static_cast<uint32_t>(cpuData.Width),
                 .height = static_cast<uint32_t>(cpuData.Height),
@@ -2589,18 +2786,18 @@ namespace Nox
                 .usage = cpuData.Usage,
                 .format = cpuData.Format,
                 .directFormat = cpuData.DirectFormat
-            });
+            }));
 
-        std::unique_ptr<NRI::Buffer> stagingBuffer = m_device->createBuffer(NRI::BufferDesc{
+        nri::Buffer stagingBuffer = m_device.createBuffer(nri::BufferDesc{
             .size = cpuData.Data.Size,
-            .usage = NRI::BufferUsage::Staging
+            .usage = NRI_BUFFER_USAGE_STAGING
         });
-        void* data = stagingBuffer->map(0, cpuData.Data.Size);
+        void* data = stagingBuffer.map(0, cpuData.Data.Size);
         memcpy(data, cpuData.Data.Data, cpuData.Data.Size);
-        stagingBuffer->unmap();
+        stagingBuffer.unmap();
 
-        std::unique_ptr<NRI::CommandBuffer> commandBuffer = beginSingleTimeCommands();
-        textureResource->uploadFromBuffer(*commandBuffer, *stagingBuffer, cpuData.Width, cpuData.Height, cpuData.MipLevels, cpuData.MipOffsets);
+        nri::CommandBuffer commandBuffer = beginSingleTimeCommands();
+        textureResource->uploadFromBuffer(commandBuffer, stagingBuffer, cpuData.Width, cpuData.Height, cpuData.MipLevels, cpuData.MipOffsets);
         endSingleTimeCommands(std::move(commandBuffer));
 
         PublishTexture(*textureResource);
@@ -2631,7 +2828,7 @@ namespace Nox
                 upload.MipOffsets.push_back(mipOffsets[mip] - begin);
         }
 
-        upload.Texture = m_device->createTexture(NRI::TextureDesc
+        upload.Texture = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc
             {
                 .width = std::max(texture.Width >> firstMip, 1u),
                 .height = std::max(texture.Height >> firstMip, 1u),
@@ -2642,11 +2839,11 @@ namespace Nox
                 .format = texture.Format,
                 .directFormat = texture.DirectFormat,
                 .sharedAcrossQueues = true
-            });
+            }));
         return upload;
     }
 
-    uint64_t Renderer::EndTextureUpload(const TextureUpload& upload, bool nextFrameReads, NRI::Texture2D* keptFrom, uint32_t keptFromMip, uint32_t keptMipCount)
+    uint64_t Renderer::EndTextureUpload(const TextureUpload& upload, bool nextFrameReads, Nox::Texture2D* keptFrom, uint32_t keptFromMip, uint32_t keptMipCount)
     {
         if (upload.MipOffsets.empty())
             m_uploads.InitializeTexture(*upload.Texture);
@@ -2659,8 +2856,8 @@ namespace Nox
 
     void Renderer::PublishTexture(Texture2D& texture)
     {
-        m_resourceHeap->registerTexture(texture);
-        uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
+        m_resourceHeap.registerTexture(texture);
+        uniformData.imageHeapIndexOffset = m_resourceHeap.getImageHeapIndexOffset();
     }
 
     void Renderer::MarkTexturesLoaded()
@@ -2683,7 +2880,7 @@ namespace Nox
         cpuData.Width = 1;
         cpuData.Height = 1;
         cpuData.MipLevels = 1;
-        cpuData.Format = NRI::ImageFormat::SRGBA8;
+        cpuData.Format = NRI_FORMAT_SRGBA8;
         cpuData.DirectFormat = UINT32_MAX;
         cpuData.Data.Data = pixel.data();
         cpuData.Data.Size = pixel.size();
@@ -2723,7 +2920,7 @@ namespace Nox
 
         // The environment textures are imported into the bindless heap and may still be
         // referenced by the current frame. Wait before replacing their descriptors.
-        m_device->waitIdle();
+        m_device.waitIdle();
         releaseEnvironmentTextures(false);
         m_proceduralSkyActive = false;
         m_skyLutsDirty = false;
@@ -2750,7 +2947,7 @@ namespace Nox
         {
             // Switching from a texture (or none) to the sky: its textures and pipelines, once. Everything after this is
             // done inside frames (addProceduralSkyPass), without waiting for the GPU.
-            m_device->waitIdle();
+            m_device.waitIdle();
             releaseEnvironmentTextures(true); // the BRDF LUT does not depend on the environment
             m_environmentPath.clear();
             createProceduralSkyResources();
@@ -2833,24 +3030,24 @@ namespace Nox
         auto releaseEnvironmentTexture = [this](Ref<Texture2D>& texture)
         {
             if (texture)
-                m_resourceHeap->unregisterTexture(texture->GetDescriptorIndexSlot());
+                m_resourceHeap.unregisterTexture(texture->GetDescriptorIndexSlot());
             texture = nullptr;
         };
         // The sky's per-mip storage slots view the textures released below.
         for (uint32_t slot : m_skyStorageSlots)
-            m_resourceHeap->unregisterTexture(slot);
+            m_resourceHeap.unregisterTexture(slot);
         m_skyStorageSlots.clear();
         releaseEnvironmentTexture(m_skyTransmittanceLut);
         releaseEnvironmentTexture(m_skyMultiScatteringLut);
         releaseEnvironmentTexture(m_skyAerialPerspective);
         if (m_skyHorizonBand)
-            m_resourceHeap->unregisterTexture(m_skyHorizonBandStorageSlot);
+            m_resourceHeap.unregisterTexture(m_skyHorizonBandStorageSlot);
         m_skyHorizonBandStorageSlot = ~0u;
         releaseEnvironmentTexture(m_skyHorizonBand);
         for (size_t frame = 0; frame < m_skyCloudShadow.size(); ++frame)
         {
             if (m_skyCloudShadow[frame])
-                m_resourceHeap->unregisterTexture(m_skyCloudShadowStorageSlots[frame]);
+                m_resourceHeap.unregisterTexture(m_skyCloudShadowStorageSlots[frame]);
             releaseEnvironmentTexture(m_skyCloudShadow[frame]);
         }
         releaseEnvironmentTexture(m_skyCloudShape);
@@ -2895,17 +3092,17 @@ namespace Nox
         {
         // 2. Create the permanent Cubemap Texture (512x512 per face, 6 array layers), registered for compute writes
         constexpr uint32_t cubemapSize = 512;
-        m_environmentCubemap = createEnvironmentCube(cubemapSize, NRI::ImageFormat::R16G16B16A16_SFLOAT);
+        m_environmentCubemap = createEnvironmentCube(cubemapSize, NRI_FORMAT_R16G16B16A16_SFLOAT);
 
         // 3. Create local resample compute pipeline (cube-to-cube for a DDS source, equirect-to-cube for a panorama)
-        NRI::PipelineDesc computeDesc{};
-        computeDesc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc computeDesc{};
+        computeDesc.type = NRI_PIPELINE_COMPUTE;
         computeDesc.shaders.push_back({
-            .stage = NRI::ShaderStage::Compute,
+            .stage = NRI_SHADER_STAGE_COMPUTE,
             .entryPoint = "compMain",
             .sourcePath = environmentIsCube ? "assets/shaders/CubemapResample.slang" : "assets/shaders/EquirectToCubemap.slang"
         });
-        std::unique_ptr<NRI::Pipeline> equirectPipeline = m_device->createPipeline(computeDesc, *m_shaderCompiler);
+        nri::Pipeline equirectPipeline = m_device.createPipeline(computeDesc, m_shaderCompiler.handle());
 
         // 4. Structure for Push Constants to pass descriptor slots to Slang
         pushData.hdrTextureIndex = enviromentHDR->GetDescriptorIndexSlot();
@@ -2915,21 +3112,21 @@ namespace Nox
 
         // 5. Record and dispatch the compute work
 
-        std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
+        nri::CommandBuffer cmd = beginSingleTimeCommands();
 
         // Bind global descriptor heaps
-        cmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+        cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
 
         // Bind compute pipeline & push constant parameters
-        cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *equirectPipeline);
-        cmd->pushData(&pushData, sizeof(EquirectPushConstants));
+        cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, equirectPipeline);
+        cmd.pushData(&pushData, sizeof(EquirectPushConstants));
 
         // Calculate thread group counts (16x16 threads per group in compute shader)
         uint32_t groupCountX = (cubemapSize + 15) / 16;
         uint32_t groupCountY = (cubemapSize + 15) / 16;
 
         // Dispatch work: X and Y cover the resolution, Z=6 covers all 6 cubemap faces
-        cmd->dispatch(groupCountX, groupCountY, 6);
+        cmd.dispatch(groupCountX, groupCountY, 6);
 
         // Submit command buffer and wait for execution to complete
         endSingleTimeCommands(std::move(cmd));
@@ -2942,21 +3139,21 @@ namespace Nox
     }
 
     // A cubemap with a full mip chain, its slot registered for compute writes (re-register it as ShaderResource for reading).
-    Ref<Texture2D> Renderer::createEnvironmentCube(uint32_t size, NRI::ImageFormat format)
+    Ref<Texture2D> Renderer::createEnvironmentCube(uint32_t size, nri::ImageFormat format)
     {
-        Ref<Texture2D> cube = m_device->createTexture(NRI::TextureDesc{
+        Ref<Texture2D> cube = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc{
             .width = size,
             .height = size,
             .arrayLayers = 6,
             .isCubeMap = true,
             .mipLevels = static_cast<uint32_t>(floor(log2(size))) + 1,
             .sampleCount = 1,
-            .usage = NRI::TextureUsage::Storage, // Allows compute shader writing
+            .usage = NRI_TEXTURE_USAGE_STORAGE, // Allows compute shader writing
             .format = format
-        });
+        }));
 
         // Register slot X as eStorageImage (writes Storage Descriptor to memory)
-        m_resourceHeap->registerTexture(*cube, NRI::TextureUsage::Storage);
+        m_resourceHeap.registerTexture(*cube, NRI_TEXTURE_USAGE_STORAGE);
         return cube;
     }
 
@@ -2964,10 +3161,10 @@ namespace Nox
     {
         auto createFilter = [this](const char* sourcePath)
         {
-            NRI::PipelineDesc desc{};
-            desc.type = NRI::PipelineType::Compute;
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "compMain", .sourcePath = sourcePath });
-            return m_device->createPipeline(desc, *m_shaderCompiler);
+            nri::PipelineDesc desc{};
+            desc.type = NRI_PIPELINE_COMPUTE;
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "compMain", .sourcePath = sourcePath });
+            return m_device.createPipeline(desc, m_shaderCompiler.handle());
         };
         if (!m_irradiancePipeline)
             m_irradiancePipeline = createFilter("assets/shaders/IrradianceConvolution.slang");
@@ -2989,13 +3186,13 @@ namespace Nox
         } pushData;
 
         {
-            std::unique_ptr<NRI::CommandBuffer> mipCmd = beginSingleTimeCommands();
-            m_environmentCubemap->generateMipmaps(*mipCmd);
+            nri::CommandBuffer mipCmd = beginSingleTimeCommands();
+            m_environmentCubemap->generateMipmaps(mipCmd);
             endSingleTimeCommands(std::move(mipCmd));
         }
 
         // Overwrite descriptor slot in heap with Sampled Image Descriptor
-        m_resourceHeap->registerTexture(*m_environmentCubemap, NRI::TextureUsage::ShaderResource);
+        m_resourceHeap.registerTexture(*m_environmentCubemap, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
 
         // ==========================================
         //  DIFFUSE IRRADIANCE CONVOLUTION
@@ -3003,18 +3200,18 @@ namespace Nox
 
         constexpr uint32_t irradianceSize = 64; // dont forget to change sampler to hardcoded maxlod
         uint32_t irradianceNumMips = static_cast<uint32_t>(floor(log2(irradianceSize))) + 1;
-        m_irradianceCubemap = m_device->createTexture(NRI::TextureDesc{
+        m_irradianceCubemap = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc{
             .width = irradianceSize,
             .height = irradianceSize,
             .arrayLayers = 6,
             .isCubeMap = true,
             .mipLevels = irradianceNumMips,
             .sampleCount = 1,
-            .usage = NRI::TextureUsage::Storage,
-            .format = NRI::ImageFormat::R32G32B32A32_SFLOAT
-        });
+            .usage = NRI_TEXTURE_USAGE_STORAGE,
+            .format = NRI_FORMAT_R32G32B32A32_SFLOAT
+        }));
 
-        m_resourceHeap->registerTexture(*m_irradianceCubemap, NRI::TextureUsage::Storage);
+        m_resourceHeap.registerTexture(*m_irradianceCubemap, NRI_TEXTURE_USAGE_STORAGE);
 
         createIBLPipelines();
 
@@ -3022,10 +3219,10 @@ namespace Nox
         pushData.cubemapStorageIndex = m_irradianceCubemap->GetDescriptorIndexSlot();
         pushData.cubemapSize = irradianceSize;
 
-        std::unique_ptr<NRI::CommandBuffer> irradCmd = beginSingleTimeCommands();
-        irradCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+        nri::CommandBuffer irradCmd = beginSingleTimeCommands();
+        irradCmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
 
-        irradCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *m_irradiancePipeline);
+        irradCmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_irradiancePipeline);
 
         std::vector<uint32_t> tempIrradMipSlots;
         // Loop through each mip level to generate all mips (just like Sascha!)
@@ -3034,18 +3231,18 @@ namespace Nox
             uint32_t mipSize = irradianceSize >> mip;
 
             // Target specifically this mip level with a spec-compliant storage descriptor
-            uint32_t mipStorageSlot = m_resourceHeap->registerStorageTextureMip(*m_irradianceCubemap, mip);
+            uint32_t mipStorageSlot = m_resourceHeap.registerStorageTextureMip(*m_irradianceCubemap, mip);
             tempIrradMipSlots.push_back(mipStorageSlot);
 
             pushData.hdrTextureIndex = m_environmentCubemap->GetDescriptorIndexSlot();
             pushData.cubemapStorageIndex = mipStorageSlot;
             pushData.cubemapSize = mipSize;
 
-            irradCmd->pushData(&pushData, sizeof(EquirectPushConstants));
+            irradCmd.pushData(&pushData, sizeof(EquirectPushConstants));
 
             uint32_t irradGroupCountX = (mipSize + 15) / 16;
             uint32_t irradGroupCountY = (mipSize + 15) / 16;
-            irradCmd->dispatch(irradGroupCountX, irradGroupCountY, 6);
+            irradCmd.dispatch(irradGroupCountX, irradGroupCountY, 6);
         }
 
         endSingleTimeCommands(std::move(irradCmd));
@@ -3053,10 +3250,10 @@ namespace Nox
         // Free the temporary per-mip storage descriptor slots
         for (uint32_t slot : tempIrradMipSlots)
         {
-            m_resourceHeap->unregisterTexture(slot);
+            m_resourceHeap.unregisterTexture(slot);
         }
 
-        m_resourceHeap->registerTexture(*m_irradianceCubemap, NRI::TextureUsage::ShaderResource);
+        m_resourceHeap.registerTexture(*m_irradianceCubemap, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
 
         // ==========================================
         //  SPECULAR IBL: PRE-FILTERED ENVIRONMENT MAP
@@ -3064,18 +3261,18 @@ namespace Nox
         constexpr uint32_t prefilteredSize = 512; // dont forget to change sampler to hardcoded maxlod
         prefilterCubeMipLevels = static_cast<uint32_t>(floor(log2(prefilteredSize))) + 1;
 
-        m_prefilteredEnvMap = m_device->createTexture(NRI::TextureDesc{
+        m_prefilteredEnvMap = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc{
             .width = prefilteredSize,
             .height = prefilteredSize,
             .arrayLayers = 6,
             .isCubeMap = true,
             .mipLevels = prefilterCubeMipLevels,
             .sampleCount = 1,
-            .usage = NRI::TextureUsage::Storage,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
-        });
+            .usage = NRI_TEXTURE_USAGE_STORAGE,
+            .format = NRI_FORMAT_R16G16B16A16_SFLOAT
+        }));
 
-        m_resourceHeap->registerTexture(*m_prefilteredEnvMap, NRI::TextureUsage::Storage);
+        m_resourceHeap.registerTexture(*m_prefilteredEnvMap, NRI_TEXTURE_USAGE_STORAGE);
 
         struct PrefilterPushConstants
         {
@@ -3090,16 +3287,16 @@ namespace Nox
         // tool, past the 2 s GPU timeout (device lost).
         for (uint32_t mip = 0; mip < prefilterCubeMipLevels; ++mip)
         {
-            std::unique_ptr<NRI::CommandBuffer> prefCmd = beginSingleTimeCommands();
-            prefCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-            prefCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *m_prefilterPipeline);
+            nri::CommandBuffer prefCmd = beginSingleTimeCommands();
+            prefCmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
+            prefCmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_prefilterPipeline);
 
             uint32_t mipWidth = prefilteredSize >> mip;
             uint32_t mipHeight = prefilteredSize >> mip;
             float roughness = (float)mip / (float)(prefilterCubeMipLevels - 1);
 
             // Register a descriptor pointing directly to this mip level
-            uint32_t mipStorageSlot = m_resourceHeap->registerStorageTextureMip(*m_prefilteredEnvMap, mip);
+            uint32_t mipStorageSlot = m_resourceHeap.registerStorageTextureMip(*m_prefilteredEnvMap, mip);
             tempMipSlots.push_back(mipStorageSlot);
 
             prefilterData.envTextureIndex = m_environmentCubemap->GetDescriptorIndexSlot();
@@ -3107,20 +3304,20 @@ namespace Nox
             prefilterData.cubemapSize = mipWidth;
             prefilterData.roughness = roughness;
 
-            prefCmd->pushData(&prefilterData, sizeof(PrefilterPushConstants));
+            prefCmd.pushData(&prefilterData, sizeof(PrefilterPushConstants));
 
             uint32_t groupX = (mipWidth + 15) / 16;
             uint32_t groupY = (mipHeight + 15) / 16;
-            prefCmd->dispatch(groupX, groupY, 6);
+            prefCmd.dispatch(groupX, groupY, 6);
             endSingleTimeCommands(std::move(prefCmd));
         }
 
         // Free the temporary per-mip storage descriptor slots
         for (uint32_t slot : tempMipSlots)
         {
-            m_resourceHeap->unregisterTexture(slot);
+            m_resourceHeap.unregisterTexture(slot);
         }
-        m_resourceHeap->registerTexture(*m_prefilteredEnvMap, NRI::TextureUsage::ShaderResource);
+        m_resourceHeap.registerTexture(*m_prefilteredEnvMap, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
 
         // ==========================================
         //  SPECULAR IBL: BRDF INTEGRATION MAP (2D LUT)
@@ -3136,28 +3333,28 @@ namespace Nox
 
         constexpr uint32_t brdfLUTSize = 512;
 
-        m_brdfLUT = m_device->createTexture(NRI::TextureDesc{
+        m_brdfLUT = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc{
             .width = brdfLUTSize,
             .height = brdfLUTSize,
             .arrayLayers = 1,
             .isCubeMap = false,
             .mipLevels = 1,
             .sampleCount = 1,
-            .usage = NRI::TextureUsage::Storage,
+            .usage = NRI_TEXTURE_USAGE_STORAGE,
             // R, G: the GGX split sum's scale and bias; B: the sheen's directional albedo (BRDFIntegration.slang).
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
-        });
+            .format = NRI_FORMAT_R16G16B16A16_SFLOAT
+        }));
 
-        m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::Storage);
+        m_resourceHeap.registerTexture(*m_brdfLUT, NRI_TEXTURE_USAGE_STORAGE);
 
-        NRI::PipelineDesc brdfComputeDesc{};
-        brdfComputeDesc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc brdfComputeDesc{};
+        brdfComputeDesc.type = NRI_PIPELINE_COMPUTE;
         brdfComputeDesc.shaders.push_back({
-            .stage = NRI::ShaderStage::Compute,
+            .stage = NRI_SHADER_STAGE_COMPUTE,
             .entryPoint = "compMain",
             .sourcePath = "assets/shaders/BRDFIntegration.slang"
         });
-        std::unique_ptr<NRI::Pipeline> brdfPipeline = m_device->createPipeline(brdfComputeDesc, *m_shaderCompiler);
+        nri::Pipeline brdfPipeline = m_device.createPipeline(brdfComputeDesc, m_shaderCompiler.handle());
 
         struct BRDFPushConstants
         {
@@ -3168,18 +3365,18 @@ namespace Nox
         brdfData.lutStorageIndex = m_brdfLUT->GetDescriptorIndexSlot();
         brdfData.lutSize = brdfLUTSize;
 
-        std::unique_ptr<NRI::CommandBuffer> brdfCmd = beginSingleTimeCommands();
-        brdfCmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+        nri::CommandBuffer brdfCmd = beginSingleTimeCommands();
+        brdfCmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
 
-        brdfCmd->bindPipeline(NRI::PipelineBindPoint::Compute, *brdfPipeline);
-        brdfCmd->pushData(&brdfData, sizeof(BRDFPushConstants));
+        brdfCmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, brdfPipeline);
+        brdfCmd.pushData(&brdfData, sizeof(BRDFPushConstants));
 
         uint32_t brdfGroupX = (brdfLUTSize + 15) / 16;
         uint32_t brdfGroupY = (brdfLUTSize + 15) / 16;
-        brdfCmd->dispatch(brdfGroupX, brdfGroupY, 1);
+        brdfCmd.dispatch(brdfGroupX, brdfGroupY, 1);
 
         endSingleTimeCommands(std::move(brdfCmd));
-        m_resourceHeap->registerTexture(*m_brdfLUT, NRI::TextureUsage::ShaderResource);
+        m_resourceHeap.registerTexture(*m_brdfLUT, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
     }
 
     // Sizes of the procedural sky's textures. The LUTs as in the paper; the cubemaps smaller than an HDR map's (512 / 64 /
@@ -3200,10 +3397,10 @@ namespace Nox
         createIBLPipelines();
         auto createSkyPipeline = [this](const char* entryPoint)
         {
-            NRI::PipelineDesc desc{};
-            desc.type = NRI::PipelineType::Compute;
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = entryPoint, .sourcePath = "assets/shaders/SkyAtmosphere.slang" });
-            return m_device->createPipeline(desc, *m_shaderCompiler);
+            nri::PipelineDesc desc{};
+            desc.type = NRI_PIPELINE_COMPUTE;
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = entryPoint, .sourcePath = "assets/shaders/SkyAtmosphere.slang" });
+            return m_device.createPipeline(desc, m_shaderCompiler.handle());
         };
         if (!m_skyTransmittancePipeline)
             m_skyTransmittancePipeline = createSkyPipeline("transmittanceMain");
@@ -3235,85 +3432,85 @@ namespace Nox
 
         auto createLut = [this](uint32_t width, uint32_t height)
         {
-            Ref<Texture2D> lut = m_device->createTexture(NRI::TextureDesc{
+            Ref<Texture2D> lut = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc{
                 .width = width,
                 .height = height,
                 .arrayLayers = 1,
                 .isCubeMap = false,
                 .mipLevels = 1,
                 .sampleCount = 1,
-                .usage = NRI::TextureUsage::Storage,
-                .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
-            });
-            m_resourceHeap->registerTexture(*lut, NRI::TextureUsage::ShaderResource);
+                .usage = NRI_TEXTURE_USAGE_STORAGE,
+                .format = NRI_FORMAT_R16G16B16A16_SFLOAT
+            }));
+            m_resourceHeap.registerTexture(*lut, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
             return lut;
         };
-        auto createCube = [this](uint32_t size, NRI::ImageFormat format)
+        auto createCube = [this](uint32_t size, nri::ImageFormat format)
         {
             Ref<Texture2D> cube = createEnvironmentCube(size, format);
-            m_resourceHeap->registerTexture(*cube, NRI::TextureUsage::ShaderResource);
+            m_resourceHeap.registerTexture(*cube, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
             return cube;
         };
         m_skyTransmittanceLut = createLut(SkyTransmittanceWidth, SkyTransmittanceHeight);
         m_skyMultiScatteringLut = createLut(SkyMultiScatteringSize, SkyMultiScatteringSize);
         m_skyHorizonBand = createLut(shaderio::SkyHorizonBandWidth, shaderio::SkyHorizonBandHeight);
-        m_skyHorizonBandStorageSlot = m_resourceHeap->registerStorageTextureMip(*m_skyHorizonBand, 0);
-        m_environmentCubemap = createCube(SkyEnvironmentSize, NRI::ImageFormat::R16G16B16A16_SFLOAT);
-        m_irradianceCubemap = createCube(SkyIrradianceSize, NRI::ImageFormat::R32G32B32A32_SFLOAT);
-        m_prefilteredEnvMap = createCube(SkyPrefilteredSize, NRI::ImageFormat::R16G16B16A16_SFLOAT);
+        m_skyHorizonBandStorageSlot = m_resourceHeap.registerStorageTextureMip(*m_skyHorizonBand, 0);
+        m_environmentCubemap = createCube(SkyEnvironmentSize, NRI_FORMAT_R16G16B16A16_SFLOAT);
+        m_irradianceCubemap = createCube(SkyIrradianceSize, NRI_FORMAT_R32G32B32A32_SFLOAT);
+        m_prefilteredEnvMap = createCube(SkyPrefilteredSize, NRI_FORMAT_R16G16B16A16_SFLOAT);
         prefilterCubeMipLevels = MipCount(SkyPrefilteredSize);
 
         // [transmittance, multiple scattering, environment mips..., irradiance mips..., pre-filtered mips...]
         m_skyStorageSlots.clear();
-        m_skyStorageSlots.push_back(m_resourceHeap->registerStorageTextureMip(*m_skyTransmittanceLut, 0));
-        m_skyStorageSlots.push_back(m_resourceHeap->registerStorageTextureMip(*m_skyMultiScatteringLut, 0));
+        m_skyStorageSlots.push_back(m_resourceHeap.registerStorageTextureMip(*m_skyTransmittanceLut, 0));
+        m_skyStorageSlots.push_back(m_resourceHeap.registerStorageTextureMip(*m_skyMultiScatteringLut, 0));
         for (Texture2D* cube : { m_environmentCubemap.get(), m_irradianceCubemap.get(), m_prefilteredEnvMap.get() })
             for (uint32_t mip = 0; mip < cube->getMipLevels(); ++mip)
-                m_skyStorageSlots.push_back(m_resourceHeap->registerStorageTextureMip(*cube, mip));
+                m_skyStorageSlots.push_back(m_resourceHeap.registerStorageTextureMip(*cube, mip));
 
-        m_skyAerialPerspective = m_device->createTexture(NRI::TextureDesc{
+        m_skyAerialPerspective = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc{
             .width = shaderio::AerialPerspectiveSize,
             .height = shaderio::AerialPerspectiveSize,
             .arrayLayers = shaderio::AerialPerspectiveSlices,
             .isCubeMap = false,
             .mipLevels = 1,
             .sampleCount = 1,
-            .usage = NRI::TextureUsage::Storage,
-            .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
-        });
-        m_resourceHeap->registerTexture(*m_skyAerialPerspective, NRI::TextureUsage::ShaderResource);
-        m_skyStorageSlots.push_back(m_resourceHeap->registerStorageTextureMip(*m_skyAerialPerspective, 0));
+            .usage = NRI_TEXTURE_USAGE_STORAGE,
+            .format = NRI_FORMAT_R16G16B16A16_SFLOAT
+        }));
+        m_resourceHeap.registerTexture(*m_skyAerialPerspective, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
+        m_skyStorageSlots.push_back(m_resourceHeap.registerStorageTextureMip(*m_skyAerialPerspective, 0));
 
         for (size_t frame = 0; frame < m_skyCloudShadow.size(); ++frame)
         {
-            m_skyCloudShadow[frame] = m_device->createTexture(NRI::TextureDesc{
+            m_skyCloudShadow[frame] = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc{
                 .width = SkyCloudShadowSize,
                 .height = SkyCloudShadowSize,
                 .arrayLayers = 1,
                 .isCubeMap = false,
                 .mipLevels = 1,
                 .sampleCount = 1,
-                .usage = NRI::TextureUsage::Storage,
-                .format = NRI::ImageFormat::R16_SFLOAT
-            });
-            m_resourceHeap->registerTexture(*m_skyCloudShadow[frame], NRI::TextureUsage::ShaderResource);
-            m_skyCloudShadowStorageSlots[frame] = m_resourceHeap->registerStorageTextureMip(*m_skyCloudShadow[frame], 0);
+                .usage = NRI_TEXTURE_USAGE_STORAGE,
+                .format = NRI_FORMAT_R16_SFLOAT
+            }));
+            m_resourceHeap.registerTexture(*m_skyCloudShadow[frame], NRI_TEXTURE_USAGE_SHADER_RESOURCE);
+            m_skyCloudShadowStorageSlots[frame] = m_resourceHeap.registerStorageTextureMip(*m_skyCloudShadow[frame], 0);
         }
 
         // Cloud noise, made once here (it never changes): tiling 3D noise stored as 2D arrays, and the weather map.
         auto createNoise = [this](uint32_t size, uint32_t layers)
         {
-            Ref<Texture2D> texture = m_device->createTexture(NRI::TextureDesc{
+            Ref<Texture2D> texture = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc{
                 .width = size,
                 .height = size,
                 .arrayLayers = layers,
                 .isCubeMap = false,
                 .mipLevels = 1,
                 .sampleCount = 1,
-                .usage = NRI::TextureUsage::Storage,
-                .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
-            });
-            m_resourceHeap->registerTexture(*texture, NRI::TextureUsage::ShaderResource);
+                .usage = NRI_TEXTURE_USAGE_STORAGE,
+                .format = NRI_FORMAT_R16G16B16A16_SFLOAT
+            }));
+            m_resourceHeap.registerTexture(*texture, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
             return texture;
         };
         constexpr uint32_t CloudShapeSize = 64;   // SkyAtmosphere.slang's sizes
@@ -3323,30 +3520,30 @@ namespace Nox
         m_skyCloudDetail = createNoise(CloudDetailSize, CloudDetailSize);
         m_skyCloudWeather = createNoise(CloudWeatherSize, 1);
         {
-            const uint32_t shapeStorage = m_resourceHeap->registerStorageTextureMip(*m_skyCloudShape, 0);
-            const uint32_t detailStorage = m_resourceHeap->registerStorageTextureMip(*m_skyCloudDetail, 0);
-            const uint32_t weatherStorage = m_resourceHeap->registerStorageTextureMip(*m_skyCloudWeather, 0);
+            const uint32_t shapeStorage = m_resourceHeap.registerStorageTextureMip(*m_skyCloudShape, 0);
+            const uint32_t detailStorage = m_resourceHeap.registerStorageTextureMip(*m_skyCloudDetail, 0);
+            const uint32_t weatherStorage = m_resourceHeap.registerStorageTextureMip(*m_skyCloudWeather, 0);
 
-            std::unique_ptr<NRI::CommandBuffer> cmd = beginSingleTimeCommands();
-            cmd->bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+            nri::CommandBuffer cmd = beginSingleTimeCommands();
+            cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
             shaderio::PushConstantSkyAtmosphere noisePush{};
             noisePush.outputStorageIndex = shapeStorage;
-            cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *m_skyCloudShapeNoisePipeline);
-            cmd->pushData(&noisePush, sizeof(noisePush));
-            cmd->dispatch(CloudShapeSize / 4, CloudShapeSize / 4, CloudShapeSize / 4);
+            cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_skyCloudShapeNoisePipeline);
+            cmd.pushData(&noisePush, sizeof(noisePush));
+            cmd.dispatch(CloudShapeSize / 4, CloudShapeSize / 4, CloudShapeSize / 4);
             noisePush.outputStorageIndex = detailStorage;
-            cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *m_skyCloudDetailNoisePipeline);
-            cmd->pushData(&noisePush, sizeof(noisePush));
-            cmd->dispatch(CloudDetailSize / 4, CloudDetailSize / 4, CloudDetailSize / 4);
+            cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_skyCloudDetailNoisePipeline);
+            cmd.pushData(&noisePush, sizeof(noisePush));
+            cmd.dispatch(CloudDetailSize / 4, CloudDetailSize / 4, CloudDetailSize / 4);
             noisePush.outputStorageIndex = weatherStorage;
-            cmd->bindPipeline(NRI::PipelineBindPoint::Compute, *m_skyCloudWeatherPipeline);
-            cmd->pushData(&noisePush, sizeof(noisePush));
-            cmd->dispatch(CloudWeatherSize / 8, CloudWeatherSize / 8, 1);
+            cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_skyCloudWeatherPipeline);
+            cmd.pushData(&noisePush, sizeof(noisePush));
+            cmd.dispatch(CloudWeatherSize / 8, CloudWeatherSize / 8, 1);
             endSingleTimeCommands(std::move(cmd));
 
-            m_resourceHeap->unregisterTexture(shapeStorage);
-            m_resourceHeap->unregisterTexture(detailStorage);
-            m_resourceHeap->unregisterTexture(weatherStorage);
+            m_resourceHeap.unregisterTexture(shapeStorage);
+            m_resourceHeap.unregisterTexture(detailStorage);
+            m_resourceHeap.unregisterTexture(weatherStorage);
         }
 
         // The BRDF LUT stays across environments; a scene that starts with the sky has none yet.
@@ -3436,13 +3633,13 @@ namespace Nox
 
         struct SkyPassData
         {
-            NRI::Pipeline* transmittance;
-            NRI::Pipeline* multiScattering;
-            NRI::Pipeline* cubemap;
-            NRI::Pipeline* downsample;
-            NRI::Pipeline* irradiance;
-            NRI::Pipeline* prefilter;
-            NRI::Pipeline* horizonBand;
+            nri::Pipeline* transmittance;
+            nri::Pipeline* multiScattering;
+            nri::Pipeline* cubemap;
+            nri::Pipeline* downsample;
+            nri::Pipeline* irradiance;
+            nri::Pipeline* prefilter;
+            nri::Pipeline* horizonBand;
             shaderio::PushConstantSkyAtmosphere push;
             std::vector<uint32_t> storageSlots;
             uint32_t environmentSlot;
@@ -3450,18 +3647,18 @@ namespace Nox
             bool updateLuts;
             int stage;
         } data{};
-        data.transmittance = m_skyTransmittancePipeline.get();
-        data.multiScattering = m_skyMultiScatteringPipeline.get();
-        data.cubemap = m_skyCubemapPipeline.get();
-        data.downsample = m_skyDownsamplePipeline.get();
-        data.irradiance = m_irradiancePipeline.get();
-        data.prefilter = m_prefilterPipeline.get();
+        data.transmittance = &m_skyTransmittancePipeline;
+        data.multiScattering = &m_skyMultiScatteringPipeline;
+        data.cubemap = &m_skyCubemapPipeline;
+        data.downsample = &m_skyDownsamplePipeline;
+        data.irradiance = &m_irradiancePipeline;
+        data.prefilter = &m_prefilterPipeline;
         data.storageSlots = m_skyStorageSlots;
         data.environmentSlot = m_environmentCubemap->GetDescriptorIndexSlot();
         // Only for clouds: without them the sky near the horizon is smooth and the cubemap holds it (the band's raymarch is the
         // dearest part of the sky update).
         const bool skyClouds = m_proceduralSky.Clouds && m_proceduralSky.CloudCoverage > 0.0f && m_proceduralSky.CloudDensity > 0.0f;
-        data.horizonBand = (m_skyHorizonBand && skyClouds) ? m_skyHorizonBandPipeline.get() : nullptr;
+        data.horizonBand = (m_skyHorizonBand && skyClouds) ? &m_skyHorizonBandPipeline : nullptr;
         data.horizonBandSlot = m_skyHorizonBandStorageSlot;
         data.updateLuts = m_skyLutsDirty;
         data.push = m_skyCyclePush;
@@ -3475,7 +3672,7 @@ namespace Nox
             },
             [data = std::move(data)](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
+                nri::CommandBuffer& cmd = context.Cmd();
                 const uint32_t environmentMips = MipCount(SkyEnvironmentSize);
                 const uint32_t irradianceMips = MipCount(SkyIrradianceSize);
                 const uint32_t prefilteredMips = MipCount(SkyPrefilteredSize);
@@ -3490,7 +3687,7 @@ namespace Nox
                 shaderio::PushConstantSkyAtmosphere push = data.push;
                 if (all && data.updateLuts)
                 {
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.transmittance);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *data.transmittance);
                     push.outputStorageIndex = data.storageSlots[0];
                     push.outputSize = SkyTransmittanceWidth;
                     push.outputHeight = SkyTransmittanceHeight;
@@ -3498,7 +3695,7 @@ namespace Nox
                     cmd.dispatch((SkyTransmittanceWidth + 7) / 8, (SkyTransmittanceHeight + 7) / 8, 1);
                     cmd.executionBarrier();
 
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.multiScattering);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *data.multiScattering);
                     push.outputStorageIndex = data.storageSlots[1];
                     push.outputSize = SkyMultiScatteringSize;
                     push.outputHeight = SkyMultiScatteringSize;
@@ -3510,7 +3707,7 @@ namespace Nox
                 // The top mip raymarched (sky and clouds): all six faces, or the one of this slice.
                 if (all || data.stage <= 5)
                 {
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.cubemap);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *data.cubemap);
                     push.outputStorageIndex = environmentStorage[0];
                     push.outputSize = SkyEnvironmentSize;
                     push.outputHeight = SkyEnvironmentSize;
@@ -3525,7 +3722,7 @@ namespace Nox
                 if (data.horizonBand && (all || data.stage < static_cast<int>(shaderio::SkyHorizonBandSlices)))
                 {
                     const uint32_t columns = all ? shaderio::SkyHorizonBandWidth : shaderio::SkyHorizonBandWidth / shaderio::SkyHorizonBandSlices;
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.horizonBand);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *data.horizonBand);
                     push.outputStorageIndex = data.horizonBandSlot;
                     push.outputSize = shaderio::SkyHorizonBandWidth;
                     push.outputHeight = shaderio::SkyHorizonBandHeight;
@@ -3538,7 +3735,7 @@ namespace Nox
                 // Every other mip averaged from the one above it, then the IBL filters, as for an HDR map (reading the mips).
                 if (all || data.stage == 6)
                 {
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.downsample);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *data.downsample);
                     for (uint32_t mip = 1; mip < environmentMips; ++mip)
                     {
                         const uint32_t size = std::max(SkyEnvironmentSize >> mip, 1u);
@@ -3552,7 +3749,7 @@ namespace Nox
                         cmd.executionBarrier();
                     }
 
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.irradiance);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *data.irradiance);
                     for (uint32_t mip = 0; mip < irradianceMips; ++mip)
                     {
                         shaderio::PushConstantEquirect filter{};
@@ -3572,7 +3769,7 @@ namespace Nox
                         uint32_t cubemapSize;
                         float roughness;
                     };
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *data.prefilter);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *data.prefilter);
                     for (uint32_t mip = 0; mip < prefilteredMips; ++mip)
                     {
                         PrefilterPushConstants filter{};
@@ -3627,7 +3824,7 @@ namespace Nox
         push.cloudShadowExtentKm = ExtentKm;
         push.cloudShadowCenterKm = centerKm;
 
-        NRI::Pipeline* pipeline = m_skyCloudShadowPipeline.get();
+        nri::Pipeline* pipeline = &m_skyCloudShadowPipeline;
         m_renderGraph.AddPass("Cloud Shadows", RGPassFlags::NeverCull,
             [](RGBuilder&)
             {
@@ -3635,8 +3832,8 @@ namespace Nox
             },
             [push, pipeline](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *pipeline);
+                nri::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *pipeline);
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch((SkyCloudShadowSize + 7) / 8, (SkyCloudShadowSize + 7) / 8, 1);
                 cmd.executionBarrier();
@@ -3660,7 +3857,7 @@ namespace Nox
 
         const SkyAtmosphereSettings& settings = m_proceduralSky;
         shaderio::PushConstantAerialPerspective push{};
-        push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+        push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
         push.outputStorageIndex = m_skyStorageSlots.back();
         push.transmittanceTextureIndex = m_skyTransmittanceLut->GetDescriptorIndexSlot();
         push.multiScatteringTextureIndex = m_skyMultiScatteringLut->GetDescriptorIndexSlot();
@@ -3678,8 +3875,8 @@ namespace Nox
         push.moonDirection = moonLength > 1e-6f ? settings.MoonDirection / moonLength : glm::vec3(0.0f, -1.0f, 0.0f);
         push.moonIlluminance = glm::max(settings.MoonIlluminance, glm::vec3(0.0f));
 
-        const RGTexture volume = m_renderGraph.ImportTexture("Aerial Perspective", m_skyAerialPerspective.get());
-        NRI::Pipeline* pipeline = m_skyAerialPerspectivePipeline.get();
+        const RGTexture volume = m_renderGraph.ImportTexture("Aerial Perspective", m_skyAerialPerspective->GetHandle());
+        nri::Pipeline* pipeline = &m_skyAerialPerspectivePipeline;
         m_renderGraph.AddPass("Aerial Perspective", RGPassFlags::None,
             [&](RGBuilder& builder)
             {
@@ -3687,8 +3884,8 @@ namespace Nox
             },
             [push, pipeline](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *pipeline);
+                nri::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *pipeline);
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch((shaderio::AerialPerspectiveSize + 7) / 8, (shaderio::AerialPerspectiveSize + 7) / 8, 1);
             });
@@ -3696,7 +3893,7 @@ namespace Nox
     }
 
     template <typename T>
-    void Renderer::UploadBufferSlice(NRI::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount)
+    void Renderer::UploadBufferSlice(nri::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount)
     {
         if (elementCount == 0) return;
 
@@ -3718,29 +3915,29 @@ namespace Nox
         // its ranges touch; without them it starts at the size a page used to have and grows by copying itself. The ceiling is the
         // element space its allocator hands offsets out of, so it is set well above what a scene is expected to need.
         constexpr uint32_t MAX_ELEMENTS = 1u << 28;
-        m_vertexStream.Init(*m_device, sizeof(shaderio::PackedVertex), INITIAL_VERTICES, MAX_ELEMENTS);
-        m_skinStream.Init(*m_device, sizeof(shaderio::SkinVertex), INITIAL_VERTICES, MAX_ELEMENTS);
-        m_colorStream.Init(*m_device, sizeof(uint32_t), INITIAL_VERTICES, MAX_ELEMENTS);
-        m_morphRangeStream.Init(*m_device, sizeof(shaderio::GpuMorphRange), INITIAL_VERTICES, MAX_ELEMENTS);
-        m_morphDeltaStream.Init(*m_device, sizeof(shaderio::GpuMorphDelta), INITIAL_VERTICES, MAX_ELEMENTS);
-        m_meshletDrawStream.Init(*m_device, sizeof(shaderio::MeshletDraw), INITIAL_DRAWS, MAX_ELEMENTS);
-        m_meshletBoundsStream.Init(*m_device, sizeof(shaderio::MeshletBounds), INITIAL_DRAWS, MAX_ELEMENTS);
-        m_meshletVertexStream.Init(*m_device, sizeof(uint32_t), INITIAL_VERTS, MAX_ELEMENTS);
-        m_meshletTriangleStream.Init(*m_device, sizeof(uint8_t), INITIAL_TRIS, MAX_ELEMENTS);
-        m_rtIndexStream.Init(*m_device, sizeof(uint32_t), INITIAL_TRIS, MAX_ELEMENTS, NRI::BufferUsage::Index);
-        m_geometryPageStream.Init(*m_device, sizeof(shaderio::GpuGeometryPage), 4096, MAX_ELEMENTS);
+        m_vertexStream.Init(m_device, sizeof(shaderio::PackedVertex), INITIAL_VERTICES, MAX_ELEMENTS);
+        m_skinStream.Init(m_device, sizeof(shaderio::SkinVertex), INITIAL_VERTICES, MAX_ELEMENTS);
+        m_colorStream.Init(m_device, sizeof(uint32_t), INITIAL_VERTICES, MAX_ELEMENTS);
+        m_morphRangeStream.Init(m_device, sizeof(shaderio::GpuMorphRange), INITIAL_VERTICES, MAX_ELEMENTS);
+        m_morphDeltaStream.Init(m_device, sizeof(shaderio::GpuMorphDelta), INITIAL_VERTICES, MAX_ELEMENTS);
+        m_meshletDrawStream.Init(m_device, sizeof(shaderio::MeshletDraw), INITIAL_DRAWS, MAX_ELEMENTS);
+        m_meshletBoundsStream.Init(m_device, sizeof(shaderio::MeshletBounds), INITIAL_DRAWS, MAX_ELEMENTS);
+        m_meshletVertexStream.Init(m_device, sizeof(uint32_t), INITIAL_VERTS, MAX_ELEMENTS);
+        m_meshletTriangleStream.Init(m_device, sizeof(uint8_t), INITIAL_TRIS, MAX_ELEMENTS);
+        m_rtIndexStream.Init(m_device, sizeof(uint32_t), INITIAL_TRIS, MAX_ELEMENTS, NRI_BUFFER_USAGE_INDEX);
+        m_geometryPageStream.Init(m_device, sizeof(shaderio::GpuGeometryPage), 4096, MAX_ELEMENTS);
     }
 
     GeometryRange Renderer::allocateGeometry(GeometryArena& stream, uint32_t count)
     {
-        std::unique_ptr<NRI::Buffer> grownFrom;
+        nri::Buffer grownFrom;
         const GeometryRange range = stream.Allocate(count, grownFrom);
         if (grownFrom)
             handleStreamGrowth(stream, std::move(grownFrom));
         return range;
     }
 
-    void Renderer::handleStreamGrowth(GeometryArena& stream, std::unique_ptr<NRI::Buffer> grownFrom)
+    void Renderer::handleStreamGrowth(GeometryArena& stream, nri::Buffer grownFrom)
     {
         // The stream grew (only without sparse buffers): its content moves to the larger buffer unchanged (offsets stay valid, the
         // address changes).
@@ -3754,14 +3951,14 @@ namespace Nox
             if (graphicsWritten && m_geometryStreamer.GetStats().Meshes > 0)
             {
                 NOX_PROFILE_SCOPE("Geometry Stream Growth Wait");
-                m_device->waitIdle();
+                m_device.waitIdle();
             }
 
             // Ordered after every write already queued to the old buffer and before the new range's writes (same transfer
             // submission). Frames in flight keep reading the old buffer, and the next frame to be submitted waits for
             // this copy, which reads it too: one frame longer than a release made during recording, as a load grows
             // the stream before that frame starts (and counts down) -- without it the buffer died under the copy.
-            m_uploads.CopyBuffer(*grownFrom, stream.GetBuffer(), grownFrom->getSize());
+            m_uploads.CopyBuffer(grownFrom, stream.GetBuffer(), grownFrom.getSize());
 
             {
                 std::scoped_lock lock(m_deferredReleasesMutex);
@@ -3901,7 +4098,7 @@ namespace Nox
         upload.Handle.rtIndices = allocateGeometry(m_rtIndexStream, rtIndexCount);
         if (skin && upload.Handle.vertices.IsValid())
         {
-            std::unique_ptr<NRI::Buffer> grownFrom;
+            nri::Buffer grownFrom;
             upload.Handle.skin = m_skinStream.Reserve(upload.Handle.vertices.offset, upload.Handle.vertices.count, grownFrom);
             if (grownFrom)
                 handleStreamGrowth(m_skinStream, std::move(grownFrom));
@@ -3911,7 +4108,7 @@ namespace Nox
         // Vertex colors go to the color stream at its vertices' range (a streamed mesh: its root pages'; the others reserve as they load).
         if (data.VertexColors && upload.Handle.vertices.IsValid())
         {
-            std::unique_ptr<NRI::Buffer> grownFrom;
+            nri::Buffer grownFrom;
             upload.Handle.colors = m_colorStream.Reserve(upload.Handle.vertices.offset, upload.Handle.vertices.count, grownFrom);
             if (grownFrom)
                 handleStreamGrowth(m_colorStream, std::move(grownFrom));
@@ -3920,7 +4117,7 @@ namespace Nox
         }
         if (morphs && upload.Handle.vertices.IsValid())
         {
-            std::unique_ptr<NRI::Buffer> grownFrom;
+            nri::Buffer grownFrom;
             upload.Handle.morphRanges = m_morphRangeStream.Reserve(upload.Handle.vertices.offset, upload.Handle.vertices.count, grownFrom);
             if (grownFrom)
                 handleStreamGrowth(m_morphRangeStream, std::move(grownFrom));
@@ -4149,21 +4346,25 @@ namespace Nox
         if (handle.rtIndices.IsValid())
         {
             // The BLAS object now, its build in a frame (addBLASBuildPass).
-            const NRI::AccelerationStructureBuildDesc buildDesc = blasBuildDesc({ .vertices = handle.vertices, .indices = handle.rtIndices, .isOpaque = upload.IsOpaque,
-                                                                                  .absolute = upload.Streaming != nullptr,
-                                                                                  .maxVertex = handle.vertices.offset + handle.vertices.count - 1 });
-            const NRI::AccelerationStructureBuildSizes buildSizes = m_device->getAccelerationStructureBuildSizes(buildDesc);
+            const ASBuildDesc buildDesc = blasBuildDesc({ .vertices = handle.vertices, .indices = handle.rtIndices, .isOpaque = upload.IsOpaque,
+                                                          .absolute = upload.Streaming != nullptr,
+                                                          .maxVertex = handle.vertices.offset + handle.vertices.count - 1 });
+            const NriAccelerationStructureBuildDesc buildDescC = buildDesc.toNri();
+            const nri::AccelerationStructureBuildSizes buildSizes = nriGetAccelerationStructureBuildSizes(m_device.handle(), &buildDescC);
 
-            std::unique_ptr<NRI::Buffer> asBuffer = m_device->createBuffer(NRI::BufferDesc{
+            nri::Buffer asBuffer = m_device.createBuffer(nri::BufferDesc{
                 .size = buildSizes.accelerationStructureSize,
-                .usage = NRI::BufferUsage::AccelerationStructure
+                .usage = NRI_BUFFER_USAGE_ACCELERATION_STRUCTURE
             });
-            std::unique_ptr<NRI::AccelerationStructure> blas = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
-                .type = NRI::AccelerationStructureType::BottomLevel,
-                .storageBuffer = asBuffer.get(),
+            const NriAccelerationStructureDesc asDesc{
+                .type = NRI_ACCELERATION_STRUCTURE_BOTTOM_LEVEL,
+                .storageBuffer = asBuffer.handle(),
                 .bufferOffset = 0,
                 .size = buildSizes.accelerationStructureSize
-            });
+            };
+            NriAccelerationStructure rawBlas = nullptr;
+            nri::checkResult(nriCreateAccelerationStructure(m_device.handle(), &asDesc, &rawBlas), "nriCreateAccelerationStructure");
+            nri::AccelerationStructure blas(rawBlas);
 
             // Reusing ids released by unloaded meshes
             MeshBLAS meshBLAS{
@@ -4218,13 +4419,13 @@ namespace Nox
             m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, Ref<Asset>(std::move(texture)) });
     }
 
-    NRI::AccelerationStructureBuildDesc Renderer::blasBuildDesc(const BlasBuild& build) const
+    ASBuildDesc Renderer::blasBuildDesc(const BlasBuild& build) const
     {
-        return NRI::AccelerationStructureBuildDesc{
-            .type = NRI::AccelerationStructureType::BottomLevel,
-            .flags = NRI::AccelerationStructureBuildFlags::PreferFastTrace | NRI::AccelerationStructureBuildFlags::AllowCompaction,
+        return ASBuildDesc{
+            .type = NRI_ACCELERATION_STRUCTURE_BOTTOM_LEVEL,
+            .flags = NRI_AS_BUILD_PREFER_FAST_TRACE | NRI_AS_BUILD_ALLOW_COMPACTION,
             .triangles = {
-                NRI::AccelerationStructureTrianglesDesc{
+                nri::AccelerationStructureTrianglesDesc{
                     // Streamed geometry's indices address the whole stream (its pages lie anywhere in it).
                     .vertexBufferAddress = m_vertexStream.GetDeviceAddress() + (build.absolute ? 0 : sizeof(shaderio::PackedVertex) * uint64_t(build.vertices.offset)),
                     .vertexStride = sizeof(shaderio::PackedVertex),
@@ -4311,8 +4512,8 @@ namespace Nox
         m_morphWeightBuffersMapped.clear();
         for (uint32_t slot = 0; slot < MAX_FRAMES_IN_FLIGHT; ++slot)
         {
-            std::unique_ptr<NRI::Buffer> buffer = m_device->createBuffer(NRI::BufferDesc{ .size = size, .usage = NRI::BufferUsage::Storage });
-            m_morphWeightBuffersMapped.push_back(buffer->map(0, size));
+            nri::Buffer buffer = m_device.createBuffer(nri::BufferDesc{ .size = size, .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_morphWeightBuffersMapped.push_back(buffer.map(0, size));
             m_morphWeightBuffers.push_back(std::move(buffer));
         }
     }
@@ -4324,7 +4525,7 @@ namespace Nox
         const uint64_t required = sizeof(float) * m_morphWeights.size();
         if (required > m_morphWeightBufferCapacity)
         {
-            for (std::unique_ptr<NRI::Buffer>& buffer : m_morphWeightBuffers)
+            for (nri::Buffer& buffer : m_morphWeightBuffers)
             {
                 std::scoped_lock lock(m_deferredReleasesMutex);
                 m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(buffer) });
@@ -4346,13 +4547,13 @@ namespace Nox
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            std::unique_ptr<NRI::Buffer> uboBuffer = m_device->createBuffer(NRI::BufferDesc
+            nri::Buffer uboBuffer = m_device.createBuffer(nri::BufferDesc
                 {
                     .size = size,
-                    .usage = NRI::BufferUsage::Storage
+                    .usage = NRI_BUFFER_USAGE_STORAGE
                 });
 
-            void* mappedMemory = uboBuffer->map(0, size);
+            void* mappedMemory = uboBuffer.map(0, size);
 
             m_boneBuffers.emplace_back(std::move(uboBuffer));
             m_boneBuffersMapped.emplace_back(mappedMemory);
@@ -4370,16 +4571,16 @@ namespace Nox
 
         for (uint32_t slot = 0; slot < MAX_FRAMES_IN_FLIGHT; ++slot)
         {
-            m_skinnedVertexBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+            m_skinnedVertexBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = skinnedVertexSize,
-                .usage = NRI::BufferUsage::StorageStatic
+                .usage = NRI_BUFFER_USAGE_STORAGE_STATIC
             }));
 
-            std::unique_ptr<NRI::Buffer> workItems = m_device->createBuffer(NRI::BufferDesc{
+            nri::Buffer workItems = m_device.createBuffer(nri::BufferDesc{
                 .size = workItemSize,
-                .usage = NRI::BufferUsage::Storage
+                .usage = NRI_BUFFER_USAGE_STORAGE
             });
-            m_skinningWorkItemBuffersMapped.push_back(workItems->map(0, workItemSize));
+            m_skinningWorkItemBuffersMapped.push_back(workItems.map(0, workItemSize));
             m_skinningWorkItemBuffers.emplace_back(std::move(workItems));
         }
     }
@@ -4445,7 +4646,7 @@ namespace Nox
         if (requiredVertexBytes > 0 &&
             (requiredVertexBytes > m_skinnedVertexBufferCapacity || requiredWorkBytes > m_skinningWorkItemBufferCapacity))
         {
-            for (std::unique_ptr<NRI::Buffer>& buffer : m_skinnedVertexBuffers)
+            for (nri::Buffer& buffer : m_skinnedVertexBuffers)
             {
                 if (buffer)
                 {
@@ -4453,7 +4654,7 @@ namespace Nox
                     m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(buffer) });
                 }
             }
-            for (std::unique_ptr<NRI::Buffer>& buffer : m_skinningWorkItemBuffers)
+            for (nri::Buffer& buffer : m_skinningWorkItemBuffers)
             {
                 if (buffer)
                 {
@@ -4477,7 +4678,7 @@ namespace Nox
         if (buffersReady && !m_skinningWorkItems.empty())
         {
             memcpy(m_skinningWorkItemBuffersMapped[currentImage], m_skinningWorkItems.data(), requiredWorkBytes);
-            m_hasSkinnedVertexHistory = m_computeSkinningPipeline != nullptr;
+            m_hasSkinnedVertexHistory = static_cast<bool>(m_computeSkinningPipeline);
         }
         else
         {
@@ -4522,10 +4723,10 @@ namespace Nox
         {
             {
                 std::scoped_lock lock(m_deferredReleasesMutex);
-                for (std::unique_ptr<NRI::Buffer>& buffer : m_rayTracingOffsetVertexBuffers)
+                for (nri::Buffer& buffer : m_rayTracingOffsetVertexBuffers)
                     if (buffer)
                         m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(buffer) });
-                for (std::unique_ptr<NRI::Buffer>& buffer : m_rayTracingOffsetWorkItemBuffers)
+                for (nri::Buffer& buffer : m_rayTracingOffsetWorkItemBuffers)
                     if (buffer)
                         m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(buffer) });
             }
@@ -4537,15 +4738,15 @@ namespace Nox
             for (uint32_t slot = 0; slot < MAX_FRAMES_IN_FLIGHT; ++slot)
             {
                 // (read as BLAS build input as well: the skinned vertices' usage)
-                m_rayTracingOffsetVertexBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+                m_rayTracingOffsetVertexBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                     .size = m_rayTracingOffsetVertexCapacity,
-                    .usage = NRI::BufferUsage::StorageStatic
+                    .usage = NRI_BUFFER_USAGE_STORAGE_STATIC
                 }));
-                std::unique_ptr<NRI::Buffer> workItems = m_device->createBuffer(NRI::BufferDesc{
+                nri::Buffer workItems = m_device.createBuffer(nri::BufferDesc{
                     .size = m_rayTracingOffsetWorkItemCapacity,
-                    .usage = NRI::BufferUsage::Storage
+                    .usage = NRI_BUFFER_USAGE_STORAGE
                 });
-                m_rayTracingOffsetWorkItemBuffersMapped.push_back(workItems->map(0, m_rayTracingOffsetWorkItemCapacity));
+                m_rayTracingOffsetWorkItemBuffersMapped.push_back(workItems.map(0, m_rayTracingOffsetWorkItemCapacity));
                 m_rayTracingOffsetWorkItemBuffers.emplace_back(std::move(workItems));
             }
         }
@@ -4608,7 +4809,7 @@ namespace Nox
         };
         std::vector<DeformedInstance> deformed;
         deformed.reserve(m_skinningLayout.size() + m_rayTracingOffsetLayout.size());
-        const uint64_t offsetVertexBase = offsetsReady ? m_rayTracingOffsetVertexBuffers[currentImage]->getDeviceAddress() : 0;
+        const uint64_t offsetVertexBase = offsetsReady ? m_rayTracingOffsetVertexBuffers[currentImage].getDeviceAddress() : 0;
         auto offsetAddress = [&](uint32_t instanceSlot) -> uint64_t
         {
             const auto found = std::lower_bound(m_rayTracingOffsetLayout.begin(), m_rayTracingOffsetLayout.end(), instanceSlot,
@@ -4618,7 +4819,7 @@ namespace Nox
         };
         if (skinningReady)
         {
-            const uint64_t skinnedVertexBase = m_skinnedVertexBuffers[currentImage]->getDeviceAddress();
+            const uint64_t skinnedVertexBase = m_skinnedVertexBuffers[currentImage].getDeviceAddress();
             for (const SkinningLayoutEntry& layout : m_skinningLayout)
             {
                 const uint64_t moved = offsetAddress(layout.instanceSlot);
@@ -4656,11 +4857,11 @@ namespace Nox
             const shaderio::GpuMaterial& material = m_gpuScene.GetMaterials().Get(instance.materialIndex);
             const bool isOpaque = material.alphaMode == static_cast<uint32_t>(AlphaMode::Opaque);
             const uint64_t skinnedVertexAddress = layout.vertexAddress;
-            NRI::AccelerationStructureBuildDesc buildDesc{
-                .type = NRI::AccelerationStructureType::BottomLevel,
-                .flags = NRI::AccelerationStructureBuildFlags::AllowUpdate | NRI::AccelerationStructureBuildFlags::PreferFastBuild,
+            ASBuildDesc buildDesc{
+                .type = NRI_ACCELERATION_STRUCTURE_BOTTOM_LEVEL,
+                .flags = NRI_AS_BUILD_ALLOW_UPDATE | NRI_AS_BUILD_PREFER_FAST_BUILD,
                 .triangles = {
-                    NRI::AccelerationStructureTrianglesDesc{
+                    nri::AccelerationStructureTrianglesDesc{
                         .vertexBufferAddress = skinnedVertexAddress,
                         .vertexStride = sizeof(shaderio::SkinnedVertex),
                         .maxVertex = mesh.vertexCount - 1,
@@ -4682,18 +4883,21 @@ namespace Nox
                 if (animated.Resource.as || animated.Resource.storageBuffer)
                     retire(layout.instanceSlot, animated);
 
-                const NRI::AccelerationStructureBuildSizes sizes = m_device->getAccelerationStructureBuildSizes(buildDesc);
-                std::unique_ptr<NRI::Buffer> storage = m_device->createBuffer(NRI::BufferDesc{
+                const NriAccelerationStructureBuildDesc buildDescC = buildDesc.toNri();
+                const nri::AccelerationStructureBuildSizes sizes = nriGetAccelerationStructureBuildSizes(m_device.handle(), &buildDescC);
+                nri::Buffer storage = m_device.createBuffer(nri::BufferDesc{
                     .size = sizes.accelerationStructureSize,
-                    .usage = NRI::BufferUsage::AccelerationStructure
+                    .usage = NRI_BUFFER_USAGE_ACCELERATION_STRUCTURE
                 });
-                std::unique_ptr<NRI::AccelerationStructure> accelerationStructure =
-                    m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
-                        .type = NRI::AccelerationStructureType::BottomLevel,
-                        .storageBuffer = storage.get(),
-                        .bufferOffset = 0,
-                        .size = sizes.accelerationStructureSize
-                    });
+                const NriAccelerationStructureDesc asDesc{
+                    .type = NRI_ACCELERATION_STRUCTURE_BOTTOM_LEVEL,
+                    .storageBuffer = storage.handle(),
+                    .bufferOffset = 0,
+                    .size = sizes.accelerationStructureSize
+                };
+                NriAccelerationStructure rawAs = nullptr;
+                nri::checkResult(nriCreateAccelerationStructure(m_device.handle(), &asDesc, &rawAs), "nriCreateAccelerationStructure");
+                nri::AccelerationStructure accelerationStructure(rawAs);
 
                 animated.Resource = {
                     .storageBuffer = std::move(storage),
@@ -4711,7 +4915,7 @@ namespace Nox
             }
 
             animated.active = true;
-            m_gpuScene.SetInstanceRayTracingGeometry(layout.instanceSlot, animated.Resource.as->getDeviceAddress(), skinnedVertexAddress);
+            m_gpuScene.SetInstanceRayTracingGeometry(layout.instanceSlot, animated.Resource.as.getDeviceAddress(), skinnedVertexAddress);
             m_animatedBLASUpdates.push_back({ layout.instanceSlot, std::move(buildDesc), !animated.built });
             requiredScratchSize = std::max(requiredScratchSize,
                                            animated.built ? animated.updateScratchSize : animated.buildScratchSize);
@@ -4731,9 +4935,9 @@ namespace Nox
                 std::scoped_lock lock(m_deferredReleasesMutex);
                 m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(m_animatedBLASScratch) });
             }
-            m_animatedBLASScratch = m_device->createBuffer(NRI::BufferDesc{
+            m_animatedBLASScratch = m_device.createBuffer(nri::BufferDesc{
                 .size = requiredScratchSize,
-                .usage = NRI::BufferUsage::AccelerationStructureScratch
+                .usage = NRI_BUFFER_USAGE_ACCELERATION_STRUCTURE_SCRATCH
             });
             m_animatedBLASScratchCapacity = requiredScratchSize;
         }
@@ -4748,13 +4952,13 @@ namespace Nox
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            std::unique_ptr<NRI::Buffer> uboBuffer = m_device->createBuffer(NRI::BufferDesc
+            nri::Buffer uboBuffer = m_device.createBuffer(nri::BufferDesc
                 {
                     .size = bufferSize,
-                    .usage = NRI::BufferUsage::Uniform
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
                 });
 
-            void* mappedMemory = uboBuffer->map(0, bufferSize);
+            void* mappedMemory = uboBuffer.map(0, bufferSize);
 
             m_uniformBuffers.emplace_back(std::move(uboBuffer));
             m_uniformBuffersMapped.emplace_back(mappedMemory);
@@ -4766,9 +4970,9 @@ namespace Nox
         m_drawListBuffers.clear();
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            m_drawListBuffers.emplace_back(m_device->createBuffer(NRI::BufferDesc{
+            m_drawListBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = bufferSize,
-                .usage = NRI::BufferUsage::Storage
+                .usage = NRI_BUFFER_USAGE_STORAGE
             }));
         }
         m_drawListStale.fill(true);
@@ -4786,24 +4990,24 @@ namespace Nox
 
         for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
-            auto buffer = m_device->createBuffer(
-                NRI::BufferDesc{
+            auto buffer = m_device.createBuffer(
+                nri::BufferDesc{
                     .size = bufferSize,
-                    .usage = NRI::BufferUsage::Storage
+                    .usage = NRI_BUFFER_USAGE_STORAGE
                 }
             );
 
 
 
 
-            void* mapped = buffer->map(0, bufferSize);
+            void* mapped = buffer.map(0, bufferSize);
 
             m_selectedEntityIDBuffers.emplace_back(std::move(buffer));
             m_selectedEntityIDBuffersMapped.emplace_back(mapped);
 
             // The selection mask's draw list: GPU scene instance slots of the selected entities (as many as entity IDs).
-            auto instances = m_device->createBuffer(NRI::BufferDesc{ .size = maxSelectedEntities * sizeof(uint32_t), .usage = NRI::BufferUsage::Storage });
-            m_selectionInstanceBuffersMapped.emplace_back(instances->map(0, maxSelectedEntities * sizeof(uint32_t)));
+            auto instances = m_device.createBuffer(nri::BufferDesc{ .size = maxSelectedEntities * sizeof(uint32_t), .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_selectionInstanceBuffersMapped.emplace_back(instances.map(0, maxSelectedEntities * sizeof(uint32_t)));
             m_selectionInstanceBuffers.emplace_back(std::move(instances));
         }
     }
@@ -4817,13 +5021,13 @@ namespace Nox
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            std::unique_ptr<NRI::Buffer> lightBuffer = m_device->createBuffer(NRI::BufferDesc
+            nri::Buffer lightBuffer = m_device.createBuffer(nri::BufferDesc
                 {
                     .size = bufferSize,
-                    .usage = NRI::BufferUsage::Storage
+                    .usage = NRI_BUFFER_USAGE_STORAGE
                 });
 
-            void* mappedMemory = lightBuffer->map(0, bufferSize);
+            void* mappedMemory = lightBuffer.map(0, bufferSize);
             m_lightBuffers.emplace_back(std::move(lightBuffer));
             m_lightBuffersMapped.emplace_back(mappedMemory);
         }
@@ -4848,149 +5052,149 @@ namespace Nox
                 samplerCreateInfo.maxLod = (float)mipLevels;
                 samplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
                 VK_CHECK_RESULT(vkCreateSampler(device->logicalDevice, &samplerCreateInfo, nullptr, &sampler));*/
-        std::vector<NRI::SamplerDesc> samplers(shaderio::SamplerCount);
+        std::vector<nri::SamplerDesc> samplers(shaderio::SamplerCount);
 
         // SAMPLER_LINEAR_REPEAT = 0
-        samplers[shaderio::SAMPLER_LINEAR_REPEAT] = NRI::SamplerDesc
+        samplers[shaderio::SAMPLER_LINEAR_REPEAT] = nri::SamplerDesc
         {
-            .magFilter = NRI::Filter::Linear,
-            .minFilter = NRI::Filter::Linear,
-            .mipmapMode = NRI::SamplerMipmapMode::Linear,
-            .addressModeU = NRI::SamplerAddressMode::Repeat,
-            .addressModeV = NRI::SamplerAddressMode::Repeat,
-            .addressModeW = NRI::SamplerAddressMode::Repeat,
+            .magFilter = NRI_FILTER_LINEAR,
+            .minFilter = NRI_FILTER_LINEAR,
+            .mipmapMode = NRI_SAMPLER_MIPMAP_LINEAR,
+            .addressModeU = NRI_SAMPLER_ADDRESS_REPEAT,
+            .addressModeV = NRI_SAMPLER_ADDRESS_REPEAT,
+            .addressModeW = NRI_SAMPLER_ADDRESS_REPEAT,
             .mipLodBias = 0.0f,
             .anisotropyEnable = true,
             .maxAnisotropy = 16.0f,
             .compareEnable = false,
-            .compareOp = NRI::CompareOp::Never,
+            .compareOp = NRI_COMPARE_NEVER,
             .minLod = 0.0f,
             .maxLod = 1000.0f
         };
 
-        samplers[shaderio::SAMPLER_NEAREST_REPEAT] = NRI::SamplerDesc
+        samplers[shaderio::SAMPLER_NEAREST_REPEAT] = nri::SamplerDesc
         {
-            .magFilter = NRI::Filter::Nearest,
-            .minFilter = NRI::Filter::Nearest,
-            .mipmapMode = NRI::SamplerMipmapMode::Nearest,
-            .addressModeU = NRI::SamplerAddressMode::Repeat,
-            .addressModeV = NRI::SamplerAddressMode::Repeat,
-            .addressModeW = NRI::SamplerAddressMode::Repeat,
+            .magFilter = NRI_FILTER_NEAREST,
+            .minFilter = NRI_FILTER_NEAREST,
+            .mipmapMode = NRI_SAMPLER_MIPMAP_NEAREST,
+            .addressModeU = NRI_SAMPLER_ADDRESS_REPEAT,
+            .addressModeV = NRI_SAMPLER_ADDRESS_REPEAT,
+            .addressModeW = NRI_SAMPLER_ADDRESS_REPEAT,
             .mipLodBias = 0.0f,
             .anisotropyEnable = true,
             .maxAnisotropy = 1.0f,
             .compareEnable = true,
-            .compareOp = NRI::CompareOp::Always,
+            .compareOp = NRI_COMPARE_ALWAYS,
             .minLod = 0.0f,
             .maxLod = 1000.0f
         };
 
-        samplers[shaderio::SAMPLER_BRDFLUT] = NRI::SamplerDesc
+        samplers[shaderio::SAMPLER_BRDFLUT] = nri::SamplerDesc
         {
-            .magFilter = NRI::Filter::Linear,
-            .minFilter = NRI::Filter::Linear,
-            .mipmapMode = NRI::SamplerMipmapMode::Nearest,
-            .addressModeU = NRI::SamplerAddressMode::ClampToEdge,
-            .addressModeV = NRI::SamplerAddressMode::ClampToEdge,
-            .addressModeW = NRI::SamplerAddressMode::ClampToEdge,
+            .magFilter = NRI_FILTER_LINEAR,
+            .minFilter = NRI_FILTER_LINEAR,
+            .mipmapMode = NRI_SAMPLER_MIPMAP_NEAREST,
+            .addressModeU = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
+            .addressModeV = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
+            .addressModeW = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
             .mipLodBias = 0.0f,
             .maxAnisotropy = 1.0f,
             .minLod = 0.0f,
             .maxLod = 1.0f,
-            .borderColor = NRI::BorderColor::FloatOpaqueWhite
+            .borderColor = NRI_BORDER_COLOR_FLOAT_OPAQUE_WHITE
         };
 
-        samplers[shaderio::SAMPLER_IRRADIANCE] = NRI::SamplerDesc
+        samplers[shaderio::SAMPLER_IRRADIANCE] = nri::SamplerDesc
         {
-            .magFilter = NRI::Filter::Linear,
-            .minFilter = NRI::Filter::Linear,
-            .mipmapMode = NRI::SamplerMipmapMode::Linear,
-            .addressModeU = NRI::SamplerAddressMode::ClampToEdge,
-            .addressModeV = NRI::SamplerAddressMode::ClampToEdge,
-            .addressModeW = NRI::SamplerAddressMode::ClampToEdge,
+            .magFilter = NRI_FILTER_LINEAR,
+            .minFilter = NRI_FILTER_LINEAR,
+            .mipmapMode = NRI_SAMPLER_MIPMAP_LINEAR,
+            .addressModeU = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
+            .addressModeV = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
+            .addressModeW = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
             .mipLodBias = 0.0f,
             .maxAnisotropy = 1.0f,
             .minLod = 0.0f,
             .maxLod = static_cast<float>(static_cast<uint32_t>(floor(log2(64))) + 1),
-            .borderColor = NRI::BorderColor::FloatOpaqueWhite
+            .borderColor = NRI_BORDER_COLOR_FLOAT_OPAQUE_WHITE
         };
 
-        samplers[shaderio::SAMPLER_PREFILTER] = NRI::SamplerDesc
+        samplers[shaderio::SAMPLER_PREFILTER] = nri::SamplerDesc
         {
-            .magFilter = NRI::Filter::Linear,
-            .minFilter = NRI::Filter::Linear,
-            .mipmapMode = NRI::SamplerMipmapMode::Linear,
-            .addressModeU = NRI::SamplerAddressMode::ClampToEdge,
-            .addressModeV = NRI::SamplerAddressMode::ClampToEdge,
-            .addressModeW = NRI::SamplerAddressMode::ClampToEdge,
+            .magFilter = NRI_FILTER_LINEAR,
+            .minFilter = NRI_FILTER_LINEAR,
+            .mipmapMode = NRI_SAMPLER_MIPMAP_LINEAR,
+            .addressModeU = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
+            .addressModeV = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
+            .addressModeW = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
             .mipLodBias = 0.0f,
             .maxAnisotropy = 1.0f,
             .minLod = 0.0f,
             .maxLod = static_cast<float>(static_cast<uint32_t>(floor(log2(512))) + 1),
-            .borderColor = NRI::BorderColor::FloatOpaqueWhite
+            .borderColor = NRI_BORDER_COLOR_FLOAT_OPAQUE_WHITE
         };
 
-        samplers[shaderio::SAMPLER_LINEAR_CLAMP] = NRI::SamplerDesc
+        samplers[shaderio::SAMPLER_LINEAR_CLAMP] = nri::SamplerDesc
         {
-            .magFilter = NRI::Filter::Linear,
-            .minFilter = NRI::Filter::Linear,
-            .mipmapMode = NRI::SamplerMipmapMode::Linear,
-            .addressModeU = NRI::SamplerAddressMode::ClampToEdge,
-            .addressModeV = NRI::SamplerAddressMode::ClampToEdge,
-            .addressModeW = NRI::SamplerAddressMode::ClampToEdge,
+            .magFilter = NRI_FILTER_LINEAR,
+            .minFilter = NRI_FILTER_LINEAR,
+            .mipmapMode = NRI_SAMPLER_MIPMAP_LINEAR,
+            .addressModeU = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
+            .addressModeV = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
+            .addressModeW = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
             .mipLodBias = 0.0f,
             .maxAnisotropy = 1.0f,
             .compareEnable = false,
-            .compareOp = NRI::CompareOp::Never,
+            .compareOp = NRI_COMPARE_NEVER,
             .minLod = 0.0f,
             .maxLod = 1000.0f,
-            .borderColor = NRI::BorderColor::FloatOpaqueWhite
+            .borderColor = NRI_BORDER_COLOR_FLOAT_OPAQUE_WHITE
         };
 
-        samplers[shaderio::SAMPLER_NEAREST_CLAMP] = NRI::SamplerDesc
+        samplers[shaderio::SAMPLER_NEAREST_CLAMP] = nri::SamplerDesc
         {
-            .magFilter = NRI::Filter::Nearest,
-            .minFilter = NRI::Filter::Nearest,
-            .mipmapMode = NRI::SamplerMipmapMode::Nearest,
-            .addressModeU = NRI::SamplerAddressMode::ClampToEdge,
-            .addressModeV = NRI::SamplerAddressMode::ClampToEdge,
-            .addressModeW = NRI::SamplerAddressMode::ClampToEdge,
+            .magFilter = NRI_FILTER_NEAREST,
+            .minFilter = NRI_FILTER_NEAREST,
+            .mipmapMode = NRI_SAMPLER_MIPMAP_NEAREST,
+            .addressModeU = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
+            .addressModeV = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
+            .addressModeW = NRI_SAMPLER_ADDRESS_CLAMP_TO_EDGE,
             .mipLodBias = 0.0f,
             .maxAnisotropy = 1.0f,
             .compareEnable = false,
-            .compareOp = NRI::CompareOp::Never,
+            .compareOp = NRI_COMPARE_NEVER,
             .minLod = 0.0f,
             .maxLod = 1000.0f,
-            .borderColor = NRI::BorderColor::FloatOpaqueWhite
+            .borderColor = NRI_BORDER_COLOR_FLOAT_OPAQUE_WHITE
         };
 
         // todo: imgui needs more space to if you want to register it
         // currently 1000 in initimgui devicevk.cpp
 
         //hardcoded samplerinfos inside descriptorheapvk cosntructor
-        m_samplerHeap = m_device->createDescriptorHeap(NRI::DescriptorHeapDesc{
-            .type = NRI::DescriptorHeapType::Sampler,
+        m_samplerHeap = m_device.createDescriptorHeap(nri::DescriptorHeapDesc{
+            .type = NRI_DESCRIPTOR_HEAP_SAMPLER,
             .maxSamplerDescriptors = shaderio::SamplerCount,
             .samplers = std::move(samplers)
         });
 
-        m_resourceHeap = m_device->createDescriptorHeap(NRI::DescriptorHeapDesc{
-            .type = NRI::DescriptorHeapType::Resource,
+        m_resourceHeap = m_device.createDescriptorHeap(nri::DescriptorHeapDesc{
+            .type = NRI_DESCRIPTOR_HEAP_RESOURCE,
             .maxBufferDescriptors = 128,
             .maxImageDescriptors = 4096 // a streamed texture's old and new image coexist until the old one is released
         });
 
         /*
         Abstract storage tracking vectors
-        std::vector<std::unique_ptr<NRI::Buffer>> m_modelDataBuffers;
+        std::vector<nri::Buffer> m_modelDataBuffers;
         
         m_modelDataBuffers.reserve(2);
         for (uint32_t i = 0; i < 2; i++)
         {
             // Create an abstract Storage Buffer
-            std::unique_ptr<NRI::Buffer> modelBuffer = m_device->createBuffer(NRI::BufferDesc{
+            nri::Buffer modelBuffer = m_device.createBuffer(nri::BufferDesc{
                 .size = sizeof(ModelData),
-                .usage = NRI::BufferUsage::Storage
+                .usage = NRI_BUFFER_USAGE_STORAGE
             });
             
             // Map and fill initial CPU data
@@ -5002,29 +5206,29 @@ namespace Nox
             modelBuffer->unmap();
     
             /#1#/ 4. Register the buffer directly to the Resource Heap at runtime!
-            uint32_t bufferBindlessIndex = m_resourceHeap->registerBuffer(*modelBuffer, sizeof(ModelData));#1#
+            uint32_t bufferBindlessIndex = m_resourceHeap.registerBuffer(*modelBuffer, sizeof(ModelData));#1#
             
             // Cache your model buffer in the renderer
             m_modelDataBuffers.emplace_back(std::move(modelBuffer));
         }*/
     }
 
-    std::unique_ptr<NRI::CommandBuffer> Renderer::beginSingleTimeCommands()
+    nri::CommandBuffer Renderer::beginSingleTimeCommands()
     {
-        std::unique_ptr<NRI::CommandBuffer> commandBuffer = m_commandAllocator->allocateCommandBuffer(1);
-        commandBuffer->begin(0, true);
+        nri::CommandBuffer commandBuffer = m_commandAllocator.allocateCommandBuffer(1);
+        commandBuffer.begin(0, true);
 
-        return std::move(commandBuffer);
+        return commandBuffer;
     }
 
-    void Renderer::endSingleTimeCommands(std::unique_ptr<NRI::CommandBuffer>&& commandBuffer)
+    void Renderer::endSingleTimeCommands(nri::CommandBuffer&& commandBuffer)
     {
-        commandBuffer->end(0);
+        commandBuffer.end(0);
 
         // Startup and tool work that may read what was just uploaded on the transfer queue (IBL precompute reads the
         // environment texture): it already blocks, so it waits for pending uploads first.
         m_uploads.GetTimeline().wait(m_uploads.Flush());
-        m_device->submitAndWait(*commandBuffer, 0);
+        m_device.submitAndWait(commandBuffer, 0);
     }
 
     std::span<const RGSubmission> Renderer::recordFrame(uint32_t imageIndex)
@@ -5142,15 +5346,15 @@ namespace Nox
         return submissions;
     }
 
-    void Renderer::applyCommandBufferBaseline(NRI::CommandBuffer& cmd) const
+    void Renderer::applyCommandBufferBaseline(nri::CommandBuffer& cmd) const
     {
-        cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+        cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
 
         // Rasterization (most of these come from VK_EXT_extended_dynamic_state_3).
         cmd.setRasterizerDiscardEnable(false);
-        cmd.setPolygonMode(NRI::PolygonMode::Fill);
-        cmd.setCullMode(NRI::CullMode::Back);
-        cmd.setFrontFace(NRI::FrontFace::CounterClockWise);
+        cmd.setPolygonMode(NRI_POLYGON_MODE_FILL);
+        cmd.setCullMode(NRI_CULL_MODE_BACK);
+        cmd.setFrontFace(NRI_FRONT_FACE_COUNTER_CLOCKWISE);
         cmd.setDepthBiasEnable(false);
         cmd.setDepthClampEnable(false);
         cmd.setLineWidth(1.0f);
@@ -5163,26 +5367,26 @@ namespace Nox
         cmd.setAlphaToCoverageEnable(false);
         // alphaToOne is required by the spec when its device feature is enabled and a
         // shader object is bound, even if we don't actually use it.
-        cmd.setAlphaToOneEnableEXT(false);
+        cmd.setAlphaToOneEnable(false);
 
         // Depth / stencil.
         cmd.setDepthTestEnable(true);
         cmd.setDepthWriteEnable(true);
-        cmd.setDepthCompareOp(NRI::CompareOp::Greater);
+        cmd.setDepthCompareOp(NRI_COMPARE_GREATER);
         cmd.setDepthBoundsTestEnable(false);
         cmd.setStencilTestEnable(false);
 
         // Color blend (for one color attachment); passes with more targets set theirs.
-        const NRI::ColorBlendEquation blendEquation
+        const nri::ColorBlendEquation blendEquation
         {
-            .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
-            .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-            .colorBlendOp = NRI::BlendOp::Add,
-            .srcAlphaBlendFactor = NRI::BlendFactor::SrcAlpha,
-            .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-            .alphaBlendOp = NRI::BlendOp::Add,
+            .srcColorBlendFactor = NRI_BLEND_FACTOR_SRC_ALPHA,
+            .dstColorBlendFactor = NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+            .colorBlendOp = NRI_BLEND_OP_ADD,
+            .srcAlphaBlendFactor = NRI_BLEND_FACTOR_SRC_ALPHA,
+            .dstAlphaBlendFactor = NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+            .alphaBlendOp = NRI_BLEND_OP_ADD,
         };
-        uint32_t colorWriteMask = NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A;
+        uint32_t colorWriteMask = nri::ColorComponent::R | nri::ColorComponent::G | nri::ColorComponent::B | nri::ColorComponent::A;
         cmd.setColorBlendEnable(0, false);
         cmd.setColorBlendEquation(0, blendEquation);
         cmd.setColorWriteMask(0, colorWriteMask);
@@ -5207,13 +5411,13 @@ namespace Nox
         {
             // drawInstancesReference: the view's visible instances, a graph buffer (beginMeshletDraws).
             shaderio::PushConstantMeshlets& references = frame.meshletReferences;
-            references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-            bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && m_boneBuffers[frameIndex] != nullptr;
+            references.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+            bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && static_cast<bool>(m_boneBuffers[frameIndex]);
             bool hasBones = !m_boneMatrices.empty();
-            references.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex]->getDeviceAddress() : 0;
+            references.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex].getDeviceAddress() : 0;
             const bool hasSkinnedVertices = m_computeSkinningPipeline && !m_skinningWorkItems.empty() && frameIndex < m_skinnedVertexBuffers.size() &&
-                                            m_skinnedVertexBuffers[frameIndex] != nullptr;
-            references.skinnedVertexReference = hasSkinnedVertices ? m_skinnedVertexBuffers[frameIndex]->getDeviceAddress() : 0;
+                                            static_cast<bool>(m_skinnedVertexBuffers[frameIndex]);
+            references.skinnedVertexReference = hasSkinnedVertices ? m_skinnedVertexBuffers[frameIndex].getDeviceAddress() : 0;
             // Real value (or left at "none") set later, in addForward3DPass, once SSAO/RTAO's result actually exists.
             references.ssaoTextureIndex = 0xFFFFFFFF;
             // Set by the pass that draws glass over a copy of the scene (addForward3DPass).
@@ -5232,24 +5436,15 @@ namespace Nox
         frame.totalDDGIProbes = getDDGIProbeCountTotal();
 
         // "A denoiser was toggled / the resolution changed": every NRD pass of this frame flushes its history.
-        frame.resetNRD = graph.WasHistoryReset(NRDHistoryKey);
+        frame.resetNRD = graph.WasHistoryReset(NRDHistoryKey) || m_isFirstFrame;
 
-        // NRD's integration layer requires its internal frame counter to advance by exactly 1 every real frame (see
-        // Device::tickNRD); the denoise passes only run when their feature does, so tick unconditionally here.
-        if (m_device->isNRDInitialized())
-        {
-            m_device->tickNRD(static_cast<uint32_t>(m_sceneFrameCounter), m_isFirstFrame || frame.resetNRD,
-                uniformData.view, uniformData.nonJitteredProj, uniformData.prevView, uniformData.prevProj,
-                glm::vec2(1.0f), m_currentJitter, m_prevJitter);
-        }
-
-        auto renderTarget = [](NRI::ImageFormat format)
+        auto renderTarget = [](nri::ImageFormat format)
         {
             RGTextureDesc desc;
             desc.Format = format;
             return desc;
         };
-        auto outputTarget = [](NRI::ImageFormat format)
+        auto outputTarget = [](nri::ImageFormat format)
         {
             RGTextureDesc desc;
             desc.Size = RGSize::OutputResolution;
@@ -5257,122 +5452,122 @@ namespace Nox
             return desc;
         };
         RGTextureDesc renderDepth;
-        renderDepth.Usage = NRI::TextureUsage::DepthStencilAttachment;
+        renderDepth.Usage = NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
         RGTextureDesc outputDepth = renderDepth;
         outputDepth.Size = RGSize::OutputResolution;
 
         // Frame-lifetime targets (allocated only when an executed pass uses them). Features that add resources of their
         // own (DDGI, RTXDI reservoirs, path tracer accumulation) create them in their add* functions.
         FrameGraphResources resources;
-        resources.Visibility = graph.CreateTexture("Visibility", renderTarget(NRI::ImageFormat::R32G32_UINT));
+        resources.Visibility = graph.CreateTexture("Visibility", renderTarget(NRI_FORMAT_R32G32_UINT));
         resources.Depth = graph.CreateTexture("Depth", renderDepth);
         resources.DepthHi = graph.CreateTexture("Depth (Display)", outputDepth);
-        resources.Entity = graph.CreateTexture("Entity IDs", renderTarget(NRI::ImageFormat::R32SINT));
-        resources.EntityHi = graph.CreateTexture("Entity IDs (Display)", outputTarget(NRI::ImageFormat::R32SINT));
-        resources.GBufferAlbedo = graph.CreateTexture("GBuffer Albedo", renderTarget(NRI::ImageFormat::RGBA8));
+        resources.Entity = graph.CreateTexture("Entity IDs", renderTarget(NRI_FORMAT_R32_SINT));
+        resources.EntityHi = graph.CreateTexture("Entity IDs (Display)", outputTarget(NRI_FORMAT_R32_SINT));
+        resources.GBufferAlbedo = graph.CreateTexture("GBuffer Albedo", renderTarget(NRI_FORMAT_RGBA8));
         {
             // DLSS Ray Reconstruction guides (addDLSSPass): written by a compute pass, only allocated when it runs.
-            RGTextureDesc guide = renderTarget(NRI::ImageFormat::RGBA8);
-            guide.Usage = NRI::TextureUsage::Storage;
+            RGTextureDesc guide = renderTarget(NRI_FORMAT_RGBA8);
+            guide.Usage = NRI_TEXTURE_USAGE_STORAGE;
             resources.RRDiffuseAlbedo = graph.CreateTexture("RR Diffuse Albedo", guide);
-            guide.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT; // dielectric specular albedo is a few percent
+            guide.Format = NRI_FORMAT_R16G16B16A16_SFLOAT; // dielectric specular albedo is a few percent
             resources.RRSpecularAlbedo = graph.CreateTexture("RR Specular Albedo", guide);
             resources.RRNormalRoughness = graph.CreateTexture("RR Normal Roughness", guide);
             // 32-bit: the path tracer keeps minus the scene length there until the reflection's hit (RTXPT's specHitT export), and a
             // reflection of the sky is far away (PathTracerBridge.slang rrSkySpecularDistance).
-            guide.Format = NRI::ImageFormat::R32_SFLOAT;
+            guide.Format = NRI_FORMAT_R32_SFLOAT;
             resources.RRSpecularHitDistance = graph.CreateTexture("RR Specular Hit Distance", guide);
             resources.RRPathDepth = graph.CreateTexture("RR Path Depth", guide);
-            guide.Format = NRI::ImageFormat::R16G16_SFLOAT;
+            guide.Format = NRI_FORMAT_R16G16_SFLOAT;
             resources.RRPathMotionVectors = graph.CreateTexture("RR Path Motion Vectors", guide);
             resources.RRSpecularMotionVectors = graph.CreateTexture("RR Specular Motion Vectors", guide);
             // DLSS-RR's Color Before Transparency guide (addForward3DPass): the HDR scene's format, as the guide requires.
-            resources.RRColorBeforeTransparency = graph.CreateTexture("RR Color Before Transparency", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+            resources.RRColorBeforeTransparency = graph.CreateTexture("RR Color Before Transparency", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
         }
-        resources.GBufferNormal = graph.CreateTexture("GBuffer Normal", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.GBufferMaterial = graph.CreateTexture("GBuffer Material", renderTarget(NRI::ImageFormat::RGBA8));
-        resources.GBufferEmission = graph.CreateTexture("GBuffer Emission", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.GBufferLobes = graph.CreateTexture("GBuffer Lobes", renderTarget(NRI::ImageFormat::R32G32B32A32_UINT));
-        resources.GBufferSpecular = graph.CreateTexture("GBuffer Specular", renderTarget(NRI::ImageFormat::RGBA8));
-        resources.GBufferVelocity = graph.CreateTexture("GBuffer Velocity", renderTarget(NRI::ImageFormat::R32G32_SFLOAT));
-        resources.HDRScene = graph.CreateTexture("HDR Scene", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.SSAORaw = graph.CreateTexture("SSAO Raw", renderTarget(NRI::ImageFormat::R16_SFLOAT));
-        resources.SSAO = graph.CreateTexture("SSAO", renderTarget(NRI::ImageFormat::R16_SFLOAT));
+        resources.GBufferNormal = graph.CreateTexture("GBuffer Normal", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
+        resources.GBufferMaterial = graph.CreateTexture("GBuffer Material", renderTarget(NRI_FORMAT_RGBA8));
+        resources.GBufferEmission = graph.CreateTexture("GBuffer Emission", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
+        resources.GBufferLobes = graph.CreateTexture("GBuffer Lobes", renderTarget(NRI_FORMAT_R32G32B32A32_UINT));
+        resources.GBufferSpecular = graph.CreateTexture("GBuffer Specular", renderTarget(NRI_FORMAT_RGBA8));
+        resources.GBufferVelocity = graph.CreateTexture("GBuffer Velocity", renderTarget(NRI_FORMAT_R32G32_SFLOAT));
+        resources.HDRScene = graph.CreateTexture("HDR Scene", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
+        resources.SSAORaw = graph.CreateTexture("SSAO Raw", renderTarget(NRI_FORMAT_R16_SFLOAT));
+        resources.SSAO = graph.CreateTexture("SSAO", renderTarget(NRI_FORMAT_R16_SFLOAT));
         RGTextureDesc autoExposureDesc;
         autoExposureDesc.Size = RGSize::Absolute;
         autoExposureDesc.Width = autoExposureDesc.Height = 256;
-        autoExposureDesc.Format = NRI::ImageFormat::R32_SFLOAT;
-        autoExposureDesc.Usage = NRI::TextureUsage::Storage;
+        autoExposureDesc.Format = NRI_FORMAT_R32_SFLOAT;
+        autoExposureDesc.Usage = NRI_TEXTURE_USAGE_STORAGE;
         autoExposureDesc.MipLevels = 9;
         resources.AutoExposure = graph.CreateTexture("Auto Exposure", autoExposureDesc);
-        resources.DLSSOutput = graph.CreateTexture("DLSS Output", outputTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.DLSSOutput = graph.CreateTexture("DLSS Output", outputTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
 
-        resources.RawShadowMask = graph.CreateTexture("Raw Shadow Mask", renderTarget(NRI::ImageFormat::R16G16_SFLOAT));
-        resources.DenoisedShadowMask = graph.CreateTexture("Denoised Shadow Mask", renderTarget(NRI::ImageFormat::R16G16_SFLOAT));
-        resources.RawReflection = graph.CreateTexture("Raw Reflection", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.DenoisedReflection = graph.CreateTexture("Denoised Reflection", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.RawShadowMask = graph.CreateTexture("Raw Shadow Mask", renderTarget(NRI_FORMAT_R16G16_SFLOAT));
+        resources.DenoisedShadowMask = graph.CreateTexture("Denoised Shadow Mask", renderTarget(NRI_FORMAT_R16G16_SFLOAT));
+        resources.RawReflection = graph.CreateTexture("Raw Reflection", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
+        resources.DenoisedReflection = graph.CreateTexture("Denoised Reflection", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
         // NRD's view-Z and packed normal/roughness guides, written each frame any NRD denoiser runs (addNRDGuidesPass).
         // 32-bit: half floats end at 65504 world units (655 m in a centimeter project) and step by centimeters a few meters out.
-        resources.ViewZ = graph.CreateTexture("NRD View Z", renderTarget(NRI::ImageFormat::R32_SFLOAT));
-        resources.NRDNormalRoughness = graph.CreateTexture("NRD Normal Roughness", renderTarget(NRI::ImageFormat::R10G10B10A2_UNORM));
+        resources.ViewZ = graph.CreateTexture("NRD View Z", renderTarget(NRI_FORMAT_R32_SFLOAT));
+        resources.NRDNormalRoughness = graph.CreateTexture("NRD Normal Roughness", renderTarget(NRI_FORMAT_R10G10B10A2_UNORM));
 
-        resources.ReSTIRGIRaw = graph.CreateTexture("ReSTIR GI Diffuse", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.ReSTIRGIDenoised = graph.CreateTexture("ReSTIR GI Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.ReSTIRDIDiffuse = graph.CreateTexture("ReSTIR DI Diffuse", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.ReSTIRDISpecular = graph.CreateTexture("ReSTIR DI Specular", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.ReSTIRDIDiffuseDenoised = graph.CreateTexture("ReSTIR DI Diffuse Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.ReSTIRDISpecularDenoised = graph.CreateTexture("ReSTIR DI Specular Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.ReSTIRGIRaw = graph.CreateTexture("ReSTIR GI Diffuse", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
+        resources.ReSTIRGIDenoised = graph.CreateTexture("ReSTIR GI Denoised", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
+        resources.ReSTIRDIDiffuse = graph.CreateTexture("ReSTIR DI Diffuse", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
+        resources.ReSTIRDISpecular = graph.CreateTexture("ReSTIR DI Specular", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
+        resources.ReSTIRDIDiffuseDenoised = graph.CreateTexture("ReSTIR DI Diffuse Denoised", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
+        resources.ReSTIRDISpecularDenoised = graph.CreateTexture("ReSTIR DI Specular Denoised", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
         {
             RGTextureDesc lightPDF;
             lightPDF.Size = RGSize::Absolute;
             lightPDF.Width = m_lightPDFTextureSize;
             lightPDF.Height = m_lightPDFTextureSize;
-            lightPDF.Format = NRI::ImageFormat::R16_SFLOAT;
-            lightPDF.Usage = NRI::TextureUsage::Storage;
+            lightPDF.Format = NRI_FORMAT_R16_SFLOAT;
+            lightPDF.Usage = NRI_TEXTURE_USAGE_STORAGE;
             lightPDF.MipLevels = m_lightPDFMipLevels;
             resources.LightPDF = graph.CreateTexture("Light PDF", lightPDF);
         }
 
-        resources.ReSTIRPTOutput = graph.CreateTexture("ReSTIR PT Output", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.ReSTIRPTPrimaryDirect = graph.CreateTexture("ReSTIR PT Primary Direct", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.ReSTIRPTOutput = graph.CreateTexture("ReSTIR PT Output", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
+        resources.ReSTIRPTPrimaryDirect = graph.CreateTexture("ReSTIR PT Primary Direct", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
         {
             // Storage: NRD writes it (ReSTIR PT), the in-place YCoCg decode and the path tracer's composite (PTComposite.slang)
             // write it through a storage slot.
-            RGTextureDesc denoised = renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT);
-            denoised.Usage = NRI::TextureUsage::Storage;
+            RGTextureDesc denoised = renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT);
+            denoised.Usage = NRI_TEXTURE_USAGE_STORAGE;
             resources.PathTracerDenoised = graph.CreateTexture("Path Tracer Denoised", denoised);
         }
         // The path tracer's NRD signals (PathTracerSignals.slang) and their denoised versions.
-        RGTextureDesc ptSignal = renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT);
-        ptSignal.Usage = NRI::TextureUsage::Storage;
+        RGTextureDesc ptSignal = renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT);
+        ptSignal.Usage = NRI_TEXTURE_USAGE_STORAGE;
         resources.PathTracerDiffuse = graph.CreateTexture("Path Tracer Diffuse", ptSignal);
         resources.PathTracerSpecular = graph.CreateTexture("Path Tracer Specular", ptSignal);
-        resources.PathTracerDiffuseDenoised = graph.CreateTexture("Path Tracer Diffuse Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
-        resources.PathTracerSpecularDenoised = graph.CreateTexture("Path Tracer Specular Denoised", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT));
+        resources.PathTracerDiffuseDenoised = graph.CreateTexture("Path Tracer Diffuse Denoised", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
+        resources.PathTracerSpecularDenoised = graph.CreateTexture("Path Tracer Specular Denoised", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT));
 
         // Previous-frame G-buffer snapshots (depth/normal for ReSTIR GI/DI temporal validity, albedo/material for ReSTIR
         // PT's RandomReplay / RAB_AreMaterialsSimilar), copied every frame by the Previous Frame Copy pass.
         resources.PrevDepth = graph.GetHistoryTexture("Previous Depth", renderDepth, 1).Textures[0];
-        resources.PrevNormal = graph.GetHistoryTexture("Previous Normal", renderTarget(NRI::ImageFormat::R16G16B16A16_SFLOAT), 1).Textures[0];
-        resources.PrevAlbedo = graph.GetHistoryTexture("Previous Albedo", renderTarget(NRI::ImageFormat::RGBA8), 1).Textures[0];
-        resources.PrevMaterial = graph.GetHistoryTexture("Previous Material", renderTarget(NRI::ImageFormat::RGBA8), 1).Textures[0];
+        resources.PrevNormal = graph.GetHistoryTexture("Previous Normal", renderTarget(NRI_FORMAT_R16G16B16A16_SFLOAT), 1).Textures[0];
+        resources.PrevAlbedo = graph.GetHistoryTexture("Previous Albedo", renderTarget(NRI_FORMAT_RGBA8), 1).Textures[0];
+        resources.PrevMaterial = graph.GetHistoryTexture("Previous Material", renderTarget(NRI_FORMAT_RGBA8), 1).Textures[0];
 
         // Renderer-owned resources.
-        resources.Scene = graph.ImportTexture("Scene", m_sceneResource.get());
+        resources.Scene = graph.ImportTexture("Scene", m_sceneResource->GetHandle());
         if (m_environmentCubemap)
-            resources.EnvironmentCubemap = graph.ImportTexture("Environment", m_environmentCubemap.get(), RGImportAccess::ReadOnly);
+            resources.EnvironmentCubemap = graph.ImportTexture("Environment", m_environmentCubemap->GetHandle(), RGImportAccess::ReadOnly);
         if (m_restirGINeighborOffsetsBuffer)
-            resources.NeighborOffsets = graph.ImportBuffer("RTXDI Neighbor Offsets", m_restirGINeighborOffsetsBuffer.get(), RGImportAccess::ReadOnly);
+            resources.NeighborOffsets = graph.ImportBuffer("RTXDI Neighbor Offsets", m_restirGINeighborOffsetsBuffer.handle(), RGImportAccess::ReadOnly);
         if (m_ssaoKernelBuffer)
-            resources.SSAOKernel = graph.ImportBuffer("SSAO Kernel", m_ssaoKernelBuffer.get(), RGImportAccess::ReadOnly);
+            resources.SSAOKernel = graph.ImportBuffer("SSAO Kernel", m_ssaoKernelBuffer.handle(), RGImportAccess::ReadOnly);
         // Depth pyramid of the camera view: written from this frame's depth, read by the next frame's phase 1 (§5.6.4).
         {
             RGTextureDesc hiZ;
             hiZ.Size = RGSize::Absolute;
             hiZ.Width = std::max(frame.renderExtent.width / 2, 1u);
             hiZ.Height = std::max(frame.renderExtent.height / 2, 1u);
-            hiZ.Format = NRI::ImageFormat::R32_SFLOAT;
-            hiZ.Usage = NRI::TextureUsage::Storage;
+            hiZ.Format = NRI_FORMAT_R32_SFLOAT;
+            hiZ.Usage = NRI_TEXTURE_USAGE_STORAGE;
             hiZ.MipLevels = 1;
             for (uint32_t size = std::max(hiZ.Width, hiZ.Height); size > 1; size >>= 1)
                 ++hiZ.MipLevels;
@@ -5388,54 +5583,54 @@ namespace Nox
             RGTextureDesc adaptedDesc;
             adaptedDesc.Size = RGSize::Absolute;
             adaptedDesc.Width = adaptedDesc.Height = 1;
-            adaptedDesc.Format = NRI::ImageFormat::R32_SFLOAT;
-            adaptedDesc.Usage = NRI::TextureUsage::Storage;
+            adaptedDesc.Format = NRI_FORMAT_R32_SFLOAT;
+            adaptedDesc.Usage = NRI_TEXTURE_USAGE_STORAGE;
             const RGTextureHistory adaptedHistory = graph.GetHistoryTexture("Auto Exposure Adapted", adaptedDesc, 1);
             resources.AutoExposureAdapted = adaptedHistory.Textures[0];
             resources.AutoExposureAdaptedReset = adaptedHistory.WasReset;
         }
 
         if (m_tlasBuffer)
-            resources.TLAS = graph.ImportBuffer("TLAS", m_tlasBuffer.get());
+            resources.TLAS = graph.ImportBuffer("TLAS", m_tlasBuffer.handle());
         // GPU scene tables: written by GPU Scene Update, read through the uniforms by the passes that draw or trace the scene.
-        if (NRI::Buffer* buffer = m_gpuScene.GetInstances().GetBuffer())
-            resources.SceneInstances = graph.ImportBuffer("Scene Instances", buffer);
-        if (NRI::Buffer* buffer = m_gpuScene.GetTransforms().GetBuffer())
-            resources.SceneTransforms = graph.ImportBuffer("Scene Transforms", buffer);
-        if (NRI::Buffer* buffer = m_gpuScene.GetMaterials().GetBuffer())
-            resources.SceneMaterials = graph.ImportBuffer("Scene Materials", buffer);
-        if (NRI::Buffer* buffer = m_gpuScene.GetMeshes().GetBuffer())
-            resources.SceneMeshes = graph.ImportBuffer("Scene Meshes", buffer);
-        if (NRI::Buffer* buffer = m_gpuScene.GetRayTracingInstances().GetBuffer())
-            resources.SceneRayTracingInstances = graph.ImportBuffer("Scene Ray Tracing Instances", buffer);
+        if (const nri::Buffer* buffer = m_gpuScene.GetInstances().GetBuffer())
+            resources.SceneInstances = graph.ImportBuffer("Scene Instances", buffer->handle());
+        if (const nri::Buffer* buffer = m_gpuScene.GetTransforms().GetBuffer())
+            resources.SceneTransforms = graph.ImportBuffer("Scene Transforms", buffer->handle());
+        if (const nri::Buffer* buffer = m_gpuScene.GetMaterials().GetBuffer())
+            resources.SceneMaterials = graph.ImportBuffer("Scene Materials", buffer->handle());
+        if (const nri::Buffer* buffer = m_gpuScene.GetMeshes().GetBuffer())
+            resources.SceneMeshes = graph.ImportBuffer("Scene Meshes", buffer->handle());
+        if (const nri::Buffer* buffer = m_gpuScene.GetRayTracingInstances().GetBuffer())
+            resources.SceneRayTracingInstances = graph.ImportBuffer("Scene Ray Tracing Instances", buffer->handle());
         if (m_emissiveGridBuffer && uniformData.emissiveGridReference != 0 && uniformData.emissiveTriangleCount > 0)
         {
-            resources.EmissiveLightGrid = graph.ImportBuffer("Emissive Light Grid", m_emissiveGridBuffer.get());
-            resources.EmissiveTriangles = graph.ImportBuffer("Emissive Triangles", m_emissiveTriangleBuffer.get());
-            resources.EmissiveTriangleCdf = graph.ImportBuffer("Emissive Triangle CDF", m_emissiveTriangleCdfBuffer.get());
+            resources.EmissiveLightGrid = graph.ImportBuffer("Emissive Light Grid", m_emissiveGridBuffer.handle());
+            resources.EmissiveTriangles = graph.ImportBuffer("Emissive Triangles", m_emissiveTriangleBuffer.handle());
+            resources.EmissiveTriangleCdf = graph.ImportBuffer("Emissive Triangle CDF", m_emissiveTriangleCdfBuffer.handle());
         }
         if (frame.skinningWorkCount > 0 && frameIndex < m_skinnedVertexBuffers.size() &&
             frameIndex < m_skinningWorkItemBuffers.size() && frameIndex < m_boneBuffers.size())
         {
             const uint32_t previousFrame = (frameIndex + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
-            resources.SkinningSourceVertices = graph.ImportBuffer("Skinning Source Vertices", &m_vertexStream.GetBuffer(), RGImportAccess::ReadOnly);
-            resources.SkinningBoneMatrices = graph.ImportBuffer("Skinning Bone Matrices", m_boneBuffers[frameIndex].get(), RGImportAccess::ReadOnly);
-            resources.SkinningWorkItems = graph.ImportBuffer("Skinning Work Items", m_skinningWorkItemBuffers[frameIndex].get(), RGImportAccess::ReadOnly);
-            resources.SkinnedVertices = graph.ImportBuffer("Skinned Vertices", m_skinnedVertexBuffers[frameIndex].get());
+            resources.SkinningSourceVertices = graph.ImportBuffer("Skinning Source Vertices", m_vertexStream.GetBuffer().handle(), RGImportAccess::ReadOnly);
+            resources.SkinningBoneMatrices = graph.ImportBuffer("Skinning Bone Matrices", m_boneBuffers[frameIndex].handle(), RGImportAccess::ReadOnly);
+            resources.SkinningWorkItems = graph.ImportBuffer("Skinning Work Items", m_skinningWorkItemBuffers[frameIndex].handle(), RGImportAccess::ReadOnly);
+            resources.SkinnedVertices = graph.ImportBuffer("Skinned Vertices", m_skinnedVertexBuffers[frameIndex].handle());
             if (previousFrame < m_skinnedVertexBuffers.size())
-                resources.PreviousSkinnedVertices = graph.ImportBuffer("Previous Skinned Vertices", m_skinnedVertexBuffers[previousFrame].get(), RGImportAccess::ReadOnly);
+                resources.PreviousSkinnedVertices = graph.ImportBuffer("Previous Skinned Vertices", m_skinnedVertexBuffers[previousFrame].handle(), RGImportAccess::ReadOnly);
         }
         if (frame.rayTracingOffsetWorkCount > 0 && frameIndex < m_rayTracingOffsetVertexBuffers.size() && frameIndex < m_rayTracingOffsetWorkItemBuffers.size())
         {
-            resources.RayTracingOffsetWorkItems = graph.ImportBuffer("Ray Tracing Offset Work Items", m_rayTracingOffsetWorkItemBuffers[frameIndex].get(), RGImportAccess::ReadOnly);
-            resources.RayTracingOffsetVertices = graph.ImportBuffer("Ray Tracing Offset Vertices", m_rayTracingOffsetVertexBuffers[frameIndex].get());
+            resources.RayTracingOffsetWorkItems = graph.ImportBuffer("Ray Tracing Offset Work Items", m_rayTracingOffsetWorkItemBuffers[frameIndex].handle(), RGImportAccess::ReadOnly);
+            resources.RayTracingOffsetVertices = graph.ImportBuffer("Ray Tracing Offset Vertices", m_rayTracingOffsetVertexBuffers[frameIndex].handle());
         }
         if (frameIndex < m_pickerStagingBuffers.size() && m_pickerStagingBuffers[frameIndex])
-            resources.PickerStaging = graph.ImportBuffer("Picker Staging", m_pickerStagingBuffers[frameIndex].get());
+            resources.PickerStaging = graph.ImportBuffer("Picker Staging", m_pickerStagingBuffers[frameIndex].handle());
         if (frameIndex < m_pickerDepthStagingBuffers.size() && m_pickerDepthStagingBuffers[frameIndex])
-            resources.PickerDepthStaging = graph.ImportBuffer("Picker Depth Staging", m_pickerDepthStagingBuffers[frameIndex].get());
-        resources.MipFeedback = graph.ImportBuffer("Mip Feedback", m_mipFeedbackBuffer.get());
-        resources.ClusterStats = graph.ImportBuffer("Cluster Stats", m_clusterStatsBuffer.get());
+            resources.PickerDepthStaging = graph.ImportBuffer("Picker Depth Staging", m_pickerDepthStagingBuffers[frameIndex].handle());
+        resources.MipFeedback = graph.ImportBuffer("Mip Feedback", m_mipFeedbackBuffer.handle());
+        resources.ClusterStats = graph.ImportBuffer("Cluster Stats", m_clusterStatsBuffer.handle());
 
         updateDDGIVolume();
         prepareDDGIFrame(resources);
@@ -5527,15 +5722,15 @@ namespace Nox
     {
         MeshletDrawCursor cursor;
         cursor.references = m_frame.meshletReferences;
-        cursor.references.drawInstancesReference = context.Buffer(late ? draws.LateInstances : draws.VisibleInstances).getDeviceAddress();
-        cursor.commands = &context.Buffer(late ? draws.LateCommands : draws.Commands);
-        cursor.counts = &context.Buffer(draws.Counts);
+        cursor.references.drawInstancesReference = nriGetBufferDeviceAddress(context.Buffer(late ? draws.LateInstances : draws.VisibleInstances));
+        cursor.commands = context.Buffer(late ? draws.LateCommands : draws.Commands);
+        cursor.counts = context.Buffer(draws.Counts);
         cursor.late = late;
         cursor.taskFlags = m_meshletCulling;
         return cursor;
     }
 
-    void Renderer::drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const
+    void Renderer::drawMeshletBucket(nri::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, const nri::Pipeline& pipeline, nri::CullMode cullMode, bool depthWrite, bool blendEnable) const
     {
         const uint32_t maxDrawCount = getBucketEntryCount(bucket);
         if (maxDrawCount == 0)
@@ -5549,7 +5744,7 @@ namespace Nox
 
         if (cursor.boundPipeline != &pipeline)
         {
-            cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, pipeline);
+            cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
             cursor.boundPipeline = &pipeline;
         }
 
@@ -5560,7 +5755,7 @@ namespace Nox
         constexpr uint32_t CommandStride = sizeof(shaderio::MeshTasksIndirectCommand);
         const size_t countArray = cursor.late ? offsetof(shaderio::CullCounts, lateDrawCount) : offsetof(shaderio::CullCounts, drawCount);
         const uint64_t countOffset = countArray + sizeof(uint32_t) * static_cast<size_t>(bucket);
-        cmd.drawMeshTasksIndirectCount(*cursor.commands, static_cast<uint64_t>(firstEntry) * CommandStride, *cursor.counts, countOffset, maxDrawCount, CommandStride);
+        nriCmdDrawMeshTasksIndirectCount(cmd.handle(), cursor.commands, static_cast<uint64_t>(firstEntry) * CommandStride, cursor.counts, countOffset, maxDrawCount, CommandStride);
     }
 
     void Renderer::updateEntityIDBuffer(uint32_t currentImage)
@@ -5603,17 +5798,17 @@ namespace Nox
         uniformData.jitterOffset = m_currentJitter;
         uniformData.prevJitterOffset = m_prevJitter;
         uniformData.samplerIndex = selectedSampler;
-        uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
-        uniformData.mipFeedbackReference = m_mipFeedbackBuffer->getDeviceAddress();
-        uniformData.virtualFeedbackReference = m_mipFeedbackBuffer->getDeviceAddress() + sizeof(uint32_t) * shaderio::MipFeedbackSlots;
-        uniformData.virtualTexturesReference = m_virtualTextureTable ? m_virtualTextureTable->getDeviceAddress() : 0;
-        uniformData.virtualPageTableReference = m_virtualPageTable ? m_virtualPageTable->getDeviceAddress() : 0;
-        uniformData.virtualTileStampsReference = m_virtualTileStamps ? m_virtualTileStamps->getDeviceAddress() : 0;
+        uniformData.imageHeapIndexOffset = m_resourceHeap.getImageHeapIndexOffset();
+        uniformData.mipFeedbackReference = m_mipFeedbackBuffer.getDeviceAddress();
+        uniformData.virtualFeedbackReference = m_mipFeedbackBuffer.getDeviceAddress() + sizeof(uint32_t) * shaderio::MipFeedbackSlots;
+        uniformData.virtualTexturesReference = m_virtualTextureTable ? m_virtualTextureTable.getDeviceAddress() : 0;
+        uniformData.virtualPageTableReference = m_virtualPageTable ? m_virtualPageTable.getDeviceAddress() : 0;
+        uniformData.virtualTileStampsReference = m_virtualTileStamps ? m_virtualTileStamps.getDeviceAddress() : 0;
         uniformData.mipFeedbackFrame = static_cast<uint32_t>(m_sceneFrameCounter);
         uniformData.lodErrorThreshold = m_lodErrorPixels / static_cast<float>(std::max(m_renderSize.height, 1u));
         uniformData.lodCameraNear = m_cameraNear;
         uniformData.lodFullDetail = (m_lodFullDetail || m_orthographic) ? 1u : 0u; // the LOD cut assumes a perspective camera
-        uniformData.clusterStatsReference = m_clusterStatsBuffer->getDeviceAddress();
+        uniformData.clusterStatsReference = m_clusterStatsBuffer.getDeviceAddress();
         uniformData.unitsPerMeter = WorldUnits::PerMeter();
         {
             // Animated Custom Lit shaders (CustomLitSurface::time): seconds since the renderer started, wrapped every hour.
@@ -5628,14 +5823,14 @@ namespace Nox
         {
             // Texture LOD biases (shaderIO.h): textures as sharp as the shown resolution wants when DLSS renders fewer pixels; the
             // path tracer one mip sharper still (RTXPT's TexLODBias), and the streaming asked for the finest of what samples.
-            const NRI::Extent2D shown = m_isEditor ? m_viewportSize : m_swapChainExtent;
+            const nri::Extent2D shown = m_isEditor ? m_viewportSize : m_swapChainExtent;
             const float upscaleBias = std::min(std::log2(static_cast<float>(std::max(m_renderSize.width, 1u)) /
                                                          static_cast<float>(std::max(shown.width, 1u))), 0.0f);
             uniformData.textureLodBias = upscaleBias;
             uniformData.pathTracerTexLodBias = upscaleBias - 1.0f;
             uniformData.mipFeedbackLodBias = m_pathTracingEnabled ? uniformData.pathTracerTexLodBias : uniformData.textureLodBias;
-            uniformData.rayReconstructionActive = (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported() &&
-                                                   m_dlssRayReconstructionEnabled && m_device->isDLSSRayReconstructionSupported()) ? 1u : 0u;
+            uniformData.rayReconstructionActive = (m_dlssEnabled && m_dlssMode != NRI_UPSCALER_MODE_OFF && isDLSSSupported() &&
+                                                   m_dlssRayReconstructionEnabled && isDLSSRayReconstructionSupported()) ? 1u : 0u;
         }
         {
             // Ray tracing resolution: which pixel of each block the reduced RT passes trace this frame (all four over four frames).
@@ -5643,8 +5838,8 @@ namespace Nox
             // Full resolution when an upsample pipeline is missing (a pass would then trace its full extent with the reduced
             // pattern: garbage), and under DLSS Ray Reconstruction (it wants its own per-pixel noise, not 2x2-upsampled input).
             const bool upsampleReady = m_rtUpsamplePipelines[0] && m_rtUpsamplePipelines[1] && m_rtUpsamplePipelines[2];
-            const bool rayReconstruction = m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_dlssRayReconstructionEnabled &&
-                                           m_device->isDLSSRayReconstructionSupported();
+            const bool rayReconstruction = m_dlssEnabled && m_dlssMode != NRI_UPSCALER_MODE_OFF && m_dlssRayReconstructionEnabled &&
+                                           isDLSSRayReconstructionSupported();
             uniformData.rtSubsample = (upsampleReady && !rayReconstruction) ? std::max(m_rtSubsample, 1u) : 1u;
             const uint32_t* offset = BlockOrder[m_sceneFrameCounter % 4];
             uniformData.rtSubsampleOffset = uniformData.rtSubsample > 1 ? (offset[0] | (offset[1] << 16)) : 0u;
@@ -5706,15 +5901,15 @@ namespace Nox
         view.blockCount = (view.entryCount + shaderio::CULL_BLOCK_SIZE - 1) / shaderio::CULL_BLOCK_SIZE;
         view.flags = (m_instanceCullingEnabled ? shaderio::CULL_INSTANCES : 0u) |
                      (m_occlusionCullingEnabled && !m_frozen ? shaderio::CULL_OCCLUSION : 0u);
-        memcpy(m_cullViewBuffers[currentImage]->map(0, sizeof(view)), &view, sizeof(view));
-        m_cullViewBuffers[currentImage]->unmap();
+        memcpy(m_cullViewBuffers[currentImage].map(0, sizeof(view)), &view, sizeof(view));
+        m_cullViewBuffers[currentImage].unmap();
 
         // What changed in the drawn scene since last frame (the views that keep what they drew redraw there).
         m_gpuScene.TakeChangedBounds(m_frameChangedBounds, m_frameChangedBoundsStatic, m_frameOriginMoved, m_frameBoundsLost);
 
-        std::vector<std::unique_ptr<NRI::Buffer>> releasedBuffers;
+        std::vector<nri::Buffer> releasedBuffers;
         m_gpuScene.PrepareUploads(currentImage, releasedBuffers);
-        for (std::unique_ptr<NRI::Buffer>& buffer : releasedBuffers)
+        for (nri::Buffer& buffer : releasedBuffers)
             {
                 std::scoped_lock lock(m_deferredReleasesMutex);
                 m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(buffer) });
@@ -5743,7 +5938,7 @@ namespace Nox
         if (byteCount > m_DrawListBufferCapacity)
         {
             m_DrawListBufferCapacity = byteCount * 2;
-            for (std::unique_ptr<NRI::Buffer>& oldBuffer : m_drawListBuffers)
+            for (nri::Buffer& oldBuffer : m_drawListBuffers)
             {
                 if (oldBuffer)
                     {
@@ -5756,8 +5951,8 @@ namespace Nox
 
         if (!std::exchange(m_drawListStale[currentImage], false) || byteCount == 0)
             return;
-        memcpy(m_drawListBuffers[currentImage]->map(0, byteCount), m_drawList.data(), byteCount);
-        m_drawListBuffers[currentImage]->unmap();
+        memcpy(m_drawListBuffers[currentImage].map(0, byteCount), m_drawList.data(), byteCount);
+        m_drawListBuffers[currentImage].unmap();
     }
 
     void Renderer::updateLightBuffer(uint32_t currentImage)
@@ -5811,7 +6006,7 @@ namespace Nox
             memcpy(m_lightBuffersMapped[currentImage], m_lightBufferObjects.data(), requiredLightSize);
         }
 
-        uniformData.lightDataReference = m_lightBuffers[currentImage]->getDeviceAddress();
+        uniformData.lightDataReference = m_lightBuffers[currentImage].getDeviceAddress();
         uniformData.lightCount = static_cast<uint32_t>(m_lightBufferObjects.size());
 
         // Emissive meshes as lights, for the path tracer and the screen-probe GI (they found them only by chance before: a lamp-lit
@@ -5844,15 +6039,15 @@ namespace Nox
                     }
                     for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; ++frame)
                     {
-                        m_emissiveLightBuffers[frame] = m_device->createBuffer(NRI::BufferDesc{ .size = m_emissiveLightBufferCapacity,
-                                                                                                .usage = NRI::BufferUsage::Storage });
-                        m_emissiveLightBuffersMapped[frame] = m_emissiveLightBuffers[frame]->map(0, m_emissiveLightBufferCapacity);
+                        m_emissiveLightBuffers[frame] = m_device.createBuffer(nri::BufferDesc{ .size = m_emissiveLightBufferCapacity,
+                                                                                                .usage = NRI_BUFFER_USAGE_STORAGE });
+                        m_emissiveLightBuffersMapped[frame] = m_emissiveLightBuffers[frame].map(0, m_emissiveLightBufferCapacity);
                     }
                 }
                 memcpy(m_emissiveLightBuffersMapped[currentImage], m_emissiveLights.data(), required);
                 uniformData.emissiveLightCount = static_cast<uint32_t>(m_emissiveLights.size());
                 uniformData.emissiveLightTotalWeight = total;
-                uniformData.emissiveLightsReference = m_emissiveLightBuffers[currentImage]->getDeviceAddress();
+                uniformData.emissiveLightsReference = m_emissiveLightBuffers[currentImage].getDeviceAddress();
 
                 // The local grid around the camera, snapped to its cells (EmissiveLightGrid.slang builds it this frame), for the path
                 // tracer and the screen-probe GI alike.
@@ -5864,7 +6059,7 @@ namespace Nox
                     // The emissive triangle lights (EmissiveLightGrid.slang trianglesMain / scanMain), grown as needed.
                     if (triangleCount > m_emissiveTriangleCapacity)
                     {
-                        for (std::unique_ptr<NRI::Buffer>* buffer : { &m_emissiveTriangleBuffer, &m_emissiveTriangleCdfBuffer })
+                        for (nri::Buffer* buffer : { &m_emissiveTriangleBuffer, &m_emissiveTriangleCdfBuffer })
                         {
                             if (*buffer)
                             {
@@ -5873,23 +6068,23 @@ namespace Nox
                             }
                         }
                         m_emissiveTriangleCapacity = triangleCount + triangleCount / 2;
-                        m_emissiveTriangleBuffer = m_device->createBuffer(NRI::BufferDesc{
-                            .size = sizeof(shaderio::EmissiveTriangle) * m_emissiveTriangleCapacity, .usage = NRI::BufferUsage::Storage });
-                        m_emissiveTriangleCdfBuffer = m_device->createBuffer(NRI::BufferDesc{
-                            .size = sizeof(float) * m_emissiveTriangleCapacity, .usage = NRI::BufferUsage::Storage });
+                        m_emissiveTriangleBuffer = m_device.createBuffer(nri::BufferDesc{
+                            .size = sizeof(shaderio::EmissiveTriangle) * m_emissiveTriangleCapacity, .usage = NRI_BUFFER_USAGE_STORAGE });
+                        m_emissiveTriangleCdfBuffer = m_device.createBuffer(nri::BufferDesc{
+                            .size = sizeof(float) * m_emissiveTriangleCapacity, .usage = NRI_BUFFER_USAGE_STORAGE });
                     }
-                    uniformData.emissiveTrianglesReference = m_emissiveTriangleBuffer->getDeviceAddress();
-                    uniformData.emissiveTriangleCdfReference = m_emissiveTriangleCdfBuffer->getDeviceAddress();
+                    uniformData.emissiveTrianglesReference = m_emissiveTriangleBuffer.getDeviceAddress();
+                    uniformData.emissiveTriangleCdfReference = m_emissiveTriangleCdfBuffer.getDeviceAddress();
                     uniformData.emissiveTriangleCount = triangleCount;
 
                     if (!m_emissiveGridBuffer)
-                        m_emissiveGridBuffer = m_device->createBuffer(NRI::BufferDesc{
+                        m_emissiveGridBuffer = m_device.createBuffer(nri::BufferDesc{
                             .size = sizeof(uint32_t) * shaderio::EmissiveGridSizeX * shaderio::EmissiveGridSizeY * shaderio::EmissiveGridSizeZ *
                                     shaderio::EmissiveGridEntries,
-                            .usage = NRI::BufferUsage::Storage });
+                            .usage = NRI_BUFFER_USAGE_STORAGE });
                     const float cellSize = shaderio::EmissiveGridCellMeters * uniformData.unitsPerMeter;
                     const glm::vec3 halfGrid = 0.5f * cellSize * glm::vec3(shaderio::EmissiveGridSizeX, shaderio::EmissiveGridSizeY, shaderio::EmissiveGridSizeZ);
-                    uniformData.emissiveGridReference = m_emissiveGridBuffer->getDeviceAddress();
+                    uniformData.emissiveGridReference = m_emissiveGridBuffer.getDeviceAddress();
                     uniformData.emissiveGridOrigin = glm::floor((glm::vec3(uniformData.cameraWorldPos) - halfGrid) / cellSize) * cellSize;
                     uniformData.emissiveGridCellSize = cellSize;
                 }
@@ -5926,7 +6121,7 @@ namespace Nox
             if (const DeferredTextureSlot* texSlot = std::get_if<DeferredTextureSlot>(&release.payload))
             {
                 if (texSlot->slot != ~0u && m_resourceHeap)
-                    m_resourceHeap->unregisterTexture(texSlot->slot);
+                    m_resourceHeap.unregisterTexture(texSlot->slot);
                 continue;
             }
             const MeshHandle* mesh = std::get_if<MeshHandle>(&release.payload);
@@ -5979,15 +6174,15 @@ namespace Nox
             geometryCommitted += stream->GetCapacityBytes();
             geometryUsed += stream->GetUsedBytes();
         }
-        for (const std::unique_ptr<NRI::Buffer>& buffer : m_skinnedVertexBuffers)
+        for (const nri::Buffer& buffer : m_skinnedVertexBuffers)
         {
             if (buffer)
-                geometryCommitted += buffer->getSize();
+                geometryCommitted += buffer.getSize();
         }
-        for (const std::unique_ptr<NRI::Buffer>& buffer : m_skinningWorkItemBuffers)
+        for (const nri::Buffer& buffer : m_skinningWorkItemBuffers)
         {
             if (buffer)
-                geometryCommitted += buffer->getSize();
+                geometryCommitted += buffer.getSize();
         }
         uint64_t skinnedVerticesInUse = 0;
         if (!m_skinningLayout.empty())
@@ -6004,23 +6199,23 @@ namespace Nox
         for (const MeshBLAS& blas : m_meshBLASes)
         {
             if (blas.storageBuffer)
-                rayTracing += blas.storageBuffer->getSize();
+                rayTracing += blas.storageBuffer.getSize();
         }
         for (const AnimatedBLAS& animated : m_animatedBLASes)
         {
             if (animated.Resource.storageBuffer)
-                rayTracing += animated.Resource.storageBuffer->getSize();
+                rayTracing += animated.Resource.storageBuffer.getSize();
         }
         if (m_animatedBLASScratch)
-            rayTracing += m_animatedBLASScratch->getSize();
+            rayTracing += m_animatedBLASScratch.getSize();
         if (m_tlasBuffer)
-            rayTracing += m_tlasBuffer->getSize();
+            rayTracing += m_tlasBuffer.getSize();
         if (m_tlasScratchBuffer)
-            rayTracing += m_tlasScratchBuffer->getSize();
-        for (const std::unique_ptr<NRI::Buffer>& buffer : m_rtInstanceBuffers)
+            rayTracing += m_tlasScratchBuffer.getSize();
+        for (const nri::Buffer& buffer : m_rtInstanceBuffers)
         {
             if (buffer)
-                rayTracing += buffer->getSize();
+                rayTracing += buffer.getSize();
         }
         m_memoryBudget.SetCommitted(MemoryCategory::RayTracing, rayTracing, rayTracing);
 
@@ -6034,7 +6229,7 @@ namespace Nox
         m_memoryBudget.SetCommitted(MemoryCategory::Transient, transient, transient);
 
         // Textures: every image the device holds, minus the render graph's share of them.
-        const uint64_t textures = m_device->getTextureBytes();
+        const uint64_t textures = m_device.getTextureBytes();
         m_memoryBudget.SetCommitted(MemoryCategory::Textures,
                                     textures > pool.GetTextureMemory() ? textures - pool.GetTextureMemory() : 0,
                                     textures > pool.GetTextureMemory() ? textures - pool.GetTextureMemory() : 0);
@@ -6049,10 +6244,10 @@ namespace Nox
             return;
         m_lastMemoryStatsSample = now;
 
-        m_device->getMemoryStats(m_memoryHeapStats);
+        m_memoryHeapStats = m_device.getMemoryStats();
         updateMemoryBudget();
 #if NOX_PROFILING_ENABLED
-        Profiler::Get().SubmitMemoryStats(m_memoryHeapStats, m_device->isMemoryBudgetSupported(), Platform::QueryProcessMemory(),
+        Profiler::Get().SubmitMemoryStats(m_memoryHeapStats, m_device.isMemoryBudgetSupported(), Platform::QueryProcessMemory(),
                                           m_memoryBudget.GetCategories());
 #endif
     }
@@ -6062,7 +6257,7 @@ namespace Nox
         NOX_PROFILE_SCOPE("Renderer::drawFrame");
 
         // Before any allocation of this frame: refreshes the VMA memory budget (VMA "Staying within budget").
-        m_device->beginFrame(static_cast<uint32_t>(m_sceneFrameCounter));
+        m_device.beginFrame(static_cast<uint32_t>(m_sceneFrameCounter));
         // Every build: the texture streaming pool is a share of the budget.
         sampleMemoryStats();
 
@@ -6073,7 +6268,7 @@ namespace Nox
         if (!m_pendingReloads.empty())
         {
             NOX_PROFILE_SCOPE("Shader Hot Reload");
-            m_device->waitIdle(); // Ensure GPU is idle before destroying and recreating pipelines!
+            m_device.waitIdle(); // Ensure GPU is idle before destroying and recreating pipelines!
 
             std::unordered_map<std::string, std::function<void()>> reloads;
             {
@@ -6096,13 +6291,13 @@ namespace Nox
 
         uint32_t imageIndex = 0;
 
-        NRI::FrameResult acquireResult;
+        nri::FrameResult acquireResult;
         {
             // Includes waiting for this frame slot's previous submission (in-flight fence).
             NOX_PROFILE_WAIT_SCOPE("Wait GPU + Acquire");
-            acquireResult = m_swapChain->acquireNextImage(frameIndex, imageIndex);
+            acquireResult = m_swapChain.acquireNextImage(frameIndex, imageIndex);
         }
-        if (acquireResult == NRI::FrameResult::ResizeRequired)
+        if (acquireResult == NRI_FRAME_RESULT_RESIZE_REQUIRED)
         {
             recreateSwapChain();
             return;
@@ -6177,12 +6372,6 @@ namespace Nox
         {
             NOX_PROFILE_SCOPE("Renderer2D Update");
             m_renderer2D->Update(frameIndex, uniformData);
-            if (m_uiRenderer)
-            {
-                m_uiRenderer->BeginFrame();
-                uploadGlyphAtlas(); // (glyphs the UI rasterized for this frame: copied before it draws)
-                m_uiRenderer->Upload(frameIndex);
-            }
         }
 
         std::span<const RGSubmission> submissions;
@@ -6197,9 +6386,9 @@ namespace Nox
             // the GPU; streamed loads were published after their copies completed, so their wait costs nothing and
             // only orders the transfer writes. Streamed copies still in flight are not waited for.
             m_uploads.Flush();
-            const NRI::TimelinePoint uploads{ &m_uploads.GetTimeline(), m_uploads.GetFrameWaitValue() };
+            const nri::TimelinePoint uploads{ m_uploads.GetTimeline(), m_uploads.GetFrameWaitValue() };
             // Pages of the sparse geometry streams bound so far (decision D5): the frame writes and reads ranges in them.
-            const NRI::TimelinePoint sparse = m_device->getSparseTimelinePoint();
+            const nri::TimelinePoint sparse = m_device.getSparseTimelinePoint();
             // With async compute the frame is several submissions on two queues, ordered by the graph's timeline points (each also
             // waits for the uploads); the last one is graphics and presents.
             for (size_t index = 0; index < submissions.size(); ++index)
@@ -6210,9 +6399,9 @@ namespace Nox
                 if (sparse.semaphore && sparse.value > 0)
                     m_submitWaitScratch.push_back(sparse);
                 if (index + 1 < submissions.size())
-                    m_device->submit(submission.Queue, submission.CommandBuffers, m_submitWaitScratch, submission.Signals);
+                    m_device.submit(submission.Queue, submission.CommandBuffers, m_submitWaitScratch, submission.Signals);
                 else
-                    m_device->submitCommandBuffers(submission.CommandBuffers, *m_swapChain, frameIndex, imageIndex, m_submitWaitScratch);
+                    m_device.submitCommandBuffers(submission.CommandBuffers, m_swapChain.handle(), frameIndex, imageIndex, m_submitWaitScratch);
             }
         }
 
@@ -6220,21 +6409,20 @@ namespace Nox
         // ResizeRequired from present() (swapchain genuinely out of date) always recreates immediately;
         // the passive framebufferResized flag (set by every SDL resize event during a live window-border
         // drag) only triggers a recreate once no new resize event has arrived for a short settle window.
-        NRI::FrameResult presentResult;
+        nri::FrameResult presentResult;
         {
             NOX_PROFILE_WAIT_SCOPE("Present");
-            presentResult = m_swapChain->present(frameIndex, imageIndex);
+            presentResult = m_swapChain.present(frameIndex, imageIndex);
         }
         bool windowResizeSettled = framebufferResized &&
             (std::chrono::steady_clock::now() - m_lastWindowResizeRequestTime >= std::chrono::milliseconds(120));
-        if (presentResult == NRI::FrameResult::ResizeRequired || windowResizeSettled)
+        if (presentResult == NRI_FRAME_RESULT_RESIZE_REQUIRED || windowResizeSettled)
         {
             framebufferResized = false;
             recreateSwapChain();
         }
 
         m_renderer2D->EndFrame();
-        resetGlyphAtlasIfFull();
 
         frameIndex = (frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
         m_sceneFrameCounter++;
@@ -6305,36 +6493,37 @@ namespace Nox
             if (m_rtInstanceBuffers.size() < MAX_FRAMES_IN_FLIGHT)
                 m_rtInstanceBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 
-            const uint64_t instanceBufferSize = sizeof(NRI::AccelerationStructureInstance) * instanceCount;
+            const uint64_t instanceBufferSize = sizeof(nri::AccelerationStructureInstance) * instanceCount;
 
             // 1. This frame slot's instance buffer (the build reads it on the GPU)
-            if (!m_rtInstanceBuffers[currentFrameIndex] || m_rtInstanceBuffers[currentFrameIndex]->getSize() < instanceBufferSize)
+            if (!m_rtInstanceBuffers[currentFrameIndex] || m_rtInstanceBuffers[currentFrameIndex].getSize() < instanceBufferSize)
             {
-                m_rtInstanceBuffers[currentFrameIndex] = m_device->createBuffer(NRI::BufferDesc{
+                m_rtInstanceBuffers[currentFrameIndex] = m_device.createBuffer(nri::BufferDesc{
                     .size = std::max(instanceBufferSize, static_cast<uint64_t>(64 * 1024)),
-                    .usage = NRI::BufferUsage::AccelerationStructureInstance
+                    .usage = NRI_BUFFER_USAGE_ACCELERATION_STRUCTURE_INSTANCE
                 });
             }
-            auto* mapped = static_cast<NRI::AccelerationStructureInstance*>(m_rtInstanceBuffers[currentFrameIndex]->map(0, instanceBufferSize));
+            auto* mapped = static_cast<nri::AccelerationStructureInstance*>(m_rtInstanceBuffers[currentFrameIndex].map(0, instanceBufferSize));
             m_gpuScene.WriteTlasInstances({ mapped, instanceCount });
-            m_rtInstanceBuffers[currentFrameIndex]->unmap();
+            m_rtInstanceBuffers[currentFrameIndex].unmap();
 
             // 2. Query TLAS build sizes
-            m_tlasBuildDesc = NRI::AccelerationStructureBuildDesc{
-                .type = NRI::AccelerationStructureType::TopLevel,
-                .flags = NRI::AccelerationStructureBuildFlags::PreferFastTrace,
+            m_tlasBuildDesc = ASBuildDesc{
+                .type = NRI_ACCELERATION_STRUCTURE_TOP_LEVEL,
+                .flags = NRI_AS_BUILD_PREFER_FAST_TRACE,
                 .instances = {
-                    .instanceBufferAddress = m_rtInstanceBuffers[currentFrameIndex]->getDeviceAddress(),
+                    .instanceBufferAddress = m_rtInstanceBuffers[currentFrameIndex].getDeviceAddress(),
                     .instanceCount = instanceCount
                 }
             };
 
-            NRI::AccelerationStructureBuildSizes tlasSizes = m_device->getAccelerationStructureBuildSizes(m_tlasBuildDesc);
+            const NriAccelerationStructureBuildDesc tlasBuildDescC = m_tlasBuildDesc.toNri();
+            nri::AccelerationStructureBuildSizes tlasSizes = nriGetAccelerationStructureBuildSizes(m_device.handle(), &tlasBuildDescC);
 
             // 3. Allocate / resize TLAS storage and scratch buffers
-            if (!m_sceneTLAS || m_sceneTLASCapacity < instanceCount || !m_tlasBuffer || m_tlasBuffer->getSize() < tlasSizes.accelerationStructureSize)
+            if (!m_sceneTLAS || m_sceneTLASCapacity < instanceCount || !m_tlasBuffer || m_tlasBuffer.getSize() < tlasSizes.accelerationStructureSize)
             {
-                m_device->waitIdle();
+                m_device.waitIdle();
 
                 // CRITICAL ORDER: Destroy VkAccelerationStructureKHR FIRST, then the backing VkBuffer!
                 m_sceneTLAS.reset();
@@ -6343,31 +6532,34 @@ namespace Nox
 
                 m_sceneTLASCapacity = std::max(instanceCount * 2, 64u);
 
-                m_tlasBuffer = m_device->createBuffer(NRI::BufferDesc{
+                m_tlasBuffer = m_device.createBuffer(nri::BufferDesc{
                     .size = tlasSizes.accelerationStructureSize,
-                    .usage = NRI::BufferUsage::AccelerationStructure
+                    .usage = NRI_BUFFER_USAGE_ACCELERATION_STRUCTURE
                 });
 
-                m_sceneTLAS = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
-                    .type = NRI::AccelerationStructureType::TopLevel,
-                    .storageBuffer = m_tlasBuffer.get(),
+                const NriAccelerationStructureDesc tlasDesc{
+                    .type = NRI_ACCELERATION_STRUCTURE_TOP_LEVEL,
+                    .storageBuffer = m_tlasBuffer.handle(),
                     .bufferOffset = 0,
                     .size = tlasSizes.accelerationStructureSize
-                });
+                };
+                NriAccelerationStructure rawTlas = nullptr;
+                nri::checkResult(nriCreateAccelerationStructure(m_device.handle(), &tlasDesc, &rawTlas), "nriCreateAccelerationStructure");
+                m_sceneTLAS = nri::AccelerationStructure(rawTlas);
 
-                m_tlasScratchBuffer = m_device->createBuffer(NRI::BufferDesc{
+                m_tlasScratchBuffer = m_device.createBuffer(nri::BufferDesc{
                     .size = tlasSizes.buildScratchSize,
-                    .usage = NRI::BufferUsage::AccelerationStructureScratch
+                    .usage = NRI_BUFFER_USAGE_ACCELERATION_STRUCTURE_SCRATCH
                 });
 
                 // Register TLAS into Descriptor Heap ONLY when newly created or resized
-                m_tlasHeapSlot = m_resourceHeap->registerAccelerationStructure(*m_sceneTLAS, m_tlasHeapSlot);
+                m_tlasHeapSlot = nriRegisterAccelerationStructure(m_resourceHeap.handle(), m_sceneTLAS.handle(), m_tlasHeapSlot);
                 m_tlasHeapIndex = m_tlasHeapSlot;
             }
         }
 
         // 4. Update UBO flags (ready for updateUniformBuffer!)
-        uniformData.tlasDeviceAddress = m_sceneTLAS ? m_sceneTLAS->getDeviceAddress() : 0;
+        uniformData.tlasDeviceAddress = m_sceneTLAS ? m_sceneTLAS.getDeviceAddress() : 0;
         uniformData.tlasHeapIndex = m_tlasHeapIndex;
         uniformData.enableRTShadows = getRayTracedShadowsActive() ? 1 : 0;
         uniformData.enableRTReflections = (m_rayTracingEnabled && m_rayTracingReflections) ? 1 : 0;
@@ -6396,15 +6588,20 @@ namespace Nox
                 continue;
             }
             const BlasBuild build{ blasId, source.meshSlot, source.vertices, source.indices, source.isOpaque };
-            const NRI::AccelerationStructureBuildSizes sizes = m_device->getAccelerationStructureBuildSizes(blasBuildDesc(build));
+            const ASBuildDesc buildDesc = blasBuildDesc(build);
+            const NriAccelerationStructureBuildDesc buildDescC = buildDesc.toNri();
+            const nri::AccelerationStructureBuildSizes sizes = nriGetAccelerationStructureBuildSizes(m_device.handle(), &buildDescC);
             MeshBLAS& blas = m_meshBLASes[blasId];
-            blas.storageBuffer = m_device->createBuffer(NRI::BufferDesc{ .size = sizes.accelerationStructureSize, .usage = NRI::BufferUsage::AccelerationStructure });
-            blas.as = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
-                .type = NRI::AccelerationStructureType::BottomLevel,
-                .storageBuffer = blas.storageBuffer.get(),
+            blas.storageBuffer = m_device.createBuffer(nri::BufferDesc{ .size = sizes.accelerationStructureSize, .usage = NRI_BUFFER_USAGE_ACCELERATION_STRUCTURE });
+            const NriAccelerationStructureDesc asDesc{
+                .type = NRI_ACCELERATION_STRUCTURE_BOTTOM_LEVEL,
+                .storageBuffer = blas.storageBuffer.handle(),
                 .bufferOffset = 0,
                 .size = sizes.accelerationStructureSize
-            });
+            };
+            NriAccelerationStructure rawBlas = nullptr;
+            nri::checkResult(nriCreateAccelerationStructure(m_device.handle(), &asDesc, &rawBlas), "nriCreateAccelerationStructure");
+            blas.as = nri::AccelerationStructure(rawBlas);
             blas.serial = ++m_blasSerial; // (compaction results measured before the eviction match no more)
             source.evicted = false;
             --m_evictedBlasCount;
@@ -6441,7 +6638,7 @@ namespace Nox
             if (freed >= excess)
                 break;
             MeshBLAS& blas = m_meshBLASes[blasId];
-            freed += blas.storageBuffer ? blas.storageBuffer->getSize() : 0;
+            freed += blas.storageBuffer ? blas.storageBuffer.getSize() : 0;
             // Out of this frame's TLAS; frames in flight may still trace it (as for a compaction's old BLAS).
             m_gpuScene.SetMeshBlas(m_blasSources[blasId].meshSlot, 0);
             {
@@ -6460,12 +6657,13 @@ namespace Nox
                           rayTracing.Committed >> 20, rayTracing.Budget >> 20, evicted, freed >> 20);
     }
 
-    void Renderer::BuildSceneAccelerationStructure(NRI::CommandBuffer& cmd)
+    void Renderer::BuildSceneAccelerationStructure(nri::CommandBuffer& cmd)
     {
         // Host instance writes -> AS build read, build, AS build write -> shader read.
-        cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::TransferToBuild);
-        cmd.buildAccelerationStructure(m_tlasBuildDesc, m_tlasScratchBuffer->getDeviceAddress(), *m_sceneTLAS);
-        cmd.accelerationStructureBarrier(NRI::AccelerationStructureBarrierType::BuildToShaderRead);
+        const NriAccelerationStructureBuildDesc tlasDescC = m_tlasBuildDesc.toNri();
+        nriCmdAccelerationStructureBarrier(cmd.handle(), NRI_AS_BARRIER_TRANSFER_TO_BUILD);
+        nriCmdBuildAccelerationStructure(cmd.handle(), &tlasDescC, m_tlasScratchBuffer.getDeviceAddress(), m_sceneTLAS.handle());
+        nriCmdAccelerationStructureBarrier(cmd.handle(), NRI_AS_BARRIER_BUILD_TO_SHADER_READ);
     }
 
     void Renderer::readBlasCompactedSizes(uint32_t frameSlot)
@@ -6475,7 +6673,7 @@ namespace Nox
             return;
 
         std::vector<uint64_t> sizes(queries.size());
-        if (!m_blasCompactionQueryPools[frameSlot]->getResults(0, sizes))
+        if (!m_blasCompactionQueryPools[frameSlot].getResults(0, sizes))
             return;
 
         for (size_t index = 0; index < queries.size(); ++index)
@@ -6484,20 +6682,23 @@ namespace Nox
             // Unloaded (or its id reused) meanwhile, or nothing to gain.
             if (query.blasId >= m_meshBLASes.size() || m_meshBLASes[query.blasId].serial != query.serial || !m_meshBLASes[query.blasId].as)
                 continue;
-            if (sizes[index] == 0 || sizes[index] >= m_meshBLASes[query.blasId].as->getSize())
+            if (sizes[index] == 0 || sizes[index] >= m_meshBLASes[query.blasId].as.getSize())
                 continue;
 
             BlasCompaction compaction{ .blasId = query.blasId, .meshSlot = query.meshSlot };
-            compaction.compacted.storageBuffer = m_device->createBuffer(NRI::BufferDesc{
+            compaction.compacted.storageBuffer = m_device.createBuffer(nri::BufferDesc{
                 .size = sizes[index],
-                .usage = NRI::BufferUsage::AccelerationStructure
+                .usage = NRI_BUFFER_USAGE_ACCELERATION_STRUCTURE
             });
-            compaction.compacted.as = m_device->createAccelerationStructure(NRI::AccelerationStructureDesc{
-                .type = NRI::AccelerationStructureType::BottomLevel,
-                .storageBuffer = compaction.compacted.storageBuffer.get(),
+            const NriAccelerationStructureDesc asDesc{
+                .type = NRI_ACCELERATION_STRUCTURE_BOTTOM_LEVEL,
+                .storageBuffer = compaction.compacted.storageBuffer.handle(),
                 .bufferOffset = 0,
                 .size = sizes[index]
-            });
+            };
+            NriAccelerationStructure rawAs = nullptr;
+            nri::checkResult(nriCreateAccelerationStructure(m_device.handle(), &asDesc, &rawAs), "nriCreateAccelerationStructure");
+            compaction.compacted.as = nri::AccelerationStructure(rawAs);
             compaction.compacted.serial = query.serial;
             m_blasCompactions.push_back(std::move(compaction));
         }
@@ -6508,7 +6709,7 @@ namespace Nox
         if (!std::exchange(m_cullStatsPending[frameSlot], false))
             return;
 
-        const auto* counts = static_cast<const shaderio::CullCounts*>(m_cullStatsBuffers[frameSlot]->map(0, sizeof(shaderio::CullCounts)));
+        const auto* counts = static_cast<const shaderio::CullCounts*>(m_cullStatsBuffers[frameSlot].map(0, sizeof(shaderio::CullCounts)));
         m_visibleInstanceCount = 0;
         m_lateCandidateCount = 0;
         for (uint32_t drawCount : counts->drawCount)
@@ -6517,7 +6718,7 @@ namespace Nox
             m_lateCandidateCount += drawCount;
         m_lateDrawnCount = counts->lateDrawn;
         m_visibleTriangleCount = counts->visibleTriangles + counts->lateTriangles;
-        m_cullStatsBuffers[frameSlot]->unmap();
+        m_cullStatsBuffers[frameSlot].unmap();
     }
 
     void Renderer::readClusterStats(uint32_t frameSlot)
@@ -6525,8 +6726,8 @@ namespace Nox
         if (!std::exchange(m_clusterStatsPending[frameSlot], false))
             return;
 
-        m_clusterStats = *static_cast<const shaderio::ClusterStats*>(m_clusterStatsReadback[frameSlot]->map(0, sizeof(shaderio::ClusterStats)));
-        m_clusterStatsReadback[frameSlot]->unmap();
+        m_clusterStats = *static_cast<const shaderio::ClusterStats*>(m_clusterStatsReadback[frameSlot].map(0, sizeof(shaderio::ClusterStats)));
+        m_clusterStatsReadback[frameSlot].unmap();
     }
 
     bool Renderer::RegisterVirtualTexture(Texture2D& tail, const CookedTextureHeader& header)
@@ -6534,12 +6735,12 @@ namespace Nox
         // The buffers every virtual texture shares, with the first one (UniformBufferObject's references stay 0 until then).
         if (!m_virtualPageTable)
         {
-            m_virtualPageTable = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(uint32_t) * uint64_t(shaderio::VirtualTileCapacity),
-                                                                         .usage = NRI::BufferUsage::StorageStatic });
-            m_virtualTileStamps = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(uint32_t) * uint64_t(shaderio::VirtualTileCapacity),
-                                                                          .usage = NRI::BufferUsage::StorageStatic });
-            m_virtualTextureTable = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::GpuVirtualTexture) * uint64_t(shaderio::MipFeedbackSlots),
-                                                                            .usage = NRI::BufferUsage::StorageStatic });
+            m_virtualPageTable = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * uint64_t(shaderio::VirtualTileCapacity),
+                                                                         .usage = NRI_BUFFER_USAGE_STORAGE_STATIC });
+            m_virtualTileStamps = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * uint64_t(shaderio::VirtualTileCapacity),
+                                                                          .usage = NRI_BUFFER_USAGE_STORAGE_STATIC });
+            m_virtualTextureTable = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::GpuVirtualTexture) * uint64_t(shaderio::MipFeedbackSlots),
+                                                                            .usage = NRI_BUFFER_USAGE_STORAGE_STATIC });
         }
         const uint32_t slot = tail.GetDescriptorIndexSlot();
         if (!m_virtualTextures.Register(slot, header))
@@ -6567,9 +6768,9 @@ namespace Nox
         if (!std::exchange(m_geometryFeedbackPending[frameSlot], false))
             return;
         const auto* feedback = static_cast<const shaderio::GeometryStreamingFeedback*>(
-            m_geometryFeedbackReadback[frameSlot]->map(0, sizeof(shaderio::GeometryStreamingFeedback)));
+            m_geometryFeedbackReadback[frameSlot].map(0, sizeof(shaderio::GeometryStreamingFeedback)));
         m_geometryStreamer.ApplyFeedback(*feedback, m_sceneFrameCounter);
-        m_geometryFeedbackReadback[frameSlot]->unmap();
+        m_geometryFeedbackReadback[frameSlot].unmap();
     }
 
     void Renderer::stageGeometryPatch(GeometryPatchTarget target, uint64_t destination, const void* data, uint64_t size)
@@ -6593,14 +6794,14 @@ namespace Nox
 
         // The slot's previous submission is done (the caller waited for it): its staging buffer can be rewritten or replaced.
         const uint64_t bytes = m_geometryPatchData.size();
-        std::unique_ptr<NRI::Buffer>& staging = m_geometryPatchStaging[frameSlot];
-        if (!staging || staging->getSize() < bytes)
-            staging = m_device->createBuffer(NRI::BufferDesc{ .size = std::max<uint64_t>(bytes + bytes / 2, 64 * 1024), .usage = NRI::BufferUsage::Staging });
-        memcpy(staging->map(0, bytes), m_geometryPatchData.data(), bytes);
-        staging->unmap();
+        nri::Buffer& staging = m_geometryPatchStaging[frameSlot];
+        if (!staging || staging.getSize() < bytes)
+            staging = m_device.createBuffer(nri::BufferDesc{ .size = std::max<uint64_t>(bytes + bytes / 2, 64 * 1024), .usage = NRI_BUFFER_USAGE_STAGING });
+        memcpy(staging.map(0, bytes), m_geometryPatchData.data(), bytes);
+        staging.unmap();
         for (const GeometryPatch& patch : m_geometryPatches)
         {
-            std::vector<NRI::BufferCopyRegion>* regions = nullptr;
+            std::vector<nri::BufferCopyRegion>* regions = nullptr;
             switch (patch.Target)
             {
             case GeometryPatchTarget::Draws: regions = &m_geometryDrawPatchRegions[frameSlot]; break;
@@ -6616,12 +6817,12 @@ namespace Nox
 
     void Renderer::createGeometryStreamingPipelines()
     {
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
-        desc.shaders.push_back({ NRI::ShaderStage::Compute, "computeMain", "assets/shaders/GeometryStreamingFeedback.slang" });
-        m_geometryFeedbackPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
+        desc.shaders.push_back({ NRI_SHADER_STAGE_COMPUTE, "computeMain", "assets/shaders/GeometryStreamingFeedback.slang" });
+        m_geometryFeedbackPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.front().sourcePath = "assets/shaders/ClusterIndices.slang";
-        m_clusterIndicesPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_clusterIndicesPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::readMipFeedback(uint32_t frameSlot)
@@ -6629,11 +6830,11 @@ namespace Nox
         if (!std::exchange(m_mipFeedbackPending[frameSlot], false))
             return;
 
-        const auto* feedback = static_cast<const uint32_t*>(m_mipFeedbackReadback[frameSlot]->map(0, MipFeedbackBytes));
+        const auto* feedback = static_cast<const uint32_t*>(m_mipFeedbackReadback[frameSlot].map(0, MipFeedbackBytes));
         m_mipFeedback.assign(feedback, feedback + shaderio::MipFeedbackSlots);
         // The virtual texture tiles the same pixels asked for, after the mips.
         m_virtualTextures.ApplyFeedback(*reinterpret_cast<const shaderio::VirtualTextureFeedback*>(feedback + shaderio::MipFeedbackSlots));
-        m_mipFeedbackReadback[frameSlot]->unmap();
+        m_mipFeedbackReadback[frameSlot].unmap();
         ++m_mipFeedbackSerial;
     }
 
@@ -6644,9 +6845,9 @@ namespace Nox
         TextureReadback readback;
         readback.Width = texture->GetWidth();
         readback.Height = texture->GetHeight();
-        readback.Staging = m_device->createBuffer(NRI::BufferDesc{
+        readback.Staging = m_device.createBuffer(nri::BufferDesc{
             .size = static_cast<uint64_t>(readback.Width) * readback.Height * 4,
-            .usage = NRI::BufferUsage::Staging
+            .usage = NRI_BUFFER_USAGE_STAGING
         });
         readback.Texture = std::move(texture);
         readback.Done = std::move(done);
@@ -6672,10 +6873,10 @@ namespace Nox
         {
             const size_t size = static_cast<size_t>(readback.Width) * readback.Height * 4;
             std::vector<uint8_t> pixels;
-            if (const void* mapped = readback.Staging->map(0, size))
+            if (const void* mapped = readback.Staging.map(0, size))
             {
                 pixels.assign(static_cast<const uint8_t*>(mapped), static_cast<const uint8_t*>(mapped) + size);
-                readback.Staging->unmap();
+                readback.Staging.unmap();
             }
             readback.Done(std::move(pixels), readback.Width, readback.Height);
         }
@@ -6687,11 +6888,11 @@ namespace Nox
             return;
         m_inspectionProbePending[frameSlot] = 0;
 
-        void* mappedMemory = m_inspectionProbeBuffers[frameSlot]->map(0, sizeof(float) * 4);
+        void* mappedMemory = m_inspectionProbeBuffers[frameSlot].map(0, sizeof(float) * 4);
         if (!mappedMemory)
             return;
         memcpy(&m_inspectionProbeValue, mappedMemory, sizeof(float) * 4);
-        m_inspectionProbeBuffers[frameSlot]->unmap();
+        m_inspectionProbeBuffers[frameSlot].unmap();
         m_inspectionProbeValid = true;
     }
 
@@ -6708,11 +6909,11 @@ namespace Nox
 
     void Renderer::createEditorRaycastPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
         desc.forceCompile = forceCompile;
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain", .sourcePath = "assets/shaders/EditorRaycast.slang" });
-        m_editorRaycastPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "computeMain", .sourcePath = "assets/shaders/EditorRaycast.slang" });
+        m_editorRaycastPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::readRaycastResults(uint32_t frameSlot)
@@ -6723,8 +6924,8 @@ namespace Nox
         m_raycastsInFlight[frameSlot].clear();
         std::vector<shaderio::EditorRay> rays(callbacks.size());
         const uint64_t bytes = sizeof(shaderio::EditorRay) * rays.size();
-        memcpy(rays.data(), m_raycastBuffers[frameSlot]->map(0, bytes), bytes);
-        m_raycastBuffers[frameSlot]->unmap();
+        memcpy(rays.data(), m_raycastBuffers[frameSlot].map(0, bytes), bytes);
+        m_raycastBuffers[frameSlot].unmap();
         for (size_t index = 0; index < callbacks.size(); ++index)
         {
             const float distance = rays[index].hitDistance;
@@ -6744,26 +6945,26 @@ namespace Nox
         if (pixelCount == 0)
             return;
 
-        void* mappedMemory = m_pickerStagingBuffers[frameSlot]->map(0, pixelCount * sizeof(int32_t));
+        void* mappedMemory = m_pickerStagingBuffers[frameSlot].map(0, pixelCount * sizeof(int32_t));
         if (!mappedMemory)
             return;
 
         const int32_t* pixels = static_cast<const int32_t*>(mappedMemory);
         m_pickResult.request = request;
         m_pickResult.pixels.assign(pixels, pixels + pixelCount);
-        m_pickerStagingBuffers[frameSlot]->unmap();
+        m_pickerStagingBuffers[frameSlot].unmap();
 
         m_pickResult.hasDepth = false;
         const size_t patchCount = static_cast<size_t>(request.patchWidth) * request.patchHeight;
         if (patchCount > 0 && patchCount * sizeof(float) <= 1024 && frameSlot < m_pickerDepthStagingBuffers.size() && m_pickerDepthStagingBuffers[frameSlot])
         {
-            void* depthMemory = m_pickerDepthStagingBuffers[frameSlot]->map(0, patchCount * sizeof(float));
+            void* depthMemory = m_pickerDepthStagingBuffers[frameSlot].map(0, patchCount * sizeof(float));
             if (depthMemory)
             {
                 const float* values = static_cast<const float*>(depthMemory);
                 m_pickResult.depthPatch.assign(values, values + patchCount);
                 m_pickResult.hasDepth = true;
-                m_pickerDepthStagingBuffers[frameSlot]->unmap();
+                m_pickerDepthStagingBuffers[frameSlot].unmap();
             }
         }
     }
@@ -6842,25 +7043,204 @@ namespace Nox
         return buffer;
     }
 
+    void Renderer::InitNoxUI(NoxUI::UIViewportManager* viewportManager)
+    {
+        if (m_noxUIInitialized)
+            ShutdownNoxUI();
+        if (!m_device || !m_resourceHeap || !m_samplerHeap)
+            return;
+        NoxUI_ImplNoxRHI_InitInfo info{};
+        info.device = &m_device;
+        info.resourceHeap = &m_resourceHeap;
+        info.samplerHeap = &m_samplerHeap;
+        info.samplerSlot = 0;
+        info.colorFormat = NRI_FORMAT_SURFACE;
+        info.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+        info.linearColorOutput = true;
+        info.viewportManager = viewportManager;
+        m_noxUIInitialized = NoxUI_ImplNoxRHI_Init(info);
+    }
+
+    void Renderer::ShutdownNoxUI()
+    {
+        if (!m_noxUIInitialized)
+            return;
+        if (m_device)
+            m_device.waitIdle();
+        NoxUI_ImplNoxRHI_Shutdown();
+        m_noxUIInitialized = false;
+    }
+
     void Renderer::initImGui()
     {
-        m_device->initImGui(*m_window);
+        if (m_imguiInitialized || !m_device || !m_window)
+            return;
+        ImGui_ImplSDL3_InitForOther(m_window->getHandle());
+        ImGui_ImplNoxRHI_InitInfo info{};
+        info.device = &m_device;
+        info.resourceHeap = &m_resourceHeap;
+        info.samplerHeap = &m_samplerHeap;
+        info.samplerSlot = 0;
+        info.colorFormat = NRI_FORMAT_SURFACE;
+        info.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+        info.linearColorOutput = true;
+        info.enableViewports = (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0;
+        m_imguiInitialized = ImGui_ImplNoxRHI_Init(info);
     }
 
     void Renderer::shutdownImGui()
     {
-        m_device->waitIdle();
-        m_device->shutdownImGui();
+        if (!m_imguiInitialized)
+            return;
+        if (m_device)
+            m_device.waitIdle();
+        ImGui_ImplNoxRHI_Shutdown();
+        m_imguiInitialized = false;
     }
 
     void Renderer::beginImGui()
     {
-        m_device->beginImGui();
+        if (m_imguiInitialized)
+            ImGui_ImplNoxRHI_NewFrame();
     }
 
     void Renderer::endImGui()
     {
-        m_device->endImGui();
+        if (m_imguiInitialized && (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable))
+        {
+            ImGui::UpdatePlatformWindows();
+            ImGui::RenderPlatformWindowsDefault();
+        }
+    }
+
+    bool Renderer::evaluateNRDShadows(nri::CommandBuffer& cmd, NriTexture inPenumbra, NriTexture inMV, NriTexture inNormalRough,
+                                      NriTexture inViewZ, NriTexture outShadow, const float lightDir[3], glm::vec2 mvScale,
+                                      uint32_t frameIdx, bool resetHistory)
+    {
+        if (!m_denoiser)
+            return false;
+        nri::DenoiserCommonSettings common{};
+        std::memcpy(common.view, glm::value_ptr(uniformData.view), sizeof(float) * 16);
+        std::memcpy(common.proj, glm::value_ptr(uniformData.nonJitteredProj), sizeof(float) * 16);
+        std::memcpy(common.prevView, glm::value_ptr(uniformData.prevView), sizeof(float) * 16);
+        std::memcpy(common.prevProj, glm::value_ptr(uniformData.prevProj), sizeof(float) * 16);
+        common.motionVectorScale[0] = mvScale.x;
+        common.motionVectorScale[1] = mvScale.y;
+        common.frameIndex = frameIdx;
+        common.resetHistory = resetHistory;
+        if (!m_denoiser.beginFrame(common))
+            return false;
+        nri::DenoiserSigmaSettings sigma{};
+        sigma.lightDirection[0] = lightDir[0];
+        sigma.lightDirection[1] = lightDir[1];
+        sigma.lightDirection[2] = lightDir[2];
+        m_denoiser.setSigmaSettings(NRI_DENOISER_SIGMA_SHADOW, sigma);
+        nri::DenoiserResourcesDesc res{};
+        res.inMotionVectors = inMV;
+        res.inNormalRoughness = inNormalRough;
+        res.inViewZ = inViewZ;
+        res.inPenumbra = inPenumbra;
+        res.outShadowTranslucent = outShadow;
+        res.restoreInitialState = true;
+        return m_denoiser.denoise(cmd, static_cast<uint32_t>(NRI_DENOISER_SIGMA_SHADOW), res);
+    }
+
+    bool Renderer::evaluateNRDReflections(nri::CommandBuffer& cmd, NRDReflectionDenoiser mode, NriTexture inSpec, NriTexture inMV,
+                                          NriTexture inNormalRough, NriTexture inViewZ, NriTexture outSpec, glm::vec2 mvScale,
+                                          uint32_t frameIdx, bool resetHistory)
+    {
+        if (!m_denoiser || mode == NRDReflectionDenoiser::Off)
+            return false;
+        nri::DenoiserCommonSettings common{};
+        std::memcpy(common.view, glm::value_ptr(uniformData.view), sizeof(float) * 16);
+        std::memcpy(common.proj, glm::value_ptr(uniformData.nonJitteredProj), sizeof(float) * 16);
+        std::memcpy(common.prevView, glm::value_ptr(uniformData.prevView), sizeof(float) * 16);
+        std::memcpy(common.prevProj, glm::value_ptr(uniformData.prevProj), sizeof(float) * 16);
+        common.motionVectorScale[0] = mvScale.x;
+        common.motionVectorScale[1] = mvScale.y;
+        common.frameIndex = frameIdx;
+        common.resetHistory = resetHistory;
+        if (!m_denoiser.beginFrame(common))
+            return false;
+        const uint32_t id = (mode == NRDReflectionDenoiser::RELAX) ? NRI_DENOISER_RELAX_SPECULAR : NRI_DENOISER_REBLUR_SPECULAR;
+        if (mode == NRDReflectionDenoiser::RELAX)
+            m_denoiser.setRelaxSettings(id, nri::DenoiserRelaxSettings{});
+        else
+            m_denoiser.setReblurSettings(id, nri::DenoiserReblurSettings{});
+        nri::DenoiserResourcesDesc res{};
+        res.inMotionVectors = inMV;
+        res.inNormalRoughness = inNormalRough;
+        res.inViewZ = inViewZ;
+        res.inSpecRadianceHitDist = inSpec;
+        res.outSpecRadianceHitDist = outSpec;
+        res.restoreInitialState = true;
+        return m_denoiser.denoise(cmd, id, res);
+    }
+
+    bool Renderer::evaluateNRDDiffuseGI(nri::CommandBuffer& cmd, NRDDiffuseDenoiser mode, NriTexture inDiff, NriTexture inMV,
+                                        NriTexture inNormalRough, NriTexture inViewZ, NriTexture outDiff, glm::vec2 mvScale,
+                                        uint32_t frameIdx, bool resetHistory)
+    {
+        if (!m_denoiser || mode == NRDDiffuseDenoiser::Off)
+            return false;
+        nri::DenoiserCommonSettings common{};
+        std::memcpy(common.view, glm::value_ptr(uniformData.view), sizeof(float) * 16);
+        std::memcpy(common.proj, glm::value_ptr(uniformData.nonJitteredProj), sizeof(float) * 16);
+        std::memcpy(common.prevView, glm::value_ptr(uniformData.prevView), sizeof(float) * 16);
+        std::memcpy(common.prevProj, glm::value_ptr(uniformData.prevProj), sizeof(float) * 16);
+        common.motionVectorScale[0] = mvScale.x;
+        common.motionVectorScale[1] = mvScale.y;
+        common.frameIndex = frameIdx;
+        common.resetHistory = resetHistory;
+        if (!m_denoiser.beginFrame(common))
+            return false;
+        const uint32_t id = (mode == NRDDiffuseDenoiser::RELAX) ? NRI_DENOISER_RELAX_DIFFUSE : NRI_DENOISER_REBLUR_DIFFUSE;
+        if (mode == NRDDiffuseDenoiser::RELAX)
+            m_denoiser.setRelaxSettings(id, nri::DenoiserRelaxSettings{});
+        else
+            m_denoiser.setReblurSettings(id, nri::DenoiserReblurSettings{});
+        nri::DenoiserResourcesDesc res{};
+        res.inMotionVectors = inMV;
+        res.inNormalRoughness = inNormalRough;
+        res.inViewZ = inViewZ;
+        res.inDiffRadianceHitDist = inDiff;
+        res.outDiffRadianceHitDist = outDiff;
+        res.restoreInitialState = true;
+        return m_denoiser.denoise(cmd, id, res);
+    }
+
+    bool Renderer::evaluateNRDDiffuseSpecular(nri::CommandBuffer& cmd, NRDDiffuseDenoiser mode, NriTexture inDiff, NriTexture inSpec,
+                                              NriTexture inMV, NriTexture inNormalRough, NriTexture inViewZ, NriTexture outDiff,
+                                              NriTexture outSpec, glm::vec2 mvScale, uint32_t frameIdx, bool resetHistory)
+    {
+        if (!m_denoiser || mode == NRDDiffuseDenoiser::Off)
+            return false;
+        nri::DenoiserCommonSettings common{};
+        std::memcpy(common.view, glm::value_ptr(uniformData.view), sizeof(float) * 16);
+        std::memcpy(common.proj, glm::value_ptr(uniformData.nonJitteredProj), sizeof(float) * 16);
+        std::memcpy(common.prevView, glm::value_ptr(uniformData.prevView), sizeof(float) * 16);
+        std::memcpy(common.prevProj, glm::value_ptr(uniformData.prevProj), sizeof(float) * 16);
+        common.motionVectorScale[0] = mvScale.x;
+        common.motionVectorScale[1] = mvScale.y;
+        common.frameIndex = frameIdx;
+        common.resetHistory = resetHistory;
+        if (!m_denoiser.beginFrame(common))
+            return false;
+        const uint32_t id = (mode == NRDDiffuseDenoiser::RELAX) ? NRI_DENOISER_RELAX_DIFFUSE_SPECULAR : NRI_DENOISER_REBLUR_DIFFUSE_SPECULAR;
+        if (mode == NRDDiffuseDenoiser::RELAX)
+            m_denoiser.setRelaxSettings(id, nri::DenoiserRelaxSettings{});
+        else
+            m_denoiser.setReblurSettings(id, nri::DenoiserReblurSettings{});
+        nri::DenoiserResourcesDesc res{};
+        res.inMotionVectors = inMV;
+        res.inNormalRoughness = inNormalRough;
+        res.inViewZ = inViewZ;
+        res.inDiffRadianceHitDist = inDiff;
+        res.inSpecRadianceHitDist = inSpec;
+        res.outDiffRadianceHitDist = outDiff;
+        res.outSpecRadianceHitDist = outSpec;
+        res.restoreInitialState = true;
+        return m_denoiser.denoise(cmd, id, res);
     }
 
     // Inverse of proj * view, computed in double precision from the two matrices themselves. Shaders unproject the near
@@ -6944,7 +7324,7 @@ namespace Nox
         // not just "DLSS enabled" (mode == Off means evaluateDLSS never runs, so jitter shouldn't
         // either - the "Camera Subpixel Jitter" toggle only has an effect while DLSS is genuinely off).
         const bool enableJitter =
-            (m_cameraJitterEnabled || isTAAActive() || (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported()))
+            (m_cameraJitterEnabled || isTAAActive() || (m_dlssEnabled && m_dlssMode != NRI_UPSCALER_MODE_OFF && isDLSSSupported()))
             && m_viewportSize.width > 0
             && m_viewportSize.height > 0;
 
@@ -7097,7 +7477,7 @@ namespace Nox
         const bool enableJitter =
             !m_orthographic && // the jitter offsets the projection's perspective terms, which an ortho projection does not have
             (m_cameraJitterEnabled || isTAAActive() ||
-                (m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device->isDLSSSupported()))
+                (m_dlssEnabled && m_dlssMode != NRI_UPSCALER_MODE_OFF && isDLSSSupported()))
             && m_viewportSize.width > 0
             && m_viewportSize.height > 0;
         // Only advance temporal state once per frame (ignores secondary calls like OnOverlayRender)
@@ -7229,7 +7609,7 @@ namespace Nox
         m_renderer2D->EndScene();
     }
 
-    void Renderer::SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid, bool preview,
+    void Renderer::SubmitExtraView(uint32_t index, const EditorCamera& camera, nri::Extent2D size, const shaderio::PushConstantGrid* grid, bool preview,
                                    uint32_t flags)
     {
         if (!m_isEditor || index >= MaxExtraViews || size.width == 0 || size.height == 0)
@@ -7240,15 +7620,15 @@ namespace Nox
         {
             for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
             {
-                std::unique_ptr<NRI::Buffer> uniforms = m_device->createBuffer(NRI::BufferDesc{
+                nri::Buffer uniforms = m_device.createBuffer(nri::BufferDesc{
                     .size = sizeof(shaderio::UniformBufferObject),
-                    .usage = NRI::BufferUsage::Uniform
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
                 });
-                view.UniformBuffersMapped.push_back(uniforms->map(0, sizeof(shaderio::UniformBufferObject)));
+                view.UniformBuffersMapped.push_back(uniforms.map(0, sizeof(shaderio::UniformBufferObject)));
                 view.UniformBuffers.push_back(std::move(uniforms));
-                view.CullViewBuffers.push_back(m_device->createBuffer(NRI::BufferDesc{
+                view.CullViewBuffers.push_back(m_device.createBuffer(nri::BufferDesc{
                     .size = sizeof(shaderio::CullView),
-                    .usage = NRI::BufferUsage::Storage
+                    .usage = NRI_BUFFER_USAGE_STORAGE
                 }));
             }
         }
@@ -7258,17 +7638,17 @@ namespace Nox
         {
             if (view.Output && view.Output != view.Shown)
                 deferTextureRelease(view.Output);
-            view.Output = m_device->createTexture(NRI::TextureDesc{
+            view.Output = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc{
                 .width = size.width,
                 .height = size.height,
                 .mipLevels = 1,
                 .sampleCount = 1,
-                .usage = NRI::TextureUsage::ColorAttachment,
-                .format = NRI::ImageFormat::Surface,
+                .usage = NRI_TEXTURE_USAGE_COLOR_ATTACHMENT,
+                .format = NRI_FORMAT_SURFACE,
                 .directFormat = UINT32_MAX
-            });
+            }));
             if (!m_useImGui && view.Output && m_resourceHeap)
-                m_resourceHeap->registerTexture(*view.Output);
+                m_resourceHeap.registerTexture(*view.Output);
             view.Size = size;
         }
 

@@ -1,6 +1,6 @@
 #pragma once
 #include "NoxCore/Project/Project.h"
-#include "NRI/Texture.h"
+#include "NoxCore/Renderer/Texture2D.h"
 #include "NoxCore/Asset/AssetMetadata.h"
 
 namespace Nox

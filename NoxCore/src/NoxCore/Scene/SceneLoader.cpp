@@ -36,7 +36,7 @@ namespace Nox
         // into the cell's scene without parsing. False: the text is read instead (no cooked file, an old one, or a damaged one --
         // whatever it made is removed first).
         bool ReadCookedCell(const std::filesystem::path& path, const std::string& text, Scene& scene, AssetHandle level, SceneLoader::Parsed& parsed,
-                            const CancellationToken& token, std::chrono::steady_clock::time_point readStart);
+                            const NoxTasks::CancellationToken& token, std::chrono::steady_clock::time_point readStart);
 
         // One entity of a document into a scene: the main thread's slices and a cell's worker alike. A cell's entity already in the
         // scene is skipped (the editor's own copy of one saved into a cell it then loads).
@@ -68,7 +68,7 @@ namespace Nox
     namespace
     {
         bool ReadCookedCell(const std::filesystem::path& path, const std::string& text, Scene& scene, AssetHandle level, SceneLoader::Parsed& parsed,
-                            const CancellationToken& token, std::chrono::steady_clock::time_point readStart)
+                            const NoxTasks::CancellationToken& token, std::chrono::steady_clock::time_point readStart)
         {
             std::filesystem::path cookedPath = path;
             cookedPath += SceneSerializer::CookedCellSuffix;
@@ -133,9 +133,9 @@ namespace Nox
     {
         const bool additive = m_Level != 0;
         const bool inMemory = !text.empty();
-        m_Read = JobSystem::Get().Async("Read Scene", JobPriority::Normal,
+        m_Read = NoxTasks::JobSystem::Get().Async("Read Scene", NoxTasks::JobPriority::Normal,
                                         [shared = m_Parsed, path = m_Path, additive, inMemory, text = std::move(text), buildInto = std::move(buildInto),
-                                         level = m_Level](const CancellationToken& token) mutable
+                                         level = m_Level](const NoxTasks::CancellationToken& token) mutable
         {
             if (token.IsCancelled()) // (the loader is gone)
                 return;

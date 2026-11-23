@@ -43,7 +43,7 @@ namespace Nox
     private:
         bool m_Open = false;
         bool m_FocusRequested = false;
-        uint64_t m_SelectedBus = kAudioBusMaster;
+        uint64_t m_SelectedBus = NoxAudio::kAudioBusMaster;
         int32_t m_RenamingSnapshot = -1;
         char m_RenameBuffer[64] = {};
 

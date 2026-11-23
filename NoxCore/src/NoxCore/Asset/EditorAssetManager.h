@@ -5,7 +5,7 @@
 #include "AssetManagerBase.h"
 #include "AssetMetadata.h"
 #include "AssetReferenceIndex.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 #include <chrono>
 #include <map>
@@ -15,7 +15,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 #include "MeshImporter.h"
 #include "NoxCore/Scene/ModelInstance.h"
 #include "NoxCore/Utils/NOXWatcher.h"
@@ -49,9 +49,9 @@ namespace Nox
         // voices keep the clip they started with).
         void SetAudioImportSettings(AssetHandle handle, const AudioImportSettings& settings);
         // An audio clip's or audio graph's priority and concurrency (AudioImportSettings::Sound).
-        void SetSoundSettings(AssetHandle handle, const AudioSoundSettings& settings);
+        void SetSoundSettings(AssetHandle handle, const NoxAudio::AudioSoundSettings& settings);
         // A material's acoustic material (saved in the registry; the playing acoustic scene picks it up).
-        void SetAcousticMaterial(AssetHandle handle, AcousticMaterial material);
+        void SetAcousticMaterial(AssetHandle handle, NoxAudio::AcousticMaterial material);
         // A material's physical surface (empty: Default); saved in the registry.
         void SetPhysicalSurface(AssetHandle handle, const std::string& surface);
         
@@ -201,7 +201,7 @@ namespace Nox
         // Do Not Combine imports cooking every static mesh of a file into its own asset in the background.
         struct PendingSplitImport
         {
-            TaskFuture<std::vector<MeshImporter::SplitMesh>> Job;
+            NoxTasks::TaskFuture<std::vector<MeshImporter::SplitMesh>> Job;
             AssetMetadata MaterialBase; // only its path (the .nmat files are named after it) and source are used
             std::shared_ptr<std::atomic<uint32_t>> Total; // meshes to cook (0 while the glTF is still being parsed)
             std::shared_ptr<std::atomic<uint32_t>> Done;
@@ -224,7 +224,7 @@ namespace Nox
         // hundreds of per-mesh loads each rewriting the whole registry file was most of a big import's time.
         bool m_RegistryDirty = false;
         std::chrono::steady_clock::time_point m_RegistryWritten = std::chrono::steady_clock::now();
-        TaskFuture<void> m_RegistryWrite; // SerializeAssetRegistryAsync's, until done
+        NoxTasks::TaskFuture<void> m_RegistryWrite; // SerializeAssetRegistryAsync's, until done
         void IndexPath(AssetHandle handle, const AssetMetadata& metadata);
         AssetMap m_LoadedAssets;
         AssetMap m_MemoryAssets; // AddMemoryAsset: no file, no registry entry

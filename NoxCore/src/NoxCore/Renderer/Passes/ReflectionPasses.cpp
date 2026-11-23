@@ -15,24 +15,24 @@ namespace Nox
 {
     void Renderer::createSSRPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT };
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/SSR.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/SSR.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/SSR.slang" });
-        m_ssrPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT };
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/SSR.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = "assets/shaders/SSR.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = "assets/shaders/SSR.slang" });
+        m_ssrPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.back().entryPoint = "filterMain";
-        m_ssrFilterPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_ssrFilterPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
 
         // Screen-space GI (RS5b): its rays, then its denoiser.
-        for (NRI::ShaderStageDesc& stage : desc.shaders)
+        for (nri::ShaderStageDesc& stage : desc.shaders)
             stage.sourcePath = "assets/shaders/SSGI.slang";
         desc.shaders.back().entryPoint = "traceMain";
-        m_ssgiTracePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_ssgiTracePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.back().entryPoint = "denoiseMain";
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32G32_SFLOAT }; // the result, (view depth, frames)
-        m_ssgiDenoisePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT, NRI_FORMAT_R32G32_SFLOAT }; // the result, (view depth, frames)
+        m_ssgiDenoisePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::addSSRPass()
@@ -51,8 +51,8 @@ namespace Nox
         // The lit scene history (two slots: last frame's read here, this frame's written by addSSRHistoryPass), full mip chain.
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         RGTextureDesc historyDesc;
-        historyDesc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
-        historyDesc.Usage = NRI::TextureUsage::Storage;
+        historyDesc.Format = NRI_FORMAT_R16G16B16A16_SFLOAT;
+        historyDesc.Usage = NRI_TEXTURE_USAGE_STORAGE;
         historyDesc.MipLevels = 1;
         for (uint32_t size = std::max(m_frame.renderExtent.width, m_frame.renderExtent.height); size > 1; size >>= 1)
             ++historyDesc.MipLevels;
@@ -68,7 +68,7 @@ namespace Nox
             return;
 
         RGTextureDesc ssrDesc;
-        ssrDesc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        ssrDesc.Format = NRI_FORMAT_R16G16B16A16_SFLOAT;
         const RGTexture rawSSR = m_renderGraph.CreateTexture("SSR Raw", ssrDesc);
         resources.SSR = m_renderGraph.CreateTexture("SSR", ssrDesc);
         m_frame.ssrAdded = true;
@@ -83,22 +83,22 @@ namespace Nox
                 builder.Read(resources.GBufferNormal);
                 builder.Read(resources.GBufferMaterial);
                 builder.Read(historyRead);
-                builder.ColorTarget(rawSSR, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.ColorTarget(rawSSR, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
             [this, res = &resources, historyRead, hiZ, hizLevels, mips = historyDesc.MipLevels](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ssrPipeline);
-                cmd.setCullMode(NRI::CullMode::None);
+                nri::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_ssrPipeline);
+                cmd.setCullMode(NRI_CULL_MODE_NONE);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
                 cmd.setColorBlendEnable(0, false);
-                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                cmd.setColorWriteMask(0, nri::ColorComponent::All);
 
                 shaderio::PushConstantSSR push{};
                 push.invViewProj = uniformData.invViewProj;
-                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.normalTextureIndex = context.Slot(res->GBufferNormal);
                 push.materialTextureIndex = context.Slot(res->GBufferMaterial);
@@ -113,7 +113,7 @@ namespace Nox
                 push.hizTextureIndex = context.Slot(hiZ);
                 push.hizLevels = hizLevels;
                 cmd.pushData(&push, sizeof(push));
-                cmd.drawMeshTasks(1, 1, 1);
+                nri::drawMeshTasks(cmd, 1, 1, 1);
             });
 
         // The roughness filter (SSR.slang filterMain): what the deferred lighting reads.
@@ -123,26 +123,26 @@ namespace Nox
                 builder.Read(rawSSR);
                 builder.Read(resources.Depth);
                 builder.Read(resources.GBufferMaterial);
-                builder.ColorTarget(resources.SSR, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.ColorTarget(resources.SSR, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
             [this, res = &resources, rawSSR](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ssrFilterPipeline);
-                cmd.setCullMode(NRI::CullMode::None);
+                nri::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_ssrFilterPipeline);
+                cmd.setCullMode(NRI_CULL_MODE_NONE);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
                 cmd.setColorBlendEnable(0, false);
-                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                cmd.setColorWriteMask(0, nri::ColorComponent::All);
                 shaderio::PushConstantSSRFilter push{};
-                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
                 push.rawTextureIndex = context.Slot(rawSSR);
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.materialTextureIndex = context.Slot(res->GBufferMaterial);
                 push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
                 cmd.pushData(&push, sizeof(push));
-                cmd.drawMeshTasks(1, 1, 1);
+                nri::drawMeshTasks(cmd, 1, 1, 1);
             });
     }
 
@@ -152,8 +152,8 @@ namespace Nox
         desc.Size = RGSize::Absolute;
         desc.Width = std::max(m_frame.renderExtent.width / 2, 1u);
         desc.Height = std::max(m_frame.renderExtent.height / 2, 1u);
-        desc.Format = NRI::ImageFormat::R32_SFLOAT;
-        desc.Usage = NRI::TextureUsage::Storage;
+        desc.Format = NRI_FORMAT_R32_SFLOAT;
+        desc.Usage = NRI_TEXTURE_USAGE_STORAGE;
         desc.MipLevels = 1;
         for (uint32_t size = std::max(desc.Width, desc.Height); size > 1; size >>= 1)
             ++desc.MipLevels;
@@ -167,17 +167,17 @@ namespace Nox
             },
             [this, depth, pyramid, desc](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_hiZBuildPipeline);
+                nri::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_hiZBuildPipeline);
                 // Mip 0 reduces the depth buffer, every next mip the one before it (as the culling pyramid, addHiZBuildPass).
                 for (uint32_t mip = 0; mip < desc.MipLevels; ++mip)
                 {
                     if (mip > 0)
                     {
-                        const NRI::TextureBarrierDesc barrier{ &context.Texture(pyramid),
-                                                               { NRI::AccessBits::ShaderWrite, NRI::StageBits::Compute },
-                                                               { NRI::AccessBits::ShaderRead, NRI::StageBits::Compute } };
-                        cmd.resourceBarriers(std::span<const NRI::TextureBarrierDesc>(&barrier, 1), {});
+                        const nri::TextureBarrierDesc barrier{ context.Texture(pyramid),
+                                                               { nri::AccessBits::ShaderWrite, nri::StageBits::Compute },
+                                                               { nri::AccessBits::ShaderRead, nri::StageBits::Compute } };
+                        cmd.resourceBarriers(std::span<const nri::TextureBarrierDesc>(&barrier, 1), {});
                     }
                     shaderio::PushConstantHiZBuild push{};
                     push.sourceTextureIndex = mip == 0 ? context.Slot(depth) : context.Slot(pyramid);
@@ -208,11 +208,11 @@ namespace Nox
         // The rays (raw, noisy), then the denoised result accumulated over frames (two history slots: last frame's read, this one's
         // written -- what the deferred lighting reads).
         RGTextureDesc desc;
-        desc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        desc.Format = NRI_FORMAT_R16G16B16A16_SFLOAT;
         const RGTexture raw = m_renderGraph.CreateTexture("SSGI Raw", desc);
         const RGTextureHistory history = m_renderGraph.GetHistoryTexture("SSGI Accumulation", desc, 2);
         RGTextureDesc depthDesc;
-        depthDesc.Format = NRI::ImageFormat::R32G32_SFLOAT;
+        depthDesc.Format = NRI_FORMAT_R32G32_SFLOAT;
         const RGTextureHistory depthHistory = m_renderGraph.GetHistoryTexture("SSGI Depth History", depthDesc, 2);
         const uint32_t readIndex = m_ssgiHistoryIndex;
         const uint32_t writeIndex = 1 - readIndex;
@@ -239,21 +239,21 @@ namespace Nox
                 builder.Read(sceneHistory);
                 if (exposureTexture.IsValid())
                     builder.Read(exposureTexture);
-                builder.ColorTarget(raw, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.ColorTarget(raw, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
             [this, res = &resources, raw, sceneHistory, exposureTexture, mips = m_frame.ssrHistoryMips](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ssgiTracePipeline);
-                cmd.setCullMode(NRI::CullMode::None);
+                nri::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_ssgiTracePipeline);
+                cmd.setCullMode(NRI_CULL_MODE_NONE);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
                 cmd.setColorBlendEnable(0, false);
-                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                cmd.setColorWriteMask(0, nri::ColorComponent::All);
                 shaderio::PushConstantSSGI push{};
                 push.invViewProj = uniformData.invViewProj;
-                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.normalTextureIndex = context.Slot(res->GBufferNormal);
                 push.historyTextureIndex = context.Slot(sceneHistory);
@@ -269,7 +269,7 @@ namespace Nox
                 push.autoExposureMinEV = m_autoExposureMinEV;
                 push.autoExposureMaxEV = m_autoExposureMaxEV;
                 cmd.pushData(&push, sizeof(push));
-                cmd.drawMeshTasks(1, 1, 1);
+                nri::drawMeshTasks(cmd, 1, 1, 1);
             });
 
         m_renderGraph.AddPass("SSGI Denoise", RGPassFlags::Raster,
@@ -285,25 +285,25 @@ namespace Nox
                 }
                 if (exposureTexture.IsValid())
                     builder.Read(exposureTexture);
-                builder.ColorTarget(historyWrite, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
-                builder.ColorTarget(depthWrite, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.ColorTarget(historyWrite, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 0.0f });
+                builder.ColorTarget(depthWrite, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
             [this, res = &resources, raw, historyRead, depthRead, historyValid, exposureTexture](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_ssgiDenoisePipeline);
-                cmd.setCullMode(NRI::CullMode::None);
+                nri::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_ssgiDenoisePipeline);
+                cmd.setCullMode(NRI_CULL_MODE_NONE);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
                 for (uint32_t attachment = 0; attachment < 2; ++attachment)
                 {
                     cmd.setColorBlendEnable(attachment, false);
-                    cmd.setColorWriteMask(attachment, NRI::ColorComponent::All);
+                    cmd.setColorWriteMask(attachment, nri::ColorComponent::All);
                 }
                 shaderio::PushConstantSSGIDenoise push{};
                 push.invViewProj = uniformData.invViewProj;
-                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
                 push.rawTextureIndex = context.Slot(raw);
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.normalTextureIndex = context.Slot(res->GBufferNormal);
@@ -316,7 +316,7 @@ namespace Nox
                 push.autoExposureMaxEV = m_autoExposureMaxEV;
                 push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
                 cmd.pushData(&push, sizeof(push));
-                cmd.drawMeshTasks(1, 1, 1);
+                nri::drawMeshTasks(cmd, 1, 1, 1);
             });
     }
 
@@ -330,7 +330,7 @@ namespace Nox
         const uint32_t writeIndex = 1 - m_ssrHistoryIndex;
         const RGTexture target = resources.SSRHistory[writeIndex];
         const RGTexture source = resources.HDRScene;
-        const NRI::Extent2D extent = m_frame.renderExtent;
+        const nri::Extent2D extent = m_frame.renderExtent;
         for (uint32_t mip = 0; mip < m_frame.ssrHistoryMips; ++mip)
         {
             m_renderGraph.AddPass(mip == 0 ? "SSR History" : "SSR History Mip", RGPassFlags::NeverCull,
@@ -341,8 +341,8 @@ namespace Nox
                 },
                 [this, mip, source, target, extent](RGPassContext& context)
                 {
-                    NRI::CommandBuffer& cmd = context.Cmd();
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, mip == 0 ? *m_colorPyramidCopyPipeline : *m_colorPyramidDownsamplePipeline);
+                    nri::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, mip == 0 ? m_colorPyramidCopyPipeline : m_colorPyramidDownsamplePipeline);
                     shaderio::PushConstantColorPyramid push{};
                     push.sourceIndex = uniformData.imageHeapIndexOffset + context.Slot(mip == 0 ? source : target);
                     push.outputIndex = context.StorageSlot(target, mip);
@@ -394,15 +394,15 @@ namespace Nox
 
     void Renderer::createReflectionProbePipelines(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
         desc.forceCompile = forceCompile;
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "assembleMain", .sourcePath = "assets/shaders/ReflectionProbe.slang" });
-        m_probeAssemblePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "assembleMain", .sourcePath = "assets/shaders/ReflectionProbe.slang" });
+        m_probeAssemblePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.back().entryPoint = "downsampleMain";
-        m_probeDownsamplePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-        desc.shaders.back() = { .stage = NRI::ShaderStage::Compute, .entryPoint = "compMain", .sourcePath = "assets/shaders/PrefilterEnv.slang" };
-        m_probePrefilterPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_probeDownsamplePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
+        desc.shaders.back() = { .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "compMain", .sourcePath = "assets/shaders/PrefilterEnv.slang" };
+        m_probePrefilterPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::addReflectionProbePasses()
@@ -420,9 +420,9 @@ namespace Nox
             if (frame - it->second.LastSubmittedFrame > ProbeKeepFrames)
             {
                 for (uint32_t slot : it->second.RawStorage)
-                    m_resourceHeap->unregisterTexture(slot);
+                    m_resourceHeap.unregisterTexture(slot);
                 for (uint32_t slot : it->second.PrefilteredStorage)
-                    m_resourceHeap->unregisterTexture(slot);
+                    m_resourceHeap.unregisterTexture(slot);
                 if (it->second.Raw)
                     deferAssetRelease(it->second.Raw);
                 if (it->second.Prefiltered)
@@ -442,22 +442,22 @@ namespace Nox
 
         if (!m_probeTableBuffers[frameIndex])
         {
-            m_probeTableBuffers[frameIndex] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::GpuReflectionProbe) * shaderio::MaxReflectionProbes, .usage = NRI::BufferUsage::Storage });
-            m_probeTableBuffersMapped[frameIndex] = m_probeTableBuffers[frameIndex]->map(0, sizeof(shaderio::GpuReflectionProbe) * shaderio::MaxReflectionProbes);
-            m_probeFaceBuffers[frameIndex] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(glm::mat4) * 6 + sizeof(glm::vec4), .usage = NRI::BufferUsage::Storage });
-            m_probeFaceBuffersMapped[frameIndex] = m_probeFaceBuffers[frameIndex]->map(0, sizeof(glm::mat4) * 6 + sizeof(glm::vec4));
+            m_probeTableBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::GpuReflectionProbe) * shaderio::MaxReflectionProbes, .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_probeTableBuffersMapped[frameIndex] = m_probeTableBuffers[frameIndex].map(0, sizeof(shaderio::GpuReflectionProbe) * shaderio::MaxReflectionProbes);
+            m_probeFaceBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(glm::mat4) * 6 + sizeof(glm::vec4), .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_probeFaceBuffersMapped[frameIndex] = m_probeFaceBuffers[frameIndex].map(0, sizeof(glm::mat4) * 6 + sizeof(glm::vec4));
             for (uint32_t face = 0; face < 6; ++face)
             {
-                m_probeFaceUniforms[frameIndex][face] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI::BufferUsage::Uniform });
-                m_probeFaceUniformsMapped[frameIndex][face] = m_probeFaceUniforms[frameIndex][face]->map(0, sizeof(shaderio::UniformBufferObject));
-                m_probeFaceCullViews[frameIndex][face] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI::BufferUsage::Storage });
+                m_probeFaceUniforms[frameIndex][face] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI_BUFFER_USAGE_UNIFORM });
+                m_probeFaceUniformsMapped[frameIndex][face] = m_probeFaceUniforms[frameIndex][face].map(0, sizeof(shaderio::UniformBufferObject));
+                m_probeFaceCullViews[frameIndex][face] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_STORAGE });
             }
         }
 
         // Which probe to capture this frame: the first one that is new, moved, resized or asked to.
         const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
         const bool cullingReady = entryCount > 0 && m_transparentLitPipeline && m_unlitPipeline &&
-            std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return pipeline != nullptr; });
+            std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return static_cast<bool>(pipeline); });
         const ReflectionProbeSubmission* toCapture = nullptr;
         for (const ReflectionProbeSubmission& submission : m_probeSubmissions)
         {
@@ -475,24 +475,24 @@ namespace Nox
             if (capture.Resolution != toCapture->Resolution || !capture.Raw)
             {
                 for (uint32_t slot : capture.RawStorage)
-                    m_resourceHeap->unregisterTexture(slot);
+                    m_resourceHeap.unregisterTexture(slot);
                 for (uint32_t slot : capture.PrefilteredStorage)
-                    m_resourceHeap->unregisterTexture(slot);
+                    m_resourceHeap.unregisterTexture(slot);
                 if (capture.Raw)
                     deferAssetRelease(capture.Raw);
                 if (capture.Prefiltered)
                     deferAssetRelease(capture.Prefiltered);
                 capture.Resolution = toCapture->Resolution;
-                capture.Raw = createEnvironmentCube(capture.Resolution, NRI::ImageFormat::R16G16B16A16_SFLOAT);
-                m_resourceHeap->registerTexture(*capture.Raw, NRI::TextureUsage::ShaderResource);
-                capture.Prefiltered = createEnvironmentCube(capture.Resolution, NRI::ImageFormat::R16G16B16A16_SFLOAT);
-                m_resourceHeap->registerTexture(*capture.Prefiltered, NRI::TextureUsage::ShaderResource);
+                capture.Raw = createEnvironmentCube(capture.Resolution, NRI_FORMAT_R16G16B16A16_SFLOAT);
+                m_resourceHeap.registerTexture(*capture.Raw, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
+                capture.Prefiltered = createEnvironmentCube(capture.Resolution, NRI_FORMAT_R16G16B16A16_SFLOAT);
+                m_resourceHeap.registerTexture(*capture.Prefiltered, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
                 capture.RawStorage.clear();
                 capture.PrefilteredStorage.clear();
                 for (uint32_t mip = 0; mip < capture.Raw->getMipLevels(); ++mip)
-                    capture.RawStorage.push_back(m_resourceHeap->registerStorageTextureMip(*capture.Raw, mip));
+                    capture.RawStorage.push_back(m_resourceHeap.registerStorageTextureMip(*capture.Raw, mip));
                 for (uint32_t mip = 0; mip < capture.Prefiltered->getMipLevels(); ++mip)
-                    capture.PrefilteredStorage.push_back(m_resourceHeap->registerStorageTextureMip(*capture.Prefiltered, mip));
+                    capture.PrefilteredStorage.push_back(m_resourceHeap.registerStorageTextureMip(*capture.Prefiltered, mip));
             }
             capture.Captured = true; // the passes below fill it before the lighting reads it
             capture.CapturedWorld = toCapture->World;
@@ -520,15 +520,15 @@ namespace Nox
 
             const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
             const uint32_t blockCount = (entryCount + shaderio::CULL_BLOCK_SIZE - 1) / shaderio::CULL_BLOCK_SIZE;
-            const NRI::Extent2D faceExtent{ capture.Resolution, capture.Resolution };
+            const nri::Extent2D faceExtent{ capture.Resolution, capture.Resolution };
             const shaderio::PushConstantSkybox skyboxSun = makeSkyboxSunPush();
             const bool ddgi = m_frame.ddgiAdded;
             const uint32_t ddgiIndex = m_frame.ddgiWriteIndex;
             std::array<RGTexture, 6> faceHdr{};
             for (uint32_t face = 0; face < 6; ++face)
             {
-                NRI::Buffer* uniformBuffer = m_probeFaceUniforms[frameIndex][face].get();
-                NRI::Buffer* cullViewBuffer = m_probeFaceCullViews[frameIndex][face].get();
+                nri::Buffer* uniformBuffer = &m_probeFaceUniforms[frameIndex][face];
+                nri::Buffer* cullViewBuffer = &m_probeFaceCullViews[frameIndex][face];
                 shaderio::CullView cull{};
                 cull.frustum = shaderio::Frustum{ faceMatrices[face] };
                 cull.viewProj = faceMatrices[face];
@@ -541,34 +541,34 @@ namespace Nox
                 cullViewBuffer->unmap();
 
                 ViewDrawResources draws;
-                draws.VisibleInstances = m_renderGraph.CreateBuffer("Probe Visible Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-                draws.Commands = m_renderGraph.CreateBuffer("Probe Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI::BufferUsage::Indirect });
-                draws.Counts = m_renderGraph.CreateBuffer("Probe Draw Counts", { sizeof(shaderio::CullCounts), NRI::BufferUsage::Indirect });
-                draws.LateInstances = m_renderGraph.CreateBuffer("Probe Late Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-                const RGBuffer flags = m_renderGraph.CreateBuffer("Probe Cull Flags", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-                const RGBuffer blocks = m_renderGraph.CreateBuffer("Probe Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI::BufferUsage::Storage });
+                draws.VisibleInstances = m_renderGraph.CreateBuffer("Probe Visible Instances", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+                draws.Commands = m_renderGraph.CreateBuffer("Probe Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI_BUFFER_USAGE_INDIRECT });
+                draws.Counts = m_renderGraph.CreateBuffer("Probe Draw Counts", { sizeof(shaderio::CullCounts), NRI_BUFFER_USAGE_INDIRECT });
+                draws.LateInstances = m_renderGraph.CreateBuffer("Probe Late Instances", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+                const RGBuffer flags = m_renderGraph.CreateBuffer("Probe Cull Flags", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+                const RGBuffer blocks = m_renderGraph.CreateBuffer("Probe Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI_BUFFER_USAGE_STORAGE });
                 addCullingDispatchPass(kProbeCullNames[face], draws, flags, blocks, entryCount, RGTexture{}, uniformBuffer, cullViewBuffer);
 
                 RGTextureDesc targetDesc;
                 targetDesc.Size = RGSize::Absolute;
                 targetDesc.Width = capture.Resolution;
                 targetDesc.Height = capture.Resolution;
-                targetDesc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+                targetDesc.Format = NRI_FORMAT_R16G16B16A16_SFLOAT;
                 const RGTexture hdr = m_renderGraph.CreateTexture(kProbeHdrNames[face], targetDesc);
                 faceHdr[face] = hdr;
-                targetDesc.Format = NRI::ImageFormat::R32SINT;
+                targetDesc.Format = NRI_FORMAT_R32_SINT;
                 const RGTexture entity = m_renderGraph.CreateTexture("Probe Face Entity IDs", targetDesc);
-                targetDesc.Format = NRI::ImageFormat::None;
-                targetDesc.Usage = NRI::TextureUsage::DepthStencilAttachment;
+                targetDesc.Format = NRI_FORMAT_NONE;
+                targetDesc.Usage = NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
                 const RGTexture depth = m_renderGraph.CreateTexture("Probe Face Depth", targetDesc);
 
                 // As the editor's extra views draw a camera: opaque and masked surfaces lit in the fragment shader, unlit ones, the sky.
                 m_renderGraph.AddPass(kProbeFaceNames[face], RGPassFlags::Raster,
                     [&](RGBuilder& builder)
                     {
-                        builder.ColorTarget(hdr, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
-                        builder.ColorTarget(entity, NRI::LoadOP::clear, NRI::StoreOP::store, { -1.0f, 0.0f, 0.0f, 0.0f });
-                        builder.DepthTarget(depth, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 });
+                        builder.ColorTarget(hdr, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 1.0f });
+                        builder.ColorTarget(entity, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { -1.0f, 0.0f, 0.0f, 0.0f });
+                        builder.DepthTarget(depth, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0 });
                         if (ddgi)
                             ReadDDGI(builder, resources, ddgiIndex);
                         if (resources.TLAS.IsValid())
@@ -585,7 +585,7 @@ namespace Nox
                     },
                     [this, draws, uniformBuffer, skyboxSun](RGPassContext& context)
                     {
-                        NRI::CommandBuffer& cmd = context.Cmd();
+                        nri::CommandBuffer& cmd = context.Cmd();
                         const uint64_t uniforms = uniformBuffer->getDeviceAddress();
                         MeshletDrawCursor cursor = beginMeshletDraws(context, draws);
                         cursor.references.matrixReference = uniforms;
@@ -593,35 +593,35 @@ namespace Nox
                         cursor.taskFlags &= ~shaderio::MESHLET_COUNT_TRIANGLES;
                         const uint32_t taskFlags = cursor.taskFlags;
                         cmd.setDepthTestEnable(true);
-                        cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                        cmd.setDepthCompareOp(NRI_COMPARE_GREATER_OR_EQUAL);
                         cmd.setColorBlendEnable(0, false);
-                        cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                        cmd.setColorWriteMask(0, nri::ColorComponent::All);
                         cmd.setColorBlendEnable(1, false);
-                        cmd.setColorWriteMask(1, NRI::ColorComponent::All);
+                        cmd.setColorWriteMask(1, nri::ColorComponent::All);
 
                         cursor.taskFlags = taskFlags | shaderio::MESHLET_SHADE_OPAQUE;
                         // The forward shader with the project's Material Shaders and material graphs (their surface and Opacity Mask) once
                         // built, as the editor's other viewports draw: a probe used to capture a dissolved graph surface whole.
-                        NRI::Pipeline& lit = *forwardLitPipeline();
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, lit, NRI::CullMode::Back, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, lit, NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, lit, NRI::CullMode::Back, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, lit, NRI::CullMode::None, true, false);
+                        const nri::Pipeline& lit = *forwardLitPipeline();
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, lit, NRI_CULL_MODE_BACK, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, lit, NRI_CULL_MODE_NONE, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, lit, NRI_CULL_MODE_BACK, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, lit, NRI_CULL_MODE_NONE, true, false);
                         cursor.taskFlags = taskFlags;
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *m_unlitPipeline, NRI::CullMode::Back, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, m_unlitPipeline, NRI_CULL_MODE_BACK, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, m_unlitPipeline, NRI_CULL_MODE_NONE, true, false);
 
                         if (m_skyboxPipeline && m_environmentCubemap)
                         {
-                            cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
-                            cmd.setCullMode(NRI::CullMode::None);
+                            cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_skyboxPipeline);
+                            cmd.setCullMode(NRI_CULL_MODE_NONE);
                             cmd.setDepthWriteEnable(false);
                             cmd.setColorBlendEnable(0, false);
                             shaderio::PushConstantSkybox skyboxPush = skyboxSun;
                             skyboxPush.matrixReference = uniforms;
                             skyboxPush.cubemapIndex = m_environmentCubemap->GetDescriptorIndexSlot();
                             cmd.pushData(&skyboxPush, sizeof(shaderio::PushConstantSkybox));
-                            cmd.drawMeshTasks(1, 1, 1);
+                            nri::drawMeshTasks(cmd, 1, 1, 1);
                             cmd.setDepthWriteEnable(true);
                         }
                     });
@@ -638,20 +638,20 @@ namespace Nox
                 },
                 [this, faceHdr, target](RGPassContext& context)
                 {
-                    NRI::CommandBuffer& cmd = context.Cmd();
+                    nri::CommandBuffer& cmd = context.Cmd();
                     const uint32_t size = target->Resolution;
                     shaderio::PushConstantProbeAssemble push{};
-                    push.facesReference = m_probeFaceBuffers[frameIndex]->getDeviceAddress();
+                    push.facesReference = m_probeFaceBuffers[frameIndex].getDeviceAddress();
                     for (uint32_t face = 0; face < 6; ++face)
                         push.faceTextureIndex[face] = uniformData.imageHeapIndexOffset + context.Slot(faceHdr[face]);
                     push.outputStorageIndex = target->RawStorage[0];
                     push.outputSize = size;
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_probeAssemblePipeline);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_probeAssemblePipeline);
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((size + 15) / 16, (size + 15) / 16, 6);
                     cmd.executionBarrier();
 
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_probeDownsamplePipeline);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_probeDownsamplePipeline);
                     for (uint32_t mip = 1; mip < static_cast<uint32_t>(target->RawStorage.size()); ++mip)
                     {
                         push.outputStorageIndex = target->RawStorage[mip];
@@ -670,7 +670,7 @@ namespace Nox
                         uint32_t cubemapSize;
                         float roughness;
                     };
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_probePrefilterPipeline);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_probePrefilterPipeline);
                     const uint32_t mips = static_cast<uint32_t>(target->PrefilteredStorage.size());
                     for (uint32_t mip = 0; mip < mips; ++mip)
                     {
@@ -718,7 +718,7 @@ namespace Nox
             table[i] = entries[i].Probe;
         if (count > 0)
         {
-            uniformData.reflectionProbesReference = m_probeTableBuffers[frameIndex]->getDeviceAddress();
+            uniformData.reflectionProbesReference = m_probeTableBuffers[frameIndex].getDeviceAddress();
             uniformData.reflectionProbeCount = count;
         }
     }

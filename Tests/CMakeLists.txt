@@ -17,7 +17,7 @@ add_dependencies(NoxToolsTest NoxEditor)
 # (with the editor's MCP protocol layer when it is built: NOX_WITH_MCP)
 if(NOX_WITH_MCP)
     # (the shared server: the NoxMcp library; the editor's plain-data parts compiled in)
-    target_link_libraries(NoxToolsTest PRIVATE NoxMcp)
+    target_link_libraries(NoxToolsTest PRIVATE NoxEngineMcp)
     target_sources(NoxToolsTest PRIVATE "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/McpMaterial.cpp" "${CMAKE_SOURCE_DIR}/NoxEditor/src/ScriptDiagnostics.cpp"
                                         "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp/McpGraph.cpp")
     target_include_directories(NoxToolsTest PRIVATE "${CMAKE_SOURCE_DIR}/NoxEditor/src/Mcp" "${CMAKE_SOURCE_DIR}/NoxEditor/src" "${CMAKE_SOURCE_DIR}/Tests"

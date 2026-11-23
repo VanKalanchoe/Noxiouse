@@ -6,8 +6,9 @@
 #include <string>
 
 #include "NoxCore/NodeGraph/NodeGraph.h"
-#include "NoxCore/UI/Widgets/UIPanZoom.h"
-#include "NoxCore/UI/Core/UIElement.h"
+#include <NoxUI/Widgets/UIPanZoom.h>
+#include <NoxUI/Core/UIElement.h>
+#include <NoxUI/Rendering/UIFont.h>
 
 namespace Nox
 {
@@ -21,7 +22,7 @@ namespace Nox
     //  - Delete removes the selected state (with its transitions; another becomes the entry) or transition. Right click: on empty
     //    space Add State, on a state Set as Entry State / Open State Graph / Delete State, on a transition Delete Transition.
     // Edits change the GraphNode in place and are reported once each (OnEdited): one undo step for the window.
-    class StateMachineViewV2 final : public UI::UIElement
+    class StateMachineViewV2 final : public NoxUI::UIElement
     {
     public:
         StateMachineViewV2();
@@ -43,11 +44,11 @@ namespace Nox
         // The first parameter's name (a new transition starts with a rule on it, so it does not fire the moment its state is active).
         std::function<std::string()> FirstParameter;
 
-        bool OnPointerDown(const UI::UIPointerEvent& e) override;
-        bool OnPointerMove(const UI::UIPointerEvent& e) override;
-        bool OnPointerUp(const UI::UIPointerEvent& e) override;
-        bool OnMouseWheel(const UI::UIPointerEvent& e) override;
-        bool OnKeyDown(const UI::UIKeyEvent& e) override;
+        bool OnPointerDown(const NoxUI::UIPointerEvent& e) override;
+        bool OnPointerMove(const NoxUI::UIPointerEvent& e) override;
+        bool OnPointerUp(const NoxUI::UIPointerEvent& e) override;
+        bool OnMouseWheel(const NoxUI::UIPointerEvent& e) override;
+        bool OnKeyDown(const NoxUI::UIKeyEvent& e) override;
 
         // The machine's entry state id (its EntryState property), 0 when none.
         static uint32_t EntryState(const GraphNode& machine);
@@ -56,35 +57,35 @@ namespace Nox
         static void DeleteState(GraphNode& machine, uint32_t state);
 
     protected:
-        UI::UIVec2 ComputeDesiredSize() override { return { 300.0f, 200.0f }; }
-        void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override;
+        NoxUI::UIVec2 ComputeDesiredSize() override { return { 300.0f, 200.0f }; }
+        void OnPaint(NoxUI::UIDrawList& drawList, const NoxUI::UITheme& theme) override;
 
     private:
         struct Box
         {
-            UI::UIVec2 Min{ 0.0f }, Max{ 0.0f }; // graph space
+            NoxUI::UIVec2 Min{ 0.0f }, Max{ 0.0f }; // graph space
         };
         Box BoxOf(const NodeSubGraph& state) const;
-        UI::UIVec2 GraphToScreen(const UI::UIVec2& p) const;
-        UI::UIVec2 ScreenToGraph(const UI::UIVec2& p) const;
+        NoxUI::UIVec2 GraphToScreen(const NoxUI::UIVec2& p) const;
+        NoxUI::UIVec2 ScreenToGraph(const NoxUI::UIVec2& p) const;
         // A transition's arrow (screen space), from the edge of its From box to the edge of its To box, moved aside when the opposite
         // transition exists too. False when a state is missing.
-        bool ArrowOf(size_t transition, UI::UIVec2& from, UI::UIVec2& to) const;
-        uint32_t StateAt(const UI::UIVec2& screen) const;
-        uint32_t HandleAt(const UI::UIVec2& screen) const;
-        int TransitionAt(const UI::UIVec2& screen) const;
-        void AddState(const UI::UIVec2& screen);
-        void OpenMenu(const UI::UIVec2& screen);
+        bool ArrowOf(size_t transition, NoxUI::UIVec2& from, NoxUI::UIVec2& to) const;
+        uint32_t StateAt(const NoxUI::UIVec2& screen) const;
+        uint32_t HandleAt(const NoxUI::UIVec2& screen) const;
+        int TransitionAt(const NoxUI::UIVec2& screen) const;
+        void AddState(const NoxUI::UIVec2& screen);
+        void OpenMenu(const NoxUI::UIVec2& screen);
         void Edited(bool structural);
 
         GraphNode* m_Machine = nullptr;
         std::string m_Domain;
-        UI::UIPanZoom m_View{ {}, 1.0f, 0.25f, 2.5f }; // pan and zoom (wheel: 0.25 .. 2.5)
+        NoxUI::UIPanZoom m_View{ {}, 1.0f, 0.25f, 2.5f }; // pan and zoom (wheel: 0.25 .. 2.5)
         bool m_NeedsFrame = true;
 
         enum class Drag : uint8_t { None, Pan, State, Transition };
         Drag m_Drag = Drag::None;
-        UI::UIVec2 m_DragStart{ 0.0f }, m_DragLast{ 0.0f };
+        NoxUI::UIVec2 m_DragStart{ 0.0f }, m_DragLast{ 0.0f };
         glm::vec2 m_DragOrigin{ 0.0f };
         bool m_DragMoved = false;
         int m_PanButton = 0;

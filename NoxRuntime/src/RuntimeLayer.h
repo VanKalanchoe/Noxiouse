@@ -10,7 +10,7 @@
 #include "NoxCore/Core/Layer.h"
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/Ref.h"
-#include "NoxCore/Network/NetProtocol.h"
+#include <NoxNet/NetProtocol.h>
 #include "NoxCore/Network/NetSession.h"
 #include "NoxCore/Console/Console.h"
 
@@ -24,8 +24,6 @@ namespace Nox
     }
     namespace Net
     {
-        class NetServer;
-        class NetClient;
         class NetReplication;
     }
 

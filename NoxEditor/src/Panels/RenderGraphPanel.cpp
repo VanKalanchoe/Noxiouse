@@ -9,31 +9,31 @@
 #include <unordered_map>
 
 #include "NoxCore/Profiling/Profiler.h"
-#include "NoxCore/RenderGraph/RGFrameReport.h"
+#include <NRIRenderGraph/RGFrameReport.h>
 #include "NoxCore/Renderer/Renderer.h"
 
 namespace Nox
 {
     namespace
     {
-        const char* FormatName(NRI::ImageFormat format)
+        const char* FormatName(nri::ImageFormat format)
         {
             switch (format)
             {
-            case NRI::ImageFormat::None: return "-";
-            case NRI::ImageFormat::Surface: return "Surface";
-            case NRI::ImageFormat::RGBA8: return "RGBA8";
-            case NRI::ImageFormat::SRGBA8: return "SRGBA8";
-            case NRI::ImageFormat::R16_SFLOAT: return "R16F";
-            case NRI::ImageFormat::R10G10B10A2_UNORM: return "RGB10A2";
-            case NRI::ImageFormat::R16G16: return "RG16";
-            case NRI::ImageFormat::R32SINT: return "R32I";
-            case NRI::ImageFormat::R32G32_UINT: return "RG32U";
-            case NRI::ImageFormat::R32G32B32A32_UINT: return "RGBA32U";
-            case NRI::ImageFormat::R32G32_SFLOAT: return "RG32F";
-            case NRI::ImageFormat::R16G16_SFLOAT: return "RG16F";
-            case NRI::ImageFormat::R16G16B16A16_SFLOAT: return "RGBA16F";
-            case NRI::ImageFormat::R32G32B32A32_SFLOAT: return "RGBA32F";
+            case NRI_FORMAT_NONE: return "-";
+            case NRI_FORMAT_SURFACE: return "Surface";
+            case NRI_FORMAT_RGBA8: return "RGBA8";
+            case NRI_FORMAT_SRGBA8: return "SRGBA8";
+            case NRI_FORMAT_R16_SFLOAT: return "R16F";
+            case NRI_FORMAT_R10G10B10A2_UNORM: return "RGB10A2";
+            case NRI_FORMAT_R16G16: return "RG16";
+            case NRI_FORMAT_R32_SINT: return "R32I";
+            case NRI_FORMAT_R32G32_UINT: return "RG32U";
+            case NRI_FORMAT_R32G32B32A32_UINT: return "RGBA32U";
+            case NRI_FORMAT_R32G32_SFLOAT: return "RG32F";
+            case NRI_FORMAT_R16G16_SFLOAT: return "RG16F";
+            case NRI_FORMAT_R16G16B16A16_SFLOAT: return "RGBA16F";
+            case NRI_FORMAT_R32G32B32A32_SFLOAT: return "RGBA32F";
             default: return "other";
             }
         }
@@ -525,9 +525,9 @@ namespace Nox
                 inspection.Mip = static_cast<uint32_t>(mip);
         }
 
-        const bool floatFormat = key.Format != NRI::ImageFormat::R32SINT && key.Format != NRI::ImageFormat::R32G32_UINT &&
-                                 key.Format != NRI::ImageFormat::R32G32B32A32_UINT &&
-                                 key.Usage != NRI::TextureUsage::DepthStencilAttachment;
+        const bool floatFormat = key.Format != NRI_FORMAT_R32_SINT && key.Format != NRI_FORMAT_R32G32_UINT &&
+                                 key.Format != NRI_FORMAT_R32G32B32A32_UINT &&
+                                 key.Usage != NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
         if (floatFormat)
         {
             ImGui::Checkbox("Depth curve", &inspection.DepthCurve);
@@ -550,7 +550,7 @@ namespace Nox
 
         inspection.ProbeX = -1;
         inspection.ProbeY = -1;
-        if (Texture2D* image = m_Renderer->getInspectionImage())
+        if (NriTexture image = m_Renderer->getInspectionImage())
         {
             const uint32_t mipWidth = std::max(key.Width >> inspection.Mip, 1u);
             const uint32_t mipHeight = std::max(key.Height >> inspection.Mip, 1u);
@@ -559,7 +559,7 @@ namespace Nox
             const ImVec2 imageSize(availableWidth, static_cast<float>(mipHeight) * scale);
 
             const ImVec2 origin = ImGui::GetCursorScreenPos();
-            ImGui::Image(image->getImTextureID(), imageSize);
+            ImGui::Image(static_cast<ImTextureID>(nriGetTextureDescriptorSlot(image)), imageSize);
             if (ImGui::IsItemHovered())
             {
                 const ImVec2 mouse = ImGui::GetMousePos();

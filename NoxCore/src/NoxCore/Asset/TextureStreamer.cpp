@@ -8,7 +8,7 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Renderer/Renderer.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 namespace Nox
 {
@@ -23,7 +23,7 @@ namespace Nox
         uint64_t SourceBytes = 0;  // the old image's mips
         TextureUpload Upload;
         Ref<Texture2D> Source;     // read by the copy until it completes
-        TaskFuture<bool> Read;
+        NoxTasks::TaskFuture<bool> Read;
         uint64_t CompleteValue = 0;
         bool Recorded = false;
         bool Failed = false;
@@ -373,8 +373,8 @@ namespace Nox
         if (uploadMipCount > 0)
         {
             // From the file straight into staging, like a load.
-            reallocation->Read = JobSystem::Get().AsyncIO("Read Texture Mips", JobPriority::High,
-                [header = texture.Header, newFirst, uploadMipCount, destination = reallocation->Upload.Staging.data](const CancellationToken&)
+            reallocation->Read = NoxTasks::JobSystem::Get().AsyncIO("Read Texture Mips", NoxTasks::JobPriority::High,
+                [header = texture.Header, newFirst, uploadMipCount, destination = reallocation->Upload.Staging.data](const NoxTasks::CancellationToken&)
                 {
                     return TextureImporter::ReadCookedTextureMips(header, newFirst, uploadMipCount, destination);
                 });

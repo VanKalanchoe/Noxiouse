@@ -10,16 +10,17 @@
 
 #include "NoxCore/Audio/AudioMixer.h"
 #include "NoxCore/Core/Ref.h"
-#include "NoxCore/UI/Core/UITypes.h"
+#include <NoxUI/Core/UITypes.h>
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIContext;
         class UIElement;
         class UIStackBox;
     }
+
+namespace Nox
+{
 
     // Window > Mixer: the project's audio mixer (.nmixer) -- a strip per bus (name, where it plays into, meter, fader, the live gain
     // reduction, mute / solo / bypass, its effects), the selected bus's details (name, Output To, volume, effects with their
@@ -29,35 +30,35 @@ namespace Nox
     class MixerV2Panel
     {
     public:
-        const Ref<UI::UIElement>& BuildUI(UI::UIContext* context);
-        const Ref<UI::UIElement>& GetRoot() const { return m_Root; }
+        const Ref<NoxUI::UIElement>& BuildUI(NoxUI::UIContext* context);
+        const Ref<NoxUI::UIElement>& GetRoot() const { return m_Root; }
         // Once a frame while shown: meters, values, the history.
         void Update();
 
     private:
         uint64_t StructureSignature() const;
         void Rebuild();
-        void BuildToolbar(UI::UIStackBox& into);
-        void BuildSnapshots(UI::UIStackBox& into);
-        void BuildStrips(UI::UIStackBox& into);
-        void BuildDetails(UI::UIStackBox& into);
-        void ShowAcoustics(const UI::UIRect& anchor);
+        void BuildToolbar(NoxUI::UIStackBox& into);
+        void BuildSnapshots(NoxUI::UIStackBox& into);
+        void BuildStrips(NoxUI::UIStackBox& into);
+        void BuildDetails(NoxUI::UIStackBox& into);
+        void ShowAcoustics(const NoxUI::UIRect& anchor);
         // A value a snapshot can override: a field with the override dot, right-click Reset / Remove from Snapshot.
-        Ref<UI::UIElement> ValueRow(const std::string& label, const AudioMixerValueKey& key, float min, float max, const char* format, float resetValue,
+        Ref<NoxUI::UIElement> ValueRow(const std::string& label, const AudioMixerValueKey& key, float min, float max, const char* format, float resetValue,
                                     const std::string& tooltip = {});
         void DeleteBus(uint64_t id);
         void Changed(bool structure);
         void CommitHistory();
         void Undo();
         void Redo();
-        bool HandleKey(const UI::UIKeyEvent& e);
+        bool HandleKey(const NoxUI::UIKeyEvent& e);
 
-        UI::UIContext* m_Context = nullptr;
-        Ref<UI::UIElement> m_Root;
-        Ref<UI::UIStackBox> m_Body;
+        NoxUI::UIContext* m_Context = nullptr;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UIStackBox> m_Body;
         uint64_t m_Signature = 0;
         bool m_Rebuild = true;
-        uint64_t m_SelectedBus = kAudioBusMaster;
+        uint64_t m_SelectedBus = NoxAudio::kAudioBusMaster;
         std::unordered_map<uint64_t, bool> m_CollapsedEffects;
 
         // History: the whole mixer before each finished change (it is small).

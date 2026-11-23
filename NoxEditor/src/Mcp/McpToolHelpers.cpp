@@ -13,6 +13,7 @@
 
 namespace Nox::Mcp
 {
+    using namespace ::NoxMcp;
     std::string ShortTypeName(AssetType type)
     {
         std::string name(AssetTypeToString(type));

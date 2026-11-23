@@ -23,7 +23,7 @@
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 namespace Nox
 {
@@ -1063,7 +1063,7 @@ namespace Nox
         // Their cooked files (§5.13.4), on the workers: cooking a cell checks every entity it makes binary, tens of milliseconds a
         // thousand entities.
         std::atomic<size_t> cookedEntities{ 0 }, allEntities{ 0 };
-        JobSystem::Get().ParallelFor("Cook World Cells", static_cast<uint32_t>(toCook.size()), 1, [&](uint32_t, uint32_t begin, uint32_t end)
+        NoxTasks::JobSystem::Get().ParallelFor("Cook World Cells", static_cast<uint32_t>(toCook.size()), 1, [&](uint32_t, uint32_t begin, uint32_t end)
         {
             for (uint32_t index = begin; index < end; ++index)
             {

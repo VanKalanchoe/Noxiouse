@@ -6,13 +6,14 @@
 
 #include "NoxCore/Core/Ref.h"
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIContext;
         class UIElement;
     }
+
+namespace Nox
+{
     class Renderer;
 
     // Window > Render Graph: the frame's passes (groups, command buffer, CPU / GPU ms, mesh invocations, flags; click a pass for what
@@ -24,14 +25,14 @@ namespace Nox
     public:
         explicit RenderGraphV2Panel(Renderer* renderer = nullptr) : m_Renderer(renderer) {}
         void SetRenderer(Renderer* renderer) { m_Renderer = renderer; }
-        const Ref<UI::UIElement>& BuildUI(UI::UIContext* context);
-        const Ref<UI::UIElement>& GetRoot() const { return m_Root; }
+        const Ref<NoxUI::UIElement>& BuildUI(NoxUI::UIContext* context);
+        const Ref<NoxUI::UIElement>& GetRoot() const { return m_Root; }
         // Every frame: `shown` while the window is open (closed, the report and any inspection stop).
         void Update(bool shown);
 
     private:
         Renderer* m_Renderer = nullptr;
-        Ref<UI::UIElement> m_Root;
+        Ref<NoxUI::UIElement> m_Root;
         uint32_t m_SelectedPass = ~0u;
         bool m_ShowUnusedResources = false;
         float m_ExposureStops = 0.0f;

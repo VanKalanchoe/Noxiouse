@@ -29,6 +29,7 @@
 // MCP4 part 2: graphs as JSON (animation and audio graphs), the engine's test programs, packaging.
 namespace Nox::Mcp
 {
+    using namespace ::NoxMcp;
     namespace
     {
         constexpr double MaxWaitSeconds = 50.0; // (under the server's 60 s call time-out)
@@ -247,7 +248,7 @@ namespace Nox::Mcp
             tool.InputSchema = Schema().String("graph", "The graph asset: uuid or path", true).Build();
             tool.InputSchema["properties"]["value"] = Json{ { "type", "object" }, { "description", "The whole graph, as get_graph gives it" } };
             tool.InputSchema["required"].push_back("value");
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 std::string error;
@@ -309,7 +310,7 @@ namespace Nox::Mcp
                                    .Enum("suite", "tools or network", { "tools", "network" }, true)
                                    .Boolean("offline", "network: skip the socket tests (default false)")
                                    .Number("timeout", "Wait at most this long, seconds (default 45)", false, 1.0, MaxWaitSeconds);
-            tool.Access = ConsoleAccess::Execute; // (runs a program)
+            tool.Access = NoxMcp::ToolAccess::Execute; // (runs a program)
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 const std::string name = arguments["suite"].get<std::string>();
@@ -438,7 +439,7 @@ namespace Nox::Mcp
                                    .Boolean("pack_files", "The assets in one Content.npak (default true)")
                                    .Boolean("precompiled_shaders_only", "Without the shader compiler (default true)")
                                    .Boolean("self_contained_dotnet", "Copy the .NET runtime in (about 70 MB; default false)");
-            tool.Access = ConsoleAccess::Execute;
+            tool.Access = NoxMcp::ToolAccess::Execute;
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 if (!context.Package || !Project::GetActive())

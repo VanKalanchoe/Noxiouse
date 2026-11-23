@@ -9,31 +9,31 @@
 #include <SDL3/SDL_scancode.h>
 
 #include "Panels/InspectorWidgetsV2.h"
-#include "NoxCore/UI/Widgets/UIPropertyRows.h"
+#include <NoxUI/Widgets/UIPropertyRows.h>
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
-#include "NoxCore/Audio/AudioDSP.h"
-#include "NoxCore/Audio/AudioEffects.h"
+#include <NoxAudio/AudioDSP.h>
+#include <NoxAudio/AudioEffects.h>
 #include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Audio/SpatialAudio.h"
 #include "NoxCore/Core/UUID.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
-#include "NoxCore/UI/Widgets/UILevelMeter.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
-#include "NoxCore/UI/Core/UIContext.h"
-#include "NoxCore/UI/Core/UITheme.h"
-#include "NoxCore/UI/Layout/UILayout.h"
-#include "NoxCore/UI/Rendering/UIDrawList.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UICheckBox.h"
-#include "NoxCore/UI/Widgets/UIDragScalar.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
-#include "NoxCore/UI/Widgets/UIModal.h"
-#include "NoxCore/UI/Widgets/UIPopup.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
-#include "NoxCore/UI/Widgets/UITextInput.h"
+#include <NoxUI/Widgets/UILevelMeter.h>
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Core/UIContext.h>
+#include <NoxUI/Core/UITheme.h>
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UICheckBox.h>
+#include <NoxUI/Widgets/UIDragScalar.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIMenu.h>
+#include <NoxUI/Widgets/UIModal.h>
+#include <NoxUI/Widgets/UIPopup.h>
+#include <NoxUI/Widgets/UIScrollView.h>
+#include <NoxUI/Widgets/UITextInput.h>
 
 namespace Nox
 {
@@ -42,31 +42,31 @@ namespace Nox
         constexpr float kStripWidth = 136.0f;
         constexpr float kMinDb = -60.0f; // the meters' floor
         constexpr float kMaxDb = 6.0f;
-        constexpr float kFaderMinDb = AudioDSP::kSilenceDb;
+        constexpr float kFaderMinDb = NoxAudio::AudioDSP::kSilenceDb;
         constexpr float kFaderMaxDb = 12.0f;
-        constexpr UI::UIThemeToken kOverride{ "MixerOverride", { 0.95f, 0.55f, 0.15f, 1.0f } };
+        constexpr NoxUI::UIThemeToken kOverride{ "MixerOverride", { 0.95f, 0.55f, 0.15f, 1.0f } };
 
-        glm::vec4 Token(const UI::UITheme& theme, const char* name, const UI::UIColor& fallback)
+        glm::vec4 Token(const NoxUI::UITheme& theme, const char* name, const NoxUI::UIColor& fallback)
         {
-            const UI::UIColor c = theme.GetToken(name, fallback);
+            const NoxUI::UIColor c = theme.GetToken(name, fallback);
             return { c.r, c.g, c.b, c.a };
         }
 
         std::string DbText(float db) { char t[32]; std::snprintf(t, sizeof(t), db <= kFaderMinDb ? "-inf dB" : "%.1f dB", db); return t; }
 
         // A vertical fader in dB: drag up / down (Shift: finer), double-click 0 dB, right-click its menu.
-        class MixerFader final : public UI::UIElement
+        class MixerFader final : public NoxUI::UIElement
         {
         public:
             std::function<float()> Get;
             std::function<void(float)> Set;
             std::function<bool()> Overridden;
-            std::function<void(const UI::UIVec2&)> OnContext;
+            std::function<void(const NoxUI::UIVec2&)> OnContext;
             bool Dragging() const { return m_Dragging; }
 
-            MixerFader() { HitTestMode = UI::UIHitTestMode::Self; }
+            MixerFader() { HitTestMode = NoxUI::UIHitTestMode::Self; }
 
-            bool OnPointerDown(const UI::UIPointerEvent& e) override
+            bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
             {
                 if (e.Button == 3 && OnContext)
                 {
@@ -83,16 +83,16 @@ namespace Nox
                 m_LastY = e.Position.y;
                 return true;
             }
-            bool OnPointerMove(const UI::UIPointerEvent& e) override
+            bool OnPointerMove(const NoxUI::UIPointerEvent& e) override
             {
                 if (!m_Dragging || !Get || !Set)
                     return false;
-                const float perPixel = (kFaderMaxDb - kFaderMinDb) / std::max(GetBounds().Height(), 40.0f) * ((e.Modifiers & UI::UIMod::Shift) ? 0.2f : 1.0f);
+                const float perPixel = (kFaderMaxDb - kFaderMinDb) / std::max(GetBounds().Height(), 40.0f) * ((e.Modifiers & NoxUI::UIMod::Shift) ? 0.2f : 1.0f);
                 Set(std::clamp(Get() - (e.Position.y - m_LastY) * perPixel, kFaderMinDb, kFaderMaxDb));
                 m_LastY = e.Position.y;
                 return true;
             }
-            bool OnPointerUp(const UI::UIPointerEvent& e) override
+            bool OnPointerUp(const NoxUI::UIPointerEvent& e) override
             {
                 if (e.Button == 1)
                     m_Dragging = false;
@@ -100,19 +100,19 @@ namespace Nox
             }
 
         protected:
-            UI::UIVec2 ComputeDesiredSize() override { return { 28.0f, 120.0f }; }
+            NoxUI::UIVec2 ComputeDesiredSize() override { return { 28.0f, 120.0f }; }
             void OnUpdate(float) override
             {
                 if (Get)
                     Tooltip = DbText(Get()) + "\nDrag (Shift: finer); double-click: 0 dB; right-click: its menu";
             }
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
             {
-                const UI::UIRect b = GetBounds();
+                const NoxUI::UIRect b = GetBounds();
                 const float cx = (b.Min.x + b.Max.x) * 0.5f;
                 d.AddRoundedRect({ cx - 2.0f, b.Min.y }, { cx + 2.0f, b.Max.y }, Token(theme, "FaderTrack", { 0.16f, 0.16f, 0.18f, 1.0f }), glm::vec4(2.0f));
                 const float zero = b.Min.y + b.Height() * (1.0f - (0.0f - kFaderMinDb) / (kFaderMaxDb - kFaderMinDb));
-                d.AddRoundedRect({ b.Min.x + 4.0f, zero }, { b.Max.x - 4.0f, zero + 1.0f }, UI::ThemeColor("FaderZeroLine", { 0.6f, 0.6f, 0.65f, 0.7f }));
+                d.AddRoundedRect({ b.Min.x + 4.0f, zero }, { b.Max.x - 4.0f, zero + 1.0f }, NoxUI::ThemeColor("FaderZeroLine", { 0.6f, 0.6f, 0.65f, 0.7f }));
                 const float value = Get ? Get() : 0.0f;
                 const float y = b.Min.y + b.Height() * (1.0f - (value - kFaderMinDb) / (kFaderMaxDb - kFaderMinDb));
                 const bool overridden = Overridden && Overridden();
@@ -127,37 +127,37 @@ namespace Nox
         };
 
         // A row that opens a menu on right-click (a value's Reset / Remove from Snapshot, a snapshot's Rename / Duplicate / Delete).
-        class ContextBox final : public UI::UIStackBox
+        class ContextBox final : public NoxUI::UIStackBox
         {
         public:
-            explicit ContextBox(UI::UIOrientation orientation) : UI::UIStackBox(orientation, 6.0f) {}
-            std::function<void(const UI::UIVec2&)> OnContext;
-            bool OnPointerDown(const UI::UIPointerEvent& e) override
+            explicit ContextBox(NoxUI::UIOrientation orientation) : NoxUI::UIStackBox(orientation, 6.0f) {}
+            std::function<void(const NoxUI::UIVec2&)> OnContext;
+            bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
             {
                 if (e.Button == 3 && OnContext)
                 {
                     OnContext(e.Position);
                     return true;
                 }
-                return UI::UIStackBox::OnPointerDown(e);
+                return NoxUI::UIStackBox::OnPointerDown(e);
             }
         };
 
         // A horizontal row of fixed-width strips that scrolls sideways with the wheel (the strips can be wider than the window).
-        class StripRow final : public UI::UIElement
+        class StripRow final : public NoxUI::UIElement
         {
         public:
             float Spacing = 6.0f;
-            StripRow() { ClipChildren = true; HitTestMode = UI::UIHitTestMode::Self; WidthMode = UI::UISizeMode::Fill; }
-            bool OnMouseWheel(const UI::UIPointerEvent& e) override
+            StripRow() { ClipChildren = true; HitTestMode = NoxUI::UIHitTestMode::Self; WidthMode = NoxUI::UISizeMode::Fill; }
+            bool OnMouseWheel(const NoxUI::UIPointerEvent& e) override
             {
                 m_Scroll = std::clamp(m_Scroll - (e.ScrollDelta.y + e.ScrollDelta.x) * 48.0f, 0.0f, std::max(0.0f, m_ContentWidth - GetBounds().Width()));
                 return true;
             }
 
         protected:
-            UI::UIVec2 ComputeDesiredSize() override { return { 300.0f, 330.0f }; }
-            void ArrangeChildren(const UI::UIRect& content) override
+            NoxUI::UIVec2 ComputeDesiredSize() override { return { 300.0f, 330.0f }; }
+            void ArrangeChildren(const NoxUI::UIRect& content) override
             {
                 float x = content.Min.x - m_Scroll;
                 m_ContentWidth = 0.0f;
@@ -177,20 +177,20 @@ namespace Nox
             float m_ContentWidth = 0.0f;
         };
 
-        Ref<UI::UILabel> Muted(const std::string& text, float size = 13.0f)
+        Ref<NoxUI::UILabel> Muted(const std::string& text, float size = 13.0f)
         {
-            Ref<UI::UILabel> label(new UI::UILabel(text, size));
+            Ref<NoxUI::UILabel> label(new NoxUI::UILabel(text, size));
             label->UseColorOverride = true;
-            label->ColorOverride = UI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
-            label->VAlign = UI::UIAlignment::Center;
+            label->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
+            label->VAlign = NoxUI::UIAlignment::Center;
             return label;
         }
 
         // Buses `bus` may route into (Output To, a send, a sidechain or ducking source) without closing a loop.
-        std::vector<UI::UIMenuItem> BusMenu(const AudioMixerData& data, uint64_t current, bool allowNone, const std::function<bool(const AudioMixerBus&)>& allowed,
+        std::vector<NoxUI::UIMenuItem> BusMenu(const AudioMixerData& data, uint64_t current, bool allowNone, const std::function<bool(const AudioMixerBus&)>& allowed,
                                             const std::function<void(uint64_t)>& pick)
         {
-            std::vector<UI::UIMenuItem> items;
+            std::vector<NoxUI::UIMenuItem> items;
             if (allowNone)
                 items.push_back({ "None", "", [pick]() { pick(0); }, false, true, current == 0 });
             for (const AudioMixerBus& candidate : data.Buses)
@@ -220,17 +220,17 @@ namespace Nox
         m_PendingChange = true;
     }
 
-    const Ref<UI::UIElement>& MixerV2Panel::BuildUI(UI::UIContext* context)
+    const Ref<NoxUI::UIElement>& MixerV2Panel::BuildUI(NoxUI::UIContext* context)
     {
         m_Context = context;
         // Keys typed in the panel that its children leave (Ctrl+Z, Ctrl+Y) come to its root.
-        Ref<UI::UIStackBox> root(new UI::UIStackBox(UI::UIOrientation::Vertical, 6.0f));
-        root->OnKey = [this](const UI::UIKeyEvent& e) { return HandleKey(e); };
-        root->WidthMode = UI::UISizeMode::Fill;
-        root->HeightMode = UI::UISizeMode::Fill;
+        Ref<NoxUI::UIStackBox> root(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 6.0f));
+        root->OnKey = [this](const NoxUI::UIKeyEvent& e) { return HandleKey(e); };
+        root->WidthMode = NoxUI::UISizeMode::Fill;
+        root->HeightMode = NoxUI::UISizeMode::Fill;
         root->StyleClass = "Surface";
         root->DrawBackground = true;
-        root->Padding = UI::UIThickness::All(8.0f);
+        root->Padding = NoxUI::UIThickness::All(8.0f);
         root->Focusable = true;
         m_Body = root;
         m_Root = root;
@@ -239,13 +239,13 @@ namespace Nox
         return m_Root;
     }
 
-    bool MixerV2Panel::HandleKey(const UI::UIKeyEvent& e)
+    bool MixerV2Panel::HandleKey(const NoxUI::UIKeyEvent& e)
     {
-        if ((e.Modifiers & UI::UIMod::Ctrl) == 0)
+        if ((e.Modifiers & NoxUI::UIMod::Ctrl) == 0)
             return false;
         if (e.KeyCode == SDL_SCANCODE_Z)
         {
-            (e.Modifiers & UI::UIMod::Shift) ? Redo() : Undo();
+            (e.Modifiers & NoxUI::UIMod::Shift) ? Redo() : Undo();
             return true;
         }
         if (e.KeyCode == SDL_SCANCODE_Y)
@@ -301,11 +301,11 @@ namespace Nox
             m_UndoStack.clear();
             m_RedoStack.clear();
             m_HaveCommitted = false;
-            m_SelectedBus = kAudioBusMaster;
+            m_SelectedBus = NoxAudio::kAudioBusMaster;
             m_Rebuild = true;
         }
         if (!data.FindBus(m_SelectedBus))
-            m_SelectedBus = kAudioBusMaster;
+            m_SelectedBus = NoxAudio::kAudioBusMaster;
         const uint64_t signature = StructureSignature();
         if (m_Rebuild || signature != m_Signature)
         {
@@ -320,7 +320,7 @@ namespace Nox
             m_HaveCommitted = true;
             m_PendingChange = false;
         }
-        else if (m_PendingChange && !UI::UIContext::IsMouseButtonHeld())
+        else if (m_PendingChange && !NoxUI::UIContext::IsMouseButtonHeld())
             CommitHistory();
     }
 
@@ -372,51 +372,51 @@ namespace Nox
         BuildToolbar(*m_Body);
         BuildSnapshots(*m_Body);
         BuildStrips(*m_Body);
-        auto scroll = UI::MakeUI<UI::UIScrollView>();
-        scroll->WidthMode = UI::UISizeMode::Fill;
-        scroll->HeightMode = UI::UISizeMode::Fill;
+        auto scroll = NoxUI::MakeUI<NoxUI::UIScrollView>();
+        scroll->WidthMode = NoxUI::UISizeMode::Fill;
+        scroll->HeightMode = NoxUI::UISizeMode::Fill;
         m_Body->AddChild(scroll);
-        auto details = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
-        details->WidthMode = UI::UISizeMode::Fill;
+        auto details = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 4.0f);
+        details->WidthMode = NoxUI::UISizeMode::Fill;
         scroll->AddChild(details);
         BuildDetails(*details);
     }
 
-    Ref<UI::UIElement> MixerV2Panel::ValueRow(const std::string& label, const AudioMixerValueKey& key, float min, float max, const char* format,
+    Ref<NoxUI::UIElement> MixerV2Panel::ValueRow(const std::string& label, const AudioMixerValueKey& key, float min, float max, const char* format,
                                               float resetValue, const std::string& tooltip)
     {
-        Ref<ContextBox> row(new ContextBox(UI::UIOrientation::Horizontal));
-        row->WidthMode = UI::UISizeMode::Fill;
+        Ref<ContextBox> row(new ContextBox(NoxUI::UIOrientation::Horizontal));
+        row->WidthMode = NoxUI::UISizeMode::Fill;
         auto name = Muted(label, 13.5f);
-        name->WidthMode = UI::UISizeMode::Fixed;
+        name->WidthMode = NoxUI::UISizeMode::Fixed;
         name->FixedSize = { 140.0f, 24.0f };
         name->Tooltip = tooltip.empty() ? label : label + "\n" + tooltip;
         row->AddChild(name);
-        Ref<UI::UIDragScalar> field = CreateSliderField(AudioMixer::GetValue(key), min, max, [this, key](float v)
+        Ref<NoxUI::UIDragScalar> field = CreateSliderField(AudioMixer::GetValue(key), min, max, [this, key](float v)
         {
             AudioMixer::SetValue(key, v);
             m_PendingChange = true;
         });
         field->Format = format;
-        field->WidthMode = UI::UISizeMode::Fill;
+        field->WidthMode = NoxUI::UISizeMode::Fill;
         row->AddChild(field);
         auto dot = Muted("in snapshot", 12.0f);
         dot->UseColorOverride = true;
         dot->ColorOverride = kOverride.Get();
         dot->Tooltip = "The snapshot being edited sets this value (right-click: Remove from Snapshot)";
         row->AddChild(dot);
-        row->OnContext = [this, key, resetValue](const UI::UIVec2& at)
+        row->OnContext = [this, key, resetValue](const NoxUI::UIVec2& at)
         {
             if (!m_Context)
                 return;
             char reset[48];
             std::snprintf(reset, sizeof(reset), "Reset (%g)", resetValue);
-            UI::UIMenuPopup::ShowContextMenu(*m_Context, at, {
+            NoxUI::UIMenuPopup::ShowContextMenu(*m_Context, at, {
                 { reset, "", [this, key, resetValue]() { AudioMixer::SetValue(key, resetValue); m_PendingChange = true; } },
                 { "Remove from Snapshot", "", [this, key]() { AudioMixer::ClearOverride(key); m_PendingChange = true; }, false, AudioMixer::IsOverridden(key) },
             });
         };
-        UI::AppendSync(*row, [field, dot, key]() // (on the row: it holds both)
+        NoxUI::AppendSync(*row, [field, dot, key]() // (on the row: it holds both)
         {
             if (!field->IsInteracting())
                 field->Value = AudioMixer::GetValue(key);
@@ -425,14 +425,14 @@ namespace Nox
         return row;
     }
 
-    void MixerV2Panel::BuildToolbar(UI::UIStackBox& into)
+    void MixerV2Panel::BuildToolbar(NoxUI::UIStackBox& into)
     {
-        auto bar = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-        bar->WidthMode = UI::UISizeMode::Fill;
-        Ref<UI::UIButton> save(new UI::UIButton("Save", []() { AudioMixer::Save(); }));
+        auto bar = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+        bar->WidthMode = NoxUI::UISizeMode::Fill;
+        Ref<NoxUI::UIButton> save(new NoxUI::UIButton("Save", []() { AudioMixer::Save(); }));
         save->Tooltip = "Writes the mixer to its file (File > Save Scene saves it too).";
         bar->AddChild(save);
-        Ref<UI::UIButton> addBus(new UI::UIButton("Add Bus", [this]()
+        Ref<NoxUI::UIButton> addBus(new NoxUI::UIButton("Add Bus", [this]()
         {
             AudioMixerData& data = AudioMixer::GetData();
             if (data.Buses.size() >= AudioEngine::MaxBuses)
@@ -443,20 +443,20 @@ namespace Nox
             do
                 bus.Name = "Bus " + std::to_string(number++);
             while (AudioMixer::FindBus(bus.Name));
-            bus.Parent = kAudioBusMaster;
+            bus.Parent = NoxAudio::kAudioBusMaster;
             data.Buses.push_back(bus);
             m_SelectedBus = bus.Id;
             Changed(true);
         }));
         addBus->Tooltip = "A new bus into Master (up to " + std::to_string(AudioEngine::MaxBuses) + "). Set its Output To below to put it under another bus.";
         bar->AddChild(addBus);
-        Ref<UI::UIButton> undo(new UI::UIButton("Undo", [this]() { Undo(); }));
-        Ref<UI::UIButton> redo(new UI::UIButton("Redo", [this]() { Redo(); }));
+        Ref<NoxUI::UIButton> undo(new NoxUI::UIButton("Undo", [this]() { Undo(); }));
+        Ref<NoxUI::UIButton> redo(new NoxUI::UIButton("Redo", [this]() { Redo(); }));
         undo->Tooltip = "Ctrl+Z (while the Mixer has the keyboard)";
         redo->Tooltip = "Ctrl+Y / Ctrl+Shift+Z";
         bar->AddChild(undo);
         bar->AddChild(redo);
-        Ref<UI::UICheckBox> headphones(new UI::UICheckBox("Headphones (HRTF)", AudioMixer::GetData().Headphones, [this](bool v)
+        Ref<NoxUI::UICheckBox> headphones(new NoxUI::UICheckBox("Headphones (HRTF)", AudioMixer::GetData().Headphones, [this](bool v)
         {
             AudioMixer::GetData().Headphones = v;
             Changed(false);
@@ -465,7 +465,7 @@ namespace Nox
                               "(for speakers). A game's options menu changes it: Audio.SetHeadphones.";
         bar->AddChild(headphones);
         bar->AddChild(Muted("Real Voices"));
-        auto voices = UI::MakeUI<UI::UIDragScalar>(static_cast<float>(AudioMixer::GetData().RealVoices), 0.25f, [this](float v)
+        auto voices = NoxUI::MakeUI<NoxUI::UIDragScalar>(static_cast<float>(AudioMixer::GetData().RealVoices), 0.25f, [this](float v)
         {
             AudioMixer::GetData().RealVoices = static_cast<uint32_t>(std::clamp(static_cast<int>(std::lround(v)), 1, static_cast<int>(AudioEngine::MaxVoices)));
             Changed(false);
@@ -474,18 +474,18 @@ namespace Nox
         voices->Max = static_cast<float>(AudioEngine::MaxVoices);
         voices->Step = 1.0f;
         voices->Format = "{:.0f}";
-        voices->WidthMode = UI::UISizeMode::Fixed;
+        voices->WidthMode = NoxUI::UISizeMode::Fixed;
         voices->FixedSize = { 64.0f, 24.0f };
         bar->AddChild(voices);
-        Ref<UI::UIButton> acoustics(new UI::UIButton("Acoustics..."));
-        UI::UIButton* acousticsRaw = acoustics.get();
+        Ref<NoxUI::UIButton> acoustics(new NoxUI::UIButton("Acoustics..."));
+        NoxUI::UIButton* acousticsRaw = acoustics.get();
         acoustics->OnClick = [this, acousticsRaw]() { ShowAcoustics(acousticsRaw->GetBounds()); };
         acoustics->Tooltip = "Steam Audio's real-time reflections: rays bounced off the level give the nearest sounds their echoes and reverb.";
         bar->AddChild(acoustics);
         auto file = Muted("");
         bar->AddChild(file);
         into.AddChild(bar);
-        UI::AppendSync(*bar, [this, save, undo, redo, headphones, voices, file]() // (on the bar: it holds them)
+        NoxUI::AppendSync(*bar, [this, save, undo, redo, headphones, voices, file]() // (on the bar: it holds them)
         {
             save->SetEnabled(AudioMixer::IsDirty() && !AudioMixer::GetPath().empty());
             save->StyleVariant = AudioMixer::IsDirty() ? "primary" : "";
@@ -515,15 +515,15 @@ namespace Nox
         });
     }
 
-    void MixerV2Panel::ShowAcoustics(const UI::UIRect& anchor)
+    void MixerV2Panel::ShowAcoustics(const NoxUI::UIRect& anchor)
     {
         if (!m_Context)
             return;
-        auto box = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
-        box->Padding = UI::UIThickness::All(10.0f);
+        auto box = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 4.0f);
+        box->Padding = NoxUI::UIThickness::All(10.0f);
         box->FixedSize = { 440.0f, 0.0f };
         // (its rows follow the settings while the popup is up: their syncs are part of the overlay, and stop with it)
-        UI::UIPropertyRows rows(box, m_Context);
+        NoxUI::UIPropertyRows rows(box, m_Context);
         AudioReflectionSettings* r = &AudioMixer::GetData().Reflections;
         const auto changed = [this]() { Changed(false); };
         rows.Check("Reflections", [r]() { return r->Enabled; }, [r, changed](bool v) { r->Enabled = v; changed(); },
@@ -548,7 +548,7 @@ namespace Nox
         rows.Slider("Level (dB)", [r]() { return r->LevelDb; }, [r, changed](float v) { r->LevelDb = v; changed(); }, kFaderMinDb, 12.0f, "{:.1f}");
         rows.Header("Baked acoustics");
         rows.Choice("Listener Reverb", { "Off", "Real time", "Baked" }, [r]() { return static_cast<int>(r->ListenerReverb); },
-            [r, changed](int v) { r->ListenerReverb = static_cast<AudioListenerReverb>(v); changed(); },
+            [r, changed](int v) { r->ListenerReverb = static_cast<NoxAudio::AudioListenerReverb>(v); changed(); },
             "The reverb an Acoustic Reverb effect applies: Baked looks it up in the Acoustic Probe Volume the listener is in; Real time traces it "
             "from the listener; Off: none.");
         rows.Int("Pathing Voices", [r]() { return r->PathingSources; }, [r, changed](int v) { r->PathingSources = v; changed(); }, 0, SpatialAudio::MaxPathingSources,
@@ -566,44 +566,44 @@ namespace Nox
                           probes.ListenerInside ? "inside one" : "outside them", stats.ListenerReverb ? "yes" : "no", stats.PathingVoices);
             return std::string(text);
         });
-        UI::UIPopup::Show(*m_Context, anchor, box);
+        NoxUI::UIPopup::Show(*m_Context, anchor, box);
     }
 
-    void MixerV2Panel::BuildSnapshots(UI::UIStackBox& into)
+    void MixerV2Panel::BuildSnapshots(NoxUI::UIStackBox& into)
     {
         AudioMixerData& data = AudioMixer::GetData();
-        auto row = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-        row->WidthMode = UI::UISizeMode::Fill;
+        auto row = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+        row->WidthMode = NoxUI::UISizeMode::Fill;
         row->AddChild(Muted("Snapshot:"));
         const int32_t edited = AudioMixer::GetEditedSnapshot();
-        Ref<UI::UIButton> defaultButton(new UI::UIButton("Default", []() { AudioMixer::SetEditedSnapshot(-1); }));
+        Ref<NoxUI::UIButton> defaultButton(new NoxUI::UIButton("Default", []() { AudioMixer::SetEditedSnapshot(-1); }));
         defaultButton->StyleVariant = edited < 0 ? "primary" : "";
         defaultButton->Tooltip = "The mix itself: every value as set here. Snapshots change some of these values.";
         row->AddChild(defaultButton);
         for (int32_t i = 0; i < static_cast<int32_t>(data.Snapshots.size()); ++i)
         {
-            Ref<ContextBox> holder(new ContextBox(UI::UIOrientation::Horizontal));
-            Ref<UI::UIButton> button(new UI::UIButton(data.Snapshots[static_cast<size_t>(i)].Name, [i]() { AudioMixer::SetEditedSnapshot(i); }));
+            Ref<ContextBox> holder(new ContextBox(NoxUI::UIOrientation::Horizontal));
+            Ref<NoxUI::UIButton> button(new NoxUI::UIButton(data.Snapshots[static_cast<size_t>(i)].Name, [i]() { AudioMixer::SetEditedSnapshot(i); }));
             button->StyleVariant = edited == i ? "primary" : "";
             button->Tooltip = "Pick to hear it and to change it: what you change is stored in this snapshot. Right-click: Rename, Duplicate, Delete.";
             holder->AddChild(button);
-            holder->OnContext = [this, i](const UI::UIVec2& at)
+            holder->OnContext = [this, i](const NoxUI::UIVec2& at)
             {
                 if (!m_Context)
                     return;
-                UI::UIMenuPopup::ShowContextMenu(*m_Context, at, {
+                NoxUI::UIMenuPopup::ShowContextMenu(*m_Context, at, {
                     { "Rename...", "", [this, i]()
                     {
                         AudioMixerData& d = AudioMixer::GetData();
                         if (i >= static_cast<int32_t>(d.Snapshots.size()) || !m_Context)
                             return;
-                        auto content = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-                        content->WidthMode = UI::UISizeMode::Fill;
-                        auto field = UI::MakeUI<UI::UITextInput>();
+                        auto content = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 6.0f);
+                        content->WidthMode = NoxUI::UISizeMode::Fill;
+                        auto field = NoxUI::MakeUI<NoxUI::UITextInput>();
                         field->Text = d.Snapshots[static_cast<size_t>(i)].Name;
-                        field->WidthMode = UI::UISizeMode::Fill;
+                        field->WidthMode = NoxUI::UISizeMode::Fill;
                         content->AddChild(field);
-                        UI::UITextInput* raw = field.get();
+                        NoxUI::UITextInput* raw = field.get();
                         const auto apply = [this, i, raw]()
                         {
                             AudioMixerData& now = AudioMixer::GetData();
@@ -614,7 +614,7 @@ namespace Nox
                             }
                         };
                         field->OnSubmit = [this, apply](const std::string&) { apply(); if (m_Context) m_Context->ClearOverlay(); };
-                        UI::UIModal::ShowCustom(*m_Context, "Rename Snapshot", content, { { "Rename", apply, true }, { "Cancel", {} } }, 380.0f);
+                        NoxUI::UIModal::ShowCustom(*m_Context, "Rename Snapshot", content, { { "Rename", apply, true }, { "Cancel", {} } }, 380.0f);
                         m_Context->SetFocus(raw);
                     } },
                     { "Duplicate", "", [this, i]()
@@ -641,7 +641,7 @@ namespace Nox
             };
             row->AddChild(holder);
         }
-        Ref<UI::UIButton> add(new UI::UIButton("+", [this]()
+        Ref<NoxUI::UIButton> add(new NoxUI::UIButton("+", [this]()
         {
             AudioMixerData& d = AudioMixer::GetData();
             AudioMixerSnapshot snapshot;
@@ -660,11 +660,11 @@ namespace Nox
 
         auto status = Muted("");
         status->UseColorOverride = true;
-        status->ColorOverride = UI::ThemeColor("StatusWarning", { 0.95f, 0.65f, 0.3f, 1.0f });
+        status->ColorOverride = NoxUI::ThemeColor("StatusWarning", { 0.95f, 0.65f, 0.3f, 1.0f });
         status->WordWrap = true;
-        status->WidthMode = UI::UISizeMode::Fill;
+        status->WidthMode = NoxUI::UISizeMode::Fill;
         into.AddChild(status);
-        UI::AppendSync(*Raw(status), [status = Raw(status)]()
+        NoxUI::AppendSync(*Raw(status), [status = Raw(status)]()
         {
             const AudioMixerData& d = AudioMixer::GetData();
             const int32_t snapshot = AudioMixer::GetEditedSnapshot();
@@ -682,53 +682,53 @@ namespace Nox
         });
     }
 
-    void MixerV2Panel::BuildStrips(UI::UIStackBox& into)
+    void MixerV2Panel::BuildStrips(NoxUI::UIStackBox& into)
     {
         AudioMixerData& data = AudioMixer::GetData();
         Ref<StripRow> strips(new StripRow());
-        strips->HeightMode = UI::UISizeMode::Fixed;
+        strips->HeightMode = NoxUI::UISizeMode::Fixed;
         strips->FixedSize = { 0.0f, 330.0f };
         for (const AudioMixerBus& bus : data.Buses)
         {
             const uint64_t id = bus.Id;
             const bool selected = id == m_SelectedBus;
-            auto strip = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
+            auto strip = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 4.0f);
             strip->StyleClass = selected ? "CardSelected" : "Card";
             strip->DrawBackground = true;
-            strip->Padding = UI::UIThickness::All(6.0f);
-            strip->HeightMode = UI::UISizeMode::Fill;
+            strip->Padding = NoxUI::UIThickness::All(6.0f);
+            strip->HeightMode = NoxUI::UISizeMode::Fill;
 
-            Ref<UI::UIButton> name(new UI::UIButton(bus.Name, [this, id]() { m_SelectedBus = id; }));
+            Ref<NoxUI::UIButton> name(new NoxUI::UIButton(bus.Name, [this, id]() { m_SelectedBus = id; }));
             name->StyleVariant = selected ? "primary" : "";
             name->Tooltip = "Select to edit its effects, sends and ducking below.";
-            name->WidthMode = UI::UISizeMode::Fill;
+            name->WidthMode = NoxUI::UISizeMode::Fill;
             strip->AddChild(name);
-            strip->AddChild(Muted("-> " + (id == kAudioBusMaster ? std::string("Speakers") : BusName(data, bus.Parent, "Master")), 12.0f));
+            strip->AddChild(Muted("-> " + (id == NoxAudio::kAudioBusMaster ? std::string("Speakers") : BusName(data, bus.Parent, "Master")), 12.0f));
 
             const AudioMixerValueKey volume{ id, AudioMixerValueKind::Volume, 0, 0 };
-            auto meterRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-            meterRow->WidthMode = UI::UISizeMode::Fill;
-            meterRow->HeightMode = UI::UISizeMode::Fill;
+            auto meterRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+            meterRow->WidthMode = NoxUI::UISizeMode::Fill;
+            meterRow->HeightMode = NoxUI::UISizeMode::Fill;
             // The bus's level: RMS filled, the peak a line, a tick every 12 dB (UI::UILevelMeter).
-            Ref<UI::UILevelMeter> meter(new UI::UILevelMeter(UI::UIOrientation::Vertical));
+            Ref<NoxUI::UILevelMeter> meter(new NoxUI::UILevelMeter(NoxUI::UIOrientation::Vertical));
             meter->MinDb = kMinDb;
             meter->MaxDb = kMaxDb;
             meter->Source = [id]()
             {
                 const AudioBusMeter m = AudioMixer::GetMeter(id);
-                return UI::UILevelMeter::Values{ m.RmsLeft, m.RmsRight, m.PeakLeft, m.PeakRight };
+                return NoxUI::UILevelMeter::Values{ m.RmsLeft, m.RmsRight, m.PeakLeft, m.PeakRight };
             };
-            meter->HeightMode = UI::UISizeMode::Fill;
+            meter->HeightMode = NoxUI::UISizeMode::Fill;
             meterRow->AddChild(meter);
             Ref<MixerFader> fader(new MixerFader());
-            fader->HeightMode = UI::UISizeMode::Fill;
+            fader->HeightMode = NoxUI::UISizeMode::Fill;
             fader->Get = [volume]() { return AudioMixer::GetValue(volume); };
             fader->Set = [this, volume](float db) { AudioMixer::SetValue(volume, db); m_PendingChange = true; };
             fader->Overridden = [volume]() { return AudioMixer::IsOverridden(volume); };
-            fader->OnContext = [this, volume](const UI::UIVec2& at)
+            fader->OnContext = [this, volume](const NoxUI::UIVec2& at)
             {
                 if (m_Context)
-                    UI::UIMenuPopup::ShowContextMenu(*m_Context, at, {
+                    NoxUI::UIMenuPopup::ShowContextMenu(*m_Context, at, {
                         { "0 dB", "", [this, volume]() { AudioMixer::SetValue(volume, 0.0f); m_PendingChange = true; } },
                         { "Remove from Snapshot", "", [this, volume]() { AudioMixer::ClearOverride(volume); m_PendingChange = true; }, false, AudioMixer::IsOverridden(volume) },
                     });
@@ -739,17 +739,17 @@ namespace Nox
             meterRow->AddChild(reduction);
             strip->AddChild(meterRow);
 
-            auto db = UI::MakeUI<UI::UIDragScalar>(AudioMixer::GetValue(volume), 0.1f, [this, volume](float v) { AudioMixer::SetValue(volume, v); m_PendingChange = true; });
+            auto db = NoxUI::MakeUI<NoxUI::UIDragScalar>(AudioMixer::GetValue(volume), 0.1f, [this, volume](float v) { AudioMixer::SetValue(volume, v); m_PendingChange = true; });
             db->Min = kFaderMinDb;
             db->Max = kFaderMaxDb;
             db->Format = "{:.1f} dB";
-            db->WidthMode = UI::UISizeMode::Fill;
+            db->WidthMode = NoxUI::UISizeMode::Fill;
             strip->AddChild(db);
 
-            auto toggles = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 3.0f);
+            auto toggles = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 3.0f);
             const auto toggle = [this, id, &toggles](const char* label, bool AudioMixerBus::*field, const char* tooltip)
             {
-                Ref<UI::UIButton> button(new UI::UIButton(label, [this, id, field]()
+                Ref<NoxUI::UIButton> button(new NoxUI::UIButton(label, [this, id, field]()
                 {
                     if (AudioMixerBus* b = AudioMixer::GetData().FindBus(id))
                     {
@@ -758,27 +758,27 @@ namespace Nox
                     }
                 }));
                 button->Tooltip = tooltip;
-                button->WidthMode = UI::UISizeMode::Fixed;
+                button->WidthMode = NoxUI::UISizeMode::Fixed;
                 button->FixedSize = { 34.0f, 24.0f };
                 toggles->AddChild(button);
                 return button;
             };
-            Ref<UI::UIButton> mute = toggle("M", &AudioMixerBus::Mute, "Mute");
-            Ref<UI::UIButton> solo = toggle("S", &AudioMixerBus::Solo, "Solo: only the soloed buses (with what feeds them, where they go and the buses they send to) are heard");
-            Ref<UI::UIButton> bypass = toggle("B", &AudioMixerBus::Bypass, "Bypass every effect of this bus");
+            Ref<NoxUI::UIButton> mute = toggle("M", &AudioMixerBus::Mute, "Mute");
+            Ref<NoxUI::UIButton> solo = toggle("S", &AudioMixerBus::Solo, "Solo: only the soloed buses (with what feeds them, where they go and the buses they send to) are heard");
+            Ref<NoxUI::UIButton> bypass = toggle("B", &AudioMixerBus::Bypass, "Bypass every effect of this bus");
             strip->AddChild(toggles);
 
             for (const AudioMixerEffect& effect : bus.Effects)
             {
-                auto effectLabel = Muted(GetAudioEffectInfo(effect.Type).Name, 12.5f);
-                effectLabel->Tooltip = GetAudioEffectInfo(effect.Type).Description;
+                auto effectLabel = Muted(NoxAudio::GetAudioEffectInfo(effect.Type).Name, 12.5f);
+                effectLabel->Tooltip = NoxAudio::GetAudioEffectInfo(effect.Type).Description;
                 strip->AddChild(effectLabel);
             }
             if (bus.Effects.empty())
                 strip->AddChild(Muted("(no effects)", 12.0f));
             strips->AddChild(strip);
 
-            UI::AppendSync(*strip, [id, volume, db, reduction, mute, solo, bypass]() // (on the strip: it holds them)
+            NoxUI::AppendSync(*strip, [id, volume, db, reduction, mute, solo, bypass]() // (on the strip: it holds them)
             {
                 const AudioMixerBus* b = AudioMixer::GetData().FindBus(id);
                 if (!b)
@@ -800,15 +800,15 @@ namespace Nox
         into.AddChild(strips);
     }
 
-    void MixerV2Panel::BuildDetails(UI::UIStackBox& into)
+    void MixerV2Panel::BuildDetails(NoxUI::UIStackBox& into)
     {
         AudioMixerData& data = AudioMixer::GetData();
         AudioMixerBus* bus = data.FindBus(m_SelectedBus);
         if (!bus)
             return;
         const uint64_t id = bus->Id;
-        const bool isMaster = id == kAudioBusMaster;
-        UI::UIPropertyRows rows(Ref<UI::UIStackBox>(&into), m_Context);
+        const bool isMaster = id == NoxAudio::kAudioBusMaster;
+        NoxUI::UIPropertyRows rows(Ref<NoxUI::UIStackBox>(&into), m_Context);
         const auto findBus = [id]() { return AudioMixer::GetData().FindBus(id); };
 
         rows.Header("Bus");
@@ -817,10 +817,10 @@ namespace Nox
         else
         {
             // Renamed when the edit ends (Enter or click away), if the name is free; scripts name buses by it.
-            auto field = UI::MakeUI<UI::UITextInput>();
+            auto field = NoxUI::MakeUI<NoxUI::UITextInput>();
             field->Text = bus->Name;
-            field->WidthMode = UI::UISizeMode::Fill;
-            UI::UITextInput* raw = field.get();
+            field->WidthMode = NoxUI::UISizeMode::Fill;
+            NoxUI::UITextInput* raw = field.get();
             const auto apply = [this, findBus, raw]()
             {
                 AudioMixerBus* b = findBus();
@@ -836,23 +836,23 @@ namespace Nox
                 Changed(false);
             };
             field->OnSubmit = [apply](const std::string&) { apply(); };
-            InspectorCardBuilder builder{ Ref<UI::UIStackBox>(&into), {}, m_Context };
+            InspectorCardBuilder builder{ Ref<NoxUI::UIStackBox>(&into), {}, m_Context };
             builder.AddRow("Name", field, "Scripts name buses by this (Audio.SetBusVolume(\"Music\", 0.5f)).");
-            UI::AppendSync(*field, [field = field.get(), apply]()
+            NoxUI::AppendSync(*field, [field = field.get(), apply]()
             {
-                if (!UI::HasState(field->GetState(), UI::UIState::Focused))
+                if (!NoxUI::HasState(field->GetState(), NoxUI::UIState::Focused))
                     apply();
             });
 
-            Ref<UI::UIButton> output(new UI::UIButton(BusName(data, bus->Parent, "Master")));
-            UI::UIButton* outputRaw = output.get();
+            Ref<NoxUI::UIButton> output(new NoxUI::UIButton(BusName(data, bus->Parent, "Master")));
+            NoxUI::UIButton* outputRaw = output.get();
             output->OnClick = [this, id, outputRaw]()
             {
                 if (!m_Context)
                     return;
                 const AudioMixerData& d = AudioMixer::GetData();
                 const AudioMixerBus* b = d.FindBus(id);
-                UI::UIMenuPopup::ShowPopupMenu(*m_Context, outputRaw->GetBounds(), BusMenu(d, b ? b->Parent : 0, false,
+                NoxUI::UIMenuPopup::ShowPopupMenu(*m_Context, outputRaw->GetBounds(), BusMenu(d, b ? b->Parent : 0, false,
                     [&d, id](const AudioMixerBus& candidate) { return candidate.Id != id && !d.WouldLoop(id, candidate.Id) && !d.IsUnder(candidate.Id, id); },
                     [this, id](uint64_t chosen) { if (AudioMixerBus* target = AudioMixer::GetData().FindBus(id)) { target->Parent = chosen; Changed(true); } }));
             };
@@ -869,10 +869,10 @@ namespace Nox
                 const AudioMixerBus* b = AudioMixer::GetData().FindBus(id);
                 if (!b || !m_Context)
                     return;
-                auto text = UI::Label("Delete '" + b->Name + "'? Its children go to its Output To; sounds on it play into Master. (Undo brings it back.)", 14.0f);
+                auto text = NoxUI::Label("Delete '" + b->Name + "'? Its children go to its Output To; sounds on it play into Master. (Undo brings it back.)", 14.0f);
                 text->WordWrap = true;
-                text->WidthMode = UI::UISizeMode::Fill;
-                UI::UIModal::ShowCustom(*m_Context, "Delete Bus", text, { { "Delete", [this, id]() { DeleteBus(id); }, true }, { "Cancel", {} } }, 420.0f);
+                text->WidthMode = NoxUI::UISizeMode::Fill;
+                NoxUI::UIModal::ShowCustom(*m_Context, "Delete Bus", text, { { "Delete", [this, id]() { DeleteBus(id); }, true }, { "Cancel", {} } }, 420.0f);
             });
         }
 
@@ -882,7 +882,7 @@ namespace Nox
         {
             const AudioMixerEffect& effect = bus->Effects[index];
             const uint64_t effectId = effect.Id;
-            const AudioEffectInfo& info = GetAudioEffectInfo(effect.Type);
+            const NoxAudio::AudioEffectInfo& info = NoxAudio::GetAudioEffectInfo(effect.Type);
             const auto findEffect = [id, effectId]() -> AudioMixerEffect*
             {
                 AudioMixerBus* b = AudioMixer::GetData().FindBus(id);
@@ -908,16 +908,16 @@ namespace Nox
                 });
             card.Card->Tooltip = info.Description;
             into.AddChild(card.Card);
-            UI::UIPropertyRows effectRows(card.Body, m_Context);
+            NoxUI::UIPropertyRows effectRows(card.Body, m_Context);
 
-            auto actions = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-            Ref<UI::UIButton> onOff(new UI::UIButton("Bypass", [this, findEffect]() { if (AudioMixerEffect* e = findEffect()) { e->Bypass = !e->Bypass; Changed(false); } }));
-            Ref<UI::UIButton> up(new UI::UIButton("Up", [this, id, index]()
+            auto actions = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+            Ref<NoxUI::UIButton> onOff(new NoxUI::UIButton("Bypass", [this, findEffect]() { if (AudioMixerEffect* e = findEffect()) { e->Bypass = !e->Bypass; Changed(false); } }));
+            Ref<NoxUI::UIButton> up(new NoxUI::UIButton("Up", [this, id, index]()
             {
                 AudioMixerBus* b = AudioMixer::GetData().FindBus(id);
                 if (b && index > 0 && index < b->Effects.size()) { std::swap(b->Effects[index], b->Effects[index - 1]); Changed(true); }
             }));
-            Ref<UI::UIButton> down(new UI::UIButton("Down", [this, id, index]()
+            Ref<NoxUI::UIButton> down(new NoxUI::UIButton("Down", [this, id, index]()
             {
                 AudioMixerBus* b = AudioMixer::GetData().FindBus(id);
                 if (b && index + 1 < b->Effects.size()) { std::swap(b->Effects[index], b->Effects[index + 1]); Changed(true); }
@@ -928,7 +928,7 @@ namespace Nox
             actions->AddChild(up);
             actions->AddChild(down);
             card.Body->AddChild(actions);
-            UI::AppendSync(*actions, [onOff, findEffect]() // (on its row: it holds the button)
+            NoxUI::AppendSync(*actions, [onOff, findEffect]() // (on its row: it holds the button)
             {
                 const AudioMixerEffect* e = findEffect();
                 onOff->StyleVariant = e && e->Bypass ? "primary" : "";
@@ -941,18 +941,18 @@ namespace Nox
                     char text[48];
                     std::snprintf(text, sizeof(text), "Gain reduction now: -%.1f dB", AudioMixer::GetEffectGainReduction(id, static_cast<uint32_t>(index)));
                     return std::string(text);
-                }, UI::ThemeColor("StatusWarning", { 0.95f, 0.7f, 0.3f, 1.0f }));
+                }, NoxUI::ThemeColor("StatusWarning", { 0.95f, 0.7f, 0.3f, 1.0f }));
             if (info.Sidechain)
             {
-                Ref<UI::UIButton> key(new UI::UIButton(BusName(data, effect.Sidechain)));
-                UI::UIButton* keyRaw = key.get();
+                Ref<NoxUI::UIButton> key(new NoxUI::UIButton(BusName(data, effect.Sidechain)));
+                NoxUI::UIButton* keyRaw = key.get();
                 key->OnClick = [this, id, findEffect, keyRaw]()
                 {
                     const AudioMixerEffect* e = findEffect();
                     if (!m_Context || !e)
                         return;
                     const AudioMixerData& d = AudioMixer::GetData();
-                    UI::UIMenuPopup::ShowPopupMenu(*m_Context, keyRaw->GetBounds(), BusMenu(d, e->Sidechain, true,
+                    NoxUI::UIMenuPopup::ShowPopupMenu(*m_Context, keyRaw->GetBounds(), BusMenu(d, e->Sidechain, true,
                         [&d, id](const AudioMixerBus& candidate) { return candidate.Id != id && !d.WouldLoop(candidate.Id, id); },
                         [this, findEffect](uint64_t chosen) { if (AudioMixerEffect* target = findEffect()) { target->Sidechain = chosen; Changed(true); } }));
                 };
@@ -967,7 +967,7 @@ namespace Nox
             }
             for (uint32_t p = 0; p < info.Parameters.size(); ++p)
             {
-                const AudioEffectParameterInfo& parameter = info.Parameters[p];
+                const NoxAudio::AudioEffectParameterInfo& parameter = info.Parameters[p];
                 if (!parameter.Options.empty())
                 {
                     // Choices are the mix's (snapshots blend numbers only).
@@ -989,17 +989,17 @@ namespace Nox
                 }
             }
         }
-        Ref<UI::UIButton> addEffect(new UI::UIButton("Add Effect..."));
-        UI::UIButton* addRaw = addEffect.get();
+        Ref<NoxUI::UIButton> addEffect(new NoxUI::UIButton("Add Effect..."));
+        NoxUI::UIButton* addRaw = addEffect.get();
         addEffect->OnClick = [this, id, addRaw]()
         {
             if (!m_Context)
                 return;
-            std::vector<UI::UIMenuItem> items;
-            for (uint32_t t = 0; t < static_cast<uint32_t>(AudioEffectType::Count); ++t)
+            std::vector<NoxUI::UIMenuItem> items;
+            for (uint32_t t = 0; t < static_cast<uint32_t>(NoxAudio::AudioEffectType::Count); ++t)
             {
-                const AudioEffectInfo& info = GetAudioEffectInfo(static_cast<AudioEffectType>(t));
-                const AudioEffectType type = info.Type;
+                const NoxAudio::AudioEffectInfo& info = NoxAudio::GetAudioEffectInfo(static_cast<NoxAudio::AudioEffectType>(t));
+                const NoxAudio::AudioEffectType type = info.Type;
                 items.push_back({ info.Name, "", [this, id, type]()
                 {
                     AudioMixerBus* b = AudioMixer::GetData().FindBus(id);
@@ -1013,9 +1013,9 @@ namespace Nox
                     Changed(true);
                 }, false, true, false, false, info.Description });
             }
-            UI::UIMenuPopup::ShowPopupMenu(*m_Context, addRaw->GetBounds(), std::move(items));
+            NoxUI::UIMenuPopup::ShowPopupMenu(*m_Context, addRaw->GetBounds(), std::move(items));
         };
-        addEffect->HAlign = UI::UIAlignment::Start;
+        addEffect->HAlign = NoxUI::UIAlignment::Start;
         into.AddChild(addEffect);
 
         // ---- Sends ----
@@ -1024,8 +1024,8 @@ namespace Nox
         {
             const uint64_t target = send.Target;
             into.AddChild(ValueRow("To " + BusName(data, target, "(missing)"), { id, AudioMixerValueKind::Send, target, 0 }, kFaderMinDb, kFaderMaxDb, "{:.1f} dB", 0.0f));
-            auto line = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-            line->Padding = UI::UIThickness{ 146.0f, 0.0f, 0.0f, 0.0f };
+            auto line = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+            line->Padding = NoxUI::UIThickness{ 146.0f, 0.0f, 0.0f, 0.0f };
             const auto findSend = [id, target]() -> AudioMixerSend*
             {
                 AudioMixerBus* b = AudioMixer::GetData().FindBus(id);
@@ -1036,10 +1036,10 @@ namespace Nox
                         return &s;
                 return nullptr;
             };
-            Ref<UI::UICheckBox> pre(new UI::UICheckBox("Pre-Fader", send.PreFader, [this, findSend](bool v) { if (AudioMixerSend* s = findSend()) { s->PreFader = v; Changed(true); } }));
+            Ref<NoxUI::UICheckBox> pre(new NoxUI::UICheckBox("Pre-Fader", send.PreFader, [this, findSend](bool v) { if (AudioMixerSend* s = findSend()) { s->PreFader = v; Changed(true); } }));
             pre->Tooltip = "Taken before this bus's fader: it still sends when the bus is turned down.";
             line->AddChild(pre);
-            Ref<UI::UIButton> remove(new UI::UIButton("Remove", [this, id, target]()
+            Ref<NoxUI::UIButton> remove(new NoxUI::UIButton("Remove", [this, id, target]()
             {
                 AudioMixerBus* b = AudioMixer::GetData().FindBus(id);
                 if (!b)
@@ -1052,8 +1052,8 @@ namespace Nox
             line->AddChild(remove);
             into.AddChild(line);
         }
-        Ref<UI::UIButton> addSend(new UI::UIButton("Add Send..."));
-        UI::UIButton* sendRaw = addSend.get();
+        Ref<NoxUI::UIButton> addSend(new NoxUI::UIButton("Add Send..."));
+        NoxUI::UIButton* sendRaw = addSend.get();
         addSend->OnClick = [this, id, sendRaw]()
         {
             if (!m_Context)
@@ -1062,7 +1062,7 @@ namespace Nox
             const AudioMixerBus* b = d.FindBus(id);
             if (!b)
                 return;
-            UI::UIMenuPopup::ShowPopupMenu(*m_Context, sendRaw->GetBounds(), BusMenu(d, 0, false,
+            NoxUI::UIMenuPopup::ShowPopupMenu(*m_Context, sendRaw->GetBounds(), BusMenu(d, 0, false,
                 [&d, b, id](const AudioMixerBus& candidate)
                 {
                     const bool exists = std::any_of(b->Sends.begin(), b->Sends.end(), [&](const AudioMixerSend& s) { return s.Target == candidate.Id; });
@@ -1080,26 +1080,26 @@ namespace Nox
                     Changed(true);
                 }));
         };
-        addSend->HAlign = UI::UIAlignment::Start;
+        addSend->HAlign = NoxUI::UIAlignment::Start;
         into.AddChild(addSend);
 
         // ---- Ducking ----
         if (!isMaster)
         {
             rows.Header("Ducking", "This bus is turned down while another bus plays (Music ducked by Voice: dialogue stays clear).");
-            Ref<UI::UIButton> source(new UI::UIButton(BusName(data, bus->Duck.Source)));
-            UI::UIButton* sourceRaw = source.get();
+            Ref<NoxUI::UIButton> source(new NoxUI::UIButton(BusName(data, bus->Duck.Source)));
+            NoxUI::UIButton* sourceRaw = source.get();
             source->OnClick = [this, id, sourceRaw]()
             {
                 if (!m_Context)
                     return;
                 const AudioMixerData& d = AudioMixer::GetData();
                 const AudioMixerBus* b = d.FindBus(id);
-                UI::UIMenuPopup::ShowPopupMenu(*m_Context, sourceRaw->GetBounds(), BusMenu(d, b ? b->Duck.Source : 0, true,
+                NoxUI::UIMenuPopup::ShowPopupMenu(*m_Context, sourceRaw->GetBounds(), BusMenu(d, b ? b->Duck.Source : 0, true,
                     [&d, id](const AudioMixerBus& candidate) { return candidate.Id != id && !d.WouldLoop(candidate.Id, id); },
                     [this, id](uint64_t chosen) { if (AudioMixerBus* target = AudioMixer::GetData().FindBus(id)) { target->Duck.Source = chosen; Changed(true); } }));
             };
-            InspectorCardBuilder builder{ Ref<UI::UIStackBox>(&into), {}, m_Context };
+            InspectorCardBuilder builder{ Ref<NoxUI::UIStackBox>(&into), {}, m_Context };
             builder.AddRow("Duck When", source);
             if (bus->Duck.Source != 0)
             {
@@ -1120,7 +1120,7 @@ namespace Nox
     {
         AudioMixerData& data = AudioMixer::GetData();
         const AudioMixerBus* bus = data.FindBus(id);
-        if (!bus || id == kAudioBusMaster)
+        if (!bus || id == NoxAudio::kAudioBusMaster)
             return;
         const uint64_t parent = bus->Parent;
         for (AudioMixerBus& other : data.Buses)
@@ -1135,7 +1135,7 @@ namespace Nox
                 other.Duck.Source = 0;
         }
         if (data.Reflections.Bus == id)
-            data.Reflections.Bus = kAudioBusMaster; // (the old panel left the reflections on a bus that was gone)
+            data.Reflections.Bus = NoxAudio::kAudioBusMaster; // (the old panel left the reflections on a bus that was gone)
         for (AudioMixerSnapshot& snapshot : data.Snapshots)
             std::erase_if(snapshot.Values, [&](const auto& entry) { return entry.first.Bus == id || (entry.first.Kind == AudioMixerValueKind::Send && entry.first.Item == id); });
         std::erase_if(data.Buses, [&](const AudioMixerBus& candidate) { return candidate.Id == id; });

@@ -19,27 +19,27 @@ namespace Nox
 
     void Renderer::createPostEffectPipelines(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
         desc.forceCompile = forceCompile;
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "dofMain", .sourcePath = "assets/shaders/PostEffects.slang" });
-        m_dofPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "dofMain", .sourcePath = "assets/shaders/PostEffects.slang" });
+        m_dofPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.back().entryPoint = "motionBlurMain";
-        m_motionBlurPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_motionBlurPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.back().entryPoint = "bloomDownsampleMain";
-        m_bloomDownsamplePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_bloomDownsamplePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.back().entryPoint = "bloomUpsampleMain";
-        m_bloomUpsamplePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_bloomUpsamplePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::createSceneOutlinePipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT }; // the HDR scene
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Vertex, .entryPoint = "vertMain", .sourcePath = "assets/shaders/SceneOutline.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/SceneOutline.slang" });
-        m_sceneOutlinePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT }; // the HDR scene
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_VERTEX, .entryPoint = "vertMain", .sourcePath = "assets/shaders/SceneOutline.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = "assets/shaders/SceneOutline.slang" });
+        m_sceneOutlinePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::addSceneOutlinePass()
@@ -51,12 +51,12 @@ namespace Nox
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         if (!resources.HDRScene.IsValid() || !resources.Depth.IsValid() || !resources.GBufferNormal.IsValid() || !resources.GBufferMaterial.IsValid())
             return;
-        const NRI::Extent2D extent = m_frame.renderExtent;
+        const nri::Extent2D extent = m_frame.renderExtent;
         if (extent.width == 0 || extent.height == 0)
             return;
 
         shaderio::PushConstantSceneOutline push{};
-        push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+        push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
         push.toonOnly = settings.OutlineToonOnly ? 1u : 0u;
         push.color = glm::vec4(glm::clamp(settings.OutlineColor, glm::vec3(0.0f), glm::vec3(1.0f)), 1.0f);
         // The thickness is in output pixels: at a lower render resolution (DLSS) the same line is fewer render pixels.
@@ -71,7 +71,7 @@ namespace Nox
         m_renderGraph.AddPass("Scene Outlines", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
-                builder.ColorTarget(resources.HDRScene, NRI::LoadOP::load, NRI::StoreOP::store);
+                builder.ColorTarget(resources.HDRScene, NRI_LOAD_OP_LOAD, NRI_STORE_OP_STORE);
                 builder.Read(resources.Depth);
                 builder.Read(resources.GBufferNormal);
                 builder.Read(resources.GBufferMaterial);
@@ -79,20 +79,20 @@ namespace Nox
             },
             [this, push, res = &resources](RGPassContext& context) mutable
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
+                nri::CommandBuffer& cmd = context.Cmd();
                 push.depthIndex = uniformData.imageHeapIndexOffset + context.Slot(res->Depth);
                 push.normalIndex = uniformData.imageHeapIndexOffset + context.Slot(res->GBufferNormal);
                 push.materialIndex = uniformData.imageHeapIndexOffset + context.Slot(res->GBufferMaterial);
-                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_sceneOutlinePipeline);
-                cmd.setCullMode(NRI::CullMode::None);
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_sceneOutlinePipeline);
+                cmd.setCullMode(NRI_CULL_MODE_NONE);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
                 cmd.setColorBlendEnable(0, true);
-                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                cmd.setColorWriteMask(0, nri::ColorComponent::All);
                 // The scene times the pixel's colour (white: unchanged); alpha stays.
                 cmd.setColorBlendEquation(0, {
-                    .srcColorBlendFactor = NRI::BlendFactor::Zero, .dstColorBlendFactor = NRI::BlendFactor::SrcColor, .colorBlendOp = NRI::BlendOp::Add,
-                    .srcAlphaBlendFactor = NRI::BlendFactor::Zero, .dstAlphaBlendFactor = NRI::BlendFactor::One, .alphaBlendOp = NRI::BlendOp::Add });
+                    .srcColorBlendFactor = NRI_BLEND_FACTOR_ZERO, .dstColorBlendFactor = NRI_BLEND_FACTOR_SRC_COLOR, .colorBlendOp = NRI_BLEND_OP_ADD,
+                    .srcAlphaBlendFactor = NRI_BLEND_FACTOR_ZERO, .dstAlphaBlendFactor = NRI_BLEND_FACTOR_ONE, .alphaBlendOp = NRI_BLEND_OP_ADD });
                 cmd.pushData(&push, sizeof(push));
                 cmd.draw(3, 1, 0, 0);
                 cmd.setColorBlendEnable(0, false);
@@ -115,7 +115,7 @@ namespace Nox
             {
                 TextureSpecification spec;
                 spec.generateMips = false;
-                spec.format = NRI::ImageFormat::RGBA8;
+                spec.format = NRI_FORMAT_RGBA8;
                 spec.virtualTexture = VirtualTextureMode::Off;
                 m_postLut = TextureImporter::LoadTexture2D(settings.LutPath, spec, this);
                 if (!m_postLut)
@@ -135,9 +135,9 @@ namespace Nox
         imageDesc.Size = RGSize::Absolute;
         imageDesc.Width = width;
         imageDesc.Height = height;
-        imageDesc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
-        imageDesc.Usage = NRI::TextureUsage::Storage;
-        const uint64_t uniforms = m_uniformBuffers[frameIndex]->getDeviceAddress();
+        imageDesc.Format = NRI_FORMAT_R16G16B16A16_SFLOAT;
+        imageDesc.Usage = NRI_TEXTURE_USAGE_STORAGE;
+        const uint64_t uniforms = m_uniformBuffers[frameIndex].getDeviceAddress();
 
         // Depth of field: needs the depth and a perspective camera (the depth's view distance is near / depth).
         const bool perspective = uniformData.nonJitteredProj[3][3] == 0.0f;
@@ -165,12 +165,12 @@ namespace Nox
                 },
                 [this, push, source, output, res = &resources](RGPassContext& context) mutable
                 {
-                    NRI::CommandBuffer& cmd = context.Cmd();
-                    cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get()); // (after DLSS: NGX may have bound its own)
+                    nri::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap); // (after DLSS: NGX may have bound its own)
                     push.sourceIndex = uniformData.imageHeapIndexOffset + context.Slot(source);
                     push.auxIndex = uniformData.imageHeapIndexOffset + context.Slot(res->Depth);
                     push.outputIndex = context.StorageSlot(output);
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_dofPipeline);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_dofPipeline);
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
                 });
@@ -197,12 +197,12 @@ namespace Nox
                 },
                 [this, push, source, output, res = &resources](RGPassContext& context) mutable
                 {
-                    NRI::CommandBuffer& cmd = context.Cmd();
-                    cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+                    nri::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
                     push.sourceIndex = uniformData.imageHeapIndexOffset + context.Slot(source);
                     push.auxIndex = uniformData.imageHeapIndexOffset + context.Slot(res->GBufferVelocity);
                     push.outputIndex = context.StorageSlot(output);
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_motionBlurPipeline);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_motionBlurPipeline);
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
                 });
@@ -238,11 +238,11 @@ namespace Nox
                     },
                     [this, push, mip, source, down](RGPassContext& context) mutable
                     {
-                        NRI::CommandBuffer& cmd = context.Cmd();
-                        cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+                        nri::CommandBuffer& cmd = context.Cmd();
+                        cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
                         push.sourceIndex = uniformData.imageHeapIndexOffset + context.Slot(mip == 0 ? source : down);
                         push.outputIndex = context.StorageSlot(down, mip);
-                        cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_bloomDownsamplePipeline);
+                        cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_bloomDownsamplePipeline);
                         cmd.pushData(&push, sizeof(push));
                         cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
                     });
@@ -267,12 +267,12 @@ namespace Nox
                     },
                     [this, push, mip, down, up](RGPassContext& context) mutable
                     {
-                        NRI::CommandBuffer& cmd = context.Cmd();
-                        cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+                        nri::CommandBuffer& cmd = context.Cmd();
+                        cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
                         push.sourceIndex = uniformData.imageHeapIndexOffset + context.Slot(down);
                         push.auxIndex = uniformData.imageHeapIndexOffset + context.Slot(up);
                         push.outputIndex = context.StorageSlot(up, static_cast<uint32_t>(mip));
-                        cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_bloomUpsamplePipeline);
+                        cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_bloomUpsamplePipeline);
                         cmd.pushData(&push, sizeof(push));
                         cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
                     });

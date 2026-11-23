@@ -1,6 +1,15 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
+#include <type_traits>
+
+namespace NoxUI
+{
+    template <typename T>
+    class Ref;
+    template <typename T>
+    class UIWidget;
+}
 
 namespace Nox
 {
@@ -71,6 +80,28 @@ namespace Nox
             m_ptr = static_cast<T*>(other.get());
             if (m_ptr)
                 m_ptr->IncRefCount();
+        }
+
+        template<typename U> requires (std::is_base_of_v<U, T> || std::is_base_of_v<T, U>)
+        Ref(const ::NoxUI::Ref<U>& other)
+        {
+            m_ptr = static_cast<T*>(other.get());
+            if (m_ptr)
+                m_ptr->IncRefCount();
+        }
+
+        template<typename U> requires (std::is_base_of_v<U, T> || std::is_base_of_v<T, U>)
+        Ref(const ::NoxUI::UIWidget<U>& widget)
+        {
+            m_ptr = static_cast<T*>(widget.Get().get());
+            if (m_ptr)
+                m_ptr->IncRefCount();
+        }
+
+        template<typename U> requires (std::is_base_of_v<U, T> || std::is_base_of_v<T, U>)
+        operator ::NoxUI::Ref<U>() const
+        {
+            return ::NoxUI::Ref<U>(static_cast<U*>(m_ptr));
         }
 
         // Accessors

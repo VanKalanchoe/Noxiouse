@@ -13,6 +13,7 @@
 
 namespace Nox::Mcp
 {
+    using namespace ::NoxMcp;
     std::string Lower(std::string_view text)
     {
         std::string lower(text);

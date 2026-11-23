@@ -11,21 +11,22 @@
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
-#include "NoxCore/UI/Core/UIElement.h"
+#include <NoxUI/Core/UIElement.h>
 
-namespace Nox
+namespace NoxUI
 {
-    class EditorSelection;
-    class EntityActiveSwitch;
-
-    namespace UI
-    {
         class UILabel;
         class UIScrollView;
         class UISearchBar;
         class UIStackBox;
         class UITextInput;
     }
+
+namespace Nox
+{
+    class EditorSelection;
+    class EntityActiveSwitch;
+
 
     // Native Nox::UI entity properties / component inspector for NoxEditorV2.
     class InspectorV2Panel
@@ -34,8 +35,8 @@ namespace Nox
         InspectorV2Panel();
         ~InspectorV2Panel();
 
-        const Ref<UI::UIElement>& BuildUI();
-        const Ref<UI::UIElement>& GetRoot() const { return m_Root; }
+        const Ref<NoxUI::UIElement>& BuildUI();
+        const Ref<NoxUI::UIElement>& GetRoot() const { return m_Root; }
 
         void SetContext(const Ref<Scene>& context);
         // The editor's selection: the inspector shows its primary (and applies transform deltas to the rest).
@@ -52,7 +53,7 @@ namespace Nox
         uint64_t ComputeEntitySignature() const;
         void RebuildContent();
         void SyncLiveFields();
-        void ShowAddComponentMenu(const UI::UIRect& triggerBounds);
+        void ShowAddComponentMenu(const NoxUI::UIRect& triggerBounds);
         void NotifyMutated(bool markDirty = false);
         void FollowSelection();
 
@@ -71,15 +72,15 @@ namespace Nox
         bool m_AllAnimClips = false;
         UUID m_PendingSplit = 0;
 
-        Ref<UI::UIElement> m_Root;
-        Ref<UI::UIStackBox> m_HeaderBox;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UIStackBox> m_HeaderBox;
         Ref<EntityActiveSwitch> m_ActiveSwitch;
-        Ref<UI::UITextInput> m_NameInput;
-        Ref<UI::UILabel> m_SubheaderLabel;
-        Ref<UI::UILabel> m_SelectionBadge;
-        Ref<UI::UISearchBar> m_FilterBar;
-        Ref<UI::UIScrollView> m_ScrollView;
-        Ref<UI::UIStackBox> m_EmptyState;
+        Ref<NoxUI::UITextInput> m_NameInput;
+        Ref<NoxUI::UILabel> m_SubheaderLabel;
+        Ref<NoxUI::UILabel> m_SelectionBadge;
+        Ref<NoxUI::UISearchBar> m_FilterBar;
+        Ref<NoxUI::UIScrollView> m_ScrollView;
+        Ref<NoxUI::UIStackBox> m_EmptyState;
 
         std::unordered_map<std::string, bool> m_ExpandedCards;
 

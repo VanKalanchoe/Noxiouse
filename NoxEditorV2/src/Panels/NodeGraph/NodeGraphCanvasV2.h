@@ -10,8 +10,9 @@
 
 #include "NoxCore/NodeGraph/NodeGraph.h"
 #include "NoxCore/NodeGraph/NodeType.h"
-#include "NoxCore/UI/Widgets/UIPanZoom.h"
-#include "NoxCore/UI/Core/UIElement.h"
+#include <NoxUI/Widgets/UIPanZoom.h>
+#include <NoxUI/Core/UIElement.h>
+#include <NoxUI/Rendering/UIFont.h>
 
 namespace Nox
 {
@@ -32,7 +33,7 @@ namespace Nox
     //  - Values on nodes (an input without a wire): drag a number sideways to change it (Shift: finer, one undo step), click a
     //    true / false to switch it, click any other value (or a number without dragging) for its editor beside it (OnEditValue).
     //  - A parameter dragged from the window's Parameters list and let go here: a reader of it (Get) where it was let go.
-    class NodeGraphCanvasV2 final : public UI::UIElement
+    class NodeGraphCanvasV2 final : public NoxUI::UIElement
     {
     public:
         NodeGraphCanvasV2();
@@ -56,39 +57,39 @@ namespace Nox
         // A node with states (a state machine) double-clicked.
         std::function<void(uint32_t nodeId)> OnOpenNode;
         // A value on a node clicked: the window shows the editor of node's `property` beside `at` (screen).
-        std::function<void(uint32_t nodeId, const std::string& property, const UI::UIRect& at)> OnEditValue;
+        std::function<void(uint32_t nodeId, const std::string& property, const NoxUI::UIRect& at)> OnEditValue;
         // The payload type of a parameter dragged from the window's list (Text: its name).
         static constexpr const char* kParameterDragType = "NoxGraphParameter";
         // A reader (Get) of the parameter at `screen`, selected; its id or 0 (no reader of its type in this graph's nodes).
-        uint32_t AddParameterReader(const std::string& parameter, const UI::UIVec2& screen);
+        uint32_t AddParameterReader(const std::string& parameter, const NoxUI::UIVec2& screen);
 
         const std::vector<uint32_t>& GetSelectedNodes() const { return m_Selected; }
         void SelectNode(uint32_t nodeId);
         // A node of `typeName` at the canvas point under `screen` (or the middle of the view), selected; its id or 0.
-        uint32_t AddNodeAt(const std::string& typeName, const UI::UIVec2& screen, bool atViewCenter = false);
+        uint32_t AddNodeAt(const std::string& typeName, const NoxUI::UIVec2& screen, bool atViewCenter = false);
         // Removes the node (and its wires); the output node is refused.
         bool DeleteNodes(const std::vector<uint32_t>& nodeIds);
 
-        bool OnPointerDown(const UI::UIPointerEvent& e) override;
-        bool OnPointerMove(const UI::UIPointerEvent& e) override;
-        bool OnPointerUp(const UI::UIPointerEvent& e) override;
-        bool OnPointerLeave(const UI::UIPointerEvent& e) override;
-        bool OnMouseWheel(const UI::UIPointerEvent& e) override;
-        bool OnKeyDown(const UI::UIKeyEvent& e) override;
+        bool OnPointerDown(const NoxUI::UIPointerEvent& e) override;
+        bool OnPointerMove(const NoxUI::UIPointerEvent& e) override;
+        bool OnPointerUp(const NoxUI::UIPointerEvent& e) override;
+        bool OnPointerLeave(const NoxUI::UIPointerEvent& e) override;
+        bool OnMouseWheel(const NoxUI::UIPointerEvent& e) override;
+        bool OnKeyDown(const NoxUI::UIKeyEvent& e) override;
 
     protected:
-        UI::UIVec2 ComputeDesiredSize() override { return { 300.0f, 200.0f }; }
+        NoxUI::UIVec2 ComputeDesiredSize() override { return { 300.0f, 200.0f }; }
         void OnUpdate(float dt) override;
-        void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override;
+        void OnPaint(NoxUI::UIDrawList& drawList, const NoxUI::UITheme& theme) override;
 
     private:
         // Where a node and its pins are, in graph space (zoom 1), worked out from its type each frame.
         struct NodeLayout
         {
-            UI::UIVec2 Size{ 0.0f };
+            NoxUI::UIVec2 Size{ 0.0f };
             std::vector<NodePinDesc> Inputs, Outputs;
             std::string Title;
-            UI::UIColor Header{ 0.35f, 0.35f, 0.35f, 1.0f };
+            NoxUI::UIColor Header{ 0.35f, 0.35f, 0.35f, 1.0f };
             bool Reroute = false;
             bool Known = true; // the type is registered
         };
@@ -106,25 +107,25 @@ namespace Nox
         GraphNode* FindNode(uint32_t id) const;
         const NodeTypeDesc* TypeOf(const GraphNode& node) const;
 
-        UI::UIVec2 GraphToScreen(const UI::UIVec2& p) const;
-        UI::UIVec2 ScreenToGraph(const UI::UIVec2& p) const;
-        UI::UIVec2 PinPosition(const GraphNode& node, const NodeLayout& layout, uint32_t pin, bool output) const; // graph space
+        NoxUI::UIVec2 GraphToScreen(const NoxUI::UIVec2& p) const;
+        NoxUI::UIVec2 ScreenToGraph(const NoxUI::UIVec2& p) const;
+        NoxUI::UIVec2 PinPosition(const GraphNode& node, const NodeLayout& layout, uint32_t pin, bool output) const; // graph space
         std::string PinType(const PinRef& pin) const;
 
-        uint32_t NodeAt(const UI::UIVec2& screen) const;
-        PinRef PinAt(const UI::UIVec2& screen) const;
-        int LinkAt(const UI::UIVec2& screen) const;
+        uint32_t NodeAt(const NoxUI::UIVec2& screen) const;
+        PinRef PinAt(const NoxUI::UIVec2& screen) const;
+        int LinkAt(const NoxUI::UIVec2& screen) const;
 
         bool CanConnect(const PinRef& a, const PinRef& b, GraphNode** retype, std::string* retypeTo) const;
         bool Connect(const PinRef& a, const PinRef& b);
-        void InsertReroute(int linkIndex, const UI::UIVec2& screen);
+        void InsertReroute(int linkIndex, const NoxUI::UIVec2& screen);
         void Duplicate();
         void Copy();
-        void Paste(const UI::UIVec2& screen);
+        void Paste(const NoxUI::UIVec2& screen);
         void SetSelection(std::vector<uint32_t> nodes);
 
-        void OpenNodeList(const UI::UIVec2& screen, const PinRef& fromPin);
-        void OpenNodeMenu(const UI::UIVec2& screen, uint32_t nodeId);
+        void OpenNodeList(const NoxUI::UIVec2& screen, const PinRef& fromPin);
+        void OpenNodeMenu(const NoxUI::UIVec2& screen, uint32_t nodeId);
         void Edited(bool structural);
 
         NodeGraph* m_Graph = nullptr;
@@ -135,7 +136,7 @@ namespace Nox
         uint32_t m_HoveredNode = 0;
         PinRef m_HoveredPin;
 
-        UI::UIPanZoom m_View;                 // pan and zoom (wheel: 0.2 .. 2.5)
+        NoxUI::UIPanZoom m_View;                 // pan and zoom (wheel: 0.2 .. 2.5)
         bool m_NeedsFrame = true;
 
         // Where each value on a node is drawn (screen space, refilled each paint; the top node's last).
@@ -143,9 +144,9 @@ namespace Nox
         {
             uint32_t Node = 0;
             std::string Property;
-            UI::UIRect Rect;
+            NoxUI::UIRect Rect;
         };
-        const ValueHit* ValueAt(const UI::UIVec2& screen) const;
+        const ValueHit* ValueAt(const NoxUI::UIVec2& screen) const;
         std::vector<ValueHit> m_ValueHits;
         ValueHit m_ValueDrag;            // the value pressed (Drag::Value)
         NodeGraphValue m_ValueStart;     // its value when pressed
@@ -153,8 +154,8 @@ namespace Nox
 
         enum class Drag : uint8_t { None, Pan, Nodes, Wire, Box, Value };
         Drag m_Drag = Drag::None;
-        UI::UIVec2 m_DragStart{ 0.0f };
-        UI::UIVec2 m_DragLast{ 0.0f };
+        NoxUI::UIVec2 m_DragStart{ 0.0f };
+        NoxUI::UIVec2 m_DragLast{ 0.0f };
         bool m_DragMoved = false;
         int m_PanButton = 0;
         PinRef m_WireFrom;

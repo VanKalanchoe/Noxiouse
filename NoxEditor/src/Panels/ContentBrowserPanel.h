@@ -4,8 +4,8 @@
 #include <unordered_set>
 
 #include "NoxCore/Core/UUID.h"
-#include "NoxCore/Tasks/JobSystem.h"
-#include "NoxCore/Audio/AudioTypes.h"
+#include <NoxTasks/JobSystem.h>
+#include <NoxAudio/AudioTypes.h>
 #include "ThumbnailCache.h"
 
 struct ImGuiPayload;
@@ -111,7 +111,7 @@ namespace Nox
         double m_FolderTreeTime = 0.0; // ImGui time of the last rebuild
         // The periodic look for folders made outside the editor, on an IO worker: walking a big project's folders took ~24 ms on the
         // main thread every 2 s (a frame spike each time). Swapped in when done.
-        TaskFuture<FolderNode> m_FolderTreeJob;
+        NoxTasks::TaskFuture<FolderNode> m_FolderTreeJob;
         static FolderNode ScanFolderTree(const std::filesystem::path& base);
         std::filesystem::path m_TreeRevealedDirectory; // the folder the tree was last unfolded to
 
@@ -178,7 +178,7 @@ namespace Nox
         bool m_OpenReferencesDialog = false;
         // Sound Settings (clips and audio graphs): priority and concurrency, edited for the selected sounds and saved on OK.
         AssetHandle m_SoundSettingsAsset = 0;
-        AudioSoundSettings m_SoundSettings;
+        NoxAudio::AudioSoundSettings m_SoundSettings;
         bool m_OpenSoundSettingsDialog = false;
         // Replace References: from (the asset), to (picked in the dialog among the same type).
         AssetHandle m_ReplaceFrom = 0;
@@ -201,7 +201,7 @@ namespace Nox
         void UpdateAudioPreview();
         bool IsPreviewing(AssetHandle clip) const;
         AssetHandle m_PreviewClip = 0;
-        uint64_t m_PreviewVoice = 0; // AudioVoiceHandle
+        uint64_t m_PreviewVoice = 0; // NoxAudio::AudioVoiceHandle
         bool m_PreviewPending = false; // waiting for the clip to load
     };
 };

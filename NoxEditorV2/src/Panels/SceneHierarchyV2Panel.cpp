@@ -7,11 +7,11 @@
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Scene/Components.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
-#include "NoxCore/UI/Core/UIContext.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
-#include "NoxCore/UI/Widgets/UISearchBar.h"
-#include "NoxCore/UI/Widgets/UITreeView.h"
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Core/UIContext.h>
+#include <NoxUI/Widgets/UIMenu.h>
+#include <NoxUI/Widgets/UISearchBar.h>
+#include <NoxUI/Widgets/UITreeView.h>
 
 namespace Nox
 {
@@ -56,21 +56,21 @@ namespace Nox
             return h;
         }
 
-        UI::UIColor EntityLabelColor(Entity entity)
+        NoxUI::UIColor EntityLabelColor(Entity entity)
         {
             if (entity.HasComponent<PrefabInstanceComponent>() || entity.HasComponent<PrefabNodeComponent>())
-                return UI::ThemeColor("EntityPrefab", { 0.48f, 0.74f, 1.00f, 1.0f });
+                return NoxUI::ThemeColor("EntityPrefab", { 0.48f, 0.74f, 1.00f, 1.0f });
             if (entity.HasComponent<CameraComponent>())
-                return UI::ThemeColor("EntityCamera", { 0.42f, 0.85f, 0.98f, 1.0f });
+                return NoxUI::ThemeColor("EntityCamera", { 0.42f, 0.85f, 0.98f, 1.0f });
             if (entity.HasComponent<DirectionalLightComponent>() || entity.HasComponent<PointLightComponent>() ||
                 entity.HasComponent<SpotLightComponent>() || entity.HasComponent<RectLightComponent>() ||
                 entity.HasComponent<DiscLightComponent>() || entity.HasComponent<EnvironmentLightComponent>())
-                return UI::ThemeColor("EntityLight", { 0.96f, 0.82f, 0.36f, 1.0f });
+                return NoxUI::ThemeColor("EntityLight", { 0.96f, 0.82f, 0.36f, 1.0f });
             if (entity.HasComponent<AudioSourceComponent>() || entity.HasComponent<AudioListenerComponent>())
-                return UI::ThemeColor("EntityAudio", { 0.46f, 0.88f, 0.65f, 1.0f });
+                return NoxUI::ThemeColor("EntityAudio", { 0.46f, 0.88f, 0.65f, 1.0f });
             if (entity.HasComponent<MeshComponent>() || entity.HasComponent<ModelInstanceComponent>())
-                return UI::ThemeColor("EntityMesh", { 0.74f, 0.84f, 0.98f, 1.0f });
-            return UI::ThemeColor("EntityDefault", { 0.84f, 0.87f, 0.93f, 1.0f });
+                return NoxUI::ThemeColor("EntityMesh", { 0.74f, 0.84f, 0.98f, 1.0f });
+            return NoxUI::ThemeColor("EntityDefault", { 0.84f, 0.87f, 0.93f, 1.0f });
         }
     }
 
@@ -83,33 +83,33 @@ namespace Nox
 
     SceneHierarchyV2Panel::~SceneHierarchyV2Panel() = default;
 
-    const Ref<UI::UIElement>& SceneHierarchyV2Panel::BuildUI()
+    const Ref<NoxUI::UIElement>& SceneHierarchyV2Panel::BuildUI()
     {
-        auto addBtn = UI::Button("+").Tooltip("Create entity or folder");
+        auto addBtn = NoxUI::Button("+").Tooltip("Create entity or folder");
         addBtn->FixedSize = { 30.0f, 28.0f };
-        addBtn->WidthMode = UI::UISizeMode::Fixed;
-        addBtn->HeightMode = UI::UISizeMode::Fixed;
-        addBtn->VAlign = UI::UIAlignment::Center;
-        UI::UIButton* addBtnPtr = addBtn.Get().get();
+        addBtn->WidthMode = NoxUI::UISizeMode::Fixed;
+        addBtn->HeightMode = NoxUI::UISizeMode::Fixed;
+        addBtn->VAlign = NoxUI::UIAlignment::Center;
+        NoxUI::UIButton* addBtnPtr = addBtn.Get().get();
         addBtn->OnClick = [this, addBtnPtr]()
         {
-            const UI::UIRect& bounds = addBtnPtr->GetBounds();
+            const NoxUI::UIRect& bounds = addBtnPtr->GetBounds();
             ShowAddMenu({ bounds.Min.x, bounds.Max.y + 2.0f });
         };
 
-        m_SearchBar = UI::MakeUI<UI::UISearchBar>("Search entities & folders...");
+        m_SearchBar = NoxUI::MakeUI<NoxUI::UISearchBar>("Search entities & folders...");
         m_SearchBar->OnSearchChanged = [this](const std::string& q)
         {
             m_SearchFilter = q;
             m_Dirty = true;
         };
 
-        auto topBar = UI::HStack(6.0f, { m_SearchBar, addBtn }).FillWidth();
-        topBar->HeightMode = UI::UISizeMode::Auto;
+        auto topBar = NoxUI::HStack(6.0f, { m_SearchBar, addBtn }).FillWidth();
+        topBar->HeightMode = NoxUI::UISizeMode::Auto;
 
-        m_TreeView = UI::MakeUI<UI::UITreeView>();
-        m_TreeView->WidthMode = UI::UISizeMode::Fill;
-        m_TreeView->HeightMode = UI::UISizeMode::Fill;
+        m_TreeView = NoxUI::MakeUI<NoxUI::UITreeView>();
+        m_TreeView->WidthMode = NoxUI::UISizeMode::Fill;
+        m_TreeView->HeightMode = NoxUI::UISizeMode::Fill;
         m_TreeView->RowHeight = 25.0f;
         m_TreeView->IndentWidth = 16.0f;
         m_TreeView->ShowTagDots = false;
@@ -200,7 +200,7 @@ namespace Nox
                 m_OnSceneMutated();
         };
 
-        m_TreeView->OnContextMenu = [this](uint64_t id, const UI::UIVec2& screenPos)
+        m_TreeView->OnContextMenu = [this](uint64_t id, const NoxUI::UIVec2& screenPos)
         {
             if (id == 0)
                 ShowBlankContextMenu(screenPos);
@@ -233,7 +233,7 @@ namespace Nox
                 m_OnSceneMutated();
         };
 
-        m_TreeView->OnBuildDragPayload = [this](uint64_t draggedId) -> std::optional<UI::UIDragPayload>
+        m_TreeView->OnBuildDragPayload = [this](uint64_t draggedId) -> std::optional<NoxUI::UIDragPayload>
         {
             auto it = m_NodeMap.find(draggedId);
             if (it == m_NodeMap.end() || !m_Context)
@@ -241,7 +241,7 @@ namespace Nox
 
             if (it->second.Kind == NodeKind::Folder)
             {
-                return UI::UIDragPayload{ "SCENE_HIERARCHY_FOLDER", FolderLeaf(it->second.FolderPath), draggedId };
+                return NoxUI::UIDragPayload{ "SCENE_HIERARCHY_FOLDER", FolderLeaf(it->second.FolderPath), draggedId };
             }
 
             Entity entity = m_Context->GetEntityByUUID(it->second.EntityId);
@@ -252,7 +252,7 @@ namespace Nox
             const std::string text = count > 1
                 ? std::to_string(count) + " entities"
                 : entity.GetComponent<TagComponent>().Tag;
-            return UI::UIDragPayload{ "SCENE_HIERARCHY_ENTITY", text, draggedId };
+            return NoxUI::UIDragPayload{ "SCENE_HIERARCHY_ENTITY", text, draggedId };
         };
 
         m_TreeView->OnDropNode = [this](uint64_t draggedId, uint64_t targetId)
@@ -326,14 +326,14 @@ namespace Nox
                 m_FocusEntity(Sel().GetPrimary());
         };
 
-        m_CountLabel = UI::Label("0 entities");
+        m_CountLabel = NoxUI::Label("0 entities");
         m_CountLabel->UseColorOverride = true;
-        m_CountLabel->ColorOverride = UI::ThemeColor("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+        m_CountLabel->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
 
-        auto footer = UI::HStack(8.0f, { m_CountLabel }).FillWidth();
-        footer->HeightMode = UI::UISizeMode::Auto;
+        auto footer = NoxUI::HStack(8.0f, { m_CountLabel }).FillWidth();
+        footer->HeightMode = NoxUI::UISizeMode::Auto;
 
-        m_Root = UI::VStack(8.0f, { topBar, m_TreeView, footer })
+        m_Root = NoxUI::VStack(8.0f, { topBar, m_TreeView, footer })
             .Padding(8.0f)
             .Fill();
 
@@ -486,7 +486,7 @@ namespace Nox
     {
         if (m_SearchBar)
         {
-            if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
+            if (NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent())
                 ctx->SetFocus(m_SearchBar.get());
         }
     }
@@ -711,7 +711,7 @@ namespace Nox
         size_t totalEntities = 0;
         size_t matchedEntities = 0;
 
-        auto buildEntityNode = [&](auto& self, Entity entity, bool& outMatches) -> UI::UITreeNode
+        auto buildEntityNode = [&](auto& self, Entity entity, bool& outMatches) -> NoxUI::UITreeNode
         {
             ++totalEntities;
             const auto& tag = entity.GetComponent<TagComponent>().Tag;
@@ -725,7 +725,7 @@ namespace Nox
             const bool selfActive = !entity.HasComponent<InactiveComponent>();
             const bool activeInHierarchy = m_Context->IsActiveInHierarchy(entity);
 
-            UI::UITreeNode node;
+            NoxUI::UITreeNode node;
             node.Id = nodeId;
             node.Label = tag;
             node.IsFolder = false;
@@ -734,7 +734,7 @@ namespace Nox
             node.IsVisibleInHierarchy = activeInHierarchy;
             node.IsDimmed = locked || !activeInHierarchy;
             node.Draggable = !prefabNode && !locked;
-            UI::UIColor labelCol = EntityLabelColor(entity);
+            NoxUI::UIColor labelCol = EntityLabelColor(entity);
             if (prefabNode && !prefabRoot)
                 labelCol.a = 0.72f;
             node.TagColor = labelCol;
@@ -763,7 +763,7 @@ namespace Nox
                     if (Entity child = m_Context->GetEntityByUUID(childId))
                     {
                         bool childMatch = false;
-                        UI::UITreeNode childNode = self(self, child, childMatch);
+                        NoxUI::UITreeNode childNode = self(self, child, childMatch);
                         if (!filtering || childMatch)
                         {
                             node.Children.push_back(std::move(childNode));
@@ -784,7 +784,7 @@ namespace Nox
 
         const std::set<std::string> folders = CollectFolderPaths();
 
-        auto buildFolderNode = [&](auto& self, const std::string& path, bool& outMatches) -> UI::UITreeNode
+        auto buildFolderNode = [&](auto& self, const std::string& path, bool& outMatches) -> NoxUI::UITreeNode
         {
             const uint64_t nodeId = NodeIdForFolder(path);
             m_NodeMap[nodeId] = { NodeKind::Folder, 0, path };
@@ -794,7 +794,7 @@ namespace Nox
             for (Entity e : contents)
                 anyVisible |= !e.HasComponent<InactiveComponent>();
 
-            UI::UITreeNode node;
+            NoxUI::UITreeNode node;
             node.Id = nodeId;
             node.Label = FolderLeaf(path);
             node.IsFolder = true;
@@ -803,7 +803,7 @@ namespace Nox
             node.IsVisibleInHierarchy = node.IsVisible;
             node.IsDimmed = contents.empty();
             node.Draggable = true;
-            node.TagColor = UI::ThemeColor("HierarchyTag", { 0.90f, 0.72f, 0.30f, 1.0f });
+            node.TagColor = NoxUI::ThemeColor("HierarchyTag", { 0.90f, 0.72f, 0.30f, 1.0f });
 
             const bool selfMatches = !filtering || (ToLower(node.Label).find(needle) != std::string::npos);
             bool anyChildMatches = false;
@@ -813,7 +813,7 @@ namespace Nox
                 if (other.size() > path.size() + 1 && other.rfind(path + "/", 0) == 0 && other.find('/', path.size() + 1) == std::string::npos)
                 {
                     bool subMatch = false;
-                    UI::UITreeNode subFolder = self(self, other, subMatch);
+                    NoxUI::UITreeNode subFolder = self(self, other, subMatch);
                     if (!filtering || subMatch)
                     {
                         node.Children.push_back(std::move(subFolder));
@@ -839,7 +839,7 @@ namespace Nox
             for (Entity entity : inside)
             {
                 bool childMatch = false;
-                UI::UITreeNode childNode = buildEntityNode(buildEntityNode, entity, childMatch);
+                NoxUI::UITreeNode childNode = buildEntityNode(buildEntityNode, entity, childMatch);
                 if (!filtering || childMatch)
                 {
                     node.Children.push_back(std::move(childNode));
@@ -853,13 +853,13 @@ namespace Nox
             return node;
         };
 
-        std::vector<UI::UITreeNode> roots;
+        std::vector<NoxUI::UITreeNode> roots;
         for (const std::string& path : folders)
         {
             if (path.find('/') == std::string::npos)
             {
                 bool folderMatch = false;
-                UI::UITreeNode folderNode = buildFolderNode(buildFolderNode, path, folderMatch);
+                NoxUI::UITreeNode folderNode = buildFolderNode(buildFolderNode, path, folderMatch);
                 if (!filtering || folderMatch)
                     roots.push_back(std::move(folderNode));
             }
@@ -873,7 +873,7 @@ namespace Nox
             if (entity.HasComponent<FolderComponent>() && !entity.GetComponent<FolderComponent>().Path.empty())
                 return;
             bool match = false;
-            UI::UITreeNode node = buildEntityNode(buildEntityNode, entity, match);
+            NoxUI::UITreeNode node = buildEntityNode(buildEntityNode, entity, match);
             if (!filtering || match)
                 roots.push_back(std::move(node));
         });
@@ -885,9 +885,9 @@ namespace Nox
         SyncTreeSelection(); // (and the count line)
     }
 
-    void SceneHierarchyV2Panel::ShowContextMenuForNode(uint64_t nodeId, const UI::UIVec2& screenPos)
+    void SceneHierarchyV2Panel::ShowContextMenuForNode(uint64_t nodeId, const NoxUI::UIVec2& screenPos)
     {
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         if (!ctx || !m_Context)
             return;
 
@@ -895,7 +895,7 @@ namespace Nox
         if (it == m_NodeMap.end())
             return;
 
-        std::vector<UI::UIMenuItem> items;
+        std::vector<NoxUI::UIMenuItem> items;
 
         if (it->second.Kind == NodeKind::Folder)
         {
@@ -939,7 +939,7 @@ namespace Nox
 
             if (m_CreateShape)
             {
-                std::vector<UI::UIMenuItem> shapeItems;
+                std::vector<NoxUI::UIMenuItem> shapeItems;
                 for (uint8_t idx = 0; idx < static_cast<uint8_t>(PrimitiveShape::Count); ++idx)
                 {
                     const PrimitiveShape shape = static_cast<PrimitiveShape>(idx);
@@ -957,7 +957,7 @@ namespace Nox
                     m_OnSceneMutated();
             }});
 
-            UI::UIMenuPopup::ShowContextMenu(*ctx, screenPos, std::move(items));
+            NoxUI::UIMenuPopup::ShowContextMenu(*ctx, screenPos, std::move(items));
             return;
         }
 
@@ -999,7 +999,7 @@ namespace Nox
         {
             const std::vector<Entity> moved = Sel().GetEntities();
             const AssetHandle from = m_Context->GetEntityLevel(entity);
-            std::vector<UI::UIMenuItem> levelItems;
+            std::vector<NoxUI::UIMenuItem> levelItems;
             levelItems.push_back({"Persistent Level", "", [this, moved]()
             {
                 m_Context->MoveToLevel(moved, 0);
@@ -1040,21 +1040,21 @@ namespace Nox
         items.push_back({"", "", {}, true});
         items.push_back({"Delete", "Del", [this]() { DeleteSelection(); }, false, !locked});
 
-        UI::UIMenuPopup::ShowContextMenu(*ctx, screenPos, std::move(items));
+        NoxUI::UIMenuPopup::ShowContextMenu(*ctx, screenPos, std::move(items));
     }
 
-    void SceneHierarchyV2Panel::ShowBlankContextMenu(const UI::UIVec2& screenPos)
+    void SceneHierarchyV2Panel::ShowBlankContextMenu(const NoxUI::UIVec2& screenPos)
     {
         ShowAddMenu(screenPos);
     }
 
-    void SceneHierarchyV2Panel::ShowAddMenu(const UI::UIVec2& screenPos)
+    void SceneHierarchyV2Panel::ShowAddMenu(const NoxUI::UIVec2& screenPos)
     {
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         if (!ctx || !m_Context)
             return;
 
-        std::vector<UI::UIMenuItem> items;
+        std::vector<NoxUI::UIMenuItem> items;
         items.push_back({"New Folder", "", [this]()
         {
             const std::set<std::string> existing = CollectFolderPaths();
@@ -1074,7 +1074,7 @@ namespace Nox
 
         if (m_CreateShape)
         {
-            std::vector<UI::UIMenuItem> shapeItems;
+            std::vector<NoxUI::UIMenuItem> shapeItems;
             for (uint8_t idx = 0; idx < static_cast<uint8_t>(PrimitiveShape::Count); ++idx)
             {
                 const PrimitiveShape shape = static_cast<PrimitiveShape>(idx);
@@ -1103,6 +1103,6 @@ namespace Nox
             m_Dirty = true;
         }});
 
-        UI::UIMenuPopup::ShowContextMenu(*ctx, screenPos, std::move(items));
+        NoxUI::UIMenuPopup::ShowContextMenu(*ctx, screenPos, std::move(items));
     }
 }

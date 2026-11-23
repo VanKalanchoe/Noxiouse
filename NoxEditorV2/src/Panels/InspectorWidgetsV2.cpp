@@ -21,35 +21,35 @@
 #include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "Panels/AssetPreviewRenderer.h"
-#include "NoxCore/UI/Widgets/UIPropertyRows.h"
-#include "NoxCore/UI/Widgets/UISearchPicker.h"
-#include "NoxCore/UI/Widgets/UIIconButton.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
-#include "NoxCore/UI/Core/UIContext.h"
-#include "NoxCore/UI/Rendering/UIDrawList.h"
-#include "NoxCore/UI/Rendering/UIIcons.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UICheckBox.h"
-#include "NoxCore/UI/Widgets/UIColorPicker.h"
-#include "NoxCore/UI/Widgets/UIDragScalar.h"
-#include "NoxCore/UI/Widgets/UIDropdown.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
-#include "NoxCore/UI/Widgets/UISlider.h"
-#include "NoxCore/UI/Widgets/UITextInput.h"
-#include "NoxCore/UI/Widgets/UIVectorEdit.h"
+#include <NoxUI/Widgets/UIPropertyRows.h>
+#include <NoxUI/Widgets/UISearchPicker.h>
+#include <NoxUI/Widgets/UIIconButton.h>
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Core/UIContext.h>
+#include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Rendering/UIIcons.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UICheckBox.h>
+#include <NoxUI/Widgets/UIColorPicker.h>
+#include <NoxUI/Widgets/UIDragScalar.h>
+#include <NoxUI/Widgets/UIDropdown.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIMenu.h>
+#include <NoxUI/Widgets/UIScrollView.h>
+#include <NoxUI/Widgets/UISlider.h>
+#include <NoxUI/Widgets/UITextInput.h>
+#include <NoxUI/Widgets/UIVectorEdit.h>
 
 namespace Nox
 {
     namespace
     {
         // The "..." button of a card or row (opens a menu under itself).
-        Ref<UI::UIIconButton> MakeMoreButton(std::function<void(const UI::UIRect&)> onOpen, std::string tooltip)
+        Ref<NoxUI::UIIconButton> MakeMoreButton(std::function<void(const NoxUI::UIRect&)> onOpen, std::string tooltip)
         {
-            Ref<UI::UIIconButton> button(new UI::UIIconButton([](UI::UIDrawList& drawList, const UI::UIRect& b, const UI::UIColor& color)
+            Ref<NoxUI::UIIconButton> button(new NoxUI::UIIconButton([](NoxUI::UIDrawList& drawList, const NoxUI::UIRect& b, const NoxUI::UIColor& color)
             {
-                UI::Icons::DrawMoreDots(drawList, b.Center(), 12.0f, color, true);
+                NoxUI::Icons::DrawMoreDots(drawList, b.Center(), 12.0f, color, true);
             }, std::move(tooltip)));
             button->FixedSize = { 24.0f, 22.0f };
             button->OnClickAt = std::move(onOpen);
@@ -143,8 +143,8 @@ namespace Nox
     }
 
     void ShowSearchableAssetPicker(
-        UI::UIContext& context,
-        const UI::UIRect& triggerBounds,
+        NoxUI::UIContext& context,
+        const NoxUI::UIRect& triggerBounds,
         const std::string& emptyLabel,
         AssetHandle currentHandle,
         std::vector<AssetPickerOption> options,
@@ -152,27 +152,27 @@ namespace Nox
         bool alignRight)
     {
         // The library's searchable popup (UI::UISearchPicker) over the assets; Id is the handle.
-        std::vector<UI::UISearchPickerOption> rows;
+        std::vector<NoxUI::UISearchPickerOption> rows;
         rows.reserve(options.size());
         for (AssetPickerOption& option : options)
             rows.push_back({ std::move(option.Label), std::move(option.Detail), static_cast<uint64_t>(option.Handle) });
-        UI::UISearchPickerSettings settings;
+        NoxUI::UISearchPickerSettings settings;
         settings.Placeholder = "Filter assets...";
         settings.NoneLabel = emptyLabel;
         settings.NoMatches = "No matching assets";
         settings.AlignRight = alignRight;
-        UI::UISearchPicker::Show(context, triggerBounds, std::move(rows), static_cast<uint64_t>(currentHandle),
+        NoxUI::UISearchPicker::Show(context, triggerBounds, std::move(rows), static_cast<uint64_t>(currentHandle),
                                  [onPick = std::move(onPick)](uint64_t id) { if (onPick) onPick(AssetHandle(id)); }, std::move(settings));
     }
 
     EntityActiveSwitch::EntityActiveSwitch(bool active, std::function<void(bool)> onChanged)
         : Checked(active), OnChanged(std::move(onChanged))
     {
-        HitTestMode = UI::UIHitTestMode::Self;
+        HitTestMode = NoxUI::UIHitTestMode::Self;
         Focusable = true;
     }
 
-    bool EntityActiveSwitch::OnPointerUp(const UI::UIPointerEvent& e)
+    bool EntityActiveSwitch::OnPointerUp(const NoxUI::UIPointerEvent& e)
     {
         if (e.Button == 1 && IsEnabled() && GetBounds().Contains(e.Position))
         {
@@ -184,38 +184,38 @@ namespace Nox
         return false;
     }
 
-    UI::UIVec2 EntityActiveSwitch::ComputeDesiredSize()
+    NoxUI::UIVec2 EntityActiveSwitch::ComputeDesiredSize()
     {
         return { 36.0f, 20.0f };
     }
 
-    void EntityActiveSwitch::OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme)
+    void EntityActiveSwitch::OnPaint(NoxUI::UIDrawList& drawList, const NoxUI::UITheme& theme)
     {
-        const UI::UIRect& b = GetBounds();
-        const bool hovered = UI::HasState(GetState(), UI::UIState::Hovered);
+        const NoxUI::UIRect& b = GetBounds();
+        const bool hovered = NoxUI::HasState(GetState(), NoxUI::UIState::Hovered);
         const float trackW = 34.0f;
         const float trackH = 18.0f;
         const float x0 = b.Min.x + (b.Width() - trackW) * 0.5f;
         const float y0 = b.Min.y + (b.Height() - trackH) * 0.5f;
-        const UI::UIVec2 tMin{ x0, y0 };
-        const UI::UIVec2 tMax{ x0 + trackW, y0 + trackH };
+        const NoxUI::UIVec2 tMin{ x0, y0 };
+        const NoxUI::UIVec2 tMax{ x0 + trackW, y0 + trackH };
         const float radius = trackH * 0.5f;
 
-        const UI::UIColor accent = theme.GetToken("Success", { 0.235f, 0.678f, 0.482f, 1.0f });
-        const UI::UIColor trackOff = theme.GetToken("Surface2", { 0.165f, 0.192f, 0.267f, 1.0f });
-        const UI::UIColor borderCol = hovered
+        const NoxUI::UIColor accent = theme.GetToken("Success", { 0.235f, 0.678f, 0.482f, 1.0f });
+        const NoxUI::UIColor trackOff = theme.GetToken("Surface2", { 0.165f, 0.192f, 0.267f, 1.0f });
+        const NoxUI::UIColor borderCol = hovered
             ? theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f })
             : (Checked ? accent : theme.GetToken("Border", { 0.20f, 0.24f, 0.32f, 1.0f }));
-        const UI::UIColor trackFill = Checked ? UI::UIColor{ accent.r, accent.g, accent.b, 0.92f } : trackOff;
+        const NoxUI::UIColor trackFill = Checked ? NoxUI::UIColor{ accent.r, accent.g, accent.b, 0.92f } : trackOff;
 
         drawList.AddRoundedRect(tMin, tMax, trackFill, glm::vec4(radius), 1.0f, borderCol);
 
         const float knobSize = 12.0f;
         const float knobY = y0 + (trackH - knobSize) * 0.5f;
         const float knobX = Checked ? (tMax.x - knobSize - 3.0f) : (tMin.x + 3.0f);
-        const UI::UIColor knobColor = Checked
-            ? UI::ThemeColor("SwitchKnobOn", { 0.96f, 0.98f, 1.0f, 1.0f })
-            : UI::ThemeColor("SwitchKnobOff", { 0.60f, 0.65f, 0.75f, 1.0f });
+        const NoxUI::UIColor knobColor = Checked
+            ? NoxUI::ThemeColor("SwitchKnobOn", { 0.96f, 0.98f, 1.0f, 1.0f })
+            : NoxUI::ThemeColor("SwitchKnobOff", { 0.60f, 0.65f, 0.75f, 1.0f });
         drawList.AddRoundedRect(
             { knobX, knobY },
             { knobX + knobSize, knobY + knobSize },
@@ -233,11 +233,11 @@ namespace Nox
         std::function<void()> onRemove)
     {
         // The library's card (UI::UICollapsibleCard); its "..." menu: Reset Component / Remove Component.
-        std::function<std::vector<UI::UIMenuItem>()> menu;
+        std::function<std::vector<NoxUI::UIMenuItem>()> menu;
         if (onReset || (removable && onRemove))
             menu = [onReset, removable, onRemove]()
             {
-                std::vector<UI::UIMenuItem> items;
+                std::vector<NoxUI::UIMenuItem> items;
                 if (onReset)
                     items.push_back({ "Reset Component", "", onReset });
                 if (removable && onRemove)
@@ -248,50 +248,50 @@ namespace Nox
                 }
                 return items;
             };
-        UI::UICollapsibleCard card = UI::UICollapsibleCard::Create(title, expanded, std::move(onExpandChanged), std::move(menu), "Component options");
+        NoxUI::UICollapsibleCard card = NoxUI::UICollapsibleCard::Create(title, expanded, std::move(onExpandChanged), std::move(menu), "Component options");
         return { card.Card, card.Body };
     }
 
-    Ref<UI::UIElement> CreateExpandToggle(bool expanded, std::function<void(bool)> onToggle, const std::string& tooltip)
+    Ref<NoxUI::UIElement> CreateExpandToggle(bool expanded, std::function<void(bool)> onToggle, const std::string& tooltip)
     {
         // A chevron that opens or closes something: the accent colour while open or under the pointer.
-        Ref<UI::UIIconButton> button(new UI::UIIconButton({}, tooltip));
-        UI::UIIconButton* raw = button.get(); // (its Active is the open state)
-        button->DrawIcon = [raw](UI::UIDrawList& drawList, const UI::UIRect& b, const UI::UIColor& color)
+        Ref<NoxUI::UIIconButton> button(new NoxUI::UIIconButton({}, tooltip));
+        NoxUI::UIIconButton* raw = button.get(); // (its Active is the open state)
+        button->DrawIcon = [raw](NoxUI::UIDrawList& drawList, const NoxUI::UIRect& b, const NoxUI::UIColor& color)
         {
-            UI::Icons::DrawChevron(drawList, b.Center(), 8.0f, raw->Active, color, 1.7f);
+            NoxUI::Icons::DrawChevron(drawList, b.Center(), 8.0f, raw->Active, color, 1.7f);
         };
         button->FixedSize = { 22.0f, 24.0f };
         button->Toggle = true;
         button->Active = expanded;
-        button->ActiveStyle = UI::UIIconButton::ActiveLook::Tint;
+        button->ActiveStyle = NoxUI::UIIconButton::ActiveLook::Tint;
         button->OnToggled = std::move(onToggle);
         return button;
     }
 
-    Ref<UI::UIElement> CreateMoreButton(std::function<void(const UI::UIRect&)> onOpen, const std::string& tooltip)
+    Ref<NoxUI::UIElement> CreateMoreButton(std::function<void(const NoxUI::UIRect&)> onOpen, const std::string& tooltip)
     {
         return MakeMoreButton(std::move(onOpen), tooltip);
     }
 
-    void InspectorCardBuilder::AddRow(const std::string& labelText, const Ref<UI::UIElement>& editor, const std::string& tooltip)
+    void InspectorCardBuilder::AddRow(const std::string& labelText, const Ref<NoxUI::UIElement>& editor, const std::string& tooltip)
     {
-        UI::UIPropertyRows(Body, Context).Row(labelText, editor, tooltip);
+        NoxUI::UIPropertyRows(Body, Context).Row(labelText, editor, tooltip);
     }
 
     void InspectorCardBuilder::AddSubheader(const std::string& title, const std::string& tooltip)
     {
-        UI::UIPropertyRows(Body, Context).Header(title, tooltip);
+        NoxUI::UIPropertyRows(Body, Context).Header(title, tooltip);
     }
 
     void InspectorCardBuilder::AddSeparator()
     {
-        UI::UIPropertyRows(Body, Context).Separator();
+        NoxUI::UIPropertyRows(Body, Context).Separator();
     }
 
     void InspectorCardBuilder::AddStatusNote(const std::string& text, const glm::vec4& color)
     {
-        auto lbl = UI::Label(text);
+        auto lbl = NoxUI::Label(text);
         lbl->FontSizeOverride = 13.5f;
         lbl->UseColorOverride = true;
         lbl->ColorOverride = color;
@@ -300,16 +300,16 @@ namespace Nox
 
     void InspectorCardBuilder::AddBool(const std::string& label, bool* target, std::function<void()> onChange, const std::string& tooltip)
     {
-        auto cb = UI::CheckBox("", *target, [mutate = OnMutate, target, onChange](bool v)
+        auto cb = NoxUI::CheckBox("", *target, [mutate = OnMutate, target, onChange](bool v)
         {
             *target = v;
             if (onChange) onChange();
             if (mutate) mutate(false);
         });
         AddRow(label, cb, tooltip);
-        UI::AppendSync(*Raw(cb), [cb = Raw(cb), target]()
+        NoxUI::AppendSync(*Raw(cb), [cb = Raw(cb), target]()
         {
-            if (!UI::HasState(cb->GetState(), UI::UIState::Pressed))
+            if (!NoxUI::HasState(cb->GetState(), NoxUI::UIState::Pressed))
                 cb->Checked = *target;
         });
     }
@@ -317,27 +317,27 @@ namespace Nox
     void InspectorCardBuilder::AddFloat(const std::string& label, float* target, float speed, float minV, float maxV,
                                         const char* fmt, std::function<void()> onChange, const std::string& tooltip)
     {
-        auto drag = UI::MakeUI<UI::UIDragScalar>(*target, speed, [mutate = OnMutate, target, onChange](float v)
+        auto drag = NoxUI::MakeUI<NoxUI::UIDragScalar>(*target, speed, [mutate = OnMutate, target, onChange](float v)
         {
             *target = v;
             if (onChange) onChange();
             if (mutate) mutate(false);
         });
-        drag->WidthMode = UI::UISizeMode::Fill;
+        drag->WidthMode = NoxUI::UISizeMode::Fill;
         drag->Min = minV;
         drag->Max = maxV;
         drag->Format = fmt;
         AddRow(label, drag, tooltip);
-        UI::AppendSync(*Raw(drag), [drag = Raw(drag), target]()
+        NoxUI::AppendSync(*Raw(drag), [drag = Raw(drag), target]()
         {
             if (!drag->IsInteracting())
                 drag->Value = *target;
         });
     }
 
-    Ref<UI::UIDragScalar> CreateSliderField(float value, float minV, float maxV, std::function<void(float)> onChanged)
+    Ref<NoxUI::UIDragScalar> CreateSliderField(float value, float minV, float maxV, std::function<void(float)> onChanged)
     {
-        return UI::UIPropertyRows::SliderField(value, minV, maxV, std::move(onChanged));
+        return NoxUI::UIPropertyRows::SliderField(value, minV, maxV, std::move(onChanged));
     }
 
     void InspectorCardBuilder::AddSlider(const std::string& label, float* target, float minV, float maxV,
@@ -353,7 +353,7 @@ namespace Nox
         if (!tooltip.empty())
             slider->Tooltip = tooltip;
         AddRow(label, slider, tooltip);
-        UI::AppendSync(*Raw(slider), [slider = Raw(slider), target]()
+        NoxUI::AppendSync(*Raw(slider), [slider = Raw(slider), target]()
         {
             if (!slider->IsInteracting())
                 slider->Value = *target;
@@ -363,7 +363,7 @@ namespace Nox
     void InspectorCardBuilder::AddUInt32(const std::string& label, uint32_t* target, uint32_t minV, uint32_t maxV,
                                          std::function<void()> onChange, const std::string& tooltip)
     {
-        auto drag = UI::MakeUI<UI::UIDragScalar>(static_cast<float>(*target), 0.25f, [mutate = OnMutate, target, minV, maxV, onChange](float v)
+        auto drag = NoxUI::MakeUI<NoxUI::UIDragScalar>(static_cast<float>(*target), 0.25f, [mutate = OnMutate, target, minV, maxV, onChange](float v)
         {
             uint32_t next = static_cast<uint32_t>(std::max(0.0f, std::round(v)));
             if (maxV > minV)
@@ -372,12 +372,12 @@ namespace Nox
             if (onChange) onChange();
             if (mutate) mutate(false);
         });
-        drag->WidthMode = UI::UISizeMode::Fill;
+        drag->WidthMode = NoxUI::UISizeMode::Fill;
         drag->Format = "{:.0f}";
         drag->Min = static_cast<float>(minV);
         drag->Max = static_cast<float>(maxV);
         AddRow(label, drag, tooltip);
-        UI::AppendSync(*Raw(drag), [drag = Raw(drag), target]()
+        NoxUI::AppendSync(*Raw(drag), [drag = Raw(drag), target]()
         {
             if (!drag->IsInteracting())
                 drag->Value = static_cast<float>(*target);
@@ -387,7 +387,7 @@ namespace Nox
     void InspectorCardBuilder::AddInt32(const std::string& label, int32_t* target, int32_t minV, int32_t maxV,
                                         std::function<void()> onChange, const std::string& tooltip)
     {
-        auto drag = UI::MakeUI<UI::UIDragScalar>(static_cast<float>(*target), 0.25f, [mutate = OnMutate, target, minV, maxV, onChange](float v)
+        auto drag = NoxUI::MakeUI<NoxUI::UIDragScalar>(static_cast<float>(*target), 0.25f, [mutate = OnMutate, target, minV, maxV, onChange](float v)
         {
             int32_t next = static_cast<int32_t>(std::round(v));
             if (maxV > minV)
@@ -396,12 +396,12 @@ namespace Nox
             if (onChange) onChange();
             if (mutate) mutate(false);
         });
-        drag->WidthMode = UI::UISizeMode::Fill;
+        drag->WidthMode = NoxUI::UISizeMode::Fill;
         drag->Format = "{:.0f}";
         drag->Min = static_cast<float>(minV);
         drag->Max = static_cast<float>(maxV);
         AddRow(label, drag, tooltip);
-        UI::AppendSync(*Raw(drag), [drag = Raw(drag), target]()
+        NoxUI::AppendSync(*Raw(drag), [drag = Raw(drag), target]()
         {
             if (!drag->IsInteracting())
                 drag->Value = static_cast<float>(*target);
@@ -414,17 +414,17 @@ namespace Nox
         const LengthUnitInfo unit = GetLengthUnitInfo(*worldValue);
         const float displayVal = *worldValue / unit.Factor;
         const float speed = std::max(unit.Meters ? 0.005f : 0.5f, std::abs(displayVal) * 0.02f);
-        auto drag = UI::MakeUI<UI::UIDragScalar>(displayVal, speed, [mutate = OnMutate, worldValue, factor = unit.Factor, onChange](float d)
+        auto drag = NoxUI::MakeUI<NoxUI::UIDragScalar>(displayVal, speed, [mutate = OnMutate, worldValue, factor = unit.Factor, onChange](float d)
         {
             *worldValue = d * factor;
             if (onChange) onChange();
             if (mutate) mutate(false);
         });
-        drag->WidthMode = UI::UISizeMode::Fill;
+        drag->WidthMode = NoxUI::UISizeMode::Fill;
         drag->Min = minWorld / unit.Factor;
         drag->Max = maxWorld / unit.Factor;
         AddRow(label + " (" + unit.Suffix + rateSuffix + ")", drag, tooltip);
-        UI::AppendSync(*Raw(drag), [drag = Raw(drag), worldValue, factor = unit.Factor]()
+        NoxUI::AppendSync(*Raw(drag), [drag = Raw(drag), worldValue, factor = unit.Factor]()
         {
             if (!drag->IsInteracting())
                 drag->Value = *worldValue / factor;
@@ -434,7 +434,7 @@ namespace Nox
     void InspectorCardBuilder::AddVec2(const std::string& label, glm::vec2* target, float speed,
                                        std::function<void()> onChange, const std::string& tooltip)
     {
-        auto vec = UI::MakeUI<UI::UIVectorEdit>(2, glm::vec4(target->x, target->y, 0.0f, 0.0f), speed,
+        auto vec = NoxUI::MakeUI<NoxUI::UIVectorEdit>(2, glm::vec4(target->x, target->y, 0.0f, 0.0f), speed,
             [mutate = OnMutate, target, onChange](const glm::vec4& v)
             {
                 target->x = v.x;
@@ -443,7 +443,7 @@ namespace Nox
                 if (mutate) mutate(false);
             });
         AddRow(label, vec, tooltip);
-        UI::AppendSync(*Raw(vec), [vec = Raw(vec), target]()
+        NoxUI::AppendSync(*Raw(vec), [vec = Raw(vec), target]()
         {
             if (!vec->IsEditing())
                 vec->SetValue({ target->x, target->y, 0.0f, 0.0f }, false);
@@ -453,7 +453,7 @@ namespace Nox
     void InspectorCardBuilder::AddVec3(const std::string& label, glm::vec3* target, float speed,
                                        std::function<void()> onChange, const std::string& tooltip)
     {
-        auto vec = UI::MakeUI<UI::UIVectorEdit>(3, glm::vec4(*target, 0.0f), speed,
+        auto vec = NoxUI::MakeUI<NoxUI::UIVectorEdit>(3, glm::vec4(*target, 0.0f), speed,
             [mutate = OnMutate, target, onChange](const glm::vec4& v)
             {
                 target->x = v.x;
@@ -463,7 +463,7 @@ namespace Nox
                 if (mutate) mutate(false);
             });
         AddRow(label, vec, tooltip);
-        UI::AppendSync(*Raw(vec), [vec = Raw(vec), target]()
+        NoxUI::AppendSync(*Raw(vec), [vec = Raw(vec), target]()
         {
             if (!vec->IsEditing())
                 vec->SetValue(glm::vec4(*target, 0.0f), false);
@@ -477,7 +477,7 @@ namespace Nox
         const LengthUnitInfo unit = GetLengthUnitInfo(largest);
         const float speed = unit.Meters ? 0.05f : 5.0f;
         const glm::vec3 initial = *worldVec / unit.Factor;
-        auto vec = UI::MakeUI<UI::UIVectorEdit>(3, glm::vec4(initial, 0.0f), speed,
+        auto vec = NoxUI::MakeUI<NoxUI::UIVectorEdit>(3, glm::vec4(initial, 0.0f), speed,
             [mutate = OnMutate, worldVec, factor = unit.Factor, onChange](const glm::vec4& v)
             {
                 *worldVec = glm::vec3(v.x, v.y, v.z) * factor;
@@ -485,7 +485,7 @@ namespace Nox
                 if (mutate) mutate(false);
             });
         AddRow(label + " (" + unit.Suffix + ")", vec, tooltip);
-        UI::AppendSync(*Raw(vec), [vec = Raw(vec), worldVec, factor = unit.Factor]()
+        NoxUI::AppendSync(*Raw(vec), [vec = Raw(vec), worldVec, factor = unit.Factor]()
         {
             if (!vec->IsEditing())
                 vec->SetValue(glm::vec4(*worldVec / factor, 0.0f), false);
@@ -494,7 +494,7 @@ namespace Nox
 
     void InspectorCardBuilder::AddColor3(const std::string& label, glm::vec3* target, std::function<void()> onChange)
     {
-        UI::UIPropertyRows(Body, Context).Color3(label, target, [mutate = OnMutate, onChange]()
+        NoxUI::UIPropertyRows(Body, Context).Color3(label, target, [mutate = OnMutate, onChange]()
         {
             if (onChange) onChange();
             if (mutate) mutate(false);
@@ -503,7 +503,7 @@ namespace Nox
 
     void InspectorCardBuilder::AddColor4(const std::string& label, glm::vec4* target, std::function<void()> onChange)
     {
-        UI::UIPropertyRows(Body, Context).Color4(label, target, [mutate = OnMutate, onChange]()
+        NoxUI::UIPropertyRows(Body, Context).Color4(label, target, [mutate = OnMutate, onChange]()
         {
             if (onChange) onChange();
             if (mutate) mutate(false);
@@ -513,7 +513,7 @@ namespace Nox
     void InspectorCardBuilder::AddString(const std::string& label, std::string* target, const std::string& placeholder,
                                          std::function<void()> onChange, const std::string& tooltip)
     {
-        UI::UIPropertyRows(Body, Context).String(label, target, placeholder, [mutate = OnMutate, onChange]()
+        NoxUI::UIPropertyRows(Body, Context).String(label, target, placeholder, [mutate = OnMutate, onChange]()
         {
             if (onChange) onChange();
             if (mutate) mutate(false);
@@ -522,23 +522,23 @@ namespace Nox
 
     void InspectorCardBuilder::AddReadonly(const std::string& label, const std::string& value)
     {
-        auto lbl = UI::Label(value);
+        auto lbl = NoxUI::Label(value);
         lbl->FontSizeOverride = 14.5f;
         lbl->UseColorOverride = true;
-        lbl->ColorOverride = UI::ThemeColor("InspectorReadonlyValue", { 0.64f, 0.70f, 0.80f, 1.0f });
+        lbl->ColorOverride = NoxUI::ThemeColor("InspectorReadonlyValue", { 0.64f, 0.70f, 0.80f, 1.0f });
         AddRow(label, lbl);
     }
 
     void InspectorCardBuilder::AddEnum(const std::string& label, std::vector<std::string> items, int selectedIdx,
                                        std::function<void(int)> onSelect, const std::string& tooltip)
     {
-        auto dd = UI::MakeUI<UI::UIDropdown>(Context, std::move(items), selectedIdx,
+        auto dd = NoxUI::MakeUI<NoxUI::UIDropdown>(Context, std::move(items), selectedIdx,
             [mutate = OnMutate, onSelect](int idx)
             {
                 if (onSelect) onSelect(idx);
                 if (mutate) mutate(true);
             });
-        dd->WidthMode = UI::UISizeMode::Fill;
+        dd->WidthMode = NoxUI::UISizeMode::Fill;
         AddRow(label, dd, tooltip);
     }
 
@@ -547,20 +547,20 @@ namespace Nox
                                             std::function<void(AssetHandle)> onAssign,
                                             const char* emptyText)
     {
-        auto slotRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-        slotRow->WidthMode = UI::UISizeMode::Fill;
-        slotRow->VAlign = UI::UIAlignment::Center;
+        auto slotRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+        slotRow->WidthMode = NoxUI::UISizeMode::Fill;
+        slotRow->VAlign = NoxUI::UIAlignment::Center;
 
-        auto pickBtn = UI::Button(AssetDisplayName(current, emptyText));
-        pickBtn->WidthMode = UI::UISizeMode::Fill;
+        auto pickBtn = NoxUI::Button(AssetDisplayName(current, emptyText));
+        pickBtn->WidthMode = NoxUI::UISizeMode::Fill;
         pickBtn->FlexWeight = 1.0f;
-        pickBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
-        pickBtn->TextElide = UI::UITextElide::Middle; // an asset's name keeps its start and its end
-        UI::UIButton* btnPtr = pickBtn.Get().get();
+        pickBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+        pickBtn->TextElide = NoxUI::UITextElide::Middle; // an asset's name keeps its start and its end
+        NoxUI::UIButton* btnPtr = pickBtn.Get().get();
         std::string emptyStr = emptyText ? emptyText : "None";
         pickBtn->OnClick = [mutate = OnMutate, btnPtr, current, emptyStr, acceptedTypes = std::move(acceptedTypes), onAssign]()
         {
-            UI::UIContext* ctx = UI::UIContext::GetCurrent();
+            NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
             if (!ctx)
                 return;
             ShowSearchableAssetPicker(
@@ -580,15 +580,15 @@ namespace Nox
 
         if (current != 0)
         {
-            auto clearBtn = UI::Button("x", [mutate = OnMutate, onAssign]()
+            auto clearBtn = NoxUI::Button("x", [mutate = OnMutate, onAssign]()
             {
                 if (onAssign) onAssign(AssetHandle(0));
                 if (mutate) mutate(true);
             }).Tooltip("Clear asset");
-            clearBtn->WidthMode = UI::UISizeMode::Fixed;
-            clearBtn->HeightMode = UI::UISizeMode::Fixed;
+            clearBtn->WidthMode = NoxUI::UISizeMode::Fixed;
+            clearBtn->HeightMode = NoxUI::UISizeMode::Fixed;
             clearBtn->FixedSize = { 24.0f, 24.0f };
-            clearBtn->Padding = UI::UIThickness::All(0.0f);
+            clearBtn->Padding = NoxUI::UIThickness::All(0.0f);
             slotRow->AddChild(clearBtn);
         }
 
@@ -610,27 +610,27 @@ namespace Nox
     {
         if (callbacks.InlineSave)
         {
-            auto line = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-            line->WidthMode = UI::UISizeMode::Fill;
-            auto label = UI::Label("Unsaved changes", 13.0f);
+            auto line = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+            line->WidthMode = NoxUI::UISizeMode::Fill;
+            auto label = NoxUI::Label("Unsaved changes", 13.0f);
             label->UseColorOverride = true;
-            label->ColorOverride = UI::ThemeColor("StatusWarning", { 0.95f, 0.65f, 0.3f, 1.0f });
-            label->VAlign = UI::UIAlignment::Center;
+            label->ColorOverride = NoxUI::ThemeColor("StatusWarning", { 0.95f, 0.65f, 0.3f, 1.0f });
+            label->VAlign = NoxUI::UIAlignment::Center;
             line->AddChild(label);
-            auto save = UI::Button("Save", [handle]() { MaterialEdits::Save(handle); });
+            auto save = NoxUI::Button("Save", [handle]() { MaterialEdits::Save(handle); });
             save->StyleVariant = "primary";
             save->Tooltip = "Write the material to its file (File > Save All saves every unsaved material)";
             line->AddChild(save);
-            auto revert = UI::Button("Revert", [handle, rebuild = callbacks.RequestRebuild]()
+            auto revert = NoxUI::Button("Revert", [handle, rebuild = callbacks.RequestRebuild]()
             {
                 if (MaterialEdits::Revert(handle) && rebuild)
                     rebuild(); // (the rows pointed at the values that were replaced)
             });
             revert->Tooltip = "Drop the changes: the material as its file has it";
             line->AddChild(revert);
-            Ref<UI::UIStackBox> lineRef = line;
+            Ref<NoxUI::UIStackBox> lineRef = line;
             c.Body->AddChild(lineRef);
-            UI::AppendSync(*lineRef, [line = lineRef.get(), handle]() { line->Visible = MaterialEdits::IsUnsaved(handle); });
+            NoxUI::AppendSync(*lineRef, [line = lineRef.get(), handle]() { line->Visible = MaterialEdits::IsUnsaved(handle); });
         }
 
         auto notifySaved = [handle]() { NotifyMaterialEdited(handle); };
@@ -645,21 +645,21 @@ namespace Nox
         if (handle != 0 && Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
         {
             auto assets = Project::GetActive()->GetEditorAssetManager();
-            const AcousticMaterial chosen = assets->GetMetadata(handle).AudioSettings.Acoustic;
-            const AcousticMaterial resolved = ResolveAcousticMaterial(chosen, data.MetallicFactor, data.TransmissionFactor, data.Mode == AlphaMode::Blend);
+            const NoxAudio::AcousticMaterial chosen = assets->GetMetadata(handle).AudioSettings.Acoustic;
+            const NoxAudio::AcousticMaterial resolved = ResolveAcousticMaterial(chosen, data.MetallicFactor, data.TransmissionFactor, data.Mode == AlphaMode::Blend);
             std::vector<std::string> acousticNames;
-            for (uint8_t i = 0; i < static_cast<uint8_t>(AcousticMaterial::Count); ++i)
+            for (uint8_t i = 0; i < static_cast<uint8_t>(NoxAudio::AcousticMaterial::Count); ++i)
             {
-                const AcousticMaterial opt = static_cast<AcousticMaterial>(i);
-                if (opt == AcousticMaterial::Auto)
-                    acousticNames.push_back("Auto (" + std::string(AcousticMaterialToString(resolved)) + ")");
+                const NoxAudio::AcousticMaterial opt = static_cast<NoxAudio::AcousticMaterial>(i);
+                if (opt == NoxAudio::AcousticMaterial::Auto)
+                    acousticNames.push_back("Auto (" + std::string(NoxAudio::AcousticMaterialToString(resolved)) + ")");
                 else
-                    acousticNames.push_back(std::string(AcousticMaterialToString(opt)));
+                    acousticNames.push_back(std::string(NoxAudio::AcousticMaterialToString(opt)));
             }
             c.AddEnum("Acoustic Material", std::move(acousticNames), static_cast<int>(chosen),
                 [assets, handle](int idx)
                 {
-                    assets->SetAcousticMaterial(handle, static_cast<AcousticMaterial>(idx));
+                    assets->SetAcousticMaterial(handle, static_cast<NoxAudio::AcousticMaterial>(idx));
                     SpatialAudio::MaterialsChanged();
                 },
                 "How this surface transmits and absorbs sound in Steam Audio.");
@@ -699,25 +699,25 @@ namespace Nox
 
         auto addTextureSlot = [&](const std::string& label, std::string& texturePath, const std::string& tooltip = {})
         {
-            auto texRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-            texRow->WidthMode = UI::UISizeMode::Fill;
-            texRow->VAlign = UI::UIAlignment::Center;
+            auto texRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+            texRow->WidthMode = NoxUI::UISizeMode::Fill;
+            texRow->VAlign = NoxUI::UIAlignment::Center;
 
             auto assets = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr;
             const AssetHandle currentHandle = (assets && !texturePath.empty())
                 ? assets->FindHandleByPath(texturePath, AssetType::Texture2D)
                 : AssetHandle(0);
 
-            auto pickBtn = UI::Button(TexturePathDisplayName(texturePath));
-            pickBtn->WidthMode = UI::UISizeMode::Fill;
+            auto pickBtn = NoxUI::Button(TexturePathDisplayName(texturePath));
+            pickBtn->WidthMode = NoxUI::UISizeMode::Fill;
             pickBtn->FlexWeight = 1.0f;
-            pickBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
-            pickBtn->TextElide = UI::UITextElide::Middle;
-        pickBtn->TextElide = UI::UITextElide::Middle; // an asset's name keeps its start and its end
-            UI::UIButton* btnPtr = pickBtn.Get().get();
+            pickBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+            pickBtn->TextElide = NoxUI::UITextElide::Middle;
+        pickBtn->TextElide = NoxUI::UITextElide::Middle; // an asset's name keeps its start and its end
+            NoxUI::UIButton* btnPtr = pickBtn.Get().get();
             pickBtn->OnClick = [btnPtr, currentHandle, &texturePath, notifySavedRebuild]()
             {
-                UI::UIContext* ctx = UI::UIContext::GetCurrent();
+                NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
                 auto mgr = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr;
                 if (!ctx || !mgr)
                     return;
@@ -746,15 +746,15 @@ namespace Nox
 
             if (!texturePath.empty())
             {
-                auto clearBtn = UI::Button("x", [&texturePath, notifySavedRebuild]()
+                auto clearBtn = NoxUI::Button("x", [&texturePath, notifySavedRebuild]()
                 {
                     texturePath.clear();
                     notifySavedRebuild();
                 }).Tooltip("Clear texture");
-                clearBtn->WidthMode = UI::UISizeMode::Fixed;
-                clearBtn->HeightMode = UI::UISizeMode::Fixed;
+                clearBtn->WidthMode = NoxUI::UISizeMode::Fixed;
+                clearBtn->HeightMode = NoxUI::UISizeMode::Fixed;
                 clearBtn->FixedSize = { 24.0f, 24.0f };
-                clearBtn->Padding = UI::UIThickness::All(0.0f);
+                clearBtn->Padding = NoxUI::UIThickness::All(0.0f);
                 texRow->AddChild(clearBtn);
             }
             c.AddRow(label, texRow, tooltip);
@@ -877,18 +877,18 @@ namespace Nox
                 ? assets->FindHandleByPath(data.CustomShader, AssetType::MaterialShader)
                 : AssetHandle(0);
 
-            auto shRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-            shRow->WidthMode = UI::UISizeMode::Fill;
-            auto pickBtn = UI::Button(TexturePathDisplayName(data.CustomShader));
-            pickBtn->WidthMode = UI::UISizeMode::Fill;
+            auto shRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+            shRow->WidthMode = NoxUI::UISizeMode::Fill;
+            auto pickBtn = NoxUI::Button(TexturePathDisplayName(data.CustomShader));
+            pickBtn->WidthMode = NoxUI::UISizeMode::Fill;
             pickBtn->FlexWeight = 1.0f;
-            pickBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
-            pickBtn->TextElide = UI::UITextElide::Middle;
-        pickBtn->TextElide = UI::UITextElide::Middle; // an asset's name keeps its start and its end
-            UI::UIButton* shBtnPtr = pickBtn.Get().get();
+            pickBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+            pickBtn->TextElide = NoxUI::UITextElide::Middle;
+        pickBtn->TextElide = NoxUI::UITextElide::Middle; // an asset's name keeps its start and its end
+            NoxUI::UIButton* shBtnPtr = pickBtn.Get().get();
             pickBtn->OnClick = [shBtnPtr, currentShader, assets, &data, notifySavedRebuild]()
             {
-                UI::UIContext* ctx = UI::UIContext::GetCurrent();
+                NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
                 if (!ctx || !assets)
                     return;
                 ShowSearchableAssetPicker(
@@ -903,7 +903,7 @@ namespace Nox
             shRow->AddChild(pickBtn);
             if (!data.CustomShader.empty())
             {
-                auto openExtBtn = UI::Button("Open", [&data, assets, currentShader]()
+                auto openExtBtn = NoxUI::Button("Open", [&data, assets, currentShader]()
                 {
                     const std::string rel = currentShader != 0 && assets
                         ? assets->GetMetadata(currentShader).FilePath.generic_string()
@@ -911,7 +911,7 @@ namespace Nox
                     const std::string url = "file:///" + std::filesystem::absolute(Project::GetActiveAssetDirectory() / rel).generic_string();
                     SDL_OpenURL(url.c_str());
                 }).Tooltip("Open .slang file in external code editor");
-                openExtBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                openExtBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                 shRow->AddChild(openExtBtn);
             }
             c.AddRow("Material Shader", shRow);
@@ -930,18 +930,18 @@ namespace Nox
                 ? assets->FindHandleByPath(data.SurfaceGraph, AssetType::MaterialGraph)
                 : AssetHandle(0);
 
-            auto grRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-            grRow->WidthMode = UI::UISizeMode::Fill;
-            auto pickBtn = UI::Button(TexturePathDisplayName(data.SurfaceGraph));
-            pickBtn->WidthMode = UI::UISizeMode::Fill;
+            auto grRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+            grRow->WidthMode = NoxUI::UISizeMode::Fill;
+            auto pickBtn = NoxUI::Button(TexturePathDisplayName(data.SurfaceGraph));
+            pickBtn->WidthMode = NoxUI::UISizeMode::Fill;
             pickBtn->FlexWeight = 1.0f;
-            pickBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
-            pickBtn->TextElide = UI::UITextElide::Middle;
-        pickBtn->TextElide = UI::UITextElide::Middle; // an asset's name keeps its start and its end
-            UI::UIButton* grBtnPtr = pickBtn.Get().get();
+            pickBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+            pickBtn->TextElide = NoxUI::UITextElide::Middle;
+        pickBtn->TextElide = NoxUI::UITextElide::Middle; // an asset's name keeps its start and its end
+            NoxUI::UIButton* grBtnPtr = pickBtn.Get().get();
             pickBtn->OnClick = [grBtnPtr, currentGraph, assets, &data, notifySavedRebuild]()
             {
-                UI::UIContext* ctx = UI::UIContext::GetCurrent();
+                NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
                 if (!ctx || !assets)
                     return;
                 ShowSearchableAssetPicker(
@@ -956,21 +956,21 @@ namespace Nox
             grRow->AddChild(pickBtn);
             if (currentGraph != 0 && callbacks.OpenAsset)
             {
-                auto openBtn = UI::Button("Open", [callbacks, currentGraph]() { callbacks.OpenAsset(currentGraph); });
-                openBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                auto openBtn = NoxUI::Button("Open", [callbacks, currentGraph]() { callbacks.OpenAsset(currentGraph); });
+                openBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                 grRow->AddChild(openBtn);
             }
             if (!data.SurfaceGraph.empty())
             {
-                auto clrBtn = UI::Button("x", [&data, notifySavedRebuild]()
+                auto clrBtn = NoxUI::Button("x", [&data, notifySavedRebuild]()
                 {
                     data.SurfaceGraph.clear();
                     notifySavedRebuild();
                 }).Tooltip("Clear surface graph");
-                clrBtn->WidthMode = UI::UISizeMode::Fixed;
-                clrBtn->HeightMode = UI::UISizeMode::Fixed;
+                clrBtn->WidthMode = NoxUI::UISizeMode::Fixed;
+                clrBtn->HeightMode = NoxUI::UISizeMode::Fixed;
                 clrBtn->FixedSize = { 24.0f, 24.0f };
-                clrBtn->Padding = UI::UIThickness::All(0.0f);
+                clrBtn->Padding = NoxUI::UIThickness::All(0.0f);
                 grRow->AddChild(clrBtn);
             }
             c.AddRow("Surface Graph", grRow);
@@ -980,9 +980,9 @@ namespace Nox
                 const Ref<NodeGraphAsset> graphAsset = AssetManager::GetAsset<NodeGraphAsset>(currentGraph);
                 const MaterialGraphProgram program = graphAsset ? CompileMaterialGraph(graphAsset->Graph) : MaterialGraphProgram{};
                 if (!graphAsset)
-                    c.AddStatusNote("Graph asset not loaded in project Assets.", UI::ThemeColor("StatusWarning", { 0.95f, 0.75f, 0.25f, 1.0f }));
+                    c.AddStatusNote("Graph asset not loaded in project Assets.", NoxUI::ThemeColor("StatusWarning", { 0.95f, 0.75f, 0.25f, 1.0f }));
                 else if (!program.Valid)
-                    c.AddStatusNote("Graph compile error: " + program.Error, UI::ThemeColor("StatusError", { 0.95f, 0.35f, 0.30f, 1.0f }));
+                    c.AddStatusNote("Graph compile error: " + program.Error, NoxUI::ThemeColor("StatusError", { 0.95f, 0.35f, 0.30f, 1.0f }));
                 else
                 {
                     for (const MaterialGraphParameter& param : program.Parameters)
@@ -996,10 +996,10 @@ namespace Nox
                         });
                         const bool overridden = (it != data.GraphParameters.end());
 
-                        auto paramRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-                        paramRow->WidthMode = UI::UISizeMode::Fill;
-                        paramRow->VAlign = UI::UIAlignment::Center;
-                        auto ovCb = UI::CheckBox("", overridden, [assets, &data, param, isTex, notifySavedRebuild](bool next)
+                        auto paramRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+                        paramRow->WidthMode = NoxUI::UISizeMode::Fill;
+                        paramRow->VAlign = NoxUI::UIAlignment::Center;
+                        auto ovCb = NoxUI::CheckBox("", overridden, [assets, &data, param, isTex, notifySavedRebuild](bool next)
                         {
                             auto found = std::find_if(data.GraphParameters.begin(), data.GraphParameters.end(), [&](const MaterialGraphParameterValue& v)
                             {
@@ -1028,14 +1028,14 @@ namespace Nox
                             if (overridden)
                             {
                                 const AssetHandle texHandle = assets ? assets->FindHandleByPath(it->Texture, AssetType::Texture2D) : AssetHandle(0);
-                                auto texBtn = UI::Button(TexturePathDisplayName(it->Texture));
-                                texBtn->WidthMode = UI::UISizeMode::Fill;
+                                auto texBtn = NoxUI::Button(TexturePathDisplayName(it->Texture));
+                                texBtn->WidthMode = NoxUI::UISizeMode::Fill;
                                 texBtn->FlexWeight = 1.0f;
-                                texBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
-                                UI::UIButton* tbPtr = texBtn.Get().get();
+                                texBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+                                NoxUI::UIButton* tbPtr = texBtn.Get().get();
                                 texBtn->OnClick = [tbPtr, texHandle, assets, &data, paramName = param.Name, notifySavedRebuild]()
                                 {
-                                    UI::UIContext* ctx = UI::UIContext::GetCurrent();
+                                    NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
                                     if (!ctx || !assets) return;
                                     ShowSearchableAssetPicker(*ctx, tbPtr->GetBounds(), "None", texHandle,
                                         CollectAssetPickerOptions({ AssetType::Texture2D }),
@@ -1056,16 +1056,16 @@ namespace Nox
                             }
                             else
                             {
-                                auto lbl = UI::Label(AssetDisplayName(param.DefaultTexture) + " (default)");
+                                auto lbl = NoxUI::Label(AssetDisplayName(param.DefaultTexture) + " (default)");
                                 lbl->FontSizeOverride = 14.0f;
                                 lbl->UseColorOverride = true;
-                                lbl->ColorOverride = UI::ThemeColor("TextMuted", { 0.56f, 0.62f, 0.72f, 1.0f });
+                                lbl->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.56f, 0.62f, 0.72f, 1.0f });
                                 paramRow->AddChild(lbl);
                             }
                         }
                         else if (param.Type == MaterialGraphParameter::Kind::Scalar)
                         {
-                            auto drag = UI::MakeUI<UI::UIDragScalar>(overridden ? it->Value.x : param.Default.x, 0.01f,
+                            auto drag = NoxUI::MakeUI<NoxUI::UIDragScalar>(overridden ? it->Value.x : param.Default.x, 0.01f,
                                 [&data, paramName = param.Name, overridden, notifySaved](float v)
                                 {
                                     if (!overridden) return;
@@ -1079,15 +1079,15 @@ namespace Nox
                                     }
                                     notifySaved();
                                 });
-                            drag->WidthMode = UI::UISizeMode::Fill;
+                            drag->WidthMode = NoxUI::UISizeMode::Fill;
                             drag->FlexWeight = 1.0f;
                             drag->SetEnabled(overridden);
                             paramRow->AddChild(drag);
                         }
                         else
                         {
-                            auto col = UI::MakeUI<UI::UIColorEdit>(c.Context, overridden ? it->Value : param.Default,
-                                [&data, paramName = param.Name, overridden, notifySaved](const UI::UIColor& v)
+                            auto col = NoxUI::MakeUI<NoxUI::UIColorEdit>(c.Context, overridden ? it->Value : param.Default,
+                                [&data, paramName = param.Name, overridden, notifySaved](const NoxUI::UIColor& v)
                                 {
                                     if (!overridden) return;
                                     for (auto& gp : data.GraphParameters)
@@ -1100,7 +1100,7 @@ namespace Nox
                                     }
                                     notifySaved();
                                 });
-                            col->WidthMode = UI::UISizeMode::Fill;
+                            col->WidthMode = NoxUI::UISizeMode::Fill;
                             col->FlexWeight = 1.0f;
                             col->SetEnabled(overridden);
                             paramRow->AddChild(col);

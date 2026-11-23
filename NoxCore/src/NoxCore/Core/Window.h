@@ -2,6 +2,7 @@
 #include <string>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_video.h>
+#include <NRI/Extensions/NRIDeviceCreation.h>
 
 namespace Nox
 {
@@ -52,6 +53,9 @@ namespace Nox
 
     public:
         virtual SDL_Window* getHandle() { return m_window; }
+        NriNativeWindowHandle GetNativeWindowHandle() const;
+
+        static NriNativeWindowHandle MakeNriWindow(SDL_Window* window);
         
     private:
         WindowSpecification m_Specification;

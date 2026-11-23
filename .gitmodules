@@ -44,3 +44,21 @@
 [submodule "NoxCore/vendors/cpp-httplib"]
 	path = NoxCore/vendors/cpp-httplib
 	url = https://github.com/yhirose/cpp-httplib
+[submodule "external/NoxTasks"]
+	path = NoxCore/vendors/NoxTasks
+	url = https://github.com/VanKalanchoe/NoxTasks.git
+[submodule "external/NoxMCP"]
+	path = NoxCore/vendors/NoxMCP
+	url = https://github.com/VanKalanchoe/NoxMCP.git
+[submodule "NoxCore/vendors/NoxNet"]
+	path = NoxCore/vendors/NoxNet
+	url = https://github.com/VanKalanchoe/NoxNet.git
+[submodule "NoxCore/vendors/NoxAudio"]
+	path = NoxCore/vendors/NoxAudio
+	url = https://github.com/VanKalanchoe/NoxAudio.git
+[submodule "NoxCore/vendors/NoxRHI"]
+	path = NoxCore/vendors/NoxRHI
+	url = https://github.com/VanKalanchoe/NoxRHI.git
+[submodule "NoxCore/vendors/NoxUI"]
+	path = NoxCore/vendors/NoxUI
+	url = https://github.com/VanKalanchoe/NoxUI.git

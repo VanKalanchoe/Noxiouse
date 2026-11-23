@@ -27,9 +27,45 @@
 #include "CustomLitShaders.h"
 #include "MaterialGraph.h"
 #include "GpuScene.h"
-#include "NoxCore/RenderGraph/RenderGraph.h"
-#include "NoxCore/UI/Rendering/UIRenderer.h"
-#include "NRI/ShaderBindingTable.h"
+#include <NRIRenderGraph/RenderGraph.h>
+#include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Rendering/UIFont.h>
+#include <NRIHPP/NRIExtensions.hpp>
+
+namespace Nox
+{
+    using nri::RenderGraph;
+    using nri::RGBuilder;
+    using nri::RGPassContext;
+    using nri::RGSubmission;
+    using nri::RGFrameDesc;
+    using nri::RGTexture;
+    using nri::RGBuffer;
+    using nri::RGResourceKind;
+    using nri::RGImportAccess;
+    using nri::RGSize;
+    using nri::RGTextureDesc;
+    using nri::RGBufferDesc;
+    using nri::RGTextureHistory;
+    using nri::RGBufferHistory;
+    using nri::RGTextureAccess;
+    using nri::RGBufferAccess;
+    using nri::RGSynchronization;
+    using nri::RGPassFlags;
+    using nri::RGViewport;
+    using nri::RGInvalidIndex;
+    using nri::RGMaxHistoryLength;
+    using nri::RGBlackboard;
+    using nri::RGResourcePool;
+    using nri::RGTextureKey;
+    using nri::RGBufferKey;
+    using nri::RGFrameReport;
+    using nri::WriteRenderGraphDot;
+    using nri::RGProfilerHooks;
+    using nri::RGTaskDispatcher;
+    using nri::RGLogLevel;
+    using nri::RGLogCallback;
+}
 
 // Forward declaration only -- the RTXDI SDK must never be #included from this header (it's engine-
 // public, pulled in by EditorLayer.cpp and others). Renderer.cpp is the only place that includes
@@ -83,16 +119,51 @@ inline int32_t selectedSampler{0};
 
 inline std::vector<std::string> samplerNames{"Linear", "Nearest"};
 
+namespace NoxUI { class UIViewportManager; }
+
 namespace Nox
 {
+    enum class NRDReflectionDenoiser : uint8_t
+    {
+        Off = 0,
+        REBLUR = 1,
+        RELAX = 2
+    };
+
+    enum class NRDDiffuseDenoiser : uint8_t
+    {
+        Off = 0,
+        REBLUR = 1,
+        RELAX = 2
+    };
+
     struct ProjectRendererSettings;
     struct FrameGraphResources;
     struct ViewDrawResources;
 
+    struct ASBuildDesc
+    {
+        nri::AccelerationStructureType type = NRI_ACCELERATION_STRUCTURE_BOTTOM_LEVEL;
+        uint32_t flags = 0;
+        std::vector<nri::AccelerationStructureTrianglesDesc> triangles;
+        nri::AccelerationStructureInstancesDesc instances{};
+
+        NriAccelerationStructureBuildDesc toNri() const
+        {
+            return NriAccelerationStructureBuildDesc{
+                .type = type,
+                .flags = flags,
+                .triangles = triangles.empty() ? nullptr : triangles.data(),
+                .triangleCount = static_cast<uint32_t>(triangles.size()),
+                .instances = instances
+            };
+        }
+    };
+
     struct MeshBLAS
     {
-        std::unique_ptr<NRI::Buffer> storageBuffer;
-        std::unique_ptr<NRI::AccelerationStructure> as;
+        nri::Buffer storageBuffer;
+        nri::AccelerationStructure as;
         uint64_t serial = 0; // which mesh's BLAS this is: ids are reused, a compaction must find the BLAS it measured
         // Destroyed backwards, so `as` goes before its buffer. Never overwrite a live one by assignment (that runs the members forwards
         // and frees the buffer under the structure): move it out first, or reset `as` then `storageBuffer`.
@@ -136,7 +207,7 @@ namespace Nox
     struct DeferredRelease
     {
         uint32_t framesRemaining = MAX_FRAMES_IN_FLIGHT;
-        std::variant<std::unique_ptr<NRI::Buffer>, Ref<Asset>, MeshHandle, MeshBLAS, DeferredTextureSlot> payload;
+        std::variant<nri::Buffer, Ref<Asset>, MeshHandle, MeshBLAS, DeferredTextureSlot> payload;
     };
 
     struct PickRequest
@@ -219,25 +290,13 @@ namespace Nox
         Renderer(std::shared_ptr<Nox::Window> window, bool isEditor, bool useImGui = true);
         ~Renderer();
 
-        UI::UIRenderer* GetUIRenderer() { return m_uiRenderer.get(); }
-        UI::UIDrawList* GetUIDrawList() { return m_uiRenderer ? &m_uiRenderer->GetDrawList() : nullptr; }
+        NoxUI::UIDrawList* GetUIDrawList() { return &m_uiDrawList; }
+        void InitNoxUI(NoxUI::UIViewportManager* viewportManager = nullptr);
+        void ShutdownNoxUI();
         Utils::NOXWatcher& GetFileWatcher() { return m_fileWatcher; }
 
-        std::unique_ptr<NRI::Swapchain> CreateWindowSwapchain(Nox::Window& window, uint32_t width, uint32_t height, bool vSync = true);
-        std::unique_ptr<NRI::CommandAllocator> CreateUICommandAllocator();
-        // A floating panel window's own UI upload buffers (nullptr without the custom UI renderer).
-        std::unique_ptr<UI::UIUploadBuffers> CreateUIUploadBuffers();
         void WaitDeviceIdle();
         uint32_t GetCurrentFrameIndex() const { return frameIndex; }
-        bool RenderSecondaryUIViewport(
-            NRI::Swapchain& swapchain,
-            NRI::CommandAllocator& allocator,
-            NRI::CommandBuffer& cmd,
-            UI::UIUploadBuffers& uploads,
-            const UI::UIDrawList& drawList,
-            const glm::vec2& viewportSize,
-            const glm::vec4& clearColor = { 0.08f, 0.09f, 0.11f, 1.0f }
-        );
 
         // Call this from EditorLayer during mouse hover/click
         // Single click (1x1)
@@ -287,7 +346,7 @@ namespace Nox
         const TextureInspection& getTextureInspection() const { return m_textureInspection; }
         // Display image of the last inspected frame, nullptr when nothing is inspected. Stays valid for a few frames after
         // its size changes (render graph history).
-        Texture2D* getInspectionImage() const { return m_inspectionImage; }
+        NriTexture getInspectionImage() const { return m_inspectionImage; }
         // Physical description of the inspected texture (imports: size only).
         const RGTextureKey& getInspectedTextureKey() const { return m_inspectedTextureKey; }
         // Raw value of the probe texel from the newest finished frame that probed it.
@@ -401,7 +460,7 @@ namespace Nox
         Texture2D* GetSceneResource() const { return m_sceneResource.get(); }
         // The same image as a reference (ReadbackTexture keeps it alive while it is copied), and the order its texels are read back in.
         Ref<Texture2D> GetSceneResourceRef() const { return m_sceneResource; }
-        bool IsSurfaceFormatBGRA() const { return m_device && m_device->isSurfaceFormatBGRA(); }
+        bool IsSurfaceFormatBGRA() const { return m_device && m_device.isSurfaceFormatBGRA(); }
 
         // Extra editor views (docs/Future.md item 5: the viewports besides the active one). Each draws another camera raster only --
         // forward-lit opaque, unlit, sky and transparent geometry, tonemapped, with the 2D overlay's world lines and its own grid -- into
@@ -423,7 +482,7 @@ namespace Nox
             ExtraViewNoParticles = 1u << 3,
             ExtraViewOutline = 1u << 4,
         };
-        void SubmitExtraView(uint32_t index, const EditorCamera& camera, NRI::Extent2D size, const shaderio::PushConstantGrid* grid, bool preview = false,
+        void SubmitExtraView(uint32_t index, const EditorCamera& camera, nri::Extent2D size, const shaderio::PushConstantGrid* grid, bool preview = false,
                              uint32_t flags = 0);
         // A ray against the scene's geometry (ray query on the TLAS: the real surface, not bounding boxes), answered a frame or two
         // later on the main thread: the distance to the first opaque surface, or a miss (also without ray tracing / a TLAS).
@@ -451,17 +510,17 @@ namespace Nox
         }
 
         void setVSync(bool enabled);
-        void onViewportSizeChange(NRI::Extent2D size);
+        void onViewportSizeChange(nri::Extent2D size);
         bool getVSync() const { return m_vSync; }
         // Frame command buffers recorded on the JobSystem workers when there is enough work (off: one command buffer).
         void setParallelCommandRecording(bool enabled) { m_renderGraph.SetParallelRecording(enabled); }
         bool isParallelCommandRecording() const { return m_renderGraph.IsParallelRecording(); }
-        NRI::Extent2D getViewPortSize() const { return m_viewportSize; }
+        nri::Extent2D getViewPortSize() const { return m_viewportSize; }
         // Final output image size (editor viewport or swapchain), i.e. the 2D overlay pass render area.
-        NRI::Extent2D getOutputSize() const { return m_isEditor ? m_viewportSize : m_swapChainExtent; }
+        nri::Extent2D getOutputSize() const { return m_isEditor ? m_viewportSize : m_swapChainExtent; }
         // Non-jittered view-projection submitted by this frame's BeginScene (editor or runtime camera).
         glm::mat4 getViewProjection() const { return m_currentNonJitteredProj * m_currentView; }
-        NRI::Extent2D getRenderSize() const { return m_renderSize; }
+        nri::Extent2D getRenderSize() const { return m_renderSize; }
         Renderer2D* getRenderer2D() const { return m_renderer2D.get(); }
         // Freezes the culling view (frustum and camera position of the moment it is frozen).
         void setFrozen(bool frozen)
@@ -810,8 +869,8 @@ namespace Nox
             }
         }
         bool getNRDShadowsEnabled() const { return m_nrdShadowsEnabled; }
-        NRI::NRDReflectionDenoiser getNRDReflectionDenoiser() const { return m_nrdReflectionDenoiser; }
-        void setNRDReflectionDenoiser(NRI::NRDReflectionDenoiser mode);
+        Nox::NRDReflectionDenoiser getNRDReflectionDenoiser() const { return m_nrdReflectionDenoiser; }
+        void setNRDReflectionDenoiser(Nox::NRDReflectionDenoiser mode);
 
         // DDGI (Dynamic Diffuse Global Illumination)
         bool isDDGIEnabled() const { return m_ddgiEnabled; }
@@ -884,7 +943,7 @@ namespace Nox
         uint32_t& getScreenProbeMaxHistory() { return m_screenProbeMaxHistory; }
         void resetScreenProbeHistory() { m_renderGraph.ResetHistory(ScreenProbeHistoryKey); }
         // Probes over the render resolution (the tile size's grid).
-        NRI::Extent2D getScreenProbeCounts() const;
+        nri::Extent2D getScreenProbeCounts() const;
 
         // ReSTIR GI (Screen-Space Diffuse Indirect Resampling via RTXDI)
         float& getReSTIRGISpatialRadius() { return m_restirGISpatialRadius; }
@@ -894,8 +953,8 @@ namespace Nox
         float& getReSTIRGIDepthThreshold() { return m_restirGIDepthThreshold; }
         bool& getReSTIRGIEnableBoilingFilter() { return m_restirGIEnableBoilingFilter; }
         float& getReSTIRGIBoilingFilterStrength() { return m_restirGIBoilingFilterStrength; }
-        NRI::NRDDiffuseDenoiser getNRDGIDenoiser() const { return m_nrdGIDenoiser; }
-        void setNRDGIDenoiser(NRI::NRDDiffuseDenoiser mode);
+        Nox::NRDDiffuseDenoiser getNRDGIDenoiser() const { return m_nrdGIDenoiser; }
+        void setNRDGIDenoiser(Nox::NRDDiffuseDenoiser mode);
 
         // ReSTIR DI (Screen-Space Resampled Direct Lighting via RTXDI)
         uint32_t getDirectLightingMode() const { return m_directLightingMode; }
@@ -911,10 +970,10 @@ namespace Nox
         float& getReGIRCellSize() { return m_regirCellSize; }
         glm::vec3& getReGIRGridCenter() { return m_regirGridCenter; }
         float& getReGIRSamplingJitter() { return m_regirSamplingJitter; }
-        NRI::NRDDiffuseDenoiser getNRDDIDenoiser() const { return m_nrdDIDenoiser; }
-        void setNRDDIDenoiser(NRI::NRDDiffuseDenoiser mode);
-        NRI::NRDDiffuseDenoiser getNRDPTDenoiser() const { return m_nrdPTDenoiser; }
-        void setNRDPTDenoiser(NRI::NRDDiffuseDenoiser mode);
+        Nox::NRDDiffuseDenoiser getNRDDIDenoiser() const { return m_nrdDIDenoiser; }
+        void setNRDDIDenoiser(Nox::NRDDiffuseDenoiser mode);
+        Nox::NRDDiffuseDenoiser getNRDPTDenoiser() const { return m_nrdPTDenoiser; }
+        void setNRDPTDenoiser(Nox::NRDDiffuseDenoiser mode);
         bool getPathTracerUsesRTXDI() const { return m_pathTracerUsesRTXDI; }
         void setPathTracerUsesRTXDI(bool enabled) { m_pathTracerUsesRTXDI = enabled; }
 
@@ -951,7 +1010,7 @@ namespace Nox
         // Whether TAA resolves this frame: on, DLSS not evaluating, no path tracer.
         bool isTAAActive() const
         {
-            const bool dlss = m_dlssEnabled && m_dlssMode != NRI::UpscaleMode::Off && m_device && m_device->isDLSSSupported();
+            const bool dlss = m_dlssEnabled && m_dlssMode != NRI_UPSCALER_MODE_OFF && isDLSSSupported();
             return m_taaEnabled && m_taaPipeline && !dlss && !m_pathTracingEnabled;
         }
         void setCameraJitterEnabled(bool enabled) { m_cameraJitterEnabled = enabled; }
@@ -1025,7 +1084,7 @@ namespace Nox
         // as in the cooked file (dataSize: the whole texture's texel bytes).
         std::optional<TextureUpload> BeginTextureUpload(const TextureData& texture, uint32_t firstMip, uint32_t uploadMipCount, uint64_t dataSize, bool wait);
         // The uploaded mips, then keptMipCount mips of keptFrom (from its mip keptFromMip) into the image mips after them.
-        uint64_t EndTextureUpload(const TextureUpload& upload, bool nextFrameReads, NRI::Texture2D* keptFrom = nullptr, uint32_t keptFromMip = 0,
+        uint64_t EndTextureUpload(const TextureUpload& upload, bool nextFrameReads, Nox::Texture2D* keptFrom = nullptr, uint32_t keptFromMip = 0,
                                   uint32_t keptMipCount = 0);
         void PublishTexture(Texture2D& texture);
         std::optional<MeshUpload> BeginMeshUpload(const MeshData& data, bool isOpaque, bool wait);
@@ -1074,7 +1133,7 @@ namespace Nox
         Ref<Texture2D> createSolidColorTexture(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
         void InitializeEnvironmentLighting(const std::filesystem::path& environmentPath, float rotation);
         void releaseEnvironmentTextures(bool keepBrdfLut);
-        Ref<Texture2D> createEnvironmentCube(uint32_t size, NRI::ImageFormat format);
+        Ref<Texture2D> createEnvironmentCube(uint32_t size, nri::ImageFormat format);
         void createIBLPipelines();
         void generateEnvironmentLighting();
         void createBRDFLut();
@@ -1090,7 +1149,7 @@ namespace Nox
         void addCloudShadowPass();
 
         template <class T>
-        void UploadBufferSlice(NRI::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount);
+        void UploadBufferSlice(nri::Buffer& dstBuffer, const T* data, uint32_t elementOffset, uint32_t elementCount);
 
         MeshHandle UploadMeshGeometry(const MeshData& data, bool isOpaque = true);
 
@@ -1132,12 +1191,12 @@ namespace Nox
         
         void setDLSSEnabled(bool enabled);
         bool isDLSSEnabled() const { return m_dlssEnabled; }
-        void setUpscaleMode(NRI::UpscaleMode mode);
-        NRI::UpscaleMode getUpscaleMode() const { return m_dlssMode; }
-        bool isDLSSSupported() const { return m_device && m_device->isDLSSSupported(); }
+        void setUpscaleMode(nri::UpscalerMode mode);
+        nri::UpscalerMode getUpscaleMode() const { return m_dlssMode; }
+        bool isDLSSSupported() const { return m_device && nri::isUpscalerSupported(m_device, NRI_UPSCALER_TYPE_DLSS_SR); }
         void setDLSSRayReconstructionEnabled(bool enabled);
         bool isDLSSRayReconstructionEnabled() const { return m_dlssRayReconstructionEnabled; }
-        bool isDLSSRayReconstructionSupported() const { return m_device && m_device->isDLSSRayReconstructionSupported(); }
+        bool isDLSSRayReconstructionSupported() const { return m_device && nri::isUpscalerSupported(m_device, NRI_UPSCALER_TYPE_DLSS_RR); }
 
     private:
         template <typename MeshAsset>
@@ -1197,7 +1256,7 @@ namespace Nox
         // G-Buffer
         void createGBufferPipeline(bool forceCompile = false);
         // The G-buffer resolve's pipeline description for a source (GBufferMaterial.slang, or its material graph variant).
-        static NRI::PipelineDesc gbufferPipelineDesc(const std::string& source, bool writeVelocity);
+        static nri::PipelineDesc gbufferPipelineDesc(const std::string& source, bool writeVelocity);
         // PBR
         void createDeferredLightingPipeline(bool forceCompile = false);
         // SSAO / RTAO
@@ -1254,16 +1313,16 @@ namespace Nox
         void createDrawListBuffers(uint64_t bufferSize);
         void createSelectedEntityIDBuffers();
         void createDescriptorHeaps();
-        std::unique_ptr<NRI::CommandBuffer> beginSingleTimeCommands();
-        void endSingleTimeCommands(std::unique_ptr<NRI::CommandBuffer>&& commandBuffer);
+        nri::CommandBuffer beginSingleTimeCommands();
+        void endSingleTimeCommands(nri::CommandBuffer&& commandBuffer);
         // Frame render graph (§5.4): recordFrame builds, compiles and executes it and returns the frame's command buffers
         // in submission order. prepareFrameGraph imports the renderer's resources and resolves this frame's CPU-side
         // state; the add* functions (Renderer/Passes/*.cpp) contribute each feature's passes in frame order and make every
         // CPU-side decision there: execute callbacks only record, possibly on worker threads.
         std::span<const RGSubmission> recordFrame(uint32_t imageIndex);
-        std::vector<NRI::TimelinePoint> m_submitWaitScratch;
+        std::vector<nri::TimelinePoint> m_submitWaitScratch;
         // Start of every frame command buffer: descriptor heaps and the dynamic state every pass builds on.
-        void applyCommandBufferBaseline(NRI::CommandBuffer& cmd) const;
+        void applyCommandBufferBaseline(nri::CommandBuffer& cmd) const;
         void prepareFrameGraph(uint32_t imageIndex);
         void addGpuSceneUpdatePass();
         void addComputeSkinningPass();
@@ -1273,7 +1332,7 @@ namespace Nox
         // The culling dispatches of one view (the camera, or an extra view): its uniforms and CullView, the Hi-Z it tests against
         // (none: no occlusion test).
         void addCullingDispatchPass(const char* name, const ViewDrawResources& draws, RGBuffer flags, RGBuffer blocks, uint32_t entryCount,
-                                    RGTexture hiZ, NRI::Buffer* uniformBuffer, NRI::Buffer* cullViewBuffer);
+                                    RGTexture hiZ, nri::Buffer* uniformBuffer, nri::Buffer* cullViewBuffer);
         // The editor's extra views (SubmitExtraView): culling, one forward raster pass, tonemapping and the world overlay each.
         void addExtraViewPasses();
         // After resolveFrameUniforms: each extra view's copy of the frame's uniforms with its own camera.
@@ -1302,7 +1361,7 @@ namespace Nox
         // An orthographic depth view of the shadow casters from the sun (a cascade, the irradiance volume's sun map): its culling (the
         // view's side planes) and its depth pass into `map`, through `uniformBuffer` (the view's copy of the uniforms).
         void addSunDepthPasses(const char* cullName, const char* depthName, RGTexture map, uint32_t resolution, const glm::mat4& viewProj,
-                               NRI::Buffer* uniformBuffer, NRI::Buffer* cullViewBuffer, float slopeBiasClamp);
+                               nri::Buffer* uniformBuffer, nri::Buffer* cullViewBuffer, float slopeBiasClamp);
         void createShadowMapPipelines(bool forceCompile = false);
         // Local lights' shadow maps (Passes/ShadowMapPasses.cpp): which lights, their views and tiles, culling per light, one depth pass
         // into the atlas; after Compile the atlas slot, the per-light view table and each view's copy of the uniforms.
@@ -1332,9 +1391,9 @@ namespace Nox
         void createSceneOutlinePipeline(bool forceCompile = false);
         // The Custom Lit pass's and the forward variant's pipelines from the generated sources (CustomLitShaders.h); false when they fail.
         bool createCustomLitPipelines(bool forceCompile);
-        std::unique_ptr<NRI::Pipeline> buildCustomLitDeferredPipeline(bool forceCompile); // (any thread; throws when it does not compile)
+        nri::Pipeline buildCustomLitDeferredPipeline(bool forceCompile); // (any thread; throws when it does not compile)
         // `withGraphs`: its mesh stage with the material graphs too (a graph's World Position Offset: CustomLitShaders::ForwardMeshSourcePath).
-        std::unique_ptr<NRI::Pipeline> buildCustomLitForwardPipeline(bool forceCompile, bool withGraphs);
+        nri::Pipeline buildCustomLitForwardPipeline(bool forceCompile, bool withGraphs);
         // The ray tracing passes with the material graphs' Opacity Mask in their alpha tests (material graph step 4c part 2): `wanted`
         // while a graph connects Opacity Mask and the variants are ready; their pipelines are created again whenever it or the graphs'
         // masks (MaterialGraphMasks.slang) changed. Main thread, waits for them (a graph build hands them over ready instead:
@@ -1346,10 +1405,10 @@ namespace Nox
             ShadowMask, DeferredLighting, RTAO, Reflection, ScreenProbeTrace, DDGIRadiance, ReSTIRDIFinalShading, ReSTIRGIInitial,
             ReSTIRPTInitial, ReSTIRPTTemporal, PathTracer, Count
         };
-        using RayTracingPassPipelines = std::array<std::unique_ptr<NRI::Pipeline>, static_cast<size_t>(RayTracingPass::Count)>;
+        using RayTracingPassPipelines = std::array<nri::Pipeline, static_cast<size_t>(RayTracingPass::Count)>;
         // Its pipeline's description, with the graph variant of its shaders when `graphMasks` (the create functions and the build share it).
-        static NRI::PipelineDesc rayTracingPassDesc(RayTracingPass pass, bool graphMasks, bool forceCompile);
-        std::unique_ptr<NRI::Pipeline>& rayTracingPassPipeline(RayTracingPass pass);
+        static nri::PipelineDesc rayTracingPassDesc(RayTracingPass pass, bool graphMasks, bool forceCompile);
+        nri::Pipeline& rayTracingPassPipeline(RayTracingPass pass);
         // All of them built and ready to bind (in parallel; any thread; throws when one does not build).
         RayTracingPassPipelines buildRayTracingPassPipelines(bool graphMasks);
         // Swapped in (main thread): what the GPU may still run waited for, the path tracer's shader table baked for its new pipeline.
@@ -1362,39 +1421,39 @@ namespace Nox
         void startCustomLitBuild(const std::vector<CustomLitSource>& sources, const std::vector<ProjectMaterialGraph>& graphs);
         // The G-buffer resolve compiled with the material graphs (CustomLitShaders::GBufferSourcePath; any thread; throws when it does
         // not compile).
-        std::unique_ptr<NRI::Pipeline> buildMaterialGraphGBufferPipeline(bool forceCompile, bool writeVelocity);
+        nri::Pipeline buildMaterialGraphGBufferPipeline(bool forceCompile, bool writeVelocity);
         // The visibility buffer's and the shadow maps' Masked pipelines with the graphs' Opacity Mask and World Position Offset
         // (CustomLitShaders::VisibilitySourcePath).
-        std::unique_ptr<NRI::Pipeline> buildMaterialGraphVisibilityPipeline(bool forceCompile, bool shadowDepth);
+        nri::Pipeline buildMaterialGraphVisibilityPipeline(bool forceCompile, bool shadowDepth);
         // The editor's stable entity IDs / depth (`selection` false) or selection mask with the graphs' Opacity Mask.
-        std::unique_ptr<NRI::Pipeline> buildMaterialGraphEditorPipeline(bool selection);
+        nri::Pipeline buildMaterialGraphEditorPipeline(bool selection);
         // The ray tracing scene's World Position Offset (CustomLitShaders::RayTracingOffsetSourcePath; any thread; throws when it does not
         // compile).
-        std::unique_ptr<NRI::Pipeline> buildMaterialGraphRayTracingOffsetPipeline(bool forceCompile);
+        nri::Pipeline buildMaterialGraphRayTracingOffsetPipeline(bool forceCompile);
         void pollCustomLitBuild();    // main thread, each frame: a finished build's pipelines swapped in
         void waitForCustomLitBuild();
         // The forward shader for lit surfaces: its Custom Lit variant while the project has Material Shaders (it shades every other
         // material as the plain one does), else the plain one.
-        NRI::Pipeline* forwardLitPipeline() const { return m_transparentLitCustomPipeline ? m_transparentLitCustomPipeline.get() : m_transparentLitPipeline.get(); }
+        const nri::Pipeline* forwardLitPipeline() const { return m_transparentLitCustomPipeline ? &m_transparentLitCustomPipeline : (m_transparentLitPipeline ? &m_transparentLitPipeline : nullptr); }
         // The Masked buckets' visibility / shadow depth pipeline: the material graph variant (a graph's Opacity Mask; World Position Offset,
         // whose materials the GPU scene puts in these buckets) while a material has a graph and it is built, else the plain one.
-        NRI::Pipeline* visibilityMaskPipeline() const
+        const nri::Pipeline* visibilityMaskPipeline() const
         {
-            return m_visibilityGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0 ? m_visibilityGraphPipeline.get() : m_visibilityPipeline.get();
+            return (m_visibilityGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0) ? &m_visibilityGraphPipeline : (m_visibilityPipeline ? &m_visibilityPipeline : nullptr);
         }
-        NRI::Pipeline* stableEntityDepthPipeline() const
+        const nri::Pipeline* stableEntityDepthPipeline() const
         {
-            return m_stableEntityDepthGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0 ? m_stableEntityDepthGraphPipeline.get()
-                                                                                               : m_stableEntityDepthPipeline.get();
+            return (m_stableEntityDepthGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0) ? &m_stableEntityDepthGraphPipeline
+                                                                                                 : (m_stableEntityDepthPipeline ? &m_stableEntityDepthPipeline : nullptr);
         }
-        NRI::Pipeline* selectionMaskPipeline() const
+        const nri::Pipeline* selectionMaskPipeline() const
         {
-            return m_selectionMaskGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0 ? m_selectionMaskGraphPipeline.get() : m_selectionMaskPipeline.get();
+            return (m_selectionMaskGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0) ? &m_selectionMaskGraphPipeline : (m_selectionMaskPipeline ? &m_selectionMaskPipeline : nullptr);
         }
-        NRI::Pipeline* shadowDepthMaskPipeline() const
+        const nri::Pipeline* shadowDepthMaskPipeline() const
         {
-            return m_shadowDepthMaskGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0 ? m_shadowDepthMaskGraphPipeline.get()
-                                                                                              : m_shadowDepthMaskPipeline.get();
+            return (m_shadowDepthMaskGraphPipeline && m_gpuScene.GetGraphMaterialCount() > 0) ? &m_shadowDepthMaskGraphPipeline
+                                                                                              : (m_shadowDepthMaskPipeline ? &m_shadowDepthMaskPipeline : nullptr);
         }
         void addSceneOutlinePass();
         // Reflection probes: the probe table of this frame and at most one probe's capture (six faces, assembled, prefiltered); after
@@ -1421,9 +1480,9 @@ namespace Nox
         void addScreenProbeGIPasses();
         // A lower ray tracing resolution (m_rtSubsample): the size the reduced RT passes render at, a target of that size, and the
         // pass bringing such a result back to the render resolution (RTUpsample.slang; mode 1: best match only).
-        NRI::Extent2D reducedRTExtent() const;
-        RGTexture createReducedRTTarget(const char* name, NRI::ImageFormat format);
-        void addRTUpsamplePass(const char* name, RGTexture source, RGTexture target, NRI::Pipeline* pipeline, uint32_t mode);
+        nri::Extent2D reducedRTExtent() const;
+        RGTexture createReducedRTTarget(const char* name, nri::ImageFormat format);
+        void addRTUpsamplePass(const char* name, RGTexture source, RGTexture target, nri::Pipeline* pipeline, uint32_t mode);
         void addLightPresamplingPasses();
         // RTXDI light sampling over this frame's presampled lights (RTXDILightSampling.slang), for ReSTIR DI and GI.
         shaderio::RTXDILightSamplingParams lightSamplingParams(const RGPassContext& context, RGBuffer risBuffer) const;
@@ -1442,7 +1501,7 @@ namespace Nox
         // The lit scene so far with blur mips (resources.RefractionSource), for glass to refract: the HDR scene at the render
         // resolution, or (`source`, `extent`) the upscaled image the transparent surfaces are drawn over after DLSS-RR.
         void addRefractionSourcePasses();
-        void addRefractionSourcePasses(RGTexture source, NRI::Extent2D extent);
+        void addRefractionSourcePasses(RGTexture source, nri::Extent2D extent);
         // Under DLSS Ray Reconstruction: the transparent surfaces over its output at display resolution, without the jitter. Drawn into
         // its input they reached RR as part of the surface behind them -- RR moved a window's reflection with the room behind it
         // (it trailed after the camera) and took the glass's own shading for noise to filter.
@@ -1490,23 +1549,37 @@ namespace Nox
         void resolveFrameUniforms();
         // Indirect meshlet draws of a view's visible instances, per bucket with the GPU-written draw count. Each pass keeps
         // its own cursor: passes may record in parallel.
+        bool isNRDInitialized() const { return static_cast<bool>(m_denoiser); }
+        bool evaluateNRDShadows(nri::CommandBuffer& cmd, NriTexture inPenumbra, NriTexture inMV, NriTexture inNormalRough,
+                                NriTexture inViewZ, NriTexture outShadow, const float lightDir[3], glm::vec2 mvScale,
+                                uint32_t frameIdx, bool resetHistory);
+        bool evaluateNRDReflections(nri::CommandBuffer& cmd, NRDReflectionDenoiser mode, NriTexture inSpec, NriTexture inMV,
+                                    NriTexture inNormalRough, NriTexture inViewZ, NriTexture outSpec, glm::vec2 mvScale,
+                                    uint32_t frameIdx, bool resetHistory);
+        bool evaluateNRDDiffuseGI(nri::CommandBuffer& cmd, NRDDiffuseDenoiser mode, NriTexture inDiff, NriTexture inMV,
+                                  NriTexture inNormalRough, NriTexture inViewZ, NriTexture outDiff, glm::vec2 mvScale,
+                                  uint32_t frameIdx, bool resetHistory);
+        bool evaluateNRDDiffuseSpecular(nri::CommandBuffer& cmd, NRDDiffuseDenoiser mode, NriTexture inDiff, NriTexture inSpec,
+                                        NriTexture inMV, NriTexture inNormalRough, NriTexture inViewZ, NriTexture outDiff,
+                                        NriTexture outSpec, glm::vec2 mvScale, uint32_t frameIdx, bool resetHistory);
+
         struct MeshletDrawCursor
         {
             shaderio::PushConstantMeshlets references{};
-            NRI::Buffer* commands = nullptr;
-            NRI::Buffer* counts = nullptr;
-            NRI::Pipeline* boundPipeline = nullptr;
+            NriBuffer commands = nullptr;
+            NriBuffer counts = nullptr;
+            const nri::Pipeline* boundPipeline = nullptr;
             bool late = false; // phase 2 draws its candidates with their own commands (empty while still occluded)
             uint32_t taskFlags = 0; // shaderio::MESHLET_* for PushConstantMeshlets::meshletCulling
         };
         MeshletDrawCursor beginMeshletDraws(const RGPassContext& context, const ViewDrawResources& draws, bool late = false) const;
-        void drawMeshletBucket(NRI::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, NRI::Pipeline& pipeline, NRI::CullMode cullMode, bool depthWrite, bool blendEnable) const;
+        void drawMeshletBucket(nri::CommandBuffer& cmd, MeshletDrawCursor& cursor, RenderBucket bucket, const nri::Pipeline& pipeline, nri::CullMode cullMode, bool depthWrite, bool blendEnable) const;
         // The transparent buckets (both culling phases), blended over the HDR scene; the cursor carries the SSAO and refraction slots.
         // With `oit` into the order-independent transparency targets instead (accumulation, revealage, entity IDs).
         // How drawForwardTransparent blends: over what is drawn (back to front, premultiplied); the glass's two passes over the
         // scene, multiplied (what it lets through) and added (its own light), lit surfaces only.
         enum class TransparentBlend { Over, GlassMultiply, GlassAdd };
-        void drawForwardTransparent(NRI::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor,
+        void drawForwardTransparent(nri::CommandBuffer& cmd, const RGPassContext& context, const ViewDrawResources& draws, MeshletDrawCursor& cursor,
                                     bool oit = false, TransparentBlend blend = TransparentBlend::Over) const;
         // Draw list entries of a bucket (its visible instances are at most that many).
         uint32_t getBucketEntryCount(RenderBucket bucket) const
@@ -1527,7 +1600,7 @@ namespace Nox
         // Sub-allocates from a geometry stream, copying the stream into a larger buffer first when it no longer fits.
         GeometryRange allocateGeometry(GeometryArena& stream, uint32_t count);
         // A stream that grew (only without sparse buffers): its content copied into the larger buffer, the old one released later.
-        void handleStreamGrowth(GeometryArena& stream, std::unique_ptr<NRI::Buffer> grownFrom);
+        void handleStreamGrowth(GeometryArena& stream, nri::Buffer grownFrom);
         void createLightBuffer(uint64_t bufferSize);
         void updateLightBuffer(uint32_t currentImage);
         void sampleMemoryStats();
@@ -1538,49 +1611,49 @@ namespace Nox
         inline static Renderer* s_Instance = nullptr;
         std::unique_ptr<Renderer2D> m_renderer2D;
         std::shared_ptr<Nox::Window> m_window;
-        std::unique_ptr<NRI::Device> m_device = nullptr;
+        nri::Device m_device{};
         // Profiling (NOX_PROFILING_ENABLED): timestamp queries for the frame command buffer.
-        std::unique_ptr<NRI::GpuProfiler> m_gpuProfiler = nullptr;
+        nri::GpuProfiler m_gpuProfiler{};
         // Sampled a few times a second in every build: the memory budget (texture streaming pool) and the stats.
-        std::vector<NRI::MemoryHeapStats> m_memoryHeapStats;
+        std::vector<nri::MemoryHeapStats> m_memoryHeapStats;
         std::chrono::steady_clock::time_point m_lastMemoryStatsSample{};
-        std::unique_ptr<NRI::Swapchain> m_swapChain = nullptr;
-        NRI::Extent2D m_swapChainExtent{640, 480};
-        NRI::Extent2D m_viewportSize{640, 480};
+        nri::Swapchain m_swapChain{};
+        nri::Extent2D m_swapChainExtent{640, 480};
+        nri::Extent2D m_viewportSize{640, 480};
         // Resolution the pre-DLSS 3D pipeline (visibility, G-buffer, lighting) actually renders at.
         // Equal to the output size unless a DLSS mode other than Off/DLAA is active, in which case
         // it's whatever slDLSSGetOptimalSettings recommends for that mode - see applyRenderResolution().
-        NRI::Extent2D m_renderSize{640, 480};
+        nri::Extent2D m_renderSize{640, 480};
         bool m_vSync = false;
         bool m_isEditor = false;
 
         Utils::NOXWatcher m_fileWatcher;
         std::mutex m_reloadMutex;
         std::unordered_map<std::string, std::function<void()>> m_pendingReloads;
-        std::unique_ptr<NRI::ShaderCompiler> m_shaderCompiler = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_unlitPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_transparentLitPipeline = nullptr;
+        nri::ShaderCompiler m_shaderCompiler{};
+        nri::Pipeline m_unlitPipeline{};
+        nri::Pipeline m_transparentLitPipeline{};
         // The same fragments into the order-independent transparency targets (accumulation, revealage, entity IDs).
-        std::unique_ptr<NRI::Pipeline> m_unlitOITPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_transparentLitOITPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_oitCompositePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_presentPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_computePipeline = nullptr;
+        nri::Pipeline m_unlitOITPipeline{};
+        nri::Pipeline m_transparentLitOITPipeline{};
+        nri::Pipeline m_oitCompositePipeline{};
+        nri::Pipeline m_presentPipeline{};
+        nri::Pipeline m_computePipeline{};
 
         // Visability
-        std::unique_ptr<NRI::Pipeline> m_visibilityPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_computeSkinningPipeline = nullptr;
+        nri::Pipeline m_visibilityPipeline{};
+        nri::Pipeline m_computeSkinningPipeline{};
         // G-Buffer
-        std::unique_ptr<NRI::Pipeline> m_gbufferPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_gbufferPipelineNoVelocity = nullptr;
+        nri::Pipeline m_gbufferPipeline{};
+        nri::Pipeline m_gbufferPipelineNoVelocity{};
         // PBR
-        std::unique_ptr<NRI::Pipeline> m_deferredLightingPipeline = nullptr;
+        nri::Pipeline m_deferredLightingPipeline{};
         // SSAO: mutually exclusive with a future RTAO (both would only ever feed the same occlusion slot -- see
         // PushConstantSSAO's comment in shaderIO.h), so this is a plain toggle, not an enum with only one real member.
-        std::unique_ptr<NRI::Pipeline> m_ssaoPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_ssaoBlurPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_rtaoPipeline = nullptr;
-        std::unique_ptr<NRI::Buffer> m_ssaoKernelBuffer; // shared: both SSAO and RTAO sample the same hemisphere kernel
+        nri::Pipeline m_ssaoPipeline{};
+        nri::Pipeline m_ssaoBlurPipeline{};
+        nri::Pipeline m_rtaoPipeline{};
+        nri::Buffer m_ssaoKernelBuffer; // shared: both SSAO and RTAO sample the same hemisphere kernel
         bool m_ssaoEnabled = true;
         bool m_rtaoEnabled = false;
         int m_ssaoKernelSize = 16;
@@ -1590,19 +1663,19 @@ namespace Nox
         float m_ssaoRadiusMeters = 0.5f;
         float m_ssaoBiasMeters = 0.025f;
         float m_ssaoPower = 1.5f;
-        std::unique_ptr<NRI::Pipeline> m_gtaoPipeline;
+        nri::Pipeline m_gtaoPipeline;
         SSAOMethod m_ssaoMethod = SSAOMethod::Classic;
         uint32_t m_gtaoSlices = 2;
         uint32_t m_gtaoSteps = 4;
         // Post Process
-        std::unique_ptr<NRI::Pipeline> m_postProcessPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_autoExposureBuildPipeline;
-        std::unique_ptr<NRI::Pipeline> m_autoExposureReducePipeline;
-        std::unique_ptr<NRI::Pipeline> m_autoExposureAdaptPipeline;
+        nri::Pipeline m_postProcessPipeline{};
+        nri::Pipeline m_autoExposureBuildPipeline;
+        nri::Pipeline m_autoExposureReducePipeline;
+        nri::Pipeline m_autoExposureAdaptPipeline;
         std::chrono::steady_clock::time_point m_autoExposureLastTime{};
         uint64_t m_autoExposureLastFrame = 0;
         // ColorPyramid.slang: the refraction source of glass (copy, downsample).
-        std::unique_ptr<NRI::Pipeline> m_colorPyramidCopyPipeline;
+        nri::Pipeline m_colorPyramidCopyPipeline;
         // Particles (SubmitParticles): this frame's, uploaded into a host-visible buffer per frame in flight.
         struct ParticleBatch
         {
@@ -1613,25 +1686,25 @@ namespace Nox
         };
         std::vector<shaderio::GpuParticle> m_particles;
         std::vector<ParticleBatch> m_particleBatches;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_particleBuffers;
+        std::vector<nri::Buffer> m_particleBuffers;
         std::vector<void*> m_particleBuffersMapped;
         uint64_t m_particleBufferCapacity = 0;
-        std::unique_ptr<NRI::Pipeline> m_particlePipeline;
-        std::unique_ptr<NRI::Pipeline> m_particleOITPipeline; // alpha-blended particles into the OIT targets
+        nri::Pipeline m_particlePipeline;
+        nri::Pipeline m_particleOITPipeline; // alpha-blended particles into the OIT targets
         // AVBOIT (Passes/AVBOITPasses.cpp): the prepasses' fragment stages (occupancy, splat) of the transparent lit / unlit meshes and
         // the particles, the depth warp and the integration; its buffers and volume (sized for the render size and slices).
-        std::unique_ptr<NRI::Pipeline> m_transparentLitAVBOITOccupancyPipeline;
-        std::unique_ptr<NRI::Pipeline> m_transparentLitAVBOITSplatPipeline;
-        std::unique_ptr<NRI::Pipeline> m_unlitAVBOITOccupancyPipeline;
-        std::unique_ptr<NRI::Pipeline> m_unlitAVBOITSplatPipeline;
-        std::unique_ptr<NRI::Pipeline> m_particleAVBOITOccupancyPipeline;
-        std::unique_ptr<NRI::Pipeline> m_particleAVBOITSplatPipeline;
-        std::unique_ptr<NRI::Pipeline> m_avboitLutPipeline;
-        std::unique_ptr<NRI::Pipeline> m_avboitIntegratePipeline;
-        std::unique_ptr<NRI::Buffer> m_avboitOccupancy;
-        std::unique_ptr<NRI::Buffer> m_avboitDepthWarp;
-        std::unique_ptr<NRI::Buffer> m_avboitExtinction;
-        std::unique_ptr<NRI::Buffer> m_avboitOverflow;
+        nri::Pipeline m_transparentLitAVBOITOccupancyPipeline;
+        nri::Pipeline m_transparentLitAVBOITSplatPipeline;
+        nri::Pipeline m_unlitAVBOITOccupancyPipeline;
+        nri::Pipeline m_unlitAVBOITSplatPipeline;
+        nri::Pipeline m_particleAVBOITOccupancyPipeline;
+        nri::Pipeline m_particleAVBOITSplatPipeline;
+        nri::Pipeline m_avboitLutPipeline;
+        nri::Pipeline m_avboitIntegratePipeline;
+        nri::Buffer m_avboitOccupancy;
+        nri::Buffer m_avboitDepthWarp;
+        nri::Buffer m_avboitExtinction;
+        nri::Buffer m_avboitOverflow;
         Ref<Texture2D> m_avboitTransmittance;
         uint32_t m_avboitTransmittanceStorage = ~0u;
         glm::uvec3 m_avboitGrid{ 0 };
@@ -1639,25 +1712,25 @@ namespace Nox
         uint32_t m_avboitSlices = 64;
         float m_avboitDistanceMeters = 500.0f;
         float m_avboitLinearMeters = 2.0f;
-        std::unique_ptr<NRI::Pipeline> m_particleMotionPipeline; // their motion into the velocity target (DLSS / TAA)
-        std::unique_ptr<NRI::Pipeline> m_colorPyramidDownsamplePipeline;
+        nri::Pipeline m_particleMotionPipeline; // their motion into the velocity target (DLSS / TAA)
+        nri::Pipeline m_colorPyramidDownsamplePipeline;
         bool m_refractionEnabled = true;
         bool m_oitEnabled = false;
         bool m_wireframeOverlay = false;
-        std::unique_ptr<NRI::Pipeline> m_wireframePipeline;
+        nri::Pipeline m_wireframePipeline;
         bool m_rtRefractionEnabled = true;
         // NRD
-        std::unique_ptr<NRI::Pipeline> m_shadowMaskPipeline = nullptr;
+        nri::Pipeline m_shadowMaskPipeline{};
         // The sun's cascaded shadow maps (Passes/ShadowMapPasses.cpp): depth of opaque and of alpha-tested casters, the resolve into
         // the shadow mask; per frame slot and cascade a copy of the uniforms (the cascade's view) and its culling view, the
         // GpuShadowCascades buffer. m_shadowCascades / Views / Projections: this frame's, from addShadowMapPasses.
-        std::unique_ptr<NRI::Pipeline> m_shadowDepthPipeline;
-        std::unique_ptr<NRI::Pipeline> m_shadowDepthMaskPipeline;
-        std::unique_ptr<NRI::Pipeline> m_shadowMapResolvePipeline;
-        std::array<std::array<std::unique_ptr<NRI::Buffer>, shaderio::MaxShadowCascades>, MAX_FRAMES_IN_FLIGHT> m_shadowCascadeUniforms;
+        nri::Pipeline m_shadowDepthPipeline;
+        nri::Pipeline m_shadowDepthMaskPipeline;
+        nri::Pipeline m_shadowMapResolvePipeline;
+        std::array<std::array<nri::Buffer, shaderio::MaxShadowCascades>, MAX_FRAMES_IN_FLIGHT> m_shadowCascadeUniforms;
         std::array<std::array<void*, shaderio::MaxShadowCascades>, MAX_FRAMES_IN_FLIGHT> m_shadowCascadeUniformsMapped{};
-        std::array<std::array<std::unique_ptr<NRI::Buffer>, shaderio::MaxShadowCascades>, MAX_FRAMES_IN_FLIGHT> m_shadowCascadeCullViews;
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_shadowCascadeBuffers;
+        std::array<std::array<nri::Buffer, shaderio::MaxShadowCascades>, MAX_FRAMES_IN_FLIGHT> m_shadowCascadeCullViews;
+        std::array<nri::Buffer, MAX_FRAMES_IN_FLIGHT> m_shadowCascadeBuffers;
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_shadowCascadeBuffersMapped{};
         shaderio::GpuShadowCascades m_shadowCascades{};
         std::array<glm::mat4, shaderio::MaxShadowCascades> m_shadowCascadeViews{};
@@ -1709,12 +1782,12 @@ namespace Nox
             uint32_t FirstView = 0;
             uint32_t ViewCount = 0;
         };
-        std::array<std::array<std::unique_ptr<NRI::Buffer>, shaderio::MaxLocalShadowViews>, MAX_FRAMES_IN_FLIGHT> m_localShadowViewUniforms;
+        std::array<std::array<nri::Buffer, shaderio::MaxLocalShadowViews>, MAX_FRAMES_IN_FLIGHT> m_localShadowViewUniforms;
         std::array<std::array<void*, shaderio::MaxLocalShadowViews>, MAX_FRAMES_IN_FLIGHT> m_localShadowViewUniformsMapped{};
-        std::array<std::array<std::unique_ptr<NRI::Buffer>, MaxLocalShadowLights>, MAX_FRAMES_IN_FLIGHT> m_localShadowCullViews;
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_localShadowBuffers;
+        std::array<std::array<nri::Buffer, MaxLocalShadowLights>, MAX_FRAMES_IN_FLIGHT> m_localShadowCullViews;
+        std::array<nri::Buffer, MAX_FRAMES_IN_FLIGHT> m_localShadowBuffers;
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_localShadowBuffersMapped{};
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_localShadowLightViewBuffers;
+        std::array<nri::Buffer, MAX_FRAMES_IN_FLIGHT> m_localShadowLightViewBuffers;
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_localShadowLightViewBuffersMapped{};
         std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> m_localShadowLightViewCapacity{};
         shaderio::GpuLocalShadows m_localShadows{};
@@ -1753,16 +1826,16 @@ namespace Nox
         };
         std::vector<ReflectionProbeSubmission> m_probeSubmissions;
         std::unordered_map<uint64_t, ReflectionProbeCapture> m_probeCaptures;
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_probeTableBuffers;
+        std::array<nri::Buffer, MAX_FRAMES_IN_FLIGHT> m_probeTableBuffers;
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_probeTableBuffersMapped{};
-        std::array<std::array<std::unique_ptr<NRI::Buffer>, 6>, MAX_FRAMES_IN_FLIGHT> m_probeFaceUniforms;
+        std::array<std::array<nri::Buffer, 6>, MAX_FRAMES_IN_FLIGHT> m_probeFaceUniforms;
         std::array<std::array<void*, 6>, MAX_FRAMES_IN_FLIGHT> m_probeFaceUniformsMapped{};
-        std::array<std::array<std::unique_ptr<NRI::Buffer>, 6>, MAX_FRAMES_IN_FLIGHT> m_probeFaceCullViews;
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_probeFaceBuffers; // mat4 viewProj[6], vec4 center
+        std::array<std::array<nri::Buffer, 6>, MAX_FRAMES_IN_FLIGHT> m_probeFaceCullViews;
+        std::array<nri::Buffer, MAX_FRAMES_IN_FLIGHT> m_probeFaceBuffers; // mat4 viewProj[6], vec4 center
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_probeFaceBuffersMapped{};
-        std::unique_ptr<NRI::Pipeline> m_probeAssemblePipeline;
-        std::unique_ptr<NRI::Pipeline> m_probeDownsamplePipeline;
-        std::unique_ptr<NRI::Pipeline> m_probePrefilterPipeline;
+        nri::Pipeline m_probeAssemblePipeline;
+        nri::Pipeline m_probeDownsamplePipeline;
+        nri::Pipeline m_probePrefilterPipeline;
         struct ProbeCaptureFrame
         {
             bool Active = false;
@@ -1775,11 +1848,11 @@ namespace Nox
         PostEffectSettings m_postEffects;
         PostProcessSettings m_scenePostProcess;
         bool m_hasScenePostProcess = false;
-        std::unique_ptr<NRI::Pipeline> m_dofPipeline;
-        std::unique_ptr<NRI::Pipeline> m_sceneOutlinePipeline;
+        nri::Pipeline m_dofPipeline;
+        nri::Pipeline m_sceneOutlinePipeline;
         // Custom Lit (CustomLitShaders.h): the deferred lighting and the forward shader compiled with the project's Material Shaders.
-        std::unique_ptr<NRI::Pipeline> m_customLitPipeline;
-        std::unique_ptr<NRI::Pipeline> m_transparentLitCustomPipeline;
+        nri::Pipeline m_customLitPipeline;
+        nri::Pipeline m_transparentLitCustomPipeline;
         std::vector<std::string> m_customLitPaths; // slot -> Material Shader path ("" : none), as the pass's pipeline in use has them
         std::vector<std::string> m_customLitRequestedPaths; // as the latest build request gave them (the next one keeps these slots)
         CustomLitStatus m_customLitStatus;
@@ -1788,8 +1861,8 @@ namespace Nox
         {
             std::future<void> Task;
             std::mutex Mutex;
-            std::unique_ptr<NRI::Pipeline> Deferred;
-            std::unique_ptr<NRI::Pipeline> Forward;
+            nri::Pipeline Deferred;
+            nri::Pipeline Forward;
             bool DeferredDone = false;
             bool ForwardDone = false;
             bool Failed = false;
@@ -1797,13 +1870,13 @@ namespace Nox
             std::vector<std::string> Paths;
             size_t ShaderCount = 0;
             // The material graphs' variant of the G-buffer resolve (both pipelines: with and without motion vectors).
-            std::unique_ptr<NRI::Pipeline> GBuffer;
-            std::unique_ptr<NRI::Pipeline> GBufferNoVelocity;
-            std::unique_ptr<NRI::Pipeline> Visibility;
-            std::unique_ptr<NRI::Pipeline> ShadowDepthMask;
-            std::unique_ptr<NRI::Pipeline> StableDepth;
-            std::unique_ptr<NRI::Pipeline> SelectionMask;
-            std::unique_ptr<NRI::Pipeline> RayTracingOffset; // (the ray tracing scene's World Position Offset)
+            nri::Pipeline GBuffer;
+            nri::Pipeline GBufferNoVelocity;
+            nri::Pipeline Visibility;
+            nri::Pipeline ShadowDepthMask;
+            nri::Pipeline StableDepth;
+            nri::Pipeline SelectionMask;
+            nri::Pipeline RayTracingOffset; // (the ray tracing scene's World Position Offset)
             bool GBufferDone = false;
             std::vector<std::string> GraphPaths;
             std::unordered_map<std::string, MaterialGraphProgram> GraphPrograms;
@@ -1831,24 +1904,24 @@ namespace Nox
         std::optional<CustomLitRequest> m_customLitPending; // the newest request while a build runs
         // Material graphs (MaterialGraph.h): the G-buffer resolve's variant with them, its slots and the programs (parameter layouts)
         // materials are packed with -- all three as the variant in use has them.
-        std::unique_ptr<NRI::Pipeline> m_gbufferGraphPipeline;
-        std::unique_ptr<NRI::Pipeline> m_gbufferGraphPipelineNoVelocity;
-        std::unique_ptr<NRI::Pipeline> m_visibilityGraphPipeline;        // (Masked buckets of the visibility pass)
-        std::unique_ptr<NRI::Pipeline> m_shadowDepthMaskGraphPipeline;   // (Masked / unlit buckets of the shadow maps)
-        std::unique_ptr<NRI::Pipeline> m_stableEntityDepthGraphPipeline; // (the editor's stable entity IDs / depth)
-        std::unique_ptr<NRI::Pipeline> m_selectionMaskGraphPipeline;     // (the editor's selection outline)
+        nri::Pipeline m_gbufferGraphPipeline;
+        nri::Pipeline m_gbufferGraphPipelineNoVelocity;
+        nri::Pipeline m_visibilityGraphPipeline;        // (Masked buckets of the visibility pass)
+        nri::Pipeline m_shadowDepthMaskGraphPipeline;   // (Masked / unlit buckets of the shadow maps)
+        nri::Pipeline m_stableEntityDepthGraphPipeline; // (the editor's stable entity IDs / depth)
+        nri::Pipeline m_selectionMaskGraphPipeline;     // (the editor's selection outline)
         std::vector<std::string> m_materialGraphPaths;          // slot -> graph path ("": none)
         std::vector<std::string> m_materialGraphRequestedPaths; // as the latest build request gave them (the next one keeps these slots)
         std::unordered_map<std::string, MaterialGraphProgram> m_materialGraphPrograms;
-        std::unique_ptr<NRI::Pipeline> m_motionBlurPipeline;
-        std::unique_ptr<NRI::Pipeline> m_bloomDownsamplePipeline;
-        std::unique_ptr<NRI::Pipeline> m_bloomUpsamplePipeline;
+        nri::Pipeline m_motionBlurPipeline;
+        nri::Pipeline m_bloomDownsamplePipeline;
+        nri::Pipeline m_bloomUpsamplePipeline;
         Ref<Texture2D> m_postLut;          // the grading LUT loaded from m_postLutLoadedPath
         std::string m_postLutLoadedPath;
         // Volumetric fog: the froxel lighting (two, last frame's read while this frame's is written), the integrated volume, their
         // storage slots, the grid they were made for.
-        std::unique_ptr<NRI::Pipeline> m_volumetricFogLightPipeline;
-        std::unique_ptr<NRI::Pipeline> m_volumetricFogIntegratePipeline;
+        nri::Pipeline m_volumetricFogLightPipeline;
+        nri::Pipeline m_volumetricFogIntegratePipeline;
         std::array<Ref<Texture2D>, 2> m_fogLighting;
         std::array<uint32_t, 2> m_fogLightingStorage{ ~0u, ~0u };
         Ref<Texture2D> m_fogIntegrated;
@@ -1888,8 +1961,8 @@ namespace Nox
             bool NeedsClear = false;
             bool RequeueAll = false;
             bool Automatic = false; // this frame's volume is the automatic one (no entity)
-            std::unique_ptr<NRI::Buffer> SH;
-            std::unique_ptr<NRI::Buffer> SurfaceCache;
+            nri::Buffer SH;
+            nri::Buffer SurfaceCache;
             // Per probe: captured (its cache holds what it sees), waiting in the capture queue.
             std::vector<uint8_t> Cached;
             std::vector<uint8_t> Queued;
@@ -1910,21 +1983,21 @@ namespace Nox
         shaderio::GpuIrradianceVolume m_irradianceTable{};
         RGTexture m_irradianceSunMap;      // this frame's handle (invalid: no sun map)
         bool m_irradianceSunDrawn = false; // drawn this frame (its view's uniforms are written)
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceTableBuffers;
+        std::array<nri::Buffer, MAX_FRAMES_IN_FLIGHT> m_irradianceTableBuffers;
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_irradianceTableBuffersMapped{};
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceProbeListBuffers;
+        std::array<nri::Buffer, MAX_FRAMES_IN_FLIGHT> m_irradianceProbeListBuffers;
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_irradianceProbeListBuffersMapped{};
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceRelightListBuffers;
+        std::array<nri::Buffer, MAX_FRAMES_IN_FLIGHT> m_irradianceRelightListBuffers;
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_irradianceRelightListBuffersMapped{};
-        std::array<std::array<std::unique_ptr<NRI::Buffer>, shaderio::MaxIrradianceProbesPerFrame>, MAX_FRAMES_IN_FLIGHT> m_irradianceCullViews;
-        std::array<std::array<std::unique_ptr<NRI::Buffer>, 6 * shaderio::MaxIrradianceProbesPerFrame>, MAX_FRAMES_IN_FLIGHT> m_irradianceFaceUniforms;
+        std::array<std::array<nri::Buffer, shaderio::MaxIrradianceProbesPerFrame>, MAX_FRAMES_IN_FLIGHT> m_irradianceCullViews;
+        std::array<std::array<nri::Buffer, 6 * shaderio::MaxIrradianceProbesPerFrame>, MAX_FRAMES_IN_FLIGHT> m_irradianceFaceUniforms;
         std::array<std::array<void*, 6 * shaderio::MaxIrradianceProbesPerFrame>, MAX_FRAMES_IN_FLIGHT> m_irradianceFaceUniformsMapped{};
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceSunUniforms;
+        std::array<nri::Buffer, MAX_FRAMES_IN_FLIGHT> m_irradianceSunUniforms;
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_irradianceSunUniformsMapped{};
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_irradianceSunCullViews;
-        std::unique_ptr<NRI::Pipeline> m_irradianceCapturePipeline;
-        std::unique_ptr<NRI::Pipeline> m_irradiancePackPipeline;
-        std::unique_ptr<NRI::Pipeline> m_irradianceRelightPipeline;
+        std::array<nri::Buffer, MAX_FRAMES_IN_FLIGHT> m_irradianceSunCullViews;
+        nri::Pipeline m_irradianceCapturePipeline;
+        nri::Pipeline m_irradiancePackPipeline;
+        nri::Pipeline m_irradianceRelightPipeline;
         struct IrradianceCaptureFrame
         {
             uint32_t Count = 0; // probes captured this frame
@@ -1938,8 +2011,8 @@ namespace Nox
         glm::vec3 m_sceneBoundsMax{ 0.0f };
         uint64_t m_sceneBoundsFrame = 0;
         bool m_sceneBoundsValid = false;
-        std::unique_ptr<NRI::Pipeline> m_ssrPipeline;
-        std::unique_ptr<NRI::Pipeline> m_ssrFilterPipeline; // SSR.slang filterMain (the roughness blur)
+        nri::Pipeline m_ssrPipeline;
+        nri::Pipeline m_ssrFilterPipeline; // SSR.slang filterMain (the roughness blur)
         bool m_ssrEnabled = true; // SSR where the RT reflections do not run
         float m_ssrMaxDistanceMeters = 50.0f;
         float m_ssrThicknessMeters = 0.3f;
@@ -1950,8 +2023,8 @@ namespace Nox
         float m_ssrMaxRoughness = 0.4f;
         uint32_t m_ssrHistoryIndex = 0; // the history slot last frame wrote (this frame reads it)
         bool m_ssrHistoryValid = false; // it holds a lit scene (written last frame at this size)
-        std::unique_ptr<NRI::Pipeline> m_ssgiTracePipeline;
-        std::unique_ptr<NRI::Pipeline> m_ssgiDenoisePipeline;
+        nri::Pipeline m_ssgiTracePipeline;
+        nri::Pipeline m_ssgiDenoisePipeline;
         bool m_ssgiEnabled = false;
         uint32_t m_ssgiRays = 2;
         uint32_t m_ssgiSteps = 16;
@@ -1962,43 +2035,43 @@ namespace Nox
         bool m_shadowsEnabled = true; // setShadowsEnabled
         float m_contactShadowLengthMeters = 0.3f;
         uint32_t m_contactShadowSamples = 12;
-        std::unique_ptr<NRI::Pipeline> m_nrdGuidesPipeline = nullptr; // NRD view Z + normal/roughness (NRDGuides.slang)
-        std::unique_ptr<NRI::Pipeline> m_reflectionPipeline = nullptr;
+        nri::Pipeline m_nrdGuidesPipeline{}; // NRD view Z + normal/roughness (NRDGuides.slang)
+        nri::Pipeline m_reflectionPipeline{};
         // Path Tracer
-        std::unique_ptr<NRI::Pipeline> m_pathTracerPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_ptEnvironmentBuildPipeline;
-        std::unique_ptr<NRI::Pipeline> m_ptEnvironmentReducePipeline;
-        std::unique_ptr<NRI::Buffer> m_pathTracerSBTBuffer = nullptr;
-        NRI::ShaderTableState m_pathTracerSBTState{};
+        nri::Pipeline m_pathTracerPipeline{};
+        nri::Pipeline m_ptEnvironmentBuildPipeline;
+        nri::Pipeline m_ptEnvironmentReducePipeline;
+        nri::Buffer m_pathTracerSBTBuffer{};
+        nri::ShaderTableState m_pathTracerSBTState{};
         // DDGI
-        std::unique_ptr<NRI::Pipeline> m_ddgiRadiancePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_ddgiBlendIrradiancePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_ddgiBlendDistancePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_ddgiRelocationPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_ddgiDebugSpheresPipeline = nullptr;
+        nri::Pipeline m_ddgiRadiancePipeline{};
+        nri::Pipeline m_ddgiBlendIrradiancePipeline{};
+        nri::Pipeline m_ddgiBlendDistancePipeline{};
+        nri::Pipeline m_ddgiRelocationPipeline{};
+        nri::Pipeline m_ddgiDebugSpheresPipeline{};
         // RT results at a lower ray tracing resolution back to the render resolution: RGBA16F (reflections), RG16F (shadow mask),
         // R16F (RTAO).
-        std::array<std::unique_ptr<NRI::Pipeline>, 3> m_rtUpsamplePipelines{};
+        std::array<nri::Pipeline, 3> m_rtUpsamplePipelines{};
         uint32_t m_rtSubsample = 1;
         // At a lower ray tracing resolution, reflections on surfaces smoother than this are traced again at full resolution.
         static constexpr float RTFullResolutionSmoothRoughness = 0.35f;
         uint32_t m_shadowRayLightLimit = 0;
         // Screen-probe GI
-        std::unique_ptr<NRI::Pipeline> m_screenProbePlacePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_screenProbeTracePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_screenProbeIrradiancePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_screenProbeFilterPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_screenProbeIntegratePipeline = nullptr;
+        nri::Pipeline m_screenProbePlacePipeline{};
+        nri::Pipeline m_screenProbeTracePipeline{};
+        nri::Pipeline m_screenProbeIrradiancePipeline{};
+        nri::Pipeline m_screenProbeFilterPipeline{};
+        nri::Pipeline m_screenProbeIntegratePipeline{};
 
-        std::unique_ptr<NRI::CommandAllocator> m_commandAllocator = nullptr; // single-time commands
+        nri::CommandAllocator m_commandAllocator{}; // single-time commands
 
         // Render graph + the frame state its passes share. Resolved in prepareFrameGraph (and by passes that run
         // earlier in the same frame, e.g. denoiser results consumed by lighting).
         struct FrameGraphState
         {
             uint32_t imageIndex = 0;
-            NRI::Extent2D renderExtent{};  // what DLSS upscales from
-            NRI::Extent2D outputExtent{};  // editor viewport / swapchain
+            nri::Extent2D renderExtent{};  // what DLSS upscales from
+            nri::Extent2D outputExtent{};  // editor viewport / swapchain
             shaderio::PushConstantMeshlets meshletReferences{};
             bool hiZReset = false; // the pyramid has no usable previous frame: no occlusion test
             bool resetNRD = false;
@@ -2078,11 +2151,11 @@ namespace Nox
         static constexpr uint32_t DDGIProbesPerRow = 64;
 
         //decsriptor
-        std::unique_ptr<NRI::DescriptorHeap> m_samplerHeap = nullptr;
-        std::unique_ptr<NRI::DescriptorHeap> m_resourceHeap = nullptr;
+        nri::DescriptorHeap m_samplerHeap{};
+        nri::DescriptorHeap m_resourceHeap{};
 
         // Scene Data + Frustum Freeze
-        std::vector<std::unique_ptr<NRI::Buffer>> m_uniformBuffers;
+        std::vector<nri::Buffer> m_uniformBuffers;
         std::vector<void*> m_uniformBuffersMapped;
         shaderio::UniformBufferObject uniformData = {};
         shaderio::UniformBufferObject frozenUniformData = {};
@@ -2108,7 +2181,7 @@ namespace Nox
 
         // NRD
         bool m_nrdShadowsEnabled = true;
-        NRI::NRDReflectionDenoiser m_nrdReflectionDenoiser = NRI::NRDReflectionDenoiser::Off;
+        Nox::NRDReflectionDenoiser m_nrdReflectionDenoiser = Nox::NRDReflectionDenoiser::Off;
 
         // DDGI (Dynamic Diffuse Global Illumination)
         uint32_t m_ddgiHistoryIndex = 0;
@@ -2138,10 +2211,10 @@ namespace Nox
         // ReSTIR GI (Screen-Space Diffuse Path Resampling via RTXDI) -- proper 3-pass pipeline
         // (Initial candidate -> Temporal -> Spatial), matching RTXPT's actual architecture instead
         // of the fused SpatioTemporal SDK function (see PushConstantReSTIRGITemporal comment).
-        std::unique_ptr<NRI::Pipeline> m_restirGIInitialPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_restirGITemporalPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_restirGISpatialPipeline = nullptr;
-        std::unique_ptr<NRI::Buffer> m_restirGINeighborOffsetsBuffer;
+        nri::Pipeline m_restirGIInitialPipeline{};
+        nri::Pipeline m_restirGITemporalPipeline{};
+        nri::Pipeline m_restirGISpatialPipeline{};
+        nri::Buffer m_restirGINeighborOffsetsBuffer;
 
         uint32_t m_diffuseGIMode = 0; // 0 = Off (IBL), 1 = DDGI, 2 = ReSTIR GI, 3 = screen probes
         // Screen-probe GI
@@ -2157,7 +2230,7 @@ namespace Nox
         float m_restirGIDepthThreshold = 0.1f;
         bool m_restirGIEnableBoilingFilter = true;
         float m_restirGIBoilingFilterStrength = 0.35f;
-        NRI::NRDDiffuseDenoiser m_nrdGIDenoiser = NRI::NRDDiffuseDenoiser::Off;
+        Nox::NRDDiffuseDenoiser m_nrdGIDenoiser = Nox::NRDDiffuseDenoiser::Off;
 
         // ReSTIR DI (Screen-Space Resampled Direct Lighting via RTXDI) -- Initial -> Temporal ->
         // Spatial -> FinalShading, 4 passes matching RTXPT's own DI architecture. Reservoir buffer
@@ -2165,11 +2238,11 @@ namespace Nox
         // through 3 physical buffers every frame (see PushConstantReSTIRDIInitial comment in
         // shaderIO.h for the exact rotation math); using only 2 here would reintroduce the read/write
         // race already found and fixed once for GI's spatial pass.
-        std::unique_ptr<NRI::Pipeline> m_restirDIInitialPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_restirDITemporalPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_restirDISpatialPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_restirDIFinalShadingPipeline = nullptr;
-        NRI::NRDDiffuseDenoiser m_nrdDIDenoiser = NRI::NRDDiffuseDenoiser::Off;
+        nri::Pipeline m_restirDIInitialPipeline{};
+        nri::Pipeline m_restirDITemporalPipeline{};
+        nri::Pipeline m_restirDISpatialPipeline{};
+        nri::Pipeline m_restirDIFinalShadingPipeline{};
+        Nox::NRDDiffuseDenoiser m_nrdDIDenoiser = Nox::NRDDiffuseDenoiser::Off;
         uint32_t m_restirDILastFrameOutputReservoir = 0;
 
         // Local (point/spot) lights and infinite (directional) lights must occupy separate
@@ -2203,8 +2276,8 @@ namespace Nox
         // pattern) -- see createReSTIRDIPipelines. RIS tiles are always built (cheap regardless of
         // light count, and serve as ReGIR's fallback for pixels outside the grid); ReGIR itself is
         // independently toggleable since it's a pure quality/perf layer on top.
-        std::unique_ptr<NRI::Pipeline> m_restirDIPresamplePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_restirDIPresampleReGIRPipeline = nullptr;
+        nri::Pipeline m_restirDIPresamplePipeline{};
+        nri::Pipeline m_restirDIPresampleReGIRPipeline{};
         uint32_t m_restirDIRISTileSize = 256;
         uint32_t m_restirDIRISTileCount = 8;
 
@@ -2213,8 +2286,8 @@ namespace Nox
         // 16384 lights via Z-curve indexing, comfortably covering "thousands of lights" scenes while
         // staying cheap (a handful of small mips). Rebuilt every frame alongside the RIS/ReGIR
         // presample passes, same cadence as the rest of ReSTIR DI's per-frame light data.
-        std::unique_ptr<NRI::Pipeline> m_restirDIWriteLightPDFPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_restirDIReduceLightPDFMipPipeline = nullptr;
+        nri::Pipeline m_restirDIWriteLightPDFPipeline{};
+        nri::Pipeline m_restirDIReduceLightPDFMipPipeline{};
         uint32_t m_lightPDFTextureSize = 128;
         uint32_t m_lightPDFMipLevels = 0; // == log2(m_lightPDFTextureSize); RTXDI_SamplePdfMipmap only
                                             // ever descends to a 2x2 mip, not all the way to 1x1
@@ -2254,9 +2327,9 @@ namespace Nox
 
         // Path Tracer NRD Denoising (fallback for hardware/preference without DLSS Ray Reconstruction --
         // mutually exclusive with it, same as GI/DI/reflections; see setNRDPTDenoiser)
-        NRI::NRDDiffuseDenoiser m_nrdPTDenoiser = NRI::NRDDiffuseDenoiser::Off;
-        std::unique_ptr<NRI::Pipeline> m_ycocgDecodePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_ptCompositePipeline = nullptr; // path tracer NRD composite (PTComposite.slang)
+        Nox::NRDDiffuseDenoiser m_nrdPTDenoiser = Nox::NRDDiffuseDenoiser::Off;
+        nri::Pipeline m_ycocgDecodePipeline{};
+        nri::Pipeline m_ptCompositePipeline{}; // path tracer NRD composite (PTComposite.slang)
 
         // ReSTIR PT (Screen-Space Path Resampling via RTXDI) -- reuses the REAL rtxdi::ReSTIRPTContext
         // C++ class (Rtxdi/PT/ReSTIRPT.h) directly for buffer-index rotation and default parameters,
@@ -2267,9 +2340,9 @@ namespace Nox
         bool m_restirPTEnabled = false; // only meaningful while Path Tracing is active
         bool m_restirPTTemporalEnabled = false; // see getReSTIRPTTemporalEnabled's comment
         std::unique_ptr<rtxdi::ReSTIRPTContext> m_restirPTContext; // created lazily once render size is known
-        std::unique_ptr<NRI::Pipeline> m_restirPTInitialPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_restirPTTemporalPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_restirPTFinalShadingPipeline = nullptr;
+        nri::Pipeline m_restirPTInitialPipeline{};
+        nri::Pipeline m_restirPTTemporalPipeline{};
+        nri::Pipeline m_restirPTFinalShadingPipeline{};
         // Numeric defaults match RTXPT's own GetDefaultReSTIRPT*Params() (see ReSTIRPT.cpp)
         uint32_t m_restirPTNumInitialSamples = 1;
         uint32_t m_restirPTMaxBounceDepth = 3;
@@ -2300,16 +2373,16 @@ namespace Nox
             glm::vec3 Position{ 0.0f };
             float NearClip = 0.01f;
             bool Orthographic = false;
-            NRI::Extent2D Size{ 0, 0 };
+            nri::Extent2D Size{ 0, 0 };
             bool HasGrid = false;
             bool Preview = false; // an asset preview: no shadow rays (the scene is above its stage), no DDGI, the uniforms' exposure
             uint32_t Flags = 0;   // ExtraViewFlags
             shaderio::PushConstantGrid Grid{};
             Ref<Texture2D> Output; // LDR (Surface format) this frame draws into
             Ref<Texture2D> Shown;  // the last texture drawn completely: what the viewport window shows
-            std::vector<std::unique_ptr<NRI::Buffer>> UniformBuffers; // per frame slot, persistently mapped
+            std::vector<nri::Buffer> UniformBuffers; // per frame slot, persistently mapped
             std::vector<void*> UniformBuffersMapped;
-            std::vector<std::unique_ptr<NRI::Buffer>> CullViewBuffers;
+            std::vector<nri::Buffer> CullViewBuffers;
         };
         std::array<ExtraView, MaxExtraViews> m_extraViews;
         // Images taken this frame (TakeExtraViewTexture): the present pass reads them once more, so the graph orders their last write
@@ -2318,14 +2391,14 @@ namespace Nox
 
         // Entity ID readback (entity IDs themselves are render graph textures, see Passes/FrameGraphResources.h)
         bool m_orthographic = false; // the editor camera is in an ortho view (no jitter, no upscaling, full mesh detail)
-        std::vector<std::unique_ptr<NRI::Buffer>> m_pickerStagingBuffers;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_pickerDepthStagingBuffers;
+        std::vector<nri::Buffer> m_pickerStagingBuffers;
+        std::vector<nri::Buffer> m_pickerDepthStagingBuffers;
         std::vector<PickRequest> m_pickerReadbackRequests;
         // ReadbackTexture: waiting (FrameSlot UINT32_MAX) or copied in the frame of that slot.
         struct TextureReadback
         {
             Ref<Texture2D> Texture;
-            std::unique_ptr<NRI::Buffer> Staging;
+            nri::Buffer Staging;
             TextureReadbackCallback Done;
             uint32_t Width = 0;
             uint32_t Height = 0;
@@ -2339,23 +2412,23 @@ namespace Nox
         struct PendingRaycast { shaderio::EditorRay Ray; glm::dvec3 Origin{ 0.0 }; RaycastCallback Callback; };
         std::vector<PendingRaycast> m_raycastQueue;
         std::vector<std::vector<RaycastCallback>> m_raycastsInFlight;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_raycastBuffers;
-        std::unique_ptr<NRI::Pipeline> m_editorRaycastPipeline;
+        std::vector<nri::Buffer> m_raycastBuffers;
+        nri::Pipeline m_editorRaycastPipeline;
         std::vector<int32_t> m_SelectedEntityIDs;
 
         // Render graph texture inspection (editor)
-        std::unique_ptr<NRI::Pipeline> m_textureInspectPipeline = nullptr;
-        std::array<std::unique_ptr<NRI::Pipeline>, 5> m_instanceCullingPipelines; // cull, count, offset, write, late
-        std::unique_ptr<NRI::Pipeline> m_hiZBuildPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_rrGuidesPipeline = nullptr; // DLSS Ray Reconstruction albedo guides
-        std::unique_ptr<NRI::Pipeline> m_taaPipeline = nullptr;      // TAA.slang
+        nri::Pipeline m_textureInspectPipeline{};
+        std::array<nri::Pipeline, 5> m_instanceCullingPipelines; // cull, count, offset, write, late
+        nri::Pipeline m_hiZBuildPipeline{};
+        nri::Pipeline m_rrGuidesPipeline{}; // DLSS Ray Reconstruction albedo guides
+        nri::Pipeline m_taaPipeline{};      // TAA.slang
         bool m_taaEnabled = true;
         uint32_t m_taaHistoryIndex = 0; // the history the next TAA pass reads
         bool m_taaRanLastFrame = false; // its history is last frame's (else it starts over)
         TextureInspection m_textureInspection;
-        Texture2D* m_inspectionImage = nullptr;
+        NriTexture m_inspectionImage = nullptr;
         RGTextureKey m_inspectedTextureKey;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_inspectionProbeBuffers; // per frame slot, 1x1 RGBA32F readback
+        std::vector<nri::Buffer> m_inspectionProbeBuffers; // per frame slot, 1x1 RGBA32F readback
         std::vector<uint8_t> m_inspectionProbePending;                     // per frame slot
         glm::vec4 m_inspectionProbeValue{ 0.0f };
         bool m_inspectionProbeValid = false;
@@ -2370,10 +2443,10 @@ namespace Nox
         std::vector<glm::mat4> m_boneMatrices;
         // This frame's morph target weights (per deformed instance with morph targets: one per target), uploaded like the bones.
         std::vector<float> m_morphWeights;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_morphWeightBuffers;
+        std::vector<nri::Buffer> m_morphWeightBuffers;
         std::vector<void*> m_morphWeightBuffersMapped;
         uint64_t m_morphWeightBufferCapacity = 0;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_boneBuffers;
+        std::vector<nri::Buffer> m_boneBuffers;
         std::vector<void*> m_boneBuffersMapped;
         uint64_t m_BoneBufferCapacity = 0;
 
@@ -2387,8 +2460,8 @@ namespace Nox
         };
         std::vector<shaderio::SkinningWorkItem> m_skinningWorkItems;
         std::vector<SkinningLayoutEntry> m_skinningLayout;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_skinnedVertexBuffers;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_skinningWorkItemBuffers;
+        std::vector<nri::Buffer> m_skinnedVertexBuffers;
+        std::vector<nri::Buffer> m_skinningWorkItemBuffers;
         std::vector<void*> m_skinningWorkItemBuffersMapped;
         uint64_t m_skinnedVertexBufferCapacity = 0;
         uint64_t m_skinningWorkItemBufferCapacity = 0;
@@ -2416,12 +2489,12 @@ namespace Nox
         std::vector<uint32_t> m_rayTracingOffsetSlots;               // (scratch: GpuScene::GetVertexOffsetInstances)
         std::vector<RayTracingOffsetEntry> m_rayTracingOffsetLayout; // by slot
         std::vector<shaderio::RayTracingOffsetWorkItem> m_rayTracingOffsetWorkItems;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_rayTracingOffsetVertexBuffers;   // SkinnedVertex, one per frame in flight
-        std::vector<std::unique_ptr<NRI::Buffer>> m_rayTracingOffsetWorkItemBuffers;
+        std::vector<nri::Buffer> m_rayTracingOffsetVertexBuffers;   // SkinnedVertex, one per frame in flight
+        std::vector<nri::Buffer> m_rayTracingOffsetWorkItemBuffers;
         std::vector<void*> m_rayTracingOffsetWorkItemBuffersMapped;
         uint64_t m_rayTracingOffsetVertexCapacity = 0;
         uint64_t m_rayTracingOffsetWorkItemCapacity = 0;
-        std::unique_ptr<NRI::Pipeline> m_rayTracingOffsetGraphPipeline; // (RayTracingOffsetMaterialGraph.slang; swapped with the G-buffer resolve's variant)
+        nri::Pipeline m_rayTracingOffsetGraphPipeline; // (RayTracingOffsetMaterialGraph.slang; swapped with the G-buffer resolve's variant)
 
         // Meshes
         // Buffers, assets and geometry ranges wait here until no frame in flight can reference them (§5.8.4).
@@ -2483,12 +2556,12 @@ namespace Nox
         struct AnimatedBLASUpdate
         {
             uint32_t instanceSlot = UINT32_MAX;
-            NRI::AccelerationStructureBuildDesc desc;
+            ASBuildDesc desc;
             bool rebuild = false;
         };
         std::vector<AnimatedBLAS> m_animatedBLASes; // indexed by GPU scene instance slot
         std::vector<AnimatedBLASUpdate> m_animatedBLASUpdates;
-        std::unique_ptr<NRI::Buffer> m_animatedBLASScratch;
+        nri::Buffer m_animatedBLASScratch;
         uint64_t m_animatedBLASScratchCapacity = 0;
 
         // Uploads run on the transfer queue (§5.11.4); frames wait on the GPU for what they read.
@@ -2511,7 +2584,7 @@ namespace Nox
             uint32_t maxVertex = 0; // absolute: the highest vertex the indices reach
         };
         std::vector<BlasBuild> m_blasBuilds;
-        std::unique_ptr<NRI::Buffer> m_blasScratch; // shared by the builds of one frame, recorded one after another
+        nri::Buffer m_blasScratch; // shared by the builds of one frame, recorded one after another
         // Bounds each frame's build work while a large load streams in (one submission building thousands of BLAS
         // could exceed the driver timeout). 2M made a 42 ms GPU frame on Bistro (RTX, Release); a quarter keeps a
         // loading frame near a normal one and Bistro still ray traces within ~15 frames.
@@ -2533,14 +2606,14 @@ namespace Nox
             MeshBLAS compacted;
         };
         static constexpr uint32_t BlasCompactionQueriesPerFrame = 1024; // also caps the builds of one frame
-        std::vector<std::unique_ptr<NRI::QueryPool>> m_blasCompactionQueryPools; // per frame slot
+        std::vector<nri::QueryPool> m_blasCompactionQueryPools; // per frame slot
         std::array<std::vector<BlasCompactionQuery>, MAX_FRAMES_IN_FLIGHT> m_blasCompactionQueries;
         std::vector<BlasCompaction> m_blasCompactions;
         uint64_t m_blasSerial = 0;
-        NRI::AccelerationStructureBuildDesc blasBuildDesc(const BlasBuild& build) const;
+        ASBuildDesc blasBuildDesc(const BlasBuild& build) const;
         // --- Hardware Ray Tracing: Scene TLAS ---
         void updateSceneAccelerationStructure(uint32_t currentFrameIndex);
-        void BuildSceneAccelerationStructure(NRI::CommandBuffer& cmd);
+        void BuildSceneAccelerationStructure(nri::CommandBuffer& cmd);
 
         bool m_rayTracingEnabled = false;
         bool m_rayTracingShadows = false;
@@ -2548,16 +2621,16 @@ namespace Nox
         bool m_pathTracingEnabled = false;
         bool m_pathTracingAccumulation = false;
 
-        std::unique_ptr<NRI::AccelerationStructure> m_sceneTLAS;
-        std::unique_ptr<NRI::Buffer> m_tlasBuffer;
-        std::unique_ptr<NRI::Buffer> m_tlasScratchBuffer;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_rtInstanceBuffers; // per frame slot, written when this frame builds
+        nri::AccelerationStructure m_sceneTLAS;
+        nri::Buffer m_tlasBuffer;
+        nri::Buffer m_tlasScratchBuffer;
+        std::vector<nri::Buffer> m_rtInstanceBuffers; // per frame slot, written when this frame builds
         uint32_t m_sceneTLASCapacity = 0;
         uint32_t m_tlasHeapIndex = 0;
         uint32_t m_tlasHeapSlot = ~0u;
         bool m_hasTLASBuild = false;
         bool m_tlasNeedBuild = true; // sticky until a build is recorded (also while ray tracing is off)
-        NRI::AccelerationStructureBuildDesc m_tlasBuildDesc{};
+        ASBuildDesc m_tlasBuildDesc{};
 
         // GPU scene and the draw list every view culls (instance slots in bucket order, uploaded per frame slot when changed)
         GpuScene m_gpuScene;
@@ -2567,7 +2640,7 @@ namespace Nox
         std::vector<uint32_t> m_drawList;
         std::array<uint32_t, RenderBucketCount + 1> m_drawBucketStarts{};
         uint64_t m_DrawListBufferCapacity = 0;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_drawListBuffers;
+        std::vector<nri::Buffer> m_drawListBuffers;
         std::array<bool, MAX_FRAMES_IN_FLIGHT> m_drawListStale{};
 
         // GPU culling: settings, the camera view's cull parameters and its visible counts (read back a frame late), per
@@ -2575,16 +2648,16 @@ namespace Nox
         bool m_instanceCullingEnabled = true;
         bool m_occlusionCullingEnabled = true;
         uint32_t m_meshletCulling = 0;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_cullViewBuffers;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_cullStatsBuffers;
+        std::vector<nri::Buffer> m_cullViewBuffers;
+        std::vector<nri::Buffer> m_cullStatsBuffers;
         std::array<bool, MAX_FRAMES_IN_FLIGHT> m_cullStatsPending{};
 
         // Texture streaming feedback (§5.12): cleared each frame, written by the G-buffer and transparent passes, read back
         // per frame slot into m_mipFeedback.
         // The mip feedback (MipFeedbackSlots entries) and after it the virtual texture tile requests (VirtualTextureFeedback).
         static constexpr uint64_t MipFeedbackBytes = sizeof(uint32_t) * shaderio::MipFeedbackSlots + sizeof(shaderio::VirtualTextureFeedback);
-        std::unique_ptr<NRI::Buffer> m_mipFeedbackBuffer;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_mipFeedbackReadback;
+        nri::Buffer m_mipFeedbackBuffer;
+        std::vector<nri::Buffer> m_mipFeedbackReadback;
         std::array<bool, MAX_FRAMES_IN_FLIGHT> m_mipFeedbackPending{};
         std::vector<uint32_t> m_mipFeedback;
         uint64_t m_mipFeedbackSerial = 0;
@@ -2597,8 +2670,8 @@ namespace Nox
         float m_previousTimeSeconds = -1.0f;
         bool m_rayTracingGraphMasks = false;       // updateRayTracingGraphMasks: the ray tracing passes run their graph variants
         uint64_t m_rayTracingGraphMasksHash = 0;   // rayTracingGraphsHash() when they were created // UniformBufferObject::previousTimeSeconds (a World Position Offset's motion vectors)
-        std::unique_ptr<NRI::Buffer> m_clusterStatsBuffer;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_clusterStatsReadback;
+        nri::Buffer m_clusterStatsBuffer;
+        std::vector<nri::Buffer> m_clusterStatsReadback;
         std::array<bool, MAX_FRAMES_IN_FLIGHT> m_clusterStatsPending{};
         shaderio::ClusterStats m_clusterStats{};
 
@@ -2621,26 +2694,26 @@ namespace Nox
         void prepareGeometryPatches(uint32_t frameSlot);
         std::vector<uint8_t> m_geometryPatchData;
         std::vector<GeometryPatch> m_geometryPatches;
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_geometryPatchStaging;
-        std::array<std::vector<NRI::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_geometryDrawPatchRegions;
-        std::array<std::vector<NRI::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_geometryPagePatchRegions;
-        std::array<std::vector<NRI::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_virtualPagePatchRegions;
-        std::array<std::vector<NRI::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_virtualTexturePatchRegions;
-        std::unique_ptr<NRI::Buffer> m_geometryFeedbackBuffer;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_geometryFeedbackReadback;
+        std::array<nri::Buffer, MAX_FRAMES_IN_FLIGHT> m_geometryPatchStaging;
+        std::array<std::vector<nri::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_geometryDrawPatchRegions;
+        std::array<std::vector<nri::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_geometryPagePatchRegions;
+        std::array<std::vector<nri::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_virtualPagePatchRegions;
+        std::array<std::vector<nri::BufferCopyRegion>, MAX_FRAMES_IN_FLIGHT> m_virtualTexturePatchRegions;
+        nri::Buffer m_geometryFeedbackBuffer;
+        std::vector<nri::Buffer> m_geometryFeedbackReadback;
         std::array<bool, MAX_FRAMES_IN_FLIGHT> m_geometryFeedbackPending{};
-        std::unique_ptr<NRI::Pipeline> m_geometryFeedbackPipeline;
-        std::unique_ptr<NRI::Pipeline> m_clusterIndicesPipeline;
+        nri::Pipeline m_geometryFeedbackPipeline;
+        nri::Pipeline m_clusterIndicesPipeline;
         // Per frame slot: the cluster index jobs of the streamed BLAS builds recorded in it.
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_clusterIndexJobBuffers;
+        std::array<nri::Buffer, MAX_FRAMES_IN_FLIGHT> m_clusterIndexJobBuffers;
         GeometryStreamer m_geometryStreamer{ *this };
 
         // Streaming virtual textures (§5.12.2): the page table (uint per entry of every virtual texture), the frame each entry was last
         // requested (written by the feedback), and a GpuVirtualTexture per material texture slot. Made with the first virtual texture.
         friend class VirtualTextureStreamer;
-        std::unique_ptr<NRI::Buffer> m_virtualPageTable;
-        std::unique_ptr<NRI::Buffer> m_virtualTileStamps;
-        std::unique_ptr<NRI::Buffer> m_virtualTextureTable;
+        nri::Buffer m_virtualPageTable;
+        nri::Buffer m_virtualTileStamps;
+        nri::Buffer m_virtualTextureTable;
         VirtualTextureStreamer m_virtualTextures{ *this };
         uint32_t m_visibleInstanceCount = 0;
         uint32_t m_lateCandidateCount = 0;
@@ -2659,14 +2732,14 @@ namespace Nox
         std::chrono::steady_clock::time_point m_lastWindowResizeRequestTime{};
 
         // Outline
-        std::vector<std::unique_ptr<NRI::Buffer>> m_selectedEntityIDBuffers;
+        std::vector<nri::Buffer> m_selectedEntityIDBuffers;
         std::vector<void*> m_selectedEntityIDBuffersMapped;
-        std::unique_ptr<NRI::Pipeline> m_outlinePipeline = nullptr;
+        nri::Pipeline m_outlinePipeline{};
         // Selection mask (SelectionMask.slang): the selected instances' GPU scene slots for this frame slot (the task stage
         // reads them as its draw list) and one direct draw per slot.
-        std::unique_ptr<NRI::Pipeline> m_selectionMaskPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_stableEntityDepthPipeline = nullptr; // EditorStableDepth.slang
-        std::vector<std::unique_ptr<NRI::Buffer>> m_selectionInstanceBuffers;
+        nri::Pipeline m_selectionMaskPipeline{};
+        nri::Pipeline m_stableEntityDepthPipeline{}; // EditorStableDepth.slang
+        std::vector<nri::Buffer> m_selectionInstanceBuffers;
         std::vector<void*> m_selectionInstanceBuffersMapped;
         std::vector<uint32_t> m_selectionTaskGroups; // per selected instance: task workgroups to cover its meshlets
 
@@ -2682,8 +2755,8 @@ namespace Nox
         bool m_environmentRotationPending = false;
         float m_pendingEnvironmentRotation = 0.0f;
         std::chrono::steady_clock::time_point m_environmentRotationChanged{};
-        std::unique_ptr<NRI::Pipeline> m_skyboxPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_lightShapesPipeline = nullptr; // LightShapes.slang: the rect lights' faces
+        nri::Pipeline m_skyboxPipeline{};
+        nri::Pipeline m_lightShapesPipeline{}; // LightShapes.slang: the rect lights' faces
         uint32_t m_rectLightCount = 0; // in this frame's light buffer
         Ref<Texture2D> m_irradianceCubemap;
         Ref<Texture2D> m_prefilteredEnvMap;
@@ -2692,22 +2765,22 @@ namespace Nox
 
         // Procedural sky: the settings the environment shows, and the newest request waiting for its rebuild.
         // IBL filters (IrradianceConvolution / PrefilterEnv.slang), created once: for an HDR map and the procedural sky.
-        std::unique_ptr<NRI::Pipeline> m_irradiancePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_prefilterPipeline = nullptr;
+        nri::Pipeline m_irradiancePipeline{};
+        nri::Pipeline m_prefilterPipeline{};
 
         // Procedural sky (SkyAtmosphere.slang): while it is the environment its textures stay (the environment, irradiance and
         // pre-filtered cubemaps, smaller than an HDR map's: the sky is smooth) and a frame whose settings changed rewrites
         // them in addProceduralSkyPass. The two atmosphere LUTs only change with the atmosphere, not with the sun.
-        std::unique_ptr<NRI::Pipeline> m_skyTransmittancePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_skyMultiScatteringPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_skyCubemapPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_skyAerialPerspectivePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_skyDownsamplePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_skyCloudShadowPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_skyHorizonBandPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_skyCloudShapeNoisePipeline = nullptr;   // the cloud noise, written when the sky is made
-        std::unique_ptr<NRI::Pipeline> m_skyCloudDetailNoisePipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_skyCloudWeatherPipeline = nullptr;
+        nri::Pipeline m_skyTransmittancePipeline{};
+        nri::Pipeline m_skyMultiScatteringPipeline{};
+        nri::Pipeline m_skyCubemapPipeline{};
+        nri::Pipeline m_skyAerialPerspectivePipeline{};
+        nri::Pipeline m_skyDownsamplePipeline{};
+        nri::Pipeline m_skyCloudShadowPipeline{};
+        nri::Pipeline m_skyHorizonBandPipeline{};
+        nri::Pipeline m_skyCloudShapeNoisePipeline{};   // the cloud noise, written when the sky is made
+        nri::Pipeline m_skyCloudDetailNoisePipeline{};
+        nri::Pipeline m_skyCloudWeatherPipeline{};
         // The sky near the horizon at ~4x the cubemap's resolution, for the skybox (shaderIO.h SkyHorizonBand*), and its storage slot.
         Ref<Texture2D> m_skyHorizonBand;
         uint32_t m_skyHorizonBandStorageSlot = ~0u;
@@ -2741,23 +2814,23 @@ namespace Nox
 
         // Lighting
         std::vector<shaderio::LightData> m_lightBufferObjects;
-        std::vector<std::unique_ptr<NRI::Buffer>> m_lightBuffers;
+        std::vector<nri::Buffer> m_lightBuffers;
         std::vector<void*> m_lightBuffersMapped;
         uint64_t m_LightBufferCapacity = 0;
         // The path tracer's emissive lights (GpuScene::CollectEmissiveLights), one host-visible buffer per frame in flight.
         std::vector<shaderio::EmissiveLightInstance> m_emissiveLights;
-        std::array<std::unique_ptr<NRI::Buffer>, MAX_FRAMES_IN_FLIGHT> m_emissiveLightBuffers;
+        std::array<nri::Buffer, MAX_FRAMES_IN_FLIGHT> m_emissiveLightBuffers;
         std::array<void*, MAX_FRAMES_IN_FLIGHT> m_emissiveLightBuffersMapped{};
         uint64_t m_emissiveLightBufferCapacity = 0;
         // The emissive lights' local grid (EmissiveLightGrid.slang), rebuilt every frame the emissive lights are sampled.
-        std::unique_ptr<NRI::Buffer> m_emissiveGridBuffer;
-        std::unique_ptr<NRI::Pipeline> m_emissiveGridPipeline;
+        nri::Buffer m_emissiveGridBuffer;
+        nri::Pipeline m_emissiveGridPipeline;
         // The path tracer's emissive triangle lights (EmissiveLightGrid.slang): their records and the running sum of their power.
-        std::unique_ptr<NRI::Buffer> m_emissiveTriangleBuffer;
-        std::unique_ptr<NRI::Buffer> m_emissiveTriangleCdfBuffer;
+        nri::Buffer m_emissiveTriangleBuffer;
+        nri::Buffer m_emissiveTriangleCdfBuffer;
         uint32_t m_emissiveTriangleCapacity = 0;
-        std::unique_ptr<NRI::Pipeline> m_emissiveTrianglesPipeline;
-        std::unique_ptr<NRI::Pipeline> m_emissiveScanPipeline;
+        nri::Pipeline m_emissiveTrianglesPipeline;
+        nri::Pipeline m_emissiveScanPipeline;
 
         // Temporal & Motion Vector State
         glm::mat4 m_prevView = glm::mat4(1.0f);
@@ -2784,7 +2857,7 @@ namespace Nox
         // DLSS Super Resolution
         bool m_dlssEnabled = false;
         // RTXPT realtime defaults to DLSS-RR at Balanced resolution. DLSS itself remains opt-in in Nox.
-        NRI::UpscaleMode m_dlssMode = NRI::UpscaleMode::Balanced;
+        nri::UpscalerMode m_dlssMode = NRI_UPSCALER_MODE_BALANCED;
         bool m_pendingRenderResolutionUpdate = false;
         bool m_dlssRayReconstructionEnabled = true;
 
@@ -2794,7 +2867,7 @@ namespace Nox
         // GPU waitIdle) on every one of those tanks perf and spams NRD reinit logs. Instead we record the
         // latest requested size and only actually apply it once no new request has arrived for a short
         // settle window (see applyPendingRenderResolutionIfNeeded()).
-        NRI::Extent2D m_pendingViewportSize{};
+        nri::Extent2D m_pendingViewportSize{};
         bool m_viewportResizePending = false;
         std::chrono::steady_clock::time_point m_lastViewportResizeRequestTime{};
 
@@ -2806,7 +2879,12 @@ namespace Nox
         float m_cameraNear = 0.1f;
         float m_cameraFOV = 30.0f;
         bool m_useImGui = true;
-        std::unique_ptr<UI::UIRenderer> m_uiRenderer;
+        nri::Upscaler m_dlssSR{};
+        nri::Upscaler m_dlssRR{};
+        nri::Denoiser m_denoiser{};
+        NoxUI::UIDrawList m_uiDrawList;
+        bool m_noxUIInitialized = false;
+        bool m_imguiInitialized = false;
         // The UI glyph cache's atlas (RendererGlyphAtlas.cpp): R8, created on first use. uploadGlyphAtlas copies the glyphs rasterized
         // since the last call (true when it recorded copies); resetGlyphAtlasIfFull empties a full atlas between frames.
         Ref<Texture2D> m_glyphAtlas;

@@ -4,7 +4,7 @@
 
 #include "Entity.h" // EntityCommandBuffer commands resolve against the complete Scene/Entity
 #include "NoxCore/Profiling/Profiler.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 namespace Nox
 {
@@ -22,12 +22,12 @@ namespace Nox
     }
 
     void SceneGraph::UpdateWorldTransforms(entt::registry& registry, const std::unordered_map<UUID, entt::entity>& entityMap,
-                                           WorkerLocal<EntityCommandBuffer>& commandBuffers, WorkerLocal<std::vector<entt::entity>>& movedEntities)
+                                           NoxTasks::WorkerLocal<EntityCommandBuffer>& commandBuffers, NoxTasks::WorkerLocal<std::vector<entt::entity>>& movedEntities)
     {
         // Children are found through entityMap, so its size bounds any level's item count. Pointers into component
         // storage stay valid: nothing makes structural changes while the frame graph runs.
-        JobSystem& jobSystem = JobSystem::Get();
-        FrameArena& arena = jobSystem.GetFrameArena();
+        NoxTasks::JobSystem& jobSystem = NoxTasks::JobSystem::Get();
+        NoxTasks::FrameArena& arena = jobSystem.GetFrameArena();
         std::span<SubtreeRoot> frontier = arena.NewArray<SubtreeRoot>(entityMap.size());
         std::span<SubtreeRoot> nextFrontier = arena.NewArray<SubtreeRoot>(entityMap.size());
         uint32_t frontierCount = 0;
@@ -104,8 +104,8 @@ namespace Nox
             });
     }
 
-    const glm::dmat4* SceneGraph::UpdateNode(entt::registry& registry, WorkerLocal<EntityCommandBuffer>& commandBuffers,
-                                            WorkerLocal<std::vector<entt::entity>>& movedEntities, entt::entity entity,
+    const glm::dmat4* SceneGraph::UpdateNode(entt::registry& registry, NoxTasks::WorkerLocal<EntityCommandBuffer>& commandBuffers,
+                                            NoxTasks::WorkerLocal<std::vector<entt::entity>>& movedEntities, entt::entity entity,
                                             const glm::dmat4& parentWorldMatrix, bool parentWasDirty, bool& outWasDirty)
     {
         DirtyTransformComponent* dirty = registry.try_get<DirtyTransformComponent>(entity);
@@ -135,7 +135,7 @@ namespace Nox
     }
 
     void SceneGraph::UpdateSubtree(entt::registry& registry, const std::unordered_map<UUID, entt::entity>& entityMap,
-                                   WorkerLocal<EntityCommandBuffer>& commandBuffers, WorkerLocal<std::vector<entt::entity>>& movedEntities,
+                                   NoxTasks::WorkerLocal<EntityCommandBuffer>& commandBuffers, NoxTasks::WorkerLocal<std::vector<entt::entity>>& movedEntities,
                                    entt::entity entity, const glm::dmat4& parentWorldMatrix, bool parentWasDirty)
     {
         bool wasDirty = false;

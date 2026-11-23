@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "McpHost.h"
-#include "McpServer.h"
+#include <NoxMcp/McpServer.h>
 
 namespace Nox
 {
@@ -52,14 +52,14 @@ namespace Nox::Mcp
         uint16_t GetPort() const { return m_Port; }
 
         // "read" / "write" / "execute" (or 0 / 1 / 2) to an access level; false when it is none of them.
-        static bool ParseAccess(const std::string& text, ConsoleAccess& access);
+        static bool ParseAccess(const std::string& text, NoxMcp::ToolAccess& access);
 
     private:
         McpRuntime() = default;
 
-        McpServer m_Server;
+        NoxMcp::McpServer m_Server;
         HostContext m_Context;
-        ConsoleAccess m_GrantedAccess = ConsoleAccess::Write;
+        NoxMcp::ToolAccess m_GrantedAccess = NoxMcp::ToolAccess::Write;
         std::vector<std::function<bool()>> m_Polls;
         uint16_t m_Port = 0;
     };

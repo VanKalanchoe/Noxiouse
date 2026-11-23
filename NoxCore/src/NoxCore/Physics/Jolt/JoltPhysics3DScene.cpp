@@ -1,5 +1,5 @@
 #include "JoltPhysics3DScene.h"
-#include "NoxCore/Network/NetPhysicsReplication.h"
+#include <NoxNet/NetPhysicsReplication.h>
 #include "NoxCore/Math/Math.h"
 #include "JoltUtils.h"
 #include "NoxCore/Physics/PhysicsEngine.h"

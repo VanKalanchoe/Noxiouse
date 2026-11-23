@@ -1,12 +1,17 @@
 #include "UILayer.h"
 
 #include <SDL3/SDL_keyboard.h>
+#include <NoxUI/Backends/noxui_impl_sdl3.h>
+#include <NoxUI/Core/UILog.h>
+#include <NoxUI/Rendering/UIFont.h>
 
+#include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/Window.h"
+#include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/Renderer.h"
-#include "NoxCore/UI/Core/UIElement.h"
-#include "NoxCore/UI/Core/UIViewportManager.h"
-#include "NoxCore/UI/Layout/UIDockSpace.h"
+#include <NoxUI/Core/UIElement.h>
+#include <NoxUI/Core/UIViewportManager.h>
+#include <NoxUI/Layout/UIDockSpace.h>
 
 namespace Nox
 {
@@ -16,16 +21,37 @@ namespace Nox
         , m_Renderer(renderer)
         , m_ThemePath(std::move(themePath))
     {
-        m_Theme = UI::UITheme::CreateDefault();
+        NoxUI::SetLogCallback([](NoxUI::LogLevel level, std::string_view message)
+        {
+            switch (level)
+            {
+            case NoxUI::LogLevel::Info:  NOX_CORE_INFO("{}", message); break;
+            case NoxUI::LogLevel::Warn:  NOX_CORE_WARN("{}", message); break;
+            case NoxUI::LogLevel::Error: NOX_CORE_ERROR("{}", message); break;
+            }
+        });
+
+        NoxUI::UIFont::SetDefaultFontPath("assets/fonts/opensans/static/OpenSans-Regular.ttf");
+
+        m_Theme = NoxUI::UITheme::CreateDefault();
         if (!m_ThemePath.empty())
         {
             m_Theme->LoadFromFile(m_ThemePath);
-            m_Theme->WatchFile(m_Renderer.GetFileWatcher(), m_ThemePath);
+            m_Theme->SetWatchedFile(m_ThemePath);
+            m_Renderer.GetFileWatcher().watch(std::filesystem::path(m_ThemePath),
+                [theme = m_Theme](const std::filesystem::path&)
+                {
+                    if (theme)
+                        theme->RequestHotReload();
+                });
         }
         m_UI.SetTheme(m_Theme);
 
         if (m_Window.getHandle())
+        {
+            NoxUI_ImplSDL3_Init(m_Window.getHandle(), m_UI, nullptr);
             SDL_StartTextInput(m_Window.getHandle());
+        }
 
         SetConfigFlags(m_ConfigFlags);
     }
@@ -35,16 +61,18 @@ namespace Nox
         if (m_ViewportManager)
             m_ViewportManager->Shutdown();
         m_ViewportManager.reset();
+        m_Renderer.ShutdownNoxUI();
+        NoxUI_ImplSDL3_Shutdown();
     }
 
-    void UILayer::SetConfigFlags(UI::UIConfigFlags flags)
+    void UILayer::SetConfigFlags(UIConfigFlags flags)
     {
         m_ConfigFlags = flags;
-        if (UI::HasFlag(m_ConfigFlags, UI::UIConfigFlags::DockingEnable))
+        if (HasFlag(m_ConfigFlags, UIConfigFlags::DockingEnable))
         {
             if (!m_DockSpace)
             {
-                m_DockSpace = Ref<UI::UIDockSpace>(new UI::UIDockSpace());
+                m_DockSpace = Ref<NoxUI::UIDockSpace>(new NoxUI::UIDockSpace());
                 if (!m_UI.GetRoot())
                     m_UI.SetRoot(m_DockSpace);
             }
@@ -61,12 +89,12 @@ namespace Nox
         }
     }
 
-    void UILayer::SetRoot(const Ref<UI::UIElement>& root)
+    void UILayer::SetRoot(const Ref<NoxUI::UIElement>& root)
     {
         m_UI.SetRoot(root);
     }
 
-    void UILayer::AttachDockSpace(UI::UIDockSpace* dockSpace)
+    void UILayer::AttachDockSpace(NoxUI::UIDockSpace* dockSpace)
     {
         if (m_ViewportManager)
             m_ViewportManager->Shutdown();
@@ -76,32 +104,30 @@ namespace Nox
             return;
 
         dockSpace->SetContext(&m_UI);
-        if (UI::HasFlag(m_ConfigFlags, UI::UIConfigFlags::ViewportsEnable) && m_Window.getHandle())
+        if (HasFlag(m_ConfigFlags, UIConfigFlags::ViewportsEnable) && m_Window.getHandle())
         {
-            m_ViewportManager = std::make_unique<UI::UIViewportManager>(
-                m_Window,
-                m_Renderer,
-                m_UI,
-                dockSpace
-            );
+            m_ViewportManager = std::make_unique<NoxUI::UIViewportManager>(m_UI, dockSpace);
+            NoxUI_ImplSDL3_Init(m_Window.getHandle(), m_UI, m_ViewportManager.get());
+            m_Renderer.InitNoxUI(m_ViewportManager.get());
             dockSpace->SetViewportManager(m_ViewportManager.get());
         }
         else
         {
+            m_Renderer.InitNoxUI(nullptr);
             dockSpace->SetViewportManager(nullptr);
         }
     }
 
-    Ref<UI::UIDockNode> UILayer::AddPanel(
+    Ref<NoxUI::UIDockNode> UILayer::AddPanel(
         const std::string& title,
-        const Ref<UI::UIElement>& content,
-        UI::UIDockDropZone zone,
+        const Ref<NoxUI::UIElement>& content,
+        NoxUI::UIDockDropZone zone,
         const std::string& targetTitle,
         float ratio,
-        UI::UIDockNodeFlags flags)
+        NoxUI::UIDockNodeFlags flags)
     {
         if (!m_DockSpace)
-            SetConfigFlags(m_ConfigFlags | UI::UIConfigFlags::DockingEnable);
+            SetConfigFlags(m_ConfigFlags | UIConfigFlags::DockingEnable);
         return m_DockSpace ? m_DockSpace->AddPanel(title, content, zone, targetTitle, ratio, flags) : nullptr;
     }
 
@@ -114,23 +140,22 @@ namespace Nox
             m_Theme->LoadFromFile(path);
     }
 
-    void UILayer::OnEvent(Event& event)
+    void UILayer::OnEvent(Event& /*event*/)
     {
-        if (m_BlockEvents)
-            return;
-        m_UI.OnEvent(event);
+        // Raw SDL3 events are dispatched directly via NoxUI_ImplSDL3_ProcessEvent in Application.cpp.
     }
 
     void UILayer::OnUpdate(Timestep ts)
     {
         m_LastDeltaSeconds = ts.GetSeconds();
-        if (m_ViewportManager)
-            m_ViewportManager->UpdateActiveDrag();
+        if (m_Theme)
+            m_Theme->PollHotReload();
+        NoxUI_ImplSDL3_NewFrame(m_UI, m_ViewportManager.get());
     }
 
     void UILayer::OnRender()
     {
-        UI::UIDrawList* draw = m_Renderer.GetUIDrawList();
+        NoxUI::UIDrawList* draw = m_Renderer.GetUIDrawList();
         if (!draw)
             return;
 

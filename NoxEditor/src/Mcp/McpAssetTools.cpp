@@ -1,7 +1,7 @@
 #include "McpEditorTools.h"
 #include "McpMaterial.h"
 #include "McpToolHelpers.h"
-#include "McpValidation.h"
+#include <NoxMcp/McpValidation.h>
 
 #include <chrono>
 #include <format>
@@ -25,6 +25,7 @@
 // brought into the project. (instantiate_prefab is with the scene edits: McpEditTools.)
 namespace Nox::Mcp
 {
+    using namespace ::NoxMcp;
     namespace
     {
         constexpr double MaxWaitSeconds = 50.0; // (under the server's 60 s call time-out)
@@ -213,7 +214,7 @@ namespace Nox::Mcp
                                "column / code / message. A build already running is waited for. A build longer than 'timeout' answers "
                                "building: true -- get_build_status then.";
             tool.InputSchema = Schema().Number("timeout", "Wait at most this long, seconds (default 45)", false, 1.0, MaxWaitSeconds);
-            tool.Access = ConsoleAccess::Execute; // (MSBuild runs the project's build)
+            tool.Access = NoxMcp::ToolAccess::Execute; // (MSBuild runs the project's build)
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 if (!context.ScriptBuild || !context.RequestScriptBuild)
@@ -327,7 +328,7 @@ namespace Nox::Mcp
                                    .String("folder", "The folder under the asset folder (default \"Materials\")")
                                    .Build();
             tool.InputSchema["properties"]["values"] = Json{ { "type", "object" }, { "description", "Fields over the defaults (get_material shows them all)" } };
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 auto manager = Assets();
@@ -416,7 +417,7 @@ namespace Nox::Mcp
                                    .String("folder", "The folder under the asset folder (default \"Shaders\")")
                                    .String("code", "The Slang code (default: the template)")
                                    .Build();
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 auto manager = Assets();
@@ -543,7 +544,7 @@ namespace Nox::Mcp
             tool.InputSchema = Schema().String("material", "The material's uuid or path", true).Build();
             tool.InputSchema["properties"]["values"] = Json{ { "type", "object" }, { "description", "The fields to set" } };
             tool.InputSchema["properties"]["operations"] = Json{ { "type", "array" }, { "description", "JSON Patch: [{ op, path, value }]" } };
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 std::string error;
@@ -624,7 +625,7 @@ namespace Nox::Mcp
                                    .Array("entities", "The entities' uuids (the first is the pivot)", "string", true)
                                    .String("name", "The prefab's name (default: the first entity's)")
                                    .String("folder", "The folder under the asset folder (default \"Prefabs\")");
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 ToolDone answer = done;
@@ -705,7 +706,7 @@ namespace Nox::Mcp
                                          { "meters", "centimeters", "millimeters", "inches", "feet" })
                                    .Number("import_scale", "Models: a custom scale in world units per file unit, instead of source_unit's", false, 1e-6, 1e6)
                                    .Boolean("animations", "Models: also import its animation clips (default true)");
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 auto manager = Assets();

@@ -35,29 +35,23 @@
 #include "NoxCore/Core/Layer.h"
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Core/Ref.h"
-#include "NRI/Texture.h"
+#include "NoxCore/Renderer/Texture2D.h"
 #include "NoxCore/Network/NetSession.h"
 #include "NoxCore/Renderer/EditorCamera.h"
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneLoader.h"
-#include "NoxCore/UI/Layout/UIWindow.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
+#include <NoxUI/Layout/UIWindow.h>
+#include <NoxUI/Widgets/UIMenu.h>
 
 namespace Nox::Mcp
 {
     class McpEditor;
 }
 
-namespace Nox
+namespace NoxUI
 {
-    class Renderer;
-    class Renderer2D;
-    class Scene;
-
-    namespace UI
-    {
         class UIDockSpace;
         class UIDrawerHost;
         class UIElement;
@@ -66,6 +60,13 @@ namespace Nox
         class UIStackBox;
         class UIWindow;
     }
+
+namespace Nox
+{
+    class Renderer;
+    class Renderer2D;
+    class Scene;
+
 
     class EditorV2Layer : public Layer
     {
@@ -162,7 +163,7 @@ namespace Nox
         void StartPlayScene(Scene::NetMode netMode);
         void EndMultiplayerPlay();
         bool LaunchPlayer(const std::vector<std::string>& arguments, bool console, const char* what);
-        void ShowPlaySettingsOverlay(UI::UIElement* anchor);
+        void ShowPlaySettingsOverlay(NoxUI::UIElement* anchor);
         void ShowSaveAndPlayOverlay();
 
         enum class ViewportLayout { One = 0, TwoSideBySide, TwoStacked, Three, Four };
@@ -174,7 +175,7 @@ namespace Nox
         int HoveredViewport() const;
         int OpenViewportCount() const;
         void SubmitExtraViewports(Timestep ts);
-        std::vector<UI::UIMenuItem> BuildViewportOptionsItems(int index);
+        std::vector<NoxUI::UIMenuItem> BuildViewportOptionsItems(int index);
         void LoadViewportPrefs();
         void SaveViewportPrefs() const;
 
@@ -222,7 +223,7 @@ namespace Nox
         // Leaves Prefab Mode (asking first when it has unsaved changes), then runs `afterwards`; Cancel runs nothing.
         void RequestExitPrefabMode(std::function<void()> afterwards = {});
         void UpdatePrefabMode(); // (every frame: the bar's name and unsaved mark, framing the prefab once it has spawned)
-        Ref<UI::UIElement> BuildPrefabBar();
+        Ref<NoxUI::UIElement> BuildPrefabBar();
         // A prefab's Create Variant: "<Base> Variant" next to it.
         AssetHandle CreateVariant(AssetHandle base, const std::filesystem::path& relativeFolder);
         // Replace References: asks about unsaved asset editors, rewrites the files, reads the loaded users again, respawns the open
@@ -230,7 +231,7 @@ namespace Nox
         void ReplaceReferences(AssetHandle from, AssetHandle to);
         void ApplyReplaceReferences(AssetHandle from, AssetHandle to);
         // A toast at the bottom right (above the status bar).
-        void Notify(UI::UINotificationSeverity severity, std::string title, std::string message = {});
+        void Notify(NoxUI::UINotificationSeverity severity, std::string title, std::string message = {});
 
         Renderer* m_Renderer = nullptr;
         Renderer2D* m_Renderer2D = nullptr;
@@ -307,7 +308,7 @@ namespace Nox
         void CreateMcpServer();
         void UpdateMcpServer();
         void DestroyMcpServer();
-        std::vector<UI::UIMenuItem> BuildMcpMenu();
+        std::vector<NoxUI::UIMenuItem> BuildMcpMenu();
         std::unique_ptr<Mcp::McpEditor> m_Mcp;
 #endif
         PackageSettings m_PackageSettings;
@@ -332,13 +333,13 @@ namespace Nox
         float m_FpsAccumulator = 0.0f;
         uint32_t m_FpsFrames = 0;
 
-        std::array<Ref<UI::UIElement>, kMaxViewports> m_ViewportSlotRoots;
-        Ref<UI::UIDockSpace> m_ViewportDockSpace;
-        Ref<UI::UIElement> m_ActiveViewportHost;
-        Ref<UI::UIImage> m_ViewportImage;
+        std::array<Ref<NoxUI::UIElement>, kMaxViewports> m_ViewportSlotRoots;
+        Ref<NoxUI::UIDockSpace> m_ViewportDockSpace;
+        Ref<NoxUI::UIElement> m_ActiveViewportHost;
+        Ref<NoxUI::UIImage> m_ViewportImage;
         Ref<ViewportCanvas> m_ViewportCanvas;
-        std::array<Ref<UI::UIElement>, kMaxViewports> m_ExtraViewportHosts;
-        std::array<Ref<UI::UIImage>, kMaxViewports> m_ExtraViewportImages;
+        std::array<Ref<NoxUI::UIElement>, kMaxViewports> m_ExtraViewportHosts;
+        std::array<Ref<NoxUI::UIImage>, kMaxViewports> m_ExtraViewportImages;
         std::array<Ref<ExtraViewportCanvas>, kMaxViewports> m_ExtraViewportCanvases;
         ViewportToolState m_ViewportTools;
         ViewportOverlayToolbar m_ViewportToolbar;
@@ -350,15 +351,15 @@ namespace Nox
         Ref<Texture2D> m_IconSimulate;
         Ref<Texture2D> m_IconStep;
 
-        Ref<UI::UIStackBox> m_ToolBar;
-        Ref<UI::UIIconButton> m_PlayBtnWrap;
-        Ref<UI::UIIconButton> m_SimulateBtnWrap;
-        Ref<UI::UIIconButton> m_PauseBtnWrap;
-        Ref<UI::UIIconButton> m_StepBtnWrap;
+        Ref<NoxUI::UIStackBox> m_ToolBar;
+        Ref<NoxUI::UIIconButton> m_PlayBtnWrap;
+        Ref<NoxUI::UIIconButton> m_SimulateBtnWrap;
+        Ref<NoxUI::UIIconButton> m_PauseBtnWrap;
+        Ref<NoxUI::UIIconButton> m_StepBtnWrap;
         Ref<UIVectorIconButton> m_PlaySettingsCogBtn;
-        Ref<UI::UILabel> m_PlayNetStatusLabel;
-        Ref<UI::UIElement> m_PrefabBar;       // the toolbar in Prefab Mode: the prefab's name, Save, Save & Exit, Exit
-        Ref<UI::UILabel> m_PrefabBarLabel;
+        Ref<NoxUI::UILabel> m_PlayNetStatusLabel;
+        Ref<NoxUI::UIElement> m_PrefabBar;       // the toolbar in Prefab Mode: the prefab's name, Save, Save & Exit, Exit
+        Ref<NoxUI::UILabel> m_PrefabBarLabel;
 
         struct PrefabModeState
         {
@@ -379,15 +380,15 @@ namespace Nox
         };
         PrefabModeState m_PrefabMode;
 
-        Ref<UI::UIElement> m_SceneLoadBanner;
-        Ref<UI::UILabel> m_SceneLoadTitleLabel;
-        Ref<UI::UILabel> m_SceneLoadStageLabel;
-        Ref<UI::UIElement> m_SceneLoadProgressFill;
+        Ref<NoxUI::UIElement> m_SceneLoadBanner;
+        Ref<NoxUI::UILabel> m_SceneLoadTitleLabel;
+        Ref<NoxUI::UILabel> m_SceneLoadStageLabel;
+        Ref<NoxUI::UIElement> m_SceneLoadProgressFill;
 
-        Ref<UI::UILabel> m_FpsLabel;
-        Ref<UI::UIElement> m_StatusBar;
-        Ref<UI::UIElement> m_StatusActivity; // left: Ready / loading / streaming / importing / building
-        Ref<UI::UIElement> m_StatusCounts;   // right: warnings and errors in the log (click: the Output Log)
+        Ref<NoxUI::UILabel> m_FpsLabel;
+        Ref<NoxUI::UIElement> m_StatusBar;
+        Ref<NoxUI::UIElement> m_StatusActivity; // left: Ready / loading / streaming / importing / building
+        Ref<NoxUI::UIElement> m_StatusCounts;   // right: warnings and errors in the log (click: the Output Log)
         bool m_ResetLayoutRequested = false;
         bool m_LayoutBuilt = false;
         uint64_t m_LastScriptBuildNotified = 0;
@@ -409,7 +410,7 @@ namespace Nox
         Scope<HLODBuilder> m_HLODBuild;              // Build HLODs: a step a frame while it runs
         void StartHLODBuild();
         void CancelHLODBuild(const char* reason); // (the scene changes, Play / Simulate start)
-        void OpenToolWindow(const std::string& title, const Ref<UI::UIElement>& root, UI::UIVec2 size);
+        void OpenToolWindow(const std::string& title, const Ref<NoxUI::UIElement>& root, NoxUI::UIVec2 size);
         void UpdateToolWindows();
         void ApplyQualityPreset(int quality);
 
@@ -425,18 +426,18 @@ namespace Nox
         std::filesystem::path KeyBindingsPath() const;
         void OpenKeyboardShortcuts();
         void RebuildKeyboardShortcuts();
-        Ref<UI::UIStackBox> m_ShortcutsList;
+        Ref<NoxUI::UIStackBox> m_ShortcutsList;
         std::string m_CaptureCommand; // the command whose key the Keyboard Shortcuts window waits for
         bool m_CapturePrimary = true;
         SceneHierarchyV2Panel m_SceneHierarchyPanel;
         InspectorV2Panel m_InspectorPanel;
         ContentBrowserV2Panel m_ContentBrowserPanel;
         OutputLogV2Panel m_OutputLogPanel;
-        Ref<UI::UIElement> m_ContentBrowserRoot;
-        Ref<UI::UIElement> m_OutputLogRoot;
-        Ref<UI::UIDrawerHost> m_CenterArea;   // the dock space with the drawer over it
-        Ref<UI::UIElement> m_ContentDockButton, m_LogDockButton;
-        Ref<UI::UIElement> m_ContentDrawerTab, m_LogDrawerTab; // in the status bar
+        Ref<NoxUI::UIElement> m_ContentBrowserRoot;
+        Ref<NoxUI::UIElement> m_OutputLogRoot;
+        Ref<NoxUI::UIDrawerHost> m_CenterArea;   // the dock space with the drawer over it
+        Ref<NoxUI::UIElement> m_ContentDockButton, m_LogDockButton;
+        Ref<NoxUI::UIElement> m_ContentDrawerTab, m_LogDrawerTab; // in the status bar
         DrawerPage m_DrawerPage = DrawerPage::None;
         float m_DrawerFraction = 0.42f;
         bool m_ShowSceneHierarchy = true;

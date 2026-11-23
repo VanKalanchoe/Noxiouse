@@ -7,14 +7,15 @@
 
 #include <glm/glm.hpp>
 
-#include "NoxCore/UI/Core/UIElement.h"
+#include <NoxUI/Core/UIElement.h>
+#include <NoxUI/Rendering/UIFont.h>
 
 namespace Nox
 {
     // A table drawn in one element (thousands of rows cost one pass of text, not thousands of widgets): a header, rows filled each
     // frame by a callback, the wheel scrolls, a click on a row reports it (and the column). For live tables (render graph passes and
     // resources, profiler scopes) whose rows change every frame.
-    class TableViewV2 final : public UI::UIElement
+    class TableViewV2 final : public NoxUI::UIElement
     {
     public:
         struct Column
@@ -41,13 +42,13 @@ namespace Nox
         std::function<void(const Row& row, int column)> OnRowClick;
 
         TableViewV2();
-        bool OnMouseWheel(const UI::UIPointerEvent& e) override;
-        bool OnPointerUp(const UI::UIPointerEvent& e) override;
-        bool OnPointerMove(const UI::UIPointerEvent& e) override;
+        bool OnMouseWheel(const NoxUI::UIPointerEvent& e) override;
+        bool OnPointerUp(const NoxUI::UIPointerEvent& e) override;
+        bool OnPointerMove(const NoxUI::UIPointerEvent& e) override;
 
     protected:
-        UI::UIVec2 ComputeDesiredSize() override { return { 300.0f, 200.0f }; }
-        void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override;
+        NoxUI::UIVec2 ComputeDesiredSize() override { return { 300.0f, 200.0f }; }
+        void OnPaint(NoxUI::UIDrawList& drawList, const NoxUI::UITheme& theme) override;
 
     private:
         float ColumnX(int column) const;

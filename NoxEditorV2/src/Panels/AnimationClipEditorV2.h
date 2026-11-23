@@ -8,12 +8,13 @@
 
 #include "Panels/AssetEditorV2.h"
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIStackBox;
     }
+
+namespace Nox
+{
     struct AnimationNotify;
 
     // An animation clip (AnimationSequence) in its own window (T1): the clip on a skeletal mesh (play, pause, loop, speed, the preview
@@ -29,9 +30,9 @@ namespace Nox
         const std::string& GetName() const override { return m_Name; }
         const char* GetKind() const override { return "animation clip"; }
         std::string GetWindowTitle() const override { return "Animation: " + m_Name; }
-        UI::UIVec2 GetDefaultSize() const override { return { 620.0f, 720.0f }; }
+        NoxUI::UIVec2 GetDefaultSize() const override { return { 620.0f, 720.0f }; }
 
-        Ref<UI::UIElement> BuildUI() override;
+        Ref<NoxUI::UIElement> BuildUI() override;
         void Update() override;
         bool IsDirty() const override { return m_Dirty; }
         void Save() override;
@@ -46,7 +47,7 @@ namespace Nox
         void FindPreviewMesh();
         void SetPreviewMesh(AssetHandle mesh);
         void RebuildNotifies();
-        void ShowSoundSettings(size_t index, const UI::UIRect& anchor);
+        void ShowSoundSettings(size_t index, const NoxUI::UIRect& anchor);
         void Edited();
 
         AssetHandle m_Clip = 0;
@@ -63,7 +64,7 @@ namespace Nox
         std::chrono::steady_clock::time_point m_LastUpdate{};
         size_t m_NotifyCount = ~size_t(0);
 
-        Ref<UI::UIElement> m_Root;
-        Ref<UI::UIStackBox> m_Notifies;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UIStackBox> m_Notifies;
     };
 }

@@ -7,6 +7,7 @@
 
 namespace Nox::Mcp
 {
+    using namespace ::NoxMcp;
     namespace
     {
         Json ToJson(float value) { return value; }

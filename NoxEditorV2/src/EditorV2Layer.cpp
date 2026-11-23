@@ -1,4 +1,5 @@
 #include "EditorV2Layer.h"
+#include <NoxUI/Rendering/UIFont.h>
 #if NOX_WITH_MCP
 #include "McpEditor.h"
 #endif
@@ -62,23 +63,23 @@
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneSerializer.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
-#include "NoxCore/UI/Layout/UIDrawerHost.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
-#include "NoxCore/UI/Core/UIContext.h"
+#include <NoxUI/Layout/UIDrawerHost.h>
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Core/UIContext.h>
 #include "NoxCore/UI/Core/UILayer.h"
-#include "NoxCore/UI/Core/UIViewportManager.h"
-#include "NoxCore/UI/Layout/UIDockSpace.h"
-#include "NoxCore/UI/Layout/UITabPanel.h"
-#include "NoxCore/UI/Rendering/UIDrawList.h"
-#include "NoxCore/UI/Rendering/UIIcons.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UICheckBox.h"
-#include "NoxCore/UI/Widgets/UIImage.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIModal.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
-#include "NoxCore/UI/Widgets/UISlider.h"
-#include "NoxCore/UI/Widgets/UITextInput.h"
+#include <NoxUI/Core/UIViewportManager.h>
+#include <NoxUI/Layout/UIDockSpace.h>
+#include <NoxUI/Layout/UITabPanel.h>
+#include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Rendering/UIIcons.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UICheckBox.h>
+#include <NoxUI/Widgets/UIImage.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIModal.h>
+#include <NoxUI/Widgets/UIScrollView.h>
+#include <NoxUI/Widgets/UISlider.h>
+#include <NoxUI/Widgets/UITextInput.h>
 #include "NoxCore/Utils/Utils.h"
 #include "ProjectManager/ProcessLauncher.h"
 #include "ProjectManager/ProjectLibrary.h"
@@ -87,7 +88,7 @@ namespace Nox
 {
     namespace
     {
-        void ActivateDockedTab(UI::UIDockSpace& dock, const std::string& title); // (below)
+        void ActivateDockedTab(NoxUI::UIDockSpace& dock, const std::string& title); // (below)
 
         // In <Project>/Saved/Layout (EditorV2Layer::LayoutDirectory).
         // ("2": the layouts saved before the drawer had the Content Browser and the Output Log docked; they start fresh once.)
@@ -98,35 +99,35 @@ namespace Nox
 
         // The status bar's left side: a dot (green: nothing is running; amber, pulsing: something loads, streams, imports or
         // builds) and what it is.
-        class StatusActivityElement final : public UI::UIElement
+        class StatusActivityElement final : public NoxUI::UIElement
         {
         public:
             std::string Text = "Ready";
             bool Busy = false;
 
         protected:
-            UI::UIVec2 ComputeDesiredSize() override
+            NoxUI::UIVec2 ComputeDesiredSize() override
             {
-                return { 26.0f + UI::UILabel::MeasureText(Text, nullptr, kFont).x + 8.0f, kStatusBarHeight - 4.0f };
+                return { 26.0f + NoxUI::UILabel::MeasureText(Text, nullptr, kFont).x + 8.0f, kStatusBarHeight - 4.0f };
             }
 
             void OnUpdate(float dt) override { m_Time += dt; }
 
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
             {
-                const UI::UIRect& b = GetBounds();
-                const UI::UIVec2 dot{ b.Min.x + 12.0f, b.Center().y };
-                const UI::UIColor ready = UI::ThemeColor("StatusGood", { 0.36f, 0.80f, 0.46f, 1.0f });
-                const UI::UIColor busy = UI::ThemeColor("StatusBusy", { 0.96f, 0.70f, 0.26f, 1.0f });
+                const NoxUI::UIRect& b = GetBounds();
+                const NoxUI::UIVec2 dot{ b.Min.x + 12.0f, b.Center().y };
+                const NoxUI::UIColor ready = NoxUI::ThemeColor("StatusGood", { 0.36f, 0.80f, 0.46f, 1.0f });
+                const NoxUI::UIColor busy = NoxUI::ThemeColor("StatusBusy", { 0.96f, 0.70f, 0.26f, 1.0f });
                 if (Busy)
                 {
                     const float pulse = 0.5f + 0.5f * std::sin(m_Time * 5.0f);
-                    d.AddRoundedRect(dot - UI::UIVec2{ 7.0f }, dot + UI::UIVec2{ 7.0f }, { busy.r, busy.g, busy.b, 0.25f * pulse }, glm::vec4(7.0f));
+                    d.AddRoundedRect(dot - NoxUI::UIVec2{ 7.0f }, dot + NoxUI::UIVec2{ 7.0f }, { busy.r, busy.g, busy.b, 0.25f * pulse }, glm::vec4(7.0f));
                 }
-                d.AddRoundedRect(dot - UI::UIVec2{ 4.0f }, dot + UI::UIVec2{ 4.0f }, Busy ? busy : ready, glm::vec4(4.0f));
-                const UI::UIColor text = Busy ? theme.GetToken("Text", { 0.92f, 0.93f, 0.95f, 1.0f }) : theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
-                const std::string shown = UI::UILabel::ElideText(Text, nullptr, kFont, std::max(0.0f, b.Width() - 30.0f));
-                const UI::UIVec2 size = UI::UILabel::MeasureText(shown, nullptr, kFont);
+                d.AddRoundedRect(dot - NoxUI::UIVec2{ 4.0f }, dot + NoxUI::UIVec2{ 4.0f }, Busy ? busy : ready, glm::vec4(4.0f));
+                const NoxUI::UIColor text = Busy ? theme.GetToken("Text", { 0.92f, 0.93f, 0.95f, 1.0f }) : theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+                const std::string shown = NoxUI::UILabel::ElideText(Text, nullptr, kFont, std::max(0.0f, b.Width() - 30.0f));
+                const NoxUI::UIVec2 size = NoxUI::UILabel::MeasureText(shown, nullptr, kFont);
                 d.AddText(shown, nullptr, { b.Min.x + 24.0f, b.Center().y - size.y * 0.5f }, kFont, text);
             }
 
@@ -136,19 +137,19 @@ namespace Nox
         };
 
         // A tab of the status bar's left end ("Content Drawer", "Output Log"): flat text, lit while its page is shown.
-        class StatusTabButton final : public UI::UIElement
+        class StatusTabButton final : public NoxUI::UIElement
         {
         public:
             StatusTabButton(std::string label, std::function<void()> onClick)
                 : m_Label(std::move(label)), m_OnClick(std::move(onClick))
             {
-                HitTestMode = UI::UIHitTestMode::Self;
-                VAlign = UI::UIAlignment::Center;
+                HitTestMode = NoxUI::UIHitTestMode::Self;
+                VAlign = NoxUI::UIAlignment::Center;
             }
 
             bool Active = false;
 
-            bool OnPointerDown(const UI::UIPointerEvent& e) override
+            bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
             {
                 if (e.Button != 1)
                     return false;
@@ -156,26 +157,26 @@ namespace Nox
                     m_OnClick();
                 return true;
             }
-            bool OnPointerEnter(const UI::UIPointerEvent&) override { m_Hovered = true; return false; }
-            bool OnPointerLeave(const UI::UIPointerEvent&) override { m_Hovered = false; return false; }
+            bool OnPointerEnter(const NoxUI::UIPointerEvent&) override { m_Hovered = true; return false; }
+            bool OnPointerLeave(const NoxUI::UIPointerEvent&) override { m_Hovered = false; return false; }
 
         protected:
-            UI::UIVec2 ComputeDesiredSize() override
+            NoxUI::UIVec2 ComputeDesiredSize() override
             {
-                return { UI::UILabel::MeasureText(m_Label, nullptr, kFont).x + 24.0f, kStatusBarHeight - 4.0f };
+                return { NoxUI::UILabel::MeasureText(m_Label, nullptr, kFont).x + 24.0f, kStatusBarHeight - 4.0f };
             }
 
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
             {
-                const UI::UIRect& b = GetBounds();
-                const UI::UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
+                const NoxUI::UIRect& b = GetBounds();
+                const NoxUI::UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
                 if (Active || m_Hovered)
-                    d.AddRoundedRect(b.Min, b.Max, Active ? UI::UIColor{ accent.r, accent.g, accent.b, 0.22f } : UI::ThemeColor("StatusTabFill", { 1.0f, 1.0f, 1.0f, 0.06f }), glm::vec4(4.0f));
+                    d.AddRoundedRect(b.Min, b.Max, Active ? NoxUI::UIColor{ accent.r, accent.g, accent.b, 0.22f } : NoxUI::ThemeColor("StatusTabFill", { 1.0f, 1.0f, 1.0f, 0.06f }), glm::vec4(4.0f));
                 if (Active)
                     d.AddRoundedRect({ b.Min.x + 6.0f, b.Max.y - 2.0f }, { b.Max.x - 6.0f, b.Max.y }, accent, glm::vec4(1.0f));
-                const UI::UIColor text = (Active || m_Hovered) ? theme.GetToken("Text", { 0.92f, 0.93f, 0.95f, 1.0f })
+                const NoxUI::UIColor text = (Active || m_Hovered) ? theme.GetToken("Text", { 0.92f, 0.93f, 0.95f, 1.0f })
                                                                : theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
-                const UI::UIVec2 size = UI::UILabel::MeasureText(m_Label, nullptr, kFont);
+                const NoxUI::UIVec2 size = NoxUI::UILabel::MeasureText(m_Label, nullptr, kFont);
                 d.AddText(m_Label, nullptr, { b.Center().x - size.x * 0.5f, b.Center().y - size.y * 0.5f }, kFont, text);
             }
 
@@ -187,17 +188,17 @@ namespace Nox
         };
 
         // The status bar's right side: the log's warnings and errors since its last Clear; a click opens the Output Log.
-        class StatusCountsElement final : public UI::UIElement
+        class StatusCountsElement final : public NoxUI::UIElement
         {
         public:
             StatusCountsElement(const OutputLogV2Panel& log, std::function<void()> onClick)
                 : m_Log(log), m_OnClick(std::move(onClick))
             {
-                HitTestMode = UI::UIHitTestMode::Self;
+                HitTestMode = NoxUI::UIHitTestMode::Self;
                 Tooltip = "Warnings and errors in the Output Log since its last Clear -- click to open it";
             }
 
-            bool OnPointerDown(const UI::UIPointerEvent& e) override
+            bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
             {
                 if (e.Button != 1)
                     return false;
@@ -205,43 +206,43 @@ namespace Nox
                     m_OnClick();
                 return true;
             }
-            bool OnPointerEnter(const UI::UIPointerEvent&) override { m_Hovered = true; return false; }
-            bool OnPointerLeave(const UI::UIPointerEvent&) override { m_Hovered = false; return false; }
+            bool OnPointerEnter(const NoxUI::UIPointerEvent&) override { m_Hovered = true; return false; }
+            bool OnPointerLeave(const NoxUI::UIPointerEvent&) override { m_Hovered = false; return false; }
 
         protected:
-            UI::UIVec2 ComputeDesiredSize() override { return { 150.0f, kStatusBarHeight - 4.0f }; }
+            NoxUI::UIVec2 ComputeDesiredSize() override { return { 150.0f, kStatusBarHeight - 4.0f }; }
 
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
             {
-                const UI::UIRect& b = GetBounds();
+                const NoxUI::UIRect& b = GetBounds();
                 if (m_Hovered)
-                    d.AddRoundedRect(b.Min, b.Max, UI::ThemeColor("StatusCountsFill", { 1.0f, 1.0f, 1.0f, 0.06f }), glm::vec4(4.0f));
-                const UI::UIColor muted = theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+                    d.AddRoundedRect(b.Min, b.Max, NoxUI::ThemeColor("StatusCountsFill", { 1.0f, 1.0f, 1.0f, 0.06f }), glm::vec4(4.0f));
+                const NoxUI::UIColor muted = theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
                 const size_t warnings = m_Log.GetWarningCount(), errors = m_Log.GetErrorCount();
-                const UI::UIColor warnColor = warnings > 0 ? UI::ThemeColor("StatusWarning", { 0.96f, 0.74f, 0.28f, 1.0f }) : muted;
-                const UI::UIColor errorColor = errors > 0 ? UI::ThemeColor("StatusError", { 0.95f, 0.38f, 0.38f, 1.0f }) : muted;
+                const NoxUI::UIColor warnColor = warnings > 0 ? NoxUI::ThemeColor("StatusWarning", { 0.96f, 0.74f, 0.28f, 1.0f }) : muted;
+                const NoxUI::UIColor errorColor = errors > 0 ? NoxUI::ThemeColor("StatusError", { 0.95f, 0.38f, 0.38f, 1.0f }) : muted;
                 const std::string errorText = std::to_string(errors);
                 const std::string warnText = std::to_string(warnings);
-                const float errorW = UI::UILabel::MeasureText(errorText, nullptr, kFont).x;
-                const float warnW = UI::UILabel::MeasureText(warnText, nullptr, kFont).x;
+                const float errorW = NoxUI::UILabel::MeasureText(errorText, nullptr, kFont).x;
+                const float warnW = NoxUI::UILabel::MeasureText(warnText, nullptr, kFont).x;
                 const float cy = b.Center().y;
 
                 // Right to left: errors, then warnings.
                 float x = b.Max.x - 10.0f - errorW;
-                d.AddText(errorText, nullptr, { x, cy - UI::UILabel::MeasureText(errorText, nullptr, kFont).y * 0.5f }, kFont, errorColor);
-                const UI::UIVec2 disc{ x - 11.0f, cy };
-                d.AddRoundedRect(disc - UI::UIVec2{ 6.5f }, disc + UI::UIVec2{ 6.5f }, { errorColor.r, errorColor.g, errorColor.b, 0.22f }, glm::vec4(6.5f), 1.5f, errorColor);
-                UI::Icons::DrawSegment(d, disc + UI::UIVec2{ -2.6f, -2.6f }, disc + UI::UIVec2{ 2.6f, 2.6f }, 1.6f, errorColor);
-                UI::Icons::DrawSegment(d, disc + UI::UIVec2{ -2.6f, 2.6f }, disc + UI::UIVec2{ 2.6f, -2.6f }, 1.6f, errorColor);
+                d.AddText(errorText, nullptr, { x, cy - NoxUI::UILabel::MeasureText(errorText, nullptr, kFont).y * 0.5f }, kFont, errorColor);
+                const NoxUI::UIVec2 disc{ x - 11.0f, cy };
+                d.AddRoundedRect(disc - NoxUI::UIVec2{ 6.5f }, disc + NoxUI::UIVec2{ 6.5f }, { errorColor.r, errorColor.g, errorColor.b, 0.22f }, glm::vec4(6.5f), 1.5f, errorColor);
+                NoxUI::Icons::DrawSegment(d, disc + NoxUI::UIVec2{ -2.6f, -2.6f }, disc + NoxUI::UIVec2{ 2.6f, 2.6f }, 1.6f, errorColor);
+                NoxUI::Icons::DrawSegment(d, disc + NoxUI::UIVec2{ -2.6f, 2.6f }, disc + NoxUI::UIVec2{ 2.6f, -2.6f }, 1.6f, errorColor);
 
                 x = disc.x - 18.0f - warnW;
-                d.AddText(warnText, nullptr, { x, cy - UI::UILabel::MeasureText(warnText, nullptr, kFont).y * 0.5f }, kFont, warnColor);
-                const UI::UIVec2 tri{ x - 11.0f, cy + 0.5f };
-                UI::Icons::DrawSegment(d, { tri.x - 6.5f, tri.y + 5.5f }, { tri.x, tri.y - 6.0f }, 1.6f, warnColor);
-                UI::Icons::DrawSegment(d, { tri.x, tri.y - 6.0f }, { tri.x + 6.5f, tri.y + 5.5f }, 1.6f, warnColor);
-                UI::Icons::DrawSegment(d, { tri.x + 6.5f, tri.y + 5.5f }, { tri.x - 6.5f, tri.y + 5.5f }, 1.6f, warnColor);
-                UI::Icons::DrawSegment(d, { tri.x, tri.y - 2.2f }, { tri.x, tri.y + 1.6f }, 1.6f, warnColor);
-                UI::Icons::DrawSegment(d, { tri.x, tri.y + 3.4f }, { tri.x, tri.y + 3.6f }, 1.8f, warnColor);
+                d.AddText(warnText, nullptr, { x, cy - NoxUI::UILabel::MeasureText(warnText, nullptr, kFont).y * 0.5f }, kFont, warnColor);
+                const NoxUI::UIVec2 tri{ x - 11.0f, cy + 0.5f };
+                NoxUI::Icons::DrawSegment(d, { tri.x - 6.5f, tri.y + 5.5f }, { tri.x, tri.y - 6.0f }, 1.6f, warnColor);
+                NoxUI::Icons::DrawSegment(d, { tri.x, tri.y - 6.0f }, { tri.x + 6.5f, tri.y + 5.5f }, 1.6f, warnColor);
+                NoxUI::Icons::DrawSegment(d, { tri.x + 6.5f, tri.y + 5.5f }, { tri.x - 6.5f, tri.y + 5.5f }, 1.6f, warnColor);
+                NoxUI::Icons::DrawSegment(d, { tri.x, tri.y - 2.2f }, { tri.x, tri.y + 1.6f }, 1.6f, warnColor);
+                NoxUI::Icons::DrawSegment(d, { tri.x, tri.y + 3.4f }, { tri.x, tri.y + 3.6f }, 1.8f, warnColor);
             }
 
         private:
@@ -320,10 +321,10 @@ namespace Nox
             const AssetHandle created = CreatePrefab(entity, m_ContentBrowserPanel.CurrentFolder());
             if (created == 0)
             {
-                Notify(UI::UINotificationSeverity::Error, "Prefab not created", "See the Output Log for why.");
+                Notify(NoxUI::UINotificationSeverity::Error, "Prefab not created", "See the Output Log for why.");
                 return;
             }
-            Notify(UI::UINotificationSeverity::Success, "Prefab created", "In " + (m_ContentBrowserPanel.CurrentFolder().empty() ? std::string("Assets") : m_ContentBrowserPanel.CurrentFolder().generic_string()));
+            Notify(NoxUI::UINotificationSeverity::Success, "Prefab created", "In " + (m_ContentBrowserPanel.CurrentFolder().empty() ? std::string("Assets") : m_ContentBrowserPanel.CurrentFolder().generic_string()));
             m_ContentBrowserPanel.ShowNewAsset(created);
         });
         m_ContentBrowserPanel.SetOpenAssetCallback([this](AssetHandle handle) { OpenAssetV2(handle); });
@@ -341,7 +342,7 @@ namespace Nox
             if (m_ActiveScene && m_ActiveScene != m_EditorScene)
                 m_ActiveScene->CollectAssetReferences(handles);
         });
-        m_ContentBrowserPanel.SetNotifyCallback([this](UI::UINotification note)
+        m_ContentBrowserPanel.SetNotifyCallback([this](NoxUI::UINotification note)
         {
             Notify(note.Severity, std::move(note.Title), std::move(note.Message));
         });
@@ -448,7 +449,7 @@ namespace Nox
         if (m_SceneDirty || m_EditorScenePath.empty())
             SaveScene();
         if (!HasUnsavedChanges(UnsavedAssets | UnsavedMixer))
-            Notify(UI::UINotificationSeverity::Success, "Saved", "Everything that was unsaved.");
+            Notify(NoxUI::UINotificationSeverity::Success, "Saved", "Everything that was unsaved.");
     }
 
     void EditorV2Layer::NewProjectAsync()
@@ -466,7 +467,7 @@ namespace Nox
             if (projectFile.empty())
             {
                 NOX_CORE_ERROR("New Project: {}", error);
-                Notify(UI::UINotificationSeverity::Error, "Project not made", error);
+                Notify(NoxUI::UINotificationSeverity::Error, "Project not made", error);
                 return;
             }
             m_CreateBasicScene = true;
@@ -509,7 +510,7 @@ namespace Nox
         if (!Project::Load(path))
         {
             NOX_CORE_ERROR("Could not open the project '{}'", path.string());
-            Notify(UI::UINotificationSeverity::Error, "Project not opened", path.filename().string() + " -- see the Output Log.");
+            Notify(NoxUI::UINotificationSeverity::Error, "Project not opened", path.filename().string() + " -- see the Output Log.");
             return false;
         }
         AssetPreviewRenderer::Get().Clear(); // the thumbnails were the other project's
@@ -561,7 +562,7 @@ namespace Nox
         m_ProjectSettings.MarkDirty();       // (its rows read the project that is open)
         m_ContentBrowserPanel.Refresh();
         if (project)
-            Notify(UI::UINotificationSeverity::Success, "Project opened", project->GetConfig().Name);
+            Notify(NoxUI::UINotificationSeverity::Success, "Project opened", project->GetConfig().Name);
         return true;
     }
 
@@ -662,7 +663,7 @@ namespace Nox
             return;
         if (load->Failed())
         {
-            Notify(UI::UINotificationSeverity::Error, "Scene not opened",
+            Notify(NoxUI::UINotificationSeverity::Error, "Scene not opened",
                    Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle).filename().string() + " could not be read -- see the Output Log.");
             return;
         }
@@ -673,7 +674,7 @@ namespace Nox
         newScene->LoadSubLevelsForEditing();
         if (m_ViewportImage)
         {
-            const UI::UIRect& bounds = m_ViewportImage->GetBounds();
+            const NoxUI::UIRect& bounds = m_ViewportImage->GetBounds();
             const uint32_t w = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Width())));
             const uint32_t h = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Height())));
             if (w > 0 && h > 0)
@@ -720,7 +721,7 @@ namespace Nox
         Profiler::Get().ResetStats();
 #endif
         m_SceneCleanPending = true;
-        Notify(UI::UINotificationSeverity::Info, "Scene opened", m_EditorScenePath.filename().string());
+        Notify(NoxUI::UINotificationSeverity::Info, "Scene opened", m_EditorScenePath.filename().string());
     }
 
     void EditorV2Layer::SaveScene(std::function<void(bool saved)> then)
@@ -757,7 +758,7 @@ namespace Nox
         const auto after = std::filesystem::last_write_time(fullPath, error);
         if (error || (existed && after == before))
         {
-            Notify(UI::UINotificationSeverity::Error, "Scene not saved", fullPath.filename().string() + " could not be written -- see the Output Log.");
+            Notify(NoxUI::UINotificationSeverity::Error, "Scene not saved", fullPath.filename().string() + " could not be written -- see the Output Log.");
             if (then)
                 then(false);
             return;
@@ -766,7 +767,7 @@ namespace Nox
         CaptureProjectThumbnail();
         m_SceneDirty = false;
         m_HistoryPositionSeen = m_History.GetPosition();
-        Notify(UI::UINotificationSeverity::Success, "Scene saved", m_EditorScenePath.generic_string());
+        Notify(NoxUI::UINotificationSeverity::Success, "Scene saved", m_EditorScenePath.generic_string());
         if (then)
             then(true);
     }
@@ -808,7 +809,7 @@ namespace Nox
         SerializeScene(m_ActiveScene, path);
         if (!std::filesystem::exists(path, error))
         {
-            Notify(UI::UINotificationSeverity::Error, "Scene not saved", path.filename().string() + " could not be written -- see the Output Log.");
+            Notify(NoxUI::UINotificationSeverity::Error, "Scene not saved", path.filename().string() + " could not be written -- see the Output Log.");
             return false;
         }
 
@@ -823,7 +824,7 @@ namespace Nox
         m_ContentBrowserPanel.Refresh();
         m_SceneDirty = false;
         m_HistoryPositionSeen = m_History.GetPosition();
-        Notify(UI::UINotificationSeverity::Success, "Scene saved", m_EditorScenePath.generic_string());
+        Notify(NoxUI::UINotificationSeverity::Success, "Scene saved", m_EditorScenePath.generic_string());
         return true;
     }
 
@@ -844,7 +845,7 @@ namespace Nox
             if (type == AssetType::Prefab && m_PrefabMode.Active && handle == m_PrefabMode.Prefab)
             {
                 // (an instance of the prefab inside itself would spawn itself without end)
-                Notify(UI::UINotificationSeverity::Warning, "Not placed", "A prefab cannot contain an instance of itself.");
+                Notify(NoxUI::UINotificationSeverity::Warning, "Not placed", "A prefab cannot contain an instance of itself.");
                 continue;
             }
             if (type == AssetType::Prefab)
@@ -1603,14 +1604,14 @@ namespace Nox
         UILayer* uiLayer = Application::Get().GetUILayer();
         if (!uiLayer)
             return;
-        Ref<UI::UILabel> label(new UI::UILabel(text, 14.0f));
+        Ref<NoxUI::UILabel> label(new NoxUI::UILabel(text, 14.0f));
         label->WordWrap = true;
-        label->WidthMode = UI::UISizeMode::Fill;
-        std::vector<UI::UIModal::Button> buttons;
+        label->WidthMode = NoxUI::UISizeMode::Fill;
+        std::vector<NoxUI::UIModal::Button> buttons;
         buttons.push_back({ "Save", std::move(save), true });
         buttons.push_back({ "Don't Save", std::move(dontSave) });
         buttons.push_back({ "Cancel", {} });
-        UI::UIModal::ShowCustom(uiLayer->GetContext(), "Save changes?", label, std::move(buttons), 480.0f);
+        NoxUI::UIModal::ShowCustom(uiLayer->GetContext(), "Save changes?", label, std::move(buttons), 480.0f);
     }
 
     void EditorV2Layer::ConfirmUnsavedChanges(const std::string& action, std::function<void()> proceed, uint32_t scope)
@@ -1662,7 +1663,7 @@ namespace Nox
                     // Still unsaved (Save As was cancelled, a file could not be written): nothing is dropped.
                     if (HasUnsavedChanges(scope))
                     {
-                        Notify(UI::UINotificationSeverity::Warning, "Not everything was saved", "Nothing was closed: save again or choose Don't Save.");
+                        Notify(NoxUI::UINotificationSeverity::Warning, "Not everything was saved", "Nothing was closed: save again or choose Don't Save.");
                         return;
                     }
                     if (proceed)
@@ -1722,7 +1723,7 @@ namespace Nox
 
         if (m_ViewportImage)
         {
-            const UI::UIRect& bounds = m_ViewportImage->GetBounds();
+            const NoxUI::UIRect& bounds = m_ViewportImage->GetBounds();
             const uint32_t w = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Width())));
             const uint32_t h = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Height())));
             if (w > 0 && h > 0)
@@ -1772,7 +1773,7 @@ namespace Nox
     {
         if (m_PrefabMode.Active)
         {
-            Notify(UI::UINotificationSeverity::Info, "Not in Prefab Mode", "Exit Prefab Mode (toolbar) to play the level.");
+            Notify(NoxUI::UINotificationSeverity::Info, "Not in Prefab Mode", "Exit Prefab Mode (toolbar) to play the level.");
             return;
         }
         CancelHLODBuild("Play");
@@ -1811,7 +1812,7 @@ namespace Nox
         m_ActiveScene->SetRenderer2D(m_Renderer2D);
         if (m_ViewportImage)
         {
-            const UI::UIRect& bounds = m_ViewportImage->GetBounds();
+            const NoxUI::UIRect& bounds = m_ViewportImage->GetBounds();
             const uint32_t w = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Width())));
             const uint32_t h = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Height())));
             if (w > 0 && h > 0)
@@ -1996,33 +1997,33 @@ namespace Nox
         m_PlaySessionEnded = false;
     }
 
-    void EditorV2Layer::ShowPlaySettingsOverlay(UI::UIElement* anchor)
+    void EditorV2Layer::ShowPlaySettingsOverlay(NoxUI::UIElement* anchor)
     {
         UILayer* uiLayer = Application::Get().GetUILayer();
         if (!uiLayer || !anchor)
             return;
 
-        UI::UIContext& ctx = uiLayer->GetContext();
-        auto backdrop = UI::MakeUI<UI::UIAnchorBox>();
-        backdrop->WidthMode = UI::UISizeMode::Fill;
-        backdrop->HeightMode = UI::UISizeMode::Fill;
-        backdrop->HitTestMode = UI::UIHitTestMode::Self;
+        NoxUI::UIContext& ctx = uiLayer->GetContext();
+        auto backdrop = NoxUI::MakeUI<NoxUI::UIAnchorBox>();
+        backdrop->WidthMode = NoxUI::UISizeMode::Fill;
+        backdrop->HeightMode = NoxUI::UISizeMode::Fill;
+        backdrop->HitTestMode = NoxUI::UIHitTestMode::Self;
 
-        auto card = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 8.0f);
+        auto card = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 8.0f);
         card->StyleClass = "Surface";
         card->DrawBackground = true;
-        card->HitTestMode = UI::UIHitTestMode::Self;
-        card->Padding = UI::UIThickness::All(12.0f);
-        card->WidthMode = UI::UISizeMode::Fixed;
-        card->HeightMode = UI::UISizeMode::Auto;
+        card->HitTestMode = NoxUI::UIHitTestMode::Self;
+        card->Padding = NoxUI::UIThickness::All(12.0f);
+        card->WidthMode = NoxUI::UISizeMode::Fixed;
+        card->HeightMode = NoxUI::UISizeMode::Auto;
         card->FixedSize = { 310.0f, 0.0f };
 
-        const UI::UIRect anchorBounds = anchor->GetBounds();
+        const NoxUI::UIRect anchorBounds = anchor->GetBounds();
         float leftX = anchorBounds.Min.x;
         float topY = anchorBounds.Max.y + 4.0f;
         if (const auto& root = ctx.GetRoot())
         {
-            const UI::UIRect& rootBounds = root->GetBounds();
+            const NoxUI::UIRect& rootBounds = root->GetBounds();
             if (rootBounds.Width() > 330.0f)
                 leftX = std::clamp(leftX, 8.0f, rootBounds.Max.x - 320.0f);
             if (rootBounds.Height() > 360.0f)
@@ -2032,19 +2033,19 @@ namespace Nox
         card->AnchorMax = { 0.0f, 0.0f };
         card->AnchorOffsets = { leftX, topY, 0.0f, 0.0f };
 
-        auto title = UI::Label("Multiplayer Play Settings").Get();
+        auto title = NoxUI::Label("Multiplayer Play Settings").Get();
         card->AddChild(title);
-        card->AddChild(UI::Separator().Get());
+        card->AddChild(NoxUI::Separator().Get());
 
-        auto modeLabel = UI::Label("Net Mode").Get();
+        auto modeLabel = NoxUI::Label("Net Mode").Get();
         card->AddChild(modeLabel);
-        std::array<Ref<UI::UIButton>, 3> modeBtns;
-        std::array<Ref<UI::UIButton>, 3> emuBtns;
-        Ref<UI::UISlider> playersSlider;
-        Ref<UI::UILabel> playersLabel;
-        Ref<UI::UITextInput> portInput;
-        Ref<UI::UICheckBox> saveCheck;
-        Ref<UI::UICheckBox> debugCheck;
+        std::array<Ref<NoxUI::UIButton>, 3> modeBtns;
+        std::array<Ref<NoxUI::UIButton>, 3> emuBtns;
+        Ref<NoxUI::UISlider> playersSlider;
+        Ref<NoxUI::UILabel> playersLabel;
+        Ref<NoxUI::UITextInput> portInput;
+        Ref<NoxUI::UICheckBox> saveCheck;
+        Ref<NoxUI::UICheckBox> debugCheck;
 
         auto syncControls = [this, &modeBtns, &emuBtns, &playersSlider, &playersLabel, &portInput, &saveCheck, &debugCheck]() mutable
         {
@@ -2072,24 +2073,24 @@ namespace Nox
         };
 
         const char* modeLabels[3] = { "Standalone", "Listen Server", "Client" };
-        auto modeRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-        modeRow->WidthMode = UI::UISizeMode::Fill;
-        modeRow->HeightMode = UI::UISizeMode::Auto;
+        auto modeRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+        modeRow->WidthMode = NoxUI::UISizeMode::Fill;
+        modeRow->HeightMode = NoxUI::UISizeMode::Auto;
         for (int i = 0; i < 3; ++i)
         {
-            modeBtns[i] = UI::MakeUI<UI::UIButton>(modeLabels[i]);
-            modeBtns[i]->WidthMode = UI::UISizeMode::Fill;
-            modeBtns[i]->Padding = UI::UIThickness::Symmetric(6.0f, 4.0f);
+            modeBtns[i] = NoxUI::MakeUI<NoxUI::UIButton>(modeLabels[i]);
+            modeBtns[i]->WidthMode = NoxUI::UISizeMode::Fill;
+            modeBtns[i]->Padding = NoxUI::UIThickness::Symmetric(6.0f, 4.0f);
             modeRow->AddChild(modeBtns[i]);
         }
         card->AddChild(modeRow);
 
-        playersLabel = UI::Label(std::format("Number of Players: {}", m_PlayNet.Players)).Get();
+        playersLabel = NoxUI::Label(std::format("Number of Players: {}", m_PlayNet.Players)).Get();
         card->AddChild(playersLabel);
-        playersSlider = UI::MakeUI<UI::UISlider>(static_cast<float>(m_PlayNet.Players), 1.0f, 8.0f);
+        playersSlider = NoxUI::MakeUI<NoxUI::UISlider>(static_cast<float>(m_PlayNet.Players), 1.0f, 8.0f);
         playersSlider->Step = 1.0f;
         playersSlider->Format = "{:.0f}";
-        playersSlider->WidthMode = UI::UISizeMode::Fill;
+        playersSlider->WidthMode = NoxUI::UISizeMode::Fill;
         playersSlider->OnChanged = [this, playersLabel](float value)
         {
             m_PlayNet.Players = std::clamp(static_cast<int>(std::round(value)), 1, 8);
@@ -2098,26 +2099,26 @@ namespace Nox
         };
         card->AddChild(playersSlider);
 
-        card->AddChild(UI::Label("Network Emulation").Get());
+        card->AddChild(NoxUI::Label("Network Emulation").Get());
         const char* emuLabels[3] = { "Off", "Average", "Bad" };
-        auto emuRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-        emuRow->WidthMode = UI::UISizeMode::Fill;
-        emuRow->HeightMode = UI::UISizeMode::Auto;
+        auto emuRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+        emuRow->WidthMode = NoxUI::UISizeMode::Fill;
+        emuRow->HeightMode = NoxUI::UISizeMode::Auto;
         for (int i = 0; i < 3; ++i)
         {
-            emuBtns[i] = UI::MakeUI<UI::UIButton>(emuLabels[i]);
-            emuBtns[i]->WidthMode = UI::UISizeMode::Fill;
-            emuBtns[i]->Padding = UI::UIThickness::Symmetric(6.0f, 4.0f);
+            emuBtns[i] = NoxUI::MakeUI<NoxUI::UIButton>(emuLabels[i]);
+            emuBtns[i]->WidthMode = NoxUI::UISizeMode::Fill;
+            emuBtns[i]->Padding = NoxUI::UIThickness::Symmetric(6.0f, 4.0f);
             emuRow->AddChild(emuBtns[i]);
         }
         card->AddChild(emuRow);
 
-        auto portRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 8.0f);
-        portRow->WidthMode = UI::UISizeMode::Fill;
-        portRow->HeightMode = UI::UISizeMode::Auto;
-        portRow->AddChild(UI::Label("Port").VAlign(UI::UIAlignment::Center).Get());
-        portInput = UI::MakeUI<UI::UITextInput>(std::to_string(m_PlayNet.Port), "7777");
-        portInput->WidthMode = UI::UISizeMode::Fill;
+        auto portRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 8.0f);
+        portRow->WidthMode = NoxUI::UISizeMode::Fill;
+        portRow->HeightMode = NoxUI::UISizeMode::Auto;
+        portRow->AddChild(NoxUI::Label("Port").VAlign(NoxUI::UIAlignment::Center).Get());
+        portInput = NoxUI::MakeUI<NoxUI::UITextInput>(std::to_string(m_PlayNet.Port), "7777");
+        portInput->WidthMode = NoxUI::UISizeMode::Fill;
         portInput->OnChanged = [this](const std::string& txt)
         {
             const int parsed = std::atoi(txt.c_str());
@@ -2127,21 +2128,21 @@ namespace Nox
         portRow->AddChild(portInput);
         card->AddChild(portRow);
 
-        saveCheck = UI::MakeUI<UI::UICheckBox>("Save the scene without asking", m_PlayNet.SaveWithoutAsking);
+        saveCheck = NoxUI::MakeUI<NoxUI::UICheckBox>("Save the scene without asking", m_PlayNet.SaveWithoutAsking);
         saveCheck->OnChanged = [this](bool v) { m_PlayNet.SaveWithoutAsking = v; };
         card->AddChild(saveCheck);
 
-        debugCheck = UI::MakeUI<UI::UICheckBox>("Network debug log (--net-debug)", m_PlayNet.DebugTrace);
+        debugCheck = NoxUI::MakeUI<NoxUI::UICheckBox>("Network debug log (--net-debug)", m_PlayNet.DebugTrace);
         debugCheck->OnChanged = [this](bool v) { m_PlayNet.DebugTrace = v; };
         card->AddChild(debugCheck);
 
-        auto closeRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-        closeRow->WidthMode = UI::UISizeMode::Fill;
-        closeRow->HeightMode = UI::UISizeMode::Auto;
-        auto closeSpacer = UI::MakeUI<UI::UIElement>();
-        closeSpacer->WidthMode = UI::UISizeMode::Fill;
-        auto closeBtn = UI::MakeUI<UI::UIButton>("Done", [&ctx]() { ctx.ClearOverlay(); });
-        closeBtn->Padding = UI::UIThickness::Symmetric(12.0f, 4.0f);
+        auto closeRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+        closeRow->WidthMode = NoxUI::UISizeMode::Fill;
+        closeRow->HeightMode = NoxUI::UISizeMode::Auto;
+        auto closeSpacer = NoxUI::MakeUI<NoxUI::UIElement>();
+        closeSpacer->WidthMode = NoxUI::UISizeMode::Fill;
+        auto closeBtn = NoxUI::MakeUI<NoxUI::UIButton>("Done", [&ctx]() { ctx.ClearOverlay(); });
+        closeBtn->Padding = NoxUI::UIThickness::Symmetric(12.0f, 4.0f);
         closeRow->AddChild(closeSpacer);
         closeRow->AddChild(closeBtn);
         card->AddChild(closeRow);
@@ -2174,8 +2175,8 @@ namespace Nox
 
         syncControls();
 
-        UI::UIElement* cardPtr = card.get();
-        backdrop->OnMouseDown = [cardPtr, &ctx](const UI::UIPointerEvent& e)
+        NoxUI::UIElement* cardPtr = card.get();
+        backdrop->OnMouseDown = [cardPtr, &ctx](const NoxUI::UIPointerEvent& e)
         {
             if (!cardPtr->GetBounds().Contains(e.Position))
             {
@@ -2194,41 +2195,41 @@ namespace Nox
         if (!uiLayer)
             return;
 
-        UI::UIContext& ctx = uiLayer->GetContext();
-        auto backdrop = UI::MakeUI<UI::UIAnchorBox>();
-        backdrop->WidthMode = UI::UISizeMode::Fill;
-        backdrop->HeightMode = UI::UISizeMode::Fill;
-        backdrop->HitTestMode = UI::UIHitTestMode::Self;
+        NoxUI::UIContext& ctx = uiLayer->GetContext();
+        auto backdrop = NoxUI::MakeUI<NoxUI::UIAnchorBox>();
+        backdrop->WidthMode = NoxUI::UISizeMode::Fill;
+        backdrop->HeightMode = NoxUI::UISizeMode::Fill;
+        backdrop->HitTestMode = NoxUI::UIHitTestMode::Self;
         backdrop->DrawBackground = true;
         backdrop->StyleClass = "Backdrop";
 
-        auto card = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 10.0f);
+        auto card = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 10.0f);
         card->StyleClass = "Surface";
         card->DrawBackground = true;
-        card->HitTestMode = UI::UIHitTestMode::Self;
-        card->Padding = UI::UIThickness::All(16.0f);
-        card->WidthMode = UI::UISizeMode::Fixed;
-        card->HeightMode = UI::UISizeMode::Auto;
+        card->HitTestMode = NoxUI::UIHitTestMode::Self;
+        card->Padding = NoxUI::UIThickness::All(16.0f);
+        card->WidthMode = NoxUI::UISizeMode::Fixed;
+        card->HeightMode = NoxUI::UISizeMode::Auto;
         card->FixedSize = { 390.0f, 0.0f };
         card->AnchorMin = { 0.5f, 0.5f };
         card->AnchorMax = { 0.5f, 0.5f };
         card->AnchorOffsets = { -195.0f, -95.0f, 195.0f, 95.0f };
 
-        card->AddChild(UI::Label("Save and Play").Get());
-        auto desc = UI::Label("Multiplayer Play starts the other players (NoxRuntime) on the saved scene: the scene is saved first.").Get();
+        card->AddChild(NoxUI::Label("Save and Play").Get());
+        auto desc = NoxUI::Label("Multiplayer Play starts the other players (NoxRuntime) on the saved scene: the scene is saved first.").Get();
         desc->WordWrap = true;
         card->AddChild(desc);
 
-        auto dontAsk = UI::CheckBox("Don't ask again (this session)", m_PlayNet.SaveWithoutAsking,
+        auto dontAsk = NoxUI::CheckBox("Don't ask again (this session)", m_PlayNet.SaveWithoutAsking,
                                     [this](bool checked) { m_PlayNet.SaveWithoutAsking = checked; }).Get();
         card->AddChild(dontAsk);
 
-        auto btnRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 8.0f);
-        btnRow->WidthMode = UI::UISizeMode::Fill;
-        btnRow->HeightMode = UI::UISizeMode::Auto;
-        auto spacer = UI::MakeUI<UI::UIElement>();
-        spacer->WidthMode = UI::UISizeMode::Fill;
-        auto saveBtn = UI::MakeUI<UI::UIButton>("Save and Play", [this, &ctx]()
+        auto btnRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 8.0f);
+        btnRow->WidthMode = NoxUI::UISizeMode::Fill;
+        btnRow->HeightMode = NoxUI::UISizeMode::Auto;
+        auto spacer = NoxUI::MakeUI<NoxUI::UIElement>();
+        spacer->WidthMode = NoxUI::UISizeMode::Fill;
+        auto saveBtn = NoxUI::MakeUI<NoxUI::UIButton>("Save and Play", [this, &ctx]()
         {
             ctx.ClearOverlay();
             SaveScene();
@@ -2236,14 +2237,14 @@ namespace Nox
             RefreshToolBar();
         });
         saveBtn->StyleVariant = "primary";
-        saveBtn->Padding = UI::UIThickness::Symmetric(12.0f, 5.0f);
+        saveBtn->Padding = NoxUI::UIThickness::Symmetric(12.0f, 5.0f);
 
-        auto cancelBtn = UI::MakeUI<UI::UIButton>("Cancel", [this, &ctx]()
+        auto cancelBtn = NoxUI::MakeUI<NoxUI::UIButton>("Cancel", [this, &ctx]()
         {
             m_PlayNet.SaveWithoutAsking = false;
             ctx.ClearOverlay();
         });
-        cancelBtn->Padding = UI::UIThickness::Symmetric(12.0f, 5.0f);
+        cancelBtn->Padding = NoxUI::UIThickness::Symmetric(12.0f, 5.0f);
 
         btnRow->AddChild(spacer);
         btnRow->AddChild(saveBtn);
@@ -2258,7 +2259,7 @@ namespace Nox
     {
         if (m_PrefabMode.Active)
         {
-            Notify(UI::UINotificationSeverity::Info, "Not in Prefab Mode", "Exit Prefab Mode (toolbar) to simulate the level.");
+            Notify(NoxUI::UINotificationSeverity::Info, "Not in Prefab Mode", "Exit Prefab Mode (toolbar) to simulate the level.");
             return;
         }
         CancelHLODBuild("Simulate");
@@ -2383,9 +2384,9 @@ namespace Nox
             }
             if (m_ViewportDockSpace && !m_ViewportDockSpace->FindNodeByPanelTitle(slot.Title))
             {
-                const UI::UIDockDropZone zone = (index == 2) ? UI::UIDockDropZone::Bottom : UI::UIDockDropZone::Right;
+                const NoxUI::UIDockDropZone zone = (index == 2) ? NoxUI::UIDockDropZone::Bottom : NoxUI::UIDockDropZone::Right;
                 const std::string target = (index == 3 && m_Viewports[1].Open) ? std::string(m_Viewports[1].Title) : std::string("Viewport");
-                const UI::UIDockDropZone useZone = (index == 3 && m_Viewports[1].Open) ? UI::UIDockDropZone::Bottom : zone;
+                const NoxUI::UIDockDropZone useZone = (index == 3 && m_Viewports[1].Open) ? NoxUI::UIDockDropZone::Bottom : zone;
                 m_ViewportDockSpace->AddPanel(slot.Title, m_ViewportSlotRoots[index], useZone, target, 0.5f);
             }
         }
@@ -2407,7 +2408,7 @@ namespace Nox
         if (m_Renderer && m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)))
             m_Renderer->ReleaseExtraView(static_cast<uint32_t>(index));
         if (m_ExtraViewportImages[index])
-            m_ExtraViewportImages[index]->TextureDescriptorSlot = ~0u;
+            m_ExtraViewportImages[index]->TextureId = ~0u;
 
         if (m_ViewportDockSpace)
             m_ViewportDockSpace->RemovePanel(slot.Title);
@@ -2448,7 +2449,7 @@ namespace Nox
         {
             m_ViewportSlotRoots[index]->ClearChildren();
             m_ViewportSlotRoots[index]->AddChild(m_ActiveViewportHost);
-            const UI::UIRect& b = m_ViewportSlotRoots[index]->GetBounds();
+            const NoxUI::UIRect& b = m_ViewportSlotRoots[index]->GetBounds();
             if (b.Width() > 1.0f && b.Height() > 1.0f)
                 m_EditorCamera.SetViewportSize(b.Width(), b.Height());
         }
@@ -2490,15 +2491,15 @@ namespace Nox
             if (m_Renderer && m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)))
                 m_Renderer->ReleaseExtraView(static_cast<uint32_t>(index));
             if (m_ExtraViewportImages[index])
-                m_ExtraViewportImages[index]->TextureDescriptorSlot = ~0u;
+                m_ExtraViewportImages[index]->TextureId = ~0u;
         }
 
         if (!dock->FindNodeByPanelTitle("Viewport") && m_ViewportSlotRoots[0])
         {
-            const UI::UIDockNodeFlags vpFlags = (count > 1)
-                ? UI::UIDockNodeFlags::NoUndocking
-                : (UI::UIDockNodeFlags::NoUndocking | UI::UIDockNodeFlags::NoTabBar);
-            dock->AddPanel("Viewport", m_ViewportSlotRoots[0], UI::UIDockDropZone::Center, {}, 0.5f, vpFlags);
+            const NoxUI::UIDockNodeFlags vpFlags = (count > 1)
+                ? NoxUI::UIDockNodeFlags::NoUndocking
+                : (NoxUI::UIDockNodeFlags::NoUndocking | NoxUI::UIDockNodeFlags::NoTabBar);
+            dock->AddPanel("Viewport", m_ViewportSlotRoots[0], NoxUI::UIDockDropZone::Center, {}, 0.5f, vpFlags);
         }
 
         auto prepareSlot = [this](int index)
@@ -2527,19 +2528,19 @@ namespace Nox
         case ViewportLayout::One:
             break;
         case ViewportLayout::TwoSideBySide:
-            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], UI::UIDockDropZone::Right, "Viewport", 0.5f);
+            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], NoxUI::UIDockDropZone::Right, "Viewport", 0.5f);
             break;
         case ViewportLayout::TwoStacked:
-            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], UI::UIDockDropZone::Bottom, "Viewport", 0.5f);
+            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], NoxUI::UIDockDropZone::Bottom, "Viewport", 0.5f);
             break;
         case ViewportLayout::Three:
-            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], UI::UIDockDropZone::Right, "Viewport", 0.4f);
-            dock->AddPanel(m_Viewports[2].Title, m_ViewportSlotRoots[2], UI::UIDockDropZone::Bottom, m_Viewports[1].Title, 0.5f);
+            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], NoxUI::UIDockDropZone::Right, "Viewport", 0.4f);
+            dock->AddPanel(m_Viewports[2].Title, m_ViewportSlotRoots[2], NoxUI::UIDockDropZone::Bottom, m_Viewports[1].Title, 0.5f);
             break;
         case ViewportLayout::Four:
-            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], UI::UIDockDropZone::Right, "Viewport", 0.5f);
-            dock->AddPanel(m_Viewports[2].Title, m_ViewportSlotRoots[2], UI::UIDockDropZone::Bottom, "Viewport", 0.5f);
-            dock->AddPanel(m_Viewports[3].Title, m_ViewportSlotRoots[3], UI::UIDockDropZone::Bottom, m_Viewports[1].Title, 0.5f);
+            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], NoxUI::UIDockDropZone::Right, "Viewport", 0.5f);
+            dock->AddPanel(m_Viewports[2].Title, m_ViewportSlotRoots[2], NoxUI::UIDockDropZone::Bottom, "Viewport", 0.5f);
+            dock->AddPanel(m_Viewports[3].Title, m_ViewportSlotRoots[3], NoxUI::UIDockDropZone::Bottom, m_Viewports[1].Title, 0.5f);
             break;
         }
         SyncViewportTabBars();
@@ -2550,9 +2551,9 @@ namespace Nox
         if (!m_ViewportDockSpace)
             return;
         const bool multi = (OpenViewportCount() > 1);
-        const UI::UIDockNodeFlags vpFlags = multi
-            ? UI::UIDockNodeFlags::NoUndocking
-            : (UI::UIDockNodeFlags::NoUndocking | UI::UIDockNodeFlags::NoTabBar);
+        const NoxUI::UIDockNodeFlags vpFlags = multi
+            ? NoxUI::UIDockNodeFlags::NoUndocking
+            : (NoxUI::UIDockNodeFlags::NoUndocking | NoxUI::UIDockNodeFlags::NoTabBar);
         m_ViewportDockSpace->SetPanelFlags("Viewport", vpFlags);
     }
 
@@ -2633,12 +2634,12 @@ namespace Nox
             if (m_SceneState == SceneState::Play)
                 flags &= ~Renderer::ExtraViewOutline;
 
-            m_Renderer->SubmitExtraView(static_cast<uint32_t>(index), slot.Camera, NRI::Extent2D{ drawSize.x, drawSize.y }, showGrid ? &grid : nullptr, false, flags);
+            m_Renderer->SubmitExtraView(static_cast<uint32_t>(index), slot.Camera, nri::Extent2D{ drawSize.x, drawSize.y }, showGrid ? &grid : nullptr, false, flags);
             slot.Submitted = true;
         }
     }
 
-    std::vector<UI::UIMenuItem> EditorV2Layer::BuildViewportOptionsItems(int index)
+    std::vector<NoxUI::UIMenuItem> EditorV2Layer::BuildViewportOptionsItems(int index)
     {
         ViewportSlot& slot = m_Viewports[index];
         auto toggleFlag = [&slot](uint32_t bit, bool inverted)
@@ -3009,7 +3010,7 @@ namespace Nox
                 const auto ground = graph.FootGround.find(probe.Bone);
                 if (ground == graph.FootGround.end() || !ground->second.Hit)
                 {
-                    line(start, end, UI::ThemeColor("DebugFootNoGround", { 1.0f, 0.25f, 0.2f, 1.0f }));
+                    line(start, end, NoxUI::ThemeColor("DebugFootNoGround", { 1.0f, 0.25f, 0.2f, 1.0f }));
                     continue;
                 }
                 const glm::vec3 hit = glm::vec3(world * glm::vec4(ground->second.Point, 1.0f));
@@ -3070,7 +3071,7 @@ namespace Nox
         if (m_SceneState != SceneState::Play && m_ViewportTools.ShowReferenceFigure)
         {
             glm::dvec3 underCursor;
-            const bool vpHovered = m_ViewportCanvas && UI::HasState(m_ViewportCanvas->GetState(), UI::UIState::Hovered);
+            const bool vpHovered = m_ViewportCanvas && NoxUI::HasState(m_ViewportCanvas->GetState(), NoxUI::UIState::Hovered);
             if (m_ViewportTools.ReferenceFigureAtCursor && vpHovered && m_ViewportCanvas->PickWorldPoint(underCursor))
                 m_ViewportTools.ReferenceFigurePosition = underCursor;
             DrawReferenceFigure(m_ViewportTools.ReferenceFigureAtCursor ? m_ViewportTools.ReferenceFigurePosition : glm::dvec3(0.0));
@@ -3173,8 +3174,8 @@ namespace Nox
                         }
                     }
                 };
-                sphere(source.Spatialization.MinDistance, UI::ThemeColor("AudioMinDistance", { 0.55f, 0.85f, 1.0f, 0.9f }));
-                sphere(source.Spatialization.MaxDistance, UI::ThemeColor("AudioMaxDistance", { 0.2f, 0.4f, 1.0f, 0.7f }));
+                sphere(source.Spatialization.MinDistance, NoxUI::ThemeColor("AudioMinDistance", { 0.55f, 0.85f, 1.0f, 0.9f }));
+                sphere(source.Spatialization.MaxDistance, NoxUI::ThemeColor("AudioMaxDistance", { 0.2f, 0.4f, 1.0f, 0.7f }));
             }
 
             constexpr glm::vec4 kVolumeColor(1.0f, 0.55f, 0.1f, 0.9f);
@@ -3316,12 +3317,12 @@ namespace Nox
         if (m_PlayBtnWrap)
         {
             const Ref<Texture2D>& tex = isPlay ? m_IconStop : m_IconPlay;
-            m_PlayBtnWrap->TextureSlot = tex ? tex->GetDescriptorIndexSlot() : ~0u;
+            m_PlayBtnWrap->Texture = tex ? tex->GetDescriptorIndexSlot() : ~0u;
         }
         if (m_SimulateBtnWrap)
         {
             const Ref<Texture2D>& tex = isSim ? m_IconStop : m_IconSimulate;
-            m_SimulateBtnWrap->TextureSlot = tex ? tex->GetDescriptorIndexSlot() : ~0u;
+            m_SimulateBtnWrap->Texture = tex ? tex->GetDescriptorIndexSlot() : ~0u;
         }
         if (m_PlaySettingsCogBtn)
         {
@@ -3481,7 +3482,7 @@ namespace Nox
             if (!failed)
                 SaveScene();
             NOX_CORE_INFO("Build HLODs: {} ({} HLODs)", failed ? "failed (see above)" : "done", built);
-            Notify(failed ? UI::UINotificationSeverity::Error : UI::UINotificationSeverity::Success, failed ? "HLOD build failed" : "HLODs built",
+            Notify(failed ? NoxUI::UINotificationSeverity::Error : NoxUI::UINotificationSeverity::Success, failed ? "HLOD build failed" : "HLODs built",
                    failed ? std::string("See the Output Log.") : std::to_string(built) + " HLODs; the scene was saved.");
         }
 
@@ -3493,10 +3494,10 @@ namespace Nox
             for (const ScriptDiagnostic& diagnostic : build.Diagnostics)
                 (diagnostic.Severity == "error" ? errors : warnings) += 1;
             if (build.Succeeded)
-                Notify(UI::UINotificationSeverity::Success, build.Reloaded ? "Scripts built and reloaded" : "Scripts built",
+                Notify(NoxUI::UINotificationSeverity::Success, build.Reloaded ? "Scripts built and reloaded" : "Scripts built",
                        std::format("{:.1f} s{}", build.Seconds, warnings > 0 ? std::format(", {} warning{}", warnings, warnings == 1 ? "" : "s") : std::string()));
             else
-                Notify(UI::UINotificationSeverity::Error, "Script build failed",
+                Notify(NoxUI::UINotificationSeverity::Error, "Script build failed",
                        std::format("{} error{} -- the Output Log lists them.", errors, errors == 1 ? "" : "s"));
         }
 
@@ -3543,7 +3544,7 @@ namespace Nox
         // "Dock in Layout" only while a page is in the drawer.
         if (UILayer* uiLayer = Application::Get().GetUILayer(); uiLayer && IsDrawerOpen())
         {
-            const UI::UIContext& ui = uiLayer->GetContext();
+            const NoxUI::UIContext& ui = uiLayer->GetContext();
             if (ui.IsDragging() && m_CenterArea && !m_CenterArea->DrawerRect().Contains(ui.GetLastMousePos()))
                 CloseDrawer();
         }
@@ -3570,13 +3571,13 @@ namespace Nox
             m_CursorHidden = wantHideCursor;
         }
 
-        const UI::UIRect& bounds = m_ViewportImage->GetBounds();
+        const NoxUI::UIRect& bounds = m_ViewportImage->GetBounds();
         const uint32_t wantW = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Width())));
         const uint32_t wantH = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Height())));
         if (wantW > 0 && wantH > 0)
         {
             m_ActiveScene->OnViewportResize(wantW, wantH);
-            const NRI::Extent2D currentSize = m_Renderer->getViewPortSize();
+            const nri::Extent2D currentSize = m_Renderer->getViewPortSize();
             UILayer* uiLayer = Application::Get().GetUILayer();
             const bool dockDragging = (uiLayer && uiLayer->GetDockSpace() && uiLayer->GetDockSpace()->IsDragging()) ||
                                       (m_ViewportDockSpace && m_ViewportDockSpace->IsDragging());
@@ -3587,10 +3588,10 @@ namespace Nox
             }
         }
 
-        const UI::UIElement* targetEl = m_ViewportCanvas ? static_cast<const UI::UIElement*>(m_ViewportCanvas.get())
-                                                         : static_cast<const UI::UIElement*>(m_ViewportImage.get());
-        const bool hovered = targetEl && UI::HasState(targetEl->GetState(), UI::UIState::Hovered);
-        const bool focused = targetEl && UI::HasState(targetEl->GetState(), UI::UIState::Focused);
+        const NoxUI::UIElement* targetEl = m_ViewportCanvas ? static_cast<const NoxUI::UIElement*>(m_ViewportCanvas.get())
+                                                         : static_cast<const NoxUI::UIElement*>(m_ViewportImage.get());
+        const bool hovered = targetEl && NoxUI::HasState(targetEl->GetState(), NoxUI::UIState::Hovered);
+        const bool focused = targetEl && NoxUI::HasState(targetEl->GetState(), NoxUI::UIState::Focused);
 
         m_Viewports[m_ActiveViewport].Size = { wantW, wantH };
         m_Viewports[m_ActiveViewport].Hovered = hovered;
@@ -3601,12 +3602,12 @@ namespace Nox
             ViewportSlot& slot = m_Viewports[index];
             if (slot.Open && m_ExtraViewportImages[index] && m_ExtraViewportCanvases[index])
             {
-                const UI::UIRect& eb = m_ExtraViewportImages[index]->GetBounds();
+                const NoxUI::UIRect& eb = m_ExtraViewportImages[index]->GetBounds();
                 slot.Size = {
                     static_cast<uint32_t>(std::max(0.0f, std::floor(eb.Width()))),
                     static_cast<uint32_t>(std::max(0.0f, std::floor(eb.Height())))
                 };
-                slot.Hovered = UI::HasState(m_ExtraViewportCanvases[index]->GetState(), UI::UIState::Hovered);
+                slot.Hovered = NoxUI::HasState(m_ExtraViewportCanvases[index]->GetState(), NoxUI::UIState::Hovered);
             }
             else
             {
@@ -3653,7 +3654,7 @@ namespace Nox
 
         if (m_ViewportCanvas)
         {
-            const UI::UIRect& vpBounds = m_ViewportCanvas->GetBounds();
+            const NoxUI::UIRect& vpBounds = m_ViewportCanvas->GetBounds();
             glm::vec2 mouse = Input::GetMousePosition();
             if (UILayer* uiLayer = Application::Get().GetUILayer())
                 mouse = uiLayer->GetContext().GetLastMousePos();
@@ -3739,7 +3740,7 @@ namespace Nox
         }
 
         Texture2D* sceneTex = m_Renderer->GetSceneResource();
-        m_ViewportImage->TextureDescriptorSlot = sceneTex ? sceneTex->GetDescriptorIndexSlot() : ~0u;
+        m_ViewportImage->TextureId = sceneTex ? sceneTex->GetDescriptorIndexSlot() : ~0u;
         for (int index = 0; index < kMaxViewports; ++index)
         {
             if (!m_ExtraViewportImages[index])
@@ -3747,11 +3748,11 @@ namespace Nox
             if (index != m_ActiveViewport && m_Viewports[index].Open && m_Viewports[index].Submitted)
             {
                 Texture2D* extraTex = m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index));
-                m_ExtraViewportImages[index]->TextureDescriptorSlot = extraTex ? extraTex->GetDescriptorIndexSlot() : ~0u;
+                m_ExtraViewportImages[index]->TextureId = extraTex ? extraTex->GetDescriptorIndexSlot() : ~0u;
             }
             else
             {
-                m_ExtraViewportImages[index]->TextureDescriptorSlot = ~0u;
+                m_ExtraViewportImages[index]->TextureId = ~0u;
             }
         }
     }
@@ -3785,8 +3786,8 @@ namespace Nox
         {
             if (UILayer* uiLayer = Application::Get().GetUILayer())
             {
-                const UI::UIContext& ui = uiLayer->GetContext();
-                const UI::UIVec2 pos = ui.GetLastMousePos();
+                const NoxUI::UIContext& ui = uiLayer->GetContext();
+                const NoxUI::UIVec2 pos = ui.GetLastMousePos();
                 const bool onTab = (m_ContentDrawerTab && m_ContentDrawerTab->GetBounds().Contains(pos)) ||
                                    (m_LogDrawerTab && m_LogDrawerTab->GetBounds().Contains(pos));
                 if (!ui.GetOverlay() && m_CenterArea && !m_CenterArea->DrawerRect().Contains(pos) && !onTab)
@@ -3804,16 +3805,16 @@ namespace Nox
             }
         }
 
-        const UI::UIElement* scrollEl = m_ViewportSlotRoots[m_ActiveViewport]
+        const NoxUI::UIElement* scrollEl = m_ViewportSlotRoots[m_ActiveViewport]
             ? m_ViewportSlotRoots[m_ActiveViewport].get()
-            : (m_ViewportCanvas ? static_cast<const UI::UIElement*>(m_ViewportCanvas.get())
-                                : static_cast<const UI::UIElement*>(m_ViewportImage.get()));
+            : (m_ViewportCanvas ? static_cast<const NoxUI::UIElement*>(m_ViewportCanvas.get())
+                                : static_cast<const NoxUI::UIElement*>(m_ViewportImage.get()));
         if (!scrollEl)
             return;
 
         if (event.GetEventType() == EventType::MouseScrolled && m_SceneState == SceneState::Edit)
         {
-            const UI::UIElement* hoveredUi = nullptr;
+            const NoxUI::UIElement* hoveredUi = nullptr;
             glm::vec2 mouse = Input::GetMousePosition();
             if (UILayer* uiLayer = Application::Get().GetUILayer())
             {
@@ -3821,11 +3822,11 @@ namespace Nox
                 mouse = uiLayer->GetContext().GetLastMousePos();
             }
             const bool activeViewportHovered =
-                (m_ViewportCanvas && (hoveredUi == m_ViewportCanvas.get() || UI::HasState(m_ViewportCanvas->GetState(), UI::UIState::Hovered))) ||
+                (m_ViewportCanvas && (hoveredUi == m_ViewportCanvas.get() || NoxUI::HasState(m_ViewportCanvas->GetState(), NoxUI::UIState::Hovered))) ||
                 (m_ExtraViewportCanvases[m_ActiveViewport] && hoveredUi == m_ExtraViewportCanvases[m_ActiveViewport].get());
             if (activeViewportHovered)
             {
-                const UI::UIRect& b = scrollEl->GetBounds();
+                const NoxUI::UIRect& b = scrollEl->GetBounds();
                 m_EditorCamera.SetCursorPosition({ mouse.x - b.Min.x, mouse.y - b.Min.y });
                 m_EditorCamera.OnEvent(event);
             }
@@ -3852,17 +3853,17 @@ namespace Nox
             dock->CanClosePanel = [this](const std::string& title) { return m_AssetEditors.CanClosePanel(title); };
         }
 
-        m_ViewportImage = UI::MakeUI<UI::UIImage>();
+        m_ViewportImage = NoxUI::MakeUI<NoxUI::UIImage>();
         m_ViewportImage->AnchorMin = { 0.0f, 0.0f };
         m_ViewportImage->AnchorMax = { 1.0f, 1.0f };
         m_ViewportImage->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
-        m_ViewportImage->HitTestMode = UI::UIHitTestMode::None;
+        m_ViewportImage->HitTestMode = NoxUI::UIHitTestMode::None;
 
-        m_ViewportCanvas = UI::MakeUI<ViewportCanvas>();
+        m_ViewportCanvas = NoxUI::MakeUI<ViewportCanvas>();
         m_ViewportCanvas->AnchorMin = { 0.0f, 0.0f };
         m_ViewportCanvas->AnchorMax = { 1.0f, 1.0f };
         m_ViewportCanvas->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
-        m_ViewportCanvas->HitTestMode = UI::UIHitTestMode::Self;
+        m_ViewportCanvas->HitTestMode = NoxUI::UIHitTestMode::Self;
         m_ViewportCanvas->Focusable = true;
         m_ViewportCanvas->Bind({
             .Render = m_Renderer,
@@ -3881,13 +3882,13 @@ namespace Nox
         });
         // Assets dragged from the Content Browser: meshes and prefabs are placed where the pointer is (on the surface under it,
         // else on the ground plane); a scene opens.
-        m_ViewportCanvas->OnDrop = [this](const UI::UIDragPayload& payload) -> bool
+        m_ViewportCanvas->OnDrop = [this](const NoxUI::UIDragPayload& payload) -> bool
         {
             if (payload.Type != "CONTENT_BROWSER_ITEM" && payload.Type != "CONTENT_BROWSER_ITEMS")
                 return false;
             if (m_SceneState != SceneState::Edit)
             {
-                Notify(UI::UINotificationSeverity::Info, "Stop Play to place assets", "Assets are placed in the edited scene.");
+                Notify(NoxUI::UINotificationSeverity::Info, "Stop Play to place assets", "Assets are placed in the edited scene.");
                 return true;
             }
             std::vector<AssetHandle> place;
@@ -3905,7 +3906,7 @@ namespace Nox
             }
             if (place.empty())
             {
-                Notify(UI::UINotificationSeverity::Info, "Nothing to place", "Meshes, prefabs and scenes can be dropped into the viewport.");
+                Notify(NoxUI::UINotificationSeverity::Info, "Nothing to place", "Meshes, prefabs and scenes can be dropped into the viewport.");
                 return true;
             }
             glm::dvec3 point{ 0.0 };
@@ -3915,7 +3916,7 @@ namespace Nox
             return true;
         };
 
-        Ref<UI::UIElement> overlayToolbar = m_ViewportToolbar.Build(m_Renderer, &m_EditorCamera, &m_ViewportTools, {
+        Ref<NoxUI::UIElement> overlayToolbar = m_ViewportToolbar.Build(m_Renderer, &m_EditorCamera, &m_ViewportTools, {
             .SetViewMode = [this](EditorViewMode mode) { SetViewMode(mode); },
             .SnapToFloor = [this]() { SnapSelectionToFloor(); },
             .SnapToGrid = [this]() { SnapSelectionToGrid(); },
@@ -3924,43 +3925,43 @@ namespace Nox
         });
 
         // Floating scene load progress banner inside the bottom center of the viewport
-        m_SceneLoadTitleLabel = UI::Label("Opening scene...").Get();
-        m_SceneLoadStageLabel = UI::Label("").Get();
+        m_SceneLoadTitleLabel = NoxUI::Label("Opening scene...").Get();
+        m_SceneLoadStageLabel = NoxUI::Label("").Get();
         m_SceneLoadStageLabel->UseColorOverride = true;
-        m_SceneLoadStageLabel->ColorOverride = UI::ThemeColor("SceneLoadText", { 0.72f, 0.76f, 0.82f, 1.0f });
+        m_SceneLoadStageLabel->ColorOverride = NoxUI::ThemeColor("SceneLoadText", { 0.72f, 0.76f, 0.82f, 1.0f });
 
-        auto progressTrack = UI::MakeUI<UI::UIElement>();
-        progressTrack->WidthMode = UI::UISizeMode::Fixed;
-        progressTrack->HeightMode = UI::UISizeMode::Fixed;
+        auto progressTrack = NoxUI::MakeUI<NoxUI::UIElement>();
+        progressTrack->WidthMode = NoxUI::UISizeMode::Fixed;
+        progressTrack->HeightMode = NoxUI::UISizeMode::Fixed;
         progressTrack->FixedSize = { 300.0f, 6.0f };
         progressTrack->DrawBackground = true;
         progressTrack->StyleClass = "Surface";
         progressTrack->ClipChildren = true;
 
-        m_SceneLoadProgressFill = UI::MakeUI<UI::UIElement>();
-        m_SceneLoadProgressFill->WidthMode = UI::UISizeMode::Fixed;
-        m_SceneLoadProgressFill->HeightMode = UI::UISizeMode::Fill;
+        m_SceneLoadProgressFill = NoxUI::MakeUI<NoxUI::UIElement>();
+        m_SceneLoadProgressFill->WidthMode = NoxUI::UISizeMode::Fixed;
+        m_SceneLoadProgressFill->HeightMode = NoxUI::UISizeMode::Fill;
         m_SceneLoadProgressFill->FixedSize = { 0.0f, 6.0f };
         m_SceneLoadProgressFill->DrawBackground = true;
         m_SceneLoadProgressFill->StyleClass = "Button";
         m_SceneLoadProgressFill->StyleVariant = "primary";
         progressTrack->AddChild(m_SceneLoadProgressFill);
 
-        m_SceneLoadBanner = UI::VStack(4.0f, { m_SceneLoadTitleLabel, m_SceneLoadStageLabel, progressTrack })
+        m_SceneLoadBanner = NoxUI::VStack(4.0f, { m_SceneLoadTitleLabel, m_SceneLoadStageLabel, progressTrack })
             .Padding(10.0f, 8.0f)
             .Style("Surface")
             .Background(true)
             .Get();
-        m_SceneLoadBanner->WidthMode = UI::UISizeMode::Auto;
-        m_SceneLoadBanner->HeightMode = UI::UISizeMode::Auto;
+        m_SceneLoadBanner->WidthMode = NoxUI::UISizeMode::Auto;
+        m_SceneLoadBanner->HeightMode = NoxUI::UISizeMode::Auto;
         m_SceneLoadBanner->AnchorMin = { 0.5f, 1.0f };
         m_SceneLoadBanner->AnchorMax = { 0.5f, 1.0f };
         m_SceneLoadBanner->AnchorOffsets = { -160.0f, -96.0f, 160.0f, -20.0f };
         m_SceneLoadBanner->Visible = false;
 
-        auto viewportHost = UI::MakeUI<UI::UIAnchorBox>();
-        viewportHost->WidthMode = UI::UISizeMode::Fill;
-        viewportHost->HeightMode = UI::UISizeMode::Fill;
+        auto viewportHost = NoxUI::MakeUI<NoxUI::UIAnchorBox>();
+        viewportHost->WidthMode = NoxUI::UISizeMode::Fill;
+        viewportHost->HeightMode = NoxUI::UISizeMode::Fill;
         viewportHost->AnchorMin = { 0.0f, 0.0f };
         viewportHost->AnchorMax = { 1.0f, 1.0f };
         viewportHost->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -3972,18 +3973,18 @@ namespace Nox
 
         for (int index = 0; index < kMaxViewports; ++index)
         {
-            auto extraImg = UI::MakeUI<UI::UIImage>();
+            auto extraImg = NoxUI::MakeUI<NoxUI::UIImage>();
             extraImg->AnchorMin = { 0.0f, 0.0f };
             extraImg->AnchorMax = { 1.0f, 1.0f };
             extraImg->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
-            extraImg->HitTestMode = UI::UIHitTestMode::None;
+            extraImg->HitTestMode = NoxUI::UIHitTestMode::None;
             m_ExtraViewportImages[index] = extraImg;
 
-            auto extraCanvas = UI::MakeUI<ExtraViewportCanvas>();
+            auto extraCanvas = NoxUI::MakeUI<ExtraViewportCanvas>();
             extraCanvas->AnchorMin = { 0.0f, 0.0f };
             extraCanvas->AnchorMax = { 1.0f, 1.0f };
             extraCanvas->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
-            extraCanvas->HitTestMode = UI::UIHitTestMode::Self;
+            extraCanvas->HitTestMode = NoxUI::UIHitTestMode::Self;
             extraCanvas->Bind({
                 .Index = index,
                 .Render = m_Renderer,
@@ -3995,14 +3996,14 @@ namespace Nox
                 .ResolutionIndex = &m_Viewports[index].ResolutionIndex,
                 .Realtime = &m_Viewports[index].Realtime,
                 .IsPlayModeFn = [this]() { return m_SceneState == SceneState::Play; },
-                .HasImageFn = [this, index]() { return m_ExtraViewportImages[index] && m_ExtraViewportImages[index]->TextureDescriptorSlot != ~0u; },
+                .HasImageFn = [this, index]() { return m_ExtraViewportImages[index] && m_ExtraViewportImages[index]->TextureId != ~0u; },
                 .OnActivate = [this](int idx) { ActivateViewport(idx); }
             });
             m_ExtraViewportCanvases[index] = extraCanvas;
 
-            auto extraHost = UI::MakeUI<UI::UIAnchorBox>();
-            extraHost->WidthMode = UI::UISizeMode::Fill;
-            extraHost->HeightMode = UI::UISizeMode::Fill;
+            auto extraHost = NoxUI::MakeUI<NoxUI::UIAnchorBox>();
+            extraHost->WidthMode = NoxUI::UISizeMode::Fill;
+            extraHost->HeightMode = NoxUI::UISizeMode::Fill;
             extraHost->AnchorMin = { 0.0f, 0.0f };
             extraHost->AnchorMax = { 1.0f, 1.0f };
             extraHost->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -4010,9 +4011,9 @@ namespace Nox
             extraHost->AddChild(extraCanvas);
             m_ExtraViewportHosts[index] = extraHost;
 
-            auto root = UI::MakeUI<UI::UIAnchorBox>();
-            root->WidthMode = UI::UISizeMode::Fill;
-            root->HeightMode = UI::UISizeMode::Fill;
+            auto root = NoxUI::MakeUI<NoxUI::UIAnchorBox>();
+            root->WidthMode = NoxUI::UISizeMode::Fill;
+            root->HeightMode = NoxUI::UISizeMode::Fill;
             root->AddChild(index == m_ActiveViewport ? m_ActiveViewportHost : m_ExtraViewportHosts[index]);
             m_ViewportSlotRoots[index] = root;
         }
@@ -4020,7 +4021,7 @@ namespace Nox
         // Play / Simulate / Pause / Step: icon buttons with the toolbar's textures.
         const auto makeToolbarIconBtn = [](const Ref<Texture2D>& icon, const std::string& tip, std::function<void()> onClick)
         {
-            return UI::UIIconButton::FromTexture(icon ? icon->GetDescriptorIndexSlot() : ~0u, tip, std::move(onClick));
+            return NoxUI::UIIconButton::FromTexture(icon ? icon->GetDescriptorIndexSlot() : ~0u, tip, std::move(onClick));
         };
 
         m_PlayBtnWrap = makeToolbarIconBtn(m_IconPlay, "Play / Stop (Esc)", [this]()
@@ -4052,27 +4053,27 @@ namespace Nox
                 m_ActiveScene->Step();
         });
 
-        m_PlaySettingsCogBtn = UI::MakeUI<UIVectorIconButton>(
+        m_PlaySettingsCogBtn = NoxUI::MakeUI<UIVectorIconButton>(
             EditorIconKind::Cogwheel,
             "Play Settings (Multiplayer: Net Mode, Players, Emulation)",
             [this]() { ShowPlaySettingsOverlay(m_PlaySettingsCogBtn.get()); });
         m_PlaySettingsCogBtn->FixedSize = { 30.0f, 30.0f };
         m_PlaySettingsCogBtn->IconScale = 1.35f;
-        m_PlaySettingsCogBtn->VAlign = UI::UIAlignment::Center;
+        m_PlaySettingsCogBtn->VAlign = NoxUI::UIAlignment::Center;
 
-        m_PlayNetStatusLabel = UI::Label("").VAlign(UI::UIAlignment::Center).Margin(6.0f, 0.0f);
+        m_PlayNetStatusLabel = NoxUI::Label("").VAlign(NoxUI::UIAlignment::Center).Margin(6.0f, 0.0f);
         m_PlayNetStatusLabel->UseColorOverride = true;
-        m_PlayNetStatusLabel->ColorOverride = UI::ThemeColor("PlayNetStatus", { 0.72f, 0.78f, 0.86f, 1.0f });
+        m_PlayNetStatusLabel->ColorOverride = NoxUI::ThemeColor("PlayNetStatus", { 0.72f, 0.78f, 0.86f, 1.0f });
         m_PlayNetStatusLabel->Visible = false;
 
-        auto tbLeftSpacer = UI::MakeUI<UI::UIElement>();
-        tbLeftSpacer->WidthMode = UI::UISizeMode::Fill;
-        tbLeftSpacer->HeightMode = UI::UISizeMode::Fill;
-        auto tbRightSpacer = UI::MakeUI<UI::UIElement>();
-        tbRightSpacer->WidthMode = UI::UISizeMode::Fill;
-        tbRightSpacer->HeightMode = UI::UISizeMode::Fill;
+        auto tbLeftSpacer = NoxUI::MakeUI<NoxUI::UIElement>();
+        tbLeftSpacer->WidthMode = NoxUI::UISizeMode::Fill;
+        tbLeftSpacer->HeightMode = NoxUI::UISizeMode::Fill;
+        auto tbRightSpacer = NoxUI::MakeUI<NoxUI::UIElement>();
+        tbRightSpacer->WidthMode = NoxUI::UISizeMode::Fill;
+        tbRightSpacer->HeightMode = NoxUI::UISizeMode::Fill;
 
-        m_ToolBar = UI::HStack(4.0f, {
+        m_ToolBar = NoxUI::HStack(4.0f, {
             tbLeftSpacer,
             BuildPrefabBar(),
             m_PlayBtnWrap,
@@ -4083,34 +4084,34 @@ namespace Nox
             m_PlayNetStatusLabel,
             tbRightSpacer
         }).Padding(6.0f, 2.0f).Style("Surface").Background(true).Get();
-        m_ToolBar->WidthMode = UI::UISizeMode::Fill;
-        m_ToolBar->HeightMode = UI::UISizeMode::Fill;
+        m_ToolBar->WidthMode = NoxUI::UISizeMode::Fill;
+        m_ToolBar->HeightMode = NoxUI::UISizeMode::Fill;
         RefreshToolBar();
 
         // Inner dock space inside "Viewports" holds Viewport 1..4 (matching ImGui NoxViewportDockSpace),
         // so Toolbar / Scene Hierarchy can dock across the full width/height of all 4 viewports cleanly.
-        m_ViewportDockSpace = UI::MakeUI<UI::UIDockSpace>();
-        m_ViewportDockSpace->WidthMode = UI::UISizeMode::Fill;
-        m_ViewportDockSpace->HeightMode = UI::UISizeMode::Fill;
+        m_ViewportDockSpace = NoxUI::MakeUI<NoxUI::UIDockSpace>();
+        m_ViewportDockSpace->WidthMode = NoxUI::UISizeMode::Fill;
+        m_ViewportDockSpace->HeightMode = NoxUI::UISizeMode::Fill;
         m_ViewportDockSpace->SetContext(&uiLayer->GetContext());
         m_ViewportDockSpace->AddPanel(
             "Viewport",
             m_ViewportSlotRoots[0],
-            UI::UIDockDropZone::Center,
+            NoxUI::UIDockDropZone::Center,
             {},
             0.5f,
             (OpenViewportCount() > 1)
-                ? UI::UIDockNodeFlags::NoUndocking
-                : (UI::UIDockNodeFlags::NoUndocking | UI::UIDockNodeFlags::NoTabBar)
+                ? NoxUI::UIDockNodeFlags::NoUndocking
+                : (NoxUI::UIDockNodeFlags::NoUndocking | NoxUI::UIDockNodeFlags::NoTabBar)
         );
 
         for (int index = 1; index < kMaxViewports; ++index)
         {
             if (m_Viewports[index].Open)
             {
-                const UI::UIDockDropZone zone = (index == 2) ? UI::UIDockDropZone::Bottom : UI::UIDockDropZone::Right;
+                const NoxUI::UIDockDropZone zone = (index == 2) ? NoxUI::UIDockDropZone::Bottom : NoxUI::UIDockDropZone::Right;
                 const std::string target = (index == 3 && m_Viewports[1].Open) ? std::string(m_Viewports[1].Title) : std::string("Viewport");
-                const UI::UIDockDropZone useZone = (index == 3 && m_Viewports[1].Open) ? UI::UIDockDropZone::Bottom : zone;
+                const NoxUI::UIDockDropZone useZone = (index == 3 && m_Viewports[1].Open) ? NoxUI::UIDockDropZone::Bottom : zone;
                 m_ViewportDockSpace->AddPanel(m_Viewports[index].Title, m_ViewportSlotRoots[index], useZone, target, 0.5f);
             }
         }
@@ -4119,10 +4120,10 @@ namespace Nox
         uiLayer->AddPanel(
             "Viewports",
             m_ViewportDockSpace,
-            UI::UIDockDropZone::Center,
+            NoxUI::UIDockDropZone::Center,
             {},
             0.5f,
-            UI::UIDockNodeFlags::CentralNode
+            NoxUI::UIDockNodeFlags::CentralNode
         );
 
         if (m_ShowSceneHierarchy)
@@ -4130,7 +4131,7 @@ namespace Nox
             uiLayer->AddPanel(
                 "Scene Hierarchy",
                 m_SceneHierarchyPanel.BuildUI(),
-                UI::UIDockDropZone::Left,
+                NoxUI::UIDockDropZone::Left,
                 "Viewports",
                 0.155f
             );
@@ -4141,7 +4142,7 @@ namespace Nox
             uiLayer->AddPanel(
                 "Inspector",
                 m_InspectorPanel.BuildUI(),
-                UI::UIDockDropZone::Right,
+                NoxUI::UIDockDropZone::Right,
                 "Viewports",
                 0.22f
             );
@@ -4152,10 +4153,10 @@ namespace Nox
             uiLayer->AddPanel(
                 "Toolbar",
                 m_ToolBar,
-                UI::UIDockDropZone::Top,
+                NoxUI::UIDockDropZone::Top,
                 "Viewports",
                 0.038f,
-                UI::UIDockNodeFlags::NoTabBar | UI::UIDockNodeFlags::NoDockingOver
+                NoxUI::UIDockNodeFlags::NoTabBar | NoxUI::UIDockNodeFlags::NoDockingOver
             );
         }
 
@@ -4163,9 +4164,9 @@ namespace Nox
         // the saved layout has them there ("Dock in Layout").
         auto dockButton = [this](DrawerPage page)
         {
-            Ref<UI::UIButton> button = UI::MakeUI<UI::UIButton>("Dock in Layout", [this, page]() { DockPage(page); });
-            button->Padding = UI::UIThickness::Symmetric(10.0f, 2.0f);
-            button->HeightMode = UI::UISizeMode::Fixed;
+            Ref<NoxUI::UIButton> button = NoxUI::MakeUI<NoxUI::UIButton>("Dock in Layout", [this, page]() { DockPage(page); });
+            button->Padding = NoxUI::UIThickness::Symmetric(10.0f, 2.0f);
+            button->HeightMode = NoxUI::UISizeMode::Fixed;
             button->FixedSize = { 0.0f, 26.0f };
             button->Tooltip = "Keep it open as a tab under the viewport (Window > Back to Drawer puts it back here)";
             return button;
@@ -4186,16 +4187,16 @@ namespace Nox
             savedLayout = ss.str();
         }
         if (savedLayout.find("Content Browser") != std::string::npos)
-            uiLayer->AddPanel("Content Browser", m_ContentBrowserRoot, UI::UIDockDropZone::Bottom, "Viewports", 0.30f);
+            uiLayer->AddPanel("Content Browser", m_ContentBrowserRoot, NoxUI::UIDockDropZone::Bottom, "Viewports", 0.30f);
         if (savedLayout.find("Output Log") != std::string::npos)
         {
             const bool besideBrowser = savedLayout.find("Content Browser") != std::string::npos;
-            uiLayer->AddPanel("Output Log", m_OutputLogRoot, besideBrowser ? UI::UIDockDropZone::Center : UI::UIDockDropZone::Bottom,
+            uiLayer->AddPanel("Output Log", m_OutputLogRoot, besideBrowser ? NoxUI::UIDockDropZone::Center : NoxUI::UIDockDropZone::Bottom,
                               besideBrowser ? "Content Browser" : "Viewports", 0.30f);
         }
 
         // The dock space with the drawer sliding up over it (UI::UIDrawerHost); dragging its top edge keeps the height for the session.
-        m_CenterArea = Ref<UI::UIDrawerHost>(new UI::UIDrawerHost(uiLayer->GetDockSpaceRef()));
+        m_CenterArea = Ref<NoxUI::UIDrawerHost>(new NoxUI::UIDrawerHost(uiLayer->GetDockSpaceRef()));
         m_CenterArea->HeightFraction = m_DrawerFraction;
         m_CenterArea->OnResized = [this](float fraction) { m_DrawerFraction = fraction; };
         m_DrawerPage = DrawerPage::None;
@@ -4208,14 +4209,14 @@ namespace Nox
         logTab->Tooltip = "The Output Log and the console's Cmd line (the ` key)";
         m_ContentDrawerTab = contentTab;
         m_LogDrawerTab = logTab;
-        m_StatusActivity = UI::MakeUI<StatusActivityElement>();
-        m_StatusActivity->WidthMode = UI::UISizeMode::Fill;
-        m_StatusActivity->Margin = UI::UIThickness{ 8.0f, 0.0f, 0.0f, 0.0f };
+        m_StatusActivity = NoxUI::MakeUI<StatusActivityElement>();
+        m_StatusActivity->WidthMode = NoxUI::UISizeMode::Fill;
+        m_StatusActivity->Margin = NoxUI::UIThickness{ 8.0f, 0.0f, 0.0f, 0.0f };
         m_StatusActivity->Tooltip = "Imports, script builds, assets loading and textures streaming show here; Ready when nothing runs";
-        m_StatusCounts = Ref<UI::UIElement>(new StatusCountsElement(m_OutputLogPanel, [this]() { ShowOutputLog(); }));
-        m_StatusBar = UI::HStack(4.0f, { contentTab, logTab, m_StatusActivity, m_StatusCounts }).Padding(4.0f, 2.0f).Style("Surface").Background(true).Get();
-        m_StatusBar->WidthMode = UI::UISizeMode::Fill;
-        m_StatusBar->HeightMode = UI::UISizeMode::Fixed;
+        m_StatusCounts = Ref<NoxUI::UIElement>(new StatusCountsElement(m_OutputLogPanel, [this]() { ShowOutputLog(); }));
+        m_StatusBar = NoxUI::HStack(4.0f, { contentTab, logTab, m_StatusActivity, m_StatusCounts }).Padding(4.0f, 2.0f).Style("Surface").Background(true).Get();
+        m_StatusBar->WidthMode = NoxUI::UISizeMode::Fill;
+        m_StatusBar->HeightMode = NoxUI::UISizeMode::Fixed;
         m_StatusBar->FixedSize = { 0.0f, kStatusBarHeight };
         uiLayer->GetContext().SetToastBottomInset(kStatusBarHeight + 6.0f);
         RefreshStatusBar();
@@ -4245,8 +4246,8 @@ namespace Nox
         }
         SyncViewportTabBars();
 
-        auto menuBar = UI::MakeUI<UI::UIMenuBar>();
-        menuBar->AddDynamicMenu("File", [this, uiLayer]() -> std::vector<UI::UIMenuItem>
+        auto menuBar = NoxUI::MakeUI<NoxUI::UIMenuBar>();
+        menuBar->AddDynamicMenu("File", [this, uiLayer]() -> std::vector<NoxUI::UIMenuItem>
         {
             return {
                 {"New Project...", "", [this]() { ConfirmUnsavedChanges("making a new project", [this]() { NewProjectAsync(); }); }},
@@ -4268,13 +4269,13 @@ namespace Nox
                 {"Save Layout", "", [this]()
                 {
                     SaveLayoutFiles();
-                    Notify(UI::UINotificationSeverity::Success, "Layout saved", "In the project's Saved/Layout folder (it is also saved on exit).");
+                    Notify(NoxUI::UINotificationSeverity::Success, "Layout saved", "In the project's Saved/Layout folder (it is also saved on exit).");
                 }},
                 {"Exit", "Alt+F4", [this]() { ConfirmUnsavedChanges("quitting", []() { Application::Get().Shutdown(); }); }}
             };
         });
 
-        menuBar->AddDynamicMenu("Edit", [this]() -> std::vector<UI::UIMenuItem>
+        menuBar->AddDynamicMenu("Edit", [this]() -> std::vector<NoxUI::UIMenuItem>
         {
             const bool editing = m_SceneState == SceneState::Edit;
             const std::string undoLabel = m_History.CanUndo() ? "Undo " + m_History.GetUndoName() : std::string("Undo");
@@ -4298,9 +4299,9 @@ namespace Nox
             };
         });
 
-        menuBar->AddDynamicMenu("Create", [this]() -> std::vector<UI::UIMenuItem>
+        menuBar->AddDynamicMenu("Create", [this]() -> std::vector<NoxUI::UIMenuItem>
         {
-            std::vector<UI::UIMenuItem> shapeItems;
+            std::vector<NoxUI::UIMenuItem> shapeItems;
             for (uint8_t index = 0; index < static_cast<uint8_t>(PrimitiveShape::Count); ++index)
             {
                 const PrimitiveShape shape = static_cast<PrimitiveShape>(index);
@@ -4328,15 +4329,15 @@ namespace Nox
         });
 
 #if NOX_WITH_MCP
-        menuBar->AddDynamicMenu("Tools", [this]() -> std::vector<UI::UIMenuItem>
+        menuBar->AddDynamicMenu("Tools", [this]() -> std::vector<NoxUI::UIMenuItem>
         {
             return { {"MCP Server", "", {}, false, true, false, false, "", BuildMcpMenu()} };
         });
 #endif
 
-        menuBar->AddDynamicMenu("Window", [this, uiLayer]() -> std::vector<UI::UIMenuItem>
+        menuBar->AddDynamicMenu("Window", [this, uiLayer]() -> std::vector<NoxUI::UIMenuItem>
         {
-            std::vector<UI::UIMenuItem> viewportItems = {
+            std::vector<NoxUI::UIMenuItem> viewportItems = {
                 {"1 Viewport", "", [this]() { ApplyViewportLayout(ViewportLayout::One); }},
                 {"2 Side by Side", "", [this]() { ApplyViewportLayout(ViewportLayout::TwoSideBySide); }},
                 {"2 Stacked", "", [this]() { ApplyViewportLayout(ViewportLayout::TwoStacked); }},
@@ -4374,7 +4375,7 @@ namespace Nox
             viewportItems.push_back({"", "", {}, true});
             viewportItems.push_back({"Click a viewport to use it; drag its tab to move it", "", {}, false, false, false, true});
 
-            std::vector<UI::UIMenuItem> animGraphItems;
+            std::vector<NoxUI::UIMenuItem> animGraphItems;
             if (Ref<Project> project = Project::GetActive(); project && project->GetEditorAssetManager())
             {
                 for (const auto& [handle, metadata] : project->GetEditorAssetManager()->GetAssetRegistry())
@@ -4396,7 +4397,7 @@ namespace Nox
                     if (const auto& dock = uiLayer->GetDockSpaceRef())
                     {
                         if (m_ShowSceneHierarchy)
-                            dock->AddPanel("Scene Hierarchy", m_SceneHierarchyPanel.BuildUI(), UI::UIDockDropZone::Left, "Viewports", 0.155f);
+                            dock->AddPanel("Scene Hierarchy", m_SceneHierarchyPanel.BuildUI(), NoxUI::UIDockDropZone::Left, "Viewports", 0.155f);
                         else
                             dock->RemovePanel("Scene Hierarchy");
                     }
@@ -4408,7 +4409,7 @@ namespace Nox
                     {
                         if (m_ShowInspector)
                         {
-                            dock->AddPanel("Inspector", m_InspectorPanel.BuildUI(), UI::UIDockDropZone::Right, "Viewports", 0.22f);
+                            dock->AddPanel("Inspector", m_InspectorPanel.BuildUI(), NoxUI::UIDockDropZone::Right, "Viewports", 0.22f);
                             m_InspectorPanel.MarkDirty();
                             m_InspectorPanel.Update();
                         }
@@ -4424,8 +4425,8 @@ namespace Nox
                     if (const auto& dock = uiLayer->GetDockSpaceRef())
                     {
                         if (m_ShowToolBar)
-                            dock->AddPanel("Toolbar", m_ToolBar, UI::UIDockDropZone::Top, "Viewports", 0.038f,
-                                           UI::UIDockNodeFlags::NoTabBar | UI::UIDockNodeFlags::NoDockingOver);
+                            dock->AddPanel("Toolbar", m_ToolBar, NoxUI::UIDockDropZone::Top, "Viewports", 0.038f,
+                                           NoxUI::UIDockNodeFlags::NoTabBar | NoxUI::UIDockNodeFlags::NoDockingOver);
                         else
                             dock->RemovePanel("Toolbar");
                     }
@@ -4491,11 +4492,11 @@ namespace Nox
             };
         });
 
-        menuBar->AddDynamicMenu("Script", [this]() -> std::vector<UI::UIMenuItem>
+        menuBar->AddDynamicMenu("Script", [this]() -> std::vector<NoxUI::UIMenuItem>
         {
             const bool waitForDbg = ScriptEngine::GetWaitForDebugger();
             const bool canReload = ScriptEngine::IsInitialized();
-            std::vector<UI::UIMenuItem> items = {
+            std::vector<NoxUI::UIMenuItem> items = {
                 {"Build and Reload", m_Commands.ShortcutText("Script.Build"), [this]() { m_Commands.Execute("Script.Build"); }, false, m_Commands.CanExecute("Script.Build")},
                 {"Reload assembly", m_Commands.ShortcutText("Script.ReloadAssembly"), [this]() { m_Commands.Execute("Script.ReloadAssembly"); }, false, canReload},
                 {"Build on Save", "", [this]() { m_ScriptBuilder.AutoBuild = !m_ScriptBuilder.AutoBuild; }, false, true, m_ScriptBuilder.AutoBuild, false,
@@ -4511,25 +4512,25 @@ namespace Nox
             return items;
         });
 
-        auto spacer = UI::MakeUI<UI::UIElement>();
-        spacer->WidthMode = UI::UISizeMode::Fill;
+        auto spacer = NoxUI::MakeUI<NoxUI::UIElement>();
+        spacer->WidthMode = NoxUI::UISizeMode::Fill;
         menuBar->AddChild(spacer);
 
         Renderer* renderer = Application::Get().GetRenderer();
-        auto vsyncBox = UI::CheckBox("VSync", renderer ? renderer->getVSync() : false, [renderer](bool enabled)
+        auto vsyncBox = NoxUI::CheckBox("VSync", renderer ? renderer->getVSync() : false, [renderer](bool enabled)
         {
             if (renderer)
                 renderer->setVSync(enabled);
-        }).VAlign(UI::UIAlignment::Center).Margin(6.0f, 0.0f);
+        }).VAlign(NoxUI::UIAlignment::Center).Margin(6.0f, 0.0f);
         menuBar->AddChild(vsyncBox);
 
-        m_FpsLabel = UI::Label("FPS: --.-").VAlign(UI::UIAlignment::Center).Margin(10.0f, 0.0f);
+        m_FpsLabel = NoxUI::Label("FPS: --.-").VAlign(NoxUI::UIAlignment::Center).Margin(10.0f, 0.0f);
         m_FpsLabel->UseColorOverride = true;
-        m_FpsLabel->ColorOverride = UI::ThemeColor("FpsText", { 0.72f, 0.76f, 0.82f, 1.0f });
+        m_FpsLabel->ColorOverride = NoxUI::ThemeColor("FpsText", { 0.72f, 0.76f, 0.82f, 1.0f });
         menuBar->AddChild(m_FpsLabel);
 
         uiLayer->SetRoot(
-            UI::VStack(0.0f, {
+            NoxUI::VStack(0.0f, {
                            menuBar,
                            m_CenterArea,
                            m_StatusBar
@@ -4565,7 +4566,7 @@ namespace Nox
         if (m_AssetEditors.Open(handle) || !AssetManager::IsAssetHandleValid(handle))
             return;
         if (!m_AssetEditors.HasEditorFor(type))
-            Notify(UI::UINotificationSeverity::Info, "No editor for " + AssetDisplayName(handle) + " yet",
+            Notify(NoxUI::UINotificationSeverity::Info, "No editor for " + AssetDisplayName(handle) + " yet",
                    "NoxEditorV2 opens scenes, prefabs, materials, graphs, animation clips and timelines so far; the old NoxEditor has the other editors.");
     }
 
@@ -4588,7 +4589,7 @@ namespace Nox
         });
 
         AssetEditorManager::Hooks hooks;
-        hooks.Notify = [this](UI::UINotification note) { Notify(note.Severity, std::move(note.Title), std::move(note.Message)); };
+        hooks.Notify = [this](NoxUI::UINotification note) { Notify(note.Severity, std::move(note.Title), std::move(note.Message)); };
         hooks.AskSave = [this](const std::string& text, std::function<void()> save, std::function<void()> dontSave)
         {
             ShowSaveChangesDialog(text, std::move(save), std::move(dontSave));
@@ -4606,7 +4607,7 @@ namespace Nox
             const std::filesystem::path directory = std::filesystem::current_path();
             if (!m_ActiveScene || !m_ActiveScene->DumpSystemGraphs(directory))
                 return false;
-            Notify(UI::UINotificationSeverity::Success, "Frame graph written", (directory / "SceneUpdate.dot").generic_string());
+            Notify(NoxUI::UINotificationSeverity::Success, "Frame graph written", (directory / "SceneUpdate.dot").generic_string());
             return true;
         };
         m_RendererSettings.SetHooks(std::move(rendererHooks));
@@ -4674,7 +4675,7 @@ namespace Nox
         if (!m_HLODBuild)
             return;
         NOX_CORE_WARN("Build HLODs cancelled ({}): the HLODs built so far are imported, the HLOD grid is not written", reason);
-        Notify(UI::UINotificationSeverity::Warning, "HLOD build cancelled", std::string(reason) + ": the HLOD grid was not written.");
+        Notify(NoxUI::UINotificationSeverity::Warning, "HLOD build cancelled", std::string(reason) + ": the HLOD grid was not written.");
         m_HLODBuild.reset();
     }
 
@@ -4684,7 +4685,7 @@ namespace Nox
             return;
         if (m_EditorScenePath.empty())
         {
-            Notify(UI::UINotificationSeverity::Warning, "Save the scene first", "Its cells are built from their files.");
+            Notify(NoxUI::UINotificationSeverity::Warning, "Save the scene first", "Its cells are built from their files.");
             return;
         }
         SaveScene(); // the cells' files are what is built
@@ -4692,7 +4693,7 @@ namespace Nox
         if (m_HLODBuild->Failed())
         {
             m_HLODBuild.reset();
-            Notify(UI::UINotificationSeverity::Error, "HLOD build not started", "See the Output Log.");
+            Notify(NoxUI::UINotificationSeverity::Error, "HLOD build not started", "See the Output Log.");
         }
     }
 
@@ -4712,13 +4713,13 @@ namespace Nox
         }
     }
 
-    void EditorV2Layer::OpenToolWindow(const std::string& title, const Ref<UI::UIElement>& root, UI::UIVec2 size)
+    void EditorV2Layer::OpenToolWindow(const std::string& title, const Ref<NoxUI::UIElement>& root, NoxUI::UIVec2 size)
     {
         UILayer* uiLayer = Application::Get().GetUILayer();
         if (!uiLayer || !uiLayer->GetDockSpaceRef() || !root)
             return;
         const auto& dock = uiLayer->GetDockSpaceRef();
-        if (const Ref<UI::UIWindow> window = dock->FindFloatingWindow(title))
+        if (const Ref<NoxUI::UIWindow> window = dock->FindFloatingWindow(title))
         {
             if (window->OnActivate)
                 window->OnActivate();
@@ -4787,7 +4788,7 @@ namespace Nox
 
         // Panels torn off into OS windows close first: the default layout docks every panel again, and a window left open would
         // keep a second copy of one.
-        if (UI::UIViewportManager* windows = uiLayer->GetViewportManager())
+        if (NoxUI::UIViewportManager* windows = uiLayer->GetViewportManager())
             windows->Shutdown();
 
         // The saved files go, so the next start shows the default layout too (until the layout is saved again on exit).
@@ -4811,7 +4812,7 @@ namespace Nox
 
         BuildUI(false);
         SaveLayoutFiles();
-        Notify(UI::UINotificationSeverity::Success, "Layout reset", "The default panels are back.");
+        Notify(NoxUI::UINotificationSeverity::Success, "Layout reset", "The default panels are back.");
     }
 
     bool EditorV2Layer::IsPanelDocked(const std::string& title) const
@@ -4824,9 +4825,9 @@ namespace Nox
     {
         const char* PageTitle(int page) { return page == 2 ? "Output Log" : "Content Browser"; }
 
-        void ActivateDockedTab(UI::UIDockSpace& dock, const std::string& title)
+        void ActivateDockedTab(NoxUI::UIDockSpace& dock, const std::string& title)
         {
-            if (Ref<UI::UIDockNode> node = dock.FindNodeByPanelTitle(title); node && node->TabPanel)
+            if (Ref<NoxUI::UIDockNode> node = dock.FindNodeByPanelTitle(title); node && node->TabPanel)
             {
                 for (size_t i = 0; i < node->TabPanel->GetTabCount(); ++i)
                 {
@@ -4873,7 +4874,7 @@ namespace Nox
     {
         if (!m_CenterArea || page == DrawerPage::None || IsPanelDocked(PageTitle(static_cast<int>(page))))
             return;
-        Ref<UI::UIElement> root = page == DrawerPage::Content ? m_ContentBrowserRoot : m_OutputLogRoot;
+        Ref<NoxUI::UIElement> root = page == DrawerPage::Content ? m_ContentBrowserRoot : m_OutputLogRoot;
         if (!root)
             return;
         m_CenterArea->SetPage(root);
@@ -4897,7 +4898,7 @@ namespace Nox
         const std::string title = PageTitle(static_cast<int>(page));
         if (dock->FindNodeByPanelTitle(title))
             return;
-        Ref<UI::UIElement> root = page == DrawerPage::Content ? m_ContentBrowserRoot : m_OutputLogRoot;
+        Ref<NoxUI::UIElement> root = page == DrawerPage::Content ? m_ContentBrowserRoot : m_OutputLogRoot;
         if (!root)
             return;
         // Out of the drawer (closed at once: the page is needed in the dock now).
@@ -4913,9 +4914,9 @@ namespace Nox
         // Under the viewports, as a tab beside the other page when that one is docked already.
         const std::string partner = PageTitle(page == DrawerPage::Log ? 1 : 2);
         if (dock->FindNodeByPanelTitle(partner))
-            dock->AddPanel(title, root, UI::UIDockDropZone::Center, partner);
+            dock->AddPanel(title, root, NoxUI::UIDockDropZone::Center, partner);
         else
-            dock->AddPanel(title, root, UI::UIDockDropZone::Bottom, "Viewports", 0.30f);
+            dock->AddPanel(title, root, NoxUI::UIDockDropZone::Bottom, "Viewports", 0.30f);
         ActivateDockedTab(*dock, title);
     }
 
@@ -4972,7 +4973,7 @@ namespace Nox
         return Project::GetActive()->GetEditorAssetManager()->RegisterExistingFile(relativePath, AssetType::Prefab);
     }
 
-    void EditorV2Layer::Notify(UI::UINotificationSeverity severity, std::string title, std::string message)
+    void EditorV2Layer::Notify(NoxUI::UINotificationSeverity severity, std::string title, std::string message)
     {
         if (UILayer* uiLayer = Application::Get().GetUILayer())
             uiLayer->GetContext().PushNotification({ severity, std::move(title), std::move(message) });

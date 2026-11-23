@@ -13,7 +13,7 @@
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Renderer.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 namespace Nox
 {
@@ -80,7 +80,7 @@ namespace Nox
 
         // A finished job's result, or empty when it threw (logged).
         template <typename T>
-        std::optional<T> takeJobResult(TaskFuture<T>& future, const AssetMetadata& metadata)
+        std::optional<T> takeJobResult(NoxTasks::TaskFuture<T>& future, const AssetMetadata& metadata)
         {
             try
             {
@@ -112,7 +112,7 @@ namespace Nox
             TextureLoad(AssetHandle handle, const AssetMetadata& metadata, const std::filesystem::path& assetDirectory)
                 : Load(handle, metadata), m_AssetDirectory(assetDirectory)
             {
-                m_Header = JobSystem::Get().AsyncIO("Read Texture Header", JobPriority::Normal, [assetDirectory, metadata](const CancellationToken&)
+                m_Header = NoxTasks::JobSystem::Get().AsyncIO("Read Texture Header", NoxTasks::JobPriority::Normal, [assetDirectory, metadata](const NoxTasks::CancellationToken&)
                 {
                     Header header;
                     header.Cooked = TextureImporter::ReadCookedTextureHeader(assetDirectory, metadata);
@@ -140,7 +140,7 @@ namespace Nox
                     {
                         // First import or a changed source: cooked (decode, mips, write) as a CPU job, then read.
                         m_CookStarted = true;
-                        m_Header = JobSystem::Get().Async("Cook Texture", JobPriority::Background, [assetDirectory = m_AssetDirectory, metadata = m_Metadata](const CancellationToken&)
+                        m_Header = NoxTasks::JobSystem::Get().Async("Cook Texture", NoxTasks::JobPriority::Background, [assetDirectory = m_AssetDirectory, metadata = m_Metadata](const NoxTasks::CancellationToken&)
                         {
                             Header cooked;
                             if (TextureImporter::CookTexture(assetDirectory, metadata))
@@ -176,8 +176,8 @@ namespace Nox
                     takeBudget(uploadBudget, bytes);
 
                     // From the file straight into staging: the texels are never copied on the CPU.
-                    m_Read = JobSystem::Get().AsyncIO("Read Texture Data", JobPriority::Normal,
-                        [cooked = m_Cooked, firstMip = m_FirstMip, mipCount = mipLevels - m_FirstMip, destination = m_Upload->Staging.data](const CancellationToken&)
+                    m_Read = NoxTasks::JobSystem::Get().AsyncIO("Read Texture Data", NoxTasks::JobPriority::Normal,
+                        [cooked = m_Cooked, firstMip = m_FirstMip, mipCount = mipLevels - m_FirstMip, destination = m_Upload->Staging.data](const NoxTasks::CancellationToken&)
                         {
                             return TextureImporter::ReadCookedTextureMips(cooked, firstMip, mipCount, destination);
                         });
@@ -266,11 +266,11 @@ namespace Nox
             uint32_t m_FirstMip = 0;
             bool m_Virtual = false; // loaded as a virtual texture (its tail)
             Stage m_Stage = Stage::Header;
-            TaskFuture<Header> m_Header;
+            NoxTasks::TaskFuture<Header> m_Header;
             bool m_CookStarted = false;
             CookedTextureHeader m_Cooked;
             std::optional<TextureUpload> m_Upload;
-            TaskFuture<bool> m_Read;
+            NoxTasks::TaskFuture<bool> m_Read;
             uint64_t m_CompleteValue = 0;
         };
 
@@ -284,7 +284,7 @@ namespace Nox
                 : Load(handle, metadata), m_AssetDirectory(assetDirectory), m_StreamPages(streamPages)
             {
                 // Geometry that streams comes with its root pages; the rest follows the feedback (GeometryStreamer, §5.7.2).
-                m_Parse = JobSystem::Get().AsyncIO("Read Mesh", JobPriority::Normal, [assetDirectory, metadata, streamPages](const CancellationToken&)
+                m_Parse = NoxTasks::JobSystem::Get().AsyncIO("Read Mesh", NoxTasks::JobPriority::Normal, [assetDirectory, metadata, streamPages](const NoxTasks::CancellationToken&)
                 {
                     Parsed parsed;
                     parsed.Mesh = MeshImporter::ReadCookedMesh(assetDirectory, metadata, streamPages);
@@ -308,8 +308,8 @@ namespace Nox
                     {
                         // First import or a changed source: cooked (glTF parse, meshlets, clips, materials) as a CPU job.
                         m_CookStarted = true;
-                        m_Parse = JobSystem::Get().Async("Cook Mesh", JobPriority::Background,
-                                                         [assetDirectory = m_AssetDirectory, metadata = m_Metadata, streamPages = m_StreamPages](const CancellationToken&)
+                        m_Parse = NoxTasks::JobSystem::Get().Async("Cook Mesh", NoxTasks::JobPriority::Background,
+                                                         [assetDirectory = m_AssetDirectory, metadata = m_Metadata, streamPages = m_StreamPages](const NoxTasks::CancellationToken&)
                         {
                             Parsed cooked;
                             if (MeshImporter::CookMesh(assetDirectory, metadata))
@@ -408,7 +408,7 @@ namespace Nox
             {
                 size_t First = 0;
                 std::vector<MeshUpload> Uploads;
-                TaskFuture<bool> Write;
+                NoxTasks::TaskFuture<bool> Write;
                 uint64_t CompleteValue = 0;
                 bool Recorded = false;
                 size_t Published = 0; // uploads handed to the mesh so far (a few per frame)
@@ -437,7 +437,7 @@ namespace Nox
                 // The job owns the batch's submeshes until it is done; each CPU copy is dropped once it is in staging.
                 Batch* written = batch.get();
                 MeshData* submeshes = m_Cooked.Submeshes.data();
-                written->Write = JobSystem::Get().Async("Write Mesh Geometry", JobPriority::Background, [written, submeshes](const CancellationToken&)
+                written->Write = NoxTasks::JobSystem::Get().Async("Write Mesh Geometry", NoxTasks::JobPriority::Background, [written, submeshes](const NoxTasks::CancellationToken&)
                 {
                     for (size_t index = 0; index < written->Uploads.size(); ++index)
                     {
@@ -452,7 +452,7 @@ namespace Nox
 
             std::filesystem::path m_AssetDirectory;
             bool m_StreamPages = false;
-            TaskFuture<Parsed> m_Parse;
+            NoxTasks::TaskFuture<Parsed> m_Parse;
             bool m_CookStarted = false;
             CookedMesh m_Cooked;
             uint64_t m_PendingBytes = 0;
@@ -468,7 +468,7 @@ namespace Nox
         public:
             ImportLoad(AssetHandle handle, const AssetMetadata& metadata, const std::filesystem::path& assetDirectory) : Load(handle, metadata)
             {
-                m_Import = JobSystem::Get().Async("Import Asset", JobPriority::Normal, [handle, metadata, assetDirectory](const CancellationToken&)
+                m_Import = NoxTasks::JobSystem::Get().Async("Import Asset", NoxTasks::JobPriority::Normal, [handle, metadata, assetDirectory](const NoxTasks::CancellationToken&)
                 {
                     Imported imported;
                     imported.Loaded = AssetImporter::ImportAsset(handle, metadata);
@@ -510,7 +510,7 @@ namespace Nox
                 std::optional<XXH128_hash_t> SourceHash;
             };
 
-            TaskFuture<Imported> m_Import;
+            NoxTasks::TaskFuture<Imported> m_Import;
         };
     }
 

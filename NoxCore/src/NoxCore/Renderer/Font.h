@@ -6,7 +6,7 @@
 
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/Ref.h"
-#include "NRI/Texture.h"
+#include "NoxCore/Renderer/Texture2D.h"
 
 namespace Nox
 {

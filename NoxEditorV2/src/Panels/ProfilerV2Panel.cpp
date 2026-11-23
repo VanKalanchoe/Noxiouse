@@ -1,4 +1,5 @@
 #include "ProfilerV2Panel.h"
+#include <NoxUI/Rendering/UIFont.h>
 
 #include <algorithm>
 #include <cctype>
@@ -12,17 +13,17 @@
 #include <SDL3/SDL_keyboard.h>
 
 #include "NoxCore/Renderer/Font.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
-#include "NoxCore/UI/Core/UIContext.h"
-#include "NoxCore/UI/Core/UITheme.h"
-#include "NoxCore/UI/Layout/UILayout.h"
-#include "NoxCore/UI/Rendering/UIDrawList.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UICheckBox.h"
-#include "NoxCore/UI/Widgets/UIDragScalar.h"
-#include "NoxCore/UI/Widgets/UIDropdown.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UISearchBar.h"
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Core/UIContext.h>
+#include <NoxUI/Core/UITheme.h>
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UICheckBox.h>
+#include <NoxUI/Widgets/UIDragScalar.h>
+#include <NoxUI/Widgets/UIDropdown.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UISearchBar.h>
 #include "NoxCore/Utils/Utils.h"
 
 namespace Nox
@@ -39,9 +40,9 @@ namespace Nox
         constexpr float kRow = 18.0f;
         constexpr float kText = 12.0f;
 
-        glm::vec4 Token(const UI::UITheme& theme, const char* name, const UI::UIColor& fallback)
+        glm::vec4 Token(const NoxUI::UITheme& theme, const char* name, const NoxUI::UIColor& fallback)
         {
-            const UI::UIColor c = theme.GetToken(name, fallback);
+            const NoxUI::UIColor c = theme.GetToken(name, fallback);
             return { c.r, c.g, c.b, c.a };
         }
 
@@ -57,7 +58,7 @@ namespace Nox
         glm::vec4 ScopeColor(uint32_t scopeId, bool isWait, bool gpu)
         {
             if (isWait)
-                return UI::ThemeColor("ProfilerWait", { 0.43f, 0.43f, 0.43f, 1.0f });
+                return NoxUI::ThemeColor("ProfilerWait", { 0.43f, 0.43f, 0.43f, 1.0f });
             const uint32_t hash = (scopeId + 1u) * 2654435761u;
             return Hsv(static_cast<float>(hash % 360u) / 360.0f, gpu ? 0.45f : 0.55f, gpu ? 0.85f : 0.75f);
         }
@@ -106,17 +107,17 @@ namespace Nox
         }
 
         // The frame-time graph (fixed slots, newest on the right) or the memory graph under it.
-        class FrameGraph final : public UI::UIElement
+        class FrameGraph final : public NoxUI::UIElement
         {
         public:
             FrameGraph(std::shared_ptr<State> state, bool memory) : m_State(std::move(state)), m_Memory(memory)
             {
-                HitTestMode = UI::UIHitTestMode::Self;
-                WidthMode = UI::UISizeMode::Fill;
-                HeightMode = UI::UISizeMode::Fixed;
+                HitTestMode = NoxUI::UIHitTestMode::Self;
+                WidthMode = NoxUI::UISizeMode::Fill;
+                HeightMode = NoxUI::UISizeMode::Fixed;
                 FixedSize = { 0.0f, memory ? 46.0f : 80.0f };
             }
-            bool OnPointerMove(const UI::UIPointerEvent& e) override
+            bool OnPointerMove(const NoxUI::UIPointerEvent& e) override
             {
                 const int32_t index = IndexAt(e.Position.x);
                 if (index < 0)
@@ -138,7 +139,7 @@ namespace Nox
                 }
                 return true;
             }
-            bool OnPointerDown(const UI::UIPointerEvent& e) override
+            bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
             {
                 if (e.Button != 1 || m_Memory)
                     return false;
@@ -151,9 +152,9 @@ namespace Nox
             }
 
         protected:
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
             {
-                const UI::UIRect b = GetBounds();
+                const NoxUI::UIRect b = GetBounds();
                 d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, Token(theme, "ProfilerBackground", { 0.10f, 0.10f, 0.11f, 1.0f }));
                 const uint32_t count = m_State->FrameCount();
                 const float slot = b.Width() / static_cast<float>(m_State->FrameSlots());
@@ -168,7 +169,7 @@ namespace Nox
         private:
             int32_t IndexAt(float x) const
             {
-                const UI::UIRect b = GetBounds();
+                const NoxUI::UIRect b = GetBounds();
                 const uint32_t count = m_State->FrameCount();
                 if (count == 0)
                     return -1;
@@ -177,7 +178,7 @@ namespace Nox
                 return index >= 0 && index < static_cast<int32_t>(count) ? index : -1;
             }
 
-            void PaintFrames(UI::UIDrawList& d, const UI::UITheme& theme, const UI::UIRect& b, uint32_t count, float slot)
+            void PaintFrames(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme, const NoxUI::UIRect& b, uint32_t count, float slot)
             {
                 double maxMs = 1000.0 / 30.0;
                 for (uint32_t i = 0; i < count; ++i)
@@ -190,8 +191,8 @@ namespace Nox
                 for (double reference : { 1000.0 / 60.0, 1000.0 / 30.0 })
                 {
                     const float y = toY(reference);
-                    d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + 1.0f }, UI::ThemeColor("ProfilerFrameLine", { 1.0f, 1.0f, 1.0f, 0.16f }));
-                    d.AddText(reference < 20.0 ? "60 fps" : "30 fps", nullptr, { b.Min.x + 2.0f, y - 14.0f }, kText, UI::ThemeColor("ProfilerFrameLineText", { 1.0f, 1.0f, 1.0f, 0.35f }));
+                    d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + 1.0f }, NoxUI::ThemeColor("ProfilerFrameLine", { 1.0f, 1.0f, 1.0f, 0.16f }));
+                    d.AddText(reference < 20.0 ? "60 fps" : "30 fps", nullptr, { b.Min.x + 2.0f, y - 14.0f }, kText, NoxUI::ThemeColor("ProfilerFrameLineText", { 1.0f, 1.0f, 1.0f, 0.35f }));
                 }
                 const glm::vec4 good = Token(theme, "ProfilerFrameGood", { 0.35f, 0.75f, 0.39f, 1.0f });
                 const glm::vec4 slow = Token(theme, "ProfilerFrameSlow", { 0.86f, 0.75f, 0.27f, 1.0f });
@@ -211,18 +212,18 @@ namespace Nox
                         d.AddRoundedRect({ x0, y - 1.0f }, { x1 + 1.0f, y + 1.0f }, gpu);
                     }
                     if (static_cast<int32_t>(i) == selected)
-                        d.AddRoundedRect({ x0 - 1.0f, b.Min.y }, { x1 + 1.0f, b.Max.y }, glm::vec4(0.0f), glm::vec4(0.0f), 1.0f, UI::ThemeColor("ProfilerFrameSelection", { 1.0f, 1.0f, 1.0f, 0.86f }));
+                        d.AddRoundedRect({ x0 - 1.0f, b.Min.y }, { x1 + 1.0f, b.Max.y }, glm::vec4(0.0f), glm::vec4(0.0f), 1.0f, NoxUI::ThemeColor("ProfilerFrameSelection", { 1.0f, 1.0f, 1.0f, 0.86f }));
                 }
             }
 
-            void PaintMemory(UI::UIDrawList& d, const UI::UITheme& theme, const UI::UIRect& b, uint32_t count, float slot)
+            void PaintMemory(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme, const NoxUI::UIRect& b, uint32_t count, float slot)
             {
                 float maxMB = 0.0f;
                 for (uint32_t i = 0; i < count; ++i)
                     maxMB = std::max({ maxMB, m_State->Frame(i).VramMB, m_State->Frame(i).RamMB });
                 if (maxMB <= 0.0f)
                 {
-                    d.AddText("No memory figures yet", nullptr, { b.Min.x + 4.0f, b.Min.y + 4.0f }, kText, UI::ThemeColor("ProfilerEmptyText", { 1.0f, 1.0f, 1.0f, 0.4f }));
+                    d.AddText("No memory figures yet", nullptr, { b.Min.x + 4.0f, b.Min.y + 4.0f }, kText, NoxUI::ThemeColor("ProfilerEmptyText", { 1.0f, 1.0f, 1.0f, 0.4f }));
                     return;
                 }
                 maxMB *= 1.1f;
@@ -237,7 +238,7 @@ namespace Nox
                         const float y = b.Max.y - std::min(mb / maxMB, 1.0f) * (b.Height() - 2.0f);
                         d.AddRoundedRect({ x - std::max(slot * 0.5f, 0.75f), y - 1.0f }, { x + std::max(slot * 0.5f, 0.75f), y + 1.0f }, colors[series]);
                     }
-                d.AddText(std::format("{:.0f} MB", maxMB), nullptr, { b.Min.x + 2.0f, b.Min.y }, kText, UI::ThemeColor("ProfilerFrameLineText", { 1.0f, 1.0f, 1.0f, 0.35f }));
+                d.AddText(std::format("{:.0f} MB", maxMB), nullptr, { b.Min.x + 2.0f, b.Min.y }, kText, NoxUI::ThemeColor("ProfilerFrameLineText", { 1.0f, 1.0f, 1.0f, 0.35f }));
                 d.AddText("VRAM", nullptr, { b.Min.x + 2.0f, b.Max.y - 14.0f }, kText, colors[0]);
                 d.AddText("RAM", nullptr, { b.Min.x + 40.0f, b.Max.y - 14.0f }, kText, colors[1]);
             }
@@ -247,20 +248,20 @@ namespace Nox
         };
 
         // The picked frame's timeline: GPU tracks, then the main thread, then the other threads; one row per scope depth.
-        class Timeline final : public UI::UIElement
+        class Timeline final : public NoxUI::UIElement
         {
         public:
             explicit Timeline(std::shared_ptr<State> state) : m_State(std::move(state))
             {
-                HitTestMode = UI::UIHitTestMode::Self;
-                WidthMode = UI::UISizeMode::Fill;
-                HeightMode = UI::UISizeMode::Fill;
+                HitTestMode = NoxUI::UIHitTestMode::Self;
+                WidthMode = NoxUI::UISizeMode::Fill;
+                HeightMode = NoxUI::UISizeMode::Fill;
                 ClipChildren = true;
             }
 
-            bool OnMouseWheel(const UI::UIPointerEvent& e) override
+            bool OnMouseWheel(const NoxUI::UIPointerEvent& e) override
             {
-                if (e.Modifiers & UI::UIMod::Shift)
+                if (e.Modifiers & NoxUI::UIMod::Shift)
                 {
                     m_ScrollY = std::max(0.0f, m_ScrollY - e.ScrollDelta.y * 40.0f); // Shift+wheel: up / down through the lanes
                     return true;
@@ -275,7 +276,7 @@ namespace Nox
                 s.Follow = false;
                 return true;
             }
-            bool OnPointerDown(const UI::UIPointerEvent& e) override
+            bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
             {
                 m_Dragging = true;
                 m_Moved = false;
@@ -283,7 +284,7 @@ namespace Nox
                 m_PressButton = e.Button;
                 return true;
             }
-            bool OnPointerMove(const UI::UIPointerEvent& e) override
+            bool OnPointerMove(const NoxUI::UIPointerEvent& e) override
             {
                 if (m_Dragging)
                 {
@@ -302,7 +303,7 @@ namespace Nox
                 UpdateHover();
                 return true;
             }
-            bool OnPointerUp(const UI::UIPointerEvent& e) override
+            bool OnPointerUp(const NoxUI::UIPointerEvent& e) override
             {
                 const bool click = m_Dragging && !m_Moved && e.Button == 1 && m_PressButton == 1;
                 m_Dragging = false;
@@ -323,7 +324,7 @@ namespace Nox
             }
 
         protected:
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override;
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override;
 
         private:
             float TrackX() const { return GetBounds().Min.x + kLaneLabelWidth; }
@@ -360,19 +361,19 @@ namespace Nox
             std::shared_ptr<State> m_State;
             bool m_Dragging = false, m_Moved = false;
             int m_PressButton = 0;
-            UI::UIVec2 m_Last{ 0.0f }, m_Pointer{ -1.0f };
+            NoxUI::UIVec2 m_Last{ 0.0f }, m_Pointer{ -1.0f };
             float m_ScrollY = 0.0f;
             Hovered m_Hovered;
             std::chrono::steady_clock::time_point m_LastClick{};
         };
 
-        void Timeline::OnPaint(UI::UIDrawList& d, const UI::UITheme& theme)
+        void Timeline::OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme)
         {
-            const UI::UIRect b = GetBounds();
+            const NoxUI::UIRect b = GetBounds();
             State& s = *m_State;
             d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, Token(theme, "ProfilerBackground", { 0.10f, 0.10f, 0.11f, 1.0f }));
-            const glm::vec4 text = UI::ThemeColor("ProfilerText", { 0.88f, 0.89f, 0.92f, 1.0f });
-            const glm::vec4 dim = UI::ThemeColor("TextMuted", { 0.55f, 0.57f, 0.62f, 1.0f });
+            const glm::vec4 text = NoxUI::ThemeColor("ProfilerText", { 0.88f, 0.89f, 0.92f, 1.0f });
+            const glm::vec4 dim = NoxUI::ThemeColor("TextMuted", { 0.55f, 0.57f, 0.62f, 1.0f });
             const uint32_t frameCount = s.FrameCount();
             const int32_t selected = s.HasSelection ? s.FindFrame(s.SelectedFrame) : -1;
             m_Hovered.Valid = false;
@@ -487,14 +488,14 @@ namespace Nox
                 const State::ScopeDetails details = s.Scope(scope.ScopeId);
                 d.AddRoundedRect({ x0, y0 }, { x1, y1 }, ScopeColor(scope.ScopeId, !gpu && details.IsWait, gpu));
                 if (scope.ScopeId == s.HighlightScope)
-                    d.AddRoundedRect({ x0, y0 }, { x1, y1 }, glm::vec4(0.0f), glm::vec4(0.0f), 2.0f, UI::ThemeColor("ProfilerScopeSelected", { 1.0f, 1.0f, 1.0f, 1.0f }));
+                    d.AddRoundedRect({ x0, y0 }, { x1, y1 }, glm::vec4(0.0f), glm::vec4(0.0f), 2.0f, NoxUI::ThemeColor("ProfilerScopeSelected", { 1.0f, 1.0f, 1.0f, 1.0f }));
                 x0 = std::max(x0, trackX);
                 x1 = std::min(x1, trackX + trackWidth);
                 if (x1 - x0 > 24.0f)
                 {
                     d.PushClipRect({ x0, y0 }, { x1, y1 });
                     d.AddText(std::string(details.Name) + " " + FormatDuration(static_cast<double>(scope.EndNs - scope.StartNs)), nullptr, { x0 + 3.0f, y0 + 2.0f },
-                              kText, UI::ThemeColor("ProfilerScopeText", { 0.06f, 0.06f, 0.06f, 1.0f }));
+                              kText, NoxUI::ThemeColor("ProfilerScopeText", { 0.06f, 0.06f, 0.06f, 1.0f }));
                     d.PopClipRect();
                 }
                 if (pointerIn && m_Pointer.x >= x0 && m_Pointer.x < x1 && m_Pointer.y >= y0 && m_Pointer.y < y1)
@@ -517,26 +518,26 @@ namespace Nox
         }
 
         // The picked frame's scopes, summed per scope and track: click a header to sort by it, a row to mark the scope.
-        class ScopeTable final : public UI::UIElement
+        class ScopeTable final : public NoxUI::UIElement
         {
         public:
             explicit ScopeTable(std::shared_ptr<State> state) : m_State(std::move(state))
             {
-                HitTestMode = UI::UIHitTestMode::Self;
-                WidthMode = UI::UISizeMode::Fill;
-                HeightMode = UI::UISizeMode::Fixed;
+                HitTestMode = NoxUI::UIHitTestMode::Self;
+                WidthMode = NoxUI::UISizeMode::Fill;
+                HeightMode = NoxUI::UISizeMode::Fixed;
                 FixedSize = { 0.0f, 210.0f };
             }
-            bool OnMouseWheel(const UI::UIPointerEvent& e) override
+            bool OnMouseWheel(const NoxUI::UIPointerEvent& e) override
             {
                 m_Scroll = std::max(0.0f, m_Scroll - e.ScrollDelta.y * 3.0f * kRow);
                 return true;
             }
-            bool OnPointerUp(const UI::UIPointerEvent& e) override
+            bool OnPointerUp(const NoxUI::UIPointerEvent& e) override
             {
                 if (e.Button != 1)
                     return false;
-                const UI::UIRect b = GetBounds();
+                const NoxUI::UIRect b = GetBounds();
                 if (e.Position.y < b.Min.y + kRow)
                 {
                     const int column = ColumnAt(e.Position.x);
@@ -556,9 +557,9 @@ namespace Nox
             }
 
         protected:
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
             {
-                const UI::UIRect b = GetBounds();
+                const NoxUI::UIRect b = GetBounds();
                 State& s = *m_State;
                 d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, Token(theme, "ProfilerBackground", { 0.10f, 0.10f, 0.11f, 1.0f }));
                 const int32_t selected = s.HasSelection ? s.FindFrame(s.SelectedFrame) : -1;
@@ -603,10 +604,10 @@ namespace Nox
                 m_Scroll = std::clamp(m_Scroll, 0.0f, std::max(0.0f, static_cast<float>(m_Rows.size()) * kRow - (b.Height() - kRow)));
 
                 static constexpr const char* kHeaders[6] = { "Scope", "Track", "Calls", "Total (ms)", "Max (ms)", "% of frame" };
-                const glm::vec4 text = UI::ThemeColor("ProfilerTableText", { 0.86f, 0.88f, 0.92f, 1.0f });
-                const glm::vec4 dim = UI::ThemeColor("TextMuted", { 0.55f, 0.57f, 0.62f, 1.0f });
+                const glm::vec4 text = NoxUI::ThemeColor("ProfilerTableText", { 0.86f, 0.88f, 0.92f, 1.0f });
+                const glm::vec4 dim = NoxUI::ThemeColor("TextMuted", { 0.55f, 0.57f, 0.62f, 1.0f });
                 d.PushClipRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y });
-                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Min.y + kRow }, UI::ThemeColor("TableHeader", { 1.0f, 1.0f, 1.0f, 0.05f }));
+                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Min.y + kRow }, NoxUI::ThemeColor("TableHeader", { 1.0f, 1.0f, 1.0f, 0.05f }));
                 for (int column = 0; column < 6; ++column)
                 {
                     std::string header = kHeaders[column];
@@ -622,9 +623,9 @@ namespace Nox
                         continue;
                     const Row& row = m_Rows[i];
                     if (row.ScopeId == s.HighlightScope)
-                        d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, UI::ThemeColor("TableRowSelected", { 0.30f, 0.45f, 0.75f, 0.45f }));
+                        d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, NoxUI::ThemeColor("TableRowSelected", { 0.30f, 0.45f, 0.75f, 0.45f }));
                     else if (i % 2)
-                        d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, UI::ThemeColor("TableRowAlternate", { 1.0f, 1.0f, 1.0f, 0.03f }));
+                        d.AddRoundedRect({ b.Min.x, y }, { b.Max.x, y + kRow }, NoxUI::ThemeColor("TableRowAlternate", { 1.0f, 1.0f, 1.0f, 0.03f }));
                     const double reference = row.Track != 0 ? frame.GpuMs : frameMs;
                     const std::string cells[6] = {
                         s.Scope(row.ScopeId).Name,
@@ -647,7 +648,7 @@ namespace Nox
             float ColumnX(int column) const
             {
                 static constexpr float kWeights[7] = { 0.0f, 0.38f, 0.52f, 0.62f, 0.74f, 0.86f, 1.0f };
-                const UI::UIRect b = GetBounds();
+                const NoxUI::UIRect b = GetBounds();
                 return b.Min.x + b.Width() * kWeights[std::clamp(column, 0, 6)];
             }
             int ColumnAt(float x) const
@@ -749,61 +750,61 @@ namespace Nox
 
     // ---- Panel ----
 
-    const Ref<UI::UIElement>& ProfilerV2Panel::BuildUI(UI::UIContext* context)
+    const Ref<NoxUI::UIElement>& ProfilerV2Panel::BuildUI(NoxUI::UIContext* context)
     {
         m_Context = context;
-        auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-        root->WidthMode = UI::UISizeMode::Fill;
-        root->HeightMode = UI::UISizeMode::Fill;
+        auto root = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 6.0f);
+        root->WidthMode = NoxUI::UISizeMode::Fill;
+        root->HeightMode = NoxUI::UISizeMode::Fill;
         root->StyleClass = "Surface";
         root->DrawBackground = true;
-        root->Padding = UI::UIThickness::All(8.0f);
+        root->Padding = NoxUI::UIThickness::All(8.0f);
         m_Root = root;
         std::shared_ptr<State> s = m_State;
 
 #if NOX_PROFILE_STATS
-        auto bar = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-        bar->WidthMode = UI::UISizeMode::Fill;
-        Ref<UI::UIButton> closeCapture(new UI::UIButton("Close Capture", [s]() { s->Capture.reset(); s->HasSelection = false; s->Follow = true; }));
+        auto bar = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+        bar->WidthMode = NoxUI::UISizeMode::Fill;
+        Ref<NoxUI::UIButton> closeCapture(new NoxUI::UIButton("Close Capture", [s]() { s->Capture.reset(); s->HasSelection = false; s->Follow = true; }));
         closeCapture->Tooltip = "Back to the live frames";
-        Ref<UI::UIButton> pause(new UI::UIButton("Pause", [s]() { s->Paused = !s->Paused; }));
-        Ref<UI::UICheckBox> follow(new UI::UICheckBox("Follow", s->Follow, [s](bool v) { s->Follow = v; }));
+        Ref<NoxUI::UIButton> pause(new NoxUI::UIButton("Pause", [s]() { s->Paused = !s->Paused; }));
+        Ref<NoxUI::UICheckBox> follow(new NoxUI::UICheckBox("Follow", s->Follow, [s](bool v) { s->Follow = v; }));
         follow->Tooltip = "Shows the newest frame (zooming, panning or picking a frame turns this off)";
-        Ref<UI::UIButton> clear(new UI::UIButton("Clear", [s]() { Profiler::Get().ClearTimeline(); s->HasSelection = false; }));
+        Ref<NoxUI::UIButton> clear(new NoxUI::UIButton("Clear", [s]() { Profiler::Get().ClearTimeline(); s->HasSelection = false; }));
         clear->Tooltip = "Drops the kept frames and spikes";
-        Ref<UI::UIButton> save(new UI::UIButton("Save", [this]() { SaveCapture(); }));
+        Ref<NoxUI::UIButton> save(new NoxUI::UIButton("Save", [this]() { SaveCapture(); }));
         save->Tooltip = "Writes the kept frames and spikes to a .noxprof file";
-        Ref<UI::UIButton> load(new UI::UIButton("Load", [this]() { LoadCapture(); }));
+        Ref<NoxUI::UIButton> load(new NoxUI::UIButton("Load", [this]() { LoadCapture(); }));
         load->Tooltip = "Opens a .noxprof file (shown instead of the live frames until closed)";
-        auto source = UI::MakeUI<UI::UIDropdown>(context, std::vector<std::string>{ "Recent Frames", "Spikes" }, 0, [s](int index)
+        auto source = NoxUI::MakeUI<NoxUI::UIDropdown>(context, std::vector<std::string>{ "Recent Frames", "Spikes" }, 0, [s](int index)
         {
             s->Source = index == 1 ? FrameSource::Spikes : FrameSource::Recent;
             s->HasSelection = false;
         });
-        source->WidthMode = UI::UISizeMode::Fixed;
+        source->WidthMode = NoxUI::UISizeMode::Fixed;
         source->FixedSize = { 150.0f, 24.0f };
         source->Tooltip = "Spikes: the last " + std::to_string(Profiler::MaxSpikeFrames) + " frames whose frame or GPU time went above the threshold, kept "
                           "after they scrolled out of the recent frames";
-        auto threshold = UI::MakeUI<UI::UIDragScalar>(Profiler::Get().GetSpikeThresholdMs(), 0.1f, [](float v) { Profiler::Get().SetSpikeThresholdMs(std::clamp(v, 1.0f, 1000.0f)); });
+        auto threshold = NoxUI::MakeUI<NoxUI::UIDragScalar>(Profiler::Get().GetSpikeThresholdMs(), 0.1f, [](float v) { Profiler::Get().SetSpikeThresholdMs(std::clamp(v, 1.0f, 1000.0f)); });
         threshold->Min = 1.0f;
         threshold->Max = 1000.0f;
         threshold->Prefix = "Spike > ";
         threshold->Format = "{:.1f} ms";
-        threshold->WidthMode = UI::UISizeMode::Fixed;
+        threshold->WidthMode = NoxUI::UISizeMode::Fixed;
         threshold->FixedSize = { 130.0f, 24.0f };
         threshold->Tooltip = "A frame slower than this (frame or GPU time) is kept as a spike";
-        Ref<UI::UICheckBox> memory(new UI::UICheckBox("Memory", s->ShowMemory, [s](bool v) { s->ShowMemory = v; }));
+        Ref<NoxUI::UICheckBox> memory(new NoxUI::UICheckBox("Memory", s->ShowMemory, [s](bool v) { s->ShowMemory = v; }));
         memory->Tooltip = "VRAM (device-local heaps) and process RAM under the frame graph";
-        auto message = UI::Label("", 13.0f);
-        Ref<UI::UILabel> messageRef = message;
-        for (const Ref<UI::UIElement>& element : std::initializer_list<Ref<UI::UIElement>>{ closeCapture, pause, follow, clear, save, load, source, threshold, memory, messageRef })
+        auto message = NoxUI::Label("", 13.0f);
+        Ref<NoxUI::UILabel> messageRef = message;
+        for (const Ref<NoxUI::UIElement>& element : std::initializer_list<Ref<NoxUI::UIElement>>{ closeCapture, pause, follow, clear, save, load, source, threshold, memory, messageRef })
             bar->AddChild(element);
         root->AddChild(bar);
 
-        auto info = UI::Label("", 13.5f);
-        Ref<UI::UILabel> infoRef = info;
+        auto info = NoxUI::Label("", 13.5f);
+        Ref<NoxUI::UILabel> infoRef = info;
         infoRef->WordWrap = true;
-        infoRef->WidthMode = UI::UISizeMode::Fill;
+        infoRef->WidthMode = NoxUI::UISizeMode::Fill;
         infoRef->Tooltip = "Graph: click a frame to show it. Timeline: wheel zooms, drag pans, Shift+wheel scrolls the lanes, click a scope to "
                            "mark it in the timeline and the table, double-click zooms to it. On the GPU tracks a pass sits where the GPU ran it: "
                            "usually after the CPU frame that recorded it.";
@@ -815,22 +816,22 @@ namespace Nox
         root->AddChild(memoryGraph);
         root->AddChild(Ref<Timeline>(new Timeline(s)));
 
-        auto tableBar = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-        tableBar->WidthMode = UI::UISizeMode::Fill;
-        auto filter = UI::MakeUI<UI::UISearchBar>();
-        filter->WidthMode = UI::UISizeMode::Fixed;
+        auto tableBar = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+        tableBar->WidthMode = NoxUI::UISizeMode::Fill;
+        auto filter = NoxUI::MakeUI<NoxUI::UISearchBar>();
+        filter->WidthMode = NoxUI::UISizeMode::Fixed;
         filter->FixedSize = { 220.0f, 24.0f };
         filter->OnSearchChanged = [s](const std::string& text) { s->Filter = text; };
         tableBar->AddChild(filter);
-        auto marked = UI::Label("", 13.0f);
-        Ref<UI::UILabel> markedRef = marked;
+        auto marked = NoxUI::Label("", 13.0f);
+        Ref<NoxUI::UILabel> markedRef = marked;
         tableBar->AddChild(markedRef);
-        Ref<UI::UIButton> unmark(new UI::UIButton("Unmark", [s]() { s->HighlightScope = ~0u; }));
+        Ref<NoxUI::UIButton> unmark(new NoxUI::UIButton("Unmark", [s]() { s->HighlightScope = ~0u; }));
         tableBar->AddChild(unmark);
         root->AddChild(tableBar);
         root->AddChild(Ref<ScopeTable>(new ScopeTable(s)));
 
-        UI::AppendSync(*root, [this, s, closeCapture, pause, follow, clear, save, threshold, source, memoryGraph, messageRef, infoRef, markedRef, unmark]()
+        NoxUI::AppendSync(*root, [this, s, closeCapture, pause, follow, clear, save, threshold, source, memoryGraph, messageRef, infoRef, markedRef, unmark]()
         {
             const bool capture = s->Capture != nullptr;
             closeCapture->Visible = capture;
@@ -870,7 +871,7 @@ namespace Nox
             unmark->Visible = s->HighlightScope != ~0u;
         });
 #else
-        root->AddChild(UI::Label("This build has no profiler data (NOX_PROFILE_STATS is off).", 14.0f));
+        root->AddChild(NoxUI::Label("This build has no profiler data (NOX_PROFILE_STATS is off).", 14.0f));
 #endif
         return m_Root;
     }

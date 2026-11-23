@@ -9,7 +9,7 @@
 #include "DataTypes.h" // shaderio, and OffsetAllocator through GeometryArena.h
 #include "UploadManager.h"
 #include "NoxCore/Asset/TextureImporter.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 namespace Nox
 {
@@ -104,7 +104,7 @@ namespace Nox
             uint32_t Slot = 0;             // its pool slot while not Absent
             uint64_t LastWanted = 0;       // streamer frame of the newest feedback that wanted it
             StagingSpan Staging;
-            TaskFuture<bool> Read;
+            NoxTasks::TaskFuture<bool> Read;
             uint64_t CopiesComplete = 0;
         };
 
@@ -122,7 +122,7 @@ namespace Nox
 
         struct Pool
         {
-            NRI::ImageFormat Format = NRI::ImageFormat::None;
+            nri::ImageFormat Format = NRI_FORMAT_NONE;
             Ref<Texture2D> Image;
             uint32_t TilesPerSide = 0;
             std::vector<uint32_t> FreeSlots;
@@ -136,7 +136,7 @@ namespace Nox
         struct OrphanRead
         {
             StagingSpan Staging;
-            TaskFuture<bool> Read;
+            NoxTasks::TaskFuture<bool> Read;
             uint32_t Pool = 0;
             uint32_t Slot = 0;
         };
@@ -155,7 +155,7 @@ namespace Nox
         static void mapSubtree(VirtualTexture& texture, uint32_t tile, uint32_t mip, uint32_t entry);
         static uint32_t encodeEntry(uint32_t slot, uint32_t mip) { return slot | (mip << shaderio::VirtualPageMipShift); }
 
-        uint32_t poolFor(NRI::ImageFormat format);
+        uint32_t poolFor(nri::ImageFormat format);
         void createPoolImage(Pool& pool);
         void releasePoolImage(Pool& pool);
         void stageDescriptor(const VirtualTexture& texture);

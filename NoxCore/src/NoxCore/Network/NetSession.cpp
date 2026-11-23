@@ -3,10 +3,10 @@
 #include <algorithm>
 #include <format>
 
-#include "NetClient.h"
+#include <NoxNet/NetClient.h>
 #include "NetProject.h"
 #include "NetReplication.h"
-#include "NetServer.h"
+#include <NoxNet/NetServer.h>
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 

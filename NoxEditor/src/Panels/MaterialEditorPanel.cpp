@@ -84,16 +84,16 @@ namespace Nox
         if (handle != 0 && Project::GetActive())
         {
             auto assets = Project::GetActive()->GetEditorAssetManager();
-            const AcousticMaterial chosen = assets->GetMetadata(handle).AudioSettings.Acoustic;
-            const AcousticMaterial resolved = ResolveAcousticMaterial(chosen, data.MetallicFactor, data.TransmissionFactor, data.Mode == AlphaMode::Blend);
-            const std::string preview = chosen == AcousticMaterial::Auto ? "Auto (" + std::string(AcousticMaterialToString(resolved)) + ")"
-                                                                         : std::string(AcousticMaterialToString(chosen));
+            const NoxAudio::AcousticMaterial chosen = assets->GetMetadata(handle).AudioSettings.Acoustic;
+            const NoxAudio::AcousticMaterial resolved = ResolveAcousticMaterial(chosen, data.MetallicFactor, data.TransmissionFactor, data.Mode == AlphaMode::Blend);
+            const std::string preview = chosen == NoxAudio::AcousticMaterial::Auto ? "Auto (" + std::string(NoxAudio::AcousticMaterialToString(resolved)) + ")"
+                                                                         : std::string(NoxAudio::AcousticMaterialToString(chosen));
             if (ImGui::BeginCombo("Acoustic Material", preview.c_str()))
             {
-                for (uint8_t i = 0; i < static_cast<uint8_t>(AcousticMaterial::Count); ++i)
+                for (uint8_t i = 0; i < static_cast<uint8_t>(NoxAudio::AcousticMaterial::Count); ++i)
                 {
-                    const AcousticMaterial option = static_cast<AcousticMaterial>(i);
-                    if (ImGui::Selectable(std::string(AcousticMaterialToString(option)).c_str(), option == chosen))
+                    const NoxAudio::AcousticMaterial option = static_cast<NoxAudio::AcousticMaterial>(i);
+                    if (ImGui::Selectable(std::string(NoxAudio::AcousticMaterialToString(option)).c_str(), option == chosen))
                     {
                         assets->SetAcousticMaterial(handle, option);
                         SpatialAudio::MaterialsChanged(); // (a playing scene re-reads its walls)
@@ -103,11 +103,11 @@ namespace Nox
             }
             if (ImGui::IsItemHovered())
             {
-                const AcousticMaterialProperties& properties = GetAcousticMaterialProperties(resolved);
+                const NoxAudio::AcousticMaterialProperties& properties = NoxAudio::GetAcousticMaterialProperties(resolved);
                 ImGui::SetTooltip("What this surface does to sound (Steam Audio): how much a wall of it lets through and absorbs.\n"
                                   "Auto: Glass for transparent / transmissive materials, Metal for metallic ones, else Generic.\n"
                                   "%s lets through %.1f %% / %.1f %% / %.1f %% (low / mid / high) and absorbs %.0f %% / %.0f %% / %.0f %%.",
-                                  std::string(AcousticMaterialToString(resolved)).c_str(), properties.Transmission[0] * 100.0f,
+                                  std::string(NoxAudio::AcousticMaterialToString(resolved)).c_str(), properties.Transmission[0] * 100.0f,
                                   properties.Transmission[1] * 100.0f, properties.Transmission[2] * 100.0f, properties.Absorption[0] * 100.0f,
                                   properties.Absorption[1] * 100.0f, properties.Absorption[2] * 100.0f);
             }

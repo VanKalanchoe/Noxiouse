@@ -11,10 +11,10 @@ namespace Nox
         constexpr std::array<const char*, MemoryCategoryCount> CategoryNames{ "Geometry", "Textures", "Ray Tracing", "Scene", "Transient" };
     }
 
-    void MemoryBudget::Update(std::span<const NRI::MemoryHeapStats> heaps)
+    void MemoryBudget::Update(std::span<const nri::MemoryHeapStats> heaps)
     {
         m_DeviceBudget = 0;
-        for (const NRI::MemoryHeapStats& heap : heaps)
+        for (const nri::MemoryHeapStats& heap : heaps)
         {
             if (heap.deviceLocal)
                 m_DeviceBudget = std::max(m_DeviceBudget, heap.budget);

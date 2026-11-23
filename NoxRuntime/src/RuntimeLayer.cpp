@@ -20,10 +20,10 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/Window.h"
 #include "NoxCore/Events/InputEvents.h"
-#include "NoxCore/Network/NetClient.h"
+#include <NoxNet/NetClient.h>
 #include "NoxCore/Network/NetProject.h"
 #include "NoxCore/Network/NetReplication.h"
-#include "NoxCore/Network/NetServer.h"
+#include <NoxNet/NetServer.h>
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
@@ -348,7 +348,7 @@ namespace Nox
         if (m_Renderer)
         {
             // The window is the viewport: the renderer's output is the swapchain, the scene's cameras take its aspect.
-            const NRI::Extent2D outputSize = m_Renderer->getOutputSize();
+            const nri::Extent2D outputSize = m_Renderer->getOutputSize();
             if (outputSize.width > 0 && outputSize.height > 0)
             {
                 m_Renderer->onViewportSizeChange(outputSize); // no-op while the size is unchanged
@@ -519,7 +519,7 @@ namespace Nox
         {
             m_Scene->SetRenderer(m_Renderer);
             m_Scene->SetRenderer2D(m_Renderer->getRenderer2D());
-            const NRI::Extent2D outputSize = m_Renderer->getOutputSize();
+            const nri::Extent2D outputSize = m_Renderer->getOutputSize();
             m_Scene->OnViewportResize(outputSize.width, outputSize.height);
         }
         if (Replication())

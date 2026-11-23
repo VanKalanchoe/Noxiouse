@@ -394,7 +394,7 @@ namespace Nox
         ranges.MeshletTriangles = m_Renderer.allocateGeometry(m_Renderer.m_meshletTriangleStream, info.MeshletTriangleCount);
         if (ranges.Vertices.IsValid() && info.HasColors())
         {
-            std::unique_ptr<NRI::Buffer> grownFrom;
+            nri::Buffer grownFrom;
             ranges.Colors = m_Renderer.m_colorStream.Reserve(ranges.Vertices.offset, ranges.Vertices.count, grownFrom);
             if (grownFrom)
                 m_Renderer.handleStreamGrowth(m_Renderer.m_colorStream, std::move(grownFrom));
@@ -411,8 +411,8 @@ namespace Nox
         page.Ranges = ranges;
         page.Staging = *staging;
         // From the cooked file straight into staging (a pack's entry as a loose file's range).
-        page.Read = JobSystem::Get().AsyncIO("Read Geometry Page", JobPriority::High,
-            [file = source.File, offset = info.PayloadOffset, bytes, destination = staging->data](const CancellationToken&)
+        page.Read = NoxTasks::JobSystem::Get().AsyncIO("Read Geometry Page", NoxTasks::JobPriority::High,
+            [file = source.File, offset = info.PayloadOffset, bytes, destination = staging->data](const NoxTasks::CancellationToken&)
             {
                 return VFS::ReadRange(file, offset, bytes, destination);
             });

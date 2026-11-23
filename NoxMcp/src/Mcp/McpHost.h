@@ -4,7 +4,8 @@
 #include <string>
 #include <vector>
 
-#include "McpProtocol.h"
+#include <NoxMcp/McpProtocol.h>
+#include <NoxMcp/McpLog.h>
 #include "NoxCore/Core/Ref.h"
 
 namespace Nox
@@ -24,7 +25,7 @@ namespace Nox::Mcp
         // The main view's last image, read back from the GPU a frame or two later: `done` gets RGBA8 / BGRA8 texels (bgra true for the
         // latter), empty when there was none. Unset (a dedicated server draws nothing): screenshot answers that there is no view.
         std::function<void(std::function<void(std::vector<uint8_t> pixels, uint32_t width, uint32_t height, bool bgra)> done)> CaptureViewport;
-        std::function<ConsoleAccess()> GrantedAccess; // what MCP clients are granted (run_command passes it to the console)
+        std::function<NoxMcp::ToolAccess()> GrantedAccess; // what MCP clients are granted (run_command passes it to the console)
         // Pause / step (the editor's Play and Simulate; NoxRuntime's game); unset: pause answers that it cannot.
         std::function<bool(bool paused, int stepFrames, std::string& error)> Pause;
         std::function<bool()> Paused;
@@ -38,7 +39,7 @@ namespace Nox::Mcp
 
     // The tools of both hosts: read_log, get_hierarchy, find_entities, get_entity, screenshot (with CaptureViewport), list_commands,
     // run_command, pause, wait_for, inject_input (with HasLocalPlayer).
-    std::vector<Tool> CreateGameTools(const HostContext& context);
+    std::vector<NoxMcp::Tool> CreateGameTools(const HostContext& context);
 
     // inject_input's key names: the C# KeyCode names (W, LeftShift, Space, Alpha1, F5 ...) and SDL's ("Left Shift"), case ignored.
     // 0 when unknown.

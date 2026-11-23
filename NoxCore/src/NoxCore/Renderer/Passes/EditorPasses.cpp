@@ -2,6 +2,8 @@
 #include "NoxCore/Renderer/Renderer.h"
 
 #include <array>
+#include <NRIHPP/imgui_impl_noxrhi.h>
+#include <NoxUI/Backends/noxui_impl_noxrhi.h>
 
 #include "FrameGraphResources.h"
 
@@ -16,11 +18,42 @@ namespace Nox
         for (uint32_t index = 0; index < MaxExtraViews; ++index)
         {
             if (m_extraViews[index].Shown)
-                extraViewImages.push_back(m_renderGraph.ImportTexture("Extra View Image", m_extraViews[index].Shown.get()));
+                extraViewImages.push_back(m_renderGraph.ImportTexture("Extra View Image", m_extraViews[index].Shown->GetHandle()));
         }
         // Asset thumbnails taken from a view this frame: read once more here, after that nothing writes them.
         for (const Ref<Texture2D>& image : m_takenExtraViewImages)
-            extraViewImages.push_back(m_renderGraph.ImportTexture("Asset Thumbnail", image.get()));
+            extraViewImages.push_back(m_renderGraph.ImportTexture("Asset Thumbnail", image->GetHandle()));
+
+        const bool drawImGui = m_isEditor && m_useImGui && m_imguiInitialized;
+        const bool drawNoxUI = m_noxUIInitialized && !m_uiDrawList.IsEmpty();
+        NriImguiDrawDataDesc imguiDrawData{};
+        if (drawImGui)
+        {
+            if (ImDrawData* dd = ImGui::GetDrawData())
+                imguiDrawData = ImGui_ImplNoxRHI_PrepareDrawData(dd, frameIndex, 0);
+        }
+        NoxUI_NoxRHIDrawData noxUIDrawData{};
+        if (drawNoxUI)
+            noxUIDrawData = NoxUI_ImplNoxRHI_PrepareDrawData(m_uiDrawList, frameIndex, 0);
+
+        if (drawImGui && imguiDrawData.drawListCount > 0)
+        {
+            m_renderGraph.AddPass("ImGui Upload", RGPassFlags::NeverCull,
+                [](RGBuilder& builder) { builder.RecordExclusive("ImGui"); },
+                [imguiDrawData](RGPassContext& context)
+                {
+                    ImGui_ImplNoxRHI_CopyData(context.Cmd(), imguiDrawData);
+                });
+        }
+        if (drawNoxUI)
+        {
+            m_renderGraph.AddPass("NoxUI Upload", RGPassFlags::NeverCull,
+                [](RGBuilder& builder) { builder.RecordExclusive("NoxUI"); },
+                [noxUIDrawData](RGPassContext& context)
+                {
+                    NoxUI_ImplNoxRHI_CopyData(context.Cmd(), noxUIDrawData);
+                });
+        }
 
         // Editor: ImGui (its viewport window shows the scene image). Runtime: fullscreen present of the scene image.
         m_renderGraph.AddPass("ImGui / Present Pass", RGPassFlags::Raster,
@@ -31,20 +64,21 @@ namespace Nox
                     ReadIfValid(builder, image);
                 // The image arrives from an Undefined transition (contents discarded) and ImGui / the present triangle cover
                 // all of it: clear, never load.
-                builder.SwapchainTarget(*m_swapChain, m_frame.imageIndex, NRI::LoadOP::clear, NRI::StoreOP::store);
-                // ImGui's Vulkan backend may also submit texture uploads to the queue while rendering: safe from a worker,
-                // only the main thread submits and it waits for recording.
-                if (m_isEditor && m_useImGui)
+                builder.SwapchainTarget(m_swapChain, m_frame.imageIndex, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE);
+                if (drawImGui)
                     builder.RecordExclusive("ImGui");
+                if (drawNoxUI)
+                    builder.RecordExclusive("NoxUI");
                 builder.SetRenderArea(m_swapChainExtent, RGViewport::None);
             },
-            [this, hasScene = resources.Scene.IsValid()](RGPassContext& context)
+            [this, hasScene = resources.Scene.IsValid(), drawImGui, imguiDrawData, drawNoxUI, noxUIDrawData](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
+                nri::CommandBuffer& cmd = context.Cmd();
 
-                if (m_isEditor && m_useImGui)
+                if (drawImGui)
                 {
-                    cmd.renderImGui();
+                    if (imguiDrawData.drawListCount > 0)
+                        ImGui_ImplNoxRHI_RenderDrawData(cmd, imguiDrawData);
                     return;
                 }
 
@@ -58,14 +92,14 @@ namespace Nox
                 cmd.setVertexInput();
 
                 // Input assembly.
-                cmd.setPrimitiveTopology(NRI::PrimitiveTopology::TriangleList);
+                cmd.setPrimitiveTopology(NRI_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
                 cmd.setPrimitiveRestartEnable(false);
 
                 // Rasterization (most of these come from VK_EXT_extended_dynamic_state_3).
                 cmd.setRasterizerDiscardEnable(false);
-                cmd.setPolygonMode(NRI::PolygonMode::Fill);
-                cmd.setCullMode(NRI::CullMode::None);
-                cmd.setFrontFace(NRI::FrontFace::CounterClockWise);
+                cmd.setPolygonMode(NRI_POLYGON_MODE_FILL);
+                cmd.setCullMode(NRI_CULL_MODE_NONE);
+                cmd.setFrontFace(NRI_FRONT_FACE_COUNTER_CLOCKWISE);
                 cmd.setDepthBiasEnable(false);
                 cmd.setDepthClampEnable(false);
 
@@ -77,26 +111,26 @@ namespace Nox
                 cmd.setAlphaToCoverageEnable(false);
                 // alphaToOne is required by the spec when its device feature is enabled and a
                 // shader object is bound, even if we don't actually use it.
-                cmd.setAlphaToOneEnableEXT(false);
+                cmd.setAlphaToOneEnable(false);
 
                 // Depth / stencil.
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
-                cmd.setDepthCompareOp(NRI::CompareOp::Less);
+                cmd.setDepthCompareOp(NRI_COMPARE_LESS);
                 cmd.setDepthBoundsTestEnable(false);
                 cmd.setStencilTestEnable(false);
 
                 // Color blend (for one color attachment); nothing varies between draws so it is set once.
-                const NRI::ColorBlendEquation blendEquation
+                const nri::ColorBlendEquation blendEquation
                 {
-                    .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
-                    .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                    .colorBlendOp = NRI::BlendOp::Add,
-                    .srcAlphaBlendFactor = NRI::BlendFactor::SrcAlpha,
-                    .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                    .alphaBlendOp = NRI::BlendOp::Add,
+                    .srcColorBlendFactor = NRI_BLEND_FACTOR_SRC_ALPHA,
+                    .dstColorBlendFactor = NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+                    .colorBlendOp = NRI_BLEND_OP_ADD,
+                    .srcAlphaBlendFactor = NRI_BLEND_FACTOR_SRC_ALPHA,
+                    .dstAlphaBlendFactor = NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+                    .alphaBlendOp = NRI_BLEND_OP_ADD,
                 };
-                uint32_t colorWriteMask = NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A;
+                uint32_t colorWriteMask = nri::ColorComponent::R | nri::ColorComponent::G | nri::ColorComponent::B | nri::ColorComponent::A;
                 cmd.setColorBlendEnable(0, false);
                 cmd.setColorBlendEquation(0, blendEquation);
                 cmd.setColorWriteMask(0, colorWriteMask);
@@ -104,11 +138,11 @@ namespace Nox
 
                 if (!m_isEditor && hasScene && m_presentPipeline)
                 {
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_presentPipeline);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_presentPipeline);
 
                     PushConstantBlock references{};
                     // Pass pointer to the global matrix via a buffer device address
-                    references.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                    references.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
                     references.vertexReference = -1;
                     references.instanceReference = -1;
                     cmd.pushData(&references, sizeof(PushConstantBlock));
@@ -127,12 +161,12 @@ namespace Nox
 
                 if (m_isEditor && !m_useImGui && m_sceneResource && m_sceneResource->GetDescriptorIndexSlot() == ~0u)
                 {
-                    m_resourceHeap->registerTexture(*m_sceneResource);
-                    uniformData.imageHeapIndexOffset = m_resourceHeap->getImageHeapIndexOffset();
+                    m_resourceHeap.registerTexture(*m_sceneResource);
+                    uniformData.imageHeapIndexOffset = m_resourceHeap.getImageHeapIndexOffset();
                 }
 
-                if (m_uiRenderer)
-                    m_uiRenderer->Render(cmd, { w, h }, uniformData.imageHeapIndexOffset, frameIndex);
+                if (drawNoxUI)
+                    NoxUI_ImplNoxRHI_RenderDrawData(cmd, noxUIDrawData);
 
 
 
@@ -156,8 +190,8 @@ namespace Nox
                 continue;
             if (recorded == kNames.size())
                 break;
-            const RGTexture texture = m_renderGraph.ImportTexture(kNames[recorded], readback.Texture.get());
-            NRI::Buffer* staging = readback.Staging.get();
+            const RGTexture texture = m_renderGraph.ImportTexture(kNames[recorded], readback.Texture->GetHandle());
+            NriBuffer staging = readback.Staging.handle();
             m_renderGraph.AddPass(kNames[recorded], RGPassFlags::NeverCull,
                 [&](RGBuilder& builder)
                 {
@@ -165,7 +199,7 @@ namespace Nox
                 },
                 [texture, staging, width = readback.Width, height = readback.Height](RGPassContext& context)
                 {
-                    context.Texture(texture).copyImageToBuffer(context.Cmd(), *staging, 0, 0, width, height);
+                    nriTextureCopyToBuffer(context.Texture(texture), context.Cmd().handle(), staging, 0, 0, width, height);
                 });
             readback.FrameSlot = frameIndex;
             ++recorded;
@@ -186,8 +220,8 @@ namespace Nox
             m_raycastsInFlight[frameIndex].push_back(std::move(m_raycastQueue[index].Callback));
         }
         m_raycastQueue.erase(m_raycastQueue.begin(), m_raycastQueue.begin() + count);
-        memcpy(m_raycastBuffers[frameIndex]->map(0, sizeof(shaderio::EditorRay) * count), rays.data(), sizeof(shaderio::EditorRay) * count);
-        m_raycastBuffers[frameIndex]->unmap();
+        memcpy(m_raycastBuffers[frameIndex].map(0, sizeof(shaderio::EditorRay) * count), rays.data(), sizeof(shaderio::EditorRay) * count);
+        m_raycastBuffers[frameIndex].unmap();
 
         // Without a TLAS (ray tracing off, nothing built yet) every ray misses: the callbacks fall back by themselves.
         const bool traced = m_editorRaycastPipeline && resources.TLAS.IsValid();
@@ -195,8 +229,8 @@ namespace Nox
         {
             for (shaderio::EditorRay& ray : rays)
                 ray.hitDistance = -1.0f;
-            memcpy(m_raycastBuffers[frameIndex]->map(0, sizeof(shaderio::EditorRay) * count), rays.data(), sizeof(shaderio::EditorRay) * count);
-            m_raycastBuffers[frameIndex]->unmap();
+            memcpy(m_raycastBuffers[frameIndex].map(0, sizeof(shaderio::EditorRay) * count), rays.data(), sizeof(shaderio::EditorRay) * count);
+            m_raycastBuffers[frameIndex].unmap();
             return;
         }
         m_renderGraph.AddPass("Editor Raycasts", RGPassFlags::NeverCull,
@@ -208,11 +242,11 @@ namespace Nox
             [this, count](RGPassContext& context)
             {
                 shaderio::PushConstantEditorRaycast push{};
-                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                push.raysReference = m_raycastBuffers[frameIndex]->getDeviceAddress();
+                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                push.raysReference = m_raycastBuffers[frameIndex].getDeviceAddress();
                 push.rayCount = count;
-                NRI::CommandBuffer& cmd = context.Cmd();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_editorRaycastPipeline);
+                nri::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_editorRaycastPipeline);
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch((count + 63) / 64, 1, 1);
             });
@@ -260,10 +294,10 @@ namespace Nox
             [res = &resources, sampleX, sampleY, width = readback.width, height = readback.height, patchX0, patchY0,
              patchWidth = readback.patchWidth, patchHeight = readback.patchHeight](RGPassContext& context)
             {
-                context.Texture(res->EntityHi).copyImageToBuffer(context.Cmd(), context.Buffer(res->PickerStaging), sampleX, sampleY, width, height);
+                nriTextureCopyToBuffer(context.Texture(res->EntityHi), context.Cmd().handle(), context.Buffer(res->PickerStaging), sampleX, sampleY, width, height);
                 // The depths around the same first pixel (the measure tool turns one into a world point).
-                context.Texture(res->DepthHi).copyImageToBuffer(context.Cmd(), context.Buffer(res->PickerDepthStaging),
-                                                                static_cast<uint32_t>(patchX0), static_cast<uint32_t>(patchY0), patchWidth, patchHeight);
+                nriTextureCopyToBuffer(context.Texture(res->DepthHi), context.Cmd().handle(), context.Buffer(res->PickerDepthStaging),
+                                       static_cast<uint32_t>(patchX0), static_cast<uint32_t>(patchY0), patchWidth, patchHeight);
             });
     }
 
@@ -277,7 +311,7 @@ namespace Nox
 
         const RGTexture source = graph.FindTexture(settings.Name, settings.Occurrence);
         // Cube maps are not 2D textures.
-        if (!source.IsValid() || (m_environmentCubemap && graph.GetTexture(source) == m_environmentCubemap.get()))
+        if (!source.IsValid() || (m_environmentCubemap && graph.GetTexture(source) == m_environmentCubemap->GetHandle()))
             return;
 
         const RGTextureKey& key = graph.GetTextureKey(source);
@@ -293,14 +327,14 @@ namespace Nox
         imageDesc.Size = RGSize::Absolute;
         imageDesc.Width = width;
         imageDesc.Height = height;
-        imageDesc.Format = NRI::ImageFormat::RGBA8;
-        imageDesc.Usage = NRI::TextureUsage::Storage;
+        imageDesc.Format = NRI_FORMAT_RGBA8;
+        imageDesc.Usage = NRI_TEXTURE_USAGE_STORAGE;
         const RGTexture image = graph.GetHistoryTexture("Texture Inspection", imageDesc, 1).Textures[0];
 
         RGTextureDesc probeDesc = imageDesc;
         probeDesc.Width = 1;
         probeDesc.Height = 1;
-        probeDesc.Format = NRI::ImageFormat::R32G32B32A32_SFLOAT;
+        probeDesc.Format = NRI_FORMAT_R32G32B32A32_SFLOAT;
         const RGTexture probe = graph.GetHistoryTexture("Texture Inspection Probe", probeDesc, 1).Textures[0];
 
         m_inspectionImage = graph.GetTexture(image);
@@ -311,18 +345,18 @@ namespace Nox
         push.channelCount = 4;
         switch (key.Format)
         {
-        case NRI::ImageFormat::R32SINT: push.mode = shaderio::TEXTURE_INSPECT_SIGNED_ID; break;
-        case NRI::ImageFormat::R32G32_UINT:
-        case NRI::ImageFormat::R32G32B32A32_UINT: push.mode = shaderio::TEXTURE_INSPECT_UNSIGNED_PAIR; break;
-        case NRI::ImageFormat::R8_UNORM:
-        case NRI::ImageFormat::R16_SFLOAT:
-        case NRI::ImageFormat::R32_SFLOAT: push.channelCount = 1; break;
-        case NRI::ImageFormat::R16G16:
-        case NRI::ImageFormat::R16G16_SFLOAT:
-        case NRI::ImageFormat::R32G32_SFLOAT: push.channelCount = 2; break;
+        case NRI_FORMAT_R32_SINT: push.mode = shaderio::TEXTURE_INSPECT_SIGNED_ID; break;
+        case NRI_FORMAT_R32G32_UINT:
+        case NRI_FORMAT_R32G32B32A32_UINT: push.mode = shaderio::TEXTURE_INSPECT_UNSIGNED_PAIR; break;
+        case NRI_FORMAT_R8_UNORM:
+        case NRI_FORMAT_R16_SFLOAT:
+        case NRI_FORMAT_R32_SFLOAT: push.channelCount = 1; break;
+        case NRI_FORMAT_R16G16:
+        case NRI_FORMAT_R16G16_SFLOAT:
+        case NRI_FORMAT_R32G32_SFLOAT: push.channelCount = 2; break;
         default: break;
         }
-        if (key.Usage == NRI::TextureUsage::DepthStencilAttachment || settings.DepthCurve)
+        if (key.Usage == NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT || settings.DepthCurve)
             push.mode = shaderio::TEXTURE_INSPECT_DEPTH;
         push.mip = mip;
         push.channelMask = settings.ChannelMask;
@@ -338,19 +372,19 @@ namespace Nox
 
         graph.InspectTexture(source, [this, source, image, probe, push, probeTexel](RGPassContext& context) mutable
         {
-            NRI::CommandBuffer& cmd = context.Cmd();
+            nri::CommandBuffer& cmd = context.Cmd();
             push.sourceTextureIndex = context.Slot(source);
             push.outputStorageIndex = context.StorageSlot(image);
             push.probeStorageIndex = context.StorageSlot(probe);
 
-            cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_textureInspectPipeline);
+            cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_textureInspectPipeline);
             cmd.pushData(&push, sizeof(shaderio::PushConstantTextureInspect));
             cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
 
             if (probeTexel)
             {
                 cmd.executionBarrier();
-                context.Texture(probe).copyImageToBuffer(cmd, *m_inspectionProbeBuffers[frameIndex], 0, 0, 1, 1);
+                nriTextureCopyToBuffer(context.Texture(probe), cmd.handle(), m_inspectionProbeBuffers[frameIndex].handle(), 0, 0, 1, 1);
             }
         });
     }

@@ -9,23 +9,23 @@
 
 #include "NoxCore/NodeGraph/GraphEvalContext.h"
 #include "NoxCore/Renderer/Font.h"
-#include "NoxCore/UI/Core/UIContext.h"
-#include "NoxCore/UI/Layout/UILayout.h"
-#include "NoxCore/UI/Rendering/UIDrawList.h"
-#include "NoxCore/UI/Rendering/UIIcons.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
-#include "NoxCore/UI/Widgets/UIPopup.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
-#include "NoxCore/UI/Widgets/UITextInput.h"
+#include <NoxUI/Core/UIContext.h>
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Rendering/UIIcons.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIMenu.h>
+#include <NoxUI/Widgets/UIPopup.h>
+#include <NoxUI/Widgets/UIScrollView.h>
+#include <NoxUI/Widgets/UITextInput.h>
 
 namespace Nox
 {
     namespace
     {
-        using UI::UIColor;
-        using UI::UIVec2;
+        using NoxUI::UIColor;
+        using NoxUI::UIVec2;
 
         constexpr float kHeader = 28.0f;   // node header height (graph space)
         constexpr float kRow = 24.0f;      // pin row height
@@ -38,15 +38,15 @@ namespace Nox
         // Pin colours by type (Unreal's convention: the type tells the socket), the same as NoxEditor's canvas.
         UIColor PinColor(const std::string& type)
         {
-            if (type == "Pose")    return UI::ThemeColor("PinPose", { 0.78f, 0.55f, 0.95f, 1.0f });
-            if (type == "Float")   return UI::ThemeColor("PinFloat", { 0.55f, 0.85f, 0.55f, 1.0f });
-            if (type == "Bool")    return UI::ThemeColor("PinBool", { 0.85f, 0.45f, 0.45f, 1.0f });
-            if (type == "Int")     return UI::ThemeColor("PinInt", { 0.40f, 0.85f, 0.85f, 1.0f });
-            if (type == "Vector2") return UI::ThemeColor("PinVector2", { 0.95f, 0.85f, 0.35f, 1.0f });
-            if (type == "Audio")   return UI::ThemeColor("PinAudio", { 0.40f, 0.60f, 1.00f, 1.0f });
-            if (type == "Trigger") return UI::ThemeColor("PinTrigger", { 0.95f, 0.95f, 0.95f, 1.0f });
-            if (type == "Value")   return UI::ThemeColor("PinValue", { 0.45f, 0.82f, 0.74f, 1.0f }); // a material graph's values
-            return UI::ThemeColor("PinDefault", { 0.75f, 0.75f, 0.78f, 1.0f });
+            if (type == "Pose")    return NoxUI::ThemeColor("PinPose", { 0.78f, 0.55f, 0.95f, 1.0f });
+            if (type == "Float")   return NoxUI::ThemeColor("PinFloat", { 0.55f, 0.85f, 0.55f, 1.0f });
+            if (type == "Bool")    return NoxUI::ThemeColor("PinBool", { 0.85f, 0.45f, 0.45f, 1.0f });
+            if (type == "Int")     return NoxUI::ThemeColor("PinInt", { 0.40f, 0.85f, 0.85f, 1.0f });
+            if (type == "Vector2") return NoxUI::ThemeColor("PinVector2", { 0.95f, 0.85f, 0.35f, 1.0f });
+            if (type == "Audio")   return NoxUI::ThemeColor("PinAudio", { 0.40f, 0.60f, 1.00f, 1.0f });
+            if (type == "Trigger") return NoxUI::ThemeColor("PinTrigger", { 0.95f, 0.95f, 0.95f, 1.0f });
+            if (type == "Value")   return NoxUI::ThemeColor("PinValue", { 0.45f, 0.82f, 0.74f, 1.0f }); // a material graph's values
+            return NoxUI::ThemeColor("PinDefault", { 0.75f, 0.75f, 0.78f, 1.0f });
         }
 
         // A node's header by its category; categories without a colour of their own get a steady one from their name.
@@ -118,9 +118,9 @@ namespace Nox
             return reader;
         }
 
-        bool Ctrl() { return (UI::UIContext::GetCurrentModifiers() & UI::UIMod::Ctrl) != 0; }
-        bool Shift() { return (UI::UIContext::GetCurrentModifiers() & UI::UIMod::Shift) != 0; }
-        bool Alt() { return (UI::UIContext::GetCurrentModifiers() & UI::UIMod::Alt) != 0; }
+        bool Ctrl() { return (NoxUI::UIContext::GetCurrentModifiers() & NoxUI::UIMod::Ctrl) != 0; }
+        bool Shift() { return (NoxUI::UIContext::GetCurrentModifiers() & NoxUI::UIMod::Shift) != 0; }
+        bool Alt() { return (NoxUI::UIContext::GetCurrentModifiers() & NoxUI::UIMod::Alt) != 0; }
 
         UIVec2 BezierPoint(const UIVec2& p0, const UIVec2& p1, const UIVec2& p2, const UIVec2& p3, float t)
         {
@@ -138,15 +138,15 @@ namespace Nox
 
     NodeGraphCanvasV2::NodeGraphCanvasV2()
     {
-        HitTestMode = UI::UIHitTestMode::Self;
+        HitTestMode = NoxUI::UIHitTestMode::Self;
         Focusable = true;
         ClipChildren = true;
-        WidthMode = UI::UISizeMode::Fill;
-        HeightMode = UI::UISizeMode::Fill;
+        WidthMode = NoxUI::UISizeMode::Fill;
+        HeightMode = NoxUI::UISizeMode::Fill;
         AcceptedDropType = kParameterDragType;
-        OnDrop = [this](const UI::UIDragPayload& payload)
+        OnDrop = [this](const NoxUI::UIDragPayload& payload)
         {
-            UI::UIContext* ctx = UI::UIContext::GetCurrent();
+            NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
             return ctx && AddParameterReader(payload.Text, ctx->GetLastMousePos()) != 0;
         };
     }
@@ -272,8 +272,8 @@ namespace Nox
             {
                 layout.Known = false;
                 layout.Title = node.TypeName + " (unknown)";
-                layout.Header = UI::ThemeColor("NodeHeaderError", { 0.5f, 0.2f, 0.2f, 1.0f });
-                layout.Size = { std::max(kMinWidth, UI::UILabel::MeasureText(layout.Title, nullptr, kTitleFont).x + 24.0f), kHeader + kRow + kBottom };
+                layout.Header = NoxUI::ThemeColor("NodeHeaderError", { 0.5f, 0.2f, 0.2f, 1.0f });
+                layout.Size = { std::max(kMinWidth, NoxUI::UILabel::MeasureText(layout.Title, nullptr, kTitleFont).x + 24.0f), kHeader + kRow + kBottom };
                 m_Layouts.emplace(node.Id, std::move(layout));
                 continue;
             }
@@ -284,19 +284,19 @@ namespace Nox
             if (const auto found = node.Properties.find(kParameterReferenceProperty); found != node.Properties.end())
                 if (const auto* name = std::get_if<std::string>(&found->second); name && !name->empty())
                     layout.Title = node.TypeName + ": " + *name;
-            layout.Header = node.Id == m_Graph->OutputNode ? UI::ThemeColor("NodeHeaderOutput", { 0.22f, 0.53f, 0.35f, 1.0f }) : CategoryColor(type->Category);
+            layout.Header = node.Id == m_Graph->OutputNode ? NoxUI::ThemeColor("NodeHeaderOutput", { 0.22f, 0.53f, 0.35f, 1.0f }) : CategoryColor(type->Category);
 
             float inputWidth = 0.0f, outputWidth = 0.0f;
             for (const NodePinDesc& pin : layout.Inputs)
             {
-                float width = UI::UILabel::MeasureText(pin.Name, nullptr, kPinFont).x;
+                float width = NoxUI::UILabel::MeasureText(pin.Name, nullptr, kPinFont).x;
                 if (const auto literal = node.Properties.find(pin.Name); literal != node.Properties.end())
-                    width += UI::UILabel::MeasureText(ShortValue(literal->second), nullptr, kPinFont).x + 10.0f;
+                    width += NoxUI::UILabel::MeasureText(ShortValue(literal->second), nullptr, kPinFont).x + 10.0f;
                 inputWidth = std::max(inputWidth, width);
             }
             for (const NodePinDesc& pin : layout.Outputs)
-                outputWidth = std::max(outputWidth, UI::UILabel::MeasureText(pin.Name, nullptr, kPinFont).x);
-            const float titleWidth = UI::UILabel::MeasureText(layout.Title, nullptr, kTitleFont).x + 28.0f;
+                outputWidth = std::max(outputWidth, NoxUI::UILabel::MeasureText(pin.Name, nullptr, kPinFont).x);
+            const float titleWidth = NoxUI::UILabel::MeasureText(layout.Title, nullptr, kTitleFont).x + 28.0f;
             const float rows = static_cast<float>(std::max<size_t>(std::max(layout.Inputs.size(), layout.Outputs.size()), 1)) +
                                (type->OwnsSubGraphs ? 1.0f : 0.0f);
             layout.Size = { std::max({ kMinWidth, titleWidth, inputWidth + outputWidth + 56.0f }), kHeader + rows * kRow + kBottom };
@@ -341,7 +341,7 @@ namespace Nox
                 if (!layout)
                     continue;
                 const UIVec2 min = GraphToScreen(it->EditorPosition), max = GraphToScreen(it->EditorPosition + layout->Size);
-                if (UI::UIRect{ min, max }.Contains(screen))
+                if (NoxUI::UIRect{ min, max }.Contains(screen))
                     return it->Id;
             }
         }
@@ -637,7 +637,7 @@ namespace Nox
 
     void NodeGraphCanvasV2::FrameSelection()
     {
-        const UI::UIRect& b = GetBounds();
+        const NoxUI::UIRect& b = GetBounds();
         if (!m_Graph || b.Width() < 10.0f || b.Height() < 10.0f)
             return;
         const std::vector<uint32_t>& nodes = m_Selected;
@@ -673,11 +673,11 @@ namespace Nox
         }
     }
 
-    bool NodeGraphCanvasV2::OnPointerDown(const UI::UIPointerEvent& e)
+    bool NodeGraphCanvasV2::OnPointerDown(const NoxUI::UIPointerEvent& e)
     {
         if (!m_Graph)
             return true;
-        if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
+        if (NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent())
             ctx->SetFocus(this);
         m_DragStart = m_DragLast = e.Position;
         m_DragMoved = false;
@@ -734,7 +734,7 @@ namespace Nox
                 m_ValueDrag = *hit;
                 m_ValueStart = value->second;
                 m_ValueChanged = false;
-                if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
+                if (NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent())
                     ctx->CancelPendingDrag();
                 return true;
             }
@@ -809,7 +809,7 @@ namespace Nox
         return true;
     }
 
-    bool NodeGraphCanvasV2::OnPointerMove(const UI::UIPointerEvent& e)
+    bool NodeGraphCanvasV2::OnPointerMove(const NoxUI::UIPointerEvent& e)
     {
         if (!m_Graph)
             return true;
@@ -900,7 +900,7 @@ namespace Nox
         return true;
     }
 
-    bool NodeGraphCanvasV2::OnPointerUp(const UI::UIPointerEvent& e)
+    bool NodeGraphCanvasV2::OnPointerUp(const NoxUI::UIPointerEvent& e)
     {
         if (!m_Graph)
             return true;
@@ -942,7 +942,7 @@ namespace Nox
         return true;
     }
 
-    bool NodeGraphCanvasV2::OnPointerLeave(const UI::UIPointerEvent&)
+    bool NodeGraphCanvasV2::OnPointerLeave(const NoxUI::UIPointerEvent&)
     {
         if (m_Drag == Drag::None)
         {
@@ -953,20 +953,20 @@ namespace Nox
         return false;
     }
 
-    bool NodeGraphCanvasV2::OnMouseWheel(const UI::UIPointerEvent& e)
+    bool NodeGraphCanvasV2::OnMouseWheel(const NoxUI::UIPointerEvent& e)
     {
         // Zoom around the pointer: the point under it stays under it.
-        const UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        const NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         const UIVec2 pointer = ctx ? ctx->GetLastMousePos() : GetBounds().Center();
         m_View.ZoomAt(GetBounds(), pointer, e.ScrollDelta.y);
         return true;
     }
 
-    bool NodeGraphCanvasV2::OnKeyDown(const UI::UIKeyEvent& e)
+    bool NodeGraphCanvasV2::OnKeyDown(const NoxUI::UIKeyEvent& e)
     {
         if (!m_Graph)
             return false;
-        const UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        const NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         const UIVec2 pointer = ctx ? ctx->GetLastMousePos() : GetBounds().Center();
         switch (e.KeyCode)
         {
@@ -1022,7 +1022,7 @@ namespace Nox
 
     void NodeGraphCanvasV2::OpenNodeList(const UIVec2& screen, const PinRef& fromPin)
     {
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         if (!ctx || !m_Graph)
             return;
 
@@ -1081,22 +1081,22 @@ namespace Nox
             return a.Category != b.Category ? a.Category < b.Category : a.Label < b.Label;
         });
 
-        Ref<UI::UIStackBox> content(new UI::UIStackBox(UI::UIOrientation::Vertical, 6.0f));
+        Ref<NoxUI::UIStackBox> content(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 6.0f));
         content->StyleClass = "MenuPopup";
         content->DrawBackground = true;
-        content->Padding = UI::UIThickness::All(8.0f);
-        content->WidthMode = UI::UISizeMode::Fixed;
+        content->Padding = NoxUI::UIThickness::All(8.0f);
+        content->WidthMode = NoxUI::UISizeMode::Fixed;
         content->FixedSize = { 300.0f, 0.0f };
-        Ref<UI::UILabel> heading(new UI::UILabel(fromPin.Valid() ? "Nodes for a " + (wireType.empty() ? std::string("wire") : wireType + " wire") : "Add Node", 13.0f));
+        Ref<NoxUI::UILabel> heading(new NoxUI::UILabel(fromPin.Valid() ? "Nodes for a " + (wireType.empty() ? std::string("wire") : wireType + " wire") : "Add Node", 13.0f));
         heading->UseColorOverride = true;
-        heading->ColorOverride = UI::ThemeColor("TextMuted", { 0.62f, 0.66f, 0.74f, 1.0f });
+        heading->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.62f, 0.66f, 0.74f, 1.0f });
         content->AddChild(heading);
-        Ref<UI::UITextInput> search(new UI::UITextInput("", "Search nodes..."));
-        search->WidthMode = UI::UISizeMode::Fill;
+        Ref<NoxUI::UITextInput> search(new NoxUI::UITextInput("", "Search nodes..."));
+        search->WidthMode = NoxUI::UISizeMode::Fill;
         content->AddChild(search);
-        Ref<UI::UIScrollView> list(new UI::UIScrollView());
-        list->WidthMode = UI::UISizeMode::Fill;
-        list->HeightMode = UI::UISizeMode::Auto;
+        Ref<NoxUI::UIScrollView> list(new NoxUI::UIScrollView());
+        list->WidthMode = NoxUI::UISizeMode::Fill;
+        list->HeightMode = NoxUI::UISizeMode::Auto;
         list->MaxSize.y = 380.0f;
         list->ChildSpacing = 1.0f;
         content->AddChild(list);
@@ -1104,13 +1104,13 @@ namespace Nox
         const UIVec2 graphPoint = ScreenToGraph(screen);
         auto entriesRef = std::make_shared<std::vector<Entry>>(std::move(entries));
         auto first = std::make_shared<std::function<void()>>();
-        UI::UIScrollView* listRaw = list.get();
+        NoxUI::UIScrollView* listRaw = list.get();
         auto pick = [this, graphPoint, fromPin, ctx](const Entry& entry)
         {
             // Copied first: closing the popup destroys the button that called this.
             const Entry chosen = entry;
             const PinRef wire = fromPin;
-            UI::UIContext* context = ctx;
+            NoxUI::UIContext* context = ctx;
             context->ClearOverlay();
             if (!m_Graph)
                 return;
@@ -1151,37 +1151,37 @@ namespace Nox
                 if (entry.Category != category)
                 {
                     category = entry.Category;
-                    Ref<UI::UILabel> header(new UI::UILabel(category, 12.0f));
+                    Ref<NoxUI::UILabel> header(new NoxUI::UILabel(category, 12.0f));
                     header->UseColorOverride = true;
-                    header->ColorOverride = UI::ThemeColor("TextMuted", { 0.55f, 0.60f, 0.70f, 1.0f });
-                    header->Margin = UI::UIThickness{ 4.0f, 6.0f, 0.0f, 2.0f };
+                    header->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.55f, 0.60f, 0.70f, 1.0f });
+                    header->Margin = NoxUI::UIThickness{ 4.0f, 6.0f, 0.0f, 2.0f };
                     listRaw->AddChild(header);
                 }
-                Ref<UI::UIButton> button(new UI::UIButton(entry.Label, [pick, entry]() { pick(entry); }));
+                Ref<NoxUI::UIButton> button(new NoxUI::UIButton(entry.Label, [pick, entry]() { pick(entry); }));
                 button->StyleClass = "MenuItem";
-                button->WidthMode = UI::UISizeMode::Fill;
+                button->WidthMode = NoxUI::UISizeMode::Fill;
                 listRaw->AddChild(button);
                 if (!*first)
                     *first = [pick, entry]() { pick(entry); };
             }
             if (listRaw->GetChildren().empty())
             {
-                Ref<UI::UILabel> none(new UI::UILabel("No node matches", 13.0f));
+                Ref<NoxUI::UILabel> none(new NoxUI::UILabel("No node matches", 13.0f));
                 none->UseColorOverride = true;
-                none->ColorOverride = UI::ThemeColor("TextMuted", { 0.55f, 0.60f, 0.70f, 1.0f });
+                none->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.55f, 0.60f, 0.70f, 1.0f });
                 listRaw->AddChild(none);
             }
         };
         rebuild("");
         search->OnChanged = [rebuild](const std::string& text) { rebuild(text); };
         search->OnSubmit = [first](const std::string&) { if (*first) (*first)(); };
-        UI::UIPopup::Show(*ctx, { screen, screen + UIVec2{ 1.0f } }, content);
+        NoxUI::UIPopup::Show(*ctx, { screen, screen + UIVec2{ 1.0f } }, content);
         ctx->SetFocus(search.get());
     }
 
     void NodeGraphCanvasV2::OpenNodeMenu(const UIVec2& screen, uint32_t nodeId)
     {
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         const GraphNode* node = FindNode(nodeId);
         if (!ctx || !node)
             return;
@@ -1189,7 +1189,7 @@ namespace Nox
             SetSelection({ nodeId });
         const NodeTypeDesc* type = TypeOf(*node);
         const bool isOutput = m_Graph && nodeId == m_Graph->OutputNode;
-        std::vector<UI::UIMenuItem> items;
+        std::vector<NoxUI::UIMenuItem> items;
         if (type && type->OwnsSubGraphs)
             items.push_back({ "Open States", "Double-click", [this, nodeId]() { if (OnOpenNode) OnOpenNode(nodeId); } });
         items.push_back({ "Duplicate", "Ctrl+D", [this]() { Duplicate(); } });
@@ -1206,14 +1206,14 @@ namespace Nox
         items.push_back({ "", "", {}, true });
         items.push_back({ "Delete", "Del", [this]() { DeleteNodes(m_Selected); }, false, !isOutput || m_Selected.size() > 1, false, false,
                           isOutput ? "The graph's output stays: without it the graph computes nothing." : "" });
-        UI::UIMenuPopup::ShowContextMenu(*ctx, screen, std::move(items));
+        NoxUI::UIMenuPopup::ShowContextMenu(*ctx, screen, std::move(items));
     }
 
     // ------------------------------------------------------------------------------------------------------------------------------
 
-    void NodeGraphCanvasV2::OnPaint(UI::UIDrawList& d, const UI::UITheme& theme)
+    void NodeGraphCanvasV2::OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme)
     {
-        const UI::UIRect& b = GetBounds();
+        const NoxUI::UIRect& b = GetBounds();
         const UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
         const UIColor border = theme.GetToken("Border", { 0.20f, 0.235f, 0.32f, 1.0f });
         const UIColor muted = theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
@@ -1254,7 +1254,7 @@ namespace Nox
             if (!lit)
                 color.a = 0.8f;
             wire(GraphToScreen(PinPosition(*from, *fromLayout, link.FromPin, true)), GraphToScreen(PinPosition(*to, *toLayout, link.ToPin, false)),
-                 static_cast<int>(i) == m_SelectedLink ? UI::ThemeColor("WireSelected", { 1.0f, 1.0f, 1.0f, 1.0f }) : color, (lit ? 3.0f : 2.2f) * std::max(m_View.Zoom, 0.6f));
+                 static_cast<int>(i) == m_SelectedLink ? NoxUI::ThemeColor("WireSelected", { 1.0f, 1.0f, 1.0f, 1.0f }) : color, (lit ? 3.0f : 2.2f) * std::max(m_View.Zoom, 0.6f));
         }
 
         const bool showText = m_View.Zoom >= 0.45f;
@@ -1262,16 +1262,16 @@ namespace Nox
         {
             const UIColor color = PinColor(type);
             const float r = kPinRadius * m_View.Zoom * (hovered ? 1.3f : 1.0f);
-            const UIColor fill = connected ? color : UI::ThemeColor("PinUnconnected", { 0.08f, 0.10f, 0.14f, 1.0f });
+            const UIColor fill = connected ? color : NoxUI::ThemeColor("PinUnconnected", { 0.08f, 0.10f, 0.14f, 1.0f });
             if (type == "Trigger")
             {
                 // An arrow pointing right (an event, like an execution pin).
                 const float w = r * 1.2f, h = r;
-                UI::Icons::DrawSegment(d, { center.x - w, center.y - h }, { center.x + w * 0.4f, center.y - h }, 1.6f * m_View.Zoom, color);
-                UI::Icons::DrawSegment(d, { center.x + w * 0.4f, center.y - h }, { center.x + w, center.y }, 1.6f * m_View.Zoom, color);
-                UI::Icons::DrawSegment(d, { center.x + w, center.y }, { center.x + w * 0.4f, center.y + h }, 1.6f * m_View.Zoom, color);
-                UI::Icons::DrawSegment(d, { center.x + w * 0.4f, center.y + h }, { center.x - w, center.y + h }, 1.6f * m_View.Zoom, color);
-                UI::Icons::DrawSegment(d, { center.x - w, center.y + h }, { center.x - w, center.y - h }, 1.6f * m_View.Zoom, color);
+                NoxUI::Icons::DrawSegment(d, { center.x - w, center.y - h }, { center.x + w * 0.4f, center.y - h }, 1.6f * m_View.Zoom, color);
+                NoxUI::Icons::DrawSegment(d, { center.x + w * 0.4f, center.y - h }, { center.x + w, center.y }, 1.6f * m_View.Zoom, color);
+                NoxUI::Icons::DrawSegment(d, { center.x + w, center.y }, { center.x + w * 0.4f, center.y + h }, 1.6f * m_View.Zoom, color);
+                NoxUI::Icons::DrawSegment(d, { center.x + w * 0.4f, center.y + h }, { center.x - w, center.y + h }, 1.6f * m_View.Zoom, color);
+                NoxUI::Icons::DrawSegment(d, { center.x - w, center.y + h }, { center.x - w, center.y - h }, 1.6f * m_View.Zoom, color);
                 if (connected)
                     d.AddRoundedRect({ center.x - w * 0.5f, center.y - h * 0.5f }, { center.x + w * 0.3f, center.y + h * 0.5f }, color);
                 return;
@@ -1317,16 +1317,16 @@ namespace Nox
             }
 
             const float radius = 8.0f * m_View.Zoom;
-            d.AddRoundedRect(min, max, UI::ThemeColor("NodeBody", { 0.11f, 0.13f, 0.18f, 0.97f }), glm::vec4(radius), isSelected ? 2.0f : 1.0f,
+            d.AddRoundedRect(min, max, NoxUI::ThemeColor("NodeBody", { 0.11f, 0.13f, 0.18f, 0.97f }), glm::vec4(radius), isSelected ? 2.0f : 1.0f,
                              isSelected ? accent : (isHovered ? UIColor{ border.r + 0.12f, border.g + 0.12f, border.b + 0.14f, 1.0f } : border),
-                             UI::ThemeColor("NodeShadow", { 0.0f, 0.0f, 0.0f, 0.45f }), { 0.0f, 4.0f * m_View.Zoom }, 12.0f * m_View.Zoom);
+                             NoxUI::ThemeColor("NodeShadow", { 0.0f, 0.0f, 0.0f, 0.45f }), { 0.0f, 4.0f * m_View.Zoom }, 12.0f * m_View.Zoom);
             d.AddRoundedRect(min, { max.x, min.y + kHeader * m_View.Zoom }, layout->Header, { radius, radius, 0.0f, 0.0f });
             if (showText)
             {
                 const float titleSize = kTitleFont * m_View.Zoom;
-                const UIVec2 titleExtent = UI::UILabel::MeasureText(layout->Title, nullptr, titleSize);
+                const UIVec2 titleExtent = NoxUI::UILabel::MeasureText(layout->Title, nullptr, titleSize);
                 d.PushClipRect(min, { max.x - 6.0f * m_View.Zoom, min.y + kHeader * m_View.Zoom });
-                d.AddText(layout->Title, nullptr, { min.x + 10.0f * m_View.Zoom, min.y + (kHeader * m_View.Zoom - titleExtent.y) * 0.5f }, titleSize, UI::ThemeColor("NodeTitle", { 1.0f, 1.0f, 1.0f, 0.96f }));
+                d.AddText(layout->Title, nullptr, { min.x + 10.0f * m_View.Zoom, min.y + (kHeader * m_View.Zoom - titleExtent.y) * 0.5f }, titleSize, NoxUI::ThemeColor("NodeTitle", { 1.0f, 1.0f, 1.0f, 0.96f }));
                 d.PopClipRect();
             }
 
@@ -1339,20 +1339,20 @@ namespace Nox
                 drawPin(p, pin.Type, connected, m_HoveredPin.Valid() && m_HoveredPin.Node == node->Id && !m_HoveredPin.Output && m_HoveredPin.Pin == i);
                 if (!showText)
                     continue;
-                const UIVec2 extent = UI::UILabel::MeasureText(pin.Name, nullptr, pinSize);
-                d.AddText(pin.Name, nullptr, { p.x + 12.0f * m_View.Zoom, p.y - extent.y * 0.5f }, pinSize, UI::ThemeColor("PinLabel", { 0.86f, 0.88f, 0.92f, 1.0f }));
+                const UIVec2 extent = NoxUI::UILabel::MeasureText(pin.Name, nullptr, pinSize);
+                d.AddText(pin.Name, nullptr, { p.x + 12.0f * m_View.Zoom, p.y - extent.y * 0.5f }, pinSize, NoxUI::ThemeColor("PinLabel", { 0.86f, 0.88f, 0.92f, 1.0f }));
                 // An input without a wire shows the value it uses, in a field it can be changed in.
                 if (!connected)
                     if (const auto literal = node->Properties.find(pin.Name); literal != node->Properties.end())
                     {
                         const std::string text = ShortValue(literal->second);
                         const UIVec2 textPos{ p.x + 12.0f * m_View.Zoom + extent.x + 8.0f * m_View.Zoom, p.y - extent.y * 0.5f };
-                        const UIVec2 textSize = UI::UILabel::MeasureText(text.empty() ? std::string("...") : text, nullptr, pinSize);
-                        const UI::UIRect field{ textPos - UIVec2{ 4.0f * m_View.Zoom, 2.0f * m_View.Zoom }, textPos + textSize + UIVec2{ 4.0f * m_View.Zoom, 2.0f * m_View.Zoom } };
+                        const UIVec2 textSize = NoxUI::UILabel::MeasureText(text.empty() ? std::string("...") : text, nullptr, pinSize);
+                        const NoxUI::UIRect field{ textPos - UIVec2{ 4.0f * m_View.Zoom, 2.0f * m_View.Zoom }, textPos + textSize + UIVec2{ 4.0f * m_View.Zoom, 2.0f * m_View.Zoom } };
                         const bool fieldHovered = field.Contains(m_DragLast) && m_Drag == Drag::None;
                         const bool fieldActive = m_Drag == Drag::Value && m_ValueDrag.Node == node->Id && m_ValueDrag.Property == pin.Name;
                         d.AddRoundedRect(field.Min, field.Max, { 1.0f, 1.0f, 1.0f, fieldActive ? 0.14f : fieldHovered ? 0.10f : 0.05f }, glm::vec4(3.0f * m_View.Zoom));
-                        d.AddText(text.empty() ? std::string("...") : text, nullptr, textPos, pinSize, fieldHovered || fieldActive ? UI::ThemeColor("PinValueHovered", { 0.95f, 0.96f, 1.0f, 1.0f }) : muted);
+                        d.AddText(text.empty() ? std::string("...") : text, nullptr, textPos, pinSize, fieldHovered || fieldActive ? NoxUI::ThemeColor("PinValueHovered", { 0.95f, 0.96f, 1.0f, 1.0f }) : muted);
                         m_ValueHits.push_back({ node->Id, pin.Name, field });
                     }
             }
@@ -1363,8 +1363,8 @@ namespace Nox
                 drawPin(p, pin.Type, isConnected(node->Id, i, true), m_HoveredPin.Valid() && m_HoveredPin.Node == node->Id && m_HoveredPin.Output && m_HoveredPin.Pin == i);
                 if (!showText)
                     continue;
-                const UIVec2 extent = UI::UILabel::MeasureText(pin.Name, nullptr, pinSize);
-                d.AddText(pin.Name, nullptr, { p.x - 12.0f * m_View.Zoom - extent.x, p.y - extent.y * 0.5f }, pinSize, UI::ThemeColor("PinLabel", { 0.86f, 0.88f, 0.92f, 1.0f }));
+                const UIVec2 extent = NoxUI::UILabel::MeasureText(pin.Name, nullptr, pinSize);
+                d.AddText(pin.Name, nullptr, { p.x - 12.0f * m_View.Zoom - extent.x, p.y - extent.y * 0.5f }, pinSize, NoxUI::ThemeColor("PinLabel", { 0.86f, 0.88f, 0.92f, 1.0f }));
             }
             if (showText)
             {
@@ -1376,8 +1376,8 @@ namespace Nox
                 }
                 if (node->Id == m_Graph->OutputNode)
                 {
-                    const UIVec2 extent = UI::UILabel::MeasureText("OUTPUT", nullptr, 10.0f * m_View.Zoom);
-                    d.AddText("OUTPUT", nullptr, { max.x - extent.x - 8.0f * m_View.Zoom, min.y - extent.y - 2.0f * m_View.Zoom }, 10.0f * m_View.Zoom, UI::ThemeColor("NodeOutputTag", { 0.45f, 0.85f, 0.55f, 1.0f }));
+                    const UIVec2 extent = NoxUI::UILabel::MeasureText("OUTPUT", nullptr, 10.0f * m_View.Zoom);
+                    d.AddText("OUTPUT", nullptr, { max.x - extent.x - 8.0f * m_View.Zoom, min.y - extent.y - 2.0f * m_View.Zoom }, 10.0f * m_View.Zoom, NoxUI::ThemeColor("NodeOutputTag", { 0.45f, 0.85f, 0.55f, 1.0f }));
                 }
             }
         }
@@ -1392,7 +1392,7 @@ namespace Nox
                 const UIVec2 pinPos = GraphToScreen(PinPosition(*node, *layout, m_WireFrom.Pin, m_WireFrom.Output));
                 UIColor color = PinColor(PinType(m_WireFrom));
                 if (m_HoveredPin.Valid())
-                    color = CanConnect(m_WireFrom, m_HoveredPin, nullptr, nullptr) ? UI::ThemeColor("WireValid", { 0.45f, 0.90f, 0.50f, 1.0f }) : UI::ThemeColor("WireInvalid", { 0.95f, 0.35f, 0.35f, 1.0f });
+                    color = CanConnect(m_WireFrom, m_HoveredPin, nullptr, nullptr) ? NoxUI::ThemeColor("WireValid", { 0.45f, 0.90f, 0.50f, 1.0f }) : NoxUI::ThemeColor("WireInvalid", { 0.95f, 0.35f, 0.35f, 1.0f });
                 if (m_WireFrom.Output)
                     wire(pinPos, m_DragLast, color, 2.5f * std::max(m_View.Zoom, 0.6f));
                 else

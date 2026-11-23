@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "McpEditorTools.h"
-#include "McpServer.h"
+#include <NoxMcp/McpServer.h>
 #include "NoxCore/Console/Console.h"
 
 namespace Nox::Mcp
@@ -60,11 +60,11 @@ namespace Nox::Mcp
         bool EnsureToken(bool rotate);
         std::filesystem::path Folder() const; // <Project>/.nox
         std::string Url() const;
-        ConsoleAccess Granted() const;
+        NoxMcp::ToolAccess Granted() const;
         void StopServer(); // (and what its calls were doing: polls dropped, injected input let go)
 
         EditorContext m_Context;
-        McpServer m_Server;
+        NoxMcp::McpServer m_Server;
         TConsoleVariable<bool>* m_Enabled = nullptr;
         TConsoleVariable<int32_t>* m_Port = nullptr;
         TConsoleVariable<int32_t>* m_Access = nullptr;

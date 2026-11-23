@@ -1,18 +1,9 @@
 set (PROJECT_NAME "NoxCore")
 
-# Add option to enable/disable C++ 20 module
-option(ENABLE_CPP20_MODULE "Enable C++ 20 module support for Vulkan" OFF)
-
-# Enable C++ module dependency scanning only if C++ 20 module is enabled
-if(ENABLE_CPP20_MODULE)
-  set(CMAKE_CXX_SCAN_FOR_MODULES ON)
-endif()
-
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 find_package (sdl3 REQUIRED)
 find_package (glm REQUIRED)
-find_package (Vulkan 1.4.350 REQUIRED)
 find_package (entt REQUIRED)
 find_package (Stb REQUIRED)
 set(STB_INCLUDEDIR ${stb_INCLUDE_DIRS})
@@ -20,66 +11,9 @@ find_package (KTX REQUIRED)
 find_package (tinyobjloader REQUIRED)
 find_package (xxhash REQUIRED)
 find_package (yaml-cpp REQUIRED)
-find_package (Freetype REQUIRED) # (UI::UIGlyphCache rasterizes small UI text with it; msdfgen-ext uses it too)
+find_package (Freetype REQUIRED)
 find_package (spdlog CONFIG REQUIRED)
 find_package (box2d REQUIRED)
-# Networking (docs/Networking_Plan_2026-11.md, NET1): Valve's open-source GameNetworkingSockets, vcpkg "gamenetworkingsockets"
-# (scripts/install_windows_dependencies.bat). The x64-windows triplet builds the DLL (GameNetworkingSockets.dll, with its
-# libprotobuf / libcrypto DLLs: vcpkg copies them next to the executables); a static triplet links it in.
-find_package (GameNetworkingSockets CONFIG REQUIRED)
-if(TARGET GameNetworkingSockets::shared)
-    set(NOX_GNS_TARGET GameNetworkingSockets::shared)
-else()
-    set(NOX_GNS_TARGET GameNetworkingSockets::static) # (its interface defines STEAMNETWORKINGSOCKETS_STATIC_LINK)
-endif()
-
-# Define Slang as an imported library
-add_library(Slang::slang IMPORTED UNKNOWN)
-
-# Set the include directory
-set(SLANG_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/slang/include")
-target_include_directories(Slang::slang INTERFACE "${SLANG_INCLUDE_DIR}")
-
-# Set the library path
-if(WIN32)
-    set(SLANG_LIB "${CMAKE_CURRENT_SOURCE_DIR}/vendors/slang/lib/slang.lib")
-    
-    # CRITICAL: This sets the actual file location for the linker
-    set_target_properties(Slang::slang PROPERTIES
-        IMPORTED_LOCATION "${SLANG_LIB}"
-    )
-else()
-    set(SLANG_LIB "${CMAKE_CURRENT_SOURCE_DIR}/vendors/slang/lib/libslang.dylib")
-    set_target_properties(Slang::slang PROPERTIES
-        IMPORTED_LOCATION "${SLANG_LIB}"
-    )
-endif()
-
-# Steam Audio (Valve's spatial audio: HRTF, occlusion / transmission, reflections; docs/Audio_Architecture_Plan_2026.md, A4), the
-# prebuilt SDK scripts/install_windows_dependencies.bat puts in vendors/steamaudio. phonon.dll is copied next to the editor.
-set(STEAMAUDIO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/steamaudio")
-if(WIN32)
-    set(STEAMAUDIO_LIB "${STEAMAUDIO_DIR}/lib/windows-x64/phonon.lib")
-else()
-    set(STEAMAUDIO_LIB "${STEAMAUDIO_DIR}/lib/linux-x64/libphonon.so")
-endif()
-if(NOT EXISTS "${STEAMAUDIO_DIR}/include/phonon.h")
-    message(FATAL_ERROR "Steam Audio is missing: run scripts/install_windows_dependencies.bat (it downloads it into NoxCore/vendors/steamaudio)")
-endif()
-
-set(STREAMLINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/Streamline")
-set(STREAMLINE_INCLUDE_DIR "${STREAMLINE_DIR}/include")
-set(STREAMLINE_LIB "${STREAMLINE_DIR}/lib/x64/sl.interposer.lib")
-
-set(NRD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/NRD")
-set(NRD_INCLUDE_DIR "${NRD_DIR}/Include")
-set(NRD_INTEGRATION_DIR "${NRD_DIR}/Integration")
-set(NRD_LIB "$<$<CONFIG:Debug>:${NRD_DIR}/Lib/Debug/NRD.lib>$<$<NOT:$<CONFIG:Debug>>:${NRD_DIR}/Lib/Release/NRD.lib>")
-set(NRD_LIBS "${NRD_LIB}")
-if(EXISTS "${NRD_DIR}/Lib/Release/NRI.lib")
-    set(NRI_LIB "$<$<CONFIG:Debug>:${NRD_DIR}/Lib/Debug/NRI.lib>$<$<NOT:$<CONFIG:Debug>>:${NRD_DIR}/Lib/Release/NRI.lib>")
-    list(APPEND NRD_LIBS "${NRI_LIB}")
-endif()
 
 set(RTXDI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/RTXDI")
 set(RTXDI_INCLUDE_DIR "${RTXDI_DIR}/Include" "${RTXDI_DIR}/Include/Rtxdi" "${RTXDI_DIR}/include")
@@ -93,11 +27,7 @@ set(IMGUI_SOURCES
     ${IMGUI_DIR}/imgui_draw.cpp
     ${IMGUI_DIR}/imgui_tables.cpp
     ${IMGUI_DIR}/imgui_widgets.cpp
-    # Add the specific backends matching your engine tech!
     ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
-    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
-    ${IMGUI_DIR}/backends/imgui_impl_dx12.cpp
-
     ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
 )
 
@@ -146,115 +76,31 @@ set(XATLAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/xatlas/source/xatlas")
 set(XATLAS_SOURCES "${XATLAS_DIR}/xatlas.cpp")
 set(BCDEC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/bcdec")
 
-# Audio (docs/Audio_Architecture_Plan_2026.md): miniaudio for the output device, the decoders (WAV, FLAC, MP3, and Ogg Vorbis through
-# its bundled stb_vorbis) and the lock-free ring buffers. Compiled once, as C, in src/NoxCore/Audio/MiniaudioImpl.c; the voices,
-# buses and spatialization are the engine's own, so miniaudio's engine, node graph, resource manager, encoders and generators are off.
-set(MINIAUDIO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/miniaudio")
-set(MINIAUDIO_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/NoxCore/Audio/MiniaudioImpl.c")
-
-# Set up Vulkan C++ module only if enabled
-if(ENABLE_CPP20_MODULE)
-  add_library(VulkanCppModule)
-  add_library(Vulkan::cppm ALIAS VulkanCppModule)
-
-  target_compile_definitions(VulkanCppModule PUBLIC VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1)
-  target_include_directories(VulkanCppModule PUBLIC "${Vulkan_INCLUDE_DIR}")
-  target_link_libraries(VulkanCppModule PUBLIC Vulkan::Vulkan)
-
-  set_target_properties(VulkanCppModule PROPERTIES CXX_STANDARD 20)
-
-  # Add MSVC-specific compiler options for proper C++ module support
-  if(MSVC)
-    target_compile_options(VulkanCppModule PRIVATE
-      /std:c++latest      # Use latest C++ standard for better module support
-      /permissive-        # Standards conformance mode
-      /Zc:__cplusplus     # Enable correct __cplusplus macro
-      /EHsc               # Enable C++ exception handling
-      /Zc:preprocessor    # Use conforming preprocessor
-      /translateInclude   # Automatically translate #include to import for standard library
-    )
-  endif()
-
-  target_sources(VulkanCppModule
-    PUBLIC
-    FILE_SET cxx_modules TYPE CXX_MODULES
-    BASE_DIRS
-    "${Vulkan_INCLUDE_DIR}"
-    FILES
-    "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.cppm"
-  )
-
-
-  # Add the vulkan.cppm file directly as a source file
-  target_sources(VulkanCppModule
-    PRIVATE
-    "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.cppm"
-  )
-else()
-  # Create a dummy interface library when C++ 20 module is disabled
-  add_library(VulkanCppModule INTERFACE)
-  add_library(Vulkan::cppm ALIAS VulkanCppModule)
-  target_link_libraries(VulkanCppModule INTERFACE Vulkan::Vulkan KTX::ktx)
-  target_compile_definitions(VulkanCppModule
-    INTERFACE VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
-  )
-endif()
-
 file(GLOB_RECURSE NOXCORE_FILES
     CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
-add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${IMGUI_NODE_EDITOR_SOURCES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES} ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${XATLAS_SOURCES} ${RTXDI_SOURCES} ${MINIAUDIO_SOURCES}) #main file here
+add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${IMGUI_NODE_EDITOR_SOURCES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES} ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${XATLAS_SOURCES} ${RTXDI_SOURCES}) #main file here
 
 # Precompiled header (src/NoxPCH.h): the standard library and the third-party headers most files include, parsed once instead of in
 # every source file. The vendors' own sources compiled into this library build without it (their own configuration macros).
 target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/NoxPCH.h")
 set_source_files_properties(${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${IMGUI_NODE_EDITOR_SOURCES} ${MESHOPTIMIZER_SOURCES}
-                            ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${XATLAS_SOURCES} ${RTXDI_SOURCES} ${MINIAUDIO_SOURCES}
+                            ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${XATLAS_SOURCES} ${RTXDI_SOURCES}
                             PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
-# slang.dll is delay-loaded: it is only loaded when a shader has to be compiled (SlangCompiler::ensureSession), so a packaged game
-# with a complete precompiled shader cache runs without it (File > Package Game: "Precompiled shaders only").
-if(MSVC)
-    target_link_options(${PROJECT_NAME} INTERFACE "/DELAYLOAD:slang.dll")
-    target_link_libraries(${PROJECT_NAME} INTERFACE delayimp)
-endif()
-
-target_link_libraries (${PROJECT_NAME} PUBLIC Coral.Native Vulkan::cppm SDL3::SDL3 glm::glm spdlog::spdlog Slang::slang EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen Freetype::Freetype tinyobjloader::tinyobjloader "${STREAMLINE_LIB}" ${NRD_LIBS} "${STEAMAUDIO_LIB}" Jolt)
-target_link_libraries (${PROJECT_NAME} PRIVATE ${NOX_GNS_TARGET}) # (only Network/GnsTransport.cpp includes its headers)
-if(WIN32)
-    target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32) # getaddrinfo: host names in network addresses (GnsTransport)
-    target_link_libraries(${PROJECT_NAME} PUBLIC d3d12 dxgi dxguid)
-    if(TARGET D3D12MemoryAllocator)
-        target_link_libraries(${PROJECT_NAME} PUBLIC D3D12MemoryAllocator)
-    endif()
-endif()
+target_link_libraries (${PROJECT_NAME} PUBLIC NoxTasks::NoxTasks NoxNet::NoxNet NoxAudio::NoxAudio NoxRHI::RenderGraph NoxUI::Core NoxUI::SDL3 NoxUI::NoxRHI Coral.Native KTX::ktx SDL3::SDL3 glm::glm spdlog::spdlog EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen Freetype::Freetype tinyobjloader::tinyobjloader Jolt)
 # Add here vendors
-target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/taskflow ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/include ${CMAKE_CURRENT_SOURCE_DIR}/vendors/VulkanMemoryAllocator-Hpp/VulkanMemoryAllocator/include ${IMGUI_DIR}/backends)
+target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${IMGUI_DIR}/backends)
 
 #vendors visible to other projects like editor
 target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${IMGUIZMO_DIR} ${IMGUI_NODE_EDITOR_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/filewatch ${CMAKE_CURRENT_SOURCE_DIR}/vendors/JoltPhysics)
 
 # Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR} ${OFFSETALLOCATOR_DIR} ${BC7ENC_DIR} ${XATLAS_DIR} ${BCDEC_DIR} ${STREAMLINE_INCLUDE_DIR} ${STEAMAUDIO_DIR}/include ${NRD_INCLUDE_DIR} ${NRD_INTEGRATION_DIR} ${RTXDI_INCLUDE_DIR} ${RTXDI_SHADERS_DIR})
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR} ${OFFSETALLOCATOR_DIR} ${BC7ENC_DIR} ${XATLAS_DIR} ${BCDEC_DIR} ${RTXDI_INCLUDE_DIR} ${RTXDI_SHADERS_DIR})
 target_include_directories(${PROJECT_NAME} PRIVATE ${CLUSTERLOD_DIR})
-target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${MINIAUDIO_DIR})
-target_compile_definitions(${PROJECT_NAME} PRIVATE MA_NO_ENCODING MA_NO_GENERATION MA_NO_ENGINE MA_NO_NODE_GRAPH MA_NO_RESOURCE_MANAGER)
-if(WIN32)
-    target_link_libraries(${PROJECT_NAME} PRIVATE avrt) # MMCSS ("Pro Audio") for the audio mixer thread
-else()
-    target_link_libraries(${PROJECT_NAME} PRIVATE ${CMAKE_DL_LIBS}) # miniaudio loads the platform's audio backend at run time
-endif()
-
-# Add compile definition if C++ 20 module is enabled
-if(ENABLE_CPP20_MODULE)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE USE_CPP20_MODULES=1)
-endif()
-
-# Define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS to treat VK_ERROR_OUT_OF_DATE_KHR as a success code
-target_compile_definitions(${PROJECT_NAME} PRIVATE "VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS" )
 
 # -----------------------------------------------------------------------------
 # Profiling (docs/Engine_Architecture_Plan_2026.md 5.1)

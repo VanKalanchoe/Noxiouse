@@ -49,7 +49,7 @@ namespace Nox
             return static_cast<double>(bytes) / BytesPerMegabyte;
         }
 
-        std::string_view UpscaleModeName(NRI::UpscaleMode mode)
+        std::string_view UpscaleModeName(nri::UpscalerMode mode)
         {
             constexpr std::array<std::string_view, 6> Names = { "Off", "DLAA", "Quality", "Balanced", "Performance", "UltraPerformance" };
             const size_t index = static_cast<size_t>(mode);
@@ -63,7 +63,7 @@ namespace Nox
 
         std::string_view DenoiserName(uint8_t denoiser)
         {
-            // NRI::NRDDiffuseDenoiser and NRI::NRDReflectionDenoiser share these values.
+            // Nox::NRDDiffuseDenoiser and Nox::NRDReflectionDenoiser share these values.
             constexpr std::array<std::string_view, 3> Names = { "Off", "NRD REBLUR", "NRD RELAX" };
             return denoiser < Names.size() ? Names[denoiser] : "Unknown";
         }
@@ -79,7 +79,7 @@ namespace Nox
         // Only the settings that are active for the current pipeline, mirroring the editor's Settings panel.
         void AppendRendererSettings(std::string& out, Renderer& renderer)
         {
-            const bool dlssActive = renderer.isDLSSEnabled() && renderer.getUpscaleMode() != NRI::UpscaleMode::Off;
+            const bool dlssActive = renderer.isDLSSEnabled() && renderer.getUpscaleMode() != NRI_UPSCALER_MODE_OFF;
             const bool rayReconstruction = dlssActive && renderer.isDLSSRayReconstructionEnabled();
 
             out += "Renderer\n";
@@ -283,8 +283,8 @@ namespace Nox
             NOX_CORE_WARN("SaveStatsReport: could not read the local time: {}", SDL_GetError());
 
         // Header: everything that changes the numbers below, so a report is comparable without extra context.
-        const NRI::Extent2D outputSize = renderer.getOutputSize();
-        const NRI::Extent2D renderSize = renderer.getRenderSize();
+        const nri::Extent2D outputSize = renderer.getOutputSize();
+        const nri::Extent2D renderSize = renderer.getRenderSize();
         std::format_to(std::back_inserter(report), "Nox Stats report {:04}-{:02}-{:02} {:02}:{:02}:{:02}\n", now.year, now.month, now.day, now.hour, now.minute, now.second);
         std::format_to(std::back_inserter(report), "Build {} | VSync {} | Parallel recording {} | Sync {} | Output {}x{} | Render {}x{}\n", NOX_BUILD_CONFIG,
                        OnOff(renderer.getVSync()), OnOff(renderer.isParallelCommandRecording()),
@@ -309,7 +309,7 @@ namespace Nox
                        ToMegabytes(memory.Process.WorkingSetBytes), ToMegabytes(memory.Process.PrivateBytes), SDL_GetSystemRAM());
         for (size_t heapIndex = 0; heapIndex < memory.Heaps.size(); ++heapIndex)
         {
-            const NRI::MemoryHeapStats& heap = memory.Heaps[heapIndex];
+            const nri::MemoryHeapStats& heap = memory.Heaps[heapIndex];
             // usage is what the process holds of the heap (driver, swapchain and Streamline included); blocks are what
             // the allocator took from the driver, of which allocations are what it handed to our resources.
             std::format_to(std::back_inserter(report), "{} heap {}: {:.0f} / {:.0f} MB, {} allocations ({:.0f} MB in {:.0f} MB of blocks)\n",

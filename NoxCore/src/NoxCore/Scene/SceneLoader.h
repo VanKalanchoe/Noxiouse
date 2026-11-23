@@ -8,7 +8,7 @@
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Core/UUID.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 namespace Nox
 {
@@ -68,7 +68,7 @@ namespace Nox
 
         std::filesystem::path m_Path;
         std::shared_ptr<Parsed> m_Parsed; // shared with the reading job
-        TaskFuture<void> m_Read;
+        NoxTasks::TaskFuture<void> m_Read;
         Ref<Scene> m_Scene;
         Scene* m_Into = nullptr; // a level's scene (additive), else m_Scene
         AssetHandle m_Level = 0;

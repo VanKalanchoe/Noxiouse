@@ -7,12 +7,13 @@
 
 #include "Panels/AssetEditorV2.h"
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIStackBox;
     }
+
+namespace Nox
+{
 
     // A material (.nmat) in its own window: a live preview sphere, Save, and its properties as the Inspector's material card shows
     // them. Edits change the loaded material at once and mark it unsaved (MaterialEdits); Save writes the file; closing with unsaved
@@ -26,9 +27,9 @@ namespace Nox
         const std::string& GetName() const override { return m_Name; }
         const char* GetKind() const override { return "material"; }
         std::string GetWindowTitle() const override { return "Material: " + m_Name; }
-        UI::UIVec2 GetDefaultSize() const override { return { 430.0f, 580.0f }; }
+        NoxUI::UIVec2 GetDefaultSize() const override { return { 430.0f, 580.0f }; }
 
-        Ref<UI::UIElement> BuildUI() override;
+        Ref<NoxUI::UIElement> BuildUI() override;
         void Update() override;
         bool IsDirty() const override;
         void Save() override;
@@ -37,10 +38,10 @@ namespace Nox
     private:
         AssetHandle m_Handle = 0;
         std::string m_Name;
-        Ref<UI::UIStackBox> m_Body;
-        Ref<UI::UIElement> m_SaveButton;
-        Ref<UI::UIElement> m_Status;
-        Ref<UI::UIElement> m_Preview;
+        Ref<NoxUI::UIStackBox> m_Body;
+        Ref<NoxUI::UIElement> m_SaveButton;
+        Ref<NoxUI::UIElement> m_Status;
+        Ref<NoxUI::UIElement> m_Preview;
         std::unordered_map<std::string, bool> m_ExpandedSections;
         bool m_Rebuild = true;
     };

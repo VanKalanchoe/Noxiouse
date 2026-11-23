@@ -4,7 +4,7 @@ namespace Nox
 {
     const EditorCommand* EditorCommandList::FindForKey(const KeyChord& chord, const KeyContext& context) const
     {
-        return UI::UICommandList::FindForKey(chord, [&context, &chord](const EditorCommand& command)
+        return NoxUI::UICommandList::FindForKey(chord, [&context, &chord](const EditorCommand& command)
         {
             switch (static_cast<CommandScope>(command.Scope))
             {
@@ -22,6 +22,6 @@ namespace Nox
 
     bool EditorCommandList::Save(const std::filesystem::path& path) const
     {
-        return UI::UICommandList::Save(path, "# NoxEditorV2 key bindings that differ from the defaults (Edit > Keyboard Shortcuts...). Id: key | second key");
+        return NoxUI::UICommandList::Save(path, "# NoxEditorV2 key bindings that differ from the defaults (Edit > Keyboard Shortcuts...). Id: key | second key");
     }
 }

@@ -6,7 +6,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include <NRI/NRI.h>
+#include <NRIHPP/NRIExtensions.hpp>
+#include "Texture2D.h"
 
 namespace Nox
 {
@@ -14,7 +15,7 @@ namespace Nox
     // Commit. A span reserved but never copied from is given back with ReleaseStaging.
     struct StagingSpan
     {
-        NRI::Buffer* buffer = nullptr; // the staging ring, or an oversized upload's own buffer
+        nri::Buffer* buffer = nullptr; // the staging ring, or an oversized upload's own buffer
         uint8_t* data = nullptr;
         uint64_t offset = 0;           // of data inside buffer
         uint64_t size = 0;
@@ -32,7 +33,7 @@ namespace Nox
     class UploadManager
     {
     public:
-        void Init(NRI::Device& device, uint64_t ringCapacity);
+        void Init(nri::Device& device, uint64_t ringCapacity);
 
         // For copies recorded right away: waits (flushing first when needed) until the ring has room.
         StagingSpan ReserveStaging(uint64_t size, uint64_t alignment = 16);
@@ -42,22 +43,22 @@ namespace Nox
         // A span that no copy read: its space returns at once.
         void ReleaseStaging(const StagingSpan& span);
 
-        void CopyToBuffer(const StagingSpan& source, uint64_t sourceOffset, uint64_t size, NRI::Buffer& destination, uint64_t destinationOffset);
+        void CopyToBuffer(const StagingSpan& source, uint64_t sourceOffset, uint64_t size, nri::Buffer& destination, uint64_t destinationOffset);
         // Every mip of an image created with sharedAcrossQueues; mip i lives at source.offset + mipOffsets[i].
-        void CopyToTexture(const StagingSpan& source, NRI::Texture2D& destination, const std::vector<size_t>& mipOffsets);
+        void CopyToTexture(const StagingSpan& source, Nox::Texture2D& destination, const std::vector<size_t>& mipOffsets);
         // A rectangle of mip 0 (width x height texels, tightly packed at source.offset + sourceOffset) into an image after its first
         // transition (a virtual texture's tile into its pool slot).
-        // rowPitch: bytes between rows in staging (0: the backend's default; see NRI::TextureRegionUpload).
-        void CopyToTextureRegion(const StagingSpan& source, uint64_t sourceOffset, NRI::Texture2D& destination, uint32_t x, uint32_t y,
+        // rowPitch: bytes between rows in staging (0: the backend's default; see nri::TextureRegionUpload).
+        void CopyToTextureRegion(const StagingSpan& source, uint64_t sourceOffset, Nox::Texture2D& destination, uint32_t x, uint32_t y,
                                  uint32_t width, uint32_t height, uint32_t rowPitch = 0);
         // An image whose mips all come from CopyTextureMips (no staging): only its first transition.
-        void InitializeTexture(NRI::Texture2D& texture);
+        void InitializeTexture(Nox::Texture2D& texture);
         // Whole mips of one image into another (a streamed texture moving to an image with more or fewer mips), after the
         // destination's first transition (CopyToTexture / InitializeTexture) in the same recording.
-        void CopyTextureMips(NRI::Texture2D& source, uint32_t sourceFirstMip, NRI::Texture2D& destination, uint32_t destinationFirstMip, uint32_t mipCount);
+        void CopyTextureMips(Nox::Texture2D& source, uint32_t sourceFirstMip, Nox::Texture2D& destination, uint32_t destinationFirstMip, uint32_t mipCount);
         // A growing stream copies itself over, after every write queued to it so far and before the ones that follow.
         // The next frame reads the new buffer, so it waits for this copy.
-        void CopyBuffer(NRI::Buffer& source, NRI::Buffer& destination, uint64_t size);
+        void CopyBuffer(nri::Buffer& source, nri::Buffer& destination, uint64_t size);
         // After the span's copies are recorded: its space returns once they complete. nextFrameReads makes the next
         // frame wait for them (uploads published right away); streamed uploads publish after completion instead.
         // Returns the value the copies complete at.
@@ -70,7 +71,8 @@ namespace Nox
         // Returns command buffers, staging space and oversized staging buffers of completed submissions.
         void Poll();
 
-        NRI::TimelineSemaphore& GetTimeline() const { return *m_timeline; }
+        nri::TimelineSemaphore& GetTimeline() { return m_timeline; }
+        const nri::TimelineSemaphore& GetTimeline() const { return m_timeline; }
         // How far the GPU had got at the last Poll: streamed uploads completed up to here can be published.
         uint64_t GetCompletedValue() const { return m_completedValue; }
         // What the frame being submitted waits for: copies it reads (see Commit), and every completion a resource was
@@ -91,12 +93,12 @@ namespace Nox
         struct Submission
         {
             uint64_t value = 0;
-            std::unique_ptr<NRI::CommandBuffer> commandBuffer;
-            std::vector<std::unique_ptr<NRI::Buffer>> retained; // oversized staging it reads
-            uint32_t profilerQuery = ~0u;                         // its timestamps on the profiler's transfer track
+            nri::CommandBuffer commandBuffer;
+            std::vector<nri::Buffer> retained; // oversized staging it reads
+            uint32_t profilerQuery = ~0u;      // its timestamps on the profiler's transfer track
         };
 
-        NRI::CommandBuffer& recording();
+        nri::CommandBuffer& recording();
         // The ring offset a new allocation of the size starts at.
         uint64_t ringOffset(uint64_t size, uint64_t alignment) const;
         bool overlapsLiveAllocation(uint64_t offset, uint64_t size) const;
@@ -106,23 +108,23 @@ namespace Nox
         StagingSpan allocateRing(uint64_t offset, uint64_t size);
         StagingSpan allocateDedicated(uint64_t size);
 
-        NRI::Device* m_device = nullptr;
-        std::unique_ptr<NRI::CommandAllocator> m_allocator;
-        std::unique_ptr<NRI::TimelineSemaphore> m_timeline;
+        nri::Device* m_device = nullptr;
+        nri::CommandAllocator m_allocator;
+        nri::TimelineSemaphore m_timeline;
 
-        std::unique_ptr<NRI::Buffer> m_ring;
+        nri::Buffer m_ring;
         uint8_t* m_ringMapped = nullptr;
         uint64_t m_ringCapacity = 0;
         uint64_t m_ringHead = 0;
         std::deque<RingAllocation> m_ringAllocations; // in reservation order
         // Oversized staging of spans not committed yet.
-        std::unordered_map<uint64_t, std::unique_ptr<NRI::Buffer>> m_dedicated;
+        std::unordered_map<uint64_t, nri::Buffer> m_dedicated;
         uint64_t m_nextTicket = 1;
 
-        std::unique_ptr<NRI::CommandBuffer> m_recording;      // copies queued since the last Flush
-        uint32_t m_recordingQuery = ~0u;                      // Profiler::BeginTransferSubmission
-        std::vector<std::unique_ptr<NRI::Buffer>> m_retained; // oversized staging m_recording reads
-        std::vector<std::unique_ptr<NRI::CommandBuffer>> m_freeCommandBuffers;
+        nri::CommandBuffer m_recording;      // copies queued since the last Flush
+        uint32_t m_recordingQuery = ~0u;     // Profiler::BeginTransferSubmission
+        std::vector<nri::Buffer> m_retained; // oversized staging m_recording reads
+        std::vector<nri::CommandBuffer> m_freeCommandBuffers;
         std::deque<Submission> m_inFlight;
         uint64_t m_submittedValue = 0;
         uint64_t m_completedValue = 0;

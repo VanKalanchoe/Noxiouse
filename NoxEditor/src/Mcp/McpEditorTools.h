@@ -115,17 +115,17 @@ namespace Nox::Mcp
 
     // MCP1, reading the editor: get_editor_status, get_selection, list_assets (the scene, log, view and console tools of both hosts:
     // CreateGameTools, McpHost.h).
-    std::vector<Tool> CreateEditorTools(const EditorContext& context);
+    std::vector<NoxMcp::Tool> CreateEditorTools(const EditorContext& context);
     // MCP2, editing the scene (validated, each change an undo step): create_entity, delete_entities, rename_entity, duplicate_entity,
     // set_parent, add_component, remove_component, patch_component, get_component_schema, apply_edits (atomic), select, save_scene,
     // undo, redo.
-    std::vector<Tool> CreateEditTools(const EditorContext& context);
+    std::vector<NoxMcp::Tool> CreateEditTools(const EditorContext& context);
     // MCP3, play and verify: play, simulate, stop, focus_entity, get_viewport_camera, set_viewport_camera (pause, wait_for and
     // inject_input: CreateGameTools); MCP5: runtime_call (a tool of a game multiplayer Play started with --mcp).
-    std::vector<Tool> CreatePlayTools(const EditorContext& context);
+    std::vector<NoxMcp::Tool> CreatePlayTools(const EditorContext& context);
     // MCP4, scripts and assets: build_scripts, get_build_status, get_material, create_material, set_material, create_prefab,
     // import_asset (instantiate_prefab is an edit tool: CreateEditTools).
-    std::vector<Tool> CreateAssetTools(const EditorContext& context);
+    std::vector<NoxMcp::Tool> CreateAssetTools(const EditorContext& context);
     // MCP4 part 2: list_graph_node_types, get_graph, set_graph, run_tests, get_test_results, package_game, get_package_result.
-    std::vector<Tool> CreateWorkflowTools(const EditorContext& context);
+    std::vector<NoxMcp::Tool> CreateWorkflowTools(const EditorContext& context);
 }

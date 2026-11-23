@@ -7,13 +7,14 @@
 #include "NoxCore/Core/LogBuffer.h"
 #include "NoxCore/Core/Ref.h"
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIElement;
         class UILabel;
     }
+
+namespace Nox
+{
 
     class LogLinesView;
     class LogFilterChip;
@@ -33,7 +34,7 @@ namespace Nox
         OutputLogV2Panel();
         ~OutputLogV2Panel();
 
-        Ref<UI::UIElement> BuildUI();
+        Ref<NoxUI::UIElement> BuildUI();
         // Once a frame: takes the new lines from the LogBuffer.
         void Update(float dt);
 
@@ -43,7 +44,7 @@ namespace Nox
         // Puts the keyboard into the Cmd line (the status bar's counters, the ` key).
         void FocusCommandLine();
         // An element put at the right end of the toolbar (the editor's "Dock in Layout" while the log is in the drawer).
-        void SetToolbarExtra(Ref<UI::UIElement> element) { m_ToolbarExtra = std::move(element); }
+        void SetToolbarExtra(Ref<NoxUI::UIElement> element) { m_ToolbarExtra = std::move(element); }
 
     private:
         friend class LogLinesView;
@@ -76,12 +77,12 @@ namespace Nox
         std::vector<std::string> m_History; // commands run, oldest first
         int m_HistoryIndex = -1;
 
-        Ref<UI::UIElement> m_Root;
-        Ref<UI::UIElement> m_ToolbarExtra;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UIElement> m_ToolbarExtra;
         Ref<LogLinesView> m_Lines;
         Ref<LogFilterChip> m_Chips[4];
         Ref<ConsoleLine> m_Command;
-        Ref<UI::UILabel> m_Suggestions;
+        Ref<NoxUI::UILabel> m_Suggestions;
         std::string m_SuggestionsFor;
     };
 }

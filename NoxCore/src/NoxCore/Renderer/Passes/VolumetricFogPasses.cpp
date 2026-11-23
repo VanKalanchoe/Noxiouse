@@ -17,13 +17,13 @@ namespace Nox
 
     void Renderer::createVolumetricFogPipelines(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
         desc.forceCompile = forceCompile;
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "lightMain", .sourcePath = "assets/shaders/VolumetricFog.slang" });
-        m_volumetricFogLightPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "lightMain", .sourcePath = "assets/shaders/VolumetricFog.slang" });
+        m_volumetricFogLightPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.back().entryPoint = "integrateMain";
-        m_volumetricFogIntegratePipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_volumetricFogIntegratePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::addVolumetricFogPass()
@@ -46,7 +46,7 @@ namespace Nox
             auto release = [this](Ref<Texture2D>& texture, uint32_t& storage)
             {
                 if (storage != ~0u)
-                    m_resourceHeap->unregisterTexture(storage);
+                    m_resourceHeap.unregisterTexture(storage);
                 storage = ~0u;
                 if (texture)
                     deferAssetRelease(texture);
@@ -54,18 +54,18 @@ namespace Nox
             };
             auto create = [this, grid](Ref<Texture2D>& texture, uint32_t& storage)
             {
-                texture = m_device->createTexture(NRI::TextureDesc{
+                texture = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc{
                     .width = grid.x,
                     .height = grid.y,
                     .arrayLayers = grid.z,
                     .isCubeMap = false,
                     .mipLevels = 1,
                     .sampleCount = 1,
-                    .usage = NRI::TextureUsage::Storage,
-                    .format = NRI::ImageFormat::R16G16B16A16_SFLOAT
-                });
-                m_resourceHeap->registerTexture(*texture, NRI::TextureUsage::ShaderResource);
-                storage = m_resourceHeap->registerStorageTextureMip(*texture, 0);
+                    .usage = NRI_TEXTURE_USAGE_STORAGE,
+                    .format = NRI_FORMAT_R16G16B16A16_SFLOAT
+                }));
+                m_resourceHeap.registerTexture(*texture, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
+                storage = m_resourceHeap.registerStorageTextureMip(*texture, 0);
             };
             for (uint32_t i = 0; i < 2; ++i)
             {
@@ -81,7 +81,7 @@ namespace Nox
         const uint32_t writeIndex = 1 - m_fogHistoryIndex;
         shaderio::PushConstantVolumetricFog push{};
         push.invViewProj = uniformData.invViewProj;
-        push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+        push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
         push.lightingStorageIndex = m_fogLightingStorage[writeIndex];
         push.historyTextureIndex = m_fogHistoryValid ? uniformData.imageHeapIndexOffset + m_fogLighting[m_fogHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
         push.integratedStorageIndex = m_fogIntegratedStorage;
@@ -110,12 +110,12 @@ namespace Nox
             },
             [this, push, grid](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_volumetricFogLightPipeline);
+                nri::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_volumetricFogLightPipeline);
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch((grid.x + 7) / 8, (grid.y + 7) / 8, grid.z);
                 cmd.executionBarrier();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_volumetricFogIntegratePipeline);
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_volumetricFogIntegratePipeline);
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch((grid.x + 7) / 8, (grid.y + 7) / 8, 1);
                 // Read through the uniforms by the lighting, the sky and the forward passes later this frame.

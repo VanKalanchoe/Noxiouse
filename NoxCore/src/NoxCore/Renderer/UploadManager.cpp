@@ -7,15 +7,15 @@
 
 namespace Nox
 {
-    void UploadManager::Init(NRI::Device& device, uint64_t ringCapacity)
+    void UploadManager::Init(nri::Device& device, uint64_t ringCapacity)
     {
         m_device = &device;
-        m_allocator = device.createCommandAllocator(NRI::CommandBufferReset::PerCommandBuffer, NRI::QueueType::Transfer);
+        m_allocator = device.createCommandAllocator(NRI_COMMAND_BUFFER_RESET_PER_COMMAND_BUFFER, NRI_QUEUE_TRANSFER);
         m_timeline = device.createTimelineSemaphore(0);
 
         m_ringCapacity = ringCapacity;
-        m_ring = device.createBuffer(NRI::BufferDesc{ .size = ringCapacity, .usage = NRI::BufferUsage::Staging });
-        m_ringMapped = static_cast<uint8_t*>(m_ring->map(0, ringCapacity));
+        m_ring = device.createBuffer(nri::BufferDesc{ .size = ringCapacity, .usage = NRI_BUFFER_USAGE_STAGING });
+        m_ringMapped = static_cast<uint8_t*>(m_ring.map(0, ringCapacity));
     }
 
     StagingSpan UploadManager::ReserveStaging(uint64_t size, uint64_t alignment)
@@ -50,41 +50,41 @@ namespace Nox
         std::erase_if(m_ringAllocations, [&](const RingAllocation& allocation) { return allocation.ticket == span.ticket; });
     }
 
-    void UploadManager::CopyToBuffer(const StagingSpan& source, uint64_t sourceOffset, uint64_t size, NRI::Buffer& destination, uint64_t destinationOffset)
+    void UploadManager::CopyToBuffer(const StagingSpan& source, uint64_t sourceOffset, uint64_t size, nri::Buffer& destination, uint64_t destinationOffset)
     {
         recording().copyBuffer(*source.buffer, destination,
-                               NRI::BufferCopyRegion{ .srcOffset = source.offset + sourceOffset, .dstOffset = destinationOffset, .size = size });
+                               nri::BufferCopyRegion{ .srcOffset = source.offset + sourceOffset, .dstOffset = destinationOffset, .size = size });
     }
 
-    void UploadManager::CopyToTexture(const StagingSpan& source, NRI::Texture2D& destination, const std::vector<size_t>& mipOffsets)
+    void UploadManager::CopyToTexture(const StagingSpan& source, Nox::Texture2D& destination, const std::vector<size_t>& mipOffsets)
     {
         destination.recordUpload(recording(), *source.buffer, source.offset, mipOffsets);
     }
 
-    void UploadManager::CopyToTextureRegion(const StagingSpan& source, uint64_t sourceOffset, NRI::Texture2D& destination, uint32_t x, uint32_t y,
+    void UploadManager::CopyToTextureRegion(const StagingSpan& source, uint64_t sourceOffset, Nox::Texture2D& destination, uint32_t x, uint32_t y,
                                             uint32_t width, uint32_t height, uint32_t rowPitch)
     {
-        const NRI::TextureRegionUpload region{ .stagingOffset = source.offset + sourceOffset, .x = x, .y = y, .width = width, .height = height,
+        const nri::TextureRegionUpload region{ .stagingOffset = source.offset + sourceOffset, .x = x, .y = y, .width = width, .height = height,
                                                .rowPitch = rowPitch };
-        destination.recordRegionUploads(recording(), *source.buffer, std::span<const NRI::TextureRegionUpload>(&region, 1));
+        destination.recordRegionUploads(recording(), *source.buffer, std::span<const nri::TextureRegionUpload>(&region, 1));
     }
 
-    void UploadManager::InitializeTexture(NRI::Texture2D& texture)
+    void UploadManager::InitializeTexture(Nox::Texture2D& texture)
     {
         texture.recordInitialLayout(recording());
     }
 
-    void UploadManager::CopyTextureMips(NRI::Texture2D& source, uint32_t sourceFirstMip, NRI::Texture2D& destination, uint32_t destinationFirstMip, uint32_t mipCount)
+    void UploadManager::CopyTextureMips(Nox::Texture2D& source, uint32_t sourceFirstMip, Nox::Texture2D& destination, uint32_t destinationFirstMip, uint32_t mipCount)
     {
         if (mipCount > 0)
-            recording().copyTextureMips(source, sourceFirstMip, destination, destinationFirstMip, mipCount);
+            recording().copyTextureMips(source.GetRHI(), sourceFirstMip, destination.GetRHI(), destinationFirstMip, mipCount);
     }
 
-    void UploadManager::CopyBuffer(NRI::Buffer& source, NRI::Buffer& destination, uint64_t size)
+    void UploadManager::CopyBuffer(nri::Buffer& source, nri::Buffer& destination, uint64_t size)
     {
-        NRI::CommandBuffer& cmd = recording();
+        nri::CommandBuffer& cmd = recording();
         cmd.transferBarrier();
-        cmd.copyBuffer(source, destination, NRI::BufferCopyRegion{ .srcOffset = 0, .dstOffset = 0, .size = size });
+        cmd.copyBuffer(source, destination, nri::BufferCopyRegion{ .srcOffset = 0, .dstOffset = 0, .size = size });
         cmd.transferBarrier();
         m_frameWaitValue = m_submittedValue + 1;
     }
@@ -126,17 +126,17 @@ namespace Nox
         if (!m_recording)
             return m_submittedValue;
 
-        Profiler::Get().EndTransferSubmission(*m_recording, m_recordingQuery);
-        m_recording->end(0);
+        Profiler::Get().EndTransferSubmission(m_recording, m_recordingQuery);
+        m_recording.end(0);
         const uint64_t value = ++m_submittedValue;
-        NRI::CommandBuffer* commandBuffer = m_recording.get();
-        const NRI::TimelinePoint signal{ m_timeline.get(), value };
+        const NriCommandBuffer commandBuffer = m_recording.handle();
+        const nri::TimelinePoint signal{ m_timeline, value };
         // Copies into a sparse geometry stream's new pages run after their memory is bound (decision D5).
-        const NRI::TimelinePoint sparse = m_device->getSparseTimelinePoint();
-        const std::span<const NRI::TimelinePoint> waits = sparse.semaphore && sparse.value > 0 ? std::span<const NRI::TimelinePoint>(&sparse, 1)
-                                                                                                : std::span<const NRI::TimelinePoint>{};
-        m_device->submit(NRI::QueueType::Transfer, std::span<NRI::CommandBuffer* const>(&commandBuffer, 1), waits,
-                         std::span<const NRI::TimelinePoint>(&signal, 1));
+        const nri::TimelinePoint sparse = m_device->getSparseTimelinePoint();
+        const std::span<const nri::TimelinePoint> waits = sparse.semaphore && sparse.value > 0 ? std::span<const nri::TimelinePoint>(&sparse, 1)
+                                                                                                : std::span<const nri::TimelinePoint>{};
+        m_device->submit(NRI_QUEUE_TRANSFER, std::span<const NriCommandBuffer>(&commandBuffer, 1), waits,
+                         std::span<const nri::TimelinePoint>(&signal, 1));
 
         m_inFlight.push_back(Submission{ value, std::move(m_recording), std::move(m_retained), m_recordingQuery });
         m_retained.clear();
@@ -146,7 +146,7 @@ namespace Nox
 
     void UploadManager::Poll()
     {
-        m_completedValue = m_timeline->getValue();
+        m_completedValue = m_timeline.getValue();
         while (!m_inFlight.empty() && m_inFlight.front().value <= m_completedValue)
         {
             Profiler::Get().CompleteTransferSubmission(m_inFlight.front().profilerQuery);
@@ -157,7 +157,7 @@ namespace Nox
         std::erase_if(m_ringAllocations, [&](const RingAllocation& allocation) { return allocation.value <= m_completedValue; });
     }
 
-    NRI::CommandBuffer& UploadManager::recording()
+    nri::CommandBuffer& UploadManager::recording()
     {
         if (!m_recording)
         {
@@ -168,15 +168,15 @@ namespace Nox
             }
             else
             {
-                m_recording = m_allocator->allocateCommandBuffer(1);
+                m_recording = m_allocator.allocateCommandBuffer(1);
             }
-            m_recording->begin(0, true);
+            m_recording.begin(0, true);
             // Copies of one submission may write what an earlier one wrote (a stream grown there, a range reused after
             // its copy): a barrier's first scope covers everything submitted to the queue before it.
-            m_recording->transferBarrier();
-            m_recordingQuery = Profiler::Get().BeginTransferSubmission(*m_recording);
+            m_recording.transferBarrier();
+            m_recordingQuery = Profiler::Get().BeginTransferSubmission(m_recording);
         }
-        return *m_recording;
+        return m_recording;
     }
 
     uint64_t UploadManager::ringOffset(uint64_t size, uint64_t alignment) const
@@ -209,7 +209,7 @@ namespace Nox
             const uint64_t value = overlapping->value;
             if (value > m_submittedValue)
                 Flush();
-            m_timeline->wait(value);
+            m_timeline.wait(value);
             Poll();
         }
     }
@@ -219,15 +219,13 @@ namespace Nox
         const uint64_t ticket = m_nextTicket++;
         m_ringAllocations.push_back({ offset, size, ticket, OpenValue });
         m_ringHead = offset + size;
-        return { m_ring.get(), m_ringMapped + offset, offset, size, ticket };
+        return { &m_ring, m_ringMapped + offset, offset, size, ticket };
     }
 
     StagingSpan UploadManager::allocateDedicated(uint64_t size)
     {
         const uint64_t ticket = m_nextTicket++;
-        std::unique_ptr<NRI::Buffer> buffer = m_device->createBuffer(NRI::BufferDesc{ .size = size, .usage = NRI::BufferUsage::Staging });
-        const StagingSpan span{ buffer.get(), static_cast<uint8_t*>(buffer->map(0, size)), 0, size, ticket };
-        m_dedicated.emplace(ticket, std::move(buffer));
-        return span;
+        auto [it, _] = m_dedicated.emplace(ticket, m_device->createBuffer(nri::BufferDesc{ .size = size, .usage = NRI_BUFFER_USAGE_STAGING }));
+        return { &it->second, static_cast<uint8_t*>(it->second.map(0, size)), 0, size, ticket };
     }
 }

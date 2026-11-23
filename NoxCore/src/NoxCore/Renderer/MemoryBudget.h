@@ -4,7 +4,7 @@
 #include <span>
 #include <vector>
 
-#include <NRI/NRI.h>
+#include <NRIHPP/NRI.hpp>
 
 namespace Nox
 {
@@ -36,7 +36,7 @@ namespace Nox
     {
     public:
         // From the newest heap sample; the device-local heap decides what there is to split.
-        void Update(std::span<const NRI::MemoryHeapStats> heaps);
+        void Update(std::span<const nri::MemoryHeapStats> heaps);
         void SetCommitted(MemoryCategory category, uint64_t committed, uint64_t used);
 
         std::span<const MemoryCategoryStats> GetCategories() const { return m_Categories; }

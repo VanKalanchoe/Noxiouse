@@ -9,18 +9,18 @@
 #include <SDL3/SDL_video.h>
 
 #include "EditorV2Layer.h"
-#include "NoxCore/UI/Core/UIContext.h"
+#include <NoxUI/Core/UIContext.h>
 #include "NoxCore/Asset/TextureImporter.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Window.h"
 #include "NoxCore/Renderer/Renderer.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
+#include <NoxUI/Core/UIBuilder.h>
 #include "NoxCore/UI/Core/UILayer.h"
-#include "NoxCore/UI/Widgets/UIBadge.h"
-#include "NoxCore/UI/Widgets/UIDropdown.h"
-#include "NoxCore/UI/Widgets/UIImage.h"
-#include "NoxCore/UI/Widgets/UISearchBar.h"
-#include "NoxCore/UI/Widgets/UISegmentedControl.h"
+#include <NoxUI/Widgets/UIBadge.h>
+#include <NoxUI/Widgets/UIDropdown.h>
+#include <NoxUI/Widgets/UIImage.h>
+#include <NoxUI/Widgets/UISearchBar.h>
+#include <NoxUI/Widgets/UISegmentedControl.h>
 #include "NoxCore/Utils/Utils.h"
 #include "ProjectManager/ProjectLibrary.h"
 
@@ -183,9 +183,9 @@ namespace Nox
 
         m_ProjectList->ClearChildren();
         const std::string needle = ToLower(m_SearchFilter);
-        const UI::UIColor muted = UI::ThemeColor("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
-        const UI::UIColor accent = UI::ThemeColor("Accent", { 0.26f, 0.53f, 0.96f, 1.0f });
-        const UI::UIColor missingRed = UI::ThemeColor("StatusError", { 0.84f, 0.31f, 0.33f, 1.0f });
+        const NoxUI::UIColor muted = NoxUI::ThemeColor("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+        const NoxUI::UIColor accent = NoxUI::ThemeColor("Accent", { 0.26f, 0.53f, 0.96f, 1.0f });
+        const NoxUI::UIColor missingRed = NoxUI::ThemeColor("StatusError", { 0.84f, 0.31f, 0.33f, 1.0f });
 
         int shown = 0;
         for (const Entry& entry : m_Projects)
@@ -199,93 +199,93 @@ namespace Nox
             }
             ++shown;
 
-            Ref<UI::UIElement> thumbWidget;
+            Ref<NoxUI::UIElement> thumbWidget;
             if (entry.Thumbnail)
             {
-                auto thumb = UI::MakeUI<UI::UIImage>(entry.Thumbnail->GetDescriptorIndexSlot(), UI::UIVec2{ 128.0f, 72.0f });
-                thumb->CornerRadius = UI::UICornerRadius::All(4.0f);
+                auto thumb = NoxUI::MakeUI<NoxUI::UIImage>(entry.Thumbnail->GetDescriptorIndexSlot(), NoxUI::UIVec2{ 128.0f, 72.0f });
+                thumb->CornerRadius = NoxUI::UICornerRadius::All(4.0f);
                 thumbWidget = thumb;
             }
             else
             {
                 const std::string initial(1, entry.Name.empty() ? '?' : static_cast<char>(std::toupper(static_cast<unsigned char>(entry.Name.front()))));
-                auto initialLabel = UI::Label(initial, 38.0f)
+                auto initialLabel = NoxUI::Label(initial, 38.0f)
                     .Fill()
-                    .Align(UI::UIAlignment::Center, UI::UIAlignment::Center);
+                    .Align(NoxUI::UIAlignment::Center, NoxUI::UIAlignment::Center);
                 initialLabel->UseColorOverride = true;
-                initialLabel->ColorOverride = UI::ThemeColor("ProjectInitial", { 0.78f, 0.84f, 0.94f, 1.0f });
-                auto placeholder = UI::VStack(0.0f, { initialLabel })
+                initialLabel->ColorOverride = NoxUI::ThemeColor("ProjectInitial", { 0.78f, 0.84f, 0.94f, 1.0f });
+                auto placeholder = NoxUI::VStack(0.0f, { initialLabel })
                     .FixedSize(128.0f, 72.0f)
                     .Style("Card")
                     .Background(true);
                 thumbWidget = placeholder;
             }
 
-            auto titleRow = UI::HStack(8.0f, {
-                UI::Label(entry.Name).VAlign(UI::UIAlignment::Center)
+            auto titleRow = NoxUI::HStack(8.0f, {
+                NoxUI::Label(entry.Name).VAlign(NoxUI::UIAlignment::Center)
             });
             if (entry.Sample)
             {
-                auto badge = UI::MakeUI<UI::UIBadge>("Sample", accent);
-                badge->VAlign = UI::UIAlignment::Center;
+                auto badge = NoxUI::MakeUI<NoxUI::UIBadge>("Sample", accent);
+                badge->VAlign = NoxUI::UIAlignment::Center;
                 titleRow->AddChild(badge);
             }
             if (!entry.Exists)
             {
-                auto missing = UI::MakeUI<UI::UIBadge>("Missing", missingRed);
-                missing->VAlign = UI::UIAlignment::Center;
+                auto missing = NoxUI::MakeUI<NoxUI::UIBadge>("Missing", missingRed);
+                missing->VAlign = NoxUI::UIAlignment::Center;
                 titleRow->AddChild(missing);
             }
             if (!entry.Modified.empty())
             {
-                auto modLabel = UI::Label(entry.Modified).VAlign(UI::UIAlignment::Center);
+                auto modLabel = NoxUI::Label(entry.Modified).VAlign(NoxUI::UIAlignment::Center);
                 modLabel->UseColorOverride = true;
                 modLabel->ColorOverride = muted;
                 titleRow->AddChild(modLabel);
             }
 
-            auto pathLabel = UI::Label(entry.File.parent_path().generic_string()).FillWidth();
+            auto pathLabel = NoxUI::Label(entry.File.parent_path().generic_string()).FillWidth();
             pathLabel->WordWrap = true;
             pathLabel->UseColorOverride = true;
             pathLabel->ColorOverride = entry.Exists ? muted : missingRed;
 
-            auto infoCol = UI::VStack(4.0f, { titleRow, pathLabel }).FillWidth().VAlign(UI::UIAlignment::Center);
+            auto infoCol = NoxUI::VStack(4.0f, { titleRow, pathLabel }).FillWidth().VAlign(NoxUI::UIAlignment::Center);
 
-            auto openBtn = UI::Button("Open", [this, file = entry.File]()
+            auto openBtn = NoxUI::Button("Open", [this, file = entry.File]()
             {
                 OpenProjectFile(file);
-            }).Primary().Enabled(entry.Exists).VAlign(UI::UIAlignment::Center);
+            }).Primary().Enabled(entry.Exists).VAlign(NoxUI::UIAlignment::Center);
 
-            auto folderBtn = UI::Button("Folder", [folder = entry.File.parent_path()]()
+            auto folderBtn = NoxUI::Button("Folder", [folder = entry.File.parent_path()]()
             {
                 ShowInFolder(folder);
-            }).Tooltip("Show in Folder").Enabled(entry.Exists).VAlign(UI::UIAlignment::Center);
+            }).Tooltip("Show in Folder").Enabled(entry.Exists).VAlign(NoxUI::UIAlignment::Center);
 
-            auto actions = UI::HStack(6.0f, { openBtn, folderBtn }).VAlign(UI::UIAlignment::Center);
+            auto actions = NoxUI::HStack(6.0f, { openBtn, folderBtn }).VAlign(NoxUI::UIAlignment::Center);
             if (!entry.Sample)
             {
-                auto removeBtn = UI::Button("X", [this, file = entry.File]()
+                auto removeBtn = NoxUI::Button("X", [this, file = entry.File]()
                 {
                     ProjectLibrary::ForgetRecentProject(file);
                     RefreshEntries();
                     RebuildProjectList();
-                }).Tooltip("Remove from recent list").VAlign(UI::UIAlignment::Center);
+                }).Tooltip("Remove from recent list").VAlign(NoxUI::UIAlignment::Center);
                 actions->AddChild(removeBtn);
             }
 
-            auto card = UI::HStack(12.0f, { thumbWidget, infoCol, actions })
+            auto card = NoxUI::HStack(12.0f, { thumbWidget, infoCol, actions })
                 .Style("Panel")
                 .Background(true)
                 .Padding(10.0f)
                 .FillWidth();
-            card->HeightMode = UI::UISizeMode::Auto;
+            card->HeightMode = NoxUI::UISizeMode::Auto;
 
             m_ProjectList->AddChild(card);
         }
 
         if (shown == 0)
         {
-            auto empty = UI::Label("No matching projects. Create one on the right or Browse for a .nproj file.");
+            auto empty = NoxUI::Label("No matching projects. Create one on the right or Browse for a .nproj file.");
             empty->UseColorOverride = true;
             empty->ColorOverride = muted;
             m_ProjectList->AddChild(empty);
@@ -352,57 +352,57 @@ namespace Nox
         if (!uiLayer)
             return;
 
-        const UI::UIColor muted = UI::ThemeColor("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
-        const UI::UIColor errorRed = UI::ThemeColor("StatusError", { 0.92f, 0.36f, 0.38f, 1.0f });
+        const NoxUI::UIColor muted = NoxUI::ThemeColor("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+        const NoxUI::UIColor errorRed = NoxUI::ThemeColor("StatusError", { 0.92f, 0.36f, 0.38f, 1.0f });
 
-        auto subtitle = UI::Label("Open a project or make a new one. Every game is its own project: its own folder, assets, scenes and C# scripts.")
+        auto subtitle = NoxUI::Label("Open a project or make a new one. Every game is its own project: its own folder, assets, scenes and C# scripts.")
             .FillWidth();
         subtitle->WordWrap = true;
         subtitle->UseColorOverride = true;
         subtitle->ColorOverride = muted;
 
-        auto topBar = UI::HStack(12.0f, {
-            UI::VStack(2.0f, {
-                UI::Label("Nox Project Manager"),
+        auto topBar = NoxUI::HStack(12.0f, {
+            NoxUI::VStack(2.0f, {
+                NoxUI::Label("Nox Project Manager"),
                 subtitle
             }).FillWidth(),
-            UI::CheckBox("Open the last project when the editor starts", m_OpenLast, [this](bool v)
+            NoxUI::CheckBox("Open the last project when the editor starts", m_OpenLast, [this](bool v)
             {
                 m_OpenLast = v;
                 ProjectLibrary::SetOpenLastProjectAtStartup(v);
-            }).VAlign(UI::UIAlignment::Center),
-            UI::Button("Browse...", [this]()
+            }).VAlign(NoxUI::UIAlignment::Center),
+            NoxUI::Button("Browse...", [this]()
             {
                 Utility::OpenFileAsync("Nox Project\0nproj\0", [this, alive = m_Alive](std::string file)
                 {
                     if (*alive && !file.empty())
                         OpenProjectFile(file);
                 });
-            }).VAlign(UI::UIAlignment::Center)
+            }).VAlign(NoxUI::UIAlignment::Center)
         })
         .Style("TopBar")
         .Background(true)
         .Padding(16.0f, 12.0f)
         .FillWidth();
-        topBar->HeightMode = UI::UISizeMode::Auto;
+        topBar->HeightMode = NoxUI::UISizeMode::Auto;
 
-        m_OpenErrorLabel = UI::Label().FillWidth();
+        m_OpenErrorLabel = NoxUI::Label().FillWidth();
         m_OpenErrorLabel->WordWrap = true;
         m_OpenErrorLabel->UseColorOverride = true;
         m_OpenErrorLabel->ColorOverride = errorRed;
         m_OpenErrorLabel->Visible = false;
 
-        auto searchBar = UI::MakeUI<UI::UISearchBar>("Search recent projects...");
+        auto searchBar = NoxUI::MakeUI<NoxUI::UISearchBar>("Search recent projects...");
         searchBar->OnSearchChanged = [this](const std::string& q)
         {
             m_SearchFilter = q;
             RebuildProjectList();
         };
 
-        m_ProjectList = UI::Scroll({}, 10.0f);
+        m_ProjectList = NoxUI::Scroll({}, 10.0f);
         RebuildProjectList();
 
-        auto leftColumn = UI::Card("Projects", {
+        auto leftColumn = NoxUI::Card("Projects", {
             m_OpenErrorLabel,
             searchBar,
             m_ProjectList
@@ -428,54 +428,54 @@ namespace Nox
             }
         };
 
-        auto templateRow = UI::HStack(10.0f, {}).FillWidth();
-        templateRow->HeightMode = UI::UISizeMode::Auto;
+        auto templateRow = NoxUI::HStack(10.0f, {}).FillWidth();
+        templateRow->HeightMode = NoxUI::UISizeMode::Auto;
         for (int i = 0; i < 2; ++i)
         {
             const uint32_t picSlot = m_TemplatePictures[i] ? m_TemplatePictures[i]->GetDescriptorIndexSlot() : ~0u;
-            Ref<UI::UIElement> pic;
+            Ref<NoxUI::UIElement> pic;
             if (picSlot != ~0u)
             {
-                auto img = UI::MakeUI<UI::UIImage>(picSlot, UI::UIVec2{ 160.0f, 90.0f });
-                img->WidthMode = UI::UISizeMode::Fill;
-                img->HeightMode = UI::UISizeMode::Auto;
+                auto img = NoxUI::MakeUI<NoxUI::UIImage>(picSlot, NoxUI::UIVec2{ 160.0f, 90.0f });
+                img->WidthMode = NoxUI::UISizeMode::Fill;
+                img->HeightMode = NoxUI::UISizeMode::Auto;
                 img->AspectRatio = 16.0f / 9.0f;
-                img->CornerRadius = UI::UICornerRadius::All(4.0f);
+                img->CornerRadius = NoxUI::UICornerRadius::All(4.0f);
                 pic = img;
             }
             else
             {
-                auto fallbackLabel = UI::Label(kTemplates[i].Name, 22.0f)
+                auto fallbackLabel = NoxUI::Label(kTemplates[i].Name, 22.0f)
                     .Fill()
-                    .Align(UI::UIAlignment::Center, UI::UIAlignment::Center);
+                    .Align(NoxUI::UIAlignment::Center, NoxUI::UIAlignment::Center);
                 fallbackLabel->UseColorOverride = true;
-                fallbackLabel->ColorOverride = UI::ThemeColor("ProjectInitial", { 0.78f, 0.84f, 0.94f, 1.0f });
-                auto fallbackBox = UI::VStack(0.0f, { fallbackLabel })
+                fallbackLabel->ColorOverride = NoxUI::ThemeColor("ProjectInitial", { 0.78f, 0.84f, 0.94f, 1.0f });
+                auto fallbackBox = NoxUI::VStack(0.0f, { fallbackLabel })
                     .Style("Card")
                     .Background(true)
                     .FillWidth();
-                fallbackBox->HeightMode = UI::UISizeMode::Fixed;
+                fallbackBox->HeightMode = NoxUI::UISizeMode::Fixed;
                 fallbackBox->FixedSize.y = 90.0f;
                 pic = fallbackBox;
             }
 
-            auto nameLabel = UI::Label(kTemplates[i].Name);
-            auto descLabel = UI::Label(kTemplates[i].Summary).FillWidth();
+            auto nameLabel = NoxUI::Label(kTemplates[i].Name);
+            auto descLabel = NoxUI::Label(kTemplates[i].Summary).FillWidth();
             descLabel->WordWrap = true;
             descLabel->UseColorOverride = true;
             descLabel->ColorOverride = muted;
 
-            auto tile = UI::VStack(6.0f, { pic, nameLabel, descLabel })
+            auto tile = NoxUI::VStack(6.0f, { pic, nameLabel, descLabel })
                 .Style("TemplateCard", m_TemplateIndex == i ? "selected" : "")
                 .Background(true)
                 .Padding(8.0f)
                 .Tooltip(kTemplates[i].Tooltip)
                 .FillWidth();
-            tile->HeightMode = UI::UISizeMode::Auto;
-            tile->VAlign = UI::UIAlignment::Start;
-            tile->HitTestMode = UI::UIHitTestMode::Self;
+            tile->HeightMode = NoxUI::UISizeMode::Auto;
+            tile->VAlign = NoxUI::UIAlignment::Start;
+            tile->HitTestMode = NoxUI::UIHitTestMode::Self;
             tile->Focusable = true;
-            tile->OnMouseUp = [this, i](const UI::UIPointerEvent& e)
+            tile->OnMouseUp = [this, i](const NoxUI::UIPointerEvent& e)
             {
                 if (e.Button == 1 && m_TemplateTiles[i] && m_TemplateTiles[i]->GetBounds().Contains(e.Position))
                 {
@@ -490,7 +490,7 @@ namespace Nox
             templateRow->AddChild(tile);
         }
 
-        m_NameInput = UI::TextInput(m_NewName, "Project name").FillWidth();
+        m_NameInput = NoxUI::TextInput(m_NewName, "Project name").FillWidth();
         m_NameInput->Tooltip = "Also the C# namespace of its scripts: letters, digits and _.";
         m_NameInput->OnChanged = [this](const std::string& s)
         {
@@ -498,14 +498,14 @@ namespace Nox
             UpdateNewProjectPreview();
         };
 
-        m_LocationInput = UI::TextInput(m_NewLocation, "Folder path").FillWidth();
+        m_LocationInput = NoxUI::TextInput(m_NewLocation, "Folder path").FillWidth();
         m_LocationInput->OnChanged = [this](const std::string& s)
         {
             m_NewLocation = s;
             UpdateNewProjectPreview();
         };
 
-        auto browseFolderBtn = UI::Button("Browse...", [this]()
+        auto browseFolderBtn = NoxUI::Button("Browse...", [this]()
         {
             Utility::OpenFolderAsync(m_NewLocation.empty() ? nullptr : m_NewLocation.c_str(), [this, alive = m_Alive](std::string folder)
             {
@@ -518,7 +518,7 @@ namespace Nox
             });
         });
 
-        auto unitsDropdown = UI::MakeUI<UI::UIDropdown>(
+        auto unitsDropdown = NoxUI::MakeUI<NoxUI::UIDropdown>(
             &uiLayer->GetContext(),
             std::vector<std::string>{
                 "Centimeters (1 unit = 1 cm, like Unreal)",
@@ -527,38 +527,38 @@ namespace Nox
             m_UnitsIndex,
             [this](int idx) { m_UnitsIndex = idx; }
         );
-        unitsDropdown->WidthMode = UI::UISizeMode::Fill;
+        unitsDropdown->WidthMode = NoxUI::UISizeMode::Fill;
         unitsDropdown->Tooltip = "What one unit of a position is. Imported models are scaled to it; it cannot be changed later\nwithout re-placing what is built.";
 
         const std::vector<std::string> qualities = QualityChoices();
-        auto qualityDropdown = UI::MakeUI<UI::UIDropdown>(
+        auto qualityDropdown = NoxUI::MakeUI<NoxUI::UIDropdown>(
             &uiLayer->GetContext(),
             qualities,
             m_QualityIndex,
             [this](int idx) { m_QualityIndex = idx; }
         );
-        qualityDropdown->WidthMode = UI::UISizeMode::Fill;
+        qualityDropdown->WidthMode = NoxUI::UISizeMode::Fill;
         qualityDropdown->Tooltip = "The renderer preset the project opens with (Auto: the one this GPU should run). Changeable later in Settings.";
 
-        m_CreatesLabel = UI::Label().FillWidth();
+        m_CreatesLabel = NoxUI::Label().FillWidth();
         m_CreatesLabel->WordWrap = true;
         m_CreatesLabel->UseColorOverride = true;
         m_CreatesLabel->ColorOverride = muted;
         m_CreatesLabel->Visible = false;
 
-        m_CreatesDetailsLabel = UI::Label().FillWidth();
+        m_CreatesDetailsLabel = NoxUI::Label().FillWidth();
         m_CreatesDetailsLabel->WordWrap = true;
         m_CreatesDetailsLabel->UseColorOverride = true;
         m_CreatesDetailsLabel->ColorOverride = muted;
         m_CreatesDetailsLabel->Visible = false;
 
-        m_ErrorLabel = UI::Label().FillWidth();
+        m_ErrorLabel = NoxUI::Label().FillWidth();
         m_ErrorLabel->WordWrap = true;
         m_ErrorLabel->UseColorOverride = true;
         m_ErrorLabel->ColorOverride = errorRed;
         m_ErrorLabel->Visible = false;
 
-        m_CreateButton = UI::Button("Create & Open", [this]()
+        m_CreateButton = NoxUI::Button("Create & Open", [this]()
         {
             const std::vector<std::string> qualityList = QualityChoices();
             const int qIdx = std::clamp(m_QualityIndex, 0, static_cast<int>(qualityList.size()) - 1);
@@ -586,26 +586,26 @@ namespace Nox
             }
             ProjectLibrary::SetDefaultProjectLocation(settings.Location);
             OpenProjectFile(created, settings.Template == ProjectLibrary::ProjectTemplate::Basic);
-        }).Primary().HAlign(UI::UIAlignment::End);
+        }).Primary().HAlign(NoxUI::UIAlignment::End);
 
-        auto rightFormScroll = UI::Scroll({
+        auto rightFormScroll = NoxUI::Scroll({
             templateRow,
-            UI::Label("Project Name"),
+            NoxUI::Label("Project Name"),
             m_NameInput,
-            UI::Label("Location"),
-            UI::HStack(6.0f, { m_LocationInput, browseFolderBtn }).FillWidth(),
-            UI::Label("World Units"),
+            NoxUI::Label("Location"),
+            NoxUI::HStack(6.0f, { m_LocationInput, browseFolderBtn }).FillWidth(),
+            NoxUI::Label("World Units"),
             unitsDropdown,
-            UI::Label("Render Quality"),
+            NoxUI::Label("Render Quality"),
             qualityDropdown,
-            UI::CheckBox("Create the scripts project (with an example Rotator behaviour)", m_CreateScripts, [this](bool v) { m_CreateScripts = v; }),
-            UI::Separator(),
+            NoxUI::CheckBox("Create the scripts project (with an example Rotator behaviour)", m_CreateScripts, [this](bool v) { m_CreateScripts = v; }),
+            NoxUI::Separator(),
             m_CreatesLabel,
             m_CreatesDetailsLabel,
             m_ErrorLabel
         }, 8.0f);
 
-        auto rightColumn = UI::Card("New Project", {
+        auto rightColumn = NoxUI::Card("New Project", {
             rightFormScroll,
             m_CreateButton
         }).Fill(1.0f);
@@ -613,9 +613,9 @@ namespace Nox
         UpdateNewProjectPreview();
 
         uiLayer->SetRoot(
-            UI::VStack(14.0f, {
+            NoxUI::VStack(14.0f, {
                 topBar,
-                UI::HStack(14.0f, { leftColumn, rightColumn }).Fill()
+                NoxUI::HStack(14.0f, { leftColumn, rightColumn }).Fill()
             })
             .Padding(16.0f)
             .Style("Background")

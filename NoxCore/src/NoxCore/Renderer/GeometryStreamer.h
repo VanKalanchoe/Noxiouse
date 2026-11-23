@@ -7,7 +7,7 @@
 
 #include "DataTypes.h"
 #include "UploadManager.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 namespace Nox
 {
@@ -127,7 +127,7 @@ namespace Nox
             float Priority = 0.0f;       // how far above the threshold its error was then (resident pages: every touch)
             uint32_t Dependents = 0;     // pages depending on it that are resident or loading
             StagingSpan Staging;
-            TaskFuture<bool> Read;
+            NoxTasks::TaskFuture<bool> Read;
             uint64_t CopiesComplete = 0; // upload value its copies complete at
             bool Failed = false;         // its read failed: not asked for again, the coarser clusters stand in
         };
@@ -154,7 +154,7 @@ namespace Nox
         struct OrphanRead
         {
             StagingSpan Staging;
-            TaskFuture<bool> Read;
+            NoxTasks::TaskFuture<bool> Read;
             PageRanges Ranges;
         };
 

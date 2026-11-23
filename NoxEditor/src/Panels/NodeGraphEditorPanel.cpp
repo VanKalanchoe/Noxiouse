@@ -268,8 +268,8 @@ namespace Nox
             AudioPlayDesc desc;
             desc.Graph = program;
             desc.GraphParameters = m_AudioPreviewValues;
-            desc.Bus = kAudioBusMaster;
-            desc.Group = AudioVoiceGroup::Editor;
+            desc.Bus = NoxAudio::kAudioBusMaster;
+            desc.Group = NoxAudio::AudioVoiceGroup::Editor;
             desc.FadeIn = m_AudioPreviewVoice != 0 ? 0.02f : 0.0f; // (crossfaded with the one it replaces)
             m_AudioPreviewVoice = AudioEngine::Play(desc);
             m_AudioPreviewProgram = program;

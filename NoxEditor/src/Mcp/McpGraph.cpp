@@ -5,11 +5,12 @@
 #include <map>
 #include <set>
 
-#include "McpValidation.h"
+#include <NoxMcp/McpValidation.h>
 #include "NoxCore/NodeGraph/NodeType.h"
 
 namespace Nox::Mcp
 {
+    using namespace ::NoxMcp;
     namespace
     {
         constexpr const char* CompareNames[] = { "Equal", "NotEqual", "Greater", "GreaterEqual", "Less", "LessEqual", "IsTrue", "IsFalse" };

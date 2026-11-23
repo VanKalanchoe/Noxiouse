@@ -1,7 +1,7 @@
 #include "McpHost.h"
-#include "McpInputPlayer.h"
+#include <NoxMcp/McpInputPlayer.h>
 #include "McpSceneHelpers.h"
-#include "McpValidation.h"
+#include <NoxMcp/McpValidation.h>
 
 #include <algorithm>
 #include <cctype>
@@ -18,6 +18,7 @@
 
 #include "NoxCore/Console/Console.h"
 #include "NoxCore/Core/Input.h"
+#include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/LogBuffer.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Scene/Components.h"
@@ -28,6 +29,7 @@
 // pause, waiting and input. Tools that take time answer later through `done`, polled once a frame (HostContext::EveryFrame).
 namespace Nox::Mcp
 {
+    using namespace ::NoxMcp;
     namespace
     {
         constexpr double MaxWaitSeconds = 50.0; // (under the server's 60 s call time-out)
@@ -153,6 +155,20 @@ namespace Nox::Mcp
 
     std::vector<Tool> CreateGameTools(const HostContext& context)
     {
+        static std::once_flag s_HooksInit;
+        std::call_once(s_HooksInit, []()
+        {
+            ::NoxMcp::SetLogCallback([](::NoxMcp::LogLevel level, std::string_view message)
+            {
+                switch (level)
+                {
+                case ::NoxMcp::LogLevel::Info:  NOX_CORE_INFO("{}", message); break;
+                case ::NoxMcp::LogLevel::Warn:  NOX_CORE_WARN("{}", message); break;
+                case ::NoxMcp::LogLevel::Error: NOX_CORE_ERROR("{}", message); break;
+                }
+            });
+        });
+
         std::vector<Tool> tools;
 
         // --------------------------------------------------------------------------------------------------------------- read_log
@@ -496,11 +512,11 @@ namespace Nox::Mcp
             tool.InputSchema = Schema().String("line", "The command line, e.g. 'net.Status' or 'net.DebugTrace 1'", true);
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
-                const ConsoleAccess access = context.GrantedAccess ? context.GrantedAccess() : ConsoleAccess::Read;
+                const NoxMcp::ToolAccess access = context.GrantedAccess ? context.GrantedAccess() : NoxMcp::ToolAccess::Read;
                 // The command runs here, on the main thread, and is done when Execute returns; what it logged meanwhile (some commands
                 // report through the log, not their output) is in the log buffer by then.
                 const uint64_t logBefore = LogBuffer::Get().GetLatestSequence();
-                const ConsoleOutput output = Console::Get().Execute(arguments["line"].get<std::string>(), access);
+                const ConsoleOutput output = Console::Get().Execute(arguments["line"].get<std::string>(), static_cast<::Nox::ConsoleAccess>(access));
                 std::vector<LogEntry> entries;
                 LogBuffer::Get().CopySince(logBefore, entries);
                 Json lines = Json::array();
@@ -548,7 +564,7 @@ namespace Nox::Mcp
             tool.InputSchema = Schema()
                                    .Boolean("paused", "true pauses, false resumes", true)
                                    .Integer("step", "While paused: advance this many frames", false, 0, 600);
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 std::string error;
@@ -689,7 +705,7 @@ namespace Nox::Mcp
                                    .Array("mouse_move", "[dx, dy]: pixels moved in all over the duration (x right, y down)", "number")
                                    .Number("scroll", "Wheel notches in all (positive: away from you)")
                                    .Number("duration", "How long to hold, seconds (default 0.1; 0: one frame)", false, 0.0, 10.0);
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context, driver](const Json& arguments, ToolDone done)
             {
                 if (Mode(context) != "play" || (context.PlayRunning && !context.PlayRunning()))

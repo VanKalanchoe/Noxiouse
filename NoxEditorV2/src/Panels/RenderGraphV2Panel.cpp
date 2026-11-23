@@ -7,42 +7,42 @@
 #include <string_view>
 #include <unordered_map>
 
-#include "NoxCore/UI/Core/UIContext.h"
-#include "NoxCore/UI/Widgets/UIPropertyRows.h"
+#include <NoxUI/Core/UIContext.h>
+#include <NoxUI/Widgets/UIPropertyRows.h>
 #include "Panels/TableViewV2.h"
 #include "NoxCore/Profiling/Profiler.h"
-#include "NoxCore/RenderGraph/RGFrameReport.h"
+#include <NRIRenderGraph/RGFrameReport.h>
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/Renderer.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
-#include "NoxCore/UI/Layout/UILayout.h"
-#include "NoxCore/UI/Layout/UITabPanel.h"
-#include "NoxCore/UI/Widgets/UIImage.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Layout/UITabPanel.h>
+#include <NoxUI/Widgets/UIImage.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIScrollView.h>
 
 namespace Nox
 {
     namespace
     {
-        const char* FormatName(NRI::ImageFormat format)
+        const char* FormatName(nri::ImageFormat format)
         {
             switch (format)
             {
-            case NRI::ImageFormat::None: return "-";
-            case NRI::ImageFormat::Surface: return "Surface";
-            case NRI::ImageFormat::RGBA8: return "RGBA8";
-            case NRI::ImageFormat::SRGBA8: return "SRGBA8";
-            case NRI::ImageFormat::R16_SFLOAT: return "R16F";
-            case NRI::ImageFormat::R10G10B10A2_UNORM: return "RGB10A2";
-            case NRI::ImageFormat::R16G16: return "RG16";
-            case NRI::ImageFormat::R32SINT: return "R32I";
-            case NRI::ImageFormat::R32G32_UINT: return "RG32U";
-            case NRI::ImageFormat::R32G32B32A32_UINT: return "RGBA32U";
-            case NRI::ImageFormat::R32G32_SFLOAT: return "RG32F";
-            case NRI::ImageFormat::R16G16_SFLOAT: return "RG16F";
-            case NRI::ImageFormat::R16G16B16A16_SFLOAT: return "RGBA16F";
-            case NRI::ImageFormat::R32G32B32A32_SFLOAT: return "RGBA32F";
+            case NRI_FORMAT_NONE: return "-";
+            case NRI_FORMAT_SURFACE: return "Surface";
+            case NRI_FORMAT_RGBA8: return "RGBA8";
+            case NRI_FORMAT_SRGBA8: return "SRGBA8";
+            case NRI_FORMAT_R16_SFLOAT: return "R16F";
+            case NRI_FORMAT_R10G10B10A2_UNORM: return "RGB10A2";
+            case NRI_FORMAT_R16G16: return "RG16";
+            case NRI_FORMAT_R32_SINT: return "R32I";
+            case NRI_FORMAT_R32G32_UINT: return "RG32U";
+            case NRI_FORMAT_R32G32B32A32_UINT: return "RGBA32U";
+            case NRI_FORMAT_R32G32_SFLOAT: return "RG32F";
+            case NRI_FORMAT_R16G16_SFLOAT: return "RG16F";
+            case NRI_FORMAT_R16G16B16A16_SFLOAT: return "RGBA16F";
+            case NRI_FORMAT_R32G32B32A32_SFLOAT: return "RGBA32F";
             default: return "other";
             }
         }
@@ -70,9 +70,9 @@ namespace Nox
             if (bytes >= 1024) return std::format("{:.1f} KB", static_cast<double>(bytes) / 1024.0);
             return std::format("{} B", bytes);
         }
-        constexpr UI::UIThemeToken kCulled{ "RenderGraphCulled", { 0.5f, 0.5f, 0.5f, 1.0f } };
-        constexpr UI::UIThemeToken kGroup{ "RenderGraphGroup", { 0.55f, 0.75f, 1.0f, 1.0f } };
-        constexpr UI::UIThemeToken kWarning{ "StatusWarning", { 1.0f, 0.7f, 0.3f, 1.0f } };
+        constexpr NoxUI::UIThemeToken kCulled{ "RenderGraphCulled", { 0.5f, 0.5f, 0.5f, 1.0f } };
+        constexpr NoxUI::UIThemeToken kGroup{ "RenderGraphGroup", { 0.55f, 0.75f, 1.0f, 1.0f } };
+        constexpr NoxUI::UIThemeToken kWarning{ "StatusWarning", { 1.0f, 0.7f, 0.3f, 1.0f } };
     }
 
     void RenderGraphV2Panel::Update(bool shown)
@@ -90,14 +90,14 @@ namespace Nox
         m_WasShown = true;
     }
 
-    const Ref<UI::UIElement>& RenderGraphV2Panel::BuildUI(UI::UIContext* context)
+    const Ref<NoxUI::UIElement>& RenderGraphV2Panel::BuildUI(NoxUI::UIContext* context)
     {
-        auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-        root->WidthMode = UI::UISizeMode::Fill;
-        root->HeightMode = UI::UISizeMode::Fill;
+        auto root = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 6.0f);
+        root->WidthMode = NoxUI::UISizeMode::Fill;
+        root->HeightMode = NoxUI::UISizeMode::Fill;
         root->StyleClass = "Surface";
         root->DrawBackground = true;
-        root->Padding = UI::UIThickness::All(8.0f);
+        root->Padding = NoxUI::UIThickness::All(8.0f);
         m_Root = root;
         Renderer* r = m_Renderer;
         if (!r)
@@ -106,8 +106,8 @@ namespace Nox
 
         // ---- Header: switches and the frame's counts ----
         {
-            UI::UIPropertyRows rows(root, context);
-            UI::UIPropertyRows header = rows.Section("Graph, Culling and LOD", true, nullptr);
+            NoxUI::UIPropertyRows rows(root, context);
+            NoxUI::UIPropertyRows header = rows.Section("Graph, Culling and LOD", true, nullptr);
             header.Check("Validation", [graph]() { return graph->IsValidationEnabled(); }, [graph](bool v) { graph->SetValidationEnabled(v); });
             header.Check("Parallel Recording", [r]() { return r->isParallelCommandRecording(); }, [r](bool v) { r->setParallelCommandRecording(v); });
             header.Choice("Synchronization", { "Blanket", "Precise" }, [graph]() { return graph->GetSynchronization() == RGSynchronization::Precise ? 1 : 0; },
@@ -123,7 +123,7 @@ namespace Nox
             header.Check("Freeze Culling View", [r]() { return r->getFrozen(); }, [r](bool v) { r->setFrozen(v); });
             header.Slider("LOD Error (px)", [r]() { return r->getLodErrorPixels(); }, [r](float v) { r->setLodErrorPixels(v); }, 0.0f, 8.0f, "{:.2f}");
             header.Check("Full Detail", [r]() { return r->getLodFullDetail(); }, [r](bool v) { r->setLodFullDetail(v); }, "Draws only the original clusters (no LOD), for comparison");
-            Ref<UI::UIElement> statistics = header.Check("Pipeline Statistics", []() { return Profiler::Get().IsPipelineStatisticsEnabled(); },
+            Ref<NoxUI::UIElement> statistics = header.Check("Pipeline Statistics", []() { return Profiler::Get().IsPipelineStatisticsEnabled(); },
                 [](bool v) { Profiler::Get().SetPipelineStatisticsEnabled(v); }, "Fragments and task / mesh shader invocations per raster pass (queries cost GPU time)");
             header.EnableWhen(statistics, []() { return Profiler::Get().IsPipelineStatisticsSupported(); },
                               []() { return std::string("needs pipeline statistics and mesh shader queries (and a profiling build)"); });
@@ -144,7 +144,7 @@ namespace Nox
                     text += std::format(" | {} draws/s | {} tris/s", FormatRate(draws * 1000.0 / frameMs), FormatRate(static_cast<double>(r->getVisibleTriangleCount()) * 1000.0 / frameMs));
                 }
                 return text;
-            }, UI::ThemeColor("RenderGraphStats", { 0.80f, 0.83f, 0.89f, 1.0f }));
+            }, NoxUI::ThemeColor("RenderGraphStats", { 0.80f, 0.83f, 0.89f, 1.0f }));
             rows.Text([graph]()
             {
                 const RGFrameReport& report = graph->GetReport();
@@ -157,16 +157,16 @@ namespace Nox
             }, kWarning);
         }
 
-        Ref<UI::UITabPanel> tabs(new UI::UITabPanel());
-        tabs->WidthMode = UI::UISizeMode::Fill;
-        tabs->HeightMode = UI::UISizeMode::Fill;
+        Ref<NoxUI::UITabPanel> tabs(new NoxUI::UITabPanel());
+        tabs->WidthMode = NoxUI::UISizeMode::Fill;
+        tabs->HeightMode = NoxUI::UISizeMode::Fill;
         root->AddChild(tabs);
 
         // ---- Passes ----
         {
-            auto page = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
-            page->WidthMode = UI::UISizeMode::Fill;
-            page->HeightMode = UI::UISizeMode::Fill;
+            auto page = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 4.0f);
+            page->WidthMode = NoxUI::UISizeMode::Fill;
+            page->HeightMode = NoxUI::UISizeMode::Fill;
             Ref<TableViewV2> table(new TableViewV2());
             table->Columns = { { "Pass", 3.0f }, { "Command Buffer", 1.0f }, { "CPU ms", 0.8f }, { "GPU ms", 0.8f }, { "Mesh inv.", 0.9f }, { "Flags", 2.5f } };
             table->Fill = [this, graph](std::vector<TableViewV2::Row>& out)
@@ -221,12 +221,12 @@ namespace Nox
             };
             table->OnRowClick = [this](const TableViewV2::Row& row, int) { if (row.Id != ~0ull) m_SelectedPass = m_SelectedPass == row.Id ? ~0u : static_cast<uint32_t>(row.Id); };
             page->AddChild(table);
-            auto accesses = UI::Label("", 13.0f);
-            Ref<UI::UILabel> accessesRef = accesses;
+            auto accesses = NoxUI::Label("", 13.0f);
+            Ref<NoxUI::UILabel> accessesRef = accesses;
             accessesRef->WordWrap = true;
-            accessesRef->WidthMode = UI::UISizeMode::Fill;
+            accessesRef->WidthMode = NoxUI::UISizeMode::Fill;
             page->AddChild(accessesRef);
-            UI::AppendSync(*page, [this, graph, accessesRef]()
+            NoxUI::AppendSync(*page, [this, graph, accessesRef]()
             {
                 const RGFrameReport& report = graph->GetReport();
                 if (m_SelectedPass >= report.Passes.size())
@@ -250,10 +250,10 @@ namespace Nox
 
         // ---- Resources ----
         {
-            auto page = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
-            page->WidthMode = UI::UISizeMode::Fill;
-            page->HeightMode = UI::UISizeMode::Fill;
-            UI::UIPropertyRows rows(page, context);
+            auto page = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 4.0f);
+            page->WidthMode = NoxUI::UISizeMode::Fill;
+            page->HeightMode = NoxUI::UISizeMode::Fill;
+            NoxUI::UIPropertyRows rows(page, context);
             rows.Check("Show resources unused this frame", [this]() { return m_ShowUnusedResources; }, [this](bool v) { m_ShowUnusedResources = v; });
             Ref<TableViewV2> table(new TableViewV2());
             table->Columns = { { "Resource", 3.0f }, { "Kind", 1.2f }, { "Size", 1.4f }, { "Format", 1.0f }, { "Memory", 1.0f }, { "Lifetime", 2.2f }, { "GPU Object", 0.9f }, { "", 0.9f } };
@@ -292,7 +292,7 @@ namespace Nox
                             row.BarColumn = 5;
                             row.BarBegin = static_cast<float>(resource.FirstPass) / passCount;
                             row.BarEnd = static_cast<float>(resource.LastPass + 1) / passCount;
-                            row.BarColor = resource.Kind == RGResourceKind::Transient ? UI::ThemeColor("RenderGraphTransient", { 0.43f, 0.75f, 0.35f, 1.0f }) : UI::ThemeColor("RenderGraphPersistent", { 0.86f, 0.59f, 0.27f, 1.0f });
+                            row.BarColor = resource.Kind == RGResourceKind::Transient ? NoxUI::ThemeColor("RenderGraphTransient", { 0.43f, 0.75f, 0.35f, 1.0f }) : NoxUI::ThemeColor("RenderGraphPersistent", { 0.86f, 0.59f, 0.27f, 1.0f });
                             if (resource.FirstPass < report.Passes.size() && resource.LastPass < report.Passes.size())
                                 row.Tooltip = std::format("{} -> {}", report.Passes[resource.FirstPass].Name, report.Passes[resource.LastPass].Name);
                         }
@@ -325,15 +325,15 @@ namespace Nox
 
         // ---- Validation ----
         {
-            auto scroll = UI::MakeUI<UI::UIScrollView>();
-            scroll->WidthMode = UI::UISizeMode::Fill;
-            scroll->HeightMode = UI::UISizeMode::Fill;
-            auto label = UI::Label("", 13.0f);
-            Ref<UI::UILabel> labelRef = label;
+            auto scroll = NoxUI::MakeUI<NoxUI::UIScrollView>();
+            scroll->WidthMode = NoxUI::UISizeMode::Fill;
+            scroll->HeightMode = NoxUI::UISizeMode::Fill;
+            auto label = NoxUI::Label("", 13.0f);
+            Ref<NoxUI::UILabel> labelRef = label;
             labelRef->WordWrap = true;
-            labelRef->WidthMode = UI::UISizeMode::Fill;
+            labelRef->WidthMode = NoxUI::UISizeMode::Fill;
             scroll->AddChild(labelRef);
-            UI::AppendSync(*scroll, [graph, labelRef]()
+            NoxUI::AppendSync(*scroll, [graph, labelRef]()
             {
                 const RGFrameReport& report = graph->GetReport();
                 std::string text = !graph->IsValidationEnabled() ? "Validation is off." : report.ValidationMessages.empty() ? "No issues this frame." : "";
@@ -356,10 +356,10 @@ namespace Nox
 
         // ---- Inspector ----
         {
-            auto page = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
-            page->WidthMode = UI::UISizeMode::Fill;
-            page->HeightMode = UI::UISizeMode::Fill;
-            UI::UIPropertyRows rows(page, context);
+            auto page = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 4.0f);
+            page->WidthMode = NoxUI::UISizeMode::Fill;
+            page->HeightMode = NoxUI::UISizeMode::Fill;
+            NoxUI::UIPropertyRows rows(page, context);
             rows.Text([r]()
             {
                 const Renderer::TextureInspection& inspection = r->getTextureInspection();
@@ -367,21 +367,21 @@ namespace Nox
                     return std::string("Pick a texture with Inspect in the Resources tab.");
                 const RGTextureKey& key = r->getInspectedTextureKey();
                 return std::format("{} [{}]  {}x{} {}", inspection.Name, inspection.Occurrence, key.Width, key.Height, FormatName(key.Format));
-            }, UI::ThemeColor("RenderGraphInspectText", { 0.86f, 0.88f, 0.92f, 1.0f }));
+            }, NoxUI::ThemeColor("RenderGraphInspectText", { 0.86f, 0.88f, 0.92f, 1.0f }));
             const auto inspecting = [r]() { return !r->getTextureInspection().Name.empty(); };
             const auto edit = [r](auto change) { Renderer::TextureInspection inspection = r->getTextureInspection(); change(inspection); r->setTextureInspection(inspection); };
-            Ref<UI::UIElement> stop = rows.Button("Stop", [r]() { r->setTextureInspection({}); });
+            Ref<NoxUI::UIElement> stop = rows.Button("Stop", [r]() { r->setTextureInspection({}); });
             rows.ShowWhen(stop, inspecting);
-            Ref<UI::UIElement> mip = rows.Int("Mip", [r]() { return static_cast<int>(r->getTextureInspection().Mip); },
+            Ref<NoxUI::UIElement> mip = rows.Int("Mip", [r]() { return static_cast<int>(r->getTextureInspection().Mip); },
                 [edit](int v) { edit([v](Renderer::TextureInspection& i) { i.Mip = static_cast<uint32_t>(v); }); }, 0, 15);
             rows.ShowWhen(mip, [r, inspecting]() { return inspecting() && r->getInspectedTextureKey().MipLevels > 1; });
             const auto floatFormat = [r]()
             {
                 const RGTextureKey& key = r->getInspectedTextureKey();
-                return key.Format != NRI::ImageFormat::R32SINT && key.Format != NRI::ImageFormat::R32G32_UINT && key.Format != NRI::ImageFormat::R32G32B32A32_UINT &&
-                       key.Usage != NRI::TextureUsage::DepthStencilAttachment;
+                return key.Format != NRI_FORMAT_R32_SINT && key.Format != NRI_FORMAT_R32G32_UINT && key.Format != NRI_FORMAT_R32G32B32A32_UINT &&
+                       key.Usage != NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
             };
-            UI::UIPropertyRows floats = rows.Group();
+            NoxUI::UIPropertyRows floats = rows.Group();
             floats.Check("Depth Curve", [r]() { return r->getTextureInspection().DepthCurve; }, [edit](bool v) { edit([v](Renderer::TextureInspection& i) { i.DepthCurve = v; }); },
                          "Reverse-Z curve: depth kept in a colour format (the Hi-Z pyramid) reads as black otherwise");
             floats.Slider("Exposure (stops)", [this]() { return m_ExposureStops; },
@@ -393,12 +393,12 @@ namespace Nox
             rows.ShowWhen(floats.GetBody(), [inspecting, floatFormat]() { return inspecting() && floatFormat(); });
 
             // The image, with the value under the pointer (the renderer reads back the probed texel).
-            class InspectImage final : public UI::UIImage
+            class InspectImage final : public NoxUI::UIImage
             {
             public:
                 Renderer* Render = nullptr;
-                bool OnPointerMove(const UI::UIPointerEvent& e) override { m_Pointer = e.Position; m_In = true; return true; }
-                bool OnPointerLeave(const UI::UIPointerEvent&) override { m_In = false; return false; }
+                bool OnPointerMove(const NoxUI::UIPointerEvent& e) override { m_Pointer = e.Position; m_In = true; return true; }
+                bool OnPointerLeave(const NoxUI::UIPointerEvent&) override { m_In = false; return false; }
             protected:
                 void OnUpdate(float) override
                 {
@@ -406,12 +406,12 @@ namespace Nox
                         return;
                     Renderer::TextureInspection inspection = Render->getTextureInspection();
                     inspection.ProbeX = inspection.ProbeY = -1;
-                    Texture2D* image = Render->getInspectionImage();
-                    TextureDescriptorSlot = image ? image->GetDescriptorIndexSlot() : ~0u;
+                    NriTexture image = Render->getInspectionImage();
+                    TextureId = image ? nriGetTextureDescriptorSlot(image) : ~0u;
                     Visible = image != nullptr;
                     const RGTextureKey& key = Render->getInspectedTextureKey();
                     const uint32_t width = std::max(key.Width >> inspection.Mip, 1u), height = std::max(key.Height >> inspection.Mip, 1u);
-                    const UI::UIRect b = GetBounds();
+                    const NoxUI::UIRect b = GetBounds();
                     const float scale = b.Width() / static_cast<float>(width);
                     FixedSize = { 0.0f, static_cast<float>(height) * std::max(scale, 0.01f) };
                     if (image && m_In && b.Contains(m_Pointer) && scale > 0.0f)
@@ -426,19 +426,19 @@ namespace Nox
                         Render->setTextureInspection(inspection);
                 }
             private:
-                UI::UIVec2 m_Pointer{ 0.0f };
+                NoxUI::UIVec2 m_Pointer{ 0.0f };
                 bool m_In = false;
             };
             Ref<InspectImage> image(new InspectImage());
             image->Render = r;
-            image->WidthMode = UI::UISizeMode::Fill;
-            image->HeightMode = UI::UISizeMode::Fixed;
-            image->HitTestMode = UI::UIHitTestMode::Self;
+            image->WidthMode = NoxUI::UISizeMode::Fill;
+            image->HeightMode = NoxUI::UISizeMode::Fixed;
+            image->HitTestMode = NoxUI::UIHitTestMode::Self;
             page->AddChild(image);
             rows.Text([r, inspecting]() { return inspecting() && !r->getInspectionImage() ? std::string("Not available this frame (culled or not produced by the current pipeline).") : std::string(); }, kWarning);
             tabs->AddTab("Inspector", page);
         }
-        UI::AppendSync(*root, [tabs, graph]()
+        NoxUI::AppendSync(*root, [tabs, graph]()
         {
             const std::string title = std::format("Validation ({})", graph->GetReport().ValidationMessages.size());
             if (tabs->GetTabCount() > 2 && tabs->GetTabTitle(2) != title)

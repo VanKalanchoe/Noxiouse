@@ -9,7 +9,7 @@
 #include "WorldPartition.h"
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/Ref.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 namespace Nox
 {

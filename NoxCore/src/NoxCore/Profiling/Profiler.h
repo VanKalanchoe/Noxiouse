@@ -13,7 +13,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "NRI/NRITypes.h"
+#include <NRIHPP/NRI.hpp>
 #include "NoxCore/Utils/PlatformUtils.h"
 #include "NoxCore/Renderer/MemoryBudget.h"
 
@@ -29,7 +29,7 @@
 #endif
 #define NOX_PROFILING_ENABLED (NOX_PROFILE_STATS || NOX_ENABLE_TRACY)
 
-namespace NRI
+namespace nri
 {
     class CommandBuffer;
     class GpuProfiler;
@@ -81,7 +81,7 @@ namespace Nox
 
     struct ProfileMemoryStats
     {
-        std::vector<NRI::MemoryHeapStats> Heaps;
+        std::vector<nri::MemoryHeapStats> Heaps;
         bool BudgetFromDriver = false; // false: the allocator estimates usage/budget itself
         Platform::ProcessMemory Process;
         std::vector<MemoryCategoryStats> Categories; // what each part of the engine holds of the device budget (§5.8.3)
@@ -206,36 +206,36 @@ namespace Nox
         void EndFrame();
 
         // GPU scopes over the frame's command buffers (submitted together, possibly recorded in parallel).
-        void SetGpuProfiler(NRI::GpuProfiler* gpuProfiler);
+        void SetGpuProfiler(nri::GpuProfiler* gpuProfiler);
         // Main thread, before recording: collects the slot's previous timings and opens the root "GPU Frame" scope
         // (GetGpuFrameTime).
         void BeginGpuFrame(uint32_t frameSlot);
         // Recorded first into the first submitted command buffer (outside rendering) / last into the last one.
-        void RecordGpuFrameBegin(NRI::CommandBuffer& cmd);
-        void RecordGpuFrameEnd(NRI::CommandBuffer& cmd);
+        void RecordGpuFrameBegin(nri::CommandBuffer& cmd);
+        void RecordGpuFrameEnd(nri::CommandBuffer& cmd);
         // By the thread recording the context's command buffer; scopes nest within a context under "GPU Frame".
-        void BeginGpuScope(GpuScopeContext& context, NRI::CommandBuffer& cmd, uint32_t scopeId);
-        void EndGpuScope(GpuScopeContext& context, NRI::CommandBuffer& cmd);
+        void BeginGpuScope(GpuScopeContext& context, nri::CommandBuffer& cmd, uint32_t scopeId);
+        void EndGpuScope(GpuScopeContext& context, nri::CommandBuffer& cmd);
         // Pipeline statistics (triangles, fragments, task/mesh shader invocations) of a pass, when enabled and supported: by
         // the recording thread, outside rendering. Off by default: the queries cost GPU time.
         void SetPipelineStatisticsEnabled(bool enabled) { m_PipelineStatisticsEnabled.store(enabled, std::memory_order_relaxed); }
         bool IsPipelineStatisticsEnabled() const { return m_PipelineStatisticsEnabled.load(std::memory_order_relaxed); }
         bool IsPipelineStatisticsSupported() const;
-        void BeginGpuStatistics(GpuScopeContext& context, NRI::CommandBuffer& cmd, uint32_t scopeId);
-        void EndGpuStatistics(GpuScopeContext& context, NRI::CommandBuffer& cmd);
+        void BeginGpuStatistics(GpuScopeContext& context, nri::CommandBuffer& cmd, uint32_t scopeId);
+        void EndGpuStatistics(GpuScopeContext& context, nri::CommandBuffer& cmd);
         // Main thread, after recording: takes the contexts' scopes in submission order and closes the frame.
         void EndGpuFrame(std::span<GpuScopeContext> contexts);
 
         // Transfer queue submissions (the upload manager, main thread), on the frame timeline's transfer track while it captures and
         // the device places GPU time on the CPU clock: begin after the command buffer's begin, end before its end, complete once the
-        // submission finished. Returns / takes NRI::GpuProfiler::InvalidQueryId when not timed.
-        uint32_t BeginTransferSubmission(NRI::CommandBuffer& cmd);
-        void EndTransferSubmission(NRI::CommandBuffer& cmd, uint32_t query);
+        // submission finished. Returns / takes nri::GpuProfiler::InvalidQueryId when not timed.
+        uint32_t BeginTransferSubmission(nri::CommandBuffer& cmd);
+        void EndTransferSubmission(nri::CommandBuffer& cmd, uint32_t query);
         void CompleteTransferSubmission(uint32_t query);
 
         // Main thread.
         void SetCounter(uint32_t scopeId, double value);
-        void SubmitMemoryStats(std::span<const NRI::MemoryHeapStats> heaps, bool budgetFromDriver, const Platform::ProcessMemory& process,
+        void SubmitMemoryStats(std::span<const nri::MemoryHeapStats> heaps, bool budgetFromDriver, const Platform::ProcessMemory& process,
                                std::span<const MemoryCategoryStats> categories);
         void ResetStats();
 
@@ -374,7 +374,7 @@ namespace Nox
         uint64_t m_FrameNumber = 0;
 
         // GPU
-        NRI::GpuProfiler* m_GpuProfiler = nullptr;
+        nri::GpuProfiler* m_GpuProfiler = nullptr;
         std::vector<GpuFrameRecord> m_GpuFrames;
         std::vector<double> m_GpuFrameMs;
         std::vector<ScopeHistory> m_GpuHistories;

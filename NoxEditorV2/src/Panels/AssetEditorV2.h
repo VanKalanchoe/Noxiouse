@@ -8,15 +8,16 @@
 
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/Ref.h"
-#include "NoxCore/UI/Core/UITypes.h"
+#include <NoxUI/Core/UITypes.h>
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIDockSpace;
         class UIElement;
     }
+
+namespace Nox
+{
 
     // One asset open in its own editor window (Unreal's FAssetEditorToolkit): a graph, a material ... The window around it, the
     // "Save changes?" question when it closes and the editor's end belong to AssetEditorManager.
@@ -31,11 +32,11 @@ namespace Nox
         virtual const char* GetKind() const = 0;
         // The window's title ("Graph: UAL_Locomotion"); one window per asset.
         virtual std::string GetWindowTitle() const = 0;
-        virtual UI::UIVec2 GetDefaultSize() const { return { 900.0f, 600.0f }; }
+        virtual NoxUI::UIVec2 GetDefaultSize() const { return { 900.0f, 600.0f }; }
 
         // False: the asset could not be loaded (no window is made).
         virtual bool IsValid() const { return true; }
-        virtual Ref<UI::UIElement> BuildUI() = 0;
+        virtual Ref<NoxUI::UIElement> BuildUI() = 0;
         // Once a frame while the window is open.
         virtual void Update() {}
 
@@ -52,7 +53,7 @@ namespace Nox
         virtual void EndPreview() {}
 
         // Set by the manager: toasts, and opening another asset (a material's texture).
-        std::function<void(UI::UINotification)> Notify;
+        std::function<void(NoxUI::UINotification)> Notify;
         std::function<void(AssetHandle)> OpenAsset;
     };
 
@@ -80,7 +81,7 @@ namespace Nox
     public:
         struct Hooks
         {
-            std::function<void(UI::UINotification)> Notify;
+            std::function<void(NoxUI::UINotification)> Notify;
             // The "Save changes?" dialog: its text, then Save and Don't Save (Cancel does nothing).
             std::function<void(const std::string& text, std::function<void()> save, std::function<void()> dontSave)> AskSave;
             std::function<void(AssetHandle)> OpenAsset;
@@ -117,11 +118,11 @@ namespace Nox
         {
             std::unique_ptr<AssetEditorV2> Editor;
             std::string Title;
-            Ref<UI::UIElement> Root; // (its syncs are dropped before the editor goes: the window can show for one more frame)
+            Ref<NoxUI::UIElement> Root; // (its syncs are dropped before the editor goes: the window can show for one more frame)
         };
         static void CloseWindow(const std::string& title);
         OpenEditor* FindByTitle(const std::string& title);
-        void Say(UI::UINotificationSeverity severity, std::string title, std::string message) const;
+        void Say(NoxUI::UINotificationSeverity severity, std::string title, std::string message) const;
 
         AssetEditorRegistry m_Registry;
         Hooks m_Hooks;

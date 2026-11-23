@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "NoxCore/Core/UUID.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 namespace Nox
 {
@@ -61,7 +61,7 @@ namespace Nox
         {
             using Function = std::decay_t<F>;
             Command command;
-            command.Payload = JobSystem::Get().GetFrameArena().New<Function>(std::forward<F>(function));
+            command.Payload = NoxTasks::JobSystem::Get().GetFrameArena().New<Function>(std::forward<F>(function));
             command.Invoke = [](void* payload, Scene& scene) { (*static_cast<Function*>(payload))(scene); };
             command.Destroy = [](void* payload) { static_cast<Function*>(payload)->~Function(); };
             m_Commands.push_back(command);

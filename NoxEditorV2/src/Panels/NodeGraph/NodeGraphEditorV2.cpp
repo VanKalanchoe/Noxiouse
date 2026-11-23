@@ -22,20 +22,20 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/MaterialGraph.h"
-#include "NoxCore/UI/Widgets/UICurveEditor.h"
-#include "NoxCore/UI/Widgets/UILevelMeter.h"
-#include "NoxCore/UI/Core/UIContext.h"
-#include "NoxCore/UI/Layout/UILayout.h"
-#include "NoxCore/UI/Rendering/UIDrawList.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UICheckBox.h"
-#include "NoxCore/UI/Widgets/UIDragScalar.h"
-#include "NoxCore/UI/Widgets/UIImage.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
-#include "NoxCore/UI/Widgets/UIPopup.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
-#include "NoxCore/UI/Widgets/UITextInput.h"
+#include <NoxUI/Widgets/UICurveEditor.h>
+#include <NoxUI/Widgets/UILevelMeter.h>
+#include <NoxUI/Core/UIContext.h>
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UICheckBox.h>
+#include <NoxUI/Widgets/UIDragScalar.h>
+#include <NoxUI/Widgets/UIImage.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIMenu.h>
+#include <NoxUI/Widgets/UIPopup.h>
+#include <NoxUI/Widgets/UIScrollView.h>
+#include <NoxUI/Widgets/UITextInput.h>
 
 namespace Nox
 {
@@ -58,13 +58,13 @@ namespace Nox
             }
         }
 
-        Ref<UI::UILabel> MutedLabel(const std::string& text, float size = 13.0f)
+        Ref<NoxUI::UILabel> MutedLabel(const std::string& text, float size = 13.0f)
         {
-            Ref<UI::UILabel> label(new UI::UILabel(text, size));
+            Ref<NoxUI::UILabel> label(new NoxUI::UILabel(text, size));
             label->UseColorOverride = true;
-            label->ColorOverride = UI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
+            label->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
             label->WordWrap = true;
-            label->WidthMode = UI::UISizeMode::Fill;
+            label->WidthMode = NoxUI::UISizeMode::Fill;
             return label;
         }
     }
@@ -102,30 +102,30 @@ namespace Nox
             m_Asset->HasUnsavedEdits = false;
     }
 
-    Ref<UI::UIElement> NodeGraphEditorV2::BuildUI()
+    Ref<NoxUI::UIElement> NodeGraphEditorV2::BuildUI()
     {
         // The window's root: keys typed in it that its children leave (Ctrl+S, Ctrl+Z ...) come here.
-        auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 0.0f);
-        root->OnKey = [this](const UI::UIKeyEvent& e) { return HandleKey(e); };
-        root->WidthMode = UI::UISizeMode::Fill;
-        root->HeightMode = UI::UISizeMode::Fill;
+        auto root = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 0.0f);
+        root->OnKey = [this](const NoxUI::UIKeyEvent& e) { return HandleKey(e); };
+        root->WidthMode = NoxUI::UISizeMode::Fill;
+        root->HeightMode = NoxUI::UISizeMode::Fill;
         root->StyleClass = "Surface";
         root->DrawBackground = true;
 
         auto button = [](const std::string& text, std::function<void()> onClick, const std::string& tooltip)
         {
-            Ref<UI::UIButton> b(new UI::UIButton(text, std::move(onClick)));
-            b->Padding = UI::UIThickness::Symmetric(10.0f, 2.0f);
-            b->HeightMode = UI::UISizeMode::Fixed;
+            Ref<NoxUI::UIButton> b(new NoxUI::UIButton(text, std::move(onClick)));
+            b->Padding = NoxUI::UIThickness::Symmetric(10.0f, 2.0f);
+            b->HeightMode = NoxUI::UISizeMode::Fixed;
             b->FixedSize = { 0.0f, 26.0f };
             b->Tooltip = tooltip;
-            b->VAlign = UI::UIAlignment::Center;
+            b->VAlign = NoxUI::UIAlignment::Center;
             return b;
         };
-        Ref<UI::UIStackBox> toolbar(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
-        toolbar->WidthMode = UI::UISizeMode::Fill;
-        toolbar->Padding = UI::UIThickness{ 6.0f, 5.0f, 6.0f, 4.0f };
-        toolbar->VAlign = UI::UIAlignment::Center;
+        Ref<NoxUI::UIStackBox> toolbar(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 6.0f));
+        toolbar->WidthMode = NoxUI::UISizeMode::Fill;
+        toolbar->Padding = NoxUI::UIThickness{ 6.0f, 5.0f, 6.0f, 4.0f };
+        toolbar->VAlign = NoxUI::UIAlignment::Center;
         m_SaveButton = button("Save", [this]() { Save(); }, "Write the graph to its file (Ctrl+S)");
         m_UndoButton = button("Undo", [this]() { Undo(); }, "Ctrl+Z");
         m_RedoButton = button("Redo", [this]() { Redo(); }, "Ctrl+Y");
@@ -135,14 +135,14 @@ namespace Nox
         toolbar->AddChild(button("Frame", [this]() { if (m_Canvas) m_Canvas->FrameSelection(); }, "The selection, or the whole graph, in view (F)"));
         m_Status = MutedLabel("", 13.0f);
         m_Status->WordWrap = false;
-        m_Status->VAlign = UI::UIAlignment::Center;
-        m_Status->Margin = UI::UIThickness{ 8.0f, 0.0f, 0.0f, 0.0f };
+        m_Status->VAlign = NoxUI::UIAlignment::Center;
+        m_Status->Margin = NoxUI::UIThickness{ 8.0f, 0.0f, 0.0f, 0.0f };
         toolbar->AddChild(m_Status);
         root->AddChild(toolbar);
         if (m_Asset && m_Asset->Graph.Domain == kMaterialGraphDomain)
         {
             m_CompileStatus = MutedLabel("", 12.5f);
-            m_CompileStatus->Margin = UI::UIThickness{ 8.0f, 0.0f, 8.0f, 4.0f };
+            m_CompileStatus->Margin = NoxUI::UIThickness{ 8.0f, 0.0f, 8.0f, 4.0f };
             root->AddChild(m_CompileStatus);
             m_CompileStatusDirty = true;
         }
@@ -150,17 +150,17 @@ namespace Nox
         // Parameters | canvas | Details.
         auto column = [](float width)
         {
-            Ref<UI::UIScrollView> scroll(new UI::UIScrollView());
-            scroll->WidthMode = UI::UISizeMode::Fixed;
+            Ref<NoxUI::UIScrollView> scroll(new NoxUI::UIScrollView());
+            scroll->WidthMode = NoxUI::UISizeMode::Fixed;
             scroll->FixedSize = { width, 0.0f };
-            scroll->HeightMode = UI::UISizeMode::Fill;
+            scroll->HeightMode = NoxUI::UISizeMode::Fill;
             scroll->ChildSpacing = 6.0f;
             return scroll;
         };
-        Ref<UI::UIScrollView> left = column(230.0f);
-        m_Parameters = Ref<UI::UIStackBox>(new UI::UIStackBox(UI::UIOrientation::Vertical, 6.0f));
-        m_Parameters->WidthMode = UI::UISizeMode::Fill;
-        m_Parameters->Padding = UI::UIThickness::All(8.0f);
+        Ref<NoxUI::UIScrollView> left = column(230.0f);
+        m_Parameters = Ref<NoxUI::UIStackBox>(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 6.0f));
+        m_Parameters->WidthMode = NoxUI::UISizeMode::Fill;
+        m_Parameters->Padding = NoxUI::UIThickness::All(8.0f);
         left->AddChild(m_Parameters);
 
         m_Canvas = Ref<NodeGraphCanvasV2>(new NodeGraphCanvasV2());
@@ -168,23 +168,23 @@ namespace Nox
         m_Canvas->OnEdited = [this](bool structural) { OnCanvasEdited(structural); };
         m_Canvas->OnSelectionChanged = [this]() { m_DetailsDirty = true; };
         m_Canvas->OnOpenNode = [this](uint32_t nodeId) { m_Path.push_back(nodeId); }; // (shown by the next update's ResolvePath)
-        m_Canvas->OnEditValue = [this](uint32_t nodeId, const std::string& property, const UI::UIRect& at) { ShowValuePopup(nodeId, property, at); };
+        m_Canvas->OnEditValue = [this](uint32_t nodeId, const std::string& property, const NoxUI::UIRect& at) { ShowValuePopup(nodeId, property, at); };
         m_Canvas->SetGraph(m_Asset ? &m_Asset->Graph : nullptr);
 
-        Ref<UI::UIScrollView> right = column(300.0f);
+        Ref<NoxUI::UIScrollView> right = column(300.0f);
         if (m_Asset && m_Asset->Graph.Domain != kMaterialGraphDomain)
         {
-            m_PreviewBox = Ref<UI::UIStackBox>(new UI::UIStackBox(UI::UIOrientation::Vertical, 4.0f));
-            m_PreviewBox->WidthMode = UI::UISizeMode::Fill;
-            m_PreviewBox->Padding = UI::UIThickness::All(8.0f);
+            m_PreviewBox = Ref<NoxUI::UIStackBox>(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 4.0f));
+            m_PreviewBox->WidthMode = NoxUI::UISizeMode::Fill;
+            m_PreviewBox->Padding = NoxUI::UIThickness::All(8.0f);
             m_PreviewBox->StyleClass = "Card";
             m_PreviewBox->DrawBackground = true;
             right->AddChild(m_PreviewBox);
             m_PreviewDirty = true;
         }
-        m_Details = Ref<UI::UIStackBox>(new UI::UIStackBox(UI::UIOrientation::Vertical, 6.0f));
-        m_Details->WidthMode = UI::UISizeMode::Fill;
-        m_Details->Padding = UI::UIThickness::All(8.0f);
+        m_Details = Ref<NoxUI::UIStackBox>(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 6.0f));
+        m_Details->WidthMode = NoxUI::UISizeMode::Fill;
+        m_Details->Padding = NoxUI::UIThickness::All(8.0f);
         right->AddChild(m_Details);
 
         m_StateView = Ref<StateMachineViewV2>(new StateMachineViewV2());
@@ -195,20 +195,20 @@ namespace Nox
         m_StateView->FirstParameter = [this]() { return m_Asset && !m_Asset->Graph.Parameters.empty() ? m_Asset->Graph.Parameters.front().Name : std::string(); };
 
         // The middle: where the window is in the graph (shown below the top), then the canvas or the states view.
-        m_Breadcrumb = Ref<UI::UIStackBox>(new UI::UIStackBox(UI::UIOrientation::Horizontal, 4.0f));
-        m_Breadcrumb->WidthMode = UI::UISizeMode::Fill;
-        m_Breadcrumb->Padding = UI::UIThickness{ 6.0f, 3.0f, 6.0f, 3.0f };
+        m_Breadcrumb = Ref<NoxUI::UIStackBox>(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 4.0f));
+        m_Breadcrumb->WidthMode = NoxUI::UISizeMode::Fill;
+        m_Breadcrumb->Padding = NoxUI::UIThickness{ 6.0f, 3.0f, 6.0f, 3.0f };
         m_Breadcrumb->Visible = false;
-        Ref<UI::UIStackBox> middle(new UI::UIStackBox(UI::UIOrientation::Vertical, 0.0f));
-        middle->WidthMode = UI::UISizeMode::Fill;
-        middle->HeightMode = UI::UISizeMode::Fill;
+        Ref<NoxUI::UIStackBox> middle(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 0.0f));
+        middle->WidthMode = NoxUI::UISizeMode::Fill;
+        middle->HeightMode = NoxUI::UISizeMode::Fill;
         middle->AddChild(m_Breadcrumb);
         middle->AddChild(m_Canvas);
         middle->AddChild(m_StateView);
 
-        Ref<UI::UIStackBox> body(new UI::UIStackBox(UI::UIOrientation::Horizontal, 0.0f));
-        body->WidthMode = UI::UISizeMode::Fill;
-        body->HeightMode = UI::UISizeMode::Fill;
+        Ref<NoxUI::UIStackBox> body(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 0.0f));
+        body->WidthMode = NoxUI::UISizeMode::Fill;
+        body->HeightMode = NoxUI::UISizeMode::Fill;
         body->AddChild(left);
         body->AddChild(middle);
         body->AddChild(right);
@@ -230,7 +230,7 @@ namespace Nox
             return;
         FollowDiskChanges();
         // A finished edit is one history step: a value dragged in Details is finished when the mouse button comes up.
-        if (m_EditPending && !UI::UIContext::IsMouseButtonHeld())
+        if (m_EditPending && !NoxUI::UIContext::IsMouseButtonHeld())
             CommitHistory();
         if (m_ParametersDirty)
             RebuildParameters();
@@ -264,7 +264,7 @@ namespace Nox
         if (m_Asset->DiskGraph)
         {
             if (Notify)
-                Notify({ UI::UINotificationSeverity::Warning, m_Title + " changed on disk",
+                Notify({ NoxUI::UINotificationSeverity::Warning, m_Title + " changed on disk",
                          "Your unsaved edits are kept: Save writes them over the file; closing the window and choosing Don't Save takes the file's version." });
             return;
         }
@@ -280,7 +280,7 @@ namespace Nox
         RebuildParameters();
         RebuildDetails();
         if (Notify)
-            Notify({ UI::UINotificationSeverity::Info, m_Title + " reloaded", "The file changed on disk (Ctrl+Z goes back to what was shown)." });
+            Notify({ NoxUI::UINotificationSeverity::Info, m_Title + " reloaded", "The file changed on disk (Ctrl+Z goes back to what was shown)." });
     }
 
     void NodeGraphEditorV2::RefreshToolbar()
@@ -303,14 +303,14 @@ namespace Nox
         }
     }
 
-    bool NodeGraphEditorV2::HandleKey(const UI::UIKeyEvent& e)
+    bool NodeGraphEditorV2::HandleKey(const NoxUI::UIKeyEvent& e)
     {
-        if ((e.Modifiers & UI::UIMod::Ctrl) == 0)
+        if ((e.Modifiers & NoxUI::UIMod::Ctrl) == 0)
             return false;
         switch (e.KeyCode)
         {
         case SDL_SCANCODE_S: Save(); return true;
-        case SDL_SCANCODE_Z: if (e.Modifiers & UI::UIMod::Shift) Redo(); else Undo(); return true;
+        case SDL_SCANCODE_Z: if (e.Modifiers & NoxUI::UIMod::Shift) Redo(); else Undo(); return true;
         case SDL_SCANCODE_Y: Redo(); return true;
         default: return false;
         }
@@ -407,7 +407,7 @@ namespace Nox
         if (!NodeGraphSerializer::Serialize(path, m_Asset->Graph))
         {
             if (Notify)
-                Notify({ UI::UINotificationSeverity::Error, "Graph not saved", path.filename().string() + " could not be written -- see the Output Log." });
+                Notify({ NoxUI::UINotificationSeverity::Error, "Graph not saved", path.filename().string() + " could not be written -- see the Output Log." });
             return;
         }
         m_Dirty = false;
@@ -415,7 +415,7 @@ namespace Nox
         m_Asset->DiskGraph.reset(); // (a version from disk that waited is overwritten now: closing must not bring it back)
         assets->NoteSourceWritten(m_Handle); // (its own save is no change on disk to reload)
         if (Notify)
-            Notify({ UI::UINotificationSeverity::Success, "Graph saved", found->second.FilePath.generic_string() });
+            Notify({ NoxUI::UINotificationSeverity::Success, "Graph saved", found->second.FilePath.generic_string() });
     }
 
     bool NodeGraphEditorV2::ApplyExternalEdit(NodeGraph replacement)
@@ -456,7 +456,7 @@ namespace Nox
             if (!read)
             {
                 if (Notify)
-                    Notify({ UI::UINotificationSeverity::Error, "Changes not discarded",
+                    Notify({ NoxUI::UINotificationSeverity::Error, "Changes not discarded",
                              m_Title + ": the file could not be read back -- see the Output Log. The edits stay." });
                 return false;
             }
@@ -491,23 +491,23 @@ namespace Nox
         if (!m_Asset)
             return;
 
-        Ref<UI::UIStackBox> header(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
-        header->WidthMode = UI::UISizeMode::Fill;
-        header->VAlign = UI::UIAlignment::Center;
-        Ref<UI::UILabel> title(new UI::UILabel("Parameters", 15.0f));
-        title->WidthMode = UI::UISizeMode::Fill;
-        title->VAlign = UI::UIAlignment::Center;
+        Ref<NoxUI::UIStackBox> header(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 6.0f));
+        header->WidthMode = NoxUI::UISizeMode::Fill;
+        header->VAlign = NoxUI::UIAlignment::Center;
+        Ref<NoxUI::UILabel> title(new NoxUI::UILabel("Parameters", 15.0f));
+        title->WidthMode = NoxUI::UISizeMode::Fill;
+        title->VAlign = NoxUI::UIAlignment::Center;
         header->AddChild(title);
-        Ref<UI::UIButton> add(new UI::UIButton("+ Add", {}));
-        add->Padding = UI::UIThickness::Symmetric(10.0f, 2.0f);
-        add->HeightMode = UI::UISizeMode::Fixed;
+        Ref<NoxUI::UIButton> add(new NoxUI::UIButton("+ Add", {}));
+        add->Padding = NoxUI::UIThickness::Symmetric(10.0f, 2.0f);
+        add->HeightMode = NoxUI::UISizeMode::Fixed;
         add->FixedSize = { 0.0f, 26.0f };
         add->StyleVariant = "primary";
         add->Tooltip = "A value the game sets from scripts (Animator.SetFloat ...) and the graph reads";
-        UI::UIButton* addRaw = add.get();
+        NoxUI::UIButton* addRaw = add.get();
         add->OnClick = [this, addRaw]()
         {
-            UI::UIContext* ctx = UI::UIContext::GetCurrent();
+            NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
             if (!ctx)
                 return;
             auto addParameter = [this](NodeGraphValue value, bool trigger)
@@ -520,12 +520,12 @@ namespace Nox
                 MarkEdited(true);
                 m_ParametersDirty = true;
             };
-            std::vector<UI::UIMenuItem> items;
+            std::vector<NoxUI::UIMenuItem> items;
             items.push_back({ "Float", "", [addParameter]() { addParameter(0.0f, false); } });
             items.push_back({ "Int", "", [addParameter]() { addParameter(int32_t(0), false); } });
             items.push_back({ "Bool", "", [addParameter]() { addParameter(false, false); } });
             items.push_back({ "Trigger", "", [addParameter]() { addParameter(false, true); }, false, true, false, false, "Fired once (a jump, a hit): true for one update." });
-            UI::UIMenuPopup::ShowPopupMenu(*ctx, addRaw->GetBounds(), std::move(items));
+            NoxUI::UIMenuPopup::ShowPopupMenu(*ctx, addRaw->GetBounds(), std::move(items));
         };
         header->AddChild(add);
         m_Parameters->AddChild(header);
@@ -536,23 +536,23 @@ namespace Nox
         for (size_t index = 0; index < parameters.size(); ++index)
         {
             GraphParameter& parameter = parameters[index];
-            Ref<UI::UIStackBox> card(new UI::UIStackBox(UI::UIOrientation::Vertical, 4.0f));
-            card->WidthMode = UI::UISizeMode::Fill;
+            Ref<NoxUI::UIStackBox> card(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 4.0f));
+            card->WidthMode = NoxUI::UISizeMode::Fill;
             card->StyleClass = "Card";
             card->DrawBackground = true;
-            card->Padding = UI::UIThickness::All(6.0f);
+            card->Padding = NoxUI::UIThickness::All(6.0f);
             // Dragged (by its background or labels) onto the canvas: a Get node of it there.
             card->Tooltip = "Drag onto the graph for a node that reads it";
-            card->OnDragStart = [this, index]() -> std::optional<UI::UIDragPayload>
+            card->OnDragStart = [this, index]() -> std::optional<NoxUI::UIDragPayload>
             {
                 if (!m_Asset || index >= m_Asset->Graph.Parameters.size())
                     return std::nullopt;
-                UI::UIDragPayload payload;
+                NoxUI::UIDragPayload payload;
                 payload.Type = NodeGraphCanvasV2::kParameterDragType;
                 payload.Text = m_Asset->Graph.Parameters[index].Name;
                 return payload;
             };
-            InspectorCardBuilder builder{ card, [this](bool) { MarkEdited(true); }, UI::UIContext::GetCurrent() };
+            InspectorCardBuilder builder{ card, [this](bool) { MarkEdited(true); }, NoxUI::UIContext::GetCurrent() };
             auto lastName = std::make_shared<std::string>(parameter.Name);
             builder.AddString("Name", &parameter.Name, "Name", [this, index, lastName]()
             {
@@ -572,7 +572,7 @@ namespace Nox
                 else if (auto* flag = std::get_if<bool>(&parameter.DefaultValue))
                     builder.AddBool("Default", flag);
             }
-            Ref<UI::UIButton> remove(new UI::UIButton("Delete", [this, index]()
+            Ref<NoxUI::UIButton> remove(new NoxUI::UIButton("Delete", [this, index]()
             {
                 std::vector<GraphParameter>& list = m_Asset->Graph.Parameters;
                 if (index < list.size())
@@ -581,8 +581,8 @@ namespace Nox
                 m_ParametersDirty = true;
                 m_DetailsDirty = true;
             }));
-            remove->Padding = UI::UIThickness::Symmetric(10.0f, 2.0f);
-            remove->HAlign = UI::UIAlignment::End;
+            remove->Padding = NoxUI::UIThickness::Symmetric(10.0f, 2.0f);
+            remove->HAlign = NoxUI::UIAlignment::End;
             remove->Tooltip = "Nodes reading it then read nothing (their value is the type's default)";
             card->AddChild(remove);
             m_Parameters->AddChild(card);
@@ -595,7 +595,7 @@ namespace Nox
         if (!m_Details)
             return;
         m_Details->ClearChildren();
-        Ref<UI::UILabel> title(new UI::UILabel("Details", 15.0f));
+        Ref<NoxUI::UILabel> title(new NoxUI::UILabel("Details", 15.0f));
         m_Details->AddChild(title);
         if (!m_Asset || !m_Canvas)
             return;
@@ -624,7 +624,7 @@ namespace Nox
         if (!node)
             return;
         const NodeTypeDesc* type = NodeTypeRegistry::Find(graph.Domain, node->TypeName);
-        Ref<UI::UILabel> name(new UI::UILabel(node->TypeName, 14.5f));
+        Ref<NoxUI::UILabel> name(new NoxUI::UILabel(node->TypeName, 14.5f));
         m_Details->AddChild(name);
         if (!type)
         {
@@ -634,10 +634,10 @@ namespace Nox
         if (!type->Category.empty())
             m_Details->AddChild(MutedLabel(type->Category + (node->Id == graph.OutputNode ? "   |   the graph's output" : std::string())));
 
-        Ref<UI::UIStackBox> body(new UI::UIStackBox(UI::UIOrientation::Vertical, 4.0f));
-        body->WidthMode = UI::UISizeMode::Fill;
+        Ref<NoxUI::UIStackBox> body(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 4.0f));
+        body->WidthMode = NoxUI::UISizeMode::Fill;
         m_Details->AddChild(body);
-        InspectorCardBuilder builder{ body, [this](bool) { MarkEdited(true); }, UI::UIContext::GetCurrent() };
+        InspectorCardBuilder builder{ body, [this](bool) { MarkEdited(true); }, NoxUI::UIContext::GetCurrent() };
         const uint32_t nodeId = node->Id;
         auto addProperty = [&](const std::string& key, const std::string& label)
         {
@@ -683,8 +683,8 @@ namespace Nox
         if (!type->VariableInputs.empty())
         {
             const uint32_t variable = VariableInputCount(*type, node->Properties);
-            Ref<UI::UIStackBox> row(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
-            Ref<UI::UIButton> addPin(new UI::UIButton("+ Pin", [this, nodeId, type, variable]()
+            Ref<NoxUI::UIStackBox> row(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 6.0f));
+            Ref<NoxUI::UIButton> addPin(new NoxUI::UIButton("+ Pin", [this, nodeId, type, variable]()
             {
                 for (GraphNode& n : ShownGraph().Nodes)
                 {
@@ -701,7 +701,7 @@ namespace Nox
             row->AddChild(addPin);
             if (variable > type->MinVariableInputs)
             {
-                Ref<UI::UIButton> removePin(new UI::UIButton("- Pin", [this, nodeId, type, variable, inputCount = static_cast<uint32_t>(pins.Inputs.size())]()
+                Ref<NoxUI::UIButton> removePin(new NoxUI::UIButton("- Pin", [this, nodeId, type, variable, inputCount = static_cast<uint32_t>(pins.Inputs.size())]()
                 {
                     const uint32_t firstOfLast = inputCount - static_cast<uint32_t>(type->VariableInputs.size());
                     std::erase_if(ShownGraph().Links, [&](const GraphLink& l) { return l.ToNode == nodeId && l.ToPin >= firstOfLast; });
@@ -821,13 +821,13 @@ namespace Nox
             const Skeleton* skeleton = m_PreviewSkeleton != 0 ? AssetManager::FindLoadedAsset<Skeleton>(m_PreviewSkeleton) : nullptr;
             const bool known = !skeleton || text->empty() ||
                                std::any_of(skeleton->AllNodes.begin(), skeleton->AllNodes.end(), [&](const Node* n) { return n && n->Name == *text; });
-            Ref<UI::UIButton> pick(new UI::UIButton(text->empty() ? std::string("(pick a bone)") : *text + (known ? "" : "  (not in the skeleton)")));
-            pick->WidthMode = UI::UISizeMode::Fill;
+            Ref<NoxUI::UIButton> pick(new NoxUI::UIButton(text->empty() ? std::string("(pick a bone)") : *text + (known ? "" : "  (not in the skeleton)")));
+            pick->WidthMode = NoxUI::UISizeMode::Fill;
             pick->Tooltip = skeleton ? "Pick from the preview skeleton's bones, or type a name" : "Type the bone's name, or pick a preview mesh to list its bones";
-            UI::UIButton* raw = pick.get();
+            NoxUI::UIButton* raw = pick.get();
             pick->OnClick = [this, nodeId, key, raw]() { ShowBonePicker(nodeId, key, raw->GetBounds()); };
             // (the button follows the value: a pick or an undo changes it)
-            UI::AppendSync(*raw, [this, nodeId, key, raw]()
+            NoxUI::AppendSync(*raw, [this, nodeId, key, raw]()
             {
                 for (const GraphNode& n : ShownGraph().Nodes)
                     if (n.Id == nodeId)
@@ -857,16 +857,16 @@ namespace Nox
             builder.AddSubheader(label, "x (what comes in) -> y (what goes out)");
             // The curve to see and shape (UI::UICurveEditor over the node's keys): drag a key, double-click to add one, right-click a key
             // to remove it; the view follows the keys.
-            Ref<UI::UICurveEditor> view(new UI::UICurveEditor({}));
-            view->RangeMode = UI::UICurveEditor::Range::FitKeys;
+            Ref<NoxUI::UICurveEditor> view(new NoxUI::UICurveEditor({}));
+            view->RangeMode = NoxUI::UICurveEditor::Range::FitKeys;
             view->AddOnDoubleClick = true;
-            view->Keys = [curveOf]() -> std::vector<UI::UIVec2>* { NodeGraphCurve* c = curveOf(); return c ? &c->Keys : nullptr; };
+            view->Keys = [curveOf]() -> std::vector<NoxUI::UIVec2>* { NodeGraphCurve* c = curveOf(); return c ? &c->Keys : nullptr; };
             view->Evaluator = [curveOf](float x) { const NodeGraphCurve* c = curveOf(); return c ? c->Evaluate(x) : 0.0f; };
             view->OnChanging = [this]() { MarkEdited(true); };
             view->OnKeyCountChanged = [this, rebuild]() { MarkEdited(true); if (rebuild) rebuild(); };
-            view->HeightMode = UI::UISizeMode::Fixed;
+            view->HeightMode = NoxUI::UISizeMode::Fixed;
             view->FixedSize = { 0.0f, 120.0f };
-            view->Padding = UI::UIThickness::All(4.0f);
+            view->Padding = NoxUI::UIThickness::All(4.0f);
             view->Tooltip = "Drag a key; double-click to add one; right-click a key to remove it.";
             builder.Body->AddChild(view);
             NodeGraphCurve* curve = curveOf();
@@ -885,8 +885,8 @@ namespace Nox
                     MarkEdited(true);
                 });
             }
-            Ref<UI::UIStackBox> row(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
-            Ref<UI::UIButton> addKey(new UI::UIButton("+ Key", [this, curveOf, rebuild]()
+            Ref<NoxUI::UIStackBox> row(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 6.0f));
+            Ref<NoxUI::UIButton> addKey(new NoxUI::UIButton("+ Key", [this, curveOf, rebuild]()
             {
                 if (NodeGraphCurve* c = curveOf())
                     c->Keys.push_back(c->Keys.empty() ? glm::vec2(0.0f) : c->Keys.back() + glm::vec2(1.0f, 0.0f));
@@ -898,7 +898,7 @@ namespace Nox
             row->AddChild(addKey);
             if (curve && !curve->Keys.empty())
             {
-                Ref<UI::UIButton> removeKey(new UI::UIButton("- Key", [this, curveOf, rebuild]()
+                Ref<NoxUI::UIButton> removeKey(new NoxUI::UIButton("- Key", [this, curveOf, rebuild]()
                 {
                     if (NodeGraphCurve* c = curveOf(); c && !c->Keys.empty())
                         c->Keys.pop_back();
@@ -928,7 +928,7 @@ namespace Nox
     {
         // Next frame, not from inside the click that changed the popup's shape (that would destroy the button running it); skipped
         // when the popup was closed meanwhile or the editor is gone.
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         if (!ctx)
         {
             show();
@@ -942,9 +942,9 @@ namespace Nox
         });
     }
 
-    void NodeGraphEditorV2::ShowValuePopup(uint32_t nodeId, const std::string& key, const UI::UIRect& at)
+    void NodeGraphEditorV2::ShowValuePopup(uint32_t nodeId, const std::string& key, const NoxUI::UIRect& at)
     {
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         if (!ctx || !m_Asset)
             return;
         // A bone opens its picker straight away (the popup would only hold its button).
@@ -956,19 +956,19 @@ namespace Nox
                         ShowBonePicker(nodeId, key, at);
                         return;
                     }
-        Ref<UI::UIStackBox> box(new UI::UIStackBox(UI::UIOrientation::Vertical, 4.0f));
-        box->Padding = UI::UIThickness::All(10.0f);
+        Ref<NoxUI::UIStackBox> box(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 4.0f));
+        box->Padding = NoxUI::UIThickness::All(10.0f);
         box->FixedSize = { 340.0f, 0.0f };
         InspectorCardBuilder builder{ box, [this](bool) { MarkEdited(true); }, ctx };
         AddValueEditor(builder, nodeId, key, key, [this, nodeId, key, at]() { DeferPopup([this, nodeId, key, at]() { ShowValuePopup(nodeId, key, at); }); });
-        m_PopupOpen = UI::UIPopup::Show(*ctx, at, box);
+        m_PopupOpen = NoxUI::UIPopup::Show(*ctx, at, box);
         m_PopupContext = ctx;
         m_DetailsDirty = true; // (Details shows the same value: built again so both point at it)
     }
 
-    void NodeGraphEditorV2::ShowBonePicker(uint32_t nodeId, const std::string& key, const UI::UIRect& at)
+    void NodeGraphEditorV2::ShowBonePicker(uint32_t nodeId, const std::string& key, const NoxUI::UIRect& at)
     {
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         if (!ctx || !m_Asset)
             return;
         std::string current;
@@ -983,7 +983,7 @@ namespace Nox
             const std::string chosen = bone;
             const uint32_t id = nodeId;
             const std::string property = key;
-            UI::UIContext* context = ctx;
+            NoxUI::UIContext* context = ctx;
             NodeGraphEditorV2* self = this;
             context->ClearOverlay(); // (nothing of this lambda is used after: it goes with the popup)
             for (GraphNode& n : self->ShownGraph().Nodes)
@@ -993,8 +993,8 @@ namespace Nox
             self->m_DetailsDirty = true;
         };
 
-        Ref<UI::UIStackBox> box(new UI::UIStackBox(UI::UIOrientation::Vertical, 6.0f));
-        box->Padding = UI::UIThickness::All(10.0f);
+        Ref<NoxUI::UIStackBox> box(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 6.0f));
+        box->Padding = NoxUI::UIThickness::All(10.0f);
         box->FixedSize = { 300.0f, 0.0f };
         const Skeleton* skeleton = m_PreviewSkeleton != 0 ? AssetManager::FindLoadedAsset<Skeleton>(m_PreviewSkeleton) : nullptr;
         if (m_PreviewSkeleton != 0 && !skeleton)
@@ -1039,18 +1039,18 @@ namespace Nox
             for (const Node* root : skeleton->RootNodes)
                 walk(root, 0);
 
-            Ref<UI::UITextInput> search(new UI::UITextInput("", "Search bones..."));
-            search->WidthMode = UI::UISizeMode::Fill;
+            Ref<NoxUI::UITextInput> search(new NoxUI::UITextInput("", "Search bones..."));
+            search->WidthMode = NoxUI::UISizeMode::Fill;
             box->AddChild(search);
-            Ref<UI::UIScrollView> scroll(new UI::UIScrollView());
-            scroll->WidthMode = UI::UISizeMode::Fill;
-            scroll->HeightMode = UI::UISizeMode::Fixed;
+            Ref<NoxUI::UIScrollView> scroll(new NoxUI::UIScrollView());
+            scroll->WidthMode = NoxUI::UISizeMode::Fill;
+            scroll->HeightMode = NoxUI::UISizeMode::Fixed;
             scroll->FixedSize = { 0.0f, 260.0f };
             box->AddChild(scroll);
-            Ref<UI::UIStackBox> list(new UI::UIStackBox(UI::UIOrientation::Vertical, 1.0f));
-            list->WidthMode = UI::UISizeMode::Fill;
+            Ref<NoxUI::UIStackBox> list(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 1.0f));
+            list->WidthMode = NoxUI::UISizeMode::Fill;
             scroll->AddChild(list);
-            UI::UIStackBox* listRaw = list.get();
+            NoxUI::UIStackBox* listRaw = list.get();
             auto fill = [listRaw, bones, choose, current](const std::string& filterText)
             {
                 listRaw->ClearChildren();
@@ -1064,8 +1064,8 @@ namespace Nox
                         continue;
                     // Indented by depth while the whole tree shows; a flat list of matches while searching.
                     const std::string shown = (filter.empty() ? std::string(static_cast<size_t>(std::min(depth, 12)) * 2, ' ') : std::string()) + name;
-                    Ref<UI::UIButton> row(new UI::UIButton(shown, [choose, name]() { choose(name); }));
-                    row->WidthMode = UI::UISizeMode::Fill;
+                    Ref<NoxUI::UIButton> row(new NoxUI::UIButton(shown, [choose, name]() { choose(name); }));
+                    row->WidthMode = NoxUI::UISizeMode::Fill;
                     if (name == current)
                         row->StyleVariant = "primary";
                     listRaw->AddChild(row);
@@ -1075,11 +1075,11 @@ namespace Nox
             fill("");
         }
         // Or typed (Enter): a bone the preview skeleton does not have (another rig), or clearing it.
-        Ref<UI::UITextInput> typed(new UI::UITextInput(current, "Bone name, Enter to set"));
-        typed->WidthMode = UI::UISizeMode::Fill;
+        Ref<NoxUI::UITextInput> typed(new NoxUI::UITextInput(current, "Bone name, Enter to set"));
+        typed->WidthMode = NoxUI::UISizeMode::Fill;
         typed->OnSubmit = [choose](const std::string& text) { choose(text); };
         box->AddChild(typed);
-        m_PopupOpen = UI::UIPopup::Show(*ctx, at, box);
+        m_PopupOpen = NoxUI::UIPopup::Show(*ctx, at, box);
         m_PopupContext = ctx;
     }
 
@@ -1142,7 +1142,7 @@ namespace Nox
         m_CompileStatus->UseColorOverride = true;
         if (!program.Valid)
         {
-            m_CompileStatus->ColorOverride = UI::ThemeColor("StatusError", { 1.0f, 0.45f, 0.40f, 1.0f });
+            m_CompileStatus->ColorOverride = NoxUI::ThemeColor("StatusError", { 1.0f, 0.45f, 0.40f, 1.0f });
             m_CompileStatus->Text = "Does not compile: " + program.Error;
             return;
         }
@@ -1163,7 +1163,7 @@ namespace Nox
         if (wpoWithoutBounds)
             text += "\nWorld Position Offset: set Max World Position Offset Displacement on the Material Output (how far it moves the surface, "
                     "world units), or the surface may be culled while pushed out of its bounds.";
-        m_CompileStatus->ColorOverride = wpoWithoutBounds ? UI::ThemeColor("StatusWarning", { 1.0f, 0.80f, 0.30f, 1.0f }) : UI::ThemeColor("StatusGood", { 0.55f, 0.82f, 0.60f, 1.0f });
+        m_CompileStatus->ColorOverride = wpoWithoutBounds ? NoxUI::ThemeColor("StatusWarning", { 1.0f, 0.80f, 0.30f, 1.0f }) : NoxUI::ThemeColor("StatusGood", { 0.55f, 0.82f, 0.60f, 1.0f });
         m_CompileStatus->Text = text;
     }
 
@@ -1252,39 +1252,39 @@ namespace Nox
             return;
         // Up one level, then every level: a click goes back to it.
         // (every click here only changes the path: the next update shows it and builds this bar again, never mid-click)
-        Ref<UI::UIButton> up(new UI::UIButton("Up", [this]() { if (!m_Path.empty()) m_Path.pop_back(); }));
+        Ref<NoxUI::UIButton> up(new NoxUI::UIButton("Up", [this]() { if (!m_Path.empty()) m_Path.pop_back(); }));
         up->Tooltip = "Back to where this was opened from";
-        up->Padding = UI::UIThickness::Symmetric(8.0f, 2.0f);
+        up->Padding = NoxUI::UIThickness::Symmetric(8.0f, 2.0f);
         m_Breadcrumb->AddChild(up);
         for (size_t k = 0; k < m_PathLabels.size(); ++k)
         {
             if (k > 0)
             {
-                Ref<UI::UILabel> separator = MutedLabel(">", 13.0f);
+                Ref<NoxUI::UILabel> separator = MutedLabel(">", 13.0f);
                 separator->WordWrap = false;
-                separator->WidthMode = UI::UISizeMode::Auto;
-                separator->VAlign = UI::UIAlignment::Center;
+                separator->WidthMode = NoxUI::UISizeMode::Auto;
+                separator->VAlign = NoxUI::UIAlignment::Center;
                 m_Breadcrumb->AddChild(separator);
             }
             if (k + 1 == m_PathLabels.size())
             {
-                Ref<UI::UILabel> here(new UI::UILabel(m_PathLabels[k], 13.5f));
-                here->VAlign = UI::UIAlignment::Center;
+                Ref<NoxUI::UILabel> here(new NoxUI::UILabel(m_PathLabels[k], 13.5f));
+                here->VAlign = NoxUI::UIAlignment::Center;
                 m_Breadcrumb->AddChild(here);
                 continue;
             }
-            Ref<UI::UIButton> level(new UI::UIButton(m_PathLabels[k], [this, k]() { m_Path.resize(k); }));
-            level->Padding = UI::UIThickness::Symmetric(8.0f, 2.0f);
+            Ref<NoxUI::UIButton> level(new NoxUI::UIButton(m_PathLabels[k], [this, k]() { m_Path.resize(k); }));
+            level->Padding = NoxUI::UIThickness::Symmetric(8.0f, 2.0f);
             m_Breadcrumb->AddChild(level);
         }
     }
 
     void NodeGraphEditorV2::BuildMachineDetails(GraphNode& machine)
     {
-        Ref<UI::UIStackBox> body(new UI::UIStackBox(UI::UIOrientation::Vertical, 4.0f));
-        body->WidthMode = UI::UISizeMode::Fill;
+        Ref<NoxUI::UIStackBox> body(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 4.0f));
+        body->WidthMode = NoxUI::UISizeMode::Fill;
         m_Details->AddChild(body);
-        InspectorCardBuilder builder{ body, [this](bool) { MarkEdited(true); }, UI::UIContext::GetCurrent() };
+        InspectorCardBuilder builder{ body, [this](bool) { MarkEdited(true); }, NoxUI::UIContext::GetCurrent() };
         auto edited = [this]() { MarkEdited(true); };
         const auto stateName = [&machine](uint32_t id) -> std::string
         {
@@ -1299,7 +1299,7 @@ namespace Nox
         if (transitionIndex >= 0 && transitionIndex < static_cast<int>(machine.Transitions.size()))
         {
             NodeTransition& transition = machine.Transitions[static_cast<size_t>(transitionIndex)];
-            m_Details->AddChild(Ref<UI::UILabel>(new UI::UILabel("Transition: " + stateName(transition.FromState) + " -> " + stateName(transition.ToState), 14.5f)));
+            m_Details->AddChild(Ref<NoxUI::UILabel>(new NoxUI::UILabel("Transition: " + stateName(transition.FromState) + " -> " + stateName(transition.ToState), 14.5f)));
             builder.AddFloat("Blend Time (s)", &transition.Duration, 0.01f, 0.0f, 10.0f, "{:.2f}", edited, "How long the two states blend");
             builder.AddBool("Ease In/Out", &transition.EaseInOut, edited, "Smooth start and end of the blend (off: linear)");
             builder.AddBool("At End of State", &transition.AtStateEnd, edited,
@@ -1355,18 +1355,18 @@ namespace Nox
                     else if (auto* flag = std::get_if<bool>(&rule.Value))
                         builder.AddBool("  Value", flag, edited);
                 }
-                Ref<UI::UIButton> remove(new UI::UIButton("Remove Rule", [this, &machine, machineIndex, r]()
+                Ref<NoxUI::UIButton> remove(new NoxUI::UIButton("Remove Rule", [this, &machine, machineIndex, r]()
                 {
                     if (machineIndex < machine.Transitions.size() && r < machine.Transitions[machineIndex].Rules.size())
                         machine.Transitions[machineIndex].Rules.erase(machine.Transitions[machineIndex].Rules.begin() + static_cast<std::ptrdiff_t>(r));
                     MarkEdited(true);
                     m_DetailsDirty = true;
                 }));
-                remove->Padding = UI::UIThickness::Symmetric(8.0f, 2.0f);
+                remove->Padding = NoxUI::UIThickness::Symmetric(8.0f, 2.0f);
                 builder.AddRow("", remove);
             }
-            Ref<UI::UIStackBox> row(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
-            Ref<UI::UIButton> addRule(new UI::UIButton("+ Add Rule", [this, &machine, machineIndex]()
+            Ref<NoxUI::UIStackBox> row(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 6.0f));
+            Ref<NoxUI::UIButton> addRule(new NoxUI::UIButton("+ Add Rule", [this, &machine, machineIndex]()
             {
                 if (machineIndex < machine.Transitions.size())
                     machine.Transitions[machineIndex].Rules.push_back({ m_Asset->Graph.Parameters.empty() ? std::string() : m_Asset->Graph.Parameters.front().Name,
@@ -1375,7 +1375,7 @@ namespace Nox
                 m_DetailsDirty = true;
             }));
             row->AddChild(addRule);
-            Ref<UI::UIButton> remove(new UI::UIButton("Delete Transition", [this, &machine, machineIndex]()
+            Ref<NoxUI::UIButton> remove(new NoxUI::UIButton("Delete Transition", [this, &machine, machineIndex]()
             {
                 if (machineIndex < machine.Transitions.size())
                     machine.Transitions.erase(machine.Transitions.begin() + static_cast<std::ptrdiff_t>(machineIndex));
@@ -1396,19 +1396,19 @@ namespace Nox
                 state = &candidate;
         if (state)
         {
-            m_Details->AddChild(Ref<UI::UILabel>(new UI::UILabel("State", 14.5f)));
+            m_Details->AddChild(Ref<NoxUI::UILabel>(new NoxUI::UILabel("State", 14.5f)));
             builder.AddString("Name", &state->Name, "State", [this]() { MarkEdited(true); m_PathLabels.clear(); });
             const bool entry = StateMachineViewV2::EntryState(machine) == state->Id;
             if (entry)
                 builder.AddReadonly("Entry", "The machine starts in this state");
-            Ref<UI::UIStackBox> row(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
+            Ref<NoxUI::UIStackBox> row(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 6.0f));
             const uint32_t id = state->Id;
-            Ref<UI::UIButton> open(new UI::UIButton("Open State Graph", [this, id]() { m_Path.push_back(id); }));
+            Ref<NoxUI::UIButton> open(new NoxUI::UIButton("Open State Graph", [this, id]() { m_Path.push_back(id); }));
             open->Tooltip = "What this state plays (double-click the state too)";
             row->AddChild(open);
             if (!entry)
             {
-                Ref<UI::UIButton> setEntry(new UI::UIButton("Set as Entry State", [this, &machine, id]()
+                Ref<NoxUI::UIButton> setEntry(new NoxUI::UIButton("Set as Entry State", [this, &machine, id]()
                 {
                     StateMachineViewV2::SetEntryState(machine, id);
                     MarkEdited(true);
@@ -1417,7 +1417,7 @@ namespace Nox
                 row->AddChild(setEntry);
             }
             builder.AddRow("", row);
-            Ref<UI::UIButton> remove(new UI::UIButton("Delete State", [this, &machine, id]()
+            Ref<NoxUI::UIButton> remove(new NoxUI::UIButton("Delete State", [this, &machine, id]()
             {
                 StateMachineViewV2::DeleteState(machine, id);
                 m_StateView->Select(0, -1);
@@ -1436,9 +1436,9 @@ namespace Nox
 
     // ------------------------------------------------------------------------------------------------------------------------------
 
-    void NodeGraphEditorV2::ShowPreviewMeshMenu(const UI::UIRect& anchor)
+    void NodeGraphEditorV2::ShowPreviewMeshMenu(const NoxUI::UIRect& anchor)
     {
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         auto assets = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr;
         if (!ctx || !assets)
             return;
@@ -1448,7 +1448,7 @@ namespace Nox
             if (metadata.Type == AssetType::Mesh && assets->FindSkeletonOf(handle) != 0)
                 meshes.emplace_back(metadata.FilePath.generic_string(), handle);
         std::sort(meshes.begin(), meshes.end());
-        std::vector<UI::UIMenuItem> items;
+        std::vector<NoxUI::UIMenuItem> items;
         for (const auto& [path, handle] : meshes)
             items.push_back({ path, "", [this, handle]()
             {
@@ -1458,7 +1458,7 @@ namespace Nox
             }, false, true, handle == m_PreviewMesh });
         if (items.empty())
             items.push_back({ "No skeletal mesh in the project (import a skinned model)", "", {}, false, false, false, true });
-        UI::UIMenuPopup::ShowPopupMenu(*ctx, anchor, std::move(items));
+        NoxUI::UIMenuPopup::ShowPopupMenu(*ctx, anchor, std::move(items));
     }
 
     void NodeGraphEditorV2::RebuildPreview()
@@ -1468,23 +1468,23 @@ namespace Nox
         if (!m_PreviewBox || !m_Asset)
             return;
         m_PreviewBox->ClearChildren();
-        m_PreviewBox->AddChild(Ref<UI::UILabel>(new UI::UILabel("Preview", 15.0f)));
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        m_PreviewBox->AddChild(Ref<NoxUI::UILabel>(new NoxUI::UILabel("Preview", 15.0f)));
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         const auto smallButton = [](const std::string& text, std::function<void()> onClick, const std::string& tooltip)
         {
-            Ref<UI::UIButton> b(new UI::UIButton(text, std::move(onClick)));
-            b->Padding = UI::UIThickness::Symmetric(10.0f, 2.0f);
+            Ref<NoxUI::UIButton> b(new NoxUI::UIButton(text, std::move(onClick)));
+            b->Padding = NoxUI::UIThickness::Symmetric(10.0f, 2.0f);
             b->Tooltip = tooltip;
             return b;
         };
         const bool audio = m_Asset->Graph.Domain == kAudioGraphDomain;
-        Ref<UI::UIStackBox> controls(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
-        controls->WidthMode = UI::UISizeMode::Fill;
+        Ref<NoxUI::UIStackBox> controls(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 6.0f));
+        controls->WidthMode = NoxUI::UISizeMode::Fill;
         m_PreviewBox->AddChild(controls);
         if (audio)
         {
-            Ref<UI::UIButton> play = smallButton("Play", {}, "Plays the graph as it is now; an edit is heard at once (a value change goes into the playing sound)");
-            UI::UIButton* playRaw = play.get();
+            Ref<NoxUI::UIButton> play = smallButton("Play", {}, "Plays the graph as it is now; an edit is heard at once (a value change goes into the playing sound)");
+            NoxUI::UIButton* playRaw = play.get();
             play->OnClick = [this]()
             {
                 if (m_AudioWanted)
@@ -1492,7 +1492,7 @@ namespace Nox
                 else
                     m_AudioWanted = true;
             };
-            UI::AppendSync(*playRaw, [this, playRaw]()
+            NoxUI::AppendSync(*playRaw, [this, playRaw]()
             {
                 const char* text = m_AudioWanted ? "Stop" : "Play";
                 if (playRaw->GetText() != text)
@@ -1500,40 +1500,40 @@ namespace Nox
                 playRaw->StyleVariant = m_AudioWanted ? "primary" : "";
             });
             controls->AddChild(play);
-            Ref<UI::UILabel> status = MutedLabel("", 12.5f);
-            status->VAlign = UI::UIAlignment::Center;
-            UI::UILabel* statusRaw = status.get();
-            UI::AppendSync(*statusRaw, [this, statusRaw]()
+            Ref<NoxUI::UILabel> status = MutedLabel("", 12.5f);
+            status->VAlign = NoxUI::UIAlignment::Center;
+            NoxUI::UILabel* statusRaw = status.get();
+            NoxUI::AppendSync(*statusRaw, [this, statusRaw]()
             {
                 statusRaw->Text = !m_AudioError.empty() ? "Cannot play: " + m_AudioError : !m_AudioProgram ? std::string("Loading...") : std::string();
             });
             controls->AddChild(status);
             // The voice's output level, left and right: bars over -60 .. 0 dB, red at 0 dB and above, the dB written on them.
-            Ref<UI::UILevelMeter> meter(new UI::UILevelMeter(UI::UIOrientation::Horizontal));
+            Ref<NoxUI::UILevelMeter> meter(new NoxUI::UILevelMeter(NoxUI::UIOrientation::Horizontal));
             meter->MinDb = -60.0f;
             meter->MaxDb = 0.0f;
             meter->LoudDb = meter->ClipDb = 0.0f;
-            meter->HitTestMode = UI::UIHitTestMode::None;
+            meter->HitTestMode = NoxUI::UIHitTestMode::None;
             meter->AutoTooltip = false;
-            meter->HeightMode = UI::UISizeMode::Fixed;
+            meter->HeightMode = NoxUI::UISizeMode::Fixed;
             meter->FixedSize = { 0.0f, 32.0f };
             meter->Source = [this]()
             {
                 const glm::vec2 peak = m_AudioVoice != 0 ? AudioEngine::GetVoicePeak(m_AudioVoice) : glm::vec2(0.0f);
-                return UI::UILevelMeter::Values{ 0.0f, 0.0f, peak.x, peak.y };
+                return NoxUI::UILevelMeter::Values{ 0.0f, 0.0f, peak.x, peak.y };
             };
             m_PreviewBox->AddChild(meter);
         }
         else
         {
             const std::string meshName = m_PreviewMesh != 0 ? AssetDisplayName(m_PreviewMesh) : std::string("(pick a skeletal mesh)");
-            Ref<UI::UIButton> mesh = smallButton(meshName, {}, "The skeletal mesh the graph plays on (its skeleton lists the bones in bone pickers too)");
-            UI::UIButton* meshRaw = mesh.get();
+            Ref<NoxUI::UIButton> mesh = smallButton(meshName, {}, "The skeletal mesh the graph plays on (its skeleton lists the bones in bone pickers too)");
+            NoxUI::UIButton* meshRaw = mesh.get();
             mesh->OnClick = [this, meshRaw]() { ShowPreviewMeshMenu(meshRaw->GetBounds()); };
             controls->AddChild(mesh);
-            Ref<UI::UIButton> play = smallButton("Pause", [this]() { m_AnimPlaying = !m_AnimPlaying; }, "Plays / holds the playheads");
-            UI::UIButton* playRaw = play.get();
-            UI::AppendSync(*playRaw, [this, playRaw]()
+            Ref<NoxUI::UIButton> play = smallButton("Pause", [this]() { m_AnimPlaying = !m_AnimPlaying; }, "Plays / holds the playheads");
+            NoxUI::UIButton* playRaw = play.get();
+            NoxUI::AppendSync(*playRaw, [this, playRaw]()
             {
                 const char* text = m_AnimPlaying ? "Pause" : "Play";
                 if (playRaw->GetText() != text)
@@ -1546,20 +1546,20 @@ namespace Nox
                 m_PreviewBox->AddChild(MutedLabel("Pick a skeletal mesh to see the graph play (found from the graph's clips when it plays one)."));
                 return;
             }
-            Ref<UI::UIImage> image(new UI::UIImage(~0u, { 280.0f, 280.0f }));
-            image->WidthMode = UI::UISizeMode::Fixed;
-            image->HeightMode = UI::UISizeMode::Fixed;
+            Ref<NoxUI::UIImage> image(new NoxUI::UIImage(~0u, { 280.0f, 280.0f }));
+            image->WidthMode = NoxUI::UISizeMode::Fixed;
+            image->HeightMode = NoxUI::UISizeMode::Fixed;
             image->FixedSize = { 280.0f, 280.0f };
-            image->HAlign = UI::UIAlignment::Center;
+            image->HAlign = NoxUI::UIAlignment::Center;
             image->Tooltip = "The graph's pose on the preview mesh, every frame";
             m_PreviewImage = image;
             m_PreviewBox->AddChild(image);
-            Ref<UI::UILabel> notify = MutedLabel("", 12.5f);
-            UI::UILabel* notifyRaw = notify.get();
-            UI::AppendSync(*notifyRaw, [this, notifyRaw]()
+            Ref<NoxUI::UILabel> notify = MutedLabel("", 12.5f);
+            NoxUI::UILabel* notifyRaw = notify.get();
+            NoxUI::AppendSync(*notifyRaw, [this, notifyRaw]()
             {
                 notifyRaw->Text = m_PreviewNotifyAge < 1.5f ? "Notify: " + m_PreviewNotify : std::string();
-                notifyRaw->ColorOverride = UI::ThemeColor("StatusWarning", { 1.0f, 0.75f, 0.25f, 1.0f });
+                notifyRaw->ColorOverride = NoxUI::ThemeColor("StatusWarning", { 1.0f, 0.75f, 0.25f, 1.0f });
             });
             m_PreviewBox->AddChild(notify);
         }
@@ -1568,8 +1568,8 @@ namespace Nox
         const std::vector<GraphParameter>& parameters = m_Asset->Graph.Parameters;
         if (parameters.empty())
             return;
-        Ref<UI::UIStackBox> rowsBox(new UI::UIStackBox(UI::UIOrientation::Vertical, 3.0f));
-        rowsBox->WidthMode = UI::UISizeMode::Fill;
+        Ref<NoxUI::UIStackBox> rowsBox(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 3.0f));
+        rowsBox->WidthMode = NoxUI::UISizeMode::Fill;
         m_PreviewBox->AddChild(rowsBox);
         InspectorCardBuilder rows{ rowsBox, {}, ctx };
         for (const GraphParameter& parameter : parameters)
@@ -1628,27 +1628,27 @@ namespace Nox
             };
             if (std::holds_alternative<bool>(parameter.DefaultValue))
             {
-                Ref<UI::UICheckBox> box(new UI::UICheckBox("", false, [apply](bool on) { apply(on); }));
-                UI::UICheckBox* boxRaw = box.get();
-                UI::AppendSync(*boxRaw, [boxRaw, current]() { const NodeGraphValue v = current(); boxRaw->Checked = std::holds_alternative<bool>(v) && std::get<bool>(v); });
+                Ref<NoxUI::UICheckBox> box(new NoxUI::UICheckBox("", false, [apply](bool on) { apply(on); }));
+                NoxUI::UICheckBox* boxRaw = box.get();
+                NoxUI::AppendSync(*boxRaw, [boxRaw, current]() { const NodeGraphValue v = current(); boxRaw->Checked = std::holds_alternative<bool>(v) && std::get<bool>(v); });
                 rows.AddRow(name, box);
             }
             else
             {
                 const bool isInt = std::holds_alternative<int32_t>(parameter.DefaultValue);
-                Ref<UI::UIDragScalar> drag(new UI::UIDragScalar(0.0f, isInt ? 0.1f : 0.01f, [apply, isInt](float v)
+                Ref<NoxUI::UIDragScalar> drag(new NoxUI::UIDragScalar(0.0f, isInt ? 0.1f : 0.01f, [apply, isInt](float v)
                 {
                     apply(isInt ? NodeGraphValue(static_cast<int32_t>(std::round(v))) : NodeGraphValue(v));
                 }));
                 drag->Format = isInt ? "{:.0f}" : "{:.3f}";
-                UI::UIDragScalar* dragRaw = drag.get();
-                UI::AppendSync(*dragRaw, [dragRaw, current]() { if (!dragRaw->IsInteracting()) dragRaw->Value = NodeGraphValueToFloat(current()); });
+                NoxUI::UIDragScalar* dragRaw = drag.get();
+                NoxUI::AppendSync(*dragRaw, [dragRaw, current]() { if (!dragRaw->IsInteracting()) dragRaw->Value = NodeGraphValueToFloat(current()); });
                 rows.AddRow(name, drag);
             }
             if (audio)
             {
                 // Changed here: Reset goes back to following the graph's default.
-                Ref<UI::UIButton> reset = smallButton("Reset", [this, name]()
+                Ref<NoxUI::UIButton> reset = smallButton("Reset", [this, name]()
                 {
                     m_AudioValues.erase(name);
                     if (m_AudioProgram && m_AudioVoice != 0)
@@ -1659,8 +1659,8 @@ namespace Nox
                                 AudioEngine::SetGraphParameter(m_AudioVoice, index, NodeGraphValueToFloat(p.DefaultValue));
                     }
                 }, "Changed here for the preview only: back to the default set in Parameters");
-                UI::UIButton* resetRaw = reset.get();
-                UI::AppendSync(*resetRaw, [this, resetRaw, name]() { resetRaw->Visible = m_AudioValues.contains(name); });
+                NoxUI::UIButton* resetRaw = reset.get();
+                NoxUI::AppendSync(*resetRaw, [this, resetRaw, name]() { resetRaw->Visible = m_AudioValues.contains(name); });
                 rows.AddRow("", reset);
             }
         }
@@ -1672,7 +1672,7 @@ namespace Nox
         const float dt = m_PreviewTick.time_since_epoch().count() == 0 ? 0.0f : std::min(std::chrono::duration<float>(now - m_PreviewTick).count(), 0.1f);
         m_PreviewTick = now;
         m_PreviewNotifyAge += dt;
-        auto* image = static_cast<UI::UIImage*>(m_PreviewImage.get());
+        auto* image = static_cast<NoxUI::UIImage*>(m_PreviewImage.get());
         if (!image || m_PreviewMesh == 0)
             return;
         if (!m_AnimPreview)
@@ -1694,7 +1694,7 @@ namespace Nox
             m_PreviewNotifyAge = 0.0f;
         }
         Texture2D* texture = AssetPreviewRenderer::Get().GetPosePreview(m_PreviewMesh, m_PreviewBones, { m_Handle, m_PreviewSkeleton }, 280);
-        image->TextureDescriptorSlot = texture ? texture->GetDescriptorIndexSlot() : ~0u;
+        image->TextureId = texture ? texture->GetDescriptorIndexSlot() : ~0u;
     }
 
     void NodeGraphEditorV2::StopAudioPreview()
@@ -1742,8 +1742,8 @@ namespace Nox
             AudioPlayDesc desc;
             desc.Graph = program;
             desc.GraphParameters = m_AudioValues;
-            desc.Bus = kAudioBusMaster;
-            desc.Group = AudioVoiceGroup::Editor;
+            desc.Bus = NoxAudio::kAudioBusMaster;
+            desc.Group = NoxAudio::AudioVoiceGroup::Editor;
             desc.FadeIn = m_AudioVoice != 0 ? 0.02f : 0.0f;
             m_AudioVoice = AudioEngine::Play(desc);
             m_AudioProgram = program;

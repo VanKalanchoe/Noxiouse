@@ -14,13 +14,11 @@
 #include "NoxCore/Asset/AssetMetadata.h"
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Core/UUID.h"
-#include "NoxCore/UI/Core/UITypes.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
+#include <NoxUI/Core/UITypes.h>
+#include <NoxUI/Widgets/UIMenu.h>
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIBreadcrumb;
         class UIButton;
         class UIDrawList;
@@ -32,6 +30,9 @@ namespace Nox
         class UITreeView;
     }
 
+namespace Nox
+{
+
     class ContentTileView;
     class ContentPathBar;
 
@@ -40,12 +41,12 @@ namespace Nox
     struct AssetTypeVisual
     {
         const char* Label = "File";
-        UI::UIColor Color{ 0.62f, 0.66f, 0.74f, 1.0f };
+        NoxUI::UIColor Color{ 0.62f, 0.66f, 0.74f, 1.0f };
     };
     AssetTypeVisual GetAssetTypeVisual(AssetType type);
     // The type's icon centred at `center`, `size` pixels across.
-    void DrawAssetTypeIcon(UI::UIDrawList& drawList, AssetType type, const UI::UIVec2& center, float size, const UI::UIColor& color);
-    void DrawFolderIcon(UI::UIDrawList& drawList, const UI::UIVec2& center, float size, const UI::UIColor& color);
+    void DrawAssetTypeIcon(NoxUI::UIDrawList& drawList, AssetType type, const NoxUI::UIVec2& center, float size, const NoxUI::UIColor& color);
+    void DrawFolderIcon(NoxUI::UIDrawList& drawList, const NoxUI::UIVec2& center, float size, const NoxUI::UIColor& color);
 
     // One file or folder the browser shows.
     struct ContentEntry
@@ -74,7 +75,7 @@ namespace Nox
         ContentBrowserV2Panel();
         ~ContentBrowserV2Panel();
 
-        Ref<UI::UIElement> BuildUI();
+        Ref<NoxUI::UIElement> BuildUI();
         // Once a frame: a folder or files changed outside the editor show up, a model import finishes, thumbnails come in.
         void Update(float dt);
         // Everything read again (the project changed, files were added by a tool).
@@ -101,9 +102,9 @@ namespace Nox
         // The assets the open scenes use (unsaved changes included): Delete warns about them too.
         void SetSceneReferencesCallback(std::function<void(std::unordered_set<AssetHandle>&)> callback) { m_SceneReferences = std::move(callback); }
         // Saved, imported, failed: shown as a toast by the editor.
-        void SetNotifyCallback(std::function<void(UI::UINotification)> callback) { m_Notify = std::move(callback); }
+        void SetNotifyCallback(std::function<void(NoxUI::UINotification)> callback) { m_Notify = std::move(callback); }
         // An element put at the right end of the toolbar (the editor's "Dock in Layout" while the browser is in the drawer).
-        void SetToolbarExtra(Ref<UI::UIElement> element) { m_ToolbarExtra = std::move(element); }
+        void SetToolbarExtra(Ref<NoxUI::UIElement> element) { m_ToolbarExtra = std::move(element); }
         // What the browser is busy with in the background (the status bar shows it), empty when nothing.
         std::string GetBusyText() const;
 
@@ -118,7 +119,7 @@ namespace Nox
         void RebuildEntries();
         void RebuildFolderTree();
         void SyncChrome();         // breadcrumb, back / forward, footer
-        void Notify(UI::UINotificationSeverity severity, std::string title, std::string message = {});
+        void Notify(NoxUI::UINotificationSeverity severity, std::string title, std::string message = {});
 
         // Actions (the tiles' menus and keys call these).
         void Activate(const ContentEntry& entry);
@@ -131,10 +132,10 @@ namespace Nox
         enum class ReferenceCheckMode : uint8_t { Delete, Show, Replace };
         void StartReferenceCheck(ReferenceCheckMode mode, std::vector<AssetHandle> handles);
         void FinishReferenceCheck();
-        void ShowDeleteDialog(UI::UIContext& context, const std::vector<AssetHandle>& handles,
+        void ShowDeleteDialog(NoxUI::UIContext& context, const std::vector<AssetHandle>& handles,
                               const std::vector<std::vector<std::filesystem::path>>& users, const std::unordered_set<AssetHandle>& inScene);
         // Replace References: the asset to use instead (same type, searchable), what will be rewritten and what cannot be.
-        void ShowReplaceDialog(UI::UIContext& context, AssetHandle from, const std::vector<std::filesystem::path>& users, bool sceneUses);
+        void ShowReplaceDialog(NoxUI::UIContext& context, AssetHandle from, const std::vector<std::filesystem::path>& users, bool sceneUses);
         void CreateVariant(AssetHandle base);
         void MoveAssets(const std::vector<AssetHandle>& handles, const std::filesystem::path& absoluteFolder);
         void CreatePrefabFromDrop(uint64_t dragId, const std::filesystem::path& absoluteFolder);
@@ -149,9 +150,9 @@ namespace Nox
         void PickAndImport();
         // A new file of the open folder: registered, listed, selected and put into rename mode.
         void AdoptNewFile(const std::filesystem::path& absolutePath);
-        std::vector<UI::UIMenuItem> BuildAssetMenu(const ContentEntry& entry);
-        std::vector<UI::UIMenuItem> BuildFolderSpaceMenu();
-        std::vector<UI::UIMenuItem> BuildAddMenu();
+        std::vector<NoxUI::UIMenuItem> BuildAssetMenu(const ContentEntry& entry);
+        std::vector<NoxUI::UIMenuItem> BuildFolderSpaceMenu();
+        std::vector<NoxUI::UIMenuItem> BuildAddMenu();
         bool PassesFilter(AssetType type, bool isScript) const;
 
         std::filesystem::path m_BaseDirectory;    // the project's Assets folder
@@ -175,23 +176,23 @@ namespace Nox
         int m_ListedFilter = -1;
         size_t m_TreeSignature = 0; // the folder tree is rebuilt only when its folders changed
 
-        Ref<UI::UIElement> m_Root;
-        Ref<UI::UITreeView> m_FolderTree;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UITreeView> m_FolderTree;
         Ref<ContentTileView> m_Tiles;
         Ref<ContentPathBar> m_PathBar;
-        Ref<UI::UIElement> m_ToolbarExtra;
-        Ref<UI::UISearchBar> m_SearchBar;
-        Ref<UI::UIDropdown> m_FilterDropdown;
-        Ref<UI::UIButton> m_BackButton;
-        Ref<UI::UIButton> m_ForwardButton;
-        Ref<UI::UILabel> m_Footer;
+        Ref<NoxUI::UIElement> m_ToolbarExtra;
+        Ref<NoxUI::UISearchBar> m_SearchBar;
+        Ref<NoxUI::UIDropdown> m_FilterDropdown;
+        Ref<NoxUI::UIButton> m_BackButton;
+        Ref<NoxUI::UIButton> m_ForwardButton;
+        Ref<NoxUI::UILabel> m_Footer;
 
         std::function<void(AssetHandle)> m_OpenAsset;
         std::function<AssetHandle(uint64_t, const std::filesystem::path&)> m_CreatePrefab;
         std::function<void(std::unordered_set<AssetHandle>&)> m_SceneReferences;
         std::function<AssetHandle(AssetHandle, const std::filesystem::path&)> m_CreateVariant;
         std::function<void(AssetHandle, AssetHandle)> m_ReplaceReferences;
-        std::function<void(UI::UINotification)> m_Notify;
+        std::function<void(NoxUI::UINotification)> m_Notify;
         AssetHandle m_PendingShow = 0;
 
         struct ReferenceCheck
@@ -200,7 +201,7 @@ namespace Nox
             std::vector<AssetHandle> Handles;
             std::unordered_set<AssetHandle> InScene;          // what the open scenes use (taken on the main thread)
             std::future<std::vector<std::vector<std::filesystem::path>>> Users; // per handle
-            UI::UIContext* Context = nullptr;                 // the window it was asked in (the dialog opens there)
+            NoxUI::UIContext* Context = nullptr;                 // the window it was asked in (the dialog opens there)
             std::string Name;                                 // the first asset's file name
         };
         std::unique_ptr<ReferenceCheck> m_ReferenceCheck;

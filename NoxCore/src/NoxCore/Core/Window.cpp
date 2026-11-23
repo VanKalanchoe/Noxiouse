@@ -151,4 +151,28 @@ namespace Nox
     {
         return m_window ? SDL_GetWindowDisplayScale(m_window) : 1.0f;
     }
+
+    NriNativeWindowHandle Window::GetNativeWindowHandle() const
+    {
+        return MakeNriWindow(m_window);
+    }
+
+    NriNativeWindowHandle Window::MakeNriWindow(SDL_Window* window)
+    {
+        NriNativeWindowHandle handle{};
+        if (!window)
+        {
+            handle.type = NRI_WINDOW_SYSTEM_HEADLESS;
+            return handle;
+        }
+        const SDL_PropertiesID props = SDL_GetWindowProperties(window);
+#ifdef _WIN32
+        handle.type = NRI_WINDOW_SYSTEM_WIN32;
+        handle.hwnd = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+        handle.hinstance = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, nullptr);
+#else
+        handle.type = NRI_WINDOW_SYSTEM_HEADLESS;
+#endif
+        return handle;
+    }
 }

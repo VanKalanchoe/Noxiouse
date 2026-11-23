@@ -2,7 +2,7 @@
 
 #include "EditorSelection.h"
 #include "Panels/RendererSettingsV2Panel.h"
-#include "NoxCore/UI/Widgets/UIPropertyRows.h"
+#include <NoxUI/Widgets/UIPropertyRows.h>
 #include "InspectorWidgetsV2.h"
 #include "Panels/AssetPreviewRenderer.h"
 
@@ -33,21 +33,21 @@
 #include "NoxCore/Scene/Prefab.h"
 #include "NoxCore/Scene/PrefabInstance.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
-#include "NoxCore/UI/Core/UIContext.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UICheckBox.h"
-#include "NoxCore/UI/Widgets/UIColorPicker.h"
-#include "NoxCore/UI/Widgets/UIDragScalar.h"
-#include "NoxCore/UI/Widgets/UIDropdown.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
-#include "NoxCore/UI/Widgets/UISearchBar.h"
-#include "NoxCore/UI/Widgets/UISeparator.h"
-#include "NoxCore/UI/Widgets/UISlider.h"
-#include "NoxCore/UI/Widgets/UITextInput.h"
-#include "NoxCore/UI/Widgets/UIVectorEdit.h"
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Core/UIContext.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UICheckBox.h>
+#include <NoxUI/Widgets/UIColorPicker.h>
+#include <NoxUI/Widgets/UIDragScalar.h>
+#include <NoxUI/Widgets/UIDropdown.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIMenu.h>
+#include <NoxUI/Widgets/UIScrollView.h>
+#include <NoxUI/Widgets/UISearchBar.h>
+#include <NoxUI/Widgets/UISeparator.h>
+#include <NoxUI/Widgets/UISlider.h>
+#include <NoxUI/Widgets/UITextInput.h>
+#include <NoxUI/Widgets/UIVectorEdit.h>
 
 namespace Nox
 {
@@ -151,7 +151,7 @@ namespace Nox
     InspectorV2Panel::InspectorV2Panel() = default;
     InspectorV2Panel::~InspectorV2Panel() = default;
 
-    const Ref<UI::UIElement>& InspectorV2Panel::BuildUI()
+    const Ref<NoxUI::UIElement>& InspectorV2Panel::BuildUI()
     {
         m_ActiveSwitch = Ref<EntityActiveSwitch>(new EntityActiveSwitch(true, [this](bool active)
         {
@@ -169,12 +169,12 @@ namespace Nox
             NotifyMutated(true);
         }));
         m_ActiveSwitch->Tooltip = "Entity Active state (Inactive disables rendering, physics, animation, and scripts).";
-        m_ActiveSwitch->VAlign = UI::UIAlignment::Center;
+        m_ActiveSwitch->VAlign = NoxUI::UIAlignment::Center;
 
-        m_NameInput = UI::MakeUI<UI::UITextInput>("", "Entity Name");
-        m_NameInput->WidthMode = UI::UISizeMode::Fill;
+        m_NameInput = NoxUI::MakeUI<NoxUI::UITextInput>("", "Entity Name");
+        m_NameInput->WidthMode = NoxUI::UISizeMode::Fill;
         m_NameInput->FlexWeight = 1.0f;
-        m_NameInput->VAlign = UI::UIAlignment::Center;
+        m_NameInput->VAlign = NoxUI::UIAlignment::Center;
         m_NameInput->OnChanged = [this](const std::string& name)
         {
             if (!m_Primary || !m_Context || m_Context->IsEntityLocked(m_Primary) || !m_Primary.HasComponent<TagComponent>())
@@ -185,67 +185,67 @@ namespace Nox
             NotifyMutated(false);
         };
 
-        auto addCompBtn = UI::Button("+ Add").Tooltip("Add a component to this entity");
+        auto addCompBtn = NoxUI::Button("+ Add").Tooltip("Add a component to this entity");
         addCompBtn->StyleVariant = "primary";
-        addCompBtn->Padding = UI::UIThickness::Symmetric(10.0f, 5.0f);
-        addCompBtn->WidthMode = UI::UISizeMode::Auto;
-        addCompBtn->HeightMode = UI::UISizeMode::Auto;
-        addCompBtn->VAlign = UI::UIAlignment::Center;
-        UI::UIButton* addCompPtr = addCompBtn.Get().get();
+        addCompBtn->Padding = NoxUI::UIThickness::Symmetric(10.0f, 5.0f);
+        addCompBtn->WidthMode = NoxUI::UISizeMode::Auto;
+        addCompBtn->HeightMode = NoxUI::UISizeMode::Auto;
+        addCompBtn->VAlign = NoxUI::UIAlignment::Center;
+        NoxUI::UIButton* addCompPtr = addCompBtn.Get().get();
         addCompBtn->OnClick = [this, addCompPtr]()
         {
             ShowAddComponentMenu(addCompPtr->GetBounds());
         };
 
-        auto nameRow = UI::HStack(8.0f, { m_ActiveSwitch, m_NameInput, addCompBtn }).FillWidth();
-        nameRow->HeightMode = UI::UISizeMode::Auto;
-        nameRow->VAlign = UI::UIAlignment::Center;
+        auto nameRow = NoxUI::HStack(8.0f, { m_ActiveSwitch, m_NameInput, addCompBtn }).FillWidth();
+        nameRow->HeightMode = NoxUI::UISizeMode::Auto;
+        nameRow->VAlign = NoxUI::UIAlignment::Center;
 
-        m_SubheaderLabel = UI::Label("");
+        m_SubheaderLabel = NoxUI::Label("");
         m_SubheaderLabel->FontSizeOverride = 13.5f;
         m_SubheaderLabel->UseColorOverride = true;
-        m_SubheaderLabel->ColorOverride = UI::ThemeColor("TextMuted", { 0.58f, 0.64f, 0.74f, 1.0f });
+        m_SubheaderLabel->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.58f, 0.64f, 0.74f, 1.0f });
 
-        m_SelectionBadge = UI::Label("");
+        m_SelectionBadge = NoxUI::Label("");
         m_SelectionBadge->FontSizeOverride = 13.5f;
         m_SelectionBadge->UseColorOverride = true;
-        m_SelectionBadge->ColorOverride = UI::ThemeColor("InspectorSelectionBadge", { 0.45f, 0.72f, 0.98f, 1.0f });
+        m_SelectionBadge->ColorOverride = NoxUI::ThemeColor("InspectorSelectionBadge", { 0.45f, 0.72f, 0.98f, 1.0f });
         m_SelectionBadge->Visible = false;
 
-        m_FilterBar = UI::MakeUI<UI::UISearchBar>("Filter components & properties...");
-        m_FilterBar->WidthMode = UI::UISizeMode::Fill;
+        m_FilterBar = NoxUI::MakeUI<NoxUI::UISearchBar>("Filter components & properties...");
+        m_FilterBar->WidthMode = NoxUI::UISizeMode::Fill;
         m_FilterBar->OnSearchChanged = [this](const std::string& q)
         {
             m_Filter = q;
             m_Dirty = true;
         };
 
-        m_HeaderBox = UI::VStack(5.0f, { nameRow, m_SubheaderLabel, m_SelectionBadge, m_FilterBar }).FillWidth();
-        m_HeaderBox->HeightMode = UI::UISizeMode::Auto;
+        m_HeaderBox = NoxUI::VStack(5.0f, { nameRow, m_SubheaderLabel, m_SelectionBadge, m_FilterBar }).FillWidth();
+        m_HeaderBox->HeightMode = NoxUI::UISizeMode::Auto;
         m_HeaderBox->Visible = false;
 
-        m_ScrollView = UI::MakeUI<UI::UIScrollView>();
-        m_ScrollView->WidthMode = UI::UISizeMode::Fill;
-        m_ScrollView->HeightMode = UI::UISizeMode::Fill;
+        m_ScrollView = NoxUI::MakeUI<NoxUI::UIScrollView>();
+        m_ScrollView->WidthMode = NoxUI::UISizeMode::Fill;
+        m_ScrollView->HeightMode = NoxUI::UISizeMode::Fill;
         m_ScrollView->ChildSpacing = 8.0f;
 
-        auto emptyTitle = UI::Label("No Entity Selected");
+        auto emptyTitle = NoxUI::Label("No Entity Selected");
         emptyTitle->FontSizeOverride = 17.0f;
-        emptyTitle->HAlign = UI::UIAlignment::Center;
+        emptyTitle->HAlign = NoxUI::UIAlignment::Center;
         emptyTitle->UseColorOverride = true;
-        emptyTitle->ColorOverride = UI::ThemeColor("InspectorEmptyTitle", { 0.78f, 0.82f, 0.90f, 1.0f });
+        emptyTitle->ColorOverride = NoxUI::ThemeColor("InspectorEmptyTitle", { 0.78f, 0.82f, 0.90f, 1.0f });
 
-        auto emptyHint = UI::Label("Select an entity in Scene Hierarchy or the Viewport.");
+        auto emptyHint = NoxUI::Label("Select an entity in Scene Hierarchy or the Viewport.");
         emptyHint->FontSizeOverride = 14.0f;
-        emptyHint->HAlign = UI::UIAlignment::Center;
+        emptyHint->HAlign = NoxUI::UIAlignment::Center;
         emptyHint->UseColorOverride = true;
-        emptyHint->ColorOverride = UI::ThemeColor("TextMuted", { 0.54f, 0.59f, 0.68f, 1.0f });
+        emptyHint->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.54f, 0.59f, 0.68f, 1.0f });
 
-        m_EmptyState = UI::VStack(4.0f, { emptyTitle, emptyHint }).Fill();
-        m_EmptyState->VAlign = UI::UIAlignment::Center;
-        m_EmptyState->HAlign = UI::UIAlignment::Center;
+        m_EmptyState = NoxUI::VStack(4.0f, { emptyTitle, emptyHint }).Fill();
+        m_EmptyState->VAlign = NoxUI::UIAlignment::Center;
+        m_EmptyState->HAlign = NoxUI::UIAlignment::Center;
 
-        m_Root = UI::VStack(8.0f, { m_HeaderBox, m_ScrollView, m_EmptyState })
+        m_Root = NoxUI::VStack(8.0f, { m_HeaderBox, m_ScrollView, m_EmptyState })
             .Padding(8.0f)
             .Fill();
 
@@ -420,10 +420,10 @@ namespace Nox
         if (!m_Primary)
             return;
 
-        if (m_ActiveSwitch && !UI::HasState(m_ActiveSwitch->GetState(), UI::UIState::Pressed))
+        if (m_ActiveSwitch && !NoxUI::HasState(m_ActiveSwitch->GetState(), NoxUI::UIState::Pressed))
             m_ActiveSwitch->Checked = !m_Primary.HasComponent<InactiveComponent>();
 
-        if (m_NameInput && !UI::HasState(m_NameInput->GetState(), UI::UIState::Focused) && m_Primary.HasComponent<TagComponent>())
+        if (m_NameInput && !NoxUI::HasState(m_NameInput->GetState(), NoxUI::UIState::Focused) && m_Primary.HasComponent<TagComponent>())
         {
             const std::string& tag = m_Primary.GetComponent<TagComponent>().Tag;
             if (m_NameInput->Text != tag)
@@ -476,8 +476,8 @@ namespace Nox
                 subText += "   •   Inactive";
             m_SubheaderLabel->Text = subText;
             m_SubheaderLabel->ColorOverride = inactive
-                ? UI::ThemeColor("InspectorInactive", { 0.86f, 0.56f, 0.42f, 1.0f })
-                : UI::ThemeColor("TextMuted", { 0.58f, 0.64f, 0.74f, 1.0f });
+                ? NoxUI::ThemeColor("InspectorInactive", { 0.86f, 0.56f, 0.42f, 1.0f })
+                : NoxUI::ThemeColor("TextMuted", { 0.58f, 0.64f, 0.74f, 1.0f });
             m_SubheaderLabel->Visible = true;
         }
 
@@ -494,7 +494,7 @@ namespace Nox
             }
         }
 
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         const std::string filterLower = ToLowerStr(m_Filter);
         Entity entity = m_Primary;
 
@@ -539,28 +539,28 @@ namespace Nox
                 if (const Prefab* prefabAsset = AssetManager::FindLoadedAsset<Prefab>(prefabHandle);
                     prefabAsset && prefabAsset->Base != 0 && AssetManager::IsAssetHandleValid(prefabAsset->Base))
                     c.AddReadonly("Variant of", AssetDisplayName(prefabAsset->Base));
-                auto actions = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-                actions->WidthMode = UI::UISizeMode::Fill;
+                auto actions = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+                actions->WidthMode = NoxUI::UISizeMode::Fill;
                 if (m_OnOpenAsset && AssetManager::IsAssetHandleValid(prefabHandle))
                 {
-                    auto openBtn = UI::Button("Open", [this, prefabHandle]() { m_OnOpenAsset(prefabHandle); })
+                    auto openBtn = NoxUI::Button("Open", [this, prefabHandle]() { m_OnOpenAsset(prefabHandle); })
                         .Tooltip("Prefab Mode: the prefab on its own; Save there updates every instance.");
-                    openBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                    openBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                     actions->AddChild(openBtn);
                 }
-                auto unpackBtn = UI::Button("Unpack", [this, entity]()
+                auto unpackBtn = NoxUI::Button("Unpack", [this, entity]()
                 {
                     PrefabInstance::Unpack(*m_Context, entity);
                     NotifyMutated(true);
                 }).Tooltip("Turn this instance into ordinary entities (nested instances stay instances).");
-                unpackBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                unpackBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                 actions->AddChild(unpackBtn);
-                auto unpackAllBtn = UI::Button("Unpack Completely", [this, entity]()
+                auto unpackAllBtn = NoxUI::Button("Unpack Completely", [this, entity]()
                 {
                     PrefabInstance::UnpackCompletely(*m_Context, entity);
                     NotifyMutated(true);
                 }).Tooltip("Ordinary entities all the way down: the instances inside it are unpacked too.");
-                unpackAllBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                unpackAllBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                 actions->AddChild(unpackAllBtn);
                 c.AddRow("Actions", actions);
 
@@ -591,35 +591,35 @@ namespace Nox
                     case Kind::AddedComponent: label = "+ Component: " + target + " / " + componentName(entry.Component); break;
                     case Kind::AddedEntity: label = "+ Entity: " + entry.Name + " (below " + target + ")"; break;
                     }
-                    auto row = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-                    row->WidthMode = UI::UISizeMode::Fill;
-                    Ref<UI::UILabel> text(new UI::UILabel(label, 12.5f));
-                    text->WidthMode = UI::UISizeMode::Fill;
-                    text->VAlign = UI::UIAlignment::Center;
+                    auto row = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+                    row->WidthMode = NoxUI::UISizeMode::Fill;
+                    Ref<NoxUI::UILabel> text(new NoxUI::UILabel(label, 12.5f));
+                    text->WidthMode = NoxUI::UISizeMode::Fill;
+                    text->VAlign = NoxUI::UIAlignment::Center;
                     text->UseColorOverride = true;
-                    text->ColorOverride = UI::ThemeColor("PrefabText", { 0.45f, 0.70f, 1.0f, 1.0f });
+                    text->ColorOverride = NoxUI::ThemeColor("PrefabText", { 0.45f, 0.70f, 1.0f, 1.0f });
                     text->Tooltip = label;
                     row->AddChild(text);
                     // (the entry is copied into each button: the list is worked out again after any of them runs)
-                    auto revert = UI::Button("Revert", [this, entity, entry]() mutable
+                    auto revert = NoxUI::Button("Revert", [this, entity, entry]() mutable
                     {
                         PrefabInstance::RevertOverride(*m_Context, entity, &entry);
                         NotifyMutated(true);
                     }).Tooltip("Back to the prefab's value for this one.");
-                    revert->Padding = UI::UIThickness::Symmetric(6.0f, 2.0f);
+                    revert->Padding = NoxUI::UIThickness::Symmetric(6.0f, 2.0f);
                     row->AddChild(revert);
-                    auto apply = UI::Button("Apply", [this, entity, entry]() mutable
+                    auto apply = NoxUI::Button("Apply", [this, entity, entry]() mutable
                     {
                         const AssetHandle applied = entity.GetComponent<PrefabInstanceComponent>().Prefab;
                         if (PrefabInstance::ApplyOverride(*m_Context, entity, entry))
                             AssetPreviewRenderer::Get().Invalidate(applied);
                         NotifyMutated(true);
                     }).Tooltip("Writes this change into the prefab file now: every instance takes it.");
-                    apply->Padding = UI::UIThickness::Symmetric(6.0f, 2.0f);
+                    apply->Padding = NoxUI::UIThickness::Symmetric(6.0f, 2.0f);
                     row->AddChild(apply);
                     if (nested)
                     {
-                        auto outer = UI::Button("Apply to Outer", [this, entity, entry]() mutable
+                        auto outer = NoxUI::Button("Apply to Outer", [this, entity, entry]() mutable
                         {
                             Entity outerRoot = m_Context->GetEntityByUUID(entity.GetComponent<PrefabNodeComponent>().Instance);
                             const AssetHandle applied = outerRoot && outerRoot.HasComponent<PrefabInstanceComponent>() ? outerRoot.GetComponent<PrefabInstanceComponent>().Prefab : AssetHandle(0);
@@ -627,7 +627,7 @@ namespace Nox
                                 AssetPreviewRenderer::Get().Invalidate(applied);
                             NotifyMutated(true);
                         }).Tooltip("Writes this change into the prefab this instance is part of (its own prefab stays as it is).");
-                        outer->Padding = UI::UIThickness::Symmetric(6.0f, 2.0f);
+                        outer->Padding = NoxUI::UIThickness::Symmetric(6.0f, 2.0f);
                         row->AddChild(outer);
                     }
                     c.AddRow("", row);
@@ -636,9 +636,9 @@ namespace Nox
                     c.AddStatusNote("... and " + std::to_string(overrides.size() - 64) + " more (Revert All drops them all).");
                 // An edit to the instance (a field typed, a child added) changes the list: worked out again twice a second while no
                 // mouse button is held (a rebuild in the middle of a drag would end the drag), the card rebuilt when it differs.
-                UI::AppendSync(*c.Body, [this, id = entity.GetUUID(), builtCount = overrides.size(), frame = 0]() mutable
+                NoxUI::AppendSync(*c.Body, [this, id = entity.GetUUID(), builtCount = overrides.size(), frame = 0]() mutable
                 {
-                    if (++frame < 30 || UI::UIContext::IsMouseButtonHeld())
+                    if (++frame < 30 || NoxUI::UIContext::IsMouseButtonHeld())
                         return;
                     frame = 0;
                     Entity now = m_Context ? m_Context->GetEntityByUUID(id) : Entity();
@@ -647,12 +647,12 @@ namespace Nox
                 });
                 if (!overrides.empty())
                 {
-                    auto revertAll = UI::Button("Revert All (" + std::to_string(overrides.size()) + ")", [this, entity]()
+                    auto revertAll = NoxUI::Button("Revert All (" + std::to_string(overrides.size()) + ")", [this, entity]()
                     {
                         PrefabInstance::RevertOverride(*m_Context, entity, nullptr);
                         NotifyMutated(true);
                     });
-                    revertAll->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                    revertAll->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                     c.AddRow("", revertAll);
                 }
             });
@@ -666,8 +666,8 @@ namespace Nox
                 c.AddReadonly("Instance", instance ? instance.GetName() : "(missing)");
                 if (instance && m_OnSelectEntity)
                 {
-                    auto selBtn = UI::Button("Select Instance Root", [this, instance]() { m_OnSelectEntity(instance); });
-                    selBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                    auto selBtn = NoxUI::Button("Select Instance Root", [this, instance]() { m_OnSelectEntity(instance); });
+                    selBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                     c.AddRow("Navigate", selBtn);
                 }
             });
@@ -694,7 +694,7 @@ namespace Nox
                          const LengthUnitInfo unit = GetLengthUnitInfo(static_cast<float>(largest));
                          const float posSpeed = unit.Meters ? 0.05f : 5.0f;
 
-                         auto posEdit = UI::MakeUI<UI::UIVectorEdit>(
+                         auto posEdit = NoxUI::MakeUI<NoxUI::UIVectorEdit>(
                              3,
                              glm::vec4(glm::vec3(tc.Translation / static_cast<double>(unit.Factor)), 0.0f),
                              posSpeed,
@@ -721,7 +721,7 @@ namespace Nox
                                  NotifyMutated(false);
                              });
                          c.AddRow(std::string("Position (") + unit.Suffix + ")", posEdit);
-                         UI::AppendSync(*Raw(posEdit), [posEdit = Raw(posEdit), entity, factor = unit.Factor]() mutable
+                         NoxUI::AppendSync(*Raw(posEdit), [posEdit = Raw(posEdit), entity, factor = unit.Factor]() mutable
                          {
                              if (!entity || posEdit->IsEditing())
                                  return;
@@ -730,7 +730,7 @@ namespace Nox
                          });
 
                          const glm::vec3 rotDeg = glm::degrees(tc.Rotation);
-                         auto rotEdit = UI::MakeUI<UI::UIVectorEdit>(
+                         auto rotEdit = NoxUI::MakeUI<NoxUI::UIVectorEdit>(
                              3,
                              glm::vec4(rotDeg, 0.0f),
                              0.5f,
@@ -751,7 +751,7 @@ namespace Nox
                                  NotifyMutated(false);
                              });
                          c.AddRow("Rotation (deg)", rotEdit);
-                         UI::AppendSync(*Raw(rotEdit), [rotEdit = Raw(rotEdit), entity]() mutable
+                         NoxUI::AppendSync(*Raw(rotEdit), [rotEdit = Raw(rotEdit), entity]() mutable
                          {
                              if (!entity || rotEdit->IsEditing())
                                  return;
@@ -759,7 +759,7 @@ namespace Nox
                              rotEdit->SetValue(glm::vec4(deg, 0.0f), false);
                          });
 
-                         auto scaleEdit = UI::MakeUI<UI::UIVectorEdit>(
+                         auto scaleEdit = NoxUI::MakeUI<NoxUI::UIVectorEdit>(
                              3,
                              glm::vec4(tc.Scale, 0.0f),
                              0.02f,
@@ -780,7 +780,7 @@ namespace Nox
                                  NotifyMutated(false);
                              });
                          c.AddRow("Scale", scaleEdit);
-                         UI::AppendSync(*Raw(scaleEdit), [scaleEdit = Raw(scaleEdit), entity]() mutable
+                         NoxUI::AppendSync(*Raw(scaleEdit), [scaleEdit = Raw(scaleEdit), entity]() mutable
                          {
                              if (!entity || scaleEdit->IsEditing())
                                  return;
@@ -809,17 +809,17 @@ namespace Nox
                          c.AddReadonly("Status", comp.Spawned ? "Spawned" : "Loading...");
                          if (!comp.RemovedNodes.empty())
                          {
-                             auto restoreBtn = UI::Button("Restore Removed Nodes (" + std::to_string(comp.RemovedNodes.size()) + ")",
+                             auto restoreBtn = NoxUI::Button("Restore Removed Nodes (" + std::to_string(comp.RemovedNodes.size()) + ")",
                                  [this, entity]() { ModelInstance::Respawn(*m_Context, entity); NotifyMutated(true); });
-                             restoreBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                             restoreBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                              c.AddRow("Nodes", restoreBtn);
                          }
-                         auto splitBtn = UI::Button("Split Into Separate Entities", [this, entity]()
+                         auto splitBtn = NoxUI::Button("Split Into Separate Entities", [this, entity]()
                          {
                              m_PendingSplit = Entity(entity).GetUUID();
                          });
                          splitBtn->SetEnabled(comp.Spawned && !m_Context->IsRunning());
-                         splitBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                         splitBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                          c.AddRow("Convert", splitBtn);
                      });
         }
@@ -868,12 +868,12 @@ namespace Nox
                              }
                              if (!targets.empty() && !comp.MorphWeights.empty())
                              {
-                                 auto resetMorphBtn = UI::Button("Reset Morphs to Defaults", [this, entity]() mutable
+                                 auto resetMorphBtn = NoxUI::Button("Reset Morphs to Defaults", [this, entity]() mutable
                                  {
                                      entity.GetComponent<MeshComponent>().MorphWeights.clear();
                                      NotifyMutated(true);
                                  });
-                                 resetMorphBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                                 resetMorphBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                                  c.AddRow("Morphs", resetMorphBtn);
                              }
                          }
@@ -957,25 +957,25 @@ namespace Nox
 
                          if (meshMaterials)
                          {
-                             auto rangeRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-                             rangeRow->WidthMode = UI::UISizeMode::Fill;
-                             rangeRow->VAlign = UI::UIAlignment::Center;
-                             auto rangeLbl = UI::Label(slotEnd > firstSlot
+                             auto rangeRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+                             rangeRow->WidthMode = NoxUI::UISizeMode::Fill;
+                             rangeRow->VAlign = NoxUI::UIAlignment::Center;
+                             auto rangeLbl = NoxUI::Label(slotEnd > firstSlot
                                  ? ("Slots " + std::to_string(firstSlot) + "-" + std::to_string(slotEnd - 1) + " of " + std::to_string(meshMaterials->size()))
                                  : ("No mesh slots (" + std::to_string(meshMaterials->size()) + " total)"));
                              rangeLbl->FontSizeOverride = 14.0f;
                              rangeLbl->UseColorOverride = true;
-                             rangeLbl->ColorOverride = UI::ThemeColor("TextMuted", { 0.62f, 0.68f, 0.78f, 1.0f });
-                             rangeLbl->WidthMode = UI::UISizeMode::Fill;
+                             rangeLbl->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.62f, 0.68f, 0.78f, 1.0f });
+                             rangeLbl->WidthMode = NoxUI::UISizeMode::Fill;
                              rangeLbl->FlexWeight = 1.0f;
                              rangeRow->AddChild(rangeLbl);
 
-                             auto showAllBtn = UI::Button(m_MaterialShowAll ? "Entity Slots" : "Show All", [this]()
+                             auto showAllBtn = NoxUI::Button(m_MaterialShowAll ? "Entity Slots" : "Show All", [this]()
                              {
                                  m_MaterialShowAll = !m_MaterialShowAll;
                                  m_Dirty = true;
                              });
-                             showAllBtn->Padding = UI::UIThickness::Symmetric(8.0f, 3.0f);
+                             showAllBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 3.0f);
                              rangeRow->AddChild(showAllBtn);
                              c.Body->AddChild(rangeRow);
                          }
@@ -1010,22 +1010,22 @@ namespace Nox
                              const std::string expandKey = "MatInline_" + std::to_string(slot) + "_" + std::to_string(static_cast<uint64_t>(handle));
                              const bool inlineOpen = slotMaterial && m_ExpandedCards.contains(expandKey) && m_ExpandedCards[expandKey];
 
-                             auto slotRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-                             slotRow->WidthMode = UI::UISizeMode::Fill;
-                             slotRow->VAlign = UI::UIAlignment::Center;
+                             auto slotRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+                             slotRow->WidthMode = NoxUI::UISizeMode::Fill;
+                             slotRow->VAlign = NoxUI::UIAlignment::Center;
 
                              // The material's properties under the row, set in a little so they read as belonging to it. Built the
                              // first time they are shown; opening and closing then only shows and hides them (a rebuild of the
                              // whole Inspector for it lost the focus and the work).
-                             Ref<UI::UIStackBox> inlineBody;
+                             Ref<NoxUI::UIStackBox> inlineBody;
                              std::function<void()> fillInline;
                              if (slotMaterial)
                              {
-                                 inlineBody = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-                                 inlineBody->WidthMode = UI::UISizeMode::Fill;
+                                 inlineBody = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 6.0f);
+                                 inlineBody->WidthMode = NoxUI::UISizeMode::Fill;
                                  inlineBody->StyleClass = "Card";
                                  inlineBody->DrawBackground = true;
-                                 inlineBody->Padding = UI::UIThickness::All(8.0f);
+                                 inlineBody->Padding = NoxUI::UIThickness::All(8.0f);
                                  inlineBody->Visible = inlineOpen;
                                  fillInline = [this, handle, slotMaterial, body = inlineBody, mutate = c.OnMutate, uiContext = c.Context]()
                                  {
@@ -1046,18 +1046,18 @@ namespace Nox
                                      "Show or hide this material's properties here"));
                              }
 
-                             auto pickBtn = UI::Button(matLabel).Tooltip(overridden
+                             auto pickBtn = NoxUI::Button(matLabel).Tooltip(overridden
                                  ? "Material overridden on this entity. Click to change."
                                  : "Click to assign or override material asset.");
-                             pickBtn->WidthMode = UI::UISizeMode::Fill;
+                             pickBtn->WidthMode = NoxUI::UISizeMode::Fill;
                              pickBtn->FlexWeight = 1.0f;
-                             pickBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
-                             pickBtn->TextElide = UI::UITextElide::Middle; // a long .nmat name keeps its start and its end
-                             UI::UIButton* pickPtr = pickBtn.Get().get();
+                             pickBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+                             pickBtn->TextElide = NoxUI::UITextElide::Middle; // a long .nmat name keeps its start and its end
+                             NoxUI::UIButton* pickPtr = pickBtn.Get().get();
                              const char* emptyText = meshMaterials ? "Use Mesh Material" : "None";
                              pickBtn->OnClick = [pickPtr, handle, overrideHandle, emptyText, slot, setOverride]() mutable
                              {
-                                 UI::UIContext* curCtx = UI::UIContext::GetCurrent();
+                                 NoxUI::UIContext* curCtx = NoxUI::UIContext::GetCurrent();
                                  if (!curCtx)
                                      return;
                                  ShowSearchableAssetPicker(
@@ -1073,9 +1073,9 @@ namespace Nox
 
                              if (validMat && m_OnOpenAsset)
                              {
-                                 auto editBtn = UI::Button("Edit", [this, handle]() { m_OnOpenAsset(handle); })
+                                 auto editBtn = NoxUI::Button("Edit", [this, handle]() { m_OnOpenAsset(handle); })
                                      .Tooltip("Open in the Material Editor");
-                                 editBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                                 editBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                                  slotRow->AddChild(editBtn);
                              }
 
@@ -1111,15 +1111,15 @@ namespace Nox
                              if (makeUnique || canReset)
                              {
                                  slotRow->AddChild(CreateMoreButton(
-                                     [makeUnique, canReset, hasMeshMaterials, slot, setOverride](const UI::UIRect& bounds) mutable
+                                     [makeUnique, canReset, hasMeshMaterials, slot, setOverride](const NoxUI::UIRect& bounds) mutable
                                      {
-                                         UI::UIContext* curCtx = UI::UIContext::GetCurrent();
+                                         NoxUI::UIContext* curCtx = NoxUI::UIContext::GetCurrent();
                                          if (!curCtx)
                                              return;
-                                         std::vector<UI::UIMenuItem> items;
+                                         std::vector<NoxUI::UIMenuItem> items;
                                          if (makeUnique)
                                          {
-                                             UI::UIMenuItem item;
+                                             NoxUI::UIMenuItem item;
                                              item.Label = "Make Unique";
                                              item.Tooltip = "Create an independent copy of this material asset and assign it to this slot";
                                              item.OnTrigger = makeUnique;
@@ -1127,12 +1127,12 @@ namespace Nox
                                          }
                                          if (canReset)
                                          {
-                                             UI::UIMenuItem item;
+                                             NoxUI::UIMenuItem item;
                                              item.Label = hasMeshMaterials ? "Reset to Mesh Material" : "Clear Material";
                                              item.OnTrigger = [slot, setOverride]() mutable { setOverride(slot, AssetHandle(0)); };
                                              items.push_back(std::move(item));
                                          }
-                                         UI::UIMenuPopup::ShowPopupMenu(*curCtx, bounds, std::move(items), true);
+                                         NoxUI::UIMenuPopup::ShowPopupMenu(*curCtx, bounds, std::move(items), true);
                                      },
                                      "Material options: Make Unique, Reset"));
                              }
@@ -1159,10 +1159,10 @@ namespace Nox
                                  c.AddFloat(pname, &param.Value.x, 0.01f, 0.0f,
                                      param.Name == MaterialParameter::EmissiveStrength ? 1000.0f : 1.0f);
 
-                             auto metaRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-                             metaRow->WidthMode = UI::UISizeMode::Fill;
+                             auto metaRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+                             metaRow->WidthMode = NoxUI::UISizeMode::Fill;
                              int32_t slotNum = param.Slot == UINT32_MAX ? -1 : static_cast<int32_t>(param.Slot);
-                             auto slotDrag = UI::MakeUI<UI::UIDragScalar>(static_cast<float>(slotNum), 0.1f, [this, &comp, i](float v)
+                             auto slotDrag = NoxUI::MakeUI<NoxUI::UIDragScalar>(static_cast<float>(slotNum), 0.1f, [this, &comp, i](float v)
                              {
                                  if (i < comp.Parameters.size())
                                  {
@@ -1174,12 +1174,12 @@ namespace Nox
                              slotDrag->Format = "{:.0f}";
                              slotDrag->Min = -1.0f;
                              slotDrag->Max = 1024.0f;
-                             slotDrag->WidthMode = UI::UISizeMode::Fill;
+                             slotDrag->WidthMode = NoxUI::UISizeMode::Fill;
                              slotDrag->FlexWeight = 1.0f;
                              slotDrag->Tooltip = "Target slot (-1 = all slots)";
                              metaRow->AddChild(slotDrag);
 
-                             auto rmBtn = UI::Button("x", [this, entity, i]() mutable
+                             auto rmBtn = NoxUI::Button("x", [this, entity, i]() mutable
                              {
                                  auto& mc = entity.GetComponent<MaterialComponent>();
                                  if (i < mc.Parameters.size())
@@ -1187,10 +1187,10 @@ namespace Nox
                                  entity.PatchComponent<MaterialComponent>();
                                  NotifyMutated(true);
                              });
-                             rmBtn->WidthMode = UI::UISizeMode::Fixed;
-                             rmBtn->HeightMode = UI::UISizeMode::Fixed;
+                             rmBtn->WidthMode = NoxUI::UISizeMode::Fixed;
+                             rmBtn->HeightMode = NoxUI::UISizeMode::Fixed;
                              rmBtn->FixedSize = { 24.0f, 24.0f };
-                             rmBtn->Padding = UI::UIThickness::All(0.0f);
+                             rmBtn->Padding = NoxUI::UIThickness::All(0.0f);
                              metaRow->AddChild(rmBtn);
                              c.AddRow("  Target Slot (-1=All)", metaRow);
                          }
@@ -1212,7 +1212,7 @@ namespace Nox
                                  c.AddFloat(gp.Name, &gp.Value.x, 0.01f);
                              }
 
-                             auto rmBtn = UI::Button("Remove " + gp.Name, [this, entity, i]() mutable
+                             auto rmBtn = NoxUI::Button("Remove " + gp.Name, [this, entity, i]() mutable
                              {
                                  auto& mc = entity.GetComponent<MaterialComponent>();
                                  if (i < mc.GraphParameters.size())
@@ -1220,19 +1220,19 @@ namespace Nox
                                  entity.PatchComponent<MaterialComponent>();
                                  NotifyMutated(true);
                              });
-                             rmBtn->Padding = UI::UIThickness::Symmetric(8.0f, 3.0f);
+                             rmBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 3.0f);
                              c.AddRow("", rmBtn);
                          }
 
-                         auto addParamBtn = UI::Button("+ Add Parameter");
-                         addParamBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
-                         UI::UIButton* addParamPtr = addParamBtn.Get().get();
+                         auto addParamBtn = NoxUI::Button("+ Add Parameter");
+                         addParamBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+                         NoxUI::UIButton* addParamPtr = addParamBtn.Get().get();
                          addParamBtn->OnClick = [this, addParamPtr, entity]() mutable
                          {
-                             UI::UIContext* curCtx = UI::UIContext::GetCurrent();
+                             NoxUI::UIContext* curCtx = NoxUI::UIContext::GetCurrent();
                              if (!curCtx)
                                  return;
-                             std::vector<UI::UIMenuItem> items;
+                             std::vector<NoxUI::UIMenuItem> items;
                              for (uint8_t idx = 0; idx < static_cast<uint8_t>(MaterialParameter::Count); ++idx)
                              {
                                  const MaterialParameter kind = static_cast<MaterialParameter>(idx);
@@ -1248,7 +1248,7 @@ namespace Nox
                                      NotifyMutated(true);
                                  } });
                              }
-                             UI::UIMenuPopup::ShowPopupMenu(*curCtx, addParamPtr->GetBounds(), std::move(items), false);
+                             NoxUI::UIMenuPopup::ShowPopupMenu(*curCtx, addParamPtr->GetBounds(), std::move(items), false);
                          };
                          c.AddRow("Parameters", addParamBtn);
                      });
@@ -1360,8 +1360,8 @@ namespace Nox
                          {
                              comp.Resolution = kRes[std::clamp(idx, 0, 3)];
                          });
-                         auto recapBtn = UI::Button("Recapture", [&comp]() { ++comp.Revision; });
-                         recapBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                         auto recapBtn = NoxUI::Button("Recapture", [&comp]() { ++comp.Revision; });
+                         recapBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                          c.AddRow("Capture", recapBtn);
                      });
         }
@@ -1377,8 +1377,8 @@ namespace Nox
                          c.AddLengthVec3("Extents", &comp.Extents);
                          c.AddLength("Probe Spacing", &comp.ProbeSpacing);
                          c.AddFloat("Intensity", &comp.Intensity, 0.02f, 0.0f, 16.0f);
-                         auto recapBtn = UI::Button("Recapture", [&comp]() { ++comp.Revision; });
-                         recapBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                         auto recapBtn = NoxUI::Button("Recapture", [&comp]() { ++comp.Revision; });
+                         recapBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                          c.AddRow("Capture", recapBtn);
                      });
         }
@@ -1458,45 +1458,45 @@ namespace Nox
                          if (cam.GetProjectionType() == SceneCamera::ProjectionType::Perspective)
                          {
                              float fovDeg = glm::degrees(cam.GetPerspectiveVerticalFOV());
-                             auto fovDrag = UI::MakeUI<UI::UIDragScalar>(fovDeg, 0.5f, [this, &cam](float v)
+                             auto fovDrag = NoxUI::MakeUI<NoxUI::UIDragScalar>(fovDeg, 0.5f, [this, &cam](float v)
                              {
                                  cam.SetPerspectiveVerticalFOV(glm::radians(std::clamp(v, 5.0f, 175.0f)));
                                  NotifyMutated(false);
                              });
-                             fovDrag->WidthMode = UI::UISizeMode::Fill;
+                             fovDrag->WidthMode = NoxUI::UISizeMode::Fill;
                              fovDrag->Min = 5.0f;
                              fovDrag->Max = 175.0f;
                              c.AddRow("Vertical FOV", fovDrag);
 
                              const float nearFactor = GetLengthUnitInfo(cam.GetPerspectiveNearClip()).Factor;
                              const char* nearSuffix = GetLengthUnitInfo(cam.GetPerspectiveNearClip()).Suffix;
-                             auto nearDrag = UI::MakeUI<UI::UIDragScalar>(cam.GetPerspectiveNearClip() / nearFactor, 0.01f, [this, &cam, nearFactor](float d)
+                             auto nearDrag = NoxUI::MakeUI<NoxUI::UIDragScalar>(cam.GetPerspectiveNearClip() / nearFactor, 0.01f, [this, &cam, nearFactor](float d)
                              {
                                  cam.SetPerspectiveNearClip(std::max(0.001f, d * nearFactor));
                                  NotifyMutated(false);
                              });
-                             nearDrag->WidthMode = UI::UISizeMode::Fill;
+                             nearDrag->WidthMode = NoxUI::UISizeMode::Fill;
                              c.AddRow(std::string("Near Clip (") + nearSuffix + ")", nearDrag);
 
                              const float farFactor = GetLengthUnitInfo(cam.GetPerspectiveFarClip()).Factor;
                              const char* farSuffix = GetLengthUnitInfo(cam.GetPerspectiveFarClip()).Suffix;
-                             auto farDrag = UI::MakeUI<UI::UIDragScalar>(cam.GetPerspectiveFarClip() / farFactor, 1.0f, [this, &cam, farFactor](float d)
+                             auto farDrag = NoxUI::MakeUI<NoxUI::UIDragScalar>(cam.GetPerspectiveFarClip() / farFactor, 1.0f, [this, &cam, farFactor](float d)
                              {
                                  cam.SetPerspectiveFarClip(std::max(1.0f, d * farFactor));
                                  NotifyMutated(false);
                              });
-                             farDrag->WidthMode = UI::UISizeMode::Fill;
+                             farDrag->WidthMode = NoxUI::UISizeMode::Fill;
                              c.AddRow(std::string("Far Clip (") + farSuffix + ")", farDrag);
                          }
                          else
                          {
                              float orthoSize = cam.GetOrthographicSize();
-                             auto sizeDrag = UI::MakeUI<UI::UIDragScalar>(orthoSize, 0.1f, [this, &cam](float v)
+                             auto sizeDrag = NoxUI::MakeUI<NoxUI::UIDragScalar>(orthoSize, 0.1f, [this, &cam](float v)
                              {
                                  cam.SetOrthographicSize(std::max(0.01f, v));
                                  NotifyMutated(false);
                              });
-                             sizeDrag->WidthMode = UI::UISizeMode::Fill;
+                             sizeDrag->WidthMode = NoxUI::UISizeMode::Fill;
                              c.AddRow("Ortho Size", sizeDrag);
                              c.AddBool("Fixed Aspect Ratio", &comp.FixedAspectRatio);
                          }
@@ -1514,10 +1514,10 @@ namespace Nox
                          auto& comp = entity.GetComponent<ScriptComponent>();
                          for (size_t idx = 0; idx < comp.ClassNames.size(); ++idx)
                          {
-                             auto classRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-                             classRow->WidthMode = UI::UISizeMode::Fill;
-                             auto classInput = UI::MakeUI<UI::UITextInput>(comp.ClassNames[idx], "Namespace.ClassName");
-                             classInput->WidthMode = UI::UISizeMode::Fill;
+                             auto classRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+                             classRow->WidthMode = NoxUI::UISizeMode::Fill;
+                             auto classInput = NoxUI::MakeUI<NoxUI::UITextInput>(comp.ClassNames[idx], "Namespace.ClassName");
+                             classInput->WidthMode = NoxUI::UISizeMode::Fill;
                              classInput->FlexWeight = 1.0f;
                              classInput->OnChanged = [this, &comp, idx](const std::string& v)
                              {
@@ -1527,7 +1527,7 @@ namespace Nox
                              };
                              classRow->AddChild(classInput);
 
-                             auto removeBtn = UI::Button("x", [this, &comp, idx]()
+                             auto removeBtn = NoxUI::Button("x", [this, &comp, idx]()
                              {
                                  if (idx < comp.ClassNames.size())
                                  {
@@ -1537,20 +1537,20 @@ namespace Nox
                                  }
                                  NotifyMutated(true);
                              }).Tooltip("Remove script class");
-                             removeBtn->WidthMode = UI::UISizeMode::Fixed;
-                             removeBtn->HeightMode = UI::UISizeMode::Fixed;
+                             removeBtn->WidthMode = NoxUI::UISizeMode::Fixed;
+                             removeBtn->HeightMode = NoxUI::UISizeMode::Fixed;
                              removeBtn->FixedSize = { 24.0f, 24.0f };
-                             removeBtn->Padding = UI::UIThickness::All(0.0f);
+                             removeBtn->Padding = NoxUI::UIThickness::All(0.0f);
                              classRow->AddChild(removeBtn);
                              c.AddRow("Class " + std::to_string(idx + 1), classRow);
 
                              const std::string& className = comp.ClassNames[idx];
                              if (!className.empty() && !ScriptEngine::EntityClassExists(className))
                              {
-                                 auto errLabel = UI::Label("Class not found in loaded script assembly");
+                                 auto errLabel = NoxUI::Label("Class not found in loaded script assembly");
                                  errLabel->FontSizeOverride = 13.0f;
                                  errLabel->UseColorOverride = true;
-                                 errLabel->ColorOverride = UI::ThemeColor("StatusError", { 0.90f, 0.34f, 0.38f, 1.0f });
+                                 errLabel->ColorOverride = NoxUI::ThemeColor("StatusError", { 0.90f, 0.34f, 0.38f, 1.0f });
                                  c.Body->AddChild(errLabel);
                                  continue;
                              }
@@ -1611,7 +1611,7 @@ namespace Nox
                                      case ScriptFieldType::Bool:
                                      {
                                          bool bv = std::get<bool>(currentVal);
-                                         auto cb = UI::CheckBox("", bv, [this, &overrides, fieldName](bool next)
+                                         auto cb = NoxUI::CheckBox("", bv, [this, &overrides, fieldName](bool next)
                                          {
                                              overrides[fieldName] = next;
                                              NotifyMutated(false);
@@ -1623,7 +1623,7 @@ namespace Nox
                                      case ScriptFieldType::Int:
                                      {
                                          int32_t iv = std::get<int32_t>(currentVal);
-                                         auto drag = UI::MakeUI<UI::UIDragScalar>(static_cast<float>(iv), 0.25f, [this, &overrides, fieldName, ranged, field](float next)
+                                         auto drag = NoxUI::MakeUI<NoxUI::UIDragScalar>(static_cast<float>(iv), 0.25f, [this, &overrides, fieldName, ranged, field](float next)
                                          {
                                              int32_t res = static_cast<int32_t>(std::round(next));
                                              if (ranged)
@@ -1631,7 +1631,7 @@ namespace Nox
                                              overrides[fieldName] = res;
                                              NotifyMutated(false);
                                          });
-                                         drag->WidthMode = UI::UISizeMode::Fill;
+                                         drag->WidthMode = NoxUI::UISizeMode::Fill;
                                          drag->Format = "{:.0f}";
                                          drag->SetEnabled(!field.ReadOnly);
                                          c.AddRow(fieldName, drag, field.Tooltip);
@@ -1640,7 +1640,7 @@ namespace Nox
                                      case ScriptFieldType::UInt:
                                      {
                                          uint32_t uv = std::get<uint32_t>(currentVal);
-                                         auto drag = UI::MakeUI<UI::UIDragScalar>(static_cast<float>(uv), 0.25f, [this, &overrides, fieldName, ranged, field](float next)
+                                         auto drag = NoxUI::MakeUI<NoxUI::UIDragScalar>(static_cast<float>(uv), 0.25f, [this, &overrides, fieldName, ranged, field](float next)
                                          {
                                              uint32_t res = static_cast<uint32_t>(std::max(0.0f, std::round(next)));
                                              if (ranged)
@@ -1648,7 +1648,7 @@ namespace Nox
                                              overrides[fieldName] = res;
                                              NotifyMutated(false);
                                          });
-                                         drag->WidthMode = UI::UISizeMode::Fill;
+                                         drag->WidthMode = NoxUI::UISizeMode::Fill;
                                          drag->Format = "{:.0f}";
                                          drag->SetEnabled(!field.ReadOnly);
                                          c.AddRow(fieldName, drag, field.Tooltip);
@@ -1659,13 +1659,13 @@ namespace Nox
                                          float factor = 1.0f;
                                          const bool hasUnit = !field.Unit.empty() && ScriptUnitFactor(field.Unit, factor);
                                          const float display = hasUnit ? std::get<float>(currentVal) / factor : std::get<float>(currentVal);
-                                         auto drag = UI::MakeUI<UI::UIDragScalar>(display, 0.1f, [this, &overrides, fieldName, ranged, field, factor, hasUnit](float next)
+                                         auto drag = NoxUI::MakeUI<NoxUI::UIDragScalar>(display, 0.1f, [this, &overrides, fieldName, ranged, field, factor, hasUnit](float next)
                                          {
                                              float v = ranged ? std::clamp(next, field.Min, field.Max) : next;
                                              overrides[fieldName] = hasUnit ? (v * factor) : v;
                                              NotifyMutated(false);
                                          });
-                                         drag->WidthMode = UI::UISizeMode::Fill;
+                                         drag->WidthMode = NoxUI::UISizeMode::Fill;
                                          drag->SetEnabled(!field.ReadOnly);
                                          c.AddRow(hasUnit ? (fieldName + " (" + field.Unit + ")") : fieldName, drag, field.Tooltip);
                                          break;
@@ -1673,8 +1673,8 @@ namespace Nox
                                      case ScriptFieldType::String:
                                      {
                                          std::string sv = std::get<std::string>(currentVal);
-                                         auto input = UI::MakeUI<UI::UITextInput>(sv);
-                                         input->WidthMode = UI::UISizeMode::Fill;
+                                         auto input = NoxUI::MakeUI<NoxUI::UITextInput>(sv);
+                                         input->WidthMode = NoxUI::UISizeMode::Fill;
                                          input->ReadOnly = field.ReadOnly;
                                          input->OnChanged = [this, &overrides, fieldName](const std::string& next)
                                          {
@@ -1687,7 +1687,7 @@ namespace Nox
                                      case ScriptFieldType::Vector3:
                                      {
                                          const glm::vec3 vv = std::get<glm::vec3>(currentVal);
-                                         auto vec = UI::MakeUI<UI::UIVectorEdit>(3, glm::vec4(vv, 0.0f), 0.1f, [this, &overrides, fieldName](const glm::vec4& next)
+                                         auto vec = NoxUI::MakeUI<NoxUI::UIVectorEdit>(3, glm::vec4(vv, 0.0f), 0.1f, [this, &overrides, fieldName](const glm::vec4& next)
                                          {
                                              overrides[fieldName] = glm::vec3(next.x, next.y, next.z);
                                              NotifyMutated(false);
@@ -1702,12 +1702,12 @@ namespace Nox
                              }
                          }
 
-                         auto addScriptBtn = UI::Button("+ Add Script Class", [this, &comp]()
+                         auto addScriptBtn = NoxUI::Button("+ Add Script Class", [this, &comp]()
                          {
                              comp.ClassNames.emplace_back();
                              NotifyMutated(true);
                          });
-                         addScriptBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                         addScriptBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                          c.AddRow("", addScriptBtn);
                      });
         }
@@ -1747,13 +1747,13 @@ namespace Nox
                          c.AddSlider("Friction", &comp.Friction, 0.0f, 1.0f);
                          c.AddSlider("Restitution", &comp.Restitution, 0.0f, 1.0f);
                          glm::vec3 lo, hi;
-                         auto fitBtn = UI::Button("Fit to Mesh", [this, entity, &comp]() mutable
+                         auto fitBtn = NoxUI::Button("Fit to Mesh", [this, entity, &comp]() mutable
                          {
                              if (FitColliderToMesh(entity, comp))
                                  NotifyMutated(true);
                          });
                          fitBtn->SetEnabled(ComputeLocalMeshBounds(entity, lo, hi));
-                         fitBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                         fitBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                          c.AddRow("Fit", fitBtn);
                      });
         }
@@ -1772,13 +1772,13 @@ namespace Nox
                          c.AddSlider("Restitution", &comp.Restitution, 0.0f, 1.0f);
                          c.AddFloat("Rolling Resist", &comp.RollingResistance, 0.005f, 0.0f, 1.0f);
                          glm::vec3 lo, hi;
-                         auto fitBtn = UI::Button("Fit to Mesh", [this, entity, &comp]() mutable
+                         auto fitBtn = NoxUI::Button("Fit to Mesh", [this, entity, &comp]() mutable
                          {
                              if (FitColliderToMesh(entity, comp))
                                  NotifyMutated(true);
                          });
                          fitBtn->SetEnabled(ComputeLocalMeshBounds(entity, lo, hi));
-                         fitBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                         fitBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                          c.AddRow("Fit", fitBtn);
                      });
         }
@@ -1798,13 +1798,13 @@ namespace Nox
                          c.AddSlider("Friction", &comp.Friction, 0.0f, 1.0f);
                          c.AddSlider("Restitution", &comp.Restitution, 0.0f, 1.0f);
                          glm::vec3 lo, hi;
-                         auto fitBtn = UI::Button("Fit to Mesh", [this, entity, &comp]() mutable
+                         auto fitBtn = NoxUI::Button("Fit to Mesh", [this, entity, &comp]() mutable
                          {
                              if (FitColliderToMesh(entity, comp))
                                  NotifyMutated(true);
                          });
                          fitBtn->SetEnabled(ComputeLocalMeshBounds(entity, lo, hi));
-                         fitBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                         fitBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                          c.AddRow("Fit", fitBtn);
                      });
         }
@@ -1978,10 +1978,10 @@ namespace Nox
                          }
 
                          // Media Controls
-                         auto mediaRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-                         mediaRow->WidthMode = UI::UISizeMode::Fill;
+                         auto mediaRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+                         mediaRow->WidthMode = NoxUI::UISizeMode::Fill;
                          const bool isPlaying = comp.Animator.IsPlaying();
-                         auto playPauseBtn = UI::Button(isPlaying ? "Pause" : "Play", [this, entity]() mutable
+                         auto playPauseBtn = NoxUI::Button(isPlaying ? "Pause" : "Play", [this, entity]() mutable
                          {
                              auto& ac = entity.GetComponent<AnimatorComponent>();
                              if (ac.Animator.IsPlaying())
@@ -1999,50 +1999,50 @@ namespace Nox
                              }
                              NotifyMutated(true);
                          });
-                         playPauseBtn->WidthMode = UI::UISizeMode::Fill;
+                         playPauseBtn->WidthMode = NoxUI::UISizeMode::Fill;
                          playPauseBtn->FlexWeight = 1.0f;
-                         playPauseBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                         playPauseBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                          if (isPlaying)
                              playPauseBtn->StyleVariant = "primary";
                          mediaRow->AddChild(playPauseBtn);
 
-                         auto stopBtn = UI::Button("Stop", [this, entity]() mutable
+                         auto stopBtn = NoxUI::Button("Stop", [this, entity]() mutable
                          {
                              auto& ac = entity.GetComponent<AnimatorComponent>();
                              ac.Animator.Stop();
                              ac.Playing = false;
                              NotifyMutated(true);
                          });
-                         stopBtn->WidthMode = UI::UISizeMode::Fill;
+                         stopBtn->WidthMode = NoxUI::UISizeMode::Fill;
                          stopBtn->FlexWeight = 1.0f;
-                         stopBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                         stopBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                          mediaRow->AddChild(stopBtn);
                          c.AddRow("Playback", mediaRow);
 
                          bool looping = comp.Animator.IsLooping();
-                         auto loopCb = UI::CheckBox("", looping, [this, entity](bool next) mutable
+                         auto loopCb = NoxUI::CheckBox("", looping, [this, entity](bool next) mutable
                          {
                              entity.GetComponent<AnimatorComponent>().Animator.SetLooping(next);
                              NotifyMutated(false);
                          });
                          c.AddRow("Looping", loopCb);
-                         UI::AppendSync(*Raw(loopCb), [loopCb = Raw(loopCb), entity]() mutable
+                         NoxUI::AppendSync(*Raw(loopCb), [loopCb = Raw(loopCb), entity]() mutable
                          {
-                             if (entity && entity.HasComponent<AnimatorComponent>() && !UI::HasState(loopCb->GetState(), UI::UIState::Pressed))
+                             if (entity && entity.HasComponent<AnimatorComponent>() && !NoxUI::HasState(loopCb->GetState(), NoxUI::UIState::Pressed))
                                  loopCb->Checked = entity.GetComponent<AnimatorComponent>().Animator.IsLooping();
                          });
 
                          float speed = comp.Animator.GetPlaybackSpeed();
-                         auto speedDrag = UI::MakeUI<UI::UIDragScalar>(speed, 0.05f, [this, entity](float v) mutable
+                         auto speedDrag = NoxUI::MakeUI<NoxUI::UIDragScalar>(speed, 0.05f, [this, entity](float v) mutable
                          {
                              entity.GetComponent<AnimatorComponent>().Animator.SetPlaybackSpeed(std::clamp(v, 0.0f, 10.0f));
                              NotifyMutated(false);
                          });
-                         speedDrag->WidthMode = UI::UISizeMode::Fill;
+                         speedDrag->WidthMode = NoxUI::UISizeMode::Fill;
                          speedDrag->Min = 0.0f;
                          speedDrag->Max = 10.0f;
                          c.AddRow("Speed", speedDrag);
-                         UI::AppendSync(*Raw(speedDrag), [speedDrag = Raw(speedDrag), entity]() mutable
+                         NoxUI::AppendSync(*Raw(speedDrag), [speedDrag = Raw(speedDrag), entity]() mutable
                          {
                              if (entity && entity.HasComponent<AnimatorComponent>() &&
                                  !speedDrag->IsInteracting())
@@ -2050,7 +2050,7 @@ namespace Nox
                          });
 
                          // Single-Clip Animation Selector (skeleton-filtered by default)
-                         auto allClipsCb = UI::CheckBox("Show clips from all skeletons", m_AllAnimClips, [this](bool next)
+                         auto allClipsCb = NoxUI::CheckBox("Show clips from all skeletons", m_AllAnimClips, [this](bool next)
                          {
                              m_AllAnimClips = next;
                              m_Dirty = true;
@@ -2060,16 +2060,16 @@ namespace Nox
 
                          std::string clipLabel = currentAnim ? (currentAnim->Name.empty() ? AssetDisplayName(currentAnim->Handle) : currentAnim->Name)
                                                              : AssetDisplayName(comp.Animation);
-                         auto clipRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-                         clipRow->WidthMode = UI::UISizeMode::Fill;
-                         auto clipBtn = UI::Button(clipLabel);
-                         clipBtn->WidthMode = UI::UISizeMode::Fill;
+                         auto clipRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+                         clipRow->WidthMode = NoxUI::UISizeMode::Fill;
+                         auto clipBtn = NoxUI::Button(clipLabel);
+                         clipBtn->WidthMode = NoxUI::UISizeMode::Fill;
                          clipBtn->FlexWeight = 1.0f;
-                         clipBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
-                         UI::UIButton* clipPtr = clipBtn.Get().get();
+                         clipBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+                         NoxUI::UIButton* clipPtr = clipBtn.Get().get();
                          clipBtn->OnClick = [this, clipPtr, entity]() mutable
                          {
-                             UI::UIContext* curCtx = UI::UIContext::GetCurrent();
+                             NoxUI::UIContext* curCtx = NoxUI::UIContext::GetCurrent();
                              auto mgr = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr;
                              if (!curCtx || !mgr)
                                  return;
@@ -2118,7 +2118,7 @@ namespace Nox
                          clipRow->AddChild(clipBtn);
                          if (comp.Animation != 0)
                          {
-                             auto clrClip = UI::Button("x", [this, entity]() mutable
+                             auto clrClip = NoxUI::Button("x", [this, entity]() mutable
                              {
                                  auto& ac = entity.GetComponent<AnimatorComponent>();
                                  ac.Animation = 0;
@@ -2127,37 +2127,37 @@ namespace Nox
                                  ac.Animator.PlayAnimation(nullptr);
                                  NotifyMutated(true);
                              });
-                             clrClip->WidthMode = UI::UISizeMode::Fixed;
-                             clrClip->HeightMode = UI::UISizeMode::Fixed;
+                             clrClip->WidthMode = NoxUI::UISizeMode::Fixed;
+                             clrClip->HeightMode = NoxUI::UISizeMode::Fixed;
                              clrClip->FixedSize = { 24.0f, 24.0f };
-                             clrClip->Padding = UI::UIThickness::All(0.0f);
+                             clrClip->Padding = NoxUI::UIThickness::All(0.0f);
                              clipRow->AddChild(clrClip);
                          }
                          c.AddRow("Animation Clip", clipRow);
 
                          const float maxDuration = currentAnim ? std::max(0.01f, currentAnim->Duration) : 100.0f;
-                         auto timeSlider = UI::MakeUI<UI::UISlider>(comp.Animator.GetCurrentAnimationTime(), 0.0f, maxDuration,
+                         auto timeSlider = NoxUI::MakeUI<NoxUI::UISlider>(comp.Animator.GetCurrentAnimationTime(), 0.0f, maxDuration,
                              [entity](float t) mutable { entity.GetComponent<AnimatorComponent>().Animator.SetCurrentTime(t); });
-                         timeSlider->WidthMode = UI::UISizeMode::Fill;
+                         timeSlider->WidthMode = NoxUI::UISizeMode::Fill;
                          c.AddRow("Time (Ticks)", timeSlider);
-                         UI::AppendSync(*Raw(timeSlider), [timeSlider = Raw(timeSlider), entity]() mutable
+                         NoxUI::AppendSync(*Raw(timeSlider), [timeSlider = Raw(timeSlider), entity]() mutable
                          {
-                             if (entity && entity.HasComponent<AnimatorComponent>() && !UI::HasState(timeSlider->GetState(), UI::UIState::Pressed))
+                             if (entity && entity.HasComponent<AnimatorComponent>() && !NoxUI::HasState(timeSlider->GetState(), NoxUI::UIState::Pressed))
                                  timeSlider->Value = entity.GetComponent<AnimatorComponent>().Animator.GetCurrentAnimationTime();
                          });
 
                          // Animation Graph Mode
                          c.AddSubheader("Animation Graph");
-                         auto graphRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-                         graphRow->WidthMode = UI::UISizeMode::Fill;
-                         auto graphBtn = UI::Button(AssetDisplayName(comp.Graph));
-                         graphBtn->WidthMode = UI::UISizeMode::Fill;
+                         auto graphRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+                         graphRow->WidthMode = NoxUI::UISizeMode::Fill;
+                         auto graphBtn = NoxUI::Button(AssetDisplayName(comp.Graph));
+                         graphBtn->WidthMode = NoxUI::UISizeMode::Fill;
                          graphBtn->FlexWeight = 1.0f;
-                         graphBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
-                         UI::UIButton* graphPtr = graphBtn.Get().get();
+                         graphBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+                         NoxUI::UIButton* graphPtr = graphBtn.Get().get();
                          graphBtn->OnClick = [this, graphPtr, entity]() mutable
                          {
-                             UI::UIContext* curCtx = UI::UIContext::GetCurrent();
+                             NoxUI::UIContext* curCtx = NoxUI::UIContext::GetCurrent();
                              if (!curCtx)
                                  return;
                              ShowSearchableAssetPicker(*curCtx, graphPtr->GetBounds(), "None",
@@ -2172,21 +2172,21 @@ namespace Nox
                          graphRow->AddChild(graphBtn);
                          if (comp.Graph != 0 && m_OnOpenAsset)
                          {
-                             auto openGr = UI::Button("Open", [this, gh = comp.Graph]() { m_OnOpenAsset(gh); });
-                             openGr->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                             auto openGr = NoxUI::Button("Open", [this, gh = comp.Graph]() { m_OnOpenAsset(gh); });
+                             openGr->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                              graphRow->AddChild(openGr);
                          }
                          if (comp.Graph != 0)
                          {
-                             auto clrGr = UI::Button("x", [this, entity]() mutable
+                             auto clrGr = NoxUI::Button("x", [this, entity]() mutable
                              {
                                  entity.GetComponent<AnimatorComponent>().Graph = 0;
                                  NotifyMutated(true);
                              });
-                             clrGr->WidthMode = UI::UISizeMode::Fixed;
-                             clrGr->HeightMode = UI::UISizeMode::Fixed;
+                             clrGr->WidthMode = NoxUI::UISizeMode::Fixed;
+                             clrGr->HeightMode = NoxUI::UISizeMode::Fixed;
                              clrGr->FixedSize = { 24.0f, 24.0f };
-                             clrGr->Padding = UI::UIThickness::All(0.0f);
+                             clrGr->Padding = NoxUI::UIThickness::All(0.0f);
                              graphRow->AddChild(clrGr);
                          }
                          c.AddRow("Graph", graphRow);
@@ -2202,24 +2202,24 @@ namespace Nox
                                  c.AddSubheader("Graph Parameters");
                              for (auto& [pName, pVal] : graphInst.Parameters)
                              {
-                                 auto pRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-                                 pRow->WidthMode = UI::UISizeMode::Fill;
-                                 pRow->VAlign = UI::UIAlignment::Center;
+                                 auto pRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+                                 pRow->WidthMode = NoxUI::UISizeMode::Fill;
+                                 pRow->VAlign = NoxUI::UIAlignment::Center;
                                  if (float* f = std::get_if<float>(&pVal))
                                  {
-                                     auto d = UI::MakeUI<UI::UIDragScalar>(*f, 0.01f, [this, &graphInst, pName, f](float v)
+                                     auto d = NoxUI::MakeUI<NoxUI::UIDragScalar>(*f, 0.01f, [this, &graphInst, pName, f](float v)
                                      {
                                          *f = v;
                                          graphInst.Overrides[pName] = *f;
                                          NotifyMutated(false);
                                      });
-                                     d->WidthMode = UI::UISizeMode::Fill;
+                                     d->WidthMode = NoxUI::UISizeMode::Fill;
                                      d->FlexWeight = 1.0f;
                                      pRow->AddChild(d);
                                  }
                                  else if (bool* b = std::get_if<bool>(&pVal))
                                  {
-                                     auto cb = UI::CheckBox("", *b, [this, &graphInst, pName, b](bool v)
+                                     auto cb = NoxUI::CheckBox("", *b, [this, &graphInst, pName, b](bool v)
                                      {
                                          *b = v;
                                          graphInst.Overrides[pName] = *b;
@@ -2230,27 +2230,27 @@ namespace Nox
                                  }
                                  else if (int32_t* iv = std::get_if<int32_t>(&pVal))
                                  {
-                                     auto d = UI::MakeUI<UI::UIDragScalar>(static_cast<float>(*iv), 0.25f, [this, &graphInst, pName, iv](float v)
+                                     auto d = NoxUI::MakeUI<NoxUI::UIDragScalar>(static_cast<float>(*iv), 0.25f, [this, &graphInst, pName, iv](float v)
                                      {
                                          *iv = static_cast<int32_t>(std::round(v));
                                          graphInst.Overrides[pName] = *iv;
                                          NotifyMutated(false);
                                      });
                                      d->Format = "{:.0f}";
-                                     d->WidthMode = UI::UISizeMode::Fill;
+                                     d->WidthMode = NoxUI::UISizeMode::Fill;
                                      d->FlexWeight = 1.0f;
                                      pRow->AddChild(d);
                                  }
                                  if (graphInst.Overrides.contains(pName))
                                  {
-                                     auto rst = UI::Button("Reset", [this, &graphInst, pName]()
+                                     auto rst = NoxUI::Button("Reset", [this, &graphInst, pName]()
                                      {
                                          graphInst.Overrides.erase(pName);
                                          if (const NodeGraphValue* fb = graphInst.DefaultOf(pName))
                                              graphInst.Parameters[pName] = *fb;
                                          NotifyMutated(true);
                                      });
-                                     rst->Padding = UI::UIThickness::Symmetric(6.0f, 3.0f);
+                                     rst->Padding = NoxUI::UIThickness::Symmetric(6.0f, 3.0f);
                                      pRow->AddChild(rst);
                                  }
                                  c.AddRow(pName, pRow);
@@ -2285,8 +2285,8 @@ namespace Nox
                          c.AddAssetSlot("Timeline", comp.Timeline, { AssetType::Timeline }, [&comp](AssetHandle h) { comp.Timeline = h; });
                          if (comp.Timeline != 0 && m_OnOpenAsset)
                          {
-                             auto openTl = UI::Button("Open Timeline", [this, h = comp.Timeline]() { m_OnOpenAsset(h); });
-                             openTl->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                             auto openTl = NoxUI::Button("Open Timeline", [this, h = comp.Timeline]() { m_OnOpenAsset(h); });
+                             openTl->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                              c.AddRow("", openTl);
                          }
                          c.AddBool("Play On Start", &comp.PlayOnStart);
@@ -2308,8 +2308,8 @@ namespace Nox
                          const bool isGraph = comp.Sound != 0 && AssetManager::GetAssetType(comp.Sound) == AssetType::AudioGraph;
                          if (isGraph && m_OnOpenAsset)
                          {
-                             auto openAg = UI::Button("Open Audio Graph", [this, h = comp.Sound]() { m_OnOpenAsset(h); });
-                             openAg->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                             auto openAg = NoxUI::Button("Open Audio Graph", [this, h = comp.Sound]() { m_OnOpenAsset(h); });
+                             openAg->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                              c.AddRow("", openAg);
                          }
                          c.AddSlider("Volume", &comp.Volume, 0.0f, 2.0f);
@@ -2382,7 +2382,7 @@ namespace Nox
                          c.AddInt32("Priority", &comp.Priority, -100, 100);
                          // The volume's effects (the same rows as Renderer Settings > Post Effects); they were missing here.
                          c.AddSubheader("Effects", "What this volume applies (saved with the scene; it replaces the editor's Renderer Settings post effects while it applies).");
-                         UI::UIPropertyRows rows(c.Body, c.Context);
+                         NoxUI::UIPropertyRows rows(c.Body, c.Context);
                          AddPostProcessSettingsRows(rows, comp.Settings, [mutate = c.OnMutate]() { if (mutate) mutate(false); });
                      });
         }
@@ -2433,50 +2433,50 @@ namespace Nox
                          auto& comp = entity.GetComponent<MetadataComponent>();
                          for (size_t i = 0; i < comp.Values.size(); ++i)
                          {
-                             auto kvRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 4.0f);
-                             kvRow->WidthMode = UI::UISizeMode::Fill;
-                             auto keyIn = UI::MakeUI<UI::UITextInput>(comp.Values[i].first, "Key");
-                             keyIn->WidthMode = UI::UISizeMode::Fill;
+                             auto kvRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+                             kvRow->WidthMode = NoxUI::UISizeMode::Fill;
+                             auto keyIn = NoxUI::MakeUI<NoxUI::UITextInput>(comp.Values[i].first, "Key");
+                             keyIn->WidthMode = NoxUI::UISizeMode::Fill;
                              keyIn->FlexWeight = 0.45f;
                              keyIn->OnChanged = [this, &comp, i](const std::string& k) { comp.Values[i].first = k; NotifyMutated(false); };
-                             auto valIn = UI::MakeUI<UI::UITextInput>(comp.Values[i].second, "Value");
-                             valIn->WidthMode = UI::UISizeMode::Fill;
+                             auto valIn = NoxUI::MakeUI<NoxUI::UITextInput>(comp.Values[i].second, "Value");
+                             valIn->WidthMode = NoxUI::UISizeMode::Fill;
                              valIn->FlexWeight = 0.55f;
                              valIn->OnChanged = [this, &comp, i](const std::string& v) { comp.Values[i].second = v; NotifyMutated(false); };
-                             auto delBtn = UI::Button("x", [this, &comp, i]()
+                             auto delBtn = NoxUI::Button("x", [this, &comp, i]()
                              {
                                  if (i < comp.Values.size())
                                      comp.Values.erase(comp.Values.begin() + static_cast<ptrdiff_t>(i));
                                  NotifyMutated(true);
                              });
-                             delBtn->WidthMode = UI::UISizeMode::Fixed;
-                             delBtn->HeightMode = UI::UISizeMode::Fixed;
+                             delBtn->WidthMode = NoxUI::UISizeMode::Fixed;
+                             delBtn->HeightMode = NoxUI::UISizeMode::Fixed;
                              delBtn->FixedSize = { 24.0f, 24.0f };
-                             delBtn->Padding = UI::UIThickness::All(0.0f);
+                             delBtn->Padding = NoxUI::UIThickness::All(0.0f);
                              kvRow->AddChild(keyIn);
                              kvRow->AddChild(valIn);
                              kvRow->AddChild(delBtn);
                              c.Body->AddChild(kvRow);
                          }
-                         auto addBtn = UI::Button("+ Add Key/Value", [this, &comp]()
+                         auto addBtn = NoxUI::Button("+ Add Key/Value", [this, &comp]()
                          {
                              comp.Values.emplace_back("Key", "Value");
                              NotifyMutated(true);
                          });
-                         addBtn->Padding = UI::UIThickness::Symmetric(8.0f, 4.0f);
+                         addBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
                          c.AddRow("", addBtn);
                      });
         }
     }
 
-    void InspectorV2Panel::ShowAddComponentMenu(const UI::UIRect& triggerBounds)
+    void InspectorV2Panel::ShowAddComponentMenu(const NoxUI::UIRect& triggerBounds)
     {
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         if (!ctx || !m_Primary)
             return;
 
         Entity entity = m_Primary;
-        auto addEntry = [&]<typename T>(const char* label, std::function<void(T&)> onInit = {}) -> UI::UIMenuItem
+        auto addEntry = [&]<typename T>(const char* label, std::function<void(T&)> onInit = {}) -> NoxUI::UIMenuItem
         {
             const bool alreadyHas = entity.HasComponent<T>();
             return {
@@ -2494,7 +2494,7 @@ namespace Nox
             };
         };
 
-        std::vector<UI::UIMenuItem> rendering = {
+        std::vector<NoxUI::UIMenuItem> rendering = {
             addEntry.template operator()<MeshComponent>("Mesh"),
             addEntry.template operator()<MaterialComponent>("Material"),
             addEntry.template operator()<CameraComponent>("Camera"),
@@ -2505,7 +2505,7 @@ namespace Nox
             addEntry.template operator()<PostProcessVolumeComponent>("Post Process Volume")
         };
 
-        std::vector<UI::UIMenuItem> lighting = {
+        std::vector<NoxUI::UIMenuItem> lighting = {
             addEntry.template operator()<DirectionalLightComponent>("Directional Light"),
             addEntry.template operator()<PointLightComponent>("Point Light"),
             addEntry.template operator()<SpotLightComponent>("Spot Light"),
@@ -2516,7 +2516,7 @@ namespace Nox
             addEntry.template operator()<EnvironmentLightComponent>("Environment Light")
         };
 
-        std::vector<UI::UIMenuItem> physics3D = {
+        std::vector<NoxUI::UIMenuItem> physics3D = {
             addEntry.template operator()<RigidBody3DComponent>("Rigidbody 3D"),
             addEntry.template operator()<BoxCollider3DComponent>("Box Collider 3D", [entity](BoxCollider3DComponent& c) mutable { FitColliderToMesh(entity, c); }),
             addEntry.template operator()<SphereCollider3DComponent>("Sphere Collider 3D", [entity](SphereCollider3DComponent& c) mutable { FitColliderToMesh(entity, c); }),
@@ -2536,26 +2536,26 @@ namespace Nox
             addEntry.template operator()<CharacterController3DComponent>("Character Controller 3D")
         };
 
-        std::vector<UI::UIMenuItem> physics2D = {
+        std::vector<NoxUI::UIMenuItem> physics2D = {
             addEntry.template operator()<RigidBody2DComponent>("Rigidbody 2D"),
             addEntry.template operator()<BoxCollider2DComponent>("Box Collider 2D"),
             addEntry.template operator()<CircleCollider2DComponent>("Circle Collider 2D")
         };
 
-        std::vector<UI::UIMenuItem> audio = {
+        std::vector<NoxUI::UIMenuItem> audio = {
             addEntry.template operator()<AudioSourceComponent>("Audio Source"),
             addEntry.template operator()<ImpactSoundComponent>("Impact Sound"),
             addEntry.template operator()<AudioListenerComponent>("Audio Listener"),
             addEntry.template operator()<AudioVolumeComponent>("Audio Volume")
         };
 
-        std::vector<UI::UIMenuItem> animation = {
+        std::vector<NoxUI::UIMenuItem> animation = {
             addEntry.template operator()<AnimatorComponent>("Animator"),
             addEntry.template operator()<BoneSocketComponent>("Bone Socket"),
             addEntry.template operator()<TimelinePlayerComponent>("Timeline Player")
         };
 
-        std::vector<UI::UIMenuItem> rootItems = {
+        std::vector<NoxUI::UIMenuItem> rootItems = {
             addEntry.template operator()<ScriptComponent>("Script"),
             { "Rendering", "", {}, false, true, false, false, "", std::move(rendering) },
             { "Lighting", "", {}, false, true, false, false, "", std::move(lighting) },
@@ -2566,6 +2566,6 @@ namespace Nox
             addEntry.template operator()<MetadataComponent>("Metadata")
         };
 
-        UI::UIMenuPopup::ShowPopupMenu(*ctx, triggerBounds, std::move(rootItems), true);
+        NoxUI::UIMenuPopup::ShowPopupMenu(*ctx, triggerBounds, std::move(rootItems), true);
     }
 }

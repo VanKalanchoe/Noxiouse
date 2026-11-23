@@ -1,4 +1,5 @@
 #include "ContentBrowserV2Panel.h"
+#include <NoxUI/Rendering/UIFont.h>
 
 #include <algorithm>
 #include <cctype>
@@ -26,23 +27,23 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/CustomLitShaders.h"
 #include "NoxCore/Renderer/MaterialGraph.h"
-#include "NoxCore/UI/Core/UIContext.h"
-#include "NoxCore/UI/Layout/UILayout.h"
-#include "NoxCore/UI/Rendering/UIDrawList.h"
-#include "NoxCore/UI/Rendering/UIIcons.h"
-#include "NoxCore/UI/Widgets/UIBreadcrumb.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UICheckBox.h"
-#include "NoxCore/UI/Widgets/UIDragScalar.h"
-#include "NoxCore/UI/Widgets/UIDropdown.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
-#include "NoxCore/UI/Widgets/UIModal.h"
-#include "NoxCore/UI/Widgets/UIScrollBar.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
-#include "NoxCore/UI/Widgets/UISearchBar.h"
-#include "NoxCore/UI/Widgets/UITextInput.h"
-#include "NoxCore/UI/Widgets/UITreeView.h"
+#include <NoxUI/Core/UIContext.h>
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Rendering/UIIcons.h>
+#include <NoxUI/Widgets/UIBreadcrumb.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UICheckBox.h>
+#include <NoxUI/Widgets/UIDragScalar.h>
+#include <NoxUI/Widgets/UIDropdown.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIMenu.h>
+#include <NoxUI/Widgets/UIModal.h>
+#include <NoxUI/Widgets/UIScrollBar.h>
+#include <NoxUI/Widgets/UIScrollView.h>
+#include <NoxUI/Widgets/UISearchBar.h>
+#include <NoxUI/Widgets/UITextInput.h>
+#include <NoxUI/Widgets/UITreeView.h>
 #include "NoxCore/Utils/Utils.h"
 
 namespace Nox
@@ -57,52 +58,52 @@ namespace Nox
         // texture red, level orange, animation turquoise, sound blue), so the line under a tile tells the kind at a glance.
         switch (type)
         {
-        case AssetType::Scene:             return { "Scene",          UI::ThemeColor("AssetScene", { 0.96f, 0.58f, 0.18f, 1.0f }) };
-        case AssetType::Texture2D:         return { "Texture",        UI::ThemeColor("AssetTexture", { 0.88f, 0.32f, 0.30f, 1.0f }) };
-        case AssetType::MeshSource:        return { "Model File",     UI::ThemeColor("AssetModelFile", { 0.55f, 0.66f, 0.72f, 1.0f }) };
-        case AssetType::Mesh:              return { "Skeletal Mesh",  UI::ThemeColor("AssetSkeletalMesh", { 0.90f, 0.40f, 0.74f, 1.0f }) };
-        case AssetType::SkeletalMesh:      return { "Skeletal Mesh",  UI::ThemeColor("AssetSkeletalMesh", { 0.90f, 0.40f, 0.74f, 1.0f }) };
-        case AssetType::StaticMesh:        return { "Static Mesh",    UI::ThemeColor("AssetStaticMesh", { 0.20f, 0.76f, 0.90f, 1.0f }) };
-        case AssetType::Material:          return { "Material",       UI::ThemeColor("AssetMaterial", { 0.40f, 0.80f, 0.34f, 1.0f }) };
-        case AssetType::MaterialGraph:     return { "Material Graph", UI::ThemeColor("AssetMaterialGraph", { 0.62f, 0.88f, 0.42f, 1.0f }) };
-        case AssetType::MaterialShader:    return { "Material Shader",UI::ThemeColor("AssetMaterialShader", { 0.78f, 0.82f, 0.32f, 1.0f }) };
-        case AssetType::Skeleton:          return { "Skeleton",       UI::ThemeColor("AssetSkeleton", { 0.88f, 0.80f, 0.58f, 1.0f }) };
-        case AssetType::AnimationSequence: return { "Animation",      UI::ThemeColor("AssetAnimation", { 0.22f, 0.86f, 0.72f, 1.0f }) };
-        case AssetType::AnimationGraph:    return { "Anim Graph",     UI::ThemeColor("AssetAnimGraph", { 0.52f, 0.58f, 0.98f, 1.0f }) };
-        case AssetType::Prefab:            return { "Prefab",         UI::ThemeColor("AssetPrefab", { 0.32f, 0.58f, 1.00f, 1.0f }) };
-        case AssetType::Timeline:          return { "Timeline",       UI::ThemeColor("AssetTimeline", { 0.98f, 0.78f, 0.28f, 1.0f }) };
-        case AssetType::Font:              return { "Font",           UI::ThemeColor("AssetFont", { 0.74f, 0.76f, 0.82f, 1.0f }) };
-        case AssetType::AudioClip:         return { "Sound",          UI::ThemeColor("AssetSound", { 0.38f, 0.72f, 1.00f, 1.0f }) };
-        case AssetType::AudioGraph:        return { "Audio Graph",    UI::ThemeColor("AssetAudioGraph", { 0.54f, 0.68f, 1.00f, 1.0f }) };
-        case AssetType::AudioMixer:        return { "Audio Mixer",    UI::ThemeColor("AssetAudioMixer", { 0.60f, 0.64f, 0.84f, 1.0f }) };
-        case AssetType::AcousticData:      return { "Acoustic Data",  UI::ThemeColor("AssetAcousticData", { 0.44f, 0.78f, 0.82f, 1.0f }) };
-        default:                           return { "File",           UI::ThemeColor("AssetFile", { 0.62f, 0.66f, 0.74f, 1.0f }) };
+        case AssetType::Scene:             return { "Scene",          NoxUI::ThemeColor("AssetScene", { 0.96f, 0.58f, 0.18f, 1.0f }) };
+        case AssetType::Texture2D:         return { "Texture",        NoxUI::ThemeColor("AssetTexture", { 0.88f, 0.32f, 0.30f, 1.0f }) };
+        case AssetType::MeshSource:        return { "Model File",     NoxUI::ThemeColor("AssetModelFile", { 0.55f, 0.66f, 0.72f, 1.0f }) };
+        case AssetType::Mesh:              return { "Skeletal Mesh",  NoxUI::ThemeColor("AssetSkeletalMesh", { 0.90f, 0.40f, 0.74f, 1.0f }) };
+        case AssetType::SkeletalMesh:      return { "Skeletal Mesh",  NoxUI::ThemeColor("AssetSkeletalMesh", { 0.90f, 0.40f, 0.74f, 1.0f }) };
+        case AssetType::StaticMesh:        return { "Static Mesh",    NoxUI::ThemeColor("AssetStaticMesh", { 0.20f, 0.76f, 0.90f, 1.0f }) };
+        case AssetType::Material:          return { "Material",       NoxUI::ThemeColor("AssetMaterial", { 0.40f, 0.80f, 0.34f, 1.0f }) };
+        case AssetType::MaterialGraph:     return { "Material Graph", NoxUI::ThemeColor("AssetMaterialGraph", { 0.62f, 0.88f, 0.42f, 1.0f }) };
+        case AssetType::MaterialShader:    return { "Material Shader",NoxUI::ThemeColor("AssetMaterialShader", { 0.78f, 0.82f, 0.32f, 1.0f }) };
+        case AssetType::Skeleton:          return { "Skeleton",       NoxUI::ThemeColor("AssetSkeleton", { 0.88f, 0.80f, 0.58f, 1.0f }) };
+        case AssetType::AnimationSequence: return { "Animation",      NoxUI::ThemeColor("AssetAnimation", { 0.22f, 0.86f, 0.72f, 1.0f }) };
+        case AssetType::AnimationGraph:    return { "Anim Graph",     NoxUI::ThemeColor("AssetAnimGraph", { 0.52f, 0.58f, 0.98f, 1.0f }) };
+        case AssetType::Prefab:            return { "Prefab",         NoxUI::ThemeColor("AssetPrefab", { 0.32f, 0.58f, 1.00f, 1.0f }) };
+        case AssetType::Timeline:          return { "Timeline",       NoxUI::ThemeColor("AssetTimeline", { 0.98f, 0.78f, 0.28f, 1.0f }) };
+        case AssetType::Font:              return { "Font",           NoxUI::ThemeColor("AssetFont", { 0.74f, 0.76f, 0.82f, 1.0f }) };
+        case AssetType::AudioClip:         return { "Sound",          NoxUI::ThemeColor("AssetSound", { 0.38f, 0.72f, 1.00f, 1.0f }) };
+        case AssetType::AudioGraph:        return { "Audio Graph",    NoxUI::ThemeColor("AssetAudioGraph", { 0.54f, 0.68f, 1.00f, 1.0f }) };
+        case AssetType::AudioMixer:        return { "Audio Mixer",    NoxUI::ThemeColor("AssetAudioMixer", { 0.60f, 0.64f, 0.84f, 1.0f }) };
+        case AssetType::AcousticData:      return { "Acoustic Data",  NoxUI::ThemeColor("AssetAcousticData", { 0.44f, 0.78f, 0.82f, 1.0f }) };
+        default:                           return { "File",           NoxUI::ThemeColor("AssetFile", { 0.62f, 0.66f, 0.74f, 1.0f }) };
         }
     }
 
     namespace
     {
-        using UI::UIColor;
-        using UI::UIVec2;
+        using NoxUI::UIColor;
+        using NoxUI::UIVec2;
 
-        void Ring(UI::UIDrawList& d, const UIVec2& c, float r, float thickness, const UIColor& color)
+        void Ring(NoxUI::UIDrawList& d, const UIVec2& c, float r, float thickness, const UIColor& color)
         {
             d.AddRoundedRect(c - UIVec2{ r }, c + UIVec2{ r }, { 0.0f, 0.0f, 0.0f, 0.0f }, glm::vec4(r), thickness, color);
         }
 
-        void Disc(UI::UIDrawList& d, const UIVec2& c, float r, const UIColor& color)
+        void Disc(NoxUI::UIDrawList& d, const UIVec2& c, float r, const UIColor& color)
         {
             d.AddRoundedRect(c - UIVec2{ r }, c + UIVec2{ r }, color, glm::vec4(r));
         }
 
-        void Line(UI::UIDrawList& d, const UIVec2& a, const UIVec2& b, float thickness, const UIColor& color)
+        void Line(NoxUI::UIDrawList& d, const UIVec2& a, const UIVec2& b, float thickness, const UIColor& color)
         {
-            UI::Icons::DrawSegment(d, a, b, thickness, color);
+            NoxUI::Icons::DrawSegment(d, a, b, thickness, color);
         }
 
         UIColor Darker(const UIColor& c, float f) { return { c.r * f, c.g * f, c.b * f, c.a }; }
 
-        void IsoCube(UI::UIDrawList& d, const UIVec2& c, float s, float t, const UIColor& color)
+        void IsoCube(NoxUI::UIDrawList& d, const UIVec2& c, float s, float t, const UIColor& color)
         {
             // An outlined cube seen from above at an angle.
             const UIVec2 top{ c.x, c.y - s * 0.50f }, left{ c.x - s * 0.44f, c.y - s * 0.25f }, right{ c.x + s * 0.44f, c.y - s * 0.25f };
@@ -114,7 +115,7 @@ namespace Nox
             Line(d, mid, bottom, t, color); Line(d, botLeft, bottom, t, color); Line(d, botRight, bottom, t, color);
         }
 
-        void NodeGraphGlyph(UI::UIDrawList& d, const UIVec2& c, float s, float t, const UIColor& color)
+        void NodeGraphGlyph(NoxUI::UIDrawList& d, const UIVec2& c, float s, float t, const UIColor& color)
         {
             const float w = s * 0.30f, h = s * 0.20f;
             const UIVec2 a{ c.x - s * 0.34f, c.y - s * 0.22f }, b{ c.x - s * 0.34f, c.y + s * 0.24f }, out{ c.x + s * 0.32f, c.y };
@@ -125,7 +126,7 @@ namespace Nox
         }
     }
 
-    void DrawFolderIcon(UI::UIDrawList& d, const UIVec2& c, float s, const UIColor& color)
+    void DrawFolderIcon(NoxUI::UIDrawList& d, const UIVec2& c, float s, const UIColor& color)
     {
         // A folder: its tab, then the front a little lighter, like a manila folder.
         const float w = s, h = s * 0.74f;
@@ -135,7 +136,7 @@ namespace Nox
         d.AddRoundedRectGradient({ min.x, min.y + h * 0.26f }, { min.x + w, min.y + h }, color, Darker(color, 0.88f), glm::vec4(s * 0.06f));
     }
 
-    void DrawAssetTypeIcon(UI::UIDrawList& d, AssetType type, const UIVec2& c, float s, const UIColor& color)
+    void DrawAssetTypeIcon(NoxUI::UIDrawList& d, AssetType type, const UIVec2& c, float s, const UIColor& color)
     {
         const float t = std::max(1.5f, s * 0.055f);
         switch (type)
@@ -160,7 +161,7 @@ namespace Nox
             // A lit sphere.
             const float r = s * 0.38f;
             d.AddRoundedRectGradient(c - UIVec2{ r }, c + UIVec2{ r }, color, Darker(color, 0.30f), glm::vec4(r));
-            Disc(d, { c.x - r * 0.35f, c.y - r * 0.38f }, r * 0.22f, UI::ThemeColor("AssetIconHighlight", { 1.0f, 1.0f, 1.0f, 0.55f }));
+            Disc(d, { c.x - r * 0.35f, c.y - r * 0.38f }, r * 0.22f, NoxUI::ThemeColor("AssetIconHighlight", { 1.0f, 1.0f, 1.0f, 0.55f }));
             break;
         }
         case AssetType::Texture2D:
@@ -237,7 +238,7 @@ namespace Nox
         case AssetType::Font:
         {
             const float size = s * 0.62f;
-            const UIVec2 extent = UI::UILabel::MeasureText("Aa", nullptr, size);
+            const UIVec2 extent = NoxUI::UILabel::MeasureText("Aa", nullptr, size);
             d.AddText("Aa", nullptr, { c.x - extent.x * 0.5f, c.y - extent.y * 0.5f }, size, color);
             break;
         }
@@ -289,8 +290,8 @@ namespace Nox
 
     namespace
     {
-        constexpr UI::UIThemeToken kFolderColor{ "ContentFolder", { 0.86f, 0.70f, 0.38f, 1.0f } };
-        constexpr UI::UIThemeToken kScriptColor{ "ContentScript", { 0.44f, 0.62f, 0.95f, 1.0f } };
+        constexpr NoxUI::UIThemeToken kFolderColor{ "ContentFolder", { 0.86f, 0.70f, 0.38f, 1.0f } };
+        constexpr NoxUI::UIThemeToken kScriptColor{ "ContentScript", { 0.44f, 0.62f, 0.95f, 1.0f } };
 
         constexpr const char* kFilterNames[] = { "All Types", "Meshes", "Materials", "Textures", "Prefabs", "Scenes", "Animation", "Audio", "Scripts" };
 
@@ -333,16 +334,16 @@ namespace Nox
 
     // Where you are, as Unreal shows it: "Assets > Models > bistro" in plain text with chevrons, one click on a folder goes there.
     // As high as the toolbar's buttons; when the path is longer than the bar, its first folders give way to "...".
-    class ContentPathBar final : public UI::UIElement
+    class ContentPathBar final : public NoxUI::UIElement
     {
     public:
         ContentPathBar()
         {
-            HitTestMode = UI::UIHitTestMode::Self;
-            WidthMode = UI::UISizeMode::Fill;
-            HeightMode = UI::UISizeMode::Fixed;
+            HitTestMode = NoxUI::UIHitTestMode::Self;
+            WidthMode = NoxUI::UISizeMode::Fill;
+            HeightMode = NoxUI::UISizeMode::Fixed;
             FixedSize = { 0.0f, 26.0f };
-            VAlign = UI::UIAlignment::Center;
+            VAlign = NoxUI::UIAlignment::Center;
         }
 
         std::function<void(int segment)> OnNavigate;
@@ -354,17 +355,17 @@ namespace Nox
         }
         const std::vector<std::string>& GetSegments() const { return m_Segments; }
 
-        bool OnPointerMove(const UI::UIPointerEvent& e) override
+        bool OnPointerMove(const NoxUI::UIPointerEvent& e) override
         {
             m_Hovered = SegmentAt(e.Position);
             return true;
         }
-        bool OnPointerLeave(const UI::UIPointerEvent&) override
+        bool OnPointerLeave(const NoxUI::UIPointerEvent&) override
         {
             m_Hovered = -1;
             return false;
         }
-        bool OnPointerDown(const UI::UIPointerEvent& e) override
+        bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
         {
             if (e.Button != 1)
                 return false;
@@ -377,10 +378,10 @@ namespace Nox
     protected:
         UIVec2 ComputeDesiredSize() override { return { 80.0f, 26.0f }; }
 
-        void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+        void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
         {
             Place();
-            const UI::UIRect& b = GetBounds();
+            const NoxUI::UIRect& b = GetBounds();
             const UIColor text = theme.GetToken("Text", { 0.92f, 0.93f, 0.95f, 1.0f });
             const UIColor muted = theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
             d.AddRoundedRect(b.Min, b.Max, theme.GetToken("Background", { 0.063f, 0.075f, 0.106f, 1.0f }), glm::vec4(4.0f), 1.0f,
@@ -389,27 +390,27 @@ namespace Nox
             const float cy = b.Center().y;
             if (m_Elided)
             {
-                const UIVec2 size = UI::UILabel::MeasureText("...", nullptr, kFont);
+                const UIVec2 size = NoxUI::UILabel::MeasureText("...", nullptr, kFont);
                 d.AddText("...", nullptr, { b.Min.x + kInset, cy - size.y * 0.5f }, kFont, muted);
                 const float x = b.Min.x + kInset + size.x + kChevron * 0.5f;
-                UI::Icons::DrawSegment(d, { x - 2.0f, cy - 4.0f }, { x + 2.0f, cy }, 1.5f, muted);
-                UI::Icons::DrawSegment(d, { x + 2.0f, cy }, { x - 2.0f, cy + 4.0f }, 1.5f, muted);
+                NoxUI::Icons::DrawSegment(d, { x - 2.0f, cy - 4.0f }, { x + 2.0f, cy }, 1.5f, muted);
+                NoxUI::Icons::DrawSegment(d, { x + 2.0f, cy }, { x - 2.0f, cy + 4.0f }, 1.5f, muted);
             }
             for (size_t i = 0; i < m_Placed.size(); ++i)
             {
                 const Placed& p = m_Placed[i];
                 const bool last = p.Index + 1 == static_cast<int>(m_Segments.size());
                 if (p.Index == m_Hovered && !last)
-                    d.AddRoundedRect({ p.X0, b.Min.y + 3.0f }, { p.X1, b.Max.y - 3.0f }, UI::ThemeColor("BreadcrumbHover", { 1.0f, 1.0f, 1.0f, 0.08f }), glm::vec4(3.0f));
+                    d.AddRoundedRect({ p.X0, b.Min.y + 3.0f }, { p.X1, b.Max.y - 3.0f }, NoxUI::ThemeColor("BreadcrumbHover", { 1.0f, 1.0f, 1.0f, 0.08f }), glm::vec4(3.0f));
                 const std::string& label = m_Segments[static_cast<size_t>(p.Index)];
-                const UIVec2 size = UI::UILabel::MeasureText(label, nullptr, kFont);
+                const UIVec2 size = NoxUI::UILabel::MeasureText(label, nullptr, kFont);
                 d.AddText(label, nullptr, { p.X0 + kPad, cy - size.y * 0.5f }, kFont, last || p.Index == m_Hovered ? text : muted);
                 if (!last)
                 {
                     // The chevron after it.
                     const float x = p.X1 + kChevron * 0.5f;
-                    UI::Icons::DrawSegment(d, { x - 2.0f, cy - 4.0f }, { x + 2.0f, cy }, 1.5f, muted);
-                    UI::Icons::DrawSegment(d, { x + 2.0f, cy }, { x - 2.0f, cy + 4.0f }, 1.5f, muted);
+                    NoxUI::Icons::DrawSegment(d, { x - 2.0f, cy - 4.0f }, { x + 2.0f, cy }, 1.5f, muted);
+                    NoxUI::Icons::DrawSegment(d, { x + 2.0f, cy }, { x - 2.0f, cy + 4.0f }, 1.5f, muted);
                 }
             }
             d.PopClipRect();
@@ -432,12 +433,12 @@ namespace Nox
         {
             m_Placed.clear();
             m_Elided = false;
-            const UI::UIRect& b = GetBounds();
+            const NoxUI::UIRect& b = GetBounds();
             const float available = b.Width() - kInset * 2.0f;
             std::vector<float> widths;
             for (const std::string& segment : m_Segments)
-                widths.push_back(UI::UILabel::MeasureText(segment, nullptr, kFont).x + kPad * 2.0f);
-            const float ellipsis = UI::UILabel::MeasureText("...", nullptr, kFont).x + kChevron;
+                widths.push_back(NoxUI::UILabel::MeasureText(segment, nullptr, kFont).x + kPad * 2.0f);
+            const float ellipsis = NoxUI::UILabel::MeasureText("...", nullptr, kFont).x + kChevron;
             int first = static_cast<int>(m_Segments.size());
             float used = 0.0f;
             while (first > 0)
@@ -460,7 +461,7 @@ namespace Nox
 
         int SegmentAt(const UIVec2& p) const
         {
-            const UI::UIRect& b = GetBounds();
+            const NoxUI::UIRect& b = GetBounds();
             if (!b.Contains(p))
                 return -1;
             for (const Placed& placed : m_Placed)
@@ -483,7 +484,7 @@ namespace Nox
 
     // The open folder's files as tiles: virtualised (only the rows in sight are drawn), its own scroll bar, selection, drag and
     // drop, the inline rename field.
-    class ContentTileView final : public UI::UIElement
+    class ContentTileView final : public NoxUI::UIElement
     {
     public:
         explicit ContentTileView(ContentBrowserV2Panel& panel)
@@ -492,17 +493,17 @@ namespace Nox
             StyleClass = "TextInput";
             DrawBackground = false;
             ClipChildren = true;
-            HitTestMode = UI::UIHitTestMode::Self;
+            HitTestMode = NoxUI::UIHitTestMode::Self;
             Focusable = true;
-            WidthMode = UI::UISizeMode::Fill;
-            HeightMode = UI::UISizeMode::Fill;
+            WidthMode = NoxUI::UISizeMode::Fill;
+            HeightMode = NoxUI::UISizeMode::Fill;
 
-            m_RenameInput = Ref<UI::UITextInput>(new UI::UITextInput());
+            m_RenameInput = Ref<NoxUI::UITextInput>(new NoxUI::UITextInput());
             m_RenameInput->Visible = false;
             m_RenameInput->OnSubmit = [this](const std::string& text) { FinishRename(true, text); };
             AddChild(m_RenameInput);
 
-            OnDragStart = [this]() -> std::optional<UI::UIDragPayload>
+            OnDragStart = [this]() -> std::optional<NoxUI::UIDragPayload>
             {
                 if (m_PressedIndex < 0 || m_PressedIndex >= static_cast<int>(m_Panel.m_Entries.size()))
                     return std::nullopt;
@@ -514,7 +515,7 @@ namespace Nox
                     m_Selected.clear();
                     m_Selected.insert(entry.Handle);
                 }
-                UI::UIDragPayload payload;
+                NoxUI::UIDragPayload payload;
                 payload.UserId = entry.Handle;
                 if (m_Selected.size() > 1)
                 {
@@ -531,9 +532,9 @@ namespace Nox
                 return payload;
             };
 
-            OnDrop = [this](const UI::UIDragPayload& payload) -> bool
+            OnDrop = [this](const NoxUI::UIDragPayload& payload) -> bool
             {
-                const UI::UIContext* ctx = UI::UIContext::GetCurrent();
+                const NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
                 const int index = ctx ? TileAt(ctx->GetLastMousePos()) : -1;
                 const ContentEntry* target = (index >= 0) ? &m_Panel.m_Entries[static_cast<size_t>(index)] : nullptr;
                 const std::filesystem::path folder = (target && target->IsDirectory) ? target->Path : m_Panel.m_CurrentDirectory;
@@ -600,7 +601,7 @@ namespace Nox
             m_RenameInput->Visible = true;
             m_RenameFrames = 0;
             m_ScrollToIndex = m_RenameIndex;
-            if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
+            if (NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent())
                 ctx->SetFocus(m_RenameInput.get());
             else
                 m_FocusRenameNextFrame = true;
@@ -608,32 +609,32 @@ namespace Nox
 
         bool IsRenaming() const { return m_RenameHandle != 0; }
 
-        UI::UICursorShape GetCursorShape(const UIVec2&) const override { return UI::UICursorShape::Default; }
+        NoxUI::UICursorShape GetCursorShape(const UIVec2&) const override { return NoxUI::UICursorShape::Default; }
 
-        bool OnPointerDown(const UI::UIPointerEvent& e) override
+        bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
         {
             m_ScrollBar.SetGeometry(GetBounds(), ContentHeight(), GetBounds().Height());
             if (e.Button == 1 && m_ScrollBar.OnPointerDown(e.Position, m_ScrollY))
             {
-                if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
+                if (NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent())
                     ctx->CancelPendingDrag();
                 return true;
             }
             if (IsRenaming() && !m_RenameInput->GetBounds().Contains(e.Position))
                 FinishRename(true, m_RenameInput->Text);
-            if (UI::UIContext* ctx = UI::UIContext::GetCurrent(); ctx && !IsRenaming())
+            if (NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent(); ctx && !IsRenaming())
                 ctx->SetFocus(this); // F2, Delete, Enter, Ctrl+A, Backspace act on the tiles
 
             const int index = TileAt(e.Position);
-            const bool ctrl = (e.Modifiers & UI::UIMod::Ctrl) != 0;
-            const bool shift = (e.Modifiers & UI::UIMod::Shift) != 0;
+            const bool ctrl = (e.Modifiers & NoxUI::UIMod::Ctrl) != 0;
+            const bool shift = (e.Modifiers & NoxUI::UIMod::Shift) != 0;
 
             if (e.Button == 3) // right button: the menu of what is under the pointer
             {
-                UI::UIContext* ctx = UI::UIContext::GetCurrent();
+                NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
                 if (!ctx)
                     return true;
-                std::vector<UI::UIMenuItem> items;
+                std::vector<NoxUI::UIMenuItem> items;
                 if (index >= 0)
                 {
                     const ContentEntry entry = m_Panel.m_Entries[static_cast<size_t>(index)];
@@ -647,7 +648,7 @@ namespace Nox
                     items = m_Panel.BuildFolderSpaceMenu();
                 }
                 const UIVec2 p = e.Position;
-                UI::UIMenuPopup::ShowPopupMenu(*ctx, { p, p + UIVec2{ 1.0f, 1.0f } }, std::move(items));
+                NoxUI::UIMenuPopup::ShowPopupMenu(*ctx, { p, p + UIVec2{ 1.0f, 1.0f } }, std::move(items));
                 return true;
             }
             if (e.Button != 1)
@@ -712,7 +713,7 @@ namespace Nox
             return true;
         }
 
-        bool OnPointerMove(const UI::UIPointerEvent& e) override
+        bool OnPointerMove(const NoxUI::UIPointerEvent& e) override
         {
             if (m_ScrollBar.OnPointerMove(e.Position, m_ScrollY))
                 return true;
@@ -734,7 +735,7 @@ namespace Nox
             return true;
         }
 
-        bool OnPointerUp(const UI::UIPointerEvent& e) override
+        bool OnPointerUp(const NoxUI::UIPointerEvent& e) override
         {
             if (e.Button == 1 && m_ScrollBar.OnPointerUp())
                 return true;
@@ -746,15 +747,15 @@ namespace Nox
             return UIElement::OnPointerUp(e);
         }
 
-        bool OnPointerLeave(const UI::UIPointerEvent&) override
+        bool OnPointerLeave(const NoxUI::UIPointerEvent&) override
         {
             m_HoveredIndex = -1;
             return false;
         }
 
-        bool OnMouseWheel(const UI::UIPointerEvent& e) override
+        bool OnMouseWheel(const NoxUI::UIPointerEvent& e) override
         {
-            if ((e.Modifiers & UI::UIMod::Ctrl) != 0)
+            if ((e.Modifiers & NoxUI::UIMod::Ctrl) != 0)
             {
                 // Ctrl + wheel: tile size, as in Unreal.
                 ThumbSize = std::clamp(ThumbSize + e.ScrollDelta.y * 12.0f, 56.0f, 224.0f);
@@ -768,7 +769,7 @@ namespace Nox
             return true;
         }
 
-        bool OnKeyDown(const UI::UIKeyEvent& e) override
+        bool OnKeyDown(const NoxUI::UIKeyEvent& e) override
         {
             if (IsRenaming())
             {
@@ -779,7 +780,7 @@ namespace Nox
                 }
                 return false;
             }
-            const bool ctrl = (e.Modifiers & UI::UIMod::Ctrl) != 0;
+            const bool ctrl = (e.Modifiers & NoxUI::UIMod::Ctrl) != 0;
             switch (e.KeyCode)
             {
             case SDL_SCANCODE_DELETE:
@@ -830,14 +831,14 @@ namespace Nox
             return { 200.0f, 160.0f };
         }
 
-        void ArrangeChildren(const UI::UIRect&) override
+        void ArrangeChildren(const NoxUI::UIRect&) override
         {
             m_ScrollBar.SetGeometry(GetBounds(), ContentHeight(), GetBounds().Height());
             m_ScrollY = std::clamp(m_ScrollY, 0.0f, m_ScrollBar.GetMaxScroll());
             if (m_ScrollToIndex >= 0)
             {
-                const UI::UIRect tile = TileRect(m_ScrollToIndex);
-                const UI::UIRect& b = GetBounds();
+                const NoxUI::UIRect tile = TileRect(m_ScrollToIndex);
+                const NoxUI::UIRect& b = GetBounds();
                 if (tile.Min.y < b.Min.y)
                     m_ScrollY -= b.Min.y - tile.Min.y + kGap;
                 else if (tile.Max.y > b.Max.y)
@@ -847,7 +848,7 @@ namespace Nox
             }
             if (IsRenaming() && m_RenameIndex >= 0 && m_RenameIndex < static_cast<int>(m_Panel.m_Entries.size()))
             {
-                const UI::UIRect tile = TileRect(m_RenameIndex);
+                const NoxUI::UIRect tile = TileRect(m_RenameIndex);
                 const float top = tile.Min.y + ThumbSize + 5.0f;
                 m_RenameInput->Arrange({ { tile.Min.x + 2.0f, top }, { tile.Max.x - 2.0f, top + 26.0f } });
             }
@@ -861,7 +862,7 @@ namespace Nox
         {
             m_ScrollBar.SetGeometry(GetBounds(), ContentHeight(), GetBounds().Height());
             bool hovered = false;
-            if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
+            if (NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent())
             {
                 hovered = ctx->GetHovered() == this && m_ScrollBar.Contains(ctx->GetLastMousePos());
                 if (m_FocusRenameNextFrame && IsRenaming())
@@ -872,13 +873,13 @@ namespace Nox
             }
             m_ScrollBar.Update(dt, hovered);
             // The rename field lost the focus (a click elsewhere, Tab): what was typed is the new name.
-            if (IsRenaming() && ++m_RenameFrames > 2 && !UI::HasState(m_RenameInput->GetState(), UI::UIState::Focused))
+            if (IsRenaming() && ++m_RenameFrames > 2 && !NoxUI::HasState(m_RenameInput->GetState(), NoxUI::UIState::Focused))
                 FinishRename(true, m_RenameInput->Text);
         }
 
-        void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+        void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
         {
-            const UI::UIRect& b = GetBounds();
+            const NoxUI::UIRect& b = GetBounds();
             const UIColor surface = theme.GetToken("Surface1", { 0.125f, 0.145f, 0.20f, 1.0f });
             const UIColor well = theme.GetToken("Background", { 0.063f, 0.075f, 0.106f, 1.0f });
             const UIColor border = theme.GetToken("Border", { 0.20f, 0.235f, 0.32f, 1.0f });
@@ -891,12 +892,12 @@ namespace Nox
             if (m_Panel.m_Entries.empty())
             {
                 const std::string message = m_Panel.m_Search.empty() ? "This folder is empty -- drag files here or use + Add" : "No assets match the search";
-                const UIVec2 size = UI::UILabel::MeasureText(message, nullptr, 14.0f);
+                const UIVec2 size = NoxUI::UILabel::MeasureText(message, nullptr, 14.0f);
                 d.AddText(message, nullptr, { b.Min.x + std::max(8.0f, (b.Width() - size.x) * 0.5f), b.Min.y + 40.0f }, 14.0f, muted);
                 return;
             }
 
-            const UI::UIContext* ctx = UI::UIContext::GetCurrent();
+            const NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
             const bool dragging = ctx && ctx->IsDragging() && b.Contains(ctx->GetLastMousePos());
             const int dropIndex = dragging ? TileAt(ctx->GetLastMousePos()) : -1;
 
@@ -911,7 +912,7 @@ namespace Nox
             for (int i = first; i < last; ++i)
             {
                 const ContentEntry& entry = m_Panel.m_Entries[static_cast<size_t>(i)];
-                const UI::UIRect r = TileRect(i);
+                const NoxUI::UIRect r = TileRect(i);
                 const bool hovered = i == m_HoveredIndex;
                 const bool selected = entry.Handle != 0 ? m_Selected.contains(entry.Handle) : (entry.Path == m_SelectedPath);
                 const bool dropTarget = i == dropIndex && entry.IsDirectory;
@@ -923,12 +924,12 @@ namespace Nox
             d.PopClipRect();
         }
 
-        void OnPaintOverlay(UI::UIDrawList& d, const UI::UITheme& theme) override
+        void OnPaintOverlay(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
         {
             m_ScrollBar.Paint(d, theme, m_ScrollY);
         }
 
-        UI::UIRect GetChildClipRect() const override { return GetBounds(); }
+        NoxUI::UIRect GetChildClipRect() const override { return GetBounds(); }
 
     private:
         static constexpr float kGap = 10.0f;
@@ -936,11 +937,11 @@ namespace Nox
         static constexpr float kTypeSize = 12.5f;
 
         float TileWidth() const { return ThumbSize; }
-        float TileHeight() const { return ThumbSize + 3.0f + 6.0f + UI::UILabel::MeasureText("Ag", nullptr, kNameSize).y * 2.0f + 2.0f + 16.0f; }
+        float TileHeight() const { return ThumbSize + 3.0f + 6.0f + NoxUI::UILabel::MeasureText("Ag", nullptr, kNameSize).y * 2.0f + 2.0f + 16.0f; }
 
         int Columns() const
         {
-            const float usable = std::max(0.0f, GetBounds().Width() - UI::UIScrollBar::kLaneWidth - kGap);
+            const float usable = std::max(0.0f, GetBounds().Width() - NoxUI::UIScrollBar::kLaneWidth - kGap);
             return std::max(1, static_cast<int>(usable / (TileWidth() + kGap)));
         }
 
@@ -950,11 +951,11 @@ namespace Nox
             return kGap + static_cast<float>(rows) * (TileHeight() + kGap);
         }
 
-        UI::UIRect TileRect(int index) const
+        NoxUI::UIRect TileRect(int index) const
         {
             const int columns = Columns();
             const int row = index / columns, column = index % columns;
-            const UI::UIRect& b = GetBounds();
+            const NoxUI::UIRect& b = GetBounds();
             const float x = b.Min.x + kGap + static_cast<float>(column) * (TileWidth() + kGap);
             const float y = b.Min.y + kGap + static_cast<float>(row) * (TileHeight() + kGap) - m_ScrollY;
             return { { x, y }, { x + TileWidth(), y + TileHeight() } };
@@ -962,7 +963,7 @@ namespace Nox
 
         int TileAt(const UIVec2& p) const
         {
-            const UI::UIRect& b = GetBounds();
+            const NoxUI::UIRect& b = GetBounds();
             if (!b.Contains(p))
                 return -1;
             const int columns = Columns();
@@ -980,22 +981,22 @@ namespace Nox
             return index < static_cast<int>(m_Panel.m_Entries.size()) ? index : -1;
         }
 
-        void PaintFolder(UI::UIDrawList& d, const UI::UIRect& r, const ContentEntry& entry, bool hovered, bool selected, bool dropTarget,
+        void PaintFolder(NoxUI::UIDrawList& d, const NoxUI::UIRect& r, const ContentEntry& entry, bool hovered, bool selected, bool dropTarget,
                          const UIColor& accent, const UIColor& text) const
         {
             if (hovered || selected || dropTarget)
             {
-                const UIColor fill = dropTarget ? UIColor{ accent.r, accent.g, accent.b, 0.28f } : selected ? UIColor{ accent.r, accent.g, accent.b, 0.22f } : UI::ThemeColor("ContentTileFill", { 1.0f, 1.0f, 1.0f, 0.05f });
+                const UIColor fill = dropTarget ? UIColor{ accent.r, accent.g, accent.b, 0.28f } : selected ? UIColor{ accent.r, accent.g, accent.b, 0.22f } : NoxUI::ThemeColor("ContentTileFill", { 1.0f, 1.0f, 1.0f, 0.05f });
                 d.AddRoundedRect(r.Min, r.Max, fill, glm::vec4(6.0f), (selected || dropTarget) ? 1.5f : 0.0f, accent);
             }
-            DrawFolderIcon(d, { r.Center().x, r.Min.y + ThumbSize * 0.52f }, ThumbSize * 0.62f, hovered ? UI::ThemeColor("ContentFolderHovered", { 0.95f, 0.80f, 0.48f, 1.0f }) : kFolderColor);
+            DrawFolderIcon(d, { r.Center().x, r.Min.y + ThumbSize * 0.52f }, ThumbSize * 0.62f, hovered ? NoxUI::ThemeColor("ContentFolderHovered", { 0.95f, 0.80f, 0.48f, 1.0f }) : kFolderColor);
             const float nameTop = r.Min.y + ThumbSize + 6.0f;
-            const std::string name = UI::UILabel::ElideText(entry.Name, nullptr, kNameSize, r.Width() - 8.0f);
-            const UIVec2 size = UI::UILabel::MeasureText(name, nullptr, kNameSize);
+            const std::string name = NoxUI::UILabel::ElideText(entry.Name, nullptr, kNameSize, r.Width() - 8.0f);
+            const UIVec2 size = NoxUI::UILabel::MeasureText(name, nullptr, kNameSize);
             d.AddText(name, nullptr, { r.Center().x - size.x * 0.5f, nameTop }, kNameSize, text);
         }
 
-        void PaintAsset(UI::UIDrawList& d, const UI::UIRect& r, const ContentEntry& entry, bool hovered, bool selected,
+        void PaintAsset(NoxUI::UIDrawList& d, const NoxUI::UIRect& r, const ContentEntry& entry, bool hovered, bool selected,
                         const UIColor& surface, const UIColor& well, const UIColor& border, const UIColor& accent,
                         const UIColor& text, const UIColor& muted) const
         {
@@ -1009,7 +1010,7 @@ namespace Nox
                 d.AddRoundedRect(r.Min, r.Max, { accent.r, accent.g, accent.b, 0.12f }, glm::vec4(5.0f));
 
             // The picture: the asset itself where there is one, else the type's icon on a dark well.
-            const UI::UIRect pic{ { r.Min.x + 1.0f, r.Min.y + 1.0f }, { r.Max.x - 1.0f, r.Min.y + ThumbSize } };
+            const NoxUI::UIRect pic{ { r.Min.x + 1.0f, r.Min.y + 1.0f }, { r.Max.x - 1.0f, r.Min.y + ThumbSize } };
             d.AddRoundedRect(pic.Min, pic.Max, well, { 4.0f, 4.0f, 0.0f, 0.0f });
             if (!PaintPreview(d, pic, entry))
                 DrawAssetTypeIcon(d, entry.IsScript ? AssetType::MaterialShader : entry.Type, pic.Center(), ThumbSize * 0.46f, visual.Color);
@@ -1020,7 +1021,7 @@ namespace Nox
             // The name, up to two lines; the second ends in "..." when it does not fit.
             const float nameLeft = r.Min.x + 6.0f, nameWidth = r.Width() - 12.0f;
             const float nameTop = pic.Max.y + 3.0f + 5.0f;
-            const std::string wrapped = UI::UILabel::WrapText(entry.Name, nullptr, kNameSize, nameWidth);
+            const std::string wrapped = NoxUI::UILabel::WrapText(entry.Name, nullptr, kNameSize, nameWidth);
             std::string line1 = wrapped, line2;
             if (const size_t newline = wrapped.find('\n'); newline != std::string::npos)
             {
@@ -1028,17 +1029,17 @@ namespace Nox
                 line2 = wrapped.substr(newline + 1);
                 std::replace(line2.begin(), line2.end(), '\n', ' ');
             }
-            const float lineH = UI::UILabel::MeasureText("Ag", nullptr, kNameSize).y;
+            const float lineH = NoxUI::UILabel::MeasureText("Ag", nullptr, kNameSize).y;
             if (!(IsRenamingIndex(entry)))
             {
-                d.AddText(UI::UILabel::ElideText(line1, nullptr, kNameSize, nameWidth), nullptr, { nameLeft, nameTop }, kNameSize, text);
+                d.AddText(NoxUI::UILabel::ElideText(line1, nullptr, kNameSize, nameWidth), nullptr, { nameLeft, nameTop }, kNameSize, text);
                 if (!line2.empty())
-                    d.AddText(UI::UILabel::ElideText(line2, nullptr, kNameSize, nameWidth), nullptr, { nameLeft, nameTop + lineH }, kNameSize, text);
+                    d.AddText(NoxUI::UILabel::ElideText(line2, nullptr, kNameSize, nameWidth), nullptr, { nameLeft, nameTop + lineH }, kNameSize, text);
             }
 
             // The type at the bottom right, small and muted.
-            const std::string type = UI::UILabel::ElideText(visual.Label, nullptr, kTypeSize, nameWidth);
-            const UIVec2 typeSize = UI::UILabel::MeasureText(type, nullptr, kTypeSize);
+            const std::string type = NoxUI::UILabel::ElideText(visual.Label, nullptr, kTypeSize, nameWidth);
+            const UIVec2 typeSize = NoxUI::UILabel::MeasureText(type, nullptr, kTypeSize);
             const UIColor typeColor = glm::mix(muted, text, 0.3f);
             d.AddText(type, nullptr, { r.Max.x - 6.0f - typeSize.x, r.Max.y - 5.0f - typeSize.y }, kTypeSize, typeColor);
         }
@@ -1046,7 +1047,7 @@ namespace Nox
         bool IsRenamingIndex(const ContentEntry& entry) const { return IsRenaming() && entry.Handle == m_RenameHandle; }
 
         // The rendered picture of a mesh, prefab or material, or a texture itself; false while there is none yet.
-        bool PaintPreview(UI::UIDrawList& d, const UI::UIRect& pic, const ContentEntry& entry) const
+        bool PaintPreview(NoxUI::UIDrawList& d, const NoxUI::UIRect& pic, const ContentEntry& entry) const
         {
             if (entry.Handle == 0)
                 return false;
@@ -1104,7 +1105,7 @@ namespace Nox
         }
 
         ContentBrowserV2Panel& m_Panel;
-        UI::UIScrollBar m_ScrollBar;
+        NoxUI::UIScrollBar m_ScrollBar;
         float m_ScrollY = 0.0f;
         int m_HoveredIndex = -1;
         int m_PressedIndex = -1;
@@ -1115,7 +1116,7 @@ namespace Nox
         AssetHandle m_DeferredSingleSelect = 0;
         std::filesystem::path m_SelectedPath;
 
-        Ref<UI::UITextInput> m_RenameInput;
+        Ref<NoxUI::UITextInput> m_RenameInput;
         AssetHandle m_RenameHandle = 0;
         int m_RenameIndex = -1;
         int m_RenameFrames = 0;
@@ -1129,7 +1130,7 @@ namespace Nox
     ContentBrowserV2Panel::ContentBrowserV2Panel() = default;
     ContentBrowserV2Panel::~ContentBrowserV2Panel() = default;
 
-    Ref<UI::UIElement> ContentBrowserV2Panel::BuildUI()
+    Ref<NoxUI::UIElement> ContentBrowserV2Panel::BuildUI()
     {
         if (Project::GetActive())
         {
@@ -1142,35 +1143,35 @@ namespace Nox
         constexpr float kBarHeight = 26.0f;
         auto compactButton = [](const std::string& text, std::function<void()> onClick, const std::string& tooltip)
         {
-            Ref<UI::UIButton> button(new UI::UIButton(text, std::move(onClick)));
-            button->Padding = UI::UIThickness::Symmetric(10.0f, 2.0f);
-            button->HeightMode = UI::UISizeMode::Fixed;
+            Ref<NoxUI::UIButton> button(new NoxUI::UIButton(text, std::move(onClick)));
+            button->Padding = NoxUI::UIThickness::Symmetric(10.0f, 2.0f);
+            button->HeightMode = NoxUI::UISizeMode::Fixed;
             button->FixedSize = { 0.0f, kBarHeight };
             button->Tooltip = tooltip;
-            button->VAlign = UI::UIAlignment::Center;
+            button->VAlign = NoxUI::UIAlignment::Center;
             return button;
         };
 
         // First row (Unreal's): what makes things, then where you are, then the settings.
-        Ref<UI::UIStackBox> toolbar(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
-        toolbar->WidthMode = UI::UISizeMode::Fill;
-        toolbar->Padding = UI::UIThickness{ 6.0f, 5.0f, 6.0f, 4.0f };
-        toolbar->VAlign = UI::UIAlignment::Center;
+        Ref<NoxUI::UIStackBox> toolbar(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 6.0f));
+        toolbar->WidthMode = NoxUI::UISizeMode::Fill;
+        toolbar->Padding = NoxUI::UIThickness{ 6.0f, 5.0f, 6.0f, 4.0f };
+        toolbar->VAlign = NoxUI::UIAlignment::Center;
 
-        Ref<UI::UIButton> addButton = compactButton("+ Add", {}, "Make a new asset or folder here");
+        Ref<NoxUI::UIButton> addButton = compactButton("+ Add", {}, "Make a new asset or folder here");
         addButton->StyleVariant = "primary";
-        UI::UIButton* addRaw = addButton.get();
+        NoxUI::UIButton* addRaw = addButton.get();
         addButton->OnClick = [this, addRaw]()
         {
-            if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
-                UI::UIMenuPopup::ShowPopupMenu(*ctx, addRaw->GetBounds(), BuildAddMenu());
+            if (NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent())
+                NoxUI::UIMenuPopup::ShowPopupMenu(*ctx, addRaw->GetBounds(), BuildAddMenu());
         };
         toolbar->AddChild(addButton);
         toolbar->AddChild(compactButton("Import", [this]() { PickAndImport(); }, "Bring a file into the open folder (or drag files from the system onto the editor)"));
 
         m_BackButton = compactButton("<", [this]() { GoBack(); }, "Back (the folder you came from)");
         m_ForwardButton = compactButton(">", [this]() { GoForward(); }, "Forward");
-        m_BackButton->Margin = UI::UIThickness{ 6.0f, 0.0f, 0.0f, 0.0f };
+        m_BackButton->Margin = NoxUI::UIThickness{ 6.0f, 0.0f, 0.0f, 0.0f };
         toolbar->AddChild(m_BackButton);
         toolbar->AddChild(m_ForwardButton);
 
@@ -1191,19 +1192,19 @@ namespace Nox
         toolbar->AddChild(m_PathBar);
         if (m_ToolbarExtra)
         {
-            m_ToolbarExtra->VAlign = UI::UIAlignment::Center;
+            m_ToolbarExtra->VAlign = NoxUI::UIAlignment::Center;
             toolbar->AddChild(m_ToolbarExtra);
         }
 
-        Ref<UI::UIButton> viewButton = compactButton("Settings", {}, "Tile size, refresh, show in Explorer");
-        UI::UIButton* viewRaw = viewButton.get();
+        Ref<NoxUI::UIButton> viewButton = compactButton("Settings", {}, "Tile size, refresh, show in Explorer");
+        NoxUI::UIButton* viewRaw = viewButton.get();
         viewButton->OnClick = [this, viewRaw]()
         {
-            UI::UIContext* ctx = UI::UIContext::GetCurrent();
+            NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
             if (!ctx || !m_Tiles)
                 return;
             const float size = m_Tiles->ThumbSize;
-            std::vector<UI::UIMenuItem> items;
+            std::vector<NoxUI::UIMenuItem> items;
             items.push_back({ "Small Tiles", "", [this]() { m_Tiles->ThumbSize = 72.0f; }, false, true, size < 88.0f });
             items.push_back({ "Medium Tiles", "", [this]() { m_Tiles->ThumbSize = 104.0f; }, false, true, size >= 88.0f && size < 136.0f });
             items.push_back({ "Large Tiles", "", [this]() { m_Tiles->ThumbSize = 160.0f; }, false, true, size >= 136.0f });
@@ -1215,15 +1216,15 @@ namespace Nox
                 Refresh();
             }, false, true, false, false, "Files added or moved outside the editor are picked up (moved ones keep their handle)." });
             items.push_back({ "Show in Explorer", "", [this]() { ShowInExplorer(m_CurrentDirectory); } });
-            UI::UIMenuPopup::ShowPopupMenu(*ctx, viewRaw->GetBounds(), std::move(items), true);
+            NoxUI::UIMenuPopup::ShowPopupMenu(*ctx, viewRaw->GetBounds(), std::move(items), true);
         };
         toolbar->AddChild(viewButton);
 
         // Folder tree | (type filter + search over the tiles).
-        m_FolderTree = Ref<UI::UITreeView>(new UI::UITreeView());
-        m_FolderTree->WidthMode = UI::UISizeMode::Fixed;
+        m_FolderTree = Ref<NoxUI::UITreeView>(new NoxUI::UITreeView());
+        m_FolderTree->WidthMode = NoxUI::UISizeMode::Fixed;
         m_FolderTree->FixedSize = { 210.0f, 0.0f };
-        m_FolderTree->HeightMode = UI::UISizeMode::Fill;
+        m_FolderTree->HeightMode = NoxUI::UISizeMode::Fill;
         m_FolderTree->ShowTagDots = false;
         m_FolderTree->EmptyText = "No folders";
         m_FolderTree->OnSelect = [this](uint64_t id)
@@ -1237,58 +1238,58 @@ namespace Nox
                 NavigateTo(it->second);
         };
 
-        m_FilterDropdown = Ref<UI::UIDropdown>(new UI::UIDropdown(nullptr, std::vector<std::string>(std::begin(kFilterNames), std::end(kFilterNames)), m_TypeFilter,
+        m_FilterDropdown = Ref<NoxUI::UIDropdown>(new NoxUI::UIDropdown(nullptr, std::vector<std::string>(std::begin(kFilterNames), std::end(kFilterNames)), m_TypeFilter,
             [this](int index)
             {
                 m_TypeFilter = index;
                 m_EntriesDirty = true;
             }));
-        m_FilterDropdown->WidthMode = UI::UISizeMode::Fixed;
-        m_FilterDropdown->HeightMode = UI::UISizeMode::Fixed;
+        m_FilterDropdown->WidthMode = NoxUI::UISizeMode::Fixed;
+        m_FilterDropdown->HeightMode = NoxUI::UISizeMode::Fixed;
         m_FilterDropdown->FixedSize = { 128.0f, kBarHeight };
         m_FilterDropdown->MinSize = { 0.0f, 0.0f }; // (its own minimum is 28 px)
-        m_FilterDropdown->VAlign = UI::UIAlignment::Center;
+        m_FilterDropdown->VAlign = NoxUI::UIAlignment::Center;
         m_FilterDropdown->Tooltip = "Show only one kind of asset";
 
-        m_SearchBar = Ref<UI::UISearchBar>(new UI::UISearchBar("Search this folder and below", [this](const std::string& query)
+        m_SearchBar = Ref<NoxUI::UISearchBar>(new NoxUI::UISearchBar("Search this folder and below", [this](const std::string& query)
         {
             m_Search = query;
             m_EntriesDirty = true;
         }));
-        m_SearchBar->WidthMode = UI::UISizeMode::Fill;
-        m_SearchBar->HeightMode = UI::UISizeMode::Fixed;
+        m_SearchBar->WidthMode = NoxUI::UISizeMode::Fill;
+        m_SearchBar->HeightMode = NoxUI::UISizeMode::Fixed;
         m_SearchBar->FixedSize = { 0.0f, kBarHeight };
-        m_SearchBar->VAlign = UI::UIAlignment::Center;
+        m_SearchBar->VAlign = NoxUI::UIAlignment::Center;
 
-        Ref<UI::UIStackBox> searchRow(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
-        searchRow->WidthMode = UI::UISizeMode::Fill;
-        searchRow->VAlign = UI::UIAlignment::Center;
+        Ref<NoxUI::UIStackBox> searchRow(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 6.0f));
+        searchRow->WidthMode = NoxUI::UISizeMode::Fill;
+        searchRow->VAlign = NoxUI::UIAlignment::Center;
         searchRow->AddChild(m_FilterDropdown);
         searchRow->AddChild(m_SearchBar);
 
         m_Tiles = Ref<ContentTileView>(new ContentTileView(*this));
 
-        Ref<UI::UIStackBox> assetsColumn(new UI::UIStackBox(UI::UIOrientation::Vertical, 6.0f));
-        assetsColumn->WidthMode = UI::UISizeMode::Fill;
-        assetsColumn->HeightMode = UI::UISizeMode::Fill;
+        Ref<NoxUI::UIStackBox> assetsColumn(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 6.0f));
+        assetsColumn->WidthMode = NoxUI::UISizeMode::Fill;
+        assetsColumn->HeightMode = NoxUI::UISizeMode::Fill;
         assetsColumn->AddChild(searchRow);
         assetsColumn->AddChild(m_Tiles);
 
-        Ref<UI::UIStackBox> body(new UI::UIStackBox(UI::UIOrientation::Horizontal, 6.0f));
-        body->WidthMode = UI::UISizeMode::Fill;
-        body->HeightMode = UI::UISizeMode::Fill;
-        body->Padding = UI::UIThickness{ 6.0f, 0.0f, 6.0f, 0.0f };
+        Ref<NoxUI::UIStackBox> body(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 6.0f));
+        body->WidthMode = NoxUI::UISizeMode::Fill;
+        body->HeightMode = NoxUI::UISizeMode::Fill;
+        body->Padding = NoxUI::UIThickness{ 6.0f, 0.0f, 6.0f, 0.0f };
         body->AddChild(m_FolderTree);
         body->AddChild(assetsColumn);
 
-        m_Footer = Ref<UI::UILabel>(new UI::UILabel("", 13.0f));
+        m_Footer = Ref<NoxUI::UILabel>(new NoxUI::UILabel("", 13.0f));
         m_Footer->UseColorOverride = true;
-        m_Footer->ColorOverride = UI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
-        m_Footer->Margin = UI::UIThickness{ 10.0f, 3.0f, 10.0f, 4.0f };
+        m_Footer->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
+        m_Footer->Margin = NoxUI::UIThickness{ 10.0f, 3.0f, 10.0f, 4.0f };
 
-        Ref<UI::UIStackBox> root(new UI::UIStackBox(UI::UIOrientation::Vertical, 0.0f));
-        root->WidthMode = UI::UISizeMode::Fill;
-        root->HeightMode = UI::UISizeMode::Fill;
+        Ref<NoxUI::UIStackBox> root(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 0.0f));
+        root->WidthMode = NoxUI::UISizeMode::Fill;
+        root->HeightMode = NoxUI::UISizeMode::Fill;
         root->AddChild(toolbar);
         root->AddChild(body);
         root->AddChild(m_Footer);
@@ -1324,7 +1325,7 @@ namespace Nox
         m_EntriesDirty = true;
     }
 
-    void ContentBrowserV2Panel::Notify(UI::UINotificationSeverity severity, std::string title, std::string message)
+    void ContentBrowserV2Panel::Notify(NoxUI::UINotificationSeverity severity, std::string title, std::string message)
     {
         if (m_Notify)
             m_Notify({ severity, std::move(title), std::move(message) });
@@ -1362,7 +1363,7 @@ namespace Nox
         // A model import running in the background finished: one toast for it.
         const bool importing = assets->GetImportProgress().Imports > 0;
         if (m_ImportsWereRunning && !importing)
-            Notify(UI::UINotificationSeverity::Success, "Import finished", "The model's meshes, materials and textures are in the Content Browser.");
+            Notify(NoxUI::UINotificationSeverity::Success, "Import finished", "The model's meshes, materials and textures are in the Content Browser.");
         m_ImportsWereRunning = importing;
 
         FinishReferenceCheck();
@@ -1397,9 +1398,9 @@ namespace Nox
 
         // Expanded state survives a rebuild.
         std::unordered_set<uint64_t> collapsed;
-        std::function<void(const std::vector<UI::UITreeNode>&)> gatherCollapsed = [&](const std::vector<UI::UITreeNode>& nodes)
+        std::function<void(const std::vector<NoxUI::UITreeNode>&)> gatherCollapsed = [&](const std::vector<NoxUI::UITreeNode>& nodes)
         {
-            for (const UI::UITreeNode& node : nodes)
+            for (const NoxUI::UITreeNode& node : nodes)
             {
                 if (!node.Expanded)
                     collapsed.insert(node.Id);
@@ -1408,10 +1409,10 @@ namespace Nox
         };
         gatherCollapsed(m_FolderTree->GetNodes());
 
-        std::function<UI::UITreeNode(const std::filesystem::path&, const std::string&, int)> build =
-            [&](const std::filesystem::path& folder, const std::string& label, int depth) -> UI::UITreeNode
+        std::function<NoxUI::UITreeNode(const std::filesystem::path&, const std::string&, int)> build =
+            [&](const std::filesystem::path& folder, const std::string& label, int depth) -> NoxUI::UITreeNode
         {
-            UI::UITreeNode node;
+            NoxUI::UITreeNode node;
             node.Id = FolderId(folder);
             node.Label = label;
             node.IsFolder = true;
@@ -1434,15 +1435,15 @@ namespace Nox
             return node;
         };
 
-        std::vector<UI::UITreeNode> nodes;
+        std::vector<NoxUI::UITreeNode> nodes;
         nodes.push_back(build(m_BaseDirectory, "Assets", 0));
         nodes.front().Expanded = true;
         // The same folders, opened the same way: the tree keeps its rows (and its scroll position, its hover).
         size_t signature = 0;
-        std::function<void(const UI::UITreeNode&)> hash = [&](const UI::UITreeNode& node)
+        std::function<void(const NoxUI::UITreeNode&)> hash = [&](const NoxUI::UITreeNode& node)
         {
             signature = signature * 1099511628211ull ^ (node.Id + (node.Expanded ? 1 : 0));
-            for (const UI::UITreeNode& child : node.Children)
+            for (const NoxUI::UITreeNode& child : node.Children)
                 hash(child);
         };
         hash(nodes.front());
@@ -1677,7 +1678,7 @@ namespace Nox
             return;
         if (!assets->CanRename(handle))
         {
-            Notify(UI::UINotificationSeverity::Info, "This asset cannot be renamed here", "Scenes, and the skeletons and clips cooked from a model, keep their names.");
+            Notify(NoxUI::UINotificationSeverity::Info, "This asset cannot be renamed here", "Scenes, and the skeletons and clips cooked from a model, keep their names.");
             return;
         }
         m_Tiles->BeginRename(handle);
@@ -1693,7 +1694,7 @@ namespace Nox
             return;
         if (!assets->RenameAsset(handle, newName))
         {
-            Notify(UI::UINotificationSeverity::Error, "Rename failed", "\"" + newName + "\" is not a valid file name, or another file already has it.");
+            Notify(NoxUI::UINotificationSeverity::Error, "Rename failed", "\"" + newName + "\" is not a valid file name, or another file already has it.");
             return;
         }
         Refresh();
@@ -1735,7 +1736,7 @@ namespace Nox
         std::error_code error;
         if (!std::filesystem::copy_file(source, target, error))
         {
-            Notify(UI::UINotificationSeverity::Error, "Duplicate failed", error.message());
+            Notify(NoxUI::UINotificationSeverity::Error, "Duplicate failed", error.message());
             return;
         }
         AdoptNewFile(target);
@@ -1754,13 +1755,13 @@ namespace Nox
     void ContentBrowserV2Panel::StartReferenceCheck(ReferenceCheckMode mode, std::vector<AssetHandle> handles)
     {
         EditorAssetManager* assets = Assets();
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         std::erase_if(handles, [assets](AssetHandle handle) { return !assets || !assets->IsAssetHandleValid(handle); });
         if (!assets || !ctx || handles.empty())
             return;
         if (m_ReferenceCheck)
         {
-            Notify(UI::UINotificationSeverity::Info, "Still looking", "The project is being searched for what uses " + m_ReferenceCheck->Name + ".");
+            Notify(NoxUI::UINotificationSeverity::Info, "Still looking", "The project is being searched for what uses " + m_ReferenceCheck->Name + ".");
             return;
         }
 
@@ -1836,10 +1837,10 @@ namespace Nox
             message += "... and " + std::to_string(found.size() - 14) + " more\n";
         if (message.empty())
             message = "Nothing in the project uses it.";
-        UI::UIModal::ShowConfirm(*check->Context, "References to " + assets->GetMetadata(handle).FilePath.filename().string(), message, {}, {}, "OK", "Close");
+        NoxUI::UIModal::ShowConfirm(*check->Context, "References to " + assets->GetMetadata(handle).FilePath.filename().string(), message, {}, {}, "OK", "Close");
     }
 
-    void ContentBrowserV2Panel::ShowDeleteDialog(UI::UIContext& context, const std::vector<AssetHandle>& handles,
+    void ContentBrowserV2Panel::ShowDeleteDialog(NoxUI::UIContext& context, const std::vector<AssetHandle>& handles,
                                                  const std::vector<std::vector<std::filesystem::path>>& users, const std::unordered_set<AssetHandle>& inScene)
     {
         EditorAssetManager* assets = Assets();
@@ -1875,7 +1876,7 @@ namespace Nox
         else
             message += "What uses it loses it (a mesh draws without its material, a slot becomes empty). This cannot be undone.";
 
-        UI::UIModal::ShowConfirm(context, title, message, [this, handles]()
+        NoxUI::UIModal::ShowConfirm(context, title, message, [this, handles]()
         {
             EditorAssetManager* manager = Assets();
             if (!manager)
@@ -1889,7 +1890,7 @@ namespace Nox
             if (m_Tiles)
                 m_Tiles->m_Selected.clear();
             Refresh();
-            Notify(deleted == handles.size() ? UI::UINotificationSeverity::Success : UI::UINotificationSeverity::Warning,
+            Notify(deleted == handles.size() ? NoxUI::UINotificationSeverity::Success : NoxUI::UINotificationSeverity::Warning,
                    deleted == 1 ? "Asset deleted" : std::to_string(deleted) + " assets deleted",
                    deleted == handles.size() ? std::string() : "Some files could not be deleted (see the Output Log).");
         }, {}, "Delete", "Cancel");
@@ -1904,14 +1905,14 @@ namespace Nox
         const AssetHandle variant = m_CreateVariant(base, assets->GetMetadata(base).FilePath.parent_path());
         if (variant == 0)
         {
-            Notify(UI::UINotificationSeverity::Error, "Variant not created", "See the Output Log for why.");
+            Notify(NoxUI::UINotificationSeverity::Error, "Variant not created", "See the Output Log for why.");
             return;
         }
-        Notify(UI::UINotificationSeverity::Success, "Variant created", assets->GetMetadata(variant).FilePath.filename().string());
+        Notify(NoxUI::UINotificationSeverity::Success, "Variant created", assets->GetMetadata(variant).FilePath.filename().string());
         ShowNewAsset(variant);
     }
 
-    void ContentBrowserV2Panel::ShowReplaceDialog(UI::UIContext& context, AssetHandle from, const std::vector<std::filesystem::path>& users, bool sceneUses)
+    void ContentBrowserV2Panel::ShowReplaceDialog(NoxUI::UIContext& context, AssetHandle from, const std::vector<std::filesystem::path>& users, bool sceneUses)
     {
         EditorAssetManager* assets = Assets();
         if (!assets || !assets->IsAssetHandleValid(from))
@@ -1938,15 +1939,15 @@ namespace Nox
         {
             AssetHandle Picked = 0;
             std::string Filter;
-            std::vector<std::pair<UI::UIButton*, AssetHandle>> Rows; // (the list's buttons: restyled in place when one is picked)
+            std::vector<std::pair<NoxUI::UIButton*, AssetHandle>> Rows; // (the list's buttons: restyled in place when one is picked)
         };
         auto state = std::make_shared<State>();
-        auto content = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-        const auto note = [&content](const std::string& text, glm::vec4 color = UI::ThemeColor("ContentNote", { 0.72f, 0.76f, 0.84f, 1.0f }))
+        auto content = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 6.0f);
+        const auto note = [&content](const std::string& text, glm::vec4 color = NoxUI::ThemeColor("ContentNote", { 0.72f, 0.76f, 0.84f, 1.0f }))
         {
-            Ref<UI::UILabel> ref(new UI::UILabel(text, 13.0f));
+            Ref<NoxUI::UILabel> ref(new NoxUI::UILabel(text, 13.0f));
             ref->WordWrap = true;
-            ref->WidthMode = UI::UISizeMode::Fill;
+            ref->WidthMode = NoxUI::UISizeMode::Fill;
             ref->UseColorOverride = true;
             ref->ColorOverride = { color.r, color.g, color.b, color.a };
             content->AddChild(ref);
@@ -1954,16 +1955,16 @@ namespace Nox
         note("Everything that uses " + fromMetadata.FilePath.generic_string() + " will use the asset picked below instead. The asset itself stays "
              "(delete it afterwards if nothing needs it).");
 
-        Ref<UI::UITextInput> search(new UI::UITextInput("", "Search"));
-        search->WidthMode = UI::UISizeMode::Fill;
+        Ref<NoxUI::UITextInput> search(new NoxUI::UITextInput("", "Search"));
+        search->WidthMode = NoxUI::UISizeMode::Fill;
         content->AddChild(search);
-        auto scroll = UI::MakeUI<UI::UIScrollView>();
-        scroll->WidthMode = UI::UISizeMode::Fill;
-        scroll->HeightMode = UI::UISizeMode::Fixed;
+        auto scroll = NoxUI::MakeUI<NoxUI::UIScrollView>();
+        scroll->WidthMode = NoxUI::UISizeMode::Fill;
+        scroll->HeightMode = NoxUI::UISizeMode::Fixed;
         scroll->FixedSize = { 0.0f, 200.0f };
         content->AddChild(scroll);
-        auto list = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 2.0f);
-        list->WidthMode = UI::UISizeMode::Fill;
+        auto list = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 2.0f);
+        list->WidthMode = NoxUI::UISizeMode::Fill;
         scroll->AddChild(list);
 
         std::string summary;
@@ -1982,12 +1983,12 @@ namespace Nox
                 text += kept[i] + "\n";
             if (kept.size() > 6)
                 text += "... and " + std::to_string(kept.size() - 6) + " more\n";
-            note(text, UI::ThemeColor("StatusWarning", { 0.95f, 0.78f, 0.45f, 1.0f }));
+            note(text, NoxUI::ThemeColor("StatusWarning", { 0.95f, 0.78f, 0.45f, 1.0f }));
         }
-        note("Open asset editors with unsaved changes are asked about first; loaded assets that use it are read again.", UI::ThemeColor("TextMuted", { 0.6f, 0.64f, 0.72f, 1.0f }));
+        note("Open asset editors with unsaved changes are asked about first; loaded assets that use it are read again.", NoxUI::ThemeColor("TextMuted", { 0.6f, 0.64f, 0.72f, 1.0f }));
 
         // The candidates: every other asset of its type, filtered by the search; the picked one highlighted.
-        UI::UIStackBox* listRaw = list.get();
+        NoxUI::UIStackBox* listRaw = list.get();
         auto rebuild = [this, state, from, type, listRaw]()
         {
             EditorAssetManager* manager = Assets();
@@ -2011,21 +2012,21 @@ namespace Nox
             std::sort(candidates.begin(), candidates.end());
             for (const auto& [path, candidate] : candidates)
             {
-                Ref<UI::UIButton> row(new UI::UIButton(path, [state, candidate]()
+                Ref<NoxUI::UIButton> row(new NoxUI::UIButton(path, [state, candidate]()
                 {
                     // (restyled, not rebuilt: rebuilding would destroy the button running this)
                     state->Picked = candidate;
                     for (const auto& [button, handle] : state->Rows)
                         button->StyleVariant = handle == candidate ? "primary" : "";
                 }));
-                row->WidthMode = UI::UISizeMode::Fill;
+                row->WidthMode = NoxUI::UISizeMode::Fill;
                 row->StyleVariant = candidate == state->Picked ? "primary" : "";
                 state->Rows.emplace_back(row.get(), candidate);
                 listRaw->AddChild(row);
             }
             if (candidates.empty())
             {
-                Ref<UI::UILabel> none(new UI::UILabel(state->Filter.empty() ? "No other asset of this type." : "Nothing matches the search.", 13.0f));
+                Ref<NoxUI::UILabel> none(new NoxUI::UILabel(state->Filter.empty() ? "No other asset of this type." : "Nothing matches the search.", 13.0f));
                 listRaw->AddChild(none);
             }
         };
@@ -2041,7 +2042,7 @@ namespace Nox
             if (state->Picked != 0 && m_ReplaceReferences)
                 m_ReplaceReferences(from, state->Picked);
         };
-        UI::UIModal::ShowCustom(context, "Replace References to " + fromMetadata.FilePath.filename().string(), content,
+        NoxUI::UIModal::ShowCustom(context, "Replace References to " + fromMetadata.FilePath.filename().string(), content,
                                 { { "Replace", replace, true, [state]() { return state->Picked != 0; } }, { "Cancel", {} } }, 560.0f);
     }
 
@@ -2065,9 +2066,9 @@ namespace Nox
         }
         Refresh();
         if (moved > 0)
-            Notify(UI::UINotificationSeverity::Success, moved == 1 ? "Asset moved" : std::to_string(moved) + " assets moved", "To " + (folder.empty() ? std::string("Assets") : folder.generic_string()));
+            Notify(NoxUI::UINotificationSeverity::Success, moved == 1 ? "Asset moved" : std::to_string(moved) + " assets moved", "To " + (folder.empty() ? std::string("Assets") : folder.generic_string()));
         if (refused > 0)
-            Notify(UI::UINotificationSeverity::Warning, std::to_string(refused) + (refused == 1 ? " asset was not moved" : " assets were not moved"),
+            Notify(NoxUI::UINotificationSeverity::Warning, std::to_string(refused) + (refused == 1 ? " asset was not moved" : " assets were not moved"),
                    "Scenes, and a model's skeletons and clips, stay where they are.");
     }
 
@@ -2081,31 +2082,31 @@ namespace Nox
         const AssetHandle prefab = m_CreatePrefab(dragId, folder);
         if (prefab == 0)
         {
-            Notify(UI::UINotificationSeverity::Error, "Prefab not created", "See the Output Log for why.");
+            Notify(NoxUI::UINotificationSeverity::Error, "Prefab not created", "See the Output Log for why.");
             return;
         }
-        Notify(UI::UINotificationSeverity::Success, "Prefab created");
+        Notify(NoxUI::UINotificationSeverity::Success, "Prefab created");
         ShowNewAsset(prefab);
     }
 
     void ContentBrowserV2Panel::NewFolder()
     {
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         if (!ctx)
             return;
-        UI::UIModal::ShowPrompt(*ctx, "New Folder", "Name of the folder, in " + (CurrentFolder().empty() ? std::string("Assets") : CurrentFolder().generic_string()),
+        NoxUI::UIModal::ShowPrompt(*ctx, "New Folder", "Name of the folder, in " + (CurrentFolder().empty() ? std::string("Assets") : CurrentFolder().generic_string()),
             "New Folder", "Folder name", [this](const std::string& name)
             {
                 if (name.empty() || name.find_first_of("\\/:*?\"<>|") != std::string::npos)
                 {
-                    Notify(UI::UINotificationSeverity::Error, "Folder not created", "\"" + name + "\" is not a valid folder name.");
+                    Notify(NoxUI::UINotificationSeverity::Error, "Folder not created", "\"" + name + "\" is not a valid folder name.");
                     return;
                 }
                 std::error_code error;
                 const std::filesystem::path path = m_CurrentDirectory / name;
                 if (std::filesystem::exists(path) || !std::filesystem::create_directory(path, error))
                 {
-                    Notify(UI::UINotificationSeverity::Error, "Folder not created", std::filesystem::exists(path) ? "A folder of that name is already here." : error.message());
+                    Notify(NoxUI::UINotificationSeverity::Error, "Folder not created", std::filesystem::exists(path) ? "A folder of that name is already here." : error.message());
                     return;
                 }
                 Refresh();
@@ -2118,7 +2119,7 @@ namespace Nox
         MaterialData data;
         if (!MaterialSerializer::Serialize(path, data))
         {
-            Notify(UI::UINotificationSeverity::Error, "Material not created", path.generic_string());
+            Notify(NoxUI::UINotificationSeverity::Error, "Material not created", path.generic_string());
             return;
         }
         AdoptNewFile(path);
@@ -2133,7 +2134,7 @@ namespace Nox
         const bool written = NodeGraphSerializer::Serialize(path, kind == 1 ? CreateEmptyAudioGraph() : kind == 2 ? CreateEmptyMaterialGraph() : CreateEmptyAnimationGraph());
         if (!written)
         {
-            Notify(UI::UINotificationSeverity::Error, "Graph not created", path.generic_string());
+            Notify(NoxUI::UINotificationSeverity::Error, "Graph not created", path.generic_string());
             return;
         }
         AdoptNewFile(path);
@@ -2146,7 +2147,7 @@ namespace Nox
         const std::string_view source = CustomLitShaders::TemplateSource();
         if (!file || !file.write(source.data(), static_cast<std::streamsize>(source.size())))
         {
-            Notify(UI::UINotificationSeverity::Error, "Material Shader not created", path.generic_string());
+            Notify(NoxUI::UINotificationSeverity::Error, "Material Shader not created", path.generic_string());
             return;
         }
         file.close();
@@ -2159,7 +2160,7 @@ namespace Nox
         Timeline timeline;
         if (!TimelineImporter::Serialize(path, timeline))
         {
-            Notify(UI::UINotificationSeverity::Error, "Timeline not created", path.generic_string());
+            Notify(NoxUI::UINotificationSeverity::Error, "Timeline not created", path.generic_string());
             return;
         }
         AdoptNewFile(path);
@@ -2167,17 +2168,17 @@ namespace Nox
 
     void ContentBrowserV2Panel::CreateScript()
     {
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         if (!ctx || !Project::GetActive())
             return;
-        UI::UIModal::ShowPrompt(*ctx, "New C# Script", "Class name (letters, digits and _). The file goes to Scripts/Source and opens in your code editor.",
+        NoxUI::UIModal::ShowPrompt(*ctx, "New C# Script", "Class name (letters, digits and _). The file goes to Scripts/Source and opens in your code editor.",
             "NewBehaviour", "ClassName", [this](const std::string& className)
             {
                 const bool valid = !className.empty() && (std::isalpha(static_cast<unsigned char>(className[0])) || className[0] == '_') &&
                     std::all_of(className.begin() + 1, className.end(), [](unsigned char ch) { return std::isalnum(ch) || ch == '_'; });
                 if (!valid)
                 {
-                    Notify(UI::UINotificationSeverity::Error, "Script not created", "\"" + className + "\" is not a valid C# class name.");
+                    Notify(NoxUI::UINotificationSeverity::Error, "Script not created", "\"" + className + "\" is not a valid C# class name.");
                     return;
                 }
                 std::string scriptNamespace = Project::GetActive()->GetConfig().Name;
@@ -2191,7 +2192,7 @@ namespace Nox
                 const std::filesystem::path scriptPath = sourceDirectory / (className + ".cs");
                 if (std::filesystem::exists(scriptPath))
                 {
-                    Notify(UI::UINotificationSeverity::Error, "Script not created", "Scripts/Source/" + className + ".cs already exists.");
+                    Notify(NoxUI::UINotificationSeverity::Error, "Script not created", "Scripts/Source/" + className + ".cs already exists.");
                     return;
                 }
                 const std::filesystem::path projectTemplate = m_BaseDirectory / "Scripts/Templates/CSharpBehaviour.cs.template";
@@ -2201,7 +2202,7 @@ namespace Nox
                 std::ifstream templateFile(templatePath, std::ios::binary);
                 if (!templateFile)
                 {
-                    Notify(UI::UINotificationSeverity::Error, "Script not created", "The template is missing: " + templatePath.generic_string());
+                    Notify(NoxUI::UINotificationSeverity::Error, "Script not created", "The template is missing: " + templatePath.generic_string());
                     return;
                 }
                 std::string contents((std::istreambuf_iterator<char>(templateFile)), std::istreambuf_iterator<char>());
@@ -2217,11 +2218,11 @@ namespace Nox
                 std::ofstream output(scriptPath, std::ios::binary);
                 if (!output || !output.write(contents.data(), static_cast<std::streamsize>(contents.size())))
                 {
-                    Notify(UI::UINotificationSeverity::Error, "Script not created", scriptPath.generic_string());
+                    Notify(NoxUI::UINotificationSeverity::Error, "Script not created", scriptPath.generic_string());
                     return;
                 }
                 output.close();
-                Notify(UI::UINotificationSeverity::Success, "C# script created", "Scripts/Source/" + className + ".cs");
+                Notify(NoxUI::UINotificationSeverity::Success, "C# script created", "Scripts/Source/" + className + ".cs");
                 NavigateTo(sourceDirectory);
                 const std::string url = "file:///" + scriptPath.generic_string();
                 SDL_OpenURL(url.c_str());
@@ -2273,7 +2274,7 @@ namespace Nox
         const AssetType type = EditorAssetManager::GetAssetTypeFromExtension(extension);
         if (type == AssetType::None)
         {
-            Notify(UI::UINotificationSeverity::Warning, "Not imported", path.filename().string() + " is not a kind of file the engine reads.");
+            Notify(NoxUI::UINotificationSeverity::Warning, "Not imported", path.filename().string() + " is not a kind of file the engine reads.");
             return;
         }
         std::filesystem::path relative = relativeToRoot;
@@ -2283,7 +2284,7 @@ namespace Nox
             std::filesystem::copy_file(source, destination, std::filesystem::copy_options::overwrite_existing, error);
             if (error)
             {
-                Notify(UI::UINotificationSeverity::Error, "Import failed", error.message());
+                Notify(NoxUI::UINotificationSeverity::Error, "Import failed", error.message());
                 return;
             }
             relative = destination.lexically_relative(m_BaseDirectory);
@@ -2296,12 +2297,12 @@ namespace Nox
         else if (!assets->FindHandleByPath(relative, type))
             assets->RegisterExistingFile(relative, type);
         Refresh();
-        Notify(UI::UINotificationSeverity::Success, "Imported " + path.filename().string(), "Into " + (relative.parent_path().empty() ? std::string("Assets") : relative.parent_path().generic_string()));
+        Notify(NoxUI::UINotificationSeverity::Success, "Imported " + path.filename().string(), "Into " + (relative.parent_path().empty() ? std::string("Assets") : relative.parent_path().generic_string()));
     }
 
     void ContentBrowserV2Panel::OpenModelImportDialog(const std::filesystem::path& relativeSource, const std::filesystem::path& externalSource)
     {
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         if (!ctx)
             return;
 
@@ -2314,39 +2315,39 @@ namespace Nox
         auto state = std::make_shared<ImportState>();
         state->FileName = relativeSource.stem().string() + ".nmesh";
 
-        Ref<UI::UIStackBox> content(new UI::UIStackBox(UI::UIOrientation::Vertical, 8.0f));
+        Ref<NoxUI::UIStackBox> content(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 8.0f));
         auto note = [&content](const std::string& text)
         {
-            Ref<UI::UILabel> label(new UI::UILabel(text, 13.5f));
+            Ref<NoxUI::UILabel> label(new NoxUI::UILabel(text, 13.5f));
             label->WordWrap = true;
-            label->WidthMode = UI::UISizeMode::Fill;
+            label->WidthMode = NoxUI::UISizeMode::Fill;
             label->UseColorOverride = true;
-            label->ColorOverride = UI::ThemeColor("TextMuted", { 0.62f, 0.66f, 0.74f, 1.0f });
+            label->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.62f, 0.66f, 0.74f, 1.0f });
             content->AddChild(label);
         };
-        auto row = [&content](const std::string& name, const Ref<UI::UIElement>& editor)
+        auto row = [&content](const std::string& name, const Ref<NoxUI::UIElement>& editor)
         {
-            Ref<UI::UIStackBox> line(new UI::UIStackBox(UI::UIOrientation::Horizontal, 8.0f));
-            line->WidthMode = UI::UISizeMode::Fill;
-            line->VAlign = UI::UIAlignment::Center;
-            Ref<UI::UILabel> label(new UI::UILabel(name, 14.5f));
-            label->WidthMode = UI::UISizeMode::Fixed;
+            Ref<NoxUI::UIStackBox> line(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 8.0f));
+            line->WidthMode = NoxUI::UISizeMode::Fill;
+            line->VAlign = NoxUI::UIAlignment::Center;
+            Ref<NoxUI::UILabel> label(new NoxUI::UILabel(name, 14.5f));
+            label->WidthMode = NoxUI::UISizeMode::Fixed;
             label->FixedSize = { 170.0f, 22.0f };
-            label->VAlign = UI::UIAlignment::Center;
+            label->VAlign = NoxUI::UIAlignment::Center;
             line->AddChild(label);
-            editor->WidthMode = UI::UISizeMode::Fill;
+            editor->WidthMode = NoxUI::UISizeMode::Fill;
             line->AddChild(editor);
             content->AddChild(line);
         };
         auto check = [&row](const std::string& name, bool& value, const std::string& tooltip)
         {
-            Ref<UI::UICheckBox> box(new UI::UICheckBox("", value, [&value](bool on) { value = on; }));
+            Ref<NoxUI::UICheckBox> box(new NoxUI::UICheckBox("", value, [&value](bool on) { value = on; }));
             box->Tooltip = tooltip;
             row(name, box);
         };
         auto combine = [&row, ctx](const std::string& name, MeshCombineMode& mode, const std::string& tooltip)
         {
-            Ref<UI::UIDropdown> dropdown(new UI::UIDropdown(ctx, { "Do Not Combine", "Combine Visible", "Combine All" }, static_cast<int>(mode),
+            Ref<NoxUI::UIDropdown> dropdown(new NoxUI::UIDropdown(ctx, { "Do Not Combine", "Combine Visible", "Combine All" }, static_cast<int>(mode),
                 [&mode](int index) { mode = static_cast<MeshCombineMode>(index); }));
             dropdown->Tooltip = tooltip;
             row(name, dropdown);
@@ -2359,7 +2360,7 @@ namespace Nox
         combine("Combine Skeletal Meshes", state->Settings.SkeletalCombine, "Merge skinned meshes that share a skeleton, in bind pose.");
         check("Import Animations", state->Settings.ImportAnimations, "The file's animation clips.");
 
-        Ref<UI::UIDragScalar> scale(new UI::UIDragScalar(state->Settings.ImportScale, 0.01f, [state](float value) { state->Settings.ImportScale = value; }));
+        Ref<NoxUI::UIDragScalar> scale(new NoxUI::UIDragScalar(state->Settings.ImportScale, 0.01f, [state](float value) { state->Settings.ImportScale = value; }));
         scale->Min = 0.0001f;
         scale->Max = 10000.0f;
         scale->Format = "{:.4f}";
@@ -2367,12 +2368,12 @@ namespace Nox
         scale->Tooltip = "glTF is in meters; a model authored in centimetres claims meters too and comes in 100x too big: 0.01 fixes it.";
         row("Import Scale", scale);
 
-        Ref<UI::UITextInput> name(new UI::UITextInput(state->FileName, "File name"));
+        Ref<NoxUI::UITextInput> name(new NoxUI::UITextInput(state->FileName, "File name"));
         name->OnChanged = [state](const std::string& text) { state->FileName = text; };
         row("File name", name);
         note("Goes to " + (relativeSource.parent_path() / "Meshes").generic_string() + ". Cooking runs in the background: the status bar shows it.");
 
-        std::vector<UI::UIModal::Button> buttons;
+        std::vector<NoxUI::UIModal::Button> buttons;
         buttons.push_back({ "Cook & Import", [this, state, relativeSource, externalSource]()
         {
             EditorAssetManager* assets = Assets();
@@ -2380,7 +2381,7 @@ namespace Nox
                 return;
             if (!state->Settings.ImportStaticMeshes && !state->Settings.ImportSkeletalMeshes)
             {
-                Notify(UI::UINotificationSeverity::Warning, "Nothing imported", "Turn on static or skeletal meshes.");
+                Notify(NoxUI::UINotificationSeverity::Warning, "Nothing imported", "Turn on static or skeletal meshes.");
                 return;
             }
             if (!externalSource.empty())
@@ -2398,7 +2399,7 @@ namespace Nox
                 }
                 if (error)
                 {
-                    Notify(UI::UINotificationSeverity::Error, "Import failed", "Could not copy the files: " + error.message());
+                    Notify(NoxUI::UINotificationSeverity::Error, "Import failed", "Could not copy the files: " + error.message());
                     return;
                 }
             }
@@ -2408,20 +2409,20 @@ namespace Nox
             const std::filesystem::path destination = relativeSource.parent_path() / "Meshes" / fileName;
             if (!assets->ImportModel(relativeSource, destination, state->Settings))
             {
-                Notify(UI::UINotificationSeverity::Error, "Import failed", relativeSource.filename().string() + " -- see the Output Log.");
+                Notify(NoxUI::UINotificationSeverity::Error, "Import failed", relativeSource.filename().string() + " -- see the Output Log.");
                 return;
             }
-            Notify(UI::UINotificationSeverity::Info, "Importing " + relativeSource.filename().string(), "Cooking in the background; the status bar shows its progress.");
+            Notify(NoxUI::UINotificationSeverity::Info, "Importing " + relativeSource.filename().string(), "Cooking in the background; the status bar shows its progress.");
             m_ImportsWereRunning = true;
             Refresh();
         }, true });
         buttons.push_back({ "Cancel", {}, false });
-        UI::UIModal::ShowCustom(*ctx, "Import Model", content, std::move(buttons), 520.0f);
+        NoxUI::UIModal::ShowCustom(*ctx, "Import Model", content, std::move(buttons), 520.0f);
     }
 
-    std::vector<UI::UIMenuItem> ContentBrowserV2Panel::BuildAddMenu()
+    std::vector<NoxUI::UIMenuItem> ContentBrowserV2Panel::BuildAddMenu()
     {
-        std::vector<UI::UIMenuItem> items;
+        std::vector<NoxUI::UIMenuItem> items;
         items.push_back({ "New Folder", "", [this]() { NewFolder(); } });
         items.push_back({ "", "", {}, true });
         items.push_back({ "Material", "", [this]() { CreateMaterial(); }, false, true, false, false,
@@ -2443,18 +2444,18 @@ namespace Nox
         return items;
     }
 
-    std::vector<UI::UIMenuItem> ContentBrowserV2Panel::BuildFolderSpaceMenu()
+    std::vector<NoxUI::UIMenuItem> ContentBrowserV2Panel::BuildFolderSpaceMenu()
     {
-        std::vector<UI::UIMenuItem> items = BuildAddMenu();
+        std::vector<NoxUI::UIMenuItem> items = BuildAddMenu();
         items.push_back({ "", "", {}, true });
         items.push_back({ "Import...", "", [this]() { PickAndImport(); } });
         items.push_back({ "Show in Explorer", "", [this]() { ShowInExplorer(m_CurrentDirectory); } });
         return items;
     }
 
-    std::vector<UI::UIMenuItem> ContentBrowserV2Panel::BuildAssetMenu(const ContentEntry& entry)
+    std::vector<NoxUI::UIMenuItem> ContentBrowserV2Panel::BuildAssetMenu(const ContentEntry& entry)
     {
-        std::vector<UI::UIMenuItem> items;
+        std::vector<NoxUI::UIMenuItem> items;
         if (entry.IsDirectory)
         {
             items.push_back({ "Open", "", [this, path = entry.Path]() { NavigateTo(path); } });
@@ -2506,7 +2507,7 @@ namespace Nox
             {
                 manager->ReimportAsset(handle, true);
                 AssetPreviewRenderer::Get().Invalidate(handle);
-                Notify(UI::UINotificationSeverity::Info, "Reimporting", manager->GetMetadata(handle).FilePath.filename().string());
+                Notify(NoxUI::UINotificationSeverity::Info, "Reimporting", manager->GetMetadata(handle).FilePath.filename().string());
             }
         }, false, hasSource || entry.Type == AssetType::Texture2D });
         items.push_back({ "", "", {}, true });

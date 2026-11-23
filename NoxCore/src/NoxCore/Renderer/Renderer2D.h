@@ -12,7 +12,7 @@ namespace shaderio // Shader IO namespace -- shared layout between C++ and shade
     #include "shaderIO.h"
 }
 
-#include "NRI/NRI.h"
+#include <NRIHPP/NRIExtensions.hpp>
 #include "NoxCore/Utils/NOXWatcher.h"
 #include "EditorCamera.h"
 #include "NoxCore/Scene/Components.h"
@@ -24,13 +24,13 @@ namespace Nox
 {
     struct RendererContext
     {
-        NRI::Device& device;
-        NRI::ShaderCompiler& shaderCompiler;
+        nri::Device& device;
+        nri::ShaderCompiler& shaderCompiler;
         Utils::NOXWatcher& fileWatcher;
         Ref<Texture2D>& whiteTexture;
         
-        std::function<std::unique_ptr<NRI::CommandBuffer>()> beginSingleTimeCommands;
-        std::function<void(std::unique_ptr<NRI::CommandBuffer>&&)> endSingleTimeCommands;
+        std::function<nri::CommandBuffer()> beginSingleTimeCommands;
+        std::function<void(nri::CommandBuffer&&)> endSingleTimeCommands;
     };
     
     /*
@@ -59,10 +59,10 @@ namespace Nox
         // frameUniforms: this frame's camera uniforms; the screen-space batch draws with a copy of them whose matrices map
         // output pixels instead.
         void Update(uint32_t currentImage, const shaderio::UniformBufferObject& frameUniforms);
-        void Flush(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex);
+        void Flush(nri::CommandBuffer& commandBuffer, const nri::Buffer& currentUniformBuffer, uint32_t frameIndex);
         // The world-space batch alone (no screen-space content) with the given camera uniforms and grid (none when null): the
         // editor's extra views draw the same lines, sprites and text with their own camera (Renderer::addExtraViewPasses).
-        void FlushWorld(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex, const shaderio::PushConstantGrid* grid);
+        void FlushWorld(nri::CommandBuffer& commandBuffer, const nri::Buffer& currentUniformBuffer, uint32_t frameIndex, const shaderio::PushConstantGrid* grid);
         void EndFrame();
 
         // Screen space: DrawQuad / DrawString calls between these two record positions in output pixels (origin top left,
@@ -143,31 +143,31 @@ namespace Nox
             // todo:: combine all buffers into with offsets idk how mcuh improvement that is
             // Quad
             std::vector<shaderio::QuadData> quadDatas;
-            std::vector<std::unique_ptr<NRI::Buffer>> quadStorageBuffers;
+            std::vector<nri::Buffer> quadStorageBuffers;
             std::vector<void*> quadStorageBuffersMapped;
             
             // Circle
             std::vector<shaderio::CircleData> circleDatas;
-            std::vector<std::unique_ptr<NRI::Buffer>> circleStorageBuffers;
+            std::vector<nri::Buffer> circleStorageBuffers;
             std::vector<void*> circleStorageBuffersMapped;
             
             // Text
             Ref<Texture2D> FontAtlasTexture;
             std::vector<shaderio::TextData> textDatas;
-            std::vector<std::unique_ptr<NRI::Buffer>> textStorageBuffers;
+            std::vector<nri::Buffer> textStorageBuffers;
             std::vector<void*> textStorageBuffersMapped;
             
             // Line
             std::vector<shaderio::LineData> lineDatas;
             std::vector<shaderio::LineData> thinLineDatas; // stored after the thick ones in the same buffer
             std::vector<shaderio::LineData> xrayLineDatas; // stored after the thin ones; drawn with depth testing off
-            std::vector<std::unique_ptr<NRI::Buffer>> lineStorageBuffers;
+            std::vector<nri::Buffer> lineStorageBuffers;
             std::vector<void*> lineStorageBuffersMapped;
 
             // Screen space (BeginScreenSpace): stored after the world-space quads / glyphs in the same storage buffers
             std::vector<shaderio::QuadData> screenQuadDatas;
             std::vector<shaderio::TextData> screenTextDatas;
-            std::vector<std::unique_ptr<NRI::Buffer>> screenUniformBuffers; // the frame's uniforms with a pixel projection
+            std::vector<nri::Buffer> screenUniformBuffers; // the frame's uniforms with a pixel projection
             std::vector<void*> screenUniformBuffersMapped;
         };
         
@@ -176,11 +176,11 @@ namespace Nox
         RendererContext m_context;
         Data m_data;
         
-        std::unique_ptr<NRI::Pipeline> m_QuadMeshPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_CircleMeshPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_TextMeshPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_LineMeshPipeline = nullptr;
-        std::unique_ptr<NRI::Pipeline> m_GridMeshPipeline = nullptr;
+        nri::Pipeline m_QuadMeshPipeline;
+        nri::Pipeline m_CircleMeshPipeline;
+        nri::Pipeline m_TextMeshPipeline;
+        nri::Pipeline m_LineMeshPipeline;
+        nri::Pipeline m_GridMeshPipeline;
         shaderio::PushConstantGrid m_Grid{};
         bool m_GridDraw = false; // set by DrawGrid, one frame
         bool m_ScreenSpace = false; // between BeginScreenSpace / EndScreenSpace

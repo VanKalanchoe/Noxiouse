@@ -7,15 +7,16 @@
 
 #include "NoxCore/Core/Ref.h"
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIContext;
         class UIElement;
         class UIStackBox;
         class UITextInput;
     }
+
+namespace Nox
+{
     class Renderer;
 
     // Window > Project Settings: what the project keeps (the .nproj, saved at each change): the start scene, the render quality
@@ -34,8 +35,8 @@ namespace Nox
         };
 
         void SetHooks(Hooks hooks) { m_Hooks = std::move(hooks); }
-        const Ref<UI::UIElement>& BuildUI(UI::UIContext* context);
-        const Ref<UI::UIElement>& GetRoot() const { return m_Root; }
+        const Ref<NoxUI::UIElement>& BuildUI(NoxUI::UIContext* context);
+        const Ref<NoxUI::UIElement>& GetRoot() const { return m_Root; }
         // Once a frame while shown.
         void Update();
         // Another project opened: the rows read its settings (built again).
@@ -46,11 +47,11 @@ namespace Nox
         void CommitSurface(size_t index, const std::string& name);
 
         Hooks m_Hooks;
-        UI::UIContext* m_Context = nullptr;
-        Ref<UI::UIElement> m_Root;
-        Ref<UI::UIStackBox> m_Body;
-        Ref<UI::UIStackBox> m_Surfaces;
-        std::vector<Ref<UI::UITextInput>> m_SurfaceFields; // index i: surface i (none for "Default")
+        NoxUI::UIContext* m_Context = nullptr;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UIStackBox> m_Body;
+        Ref<NoxUI::UIStackBox> m_Surfaces;
+        std::vector<Ref<NoxUI::UITextInput>> m_SurfaceFields; // index i: surface i (none for "Default")
         std::unordered_map<std::string, bool> m_Expanded;
         bool m_Rebuild = false;
         bool m_SurfacesDirty = false;

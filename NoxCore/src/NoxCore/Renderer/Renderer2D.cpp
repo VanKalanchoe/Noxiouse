@@ -125,76 +125,76 @@ namespace Nox
         memcpy(lines + thickCount + thinCount, m_data.xrayLineDatas.data(), xrayCount * sizeof(shaderio::LineData));
     }
 
-    void Renderer2D::FlushWorld(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex, const shaderio::PushConstantGrid* grid)
+    void Renderer2D::FlushWorld(nri::CommandBuffer& commandBuffer, const nri::Buffer& currentUniformBuffer, uint32_t frameIndex, const shaderio::PushConstantGrid* grid)
     {
         // QuadMesh
         if (!m_data.quadDatas.empty())
         {
-            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_QuadMeshPipeline);
+            commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_QuadMeshPipeline);
             
             shaderio::PushConstantQuad quadReferences;
             quadReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            quadReferences.quadDataReference = m_data.quadStorageBuffers[frameIndex]->getDeviceAddress();
+            quadReferences.quadDataReference = m_data.quadStorageBuffers[frameIndex].getDeviceAddress();
             quadReferences.numOfElements = std::min(m_data.quadDatas.size(), kMaxQuads);
             commandBuffer.pushData(&quadReferences, sizeof(shaderio::PushConstantQuad));
             
-            commandBuffer.drawMeshTasks(1, 1, 1);
+            nri::drawMeshTasks(commandBuffer, 1, 1, 1);
         }
         
         // CircleMesh
         if (!m_data.circleDatas.empty())
         {
-            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_CircleMeshPipeline);
+            commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_CircleMeshPipeline);
             
             shaderio::PushConstantCircle circleReferences;
             circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            circleReferences.circleDataReference = m_data.circleStorageBuffers[frameIndex]->getDeviceAddress();
+            circleReferences.circleDataReference = m_data.circleStorageBuffers[frameIndex].getDeviceAddress();
             circleReferences.numOfElements = std::min(m_data.circleDatas.size(), kMaxCircles);
             commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantCircle));
 
-            commandBuffer.drawMeshTasks(1, 1, 1);
+            nri::drawMeshTasks(commandBuffer, 1, 1, 1);
         }
         
         // TextMesh
         if (!m_data.textDatas.empty())
         {
-            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_TextMeshPipeline);
+            commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_TextMeshPipeline);
             
             shaderio::PushConstantText circleReferences;
             circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            circleReferences.textDataReference = m_data.textStorageBuffers[frameIndex]->getDeviceAddress();
+            circleReferences.textDataReference = m_data.textStorageBuffers[frameIndex].getDeviceAddress();
             circleReferences.numOfElements = std::min(m_data.textDatas.size(), kMaxGlyphs);
             commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantText));
 
-            commandBuffer.drawMeshTasks(1, 1, 1);
+            nri::drawMeshTasks(commandBuffer, 1, 1, 1);
         }
         
         // Grid (Godot's editor grid, see GridMesh.slang): real one pixel lines, one mesh shader group each
         if (grid)
         {
             commandBuffer.setLineWidth(1.0f);
-            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_GridMeshPipeline);
+            commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_GridMeshPipeline);
 
             shaderio::PushConstantGrid gridReferences = *grid;
             gridReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
             commandBuffer.pushData(&gridReferences, sizeof(shaderio::PushConstantGrid));
 
-            commandBuffer.drawMeshTasks(1, 1, 1);
+            nri::drawMeshTasks(commandBuffer, 1, 1, 1);
         }
 
         // LineMesh
         if (!m_data.lineDatas.empty())
         {
             commandBuffer.setLineWidth(5.0f);
-            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_LineMeshPipeline);
+            commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_LineMeshPipeline);
 
             shaderio::PushConstantLine circleReferences;
             circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            circleReferences.lineDataReference = m_data.lineStorageBuffers[frameIndex]->getDeviceAddress();
+            circleReferences.lineDataReference = m_data.lineStorageBuffers[frameIndex].getDeviceAddress();
             circleReferences.numOfElements = std::min(m_data.lineDatas.size(), kMaxLines);
             commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantLine));
             
-            commandBuffer.drawMeshTasks(1, 1, 1);
+            nri::drawMeshTasks(commandBuffer, 1, 1, 1);
         }
 
         // Thin lines: the same pipeline drawn one pixel wide, from the same buffer behind the thick lines (an address offset).
@@ -205,15 +205,15 @@ namespace Nox
             if (thinCount > 0)
             {
                 commandBuffer.setLineWidth(1.0f);
-                commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_LineMeshPipeline);
+                commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_LineMeshPipeline);
 
                 shaderio::PushConstantLine thinReferences;
                 thinReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-                thinReferences.lineDataReference = m_data.lineStorageBuffers[frameIndex]->getDeviceAddress() + thickCount * sizeof(shaderio::LineData);
+                thinReferences.lineDataReference = m_data.lineStorageBuffers[frameIndex].getDeviceAddress() + thickCount * sizeof(shaderio::LineData);
                 thinReferences.numOfElements = thinCount;
                 commandBuffer.pushData(&thinReferences, sizeof(shaderio::PushConstantLine));
 
-                commandBuffer.drawMeshTasks(1, 1, 1);
+                nri::drawMeshTasks(commandBuffer, 1, 1, 1);
             }
         }
 
@@ -226,28 +226,28 @@ namespace Nox
             {
                 commandBuffer.setLineWidth(1.5f);
                 commandBuffer.setDepthTestEnable(false);
-                commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_LineMeshPipeline);
+                commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_LineMeshPipeline);
 
                 shaderio::PushConstantLine xrayReferences;
                 xrayReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-                xrayReferences.lineDataReference = m_data.lineStorageBuffers[frameIndex]->getDeviceAddress() + (thickCount + thinCount) * sizeof(shaderio::LineData);
+                xrayReferences.lineDataReference = m_data.lineStorageBuffers[frameIndex].getDeviceAddress() + (thickCount + thinCount) * sizeof(shaderio::LineData);
                 xrayReferences.numOfElements = xrayCount;
                 commandBuffer.pushData(&xrayReferences, sizeof(shaderio::PushConstantLine));
 
-                commandBuffer.drawMeshTasks(1, 1, 1);
+                nri::drawMeshTasks(commandBuffer, 1, 1, 1);
                 commandBuffer.setDepthTestEnable(true);
             }
         }
     }
 
     // Runs inside a Begin rendering
-    void Renderer2D::Flush(NRI::CommandBuffer& commandBuffer, const NRI::Buffer& currentUniformBuffer, uint32_t frameIndex)
+    void Renderer2D::Flush(nri::CommandBuffer& commandBuffer, const nri::Buffer& currentUniformBuffer, uint32_t frameIndex)
     {
         FlushWorld(commandBuffer, currentUniformBuffer, frameIndex, m_GridDraw ? &m_Grid : nullptr);
 
         // Screen space last, so it lands on top of the world-space 2D content too: panels before their text, same
         // pipelines, the pixel-projection uniforms instead of the camera's, depth testing off (nothing may hide it).
-        const NRI::Buffer& screenUniforms = *m_data.screenUniformBuffers[frameIndex];
+        const nri::Buffer& screenUniforms = m_data.screenUniformBuffers[frameIndex];
         const size_t worldQuadCount = std::min(m_data.quadDatas.size(), kMaxQuads);
         const size_t screenQuadCount = std::min(m_data.screenQuadDatas.size(), kMaxQuads - worldQuadCount);
         const size_t worldGlyphCount = std::min(m_data.textDatas.size(), kMaxGlyphs);
@@ -258,28 +258,28 @@ namespace Nox
 
         if (screenQuadCount > 0)
         {
-            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_QuadMeshPipeline);
+            commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_QuadMeshPipeline);
 
             shaderio::PushConstantQuad screenQuadReferences;
             screenQuadReferences.matrixReference = screenUniforms.getDeviceAddress();
-            screenQuadReferences.quadDataReference = m_data.quadStorageBuffers[frameIndex]->getDeviceAddress() + worldQuadCount * sizeof(shaderio::QuadData);
+            screenQuadReferences.quadDataReference = m_data.quadStorageBuffers[frameIndex].getDeviceAddress() + worldQuadCount * sizeof(shaderio::QuadData);
             screenQuadReferences.numOfElements = screenQuadCount;
             commandBuffer.pushData(&screenQuadReferences, sizeof(shaderio::PushConstantQuad));
 
-            commandBuffer.drawMeshTasks(1, 1, 1);
+            nri::drawMeshTasks(commandBuffer, 1, 1, 1);
         }
 
         if (screenGlyphCount > 0)
         {
-            commandBuffer.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_TextMeshPipeline);
+            commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_TextMeshPipeline);
 
             shaderio::PushConstantText screenTextReferences;
             screenTextReferences.matrixReference = screenUniforms.getDeviceAddress();
-            screenTextReferences.textDataReference = m_data.textStorageBuffers[frameIndex]->getDeviceAddress() + worldGlyphCount * sizeof(shaderio::TextData);
+            screenTextReferences.textDataReference = m_data.textStorageBuffers[frameIndex].getDeviceAddress() + worldGlyphCount * sizeof(shaderio::TextData);
             screenTextReferences.numOfElements = screenGlyphCount;
             commandBuffer.pushData(&screenTextReferences, sizeof(shaderio::PushConstantText));
 
-            commandBuffer.drawMeshTasks(1, 1, 1);
+            nri::drawMeshTasks(commandBuffer, 1, 1, 1);
         }
         commandBuffer.setDepthTestEnable(true); // restored like the x-ray lines do: not necessarily the pass's last draw
     }
@@ -303,13 +303,13 @@ namespace Nox
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            std::unique_ptr<NRI::Buffer> uboBuffer = m_context.device.createBuffer(NRI::BufferDesc
+            nri::Buffer uboBuffer = m_context.device.createBuffer(nri::BufferDesc
                 {
                     .size = bufferSize,
-                    .usage = NRI::BufferUsage::Uniform
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
                 });
 
-            void* mappedMemory = uboBuffer->map(0, bufferSize);
+            void* mappedMemory = uboBuffer.map(0, bufferSize);
 
             m_data.screenUniformBuffers.emplace_back(std::move(uboBuffer));
             m_data.screenUniformBuffersMapped.emplace_back(mappedMemory);
@@ -348,29 +348,29 @@ namespace Nox
 
     void Renderer2D::createMeshPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.colorFormats =
         {
-            NRI::ImageFormat::Surface,
-            NRI::ImageFormat::R32SINT
+            NRI_FORMAT_SURFACE,
+            NRI_FORMAT_R32_SINT
         };
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
+            .stage = NRI_SHADER_STAGE_TASK,
             .entryPoint = "taskMain",
             .sourcePath = "assets/shaders/QuadMesh.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
+            .stage = NRI_SHADER_STAGE_MESH,
             .entryPoint = "meshMain",
             .sourcePath = "assets/shaders/QuadMesh.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
+            .stage = NRI_SHADER_STAGE_FRAGMENT,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/QuadMesh.slang"
         });
-        m_QuadMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
+        m_QuadMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler.handle());
     }
 
     void Renderer2D::createQuadStorageBuffers()
@@ -382,13 +382,13 @@ namespace Nox
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            std::unique_ptr<NRI::Buffer> uboBuffer = m_context.device.createBuffer(NRI::BufferDesc
+            nri::Buffer uboBuffer = m_context.device.createBuffer(nri::BufferDesc
                 {
                     .size = bufferSize,
-                    .usage = NRI::BufferUsage::Storage
+                    .usage = NRI_BUFFER_USAGE_STORAGE
                 });
 
-            void* mappedMemory = uboBuffer->map(0, bufferSize);
+            void* mappedMemory = uboBuffer.map(0, bufferSize);
 
             m_data.quadStorageBuffers.emplace_back(std::move(uboBuffer));
             m_data.quadStorageBuffersMapped.emplace_back(mappedMemory);
@@ -432,29 +432,29 @@ namespace Nox
     
     void Renderer2D::createCircleMeshPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.colorFormats =
         {
-            NRI::ImageFormat::Surface,
-            NRI::ImageFormat::R32SINT
+            NRI_FORMAT_SURFACE,
+            NRI_FORMAT_R32_SINT
         };
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
+            .stage = NRI_SHADER_STAGE_TASK,
             .entryPoint = "taskMain",
             .sourcePath = "assets/shaders/CircleMesh.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
+            .stage = NRI_SHADER_STAGE_MESH,
             .entryPoint = "meshMain",
             .sourcePath = "assets/shaders/CircleMesh.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
+            .stage = NRI_SHADER_STAGE_FRAGMENT,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/CircleMesh.slang"
         });
-        m_CircleMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
+        m_CircleMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler.handle());
     }
     
     void Renderer2D::createCircleStorageBuffers()
@@ -466,13 +466,13 @@ namespace Nox
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            std::unique_ptr<NRI::Buffer> uboBuffer = m_context.device.createBuffer(NRI::BufferDesc
+            nri::Buffer uboBuffer = m_context.device.createBuffer(nri::BufferDesc
                 {
                     .size = bufferSize,
-                    .usage = NRI::BufferUsage::Storage
+                    .usage = NRI_BUFFER_USAGE_STORAGE
                 });
 
-            void* mappedMemory = uboBuffer->map(0, bufferSize);
+            void* mappedMemory = uboBuffer.map(0, bufferSize);
 
             m_data.circleStorageBuffers.emplace_back(std::move(uboBuffer));
             m_data.circleStorageBuffersMapped.emplace_back(mappedMemory);
@@ -493,29 +493,29 @@ namespace Nox
     
      void Renderer2D::createTextMeshPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.colorFormats =
         {
-            NRI::ImageFormat::Surface,
-            NRI::ImageFormat::R32SINT
+            NRI_FORMAT_SURFACE,
+            NRI_FORMAT_R32_SINT
         };
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
+            .stage = NRI_SHADER_STAGE_TASK,
             .entryPoint = "taskMain",
             .sourcePath = "assets/shaders/TextMesh.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
+            .stage = NRI_SHADER_STAGE_MESH,
             .entryPoint = "meshMain",
             .sourcePath = "assets/shaders/TextMesh.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
+            .stage = NRI_SHADER_STAGE_FRAGMENT,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/TextMesh.slang"
         });
-        m_TextMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
+        m_TextMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler.handle());
     }
     
     void Renderer2D::createTextStorageBuffers()
@@ -527,13 +527,13 @@ namespace Nox
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            std::unique_ptr<NRI::Buffer> uboBuffer = m_context.device.createBuffer(NRI::BufferDesc
+            nri::Buffer uboBuffer = m_context.device.createBuffer(nri::BufferDesc
                 {
                     .size = bufferSize,
-                    .usage = NRI::BufferUsage::Storage
+                    .usage = NRI_BUFFER_USAGE_STORAGE
                 });
 
-            void* mappedMemory = uboBuffer->map(0, bufferSize);
+            void* mappedMemory = uboBuffer.map(0, bufferSize);
 
             m_data.textStorageBuffers.emplace_back(std::move(uboBuffer));
             m_data.textStorageBuffersMapped.emplace_back(mappedMemory);
@@ -656,44 +656,44 @@ namespace Nox
 
     void Renderer2D::createLineMeshPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.colorFormats =
         {
-            NRI::ImageFormat::Surface,
-            NRI::ImageFormat::R32SINT
+            NRI_FORMAT_SURFACE,
+            NRI_FORMAT_R32_SINT
         };
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Task,
+            .stage = NRI_SHADER_STAGE_TASK,
             .entryPoint = "taskMain",
             .sourcePath = "assets/shaders/LineMesh.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Mesh,
+            .stage = NRI_SHADER_STAGE_MESH,
             .entryPoint = "meshMain",
             .sourcePath = "assets/shaders/LineMesh.slang"
         });
         desc.shaders.push_back({
-            .stage = NRI::ShaderStage::Fragment,
+            .stage = NRI_SHADER_STAGE_FRAGMENT,
             .entryPoint = "fragMain",
             .sourcePath = "assets/shaders/LineMesh.slang"
         });
-        m_LineMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
+        m_LineMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler.handle());
     }
     
     void Renderer2D::createGridMeshPipeline(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.colorFormats =
         {
-            NRI::ImageFormat::Surface,
-            NRI::ImageFormat::R32SINT
+            NRI_FORMAT_SURFACE,
+            NRI_FORMAT_R32_SINT
         };
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/GridMesh.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/GridMesh.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/GridMesh.slang" });
-        m_GridMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler);
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/GridMesh.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = "assets/shaders/GridMesh.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = "assets/shaders/GridMesh.slang" });
+        m_GridMeshPipeline = m_context.device.createPipeline(desc, m_context.shaderCompiler.handle());
     }
 
     void Renderer2D::createLineStorageBuffers()
@@ -705,13 +705,13 @@ namespace Nox
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            std::unique_ptr<NRI::Buffer> uboBuffer = m_context.device.createBuffer(NRI::BufferDesc
+            nri::Buffer uboBuffer = m_context.device.createBuffer(nri::BufferDesc
                 {
                     .size = bufferSize,
-                    .usage = NRI::BufferUsage::Storage
+                    .usage = NRI_BUFFER_USAGE_STORAGE
                 });
 
-            void* mappedMemory = uboBuffer->map(0, bufferSize);
+            void* mappedMemory = uboBuffer.map(0, bufferSize);
 
             m_data.lineStorageBuffers.emplace_back(std::move(uboBuffer));
             m_data.lineStorageBuffersMapped.emplace_back(mappedMemory);

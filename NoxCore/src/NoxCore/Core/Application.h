@@ -10,12 +10,16 @@
 #include "NoxCore/Core/Layer.h"
 #include "NoxCore/Events/Event.h"
 
+namespace NoxTasks
+{
+    class JobSystem;
+}
+
 namespace Nox
 {
     class Renderer;
     class ImGuiLayer;
     class UILayer;
-    class JobSystem;
     class Application;
 
     // The command line: switches start with "--" and may come anywhere (--vk, --dx12, --windowed); everything else is positional (the
@@ -235,7 +239,7 @@ namespace Nox
         bool getBlockEvents() { return m_BlockEvents; }
     private:
         // First member: created before and destroyed after everything that schedules tasks.
-        std::unique_ptr<JobSystem> m_JobSystem;
+        std::unique_ptr<NoxTasks::JobSystem> m_JobSystem;
         ApplicationSpecification m_Specification;
         bool m_BlockEvents = false;
     public:

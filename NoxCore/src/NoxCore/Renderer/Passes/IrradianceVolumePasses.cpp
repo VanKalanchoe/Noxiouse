@@ -65,21 +65,21 @@ namespace Nox
 
     void Renderer::createIrradianceVolumePipelines(bool forceCompile)
     {
-        NRI::PipelineDesc capture{};
+        nri::PipelineDesc capture{};
         capture.forceCompile = forceCompile;
-        capture.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R16G16B16A16_SFLOAT };
-        capture.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
-        capture.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Material_PBR_Mesh.slang" });
-        capture.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "captureFragMain", .sourcePath = "assets/shaders/Material_TransparentLit_Mesh.slang" });
-        m_irradianceCapturePipeline = m_device->createPipeline(capture, *m_shaderCompiler);
+        capture.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT, NRI_FORMAT_R16G16B16A16_SFLOAT };
+        capture.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
+        capture.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Material_PBR_Mesh.slang" });
+        capture.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "captureFragMain", .sourcePath = "assets/shaders/Material_TransparentLit_Mesh.slang" });
+        m_irradianceCapturePipeline = m_device.createPipeline(capture, m_shaderCompiler.handle());
 
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
         desc.forceCompile = forceCompile;
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "packMain", .sourcePath = "assets/shaders/IrradianceProbeSH.slang" });
-        m_irradiancePackPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "packMain", .sourcePath = "assets/shaders/IrradianceProbeSH.slang" });
+        m_irradiancePackPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.back().entryPoint = "relightMain";
-        m_irradianceRelightPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_irradianceRelightPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     void Renderer::addIrradianceVolumePasses()
@@ -151,9 +151,9 @@ namespace Nox
                     if (state.SurfaceCache)
                         m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(state.SurfaceCache) });
                 }
-                state.SH = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(glm::vec4) * shaderio::IrradianceProbeSHStride * probeCount, .usage = NRI::BufferUsage::Storage });
-                state.SurfaceCache = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(glm::uvec4) * 6ull * cacheFaceSize * cacheFaceSize * probeCount,
-                                                                             .usage = NRI::BufferUsage::Storage });
+                state.SH = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(glm::vec4) * shaderio::IrradianceProbeSHStride * probeCount, .usage = NRI_BUFFER_USAGE_STORAGE });
+                state.SurfaceCache = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(glm::uvec4) * 6ull * cacheFaceSize * cacheFaceSize * probeCount,
+                                                                             .usage = NRI_BUFFER_USAGE_STORAGE });
             }
             // Moved, resized or asked to: captured again from the start (the lookup leaves each probe out until it is lit).
             state.NeedsClear = true;
@@ -235,17 +235,17 @@ namespace Nox
 
         if (!m_irradianceTableBuffers[frameIndex])
         {
-            m_irradianceTableBuffers[frameIndex] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::GpuIrradianceVolume), .usage = NRI::BufferUsage::Storage });
-            m_irradianceTableBuffersMapped[frameIndex] = m_irradianceTableBuffers[frameIndex]->map(0, sizeof(shaderio::GpuIrradianceVolume));
-            m_irradianceProbeListBuffers[frameIndex] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(uint32_t) * shaderio::MaxIrradianceProbesPerFrame, .usage = NRI::BufferUsage::Storage });
-            m_irradianceProbeListBuffersMapped[frameIndex] = m_irradianceProbeListBuffers[frameIndex]->map(0, sizeof(uint32_t) * shaderio::MaxIrradianceProbesPerFrame);
-            m_irradianceRelightListBuffers[frameIndex] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(uint32_t) * shaderio::MaxIrradianceRelightsPerFrame, .usage = NRI::BufferUsage::Storage });
-            m_irradianceRelightListBuffersMapped[frameIndex] = m_irradianceRelightListBuffers[frameIndex]->map(0, sizeof(uint32_t) * shaderio::MaxIrradianceRelightsPerFrame);
+            m_irradianceTableBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::GpuIrradianceVolume), .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_irradianceTableBuffersMapped[frameIndex] = m_irradianceTableBuffers[frameIndex].map(0, sizeof(shaderio::GpuIrradianceVolume));
+            m_irradianceProbeListBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * shaderio::MaxIrradianceProbesPerFrame, .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_irradianceProbeListBuffersMapped[frameIndex] = m_irradianceProbeListBuffers[frameIndex].map(0, sizeof(uint32_t) * shaderio::MaxIrradianceProbesPerFrame);
+            m_irradianceRelightListBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * shaderio::MaxIrradianceRelightsPerFrame, .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_irradianceRelightListBuffersMapped[frameIndex] = m_irradianceRelightListBuffers[frameIndex].map(0, sizeof(uint32_t) * shaderio::MaxIrradianceRelightsPerFrame);
             for (auto& cullView : m_irradianceCullViews[frameIndex])
-                cullView = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI::BufferUsage::Storage });
-            m_irradianceSunUniforms[frameIndex] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI::BufferUsage::Uniform });
-            m_irradianceSunUniformsMapped[frameIndex] = m_irradianceSunUniforms[frameIndex]->map(0, sizeof(shaderio::UniformBufferObject));
-            m_irradianceSunCullViews[frameIndex] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI::BufferUsage::Storage });
+                cullView = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_irradianceSunUniforms[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI_BUFFER_USAGE_UNIFORM });
+            m_irradianceSunUniformsMapped[frameIndex] = m_irradianceSunUniforms[frameIndex].map(0, sizeof(shaderio::UniformBufferObject));
+            m_irradianceSunCullViews[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_STORAGE });
         }
         shaderio::GpuIrradianceVolume& volume = m_irradianceTable;
         volume = {};
@@ -256,18 +256,18 @@ namespace Nox
         volume.countY = state.Counts.y;
         volume.countZ = state.Counts.z;
         volume.probeCount = state.ProbeCount;
-        volume.probeSHReference = state.SH->getDeviceAddress();
-        volume.surfaceCacheReference = state.SurfaceCache->getDeviceAddress();
+        volume.probeSHReference = state.SH.getDeviceAddress();
+        volume.surfaceCacheReference = state.SurfaceCache.getDeviceAddress();
         volume.cacheFaceSize = state.CacheFaceSize;
         volume.sunShadowTextureIndex = 0xFFFFFFFF;
         // A quarter of a cell along the normal (in local units).
         volume.normalBias = 0.25f * std::min({ cell.x, cell.y, cell.z });
         // The table's contents are final after Compile (the sun map's slot): updateIrradianceVolumeUniforms.
-        const uint64_t tableAddress = m_irradianceTableBuffers[frameIndex]->getDeviceAddress();
+        const uint64_t tableAddress = m_irradianceTableBuffers[frameIndex].getDeviceAddress();
         uniformData.irradianceVolumeReference = tableAddress;
 
         // A cleared volume (zero SH: nothing lit) before its first probes are.
-        NRI::Buffer* shBuffer = state.SH.get();
+        nri::Buffer* shBuffer = &state.SH;
         if (state.NeedsClear)
         {
             state.NeedsClear = false;
@@ -283,7 +283,7 @@ namespace Nox
 
         const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
         const bool drawReady = entryCount > 0 && m_shadowDepthPipeline && m_shadowDepthMaskPipeline &&
-            std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return pipeline != nullptr; });
+            std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return static_cast<bool>(pipeline); });
         if (!drawReady)
             return;
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
@@ -309,8 +309,8 @@ namespace Nox
             mapDesc.Size = RGSize::Absolute;
             mapDesc.Width = SunShadowResolution;
             mapDesc.Height = SunShadowResolution;
-            mapDesc.Format = NRI::ImageFormat::None; // the device's depth format
-            mapDesc.Usage = NRI::TextureUsage::DepthStencilAttachment;
+            mapDesc.Format = NRI_FORMAT_NONE; // the device's depth format
+            mapDesc.Usage = NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
             const RGTextureHistory history = m_renderGraph.GetHistoryTexture("Irradiance Volume Sun Shadow", mapDesc, 1);
             if (history.WasReset || m_frameOriginMoved) // (a new render origin: the old view is in the old render space)
                 state.SunValid = false;
@@ -339,7 +339,7 @@ namespace Nox
                 state.SunDirty = false;
                 m_irradianceSunDrawn = true;
                 addSunDepthPasses("Irradiance Volume Sun Culling", "Irradiance Volume Sun Shadow", history.Textures[0], SunShadowResolution,
-                                  projection * view, m_irradianceSunUniforms[frameIndex].get(), m_irradianceSunCullViews[frameIndex].get(),
+                                  projection * view, &m_irradianceSunUniforms[frameIndex], &m_irradianceSunCullViews[frameIndex],
                                   -4.0f * state.SunTexelWorld / depthRange);
             }
             m_irradianceSunMap = history.Textures[0];
@@ -382,8 +382,8 @@ namespace Nox
             {
                 if (!m_irradianceFaceUniforms[frameIndex][face])
                 {
-                    m_irradianceFaceUniforms[frameIndex][face] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI::BufferUsage::Uniform });
-                    m_irradianceFaceUniformsMapped[frameIndex][face] = m_irradianceFaceUniforms[frameIndex][face]->map(0, sizeof(shaderio::UniformBufferObject));
+                    m_irradianceFaceUniforms[frameIndex][face] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI_BUFFER_USAGE_UNIFORM });
+                    m_irradianceFaceUniformsMapped[frameIndex][face] = m_irradianceFaceUniforms[frameIndex][face].map(0, sizeof(shaderio::UniformBufferObject));
                 }
             }
 
@@ -404,18 +404,18 @@ namespace Nox
                 cull.entryCount = entryCount;
                 cull.blockCount = blockCount;
                 cull.flags = shaderio::CULL_INSTANCES;
-                NRI::Buffer* cullViewBuffer = m_irradianceCullViews[frameIndex][k].get();
+                nri::Buffer* cullViewBuffer = &m_irradianceCullViews[frameIndex][k];
                 memcpy(cullViewBuffer->map(0, sizeof(cull)), &cull, sizeof(cull));
                 cullViewBuffer->unmap();
 
                 ViewDrawResources& probeDraws = draws[k];
-                probeDraws.VisibleInstances = m_renderGraph.CreateBuffer("Irradiance Probe Visible Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-                probeDraws.Commands = m_renderGraph.CreateBuffer("Irradiance Probe Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI::BufferUsage::Indirect });
-                probeDraws.Counts = m_renderGraph.CreateBuffer("Irradiance Probe Draw Counts", { sizeof(shaderio::CullCounts), NRI::BufferUsage::Indirect });
-                probeDraws.LateInstances = m_renderGraph.CreateBuffer("Irradiance Probe Late Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-                const RGBuffer flags = m_renderGraph.CreateBuffer("Irradiance Probe Cull Flags", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-                const RGBuffer blocks = m_renderGraph.CreateBuffer("Irradiance Probe Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI::BufferUsage::Storage });
-                addCullingDispatchPass(kCaptureCullNames[k], probeDraws, flags, blocks, entryCount, RGTexture{}, m_irradianceFaceUniforms[frameIndex][k * 6].get(), cullViewBuffer);
+                probeDraws.VisibleInstances = m_renderGraph.CreateBuffer("Irradiance Probe Visible Instances", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+                probeDraws.Commands = m_renderGraph.CreateBuffer("Irradiance Probe Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI_BUFFER_USAGE_INDIRECT });
+                probeDraws.Counts = m_renderGraph.CreateBuffer("Irradiance Probe Draw Counts", { sizeof(shaderio::CullCounts), NRI_BUFFER_USAGE_INDIRECT });
+                probeDraws.LateInstances = m_renderGraph.CreateBuffer("Irradiance Probe Late Instances", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+                const RGBuffer flags = m_renderGraph.CreateBuffer("Irradiance Probe Cull Flags", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+                const RGBuffer blocks = m_renderGraph.CreateBuffer("Irradiance Probe Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI_BUFFER_USAGE_STORAGE });
+                addCullingDispatchPass(kCaptureCullNames[k], probeDraws, flags, blocks, entryCount, RGTexture{}, &m_irradianceFaceUniforms[frameIndex][k * 6], cullViewBuffer);
             }
 
             // The faces: row k holds probe k's six (+X, -X, +Y, -Y, +Z, -Z), unlit.
@@ -424,19 +424,19 @@ namespace Nox
             atlasDesc.Size = RGSize::Absolute;
             atlasDesc.Width = 6 * faceSize;
             atlasDesc.Height = count * faceSize;
-            atlasDesc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+            atlasDesc.Format = NRI_FORMAT_R16G16B16A16_SFLOAT;
             const RGTexture albedo = m_renderGraph.CreateTexture("Irradiance Probe Albedo", atlasDesc);
             const RGTexture emission = m_renderGraph.CreateTexture("Irradiance Probe Emission", atlasDesc);
-            atlasDesc.Format = NRI::ImageFormat::None;
-            atlasDesc.Usage = NRI::TextureUsage::DepthStencilAttachment;
+            atlasDesc.Format = NRI_FORMAT_NONE;
+            atlasDesc.Usage = NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
             const RGTexture depth = m_renderGraph.CreateTexture("Irradiance Probe Depth", atlasDesc);
-            const NRI::Extent2D atlasExtent{ 6 * faceSize, count * faceSize };
+            const nri::Extent2D atlasExtent{ 6 * faceSize, count * faceSize };
             m_renderGraph.AddPass("Irradiance Probe Capture", RGPassFlags::Raster,
                 [&](RGBuilder& builder)
                 {
-                    builder.ColorTarget(albedo, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
-                    builder.ColorTarget(emission, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
-                    builder.DepthTarget(depth, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 }); // reverse Z: 0 is the sky
+                    builder.ColorTarget(albedo, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 0.0f });
+                    builder.ColorTarget(emission, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 0.0f });
+                    builder.DepthTarget(depth, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0 }); // reverse Z: 0 is the sky
                     builder.SetRenderArea(atlasExtent);
                     ReadGpuScene(builder, resources);
                     ReadIfValid(builder, resources.SkinnedVertices);
@@ -445,13 +445,13 @@ namespace Nox
                 },
                 [this, draws, count, atlasExtent](RGPassContext& context)
                 {
-                    NRI::CommandBuffer& cmd = context.Cmd();
+                    nri::CommandBuffer& cmd = context.Cmd();
                     cmd.setDepthTestEnable(true);
-                    cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                    cmd.setDepthCompareOp(NRI_COMPARE_GREATER_OR_EQUAL);
                     for (uint32_t attachment = 0; attachment < 2; ++attachment)
                     {
                         cmd.setColorBlendEnable(attachment, false);
-                        cmd.setColorWriteMask(attachment, NRI::ColorComponent::All);
+                        cmd.setColorWriteMask(attachment, nri::ColorComponent::All);
                     }
                     for (uint32_t k = 0; k < count; ++k)
                     {
@@ -465,13 +465,13 @@ namespace Nox
                             const float size = static_cast<float>(faceSize);
                             cmd.setViewportWithCount({ x, y + size, size, -size }, 0.0f, 1.0f); // the graph's flipped viewport on the face
                             cmd.setScissorRect(static_cast<int32_t>(x), static_cast<int32_t>(y), faceSize, faceSize);
-                            cursor.references.matrixReference = m_irradianceFaceUniforms[frameIndex][k * 6 + face]->getDeviceAddress();
-                            drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_irradianceCapturePipeline, NRI::CullMode::Back, true, false);
-                            drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_irradianceCapturePipeline, NRI::CullMode::None, true, false);
-                            drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_irradianceCapturePipeline, NRI::CullMode::Back, true, false);
-                            drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_irradianceCapturePipeline, NRI::CullMode::None, true, false);
-                            drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *m_irradianceCapturePipeline, NRI::CullMode::Back, true, false);
-                            drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *m_irradianceCapturePipeline, NRI::CullMode::None, true, false);
+                            cursor.references.matrixReference = m_irradianceFaceUniforms[frameIndex][k * 6 + face].getDeviceAddress();
+                            drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, m_irradianceCapturePipeline, NRI_CULL_MODE_BACK, true, false);
+                            drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, m_irradianceCapturePipeline, NRI_CULL_MODE_NONE, true, false);
+                            drawMeshletBucket(cmd, cursor, RenderBucket::Mask, m_irradianceCapturePipeline, NRI_CULL_MODE_BACK, true, false);
+                            drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, m_irradianceCapturePipeline, NRI_CULL_MODE_NONE, true, false);
+                            drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, m_irradianceCapturePipeline, NRI_CULL_MODE_BACK, true, false);
+                            drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, m_irradianceCapturePipeline, NRI_CULL_MODE_NONE, true, false);
                         }
                     }
                     cmd.setViewportWithCount({ 0.0f, static_cast<float>(atlasExtent.height), static_cast<float>(atlasExtent.width), -static_cast<float>(atlasExtent.height) }, 0.0f, 1.0f);
@@ -479,7 +479,7 @@ namespace Nox
                 });
 
             // The faces into each probe's surface cache and distance SH (the volume's buffers are outside the graph: a full barrier).
-            NRI::Buffer* probeListBuffer = m_irradianceProbeListBuffers[frameIndex].get();
+            nri::Buffer* probeListBuffer = &m_irradianceProbeListBuffers[frameIndex];
             const float maxDistance = 2.0f * glm::length(glm::vec3(world * glm::vec4(cell, 0.0f))); // two cells' diagonals (world units)
             m_renderGraph.AddPass("Irradiance Probe Pack", RGPassFlags::NeverCull,
                 [&](RGBuilder& builder)
@@ -490,7 +490,7 @@ namespace Nox
                 },
                 [this, albedo, emission, depth, count, tableAddress, probeListBuffer, maxDistance](RGPassContext& context)
                 {
-                    NRI::CommandBuffer& cmd = context.Cmd();
+                    nri::CommandBuffer& cmd = context.Cmd();
                     shaderio::PushConstantIrradianceProbePack push{};
                     push.probeIndicesReference = probeListBuffer->getDeviceAddress();
                     push.volumeReference = tableAddress;
@@ -500,7 +500,7 @@ namespace Nox
                     push.probesThisFrame = count;
                     push.nearPlane = WorldUnits::FromMeters(0.05f); // the faces' projection (updateIrradianceVolumeUniforms)
                     push.maxDistance = maxDistance;
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_irradiancePackPipeline);
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_irradiancePackPipeline);
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch(count, 1, 1);
                     cmd.executionBarrier();
@@ -522,7 +522,7 @@ namespace Nox
         }
         if (relightCount == 0)
             return;
-        NRI::Buffer* relightListBuffer = m_irradianceRelightListBuffers[frameIndex].get();
+        nri::Buffer* relightListBuffer = &m_irradianceRelightListBuffers[frameIndex];
         const RGTexture sunMap = m_irradianceSunMap;
         m_renderGraph.AddPass("Irradiance Probe Relight", RGPassFlags::NeverCull,
             [&](RGBuilder& builder)
@@ -533,14 +533,14 @@ namespace Nox
             },
             [this, relightCount, tableAddress, relightListBuffer](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
+                nri::CommandBuffer& cmd = context.Cmd();
                 shaderio::PushConstantIrradianceRelight push{};
-                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
                 push.probeIndicesReference = relightListBuffer->getDeviceAddress();
                 push.volumeReference = tableAddress;
                 push.probeCount = relightCount;
                 push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_irradianceRelightPipeline);
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_irradianceRelightPipeline);
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch(relightCount, 1, 1);
                 cmd.executionBarrier();

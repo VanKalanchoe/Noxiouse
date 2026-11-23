@@ -323,7 +323,7 @@ namespace Nox
             std::vector<Scene::TimelineAudioSection> sections;
             if (m_Playing)
                 scene->CollectTimelineAudio(player, *timeline, m_Time, sections);
-            scene->SyncTimelineAudio(sections, m_PreviewAudio, AudioVoiceGroup::Editor);
+            scene->SyncTimelineAudio(sections, m_PreviewAudio, NoxAudio::AudioVoiceGroup::Editor);
         }
         else
             StopPreviewAudio();

@@ -314,7 +314,7 @@ namespace Nox
         {
             m_Stats.PoolTiles += pool.TilesPerSide * pool.TilesPerSide;
             const uint32_t texels = pool.TilesPerSide * shaderio::VirtualTileStride;
-            m_Stats.PoolBytes += NRI::estimateTextureBytes(NRI::TextureDesc{ .width = texels, .height = texels, .format = pool.Format });
+            m_Stats.PoolBytes += nri::estimateTextureBytes(nri::TextureDesc{ .width = texels, .height = texels, .format = pool.Format });
         }
         NOX_PROFILE_COUNTER("Virtual Textures", m_Stats.Textures);
         NOX_PROFILE_COUNTER("Virtual Tiles Resident", m_Stats.ResidentTiles);
@@ -398,8 +398,8 @@ namespace Nox
         tile.Staging = *staging;
         m_Pools[texture.Pool].Owners[slot] = { id, index };
         // From the cooked file straight into staging (a pack's entry as a loose file's range).
-        tile.Read = JobSystem::Get().AsyncIO("Read Virtual Texture Tile", JobPriority::High,
-            [file = texture.Header.Path, offset = layout.TileFileOffset(tile.Mip, x, y), bytes, destination = staging->data](const CancellationToken&)
+        tile.Read = NoxTasks::JobSystem::Get().AsyncIO("Read Virtual Texture Tile", NoxTasks::JobPriority::High,
+            [file = texture.Header.Path, offset = layout.TileFileOffset(tile.Mip, x, y), bytes, destination = staging->data](const NoxTasks::CancellationToken&)
             {
                 return VFS::ReadRange(file, offset, bytes, destination);
             });
@@ -488,7 +488,7 @@ namespace Nox
         pool.Releasing.push_back({ slot, m_Frame + frames });
     }
 
-    uint32_t VirtualTextureStreamer::poolFor(NRI::ImageFormat format)
+    uint32_t VirtualTextureStreamer::poolFor(nri::ImageFormat format)
     {
         for (uint32_t index = 0; index < m_Pools.size(); ++index)
         {
@@ -505,15 +505,15 @@ namespace Nox
     void VirtualTextureStreamer::createPoolImage(Pool& pool)
     {
         const uint32_t texels = pool.TilesPerSide * shaderio::VirtualTileStride;
-        pool.Image = m_Renderer.m_device->createTexture(NRI::TextureDesc{
+        pool.Image = CreateRef<Texture2D>(m_Renderer.m_device.createTexture(nri::TextureDesc{
             .width = texels,
             .height = texels,
             .mipLevels = 1,
             .sampleCount = 1,
-            .usage = NRI::TextureUsage::ShaderResource,
+            .usage = NRI_TEXTURE_USAGE_SHADER_RESOURCE,
             .format = pool.Format,
             .sharedAcrossQueues = true
-        });
+        }));
         // Its first transition on the transfer queue, ahead of every tile copy into it; frames sample only slots tiles were copied to.
         m_Renderer.m_uploads.InitializeTexture(*pool.Image);
         m_Renderer.m_uploads.CommitCopies(true);
@@ -526,7 +526,7 @@ namespace Nox
         pool.Owners.assign(slots, { UINT32_MAX, 0 });
         pool.Releasing.clear();
         NOX_CORE_INFO("Virtual textures: pool of format {} with {}x{} tiles ({} MB)", static_cast<uint32_t>(pool.Format), pool.TilesPerSide, pool.TilesPerSide,
-                      NRI::estimateTextureBytes(NRI::TextureDesc{ .width = texels, .height = texels, .format = pool.Format }) >> 20);
+                      nri::estimateTextureBytes(nri::TextureDesc{ .width = texels, .height = texels, .format = pool.Format }) >> 20);
     }
 
     void VirtualTextureStreamer::releasePoolImage(Pool& pool)
@@ -598,7 +598,7 @@ namespace Nox
             return;
 
         // A debugging action: everything the pools hold goes, after the GPU (every queue) is done with them.
-        m_Renderer.m_device->waitIdle();
+        m_Renderer.m_device.waitIdle();
         dropAllTiles();
         for (Pool& pool : m_Pools)
         {

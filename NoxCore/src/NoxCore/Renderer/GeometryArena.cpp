@@ -6,8 +6,8 @@
 
 namespace Nox
 {
-    void GeometryArena::Init(NRI::Device& device, uint32_t elementSize, uint32_t initialCapacity, uint32_t maxCapacity,
-                             NRI::BufferUsage usage)
+    void GeometryArena::Init(nri::Device& device, uint32_t elementSize, uint32_t initialCapacity, uint32_t maxCapacity,
+                             nri::BufferUsage usage)
     {
         m_device = &device;
         m_elementSize = elementSize;
@@ -26,13 +26,13 @@ namespace Nox
             const uint32_t reserved = static_cast<uint32_t>(std::min<uint64_t>(m_maxCapacity, reservable));
             if (reserved >= initialCapacity)
             {
-                std::unique_ptr<NRI::Buffer> buffer = createBuffer(reserved, true);
-                if (buffer && buffer->getSparsePageSize() != 0)
+                nri::Buffer buffer = createBuffer(reserved, true);
+                if (buffer && buffer.getSparsePageSize() != 0)
                 {
                     m_buffer = std::move(buffer);
                     m_maxCapacity = reserved;
                     m_capacity = reserved;
-                    m_pageSize = m_buffer->getSparsePageSize();
+                    m_pageSize = m_buffer.getSparsePageSize();
                     m_pageUse.assign((uint64_t(reserved) * elementSize + m_pageSize - 1) / m_pageSize, 0);
                     m_allocator.emplace(m_maxCapacity);
                     return;
@@ -61,21 +61,21 @@ namespace Nox
         }
         if (!m_pageScratch.empty())
         {
-            const std::span<const NRI::SparsePageRange> changed(m_pageScratch);
-            if (!m_device->updateSparseBuffer(*m_buffer, add ? changed : std::span<const NRI::SparsePageRange>{},
-                                              add ? std::span<const NRI::SparsePageRange>{} : changed))
+            const std::span<const nri::SparsePageRange> changed(m_pageScratch);
+            if (!m_device->updateSparseBuffer(m_buffer, add ? changed : std::span<const nri::SparsePageRange>{},
+                                              add ? std::span<const nri::SparsePageRange>{} : changed))
                 return false;
         }
         for (uint64_t page = firstPage; page <= lastPage; ++page)
             m_pageUse[page] = add ? m_pageUse[page] + 1 : m_pageUse[page] - 1;
         uint64_t changedPages = 0;
-        for (const NRI::SparsePageRange& range : m_pageScratch)
+        for (const nri::SparsePageRange& range : m_pageScratch)
             changedPages += range.pageCount;
         m_committedPages = add ? m_committedPages + changedPages : m_committedPages - std::min(m_committedPages, changedPages);
         return true;
     }
 
-    GeometryRange GeometryArena::Allocate(uint32_t count, std::unique_ptr<NRI::Buffer>& outGrownFrom)
+    GeometryRange GeometryArena::Allocate(uint32_t count, nri::Buffer& outGrownFrom)
     {
         if (count == 0)
             return {};
@@ -104,7 +104,7 @@ namespace Nox
         if (end > m_capacity)
         {
             const uint32_t capacity = std::min(std::max(m_capacity * 2, end), m_maxCapacity);
-            std::unique_ptr<NRI::Buffer> grown = createBuffer(capacity, false);
+            nri::Buffer grown = createBuffer(capacity, false);
 
             outGrownFrom = std::move(m_buffer);
             m_buffer = std::move(grown);
@@ -136,7 +136,7 @@ namespace Nox
             changePageUse(range.offset, range.count, false);
     }
 
-    bool GeometryArena::Reserve(uint32_t offset, uint32_t count, std::unique_ptr<NRI::Buffer>& outGrownFrom)
+    bool GeometryArena::Reserve(uint32_t offset, uint32_t count, nri::Buffer& outGrownFrom)
     {
         if (count == 0)
             return true;
@@ -150,7 +150,7 @@ namespace Nox
         else if (offset + count > m_capacity)
         {
             const uint32_t capacity = std::min(std::max(m_capacity * 2, offset + count), m_maxCapacity);
-            std::unique_ptr<NRI::Buffer> grown = createBuffer(capacity, false);
+            nri::Buffer grown = createBuffer(capacity, false);
             outGrownFrom = std::move(m_buffer);
             m_buffer = std::move(grown);
             m_capacity = capacity;
@@ -168,9 +168,9 @@ namespace Nox
             changePageUse(offset, count, false);
     }
 
-    std::unique_ptr<NRI::Buffer> GeometryArena::createBuffer(uint32_t capacity, bool sparse) const
+    nri::Buffer GeometryArena::createBuffer(uint32_t capacity, bool sparse) const
     {
-        return m_device->createBuffer(NRI::BufferDesc{
+        return m_device->createBuffer(nri::BufferDesc{
             .size = uint64_t(capacity) * m_elementSize,
             .usage = m_usage,
             .sharedAcrossQueues = true, // new ranges are copied on the transfer queue while graphics reads the others

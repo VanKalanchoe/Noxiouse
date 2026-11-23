@@ -2,11 +2,11 @@
 #include <cstdint>
 
 #include <imgui.h>
+#include <NRIRenderGraph/RGFrameReport.h>
 
 namespace Nox
 {
     class Renderer;
-    struct RGFrameReport;
 
     // Render graph tooling (§5.4.7): passes (culled, command buffer, CPU/GPU time, accesses), resources (lifetime, memory,
     // aliasing), validation messages and texture inspection of any graph texture. Opened from Window > Render Graph; while
@@ -22,10 +22,10 @@ namespace Nox
         void SetOpen(bool open) { m_Open = open; }
 
     private:
-        void DrawHeader(const RGFrameReport& report);
-        void DrawPasses(const RGFrameReport& report);
-        void DrawResources(const RGFrameReport& report);
-        void DrawValidation(const RGFrameReport& report);
+        void DrawHeader(const nri::RGFrameReport& report);
+        void DrawPasses(const nri::RGFrameReport& report);
+        void DrawResources(const nri::RGFrameReport& report);
+        void DrawValidation(const nri::RGFrameReport& report);
         void DrawInspector();
         void Inspect(const char* name, uint32_t occurrence);
         void StopInspection();

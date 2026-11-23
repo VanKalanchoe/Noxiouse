@@ -8,14 +8,15 @@
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Profiling/Profiler.h"
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIContext;
         class UIElement;
         class UILabel;
     }
+
+namespace Nox
+{
 
     // Window > Profiler (Unreal Insights / Tracy in the editor): the frame-time graph of the kept frames (click one to show it), VRAM
     // and RAM under it, the picked frame's timeline (the GPU queues, the main thread, the other threads; wheel zooms, drag pans,
@@ -24,8 +25,8 @@ namespace Nox
     class ProfilerV2Panel
     {
     public:
-        const Ref<UI::UIElement>& BuildUI(UI::UIContext* context);
-        const Ref<UI::UIElement>& GetRoot() const { return m_Root; }
+        const Ref<NoxUI::UIElement>& BuildUI(NoxUI::UIContext* context);
+        const Ref<NoxUI::UIElement>& GetRoot() const { return m_Root; }
         // Once a frame: `shown` while the window is open (frames are kept only while someone looks: the copies cost a little).
         void Update(bool shown);
 
@@ -63,8 +64,8 @@ namespace Nox
         void LoadCapture();
         void LoadCaptureFrom(const std::string& path);
 
-        UI::UIContext* m_Context = nullptr;
-        Ref<UI::UIElement> m_Root;
+        NoxUI::UIContext* m_Context = nullptr;
+        Ref<NoxUI::UIElement> m_Root;
         std::shared_ptr<State> m_State = std::make_shared<State>();
         std::string m_Message;
     };

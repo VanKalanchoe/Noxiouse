@@ -8,18 +8,18 @@
 
 #include "NoxCore/Animation/AnimationGraphNodes.h"
 #include "NoxCore/Renderer/Font.h"
-#include "NoxCore/UI/Core/UIContext.h"
-#include "NoxCore/UI/Rendering/UIDrawList.h"
-#include "NoxCore/UI/Rendering/UIIcons.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
+#include <NoxUI/Core/UIContext.h>
+#include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Rendering/UIIcons.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIMenu.h>
 
 namespace Nox
 {
     namespace
     {
-        using UI::UIColor;
-        using UI::UIVec2;
+        using NoxUI::UIColor;
+        using NoxUI::UIVec2;
 
         constexpr float kHeader = 26.0f;
         constexpr float kBoxHeight = 50.0f;
@@ -60,11 +60,11 @@ namespace Nox
 
     StateMachineViewV2::StateMachineViewV2()
     {
-        HitTestMode = UI::UIHitTestMode::Self;
+        HitTestMode = NoxUI::UIHitTestMode::Self;
         Focusable = true;
         ClipChildren = true;
-        WidthMode = UI::UISizeMode::Fill;
-        HeightMode = UI::UISizeMode::Fill;
+        WidthMode = NoxUI::UISizeMode::Fill;
+        HeightMode = NoxUI::UISizeMode::Fill;
     }
 
     uint32_t StateMachineViewV2::EntryState(const GraphNode& machine)
@@ -125,7 +125,7 @@ namespace Nox
     StateMachineViewV2::Box StateMachineViewV2::BoxOf(const NodeSubGraph& state) const
     {
         const std::string name = state.Name.empty() ? std::string("State") : state.Name;
-        const float width = std::max(kMinWidth, UI::UILabel::MeasureText(name, nullptr, kTitleFont).x + 40.0f);
+        const float width = std::max(kMinWidth, NoxUI::UILabel::MeasureText(name, nullptr, kTitleFont).x + 40.0f);
         return { state.EditorPosition, UIVec2(state.EditorPosition) + UIVec2{ width, kBoxHeight } };
     }
 
@@ -227,7 +227,7 @@ namespace Nox
 
     void StateMachineViewV2::FrameAll()
     {
-        const UI::UIRect& b = GetBounds();
+        const NoxUI::UIRect& b = GetBounds();
         if (!m_Machine || b.Width() < 10.0f || b.Height() < 10.0f)
             return;
         m_NeedsFrame = false;
@@ -268,11 +268,11 @@ namespace Nox
 
     void StateMachineViewV2::OpenMenu(const UIVec2& screen)
     {
-        UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         if (!ctx || !m_Machine)
             return;
-        std::vector<UI::UIMenuItem> items;
-        const UI::UIRect at{ screen, screen + UIVec2{ 1.0f } };
+        std::vector<NoxUI::UIMenuItem> items;
+        const NoxUI::UIRect at{ screen, screen + UIVec2{ 1.0f } };
         if (const uint32_t state = StateAt(screen); state != 0)
         {
             Select(state, -1);
@@ -309,14 +309,14 @@ namespace Nox
         }
         else
             items.push_back({ "Add State", "", [this, screen]() { AddState(screen); }, false, true, false, false, "A state with an empty graph of its own" });
-        UI::UIMenuPopup::ShowPopupMenu(*ctx, at, std::move(items));
+        NoxUI::UIMenuPopup::ShowPopupMenu(*ctx, at, std::move(items));
     }
 
-    bool StateMachineViewV2::OnPointerDown(const UI::UIPointerEvent& e)
+    bool StateMachineViewV2::OnPointerDown(const NoxUI::UIPointerEvent& e)
     {
         if (!m_Machine)
             return true;
-        if (UI::UIContext* ctx = UI::UIContext::GetCurrent())
+        if (NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent())
         {
             ctx->SetFocus(this);
             ctx->CancelPendingDrag();
@@ -364,7 +364,7 @@ namespace Nox
         return true;
     }
 
-    bool StateMachineViewV2::OnPointerMove(const UI::UIPointerEvent& e)
+    bool StateMachineViewV2::OnPointerMove(const NoxUI::UIPointerEvent& e)
     {
         if (!m_Machine)
             return true;
@@ -395,7 +395,7 @@ namespace Nox
         return true;
     }
 
-    bool StateMachineViewV2::OnPointerUp(const UI::UIPointerEvent& e)
+    bool StateMachineViewV2::OnPointerUp(const NoxUI::UIPointerEvent& e)
     {
         if (!m_Machine)
             return true;
@@ -435,15 +435,15 @@ namespace Nox
         return true;
     }
 
-    bool StateMachineViewV2::OnMouseWheel(const UI::UIPointerEvent& e)
+    bool StateMachineViewV2::OnMouseWheel(const NoxUI::UIPointerEvent& e)
     {
-        const UI::UIContext* ctx = UI::UIContext::GetCurrent();
+        const NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         const UIVec2 pointer = ctx ? ctx->GetLastMousePos() : GetBounds().Center();
         m_View.ZoomAt(GetBounds(), pointer, e.ScrollDelta.y);
         return true;
     }
 
-    bool StateMachineViewV2::OnKeyDown(const UI::UIKeyEvent& e)
+    bool StateMachineViewV2::OnKeyDown(const NoxUI::UIKeyEvent& e)
     {
         if (!m_Machine)
             return false;
@@ -472,9 +472,9 @@ namespace Nox
         return false;
     }
 
-    void StateMachineViewV2::OnPaint(UI::UIDrawList& d, const UI::UITheme& theme)
+    void StateMachineViewV2::OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme)
     {
-        const UI::UIRect& b = GetBounds();
+        const NoxUI::UIRect& b = GetBounds();
         if (m_NeedsFrame && m_Machine && b.Width() > 10.0f)
             FrameAll();
         const UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
@@ -499,10 +499,10 @@ namespace Nox
             const UIVec2 side{ -direction.y, direction.x };
             const float head = 10.0f * z;
             const UIVec2 base = to - direction * head;
-            UI::Icons::DrawSegment(d, from, base, width, color);
-            UI::Icons::DrawSegment(d, to, base + side * head * 0.5f, width, color);
-            UI::Icons::DrawSegment(d, to, base - side * head * 0.5f, width, color);
-            UI::Icons::DrawSegment(d, base + side * head * 0.5f, base - side * head * 0.5f, width, color);
+            NoxUI::Icons::DrawSegment(d, from, base, width, color);
+            NoxUI::Icons::DrawSegment(d, to, base + side * head * 0.5f, width, color);
+            NoxUI::Icons::DrawSegment(d, to, base - side * head * 0.5f, width, color);
+            NoxUI::Icons::DrawSegment(d, base + side * head * 0.5f, base - side * head * 0.5f, width, color);
         };
 
         // Transitions under the states, each with its round button in the middle (the rule count in it).
@@ -513,16 +513,16 @@ namespace Nox
                 continue;
             const bool selected = static_cast<int>(i) == SelectedTransition;
             const bool hovered = static_cast<int>(i) == m_HoveredTransition;
-            const UIColor color = selected ? UI::ThemeColor("TransitionSelected", { 1.0f, 0.69f, 0.2f, 1.0f }) : hovered ? UI::ThemeColor("TransitionHovered", { 0.2f, 0.69f, 1.0f, 1.0f }) : UI::ThemeColor("Transition", { 0.78f, 0.78f, 0.80f, 1.0f });
+            const UIColor color = selected ? NoxUI::ThemeColor("TransitionSelected", { 1.0f, 0.69f, 0.2f, 1.0f }) : hovered ? NoxUI::ThemeColor("TransitionHovered", { 0.2f, 0.69f, 1.0f, 1.0f }) : NoxUI::ThemeColor("Transition", { 0.78f, 0.78f, 0.80f, 1.0f });
             arrow(from, to, color, (selected || hovered ? 2.6f : 1.8f) * z);
             const UIVec2 middle = (from + to) * 0.5f;
             const float r = kButtonRadius * z;
             const NodeTransition& transition = m_Machine->Transitions[i];
-            d.AddRoundedRect(middle - UIVec2{ r }, middle + UIVec2{ r }, UI::ThemeColor("TransitionMarker", { 0.12f, 0.14f, 0.19f, 1.0f }), glm::vec4(r), 1.5f * z, color);
+            d.AddRoundedRect(middle - UIVec2{ r }, middle + UIVec2{ r }, NoxUI::ThemeColor("TransitionMarker", { 0.12f, 0.14f, 0.19f, 1.0f }), glm::vec4(r), 1.5f * z, color);
             if (m_View.Zoom >= 0.5f)
             {
                 const std::string count = transition.AtStateEnd && transition.Rules.empty() ? std::string("E") : std::to_string(transition.Rules.size());
-                const UIVec2 extent = UI::UILabel::MeasureText(count, nullptr, 10.0f * z);
+                const UIVec2 extent = NoxUI::UILabel::MeasureText(count, nullptr, 10.0f * z);
                 d.AddText(count, nullptr, middle - extent * 0.5f, 10.0f * z, color);
             }
         }
@@ -535,7 +535,7 @@ namespace Nox
                     const Box box = BoxOf(state);
                     const UIVec2 start = GraphToScreen({ box.Max.x, (box.Min.y + kHeader + box.Max.y) * 0.5f });
                     const bool valid = m_HoveredState != 0 && m_HoveredState != m_DragState;
-                    arrow(start, m_DragLast, valid ? UI::ThemeColor("WireValid", { 0.45f, 0.9f, 0.5f, 1.0f }) : accent, 2.2f * z);
+                    arrow(start, m_DragLast, valid ? NoxUI::ThemeColor("WireValid", { 0.45f, 0.9f, 0.5f, 1.0f }) : accent, 2.2f * z);
                 }
 
         // States.
@@ -551,24 +551,24 @@ namespace Nox
             const bool hovered = state.Id == m_HoveredState;
             const bool isEntry = state.Id == entry;
             const float radius = 8.0f * m_View.Zoom;
-            d.AddRoundedRect(min, max, UI::ThemeColor("NodeBody", { 0.11f, 0.13f, 0.18f, 0.97f }), glm::vec4(radius), selected ? 2.0f : 1.0f,
+            d.AddRoundedRect(min, max, NoxUI::ThemeColor("NodeBody", { 0.11f, 0.13f, 0.18f, 0.97f }), glm::vec4(radius), selected ? 2.0f : 1.0f,
                              selected ? accent : (hovered ? UIColor{ border.r + 0.12f, border.g + 0.12f, border.b + 0.14f, 1.0f } : border),
-                             UI::ThemeColor("NodeShadow", { 0.0f, 0.0f, 0.0f, 0.45f }), { 0.0f, 4.0f * m_View.Zoom }, 12.0f * m_View.Zoom);
-            d.AddRoundedRect(min, { max.x, min.y + kHeader * m_View.Zoom }, isEntry ? UI::ThemeColor("StateHeaderEntry", { 0.22f, 0.53f, 0.35f, 1.0f }) : UI::ThemeColor("StateHeader", { 0.59f, 0.24f, 0.24f, 1.0f }),
+                             NoxUI::ThemeColor("NodeShadow", { 0.0f, 0.0f, 0.0f, 0.45f }), { 0.0f, 4.0f * m_View.Zoom }, 12.0f * m_View.Zoom);
+            d.AddRoundedRect(min, { max.x, min.y + kHeader * m_View.Zoom }, isEntry ? NoxUI::ThemeColor("StateHeaderEntry", { 0.22f, 0.53f, 0.35f, 1.0f }) : NoxUI::ThemeColor("StateHeader", { 0.59f, 0.24f, 0.24f, 1.0f }),
                              { radius, radius, 0.0f, 0.0f });
             if (showText)
             {
                 const std::string name = state.Name.empty() ? std::string("State") : state.Name;
                 const float size = kTitleFont * m_View.Zoom;
-                const UIVec2 extent = UI::UILabel::MeasureText(name, nullptr, size);
-                d.AddText(name, nullptr, { min.x + 10.0f * m_View.Zoom, min.y + (kHeader * m_View.Zoom - extent.y) * 0.5f }, size, UI::ThemeColor("NodeTitle", { 1.0f, 1.0f, 1.0f, 0.96f }));
+                const UIVec2 extent = NoxUI::UILabel::MeasureText(name, nullptr, size);
+                d.AddText(name, nullptr, { min.x + 10.0f * m_View.Zoom, min.y + (kHeader * m_View.Zoom - extent.y) * 0.5f }, size, NoxUI::ThemeColor("NodeTitle", { 1.0f, 1.0f, 1.0f, 0.96f }));
                 const std::string info = std::to_string(state.Graph.Nodes.size()) + (state.Graph.Nodes.size() == 1 ? " node" : " nodes") + (isEntry ? "   entry" : "");
                 d.AddText(info, nullptr, { min.x + 10.0f * m_View.Zoom, min.y + (kHeader + 5.0f) * m_View.Zoom }, 11.5f * m_View.Zoom, muted);
             }
             // The handle transitions are dragged out of.
             const UIVec2 handle = GraphToScreen({ box.Max.x, (box.Min.y + kHeader + box.Max.y) * 0.5f });
             const float r = kHandleRadius * z;
-            d.AddRoundedRect(handle - UIVec2{ r }, handle + UIVec2{ r }, UI::ThemeColor("StateHandle", { 0.08f, 0.10f, 0.14f, 1.0f }), glm::vec4(r), 1.6f * z, UI::ThemeColor("StateHandleBorder", { 0.9f, 0.9f, 0.9f, 1.0f }));
+            d.AddRoundedRect(handle - UIVec2{ r }, handle + UIVec2{ r }, NoxUI::ThemeColor("StateHandle", { 0.08f, 0.10f, 0.14f, 1.0f }), glm::vec4(r), 1.6f * z, NoxUI::ThemeColor("StateHandleBorder", { 0.9f, 0.9f, 0.9f, 1.0f }));
         }
         if (m_Machine->SubGraphs.empty())
             d.AddText("No states: right-click > Add State.", nullptr, b.Min + UIVec2{ 12.0f, 12.0f }, 13.5f, muted);

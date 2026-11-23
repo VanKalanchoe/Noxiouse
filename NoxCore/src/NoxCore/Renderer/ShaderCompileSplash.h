@@ -5,7 +5,7 @@
 #include <string>
 #include <thread>
 
-#include "NRI/ShaderCompiler.h"
+#include <NRI/Extensions/NRIShaderCompiler.h>
 
 struct SDL_Window;
 struct SDL_Renderer;
@@ -35,7 +35,7 @@ namespace Nox
         void EnsureWindow();
 
         std::filesystem::path m_CountFile;
-        NRI::ShaderProgress m_Progress;
+        NriShaderProgressCallbacks m_Progress{};
         SDL_Window* m_Window = nullptr;
         SDL_Renderer* m_Renderer = nullptr;
         uint32_t m_Pipelines = 0;

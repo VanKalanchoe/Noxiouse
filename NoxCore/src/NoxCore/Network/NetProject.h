@@ -1,5 +1,5 @@
 #pragma once
-#include "NetProtocol.h"
+#include <NoxNet/NetProtocol.h>
 
 // What the active project is to the network (docs/Networking_Plan_2026-11.md, NET1): its name and a checksum of the content a
 // client must share with the server -- the game's script assemblies (Nox.ScriptCore and the project's own: replicated fields and

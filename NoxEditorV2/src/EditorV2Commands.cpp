@@ -3,6 +3,7 @@
 
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_keycode.h>
+#include <NoxUI/Backends/noxui_impl_sdl3.h>
 
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Input.h"
@@ -10,17 +11,17 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Scene/HLODBuilder.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
-#include "NoxCore/UI/Core/UIContext.h"
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Core/UIContext.h>
 #include "NoxCore/UI/Core/UILayer.h"
-#include "NoxCore/UI/Layout/UIDockSpace.h"
-#include "NoxCore/UI/Layout/UILayout.h"
-#include "NoxCore/UI/Layout/UIWindow.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UIImage.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
-#include "NoxCore/UI/Widgets/UITextInput.h"
+#include <NoxUI/Layout/UIDockSpace.h>
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Layout/UIWindow.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UIImage.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIScrollView.h>
+#include <NoxUI/Widgets/UITextInput.h>
 
 namespace Nox
 {
@@ -30,7 +31,7 @@ namespace Nox
 
         KeyChord Chord(int scancode, bool ctrl = false, bool shift = false, bool alt = false)
         {
-            return KeyChord{ scancode, ctrl, shift, alt };
+            return KeyChord{ NoxUI::Detail::TranslateSDLScancode(static_cast<SDL_Scancode>(scancode)), ctrl, shift, alt };
         }
 
         bool IsModifierKey(int scancode)
@@ -49,7 +50,7 @@ namespace Nox
                 scancode = SDL_SCANCODE_A + static_cast<int>(layoutKey - SDLK_A);
             const auto mods = key.GetModifiers();
             KeyChord chord;
-            chord.Scancode = scancode;
+            chord.Key = NoxUI::Detail::TranslateSDLScancode(static_cast<SDL_Scancode>(scancode));
             chord.Ctrl = (mods & SDL_KMOD_CTRL) != 0 || Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
             chord.Shift = (mods & SDL_KMOD_SHIFT) != 0 || Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
             chord.Alt = (mods & SDL_KMOD_ALT) != 0 || Input::IsKeyPressed(SDL_SCANCODE_LALT) || Input::IsKeyPressed(SDL_SCANCODE_RALT);
@@ -176,16 +177,16 @@ namespace Nox
         UILayer* uiLayer = Application::Get().GetUILayer();
         if (!uiLayer)
             return false;
-        const UI::UIElement* focused = uiLayer->GetContext().GetFocused();
+        const NoxUI::UIElement* focused = uiLayer->GetContext().GetFocused();
         if (!focused)
             return true;
         // The level editor's panels; anything else (the Content Browser, the Output Log, an asset editor, a panel ported later)
         // keeps the level's keys out -- a new panel is safe without being added to a list.
-        const UI::UIElement* levelRoots[] = {
+        const NoxUI::UIElement* levelRoots[] = {
             m_ViewportDockSpace.get(), m_SceneHierarchyPanel.GetRoot().get(), m_InspectorPanel.GetRoot().get(), m_ToolBar.get()
         };
-        for (const UI::UIElement* cur = focused; cur; cur = cur->GetParent())
-            for (const UI::UIElement* root : levelRoots)
+        for (const NoxUI::UIElement* cur = focused; cur; cur = cur->GetParent())
+            for (const NoxUI::UIElement* root : levelRoots)
                 if (root && cur == root)
                     return true;
         return false;
@@ -196,7 +197,7 @@ namespace Nox
         UILayer* uiLayer = Application::Get().GetUILayer();
         if (!uiLayer)
             return false; // (no UI: nothing dispatched here)
-        UI::UIContext& ui = uiLayer->GetContext();
+        NoxUI::UIContext& ui = uiLayer->GetContext();
 
         // A key for the Keyboard Shortcuts window being assigned.
         if (!m_CaptureCommand.empty())
@@ -206,14 +207,14 @@ namespace Nox
             const std::string id = m_CaptureCommand;
             m_CaptureCommand.clear();
             const KeyChord chord = ChordOf(key);
-            if (chord.Scancode != SDL_SCANCODE_ESCAPE || chord.Ctrl || chord.Shift || chord.Alt)
+            if (chord.Key != NoxUI::UIKey::Escape || chord.Ctrl || chord.Shift || chord.Alt)
             {
-                const bool clear = chord.Scancode == SDL_SCANCODE_BACKSPACE && !chord.Ctrl && !chord.Shift && !chord.Alt;
+                const bool clear = chord.Key == NoxUI::UIKey::Backspace && !chord.Ctrl && !chord.Shift && !chord.Alt;
                 const std::string taken = m_Commands.Bind(id, clear ? KeyChord{} : chord, m_CapturePrimary);
                 m_Commands.Save(KeyBindingsPath());
                 if (!taken.empty())
                     if (const EditorCommand* other = m_Commands.Find(taken))
-                        Notify(UI::UINotificationSeverity::Warning, chord.ToString() + " moved",
+                        Notify(NoxUI::UINotificationSeverity::Warning, chord.ToString() + " moved",
                                "It was the key of \"" + other->Label + "\", which has no key now.");
             }
             RebuildKeyboardShortcuts();
@@ -223,8 +224,10 @@ namespace Nox
         // The focused widget and its parents first: a text field types, a panel takes its own keys (Delete in the Content Browser
         // deletes assets), a graph window takes Ctrl+Z. What none of them takes goes to the commands.
         // (Dispatched here, so the UI layer after this one must not get it again: the key counts as handled either way.)
-        ui.OnEvent(key);
-        const bool widgetTook = key.Handled;
+        const bool widgetTook = ui.OnKeyDown(
+            NoxUI::Detail::TranslateSDLScancode(static_cast<SDL_Scancode>(key.GetKeyCode())),
+            NoxUI::Detail::TranslateSDLMods(static_cast<SDL_Keymod>(key.GetModifiers())),
+            key.IsRepeat());
         key.Handled = true;
         if (widgetTook || key.IsRepeat() || IsModifierKey(key.GetKeyCode()))
             return true;
@@ -232,12 +235,12 @@ namespace Nox
         if (ui.GetOverlay())
             return true;
 
-        const UI::UIElement* viewport = m_ViewportCanvas ? static_cast<const UI::UIElement*>(m_ViewportCanvas.get())
-                                                         : static_cast<const UI::UIElement*>(m_ViewportImage.get());
+        const NoxUI::UIElement* viewport = m_ViewportCanvas ? static_cast<const NoxUI::UIElement*>(m_ViewportCanvas.get())
+                                                         : static_cast<const NoxUI::UIElement*>(m_ViewportImage.get());
         EditorCommandList::KeyContext context;
-        context.TextInputFocused = dynamic_cast<const UI::UITextInput*>(ui.GetFocused()) != nullptr;
+        context.TextInputFocused = dynamic_cast<const NoxUI::UITextInput*>(ui.GetFocused()) != nullptr;
         context.LevelFocus = IsLevelFocus();
-        context.ViewportHovered = viewport && UI::HasState(viewport->GetState(), UI::UIState::Hovered);
+        context.ViewportHovered = viewport && NoxUI::HasState(viewport->GetState(), NoxUI::UIState::Hovered);
         if (const EditorCommand* command = m_Commands.FindForKey(ChordOf(key), context))
         {
             const std::function<void()> run = command->Execute;
@@ -252,7 +255,7 @@ namespace Nox
         if (!uiLayer || !uiLayer->GetDockSpaceRef())
             return;
         const auto& dock = uiLayer->GetDockSpaceRef();
-        if (const Ref<UI::UIWindow> window = dock->FindFloatingWindow(kShortcutsTitle))
+        if (const Ref<NoxUI::UIWindow> window = dock->FindFloatingWindow(kShortcutsTitle))
         {
             if (window->OnActivate)
                 window->OnActivate();
@@ -261,37 +264,37 @@ namespace Nox
         if (dock->HasPanel(kShortcutsTitle))
             return;
 
-        auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-        root->WidthMode = UI::UISizeMode::Fill;
-        root->HeightMode = UI::UISizeMode::Fill;
+        auto root = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 6.0f);
+        root->WidthMode = NoxUI::UISizeMode::Fill;
+        root->HeightMode = NoxUI::UISizeMode::Fill;
         root->StyleClass = "Surface";
         root->DrawBackground = true;
-        root->Padding = UI::UIThickness::All(10.0f);
+        root->Padding = NoxUI::UIThickness::All(10.0f);
 
-        auto intro = UI::Label("Click a key to change it, then press the new key (Esc: keep it, Backspace: no key). A key another "
+        auto intro = NoxUI::Label("Click a key to change it, then press the new key (Esc: keep it, Backspace: no key). A key another "
                                "command used moves here. Saved for this project in Saved/Config.", 13.0f);
         intro->WordWrap = true;
-        intro->WidthMode = UI::UISizeMode::Fill;
+        intro->WidthMode = NoxUI::UISizeMode::Fill;
         intro->UseColorOverride = true;
-        intro->ColorOverride = UI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
+        intro->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
         root->AddChild(intro);
 
-        Ref<UI::UIButton> resetAll(new UI::UIButton("Reset All to Defaults", [this]()
+        Ref<NoxUI::UIButton> resetAll(new NoxUI::UIButton("Reset All to Defaults", [this]()
         {
             m_CaptureCommand.clear();
             m_Commands.ResetAll();
             m_Commands.Save(KeyBindingsPath());
             RebuildKeyboardShortcuts();
         }));
-        resetAll->HAlign = UI::UIAlignment::Start;
+        resetAll->HAlign = NoxUI::UIAlignment::Start;
         root->AddChild(resetAll);
 
-        auto scroll = UI::MakeUI<UI::UIScrollView>();
-        scroll->WidthMode = UI::UISizeMode::Fill;
-        scroll->HeightMode = UI::UISizeMode::Fill;
+        auto scroll = NoxUI::MakeUI<NoxUI::UIScrollView>();
+        scroll->WidthMode = NoxUI::UISizeMode::Fill;
+        scroll->HeightMode = NoxUI::UISizeMode::Fill;
         root->AddChild(scroll);
-        m_ShortcutsList = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 2.0f);
-        m_ShortcutsList->WidthMode = UI::UISizeMode::Fill;
+        m_ShortcutsList = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 2.0f);
+        m_ShortcutsList->WidthMode = NoxUI::UISizeMode::Fill;
         scroll->AddChild(m_ShortcutsList);
         RebuildKeyboardShortcuts();
 
@@ -309,16 +312,16 @@ namespace Nox
             if (command.Category != category)
             {
                 category = command.Category;
-                auto header = UI::Label(category, 14.5f);
-                header->Margin = UI::UIThickness{ 0.0f, 8.0f, 0.0f, 2.0f };
+                auto header = NoxUI::Label(category, 14.5f);
+                header->Margin = NoxUI::UIThickness{ 0.0f, 8.0f, 0.0f, 2.0f };
                 m_ShortcutsList->AddChild(header);
             }
-            auto row = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-            row->WidthMode = UI::UISizeMode::Fill;
+            auto row = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+            row->WidthMode = NoxUI::UISizeMode::Fill;
 
-            auto label = UI::Label(command.Label, 13.5f);
-            label->WidthMode = UI::UISizeMode::Fill;
-            label->VAlign = UI::UIAlignment::Center;
+            auto label = NoxUI::Label(command.Label, 13.5f);
+            label->WidthMode = NoxUI::UISizeMode::Fill;
+            label->VAlign = NoxUI::UIAlignment::Center;
             const char* scope = static_cast<CommandScope>(command.Scope) == CommandScope::Global ? "anywhere in the editor"
                               : static_cast<CommandScope>(command.Scope) == CommandScope::Viewport ? "the pointer over a viewport, the level editor has the keyboard"
                                                                         : "the level editor (viewport, Scene Hierarchy, Inspector) has the keyboard";
@@ -331,21 +334,21 @@ namespace Nox
                 const bool primary = slot == 0;
                 const bool capturing = m_CaptureCommand == id && m_CapturePrimary == primary;
                 const KeyChord& chord = primary ? command.Key : command.AltKey;
-                Ref<UI::UIButton> keyButton(new UI::UIButton(capturing ? "Press a key..." : chord.IsSet() ? chord.ToString() : "-",
+                Ref<NoxUI::UIButton> keyButton(new NoxUI::UIButton(capturing ? "Press a key..." : chord.IsSet() ? chord.ToString() : "-",
                                                              [this, id, primary]()
                 {
                     m_CaptureCommand = id;
                     m_CapturePrimary = primary;
                     RebuildKeyboardShortcuts();
                 }));
-                keyButton->WidthMode = UI::UISizeMode::Fixed;
+                keyButton->WidthMode = NoxUI::UISizeMode::Fixed;
                 keyButton->FixedSize = { 150.0f, 24.0f };
                 keyButton->StyleVariant = capturing ? "primary" : "";
                 keyButton->Tooltip = primary ? "The key (click, then press the new one)" : "A second key (click, then press it)";
                 row->AddChild(keyButton);
             }
             const bool isDefault = command.Key == command.DefaultKey && command.AltKey == command.DefaultAltKey;
-            Ref<UI::UIButton> reset(new UI::UIButton("Reset", [this, id]()
+            Ref<NoxUI::UIButton> reset(new NoxUI::UIButton("Reset", [this, id]()
             {
                 m_CaptureCommand.clear();
                 m_Commands.ResetToDefault(id);

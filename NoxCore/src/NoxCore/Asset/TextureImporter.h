@@ -8,7 +8,7 @@
 #include "Asset.h"
 #include "AssetMetadata.h"
 #include "NoxCore/Core/core.h"
-#include "NRI/Texture.h"
+#include "NoxCore/Renderer/Texture2D.h"
 #include "NoxCore/Core/Buffer.h"
 
 namespace Nox
@@ -20,9 +20,9 @@ namespace Nox
         uint32_t ArrayLayers = 1;
         bool IsCubeMap = false;
         uint32_t MipLevels = 0;
-        NRI::TextureUsage Usage = NRI::TextureUsage::ShaderResource;
+        nri::TextureUsage Usage = NRI_TEXTURE_USAGE_SHADER_RESOURCE;
         Buffer Data; // Raw CPU buffer from stb
-        NRI::ImageFormat Format = NRI::ImageFormat::SRGBA8;
+        nri::ImageFormat Format = NRI_FORMAT_SRGBA8;
         uint32_t DirectFormat = UINT32_MAX;
         std::vector<size_t> MipOffsets;
     };

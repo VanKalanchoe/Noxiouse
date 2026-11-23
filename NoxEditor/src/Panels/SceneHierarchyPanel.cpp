@@ -118,7 +118,7 @@ namespace Nox
             ImGui::SetItemTooltip("Silent from here.");
             spatial.MinDistance = std::max(spatial.MinDistance, 0.01f);
             spatial.MaxDistance = std::max(spatial.MaxDistance, spatial.MinDistance + 0.01f);
-            constexpr AudioAttenuation kCurves[] = { AudioAttenuation::Inverse, AudioAttenuation::InverseSquare, AudioAttenuation::Linear, AudioAttenuation::None };
+            constexpr NoxAudio::AudioAttenuation kCurves[] = { NoxAudio::AudioAttenuation::Inverse, NoxAudio::AudioAttenuation::InverseSquare, NoxAudio::AudioAttenuation::Linear, NoxAudio::AudioAttenuation::None };
             constexpr const char* kCurveNames[] = { "Inverse", "Inverse Square", "Linear", "None" };
             int curve = static_cast<int>(spatial.Attenuation);
             if (ImGui::Combo("Attenuation", &curve, kCurveNames, IM_ARRAYSIZE(kCurveNames)))
@@ -130,7 +130,7 @@ namespace Nox
             constexpr const char* kModes[] = { "Default", "Panning", "Binaural (HRTF)" };
             int mode = static_cast<int>(spatial.Spatialization);
             if (ImGui::Combo("Spatialization", &mode, kModes, IM_ARRAYSIZE(kModes)))
-                spatial.Spatialization = static_cast<AudioSpatialization>(mode);
+                spatial.Spatialization = static_cast<NoxAudio::AudioSpatialization>(mode);
             ImGui::SetItemTooltip("How it reaches the ears (Steam Audio). Binaural (HRTF): for headphones -- above, below and behind are heard.\n"
                                   "Panning: left / right, for speakers. Default: the Mixer's Headphones setting (a game's options: Audio.SetHeadphones).");
             ImGui::Checkbox("Reflections", &spatial.Reflections);

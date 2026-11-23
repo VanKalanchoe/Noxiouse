@@ -1,6 +1,6 @@
 #include "McpEditorTools.h"
 #include "McpToolHelpers.h"
-#include "McpClient.h"
+#include <NoxMcp/McpClient.h>
 #include "McpProjectFiles.h"
 
 #include <algorithm>
@@ -19,6 +19,7 @@
 // tools: McpGameTools, NoxMcp). Tools that take time answer later through `done`, polled once a frame (HostContext::EveryFrame).
 namespace Nox::Mcp
 {
+    using namespace ::NoxMcp;
     namespace
     {
         Json Vector(const glm::dvec3& value)
@@ -82,7 +83,7 @@ namespace Nox::Mcp
                                    .Boolean("debug_log", "Multiplayer: the network debug trace in every player's log (default false)")
                                    .Boolean("player_mcp", "Multiplayer: start the other players (and the dedicated server) with MCP servers of "
                                                           "their own, reached with runtime_call (default: the Play settings' choice)");
-            tool.Access = ConsoleAccess::Execute; // (runs the project's scripts; multiplayer starts processes)
+            tool.Access = NoxMcp::ToolAccess::Execute; // (runs the project's scripts; multiplayer starts processes)
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 if (!context.Play)
@@ -153,7 +154,7 @@ namespace Nox::Mcp
             tool.Description = "Starts Simulate: physics and animation run, scripts do not, and the editor camera stays (the Simulate button). "
                                "stop ends it.";
             tool.InputSchema = Schema();
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json&, ToolDone done)
             {
                 std::string error;
@@ -175,7 +176,7 @@ namespace Nox::Mcp
             tool.Description = "Ends Play or Simulate: the scene goes back to how it was before (changes made while playing are gone); the "
                                "other players' windows and the dedicated server close.";
             tool.InputSchema = Schema();
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json&, ToolDone done)
             {
                 std::string error;
@@ -197,7 +198,7 @@ namespace Nox::Mcp
             tool.Description = "Points the editor camera at an entity (name or uuid) so it fills the view, as the F key does -- then "
                                "screenshot. Edit and Simulate (in Play the viewport shows the game's own camera).";
             tool.InputSchema = Schema().String("entity", "The entity's name or uuid", true);
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 ToolDone answer = done;
@@ -283,7 +284,7 @@ namespace Nox::Mcp
             tool.InputSchema["properties"]["pitch"] = Json{ { "type", "number" }, { "minimum", -89.9 }, { "maximum", 89.9 },
                                                             { "description", "Degrees, positive looks down" } };
             tool.InputSchema["properties"]["yaw"] = Json{ { "type", "number" }, { "description", "Degrees, 0 looks along -Z, 90 along +X" } };
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 if (!context.GetCamera || !context.SetCamera)

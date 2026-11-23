@@ -14,7 +14,7 @@
 #include "NoxCore/Asset/MeshImporter.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 namespace Nox
 {
@@ -25,7 +25,7 @@ namespace Nox
         constexpr float kSimplifyError = 0.01f;     // ... moving the surface by at most 1 % of the submesh's size
 
         std::shared_ptr<AcousticMesh> ReadMesh(const std::filesystem::path& assetDirectory, const AssetMetadata& metadata, uint32_t firstSubmesh,
-                                               uint32_t submeshCount, const std::vector<AcousticMaterial>& materials)
+                                               uint32_t submeshCount, const std::vector<NoxAudio::AcousticMaterial>& materials)
         {
             std::optional<CookedMesh> cooked = MeshImporter::ReadCookedMesh(assetDirectory, metadata);
             if (!cooked)
@@ -73,7 +73,7 @@ namespace Nox
                         indices.swap(simplified);
                     }
                 }
-                const AcousticMaterial material = submesh - first < materials.size() ? materials[submesh - first] : AcousticMaterial::Generic;
+                const NoxAudio::AcousticMaterial material = submesh - first < materials.size() ? materials[submesh - first] : NoxAudio::AcousticMaterial::Generic;
                 const uint32_t base = static_cast<uint32_t>(mesh->Vertices.size());
                 mesh->Vertices.insert(mesh->Vertices.end(), vertices.begin(), vertices.end());
                 for (uint32_t index : indices)
@@ -84,7 +84,7 @@ namespace Nox
         }
     }
 
-    AcousticMeshRead StartAcousticMeshRead(AssetHandle meshHandle, uint32_t firstSubmesh, uint32_t submeshCount, std::vector<AcousticMaterial> materials)
+    AcousticMeshRead StartAcousticMeshRead(AssetHandle meshHandle, uint32_t firstSubmesh, uint32_t submeshCount, std::vector<NoxAudio::AcousticMaterial> materials)
     {
         const AssetType type = AssetManager::GetAssetType(meshHandle);
         if (type != AssetType::StaticMesh && type != AssetType::Mesh)
@@ -95,9 +95,9 @@ namespace Nox
         if (metadata.FilePath.empty())
             return {};
         const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
-        auto job = std::make_shared<TaskFuture<std::shared_ptr<AcousticMesh>>>(
-            JobSystem::Get().Async("Acoustic Mesh", JobPriority::Normal,
-                [assetDirectory, metadata, firstSubmesh, submeshCount, materials = std::move(materials)](const CancellationToken&)
+        auto job = std::make_shared<NoxTasks::TaskFuture<std::shared_ptr<AcousticMesh>>>(
+            NoxTasks::JobSystem::Get().Async("Acoustic Mesh", NoxTasks::JobPriority::Normal,
+                [assetDirectory, metadata, firstSubmesh, submeshCount, materials = std::move(materials)](const NoxTasks::CancellationToken&)
                 {
                     return ReadMesh(assetDirectory, metadata, firstSubmesh, submeshCount, materials);
                 }));

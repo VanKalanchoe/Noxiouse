@@ -37,7 +37,7 @@ namespace Nox
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
         const bool cullingReady = entryCount > 0 &&
-            std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return pipeline != nullptr; });
+            std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return static_cast<bool>(pipeline); });
         const uint32_t blockCount = (entryCount + shaderio::CULL_BLOCK_SIZE - 1) / shaderio::CULL_BLOCK_SIZE;
         // The camera's exposure is shared (auto exposure measured the main view; addPostProcessPass wrote it earlier).
         const bool postReady = m_postProcessPipeline && m_autoExposureBuildPipeline && m_autoExposureReducePipeline;
@@ -53,8 +53,8 @@ namespace Nox
                 continue;
             view.Recorded = true;
 
-            NRI::Buffer* uniformBuffer = view.UniformBuffers[frameIndex].get();
-            NRI::Buffer* cullViewBuffer = view.CullViewBuffers[frameIndex].get();
+            nri::Buffer* uniformBuffer = &view.UniformBuffers[frameIndex];
+            nri::Buffer* cullViewBuffer = &view.CullViewBuffers[frameIndex];
             const glm::mat4 viewProjection = view.Projection * view.View;
             // An asset preview keeps its own brightness whatever the scene's exposure is doing; an unlit view shows base colors as
             // they are (no exposure).
@@ -77,13 +77,13 @@ namespace Nox
                 memcpy(cullViewBuffer->map(0, sizeof(cull)), &cull, sizeof(cull));
                 cullViewBuffer->unmap();
 
-                draws.VisibleInstances = m_renderGraph.CreateBuffer("Extra View Visible Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-                draws.Commands = m_renderGraph.CreateBuffer("Extra View Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI::BufferUsage::Indirect });
-                draws.Counts = m_renderGraph.CreateBuffer("Extra View Draw Counts", { sizeof(shaderio::CullCounts), NRI::BufferUsage::Indirect });
+                draws.VisibleInstances = m_renderGraph.CreateBuffer("Extra View Visible Instances", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+                draws.Commands = m_renderGraph.CreateBuffer("Extra View Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI_BUFFER_USAGE_INDIRECT });
+                draws.Counts = m_renderGraph.CreateBuffer("Extra View Draw Counts", { sizeof(shaderio::CullCounts), NRI_BUFFER_USAGE_INDIRECT });
                 // Where the shader puts entries the occlusion test rejected: never written without that test.
-                draws.LateInstances = m_renderGraph.CreateBuffer("Extra View Late Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-                const RGBuffer flags = m_renderGraph.CreateBuffer("Extra View Cull Flags", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-                const RGBuffer blocks = m_renderGraph.CreateBuffer("Extra View Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI::BufferUsage::Storage });
+                draws.LateInstances = m_renderGraph.CreateBuffer("Extra View Late Instances", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+                const RGBuffer flags = m_renderGraph.CreateBuffer("Extra View Cull Flags", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+                const RGBuffer blocks = m_renderGraph.CreateBuffer("Extra View Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI_BUFFER_USAGE_STORAGE });
                 addCullingDispatchPass(kCullNames[index], draws, flags, blocks, entryCount, RGTexture{}, uniformBuffer, cullViewBuffer);
             }
 
@@ -91,15 +91,15 @@ namespace Nox
             targetDesc.Size = RGSize::Absolute;
             targetDesc.Width = view.Size.width;
             targetDesc.Height = view.Size.height;
-            targetDesc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+            targetDesc.Format = NRI_FORMAT_R16G16B16A16_SFLOAT;
             const RGTexture hdr = m_renderGraph.CreateTexture(kHdrNames[index], targetDesc);
-            targetDesc.Format = NRI::ImageFormat::R32SINT;
+            targetDesc.Format = NRI_FORMAT_R32_SINT;
             const RGTexture entity = m_renderGraph.CreateTexture(kEntityNames[index], targetDesc);
-            targetDesc.Format = NRI::ImageFormat::None;
-            targetDesc.Usage = NRI::TextureUsage::DepthStencilAttachment;
+            targetDesc.Format = NRI_FORMAT_NONE;
+            targetDesc.Usage = NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
             const RGTexture depth = m_renderGraph.CreateTexture(kDepthNames[index], targetDesc);
-            const RGTexture output = m_renderGraph.ImportTexture(kOutputNames[index], view.Output.get());
-            const NRI::Extent2D extent = view.Size;
+            const RGTexture output = m_renderGraph.ImportTexture(kOutputNames[index], view.Output->GetHandle());
+            const nri::Extent2D extent = view.Size;
 
             m_renderGraph.AddPass(kForwardNames[index], RGPassFlags::Raster,
                 [&](RGBuilder& builder)
@@ -107,9 +107,9 @@ namespace Nox
                     // An asset preview (thumbnails, the Material Editor) stands on a neutral grey instead of the scene's sky, so a
                     // thumbnail looks the same by day and by night (the sky is not drawn for it below).
                     const float backdrop = view.Preview ? 0.18f : 0.0f;
-                    builder.ColorTarget(hdr, NRI::LoadOP::clear, NRI::StoreOP::store, { backdrop, backdrop, backdrop * 1.08f, 1.0f });
-                    builder.ColorTarget(entity, NRI::LoadOP::clear, NRI::StoreOP::store, { -1.0f, 0.0f, 0.0f, 0.0f }); // R32SINT
-                    builder.DepthTarget(depth, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 });                    // reverse Z
+                    builder.ColorTarget(hdr, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { backdrop, backdrop, backdrop * 1.08f, 1.0f });
+                    builder.ColorTarget(entity, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { -1.0f, 0.0f, 0.0f, 0.0f }); // R32SINT
+                    builder.DepthTarget(depth, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0 });                    // reverse Z
                     // Forward shading samples the DDGI atlases (through the uniforms) when DDGI ran this frame.
                     if (ddgi)
                     {
@@ -130,7 +130,7 @@ namespace Nox
                 },
                 [this, draws, uniformBuffer, skyboxSun, preview = view.Preview, flags, unlit](RGPassContext& context)
                 {
-                    NRI::CommandBuffer& cmd = context.Cmd();
+                    nri::CommandBuffer& cmd = context.Cmd();
                     const uint64_t uniforms = uniformBuffer->getDeviceAddress();
                     const bool hasDraws = draws.Commands.IsValid();
                     MeshletDrawCursor cursor = hasDraws ? beginMeshletDraws(context, draws) : MeshletDrawCursor{};
@@ -141,43 +141,43 @@ namespace Nox
                     const uint32_t taskFlags = cursor.taskFlags;
 
                     cmd.setDepthTestEnable(true);
-                    cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                    cmd.setDepthCompareOp(NRI_COMPARE_GREATER_OR_EQUAL);
                     cmd.setColorBlendEnable(0, false);
-                    cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                    cmd.setColorWriteMask(0, nri::ColorComponent::All);
                     cmd.setColorBlendEnable(1, false);
-                    cmd.setColorWriteMask(1, NRI::ColorComponent::All);
+                    cmd.setColorWriteMask(1, nri::ColorComponent::All);
 
                     // A. Opaque and masked surfaces, lit in the fragment shader (no G-buffer here); an unlit view draws their base colors.
                     if (hasDraws && unlit && m_unlitPipeline)
                     {
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_unlitPipeline, NRI::CullMode::Back, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_unlitPipeline, NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *m_unlitPipeline, NRI::CullMode::Back, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *m_unlitPipeline, NRI::CullMode::None, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, m_unlitPipeline, NRI_CULL_MODE_BACK, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, m_unlitPipeline, NRI_CULL_MODE_NONE, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, m_unlitPipeline, NRI_CULL_MODE_BACK, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, m_unlitPipeline, NRI_CULL_MODE_NONE, true, false);
                     }
                     else if (hasDraws && forwardLitPipeline())
                     {
                         cursor.taskFlags = taskFlags | shaderio::MESHLET_SHADE_OPAQUE;
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *forwardLitPipeline(), NRI::CullMode::Back, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *forwardLitPipeline(), NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *forwardLitPipeline(), NRI::CullMode::Back, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *forwardLitPipeline(), NRI::CullMode::None, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *forwardLitPipeline(), NRI_CULL_MODE_BACK, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *forwardLitPipeline(), NRI_CULL_MODE_NONE, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *forwardLitPipeline(), NRI_CULL_MODE_BACK, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *forwardLitPipeline(), NRI_CULL_MODE_NONE, true, false);
                         cursor.taskFlags = taskFlags;
                     }
 
                     // B. Unlit surfaces.
                     if (hasDraws && m_unlitPipeline)
                     {
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *m_unlitPipeline, NRI::CullMode::Back, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, m_unlitPipeline, NRI_CULL_MODE_BACK, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, m_unlitPipeline, NRI_CULL_MODE_NONE, true, false);
                     }
 
                     // C. The sky where nothing was drawn (depth 0).
                     if (m_skyboxPipeline && m_environmentCubemap && !preview && !(flags & ExtraViewNoSky))
                     {
-                        cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_skyboxPipeline);
-                        cursor.boundPipeline = m_skyboxPipeline.get();
-                        cmd.setCullMode(NRI::CullMode::None);
+                        cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_skyboxPipeline);
+                        cursor.boundPipeline = &m_skyboxPipeline;
+                        cmd.setCullMode(NRI_CULL_MODE_NONE);
                         cmd.setDepthWriteEnable(false);
                         cmd.setColorBlendEnable(0, false);
 
@@ -185,26 +185,26 @@ namespace Nox
                         skyboxPush.matrixReference = uniforms;
                         skyboxPush.cubemapIndex = m_environmentCubemap->GetDescriptorIndexSlot();
                         cmd.pushData(&skyboxPush, sizeof(shaderio::PushConstantSkybox));
-                        cmd.drawMeshTasks(1, 1, 1);
+                        nri::drawMeshTasks(cmd, 1, 1, 1);
                     }
 
                     // D. Transparent surfaces, blended (sorted back to front for the main camera, which is close enough here).
                     if (hasDraws && m_unlitPipeline && forwardLitPipeline())
                     {
-                        const NRI::ColorBlendEquation blendEquation
+                        const nri::ColorBlendEquation blendEquation
                         {
-                            .srcColorBlendFactor = NRI::BlendFactor::One,
-                            .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                            .colorBlendOp = NRI::BlendOp::Add,
-                            .srcAlphaBlendFactor = NRI::BlendFactor::One,
-                            .dstAlphaBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                            .alphaBlendOp = NRI::BlendOp::Add,
+                            .srcColorBlendFactor = NRI_BLEND_FACTOR_ONE,
+                            .dstColorBlendFactor = NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+                            .colorBlendOp = NRI_BLEND_OP_ADD,
+                            .srcAlphaBlendFactor = NRI_BLEND_FACTOR_ONE,
+                            .dstAlphaBlendFactor = NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+                            .alphaBlendOp = NRI_BLEND_OP_ADD,
                         };
                         cmd.setColorBlendEquation(0, blendEquation);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Transparent, *forwardLitPipeline(), NRI::CullMode::Back, false, true);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentDoubleSided, *forwardLitPipeline(), NRI::CullMode::None, false, true);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlit, *m_unlitPipeline, NRI::CullMode::Back, false, true);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlitDoubleSided, *m_unlitPipeline, NRI::CullMode::None, false, true);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Transparent, *forwardLitPipeline(), NRI_CULL_MODE_BACK, false, true);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentDoubleSided, *forwardLitPipeline(), NRI_CULL_MODE_NONE, false, true);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlit, m_unlitPipeline, NRI_CULL_MODE_BACK, false, true);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::TransparentUnlitDoubleSided, m_unlitPipeline, NRI_CULL_MODE_NONE, false, true);
                         cmd.setColorBlendEnable(0, false);
                         cmd.setDepthWriteEnable(true);
                     }
@@ -212,27 +212,27 @@ namespace Nox
                     // E. Wireframe: every bucket's triangles as lines multiplied into the image, depth tested against it (as the camera's).
                     if (hasDraws && (flags & ExtraViewWireframe) && m_wireframePipeline)
                     {
-                        cmd.setPolygonMode(NRI::PolygonMode::Line);
+                        cmd.setPolygonMode(NRI_POLYGON_MODE_LINE);
                         cmd.setLineWidth(1.0f);
                         cmd.setDepthTestEnable(true);
                         cmd.setDepthWriteEnable(false);
-                        cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                        cmd.setDepthCompareOp(NRI_COMPARE_GREATER_OR_EQUAL);
                         cmd.setColorBlendEnable(0, true);
-                        cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B);
+                        cmd.setColorWriteMask(0, nri::ColorComponent::R | nri::ColorComponent::G | nri::ColorComponent::B);
                         cmd.setColorWriteMask(1, 0u);
-                        const NRI::ColorBlendEquation multiply{ NRI::BlendFactor::Zero, NRI::BlendFactor::SrcColor, NRI::BlendOp::Add,
-                                                                NRI::BlendFactor::Zero, NRI::BlendFactor::One, NRI::BlendOp::Add };
+                        const nri::ColorBlendEquation multiply{ NRI_BLEND_FACTOR_ZERO, NRI_BLEND_FACTOR_SRC_COLOR, NRI_BLEND_OP_ADD,
+                                                                NRI_BLEND_FACTOR_ZERO, NRI_BLEND_FACTOR_ONE, NRI_BLEND_OP_ADD };
                         cmd.setColorBlendEquation(0, multiply);
                         constexpr RenderBucket kWireBuckets[] = { RenderBucket::Opaque, RenderBucket::OpaqueDoubleSided, RenderBucket::Mask, RenderBucket::MaskDoubleSided,
                                                                   RenderBucket::Unlit, RenderBucket::UnlitDoubleSided, RenderBucket::Transparent,
                                                                   RenderBucket::TransparentDoubleSided, RenderBucket::TransparentUnlit,
                                                                   RenderBucket::TransparentUnlitDoubleSided };
                         for (RenderBucket bucket : kWireBuckets)
-                            drawMeshletBucket(cmd, cursor, bucket, *m_wireframePipeline, NRI::CullMode::None, false, true);
+                            drawMeshletBucket(cmd, cursor, bucket, m_wireframePipeline, NRI_CULL_MODE_NONE, false, true);
                         cmd.setColorBlendEnable(0, false);
-                        cmd.setPolygonMode(NRI::PolygonMode::Fill);
-                        cmd.setColorWriteMask(0, NRI::ColorComponent::All);
-                        cmd.setColorWriteMask(1, NRI::ColorComponent::All);
+                        cmd.setPolygonMode(NRI_POLYGON_MODE_FILL);
+                        cmd.setColorWriteMask(0, nri::ColorComponent::All);
+                        cmd.setColorWriteMask(1, nri::ColorComponent::All);
                         cmd.setDepthWriteEnable(true);
                     }
                 });
@@ -244,7 +244,7 @@ namespace Nox
                 m_renderGraph.AddPass(kParticleNames[index], RGPassFlags::Raster,
                     [&](RGBuilder& builder)
                     {
-                        builder.ColorTarget(hdr, NRI::LoadOP::load, NRI::StoreOP::store);
+                        builder.ColorTarget(hdr, NRI_LOAD_OP_LOAD, NRI_STORE_OP_STORE);
                         builder.Read(depth);
                         if (ddgi)
                             ReadDDGI(builder, resources, ddgiIndex);
@@ -257,17 +257,17 @@ namespace Nox
                     },
                     [this, uniformBuffer, depth, particleShadows](RGPassContext& context)
                     {
-                        NRI::CommandBuffer& cmd = context.Cmd();
-                        cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_particlePipeline);
-                        cmd.setCullMode(NRI::CullMode::None);
+                        nri::CommandBuffer& cmd = context.Cmd();
+                        cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_particlePipeline);
+                        cmd.setCullMode(NRI_CULL_MODE_NONE);
                         cmd.setDepthTestEnable(false);
                         cmd.setDepthWriteEnable(false);
                         cmd.setColorBlendEnable(0, true);
-                        cmd.setColorWriteMask(0, NRI::ColorComponent::All);
-                        const NRI::ColorBlendEquation additive{ NRI::BlendFactor::One, NRI::BlendFactor::One, NRI::BlendOp::Add,
-                                                                NRI::BlendFactor::Zero, NRI::BlendFactor::One, NRI::BlendOp::Add };
-                        const NRI::ColorBlendEquation covering{ NRI::BlendFactor::One, NRI::BlendFactor::OneMinusSrcAlpha, NRI::BlendOp::Add,
-                                                                NRI::BlendFactor::One, NRI::BlendFactor::OneMinusSrcAlpha, NRI::BlendOp::Add };
+                        cmd.setColorWriteMask(0, nri::ColorComponent::All);
+                        const nri::ColorBlendEquation additive{ NRI_BLEND_FACTOR_ONE, NRI_BLEND_FACTOR_ONE, NRI_BLEND_OP_ADD,
+                                                                NRI_BLEND_FACTOR_ZERO, NRI_BLEND_FACTOR_ONE, NRI_BLEND_OP_ADD };
+                        const nri::ColorBlendEquation covering{ NRI_BLEND_FACTOR_ONE, NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, NRI_BLEND_OP_ADD,
+                                                                NRI_BLEND_FACTOR_ONE, NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, NRI_BLEND_OP_ADD };
                         std::vector<ParticleBatch> batches = m_particleBatches;
                         std::stable_sort(batches.begin(), batches.end(), [](const ParticleBatch& a, const ParticleBatch& b) { return a.Distance > b.Distance; });
                         for (const ParticleBatch& batch : batches)
@@ -275,7 +275,7 @@ namespace Nox
                             cmd.setColorBlendEquation(0, batch.Settings.Additive ? additive : covering);
                             shaderio::PushConstantParticles push{};
                             push.matrixReference = uniformBuffer->getDeviceAddress();
-                            push.particlesReference = m_particleBuffers[frameIndex]->getDeviceAddress();
+                            push.particlesReference = m_particleBuffers[frameIndex].getDeviceAddress();
                             push.firstParticle = batch.First;
                             push.particleCount = batch.Count;
                             push.textureIndex = batch.Settings.TextureSlot;
@@ -287,7 +287,7 @@ namespace Nox
                             push.depthTextureIndex = context.Slot(depth);
                             push.softDistance = batch.Settings.SoftDistance;
                             cmd.pushData(&push, sizeof(push));
-                            cmd.drawMeshTasks((batch.Count + 31) / 32, 1, 1);
+                            nri::drawMeshTasks(cmd, (batch.Count + 31) / 32, 1, 1);
                         }
                         cmd.setColorBlendEnable(0, false);
                     });
@@ -300,18 +300,18 @@ namespace Nox
                     builder.Read(hdr);
                     if (autoExposure)
                         builder.Read(resources.AutoExposure);
-                    builder.ColorTarget(output, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 1.0f });
+                    builder.ColorTarget(output, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 1.0f });
                     builder.SetRenderArea(extent);
                 },
                 [this, hdr, autoExposure, unlit, exposureTexture = resources.AutoExposure, uniformBuffer](RGPassContext& context)
                 {
-                    NRI::CommandBuffer& cmd = context.Cmd();
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_postProcessPipeline);
-                    cmd.setCullMode(NRI::CullMode::None);
+                    nri::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_postProcessPipeline);
+                    cmd.setCullMode(NRI_CULL_MODE_NONE);
                     cmd.setDepthTestEnable(false);
                     cmd.setDepthWriteEnable(false);
                     cmd.setColorBlendEnable(0, false);
-                    cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                    cmd.setColorWriteMask(0, nri::ColorComponent::All);
 
                     shaderio::PushConstantPostProcess postPush{};
                     postPush.matrixReference = uniformBuffer->getDeviceAddress();
@@ -329,7 +329,7 @@ namespace Nox
                     postPush.saturation = 1.0f;
                     postPush.contrast = 1.0f;
                     cmd.pushData(&postPush, sizeof(shaderio::PushConstantPostProcess));
-                    cmd.drawMeshTasks(1, 1, 1);
+                    nri::drawMeshTasks(cmd, 1, 1, 1);
                 });
 
             // The selection's outline from this view's entity IDs (the camera's outline shader, pointed at them).
@@ -339,31 +339,31 @@ namespace Nox
                     [&](RGBuilder& builder)
                     {
                         builder.Read(entity);
-                        builder.ColorTarget(output, NRI::LoadOP::load, NRI::StoreOP::store);
+                        builder.ColorTarget(output, NRI_LOAD_OP_LOAD, NRI_STORE_OP_STORE);
                         builder.SetRenderArea(extent);
                     },
                     [this, entity, uniformBuffer](RGPassContext& context)
                     {
-                        NRI::CommandBuffer& cmd = context.Cmd();
-                        cmd.setPolygonMode(NRI::PolygonMode::Fill);
-                        cmd.setCullMode(NRI::CullMode::None);
+                        nri::CommandBuffer& cmd = context.Cmd();
+                        cmd.setPolygonMode(NRI_POLYGON_MODE_FILL);
+                        cmd.setCullMode(NRI_CULL_MODE_NONE);
                         cmd.setDepthTestEnable(false);
                         cmd.setDepthWriteEnable(false);
-                        const NRI::ColorBlendEquation blendEquation{ NRI::BlendFactor::SrcAlpha, NRI::BlendFactor::OneMinusSrcAlpha, NRI::BlendOp::Add,
-                                                                     NRI::BlendFactor::SrcAlpha, NRI::BlendFactor::OneMinusSrcAlpha, NRI::BlendOp::Add };
+                        const nri::ColorBlendEquation blendEquation{ NRI_BLEND_FACTOR_SRC_ALPHA, NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, NRI_BLEND_OP_ADD,
+                                                                     NRI_BLEND_FACTOR_SRC_ALPHA, NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, NRI_BLEND_OP_ADD };
                         cmd.setColorBlendEnable(0, true);
                         cmd.setColorBlendEquation(0, blendEquation);
-                        cmd.setColorWriteMask(0, NRI::ColorComponent::All);
-                        cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_outlinePipeline);
+                        cmd.setColorWriteMask(0, nri::ColorComponent::All);
+                        cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_outlinePipeline);
 
                         shaderio::PushConstantOutline references{};
                         references.matrixReference = uniformBuffer->getDeviceAddress();
-                        references.selectedEntityIDsReference = m_selectedEntityIDBuffers[frameIndex]->getDeviceAddress();
+                        references.selectedEntityIDsReference = m_selectedEntityIDBuffers[frameIndex].getDeviceAddress();
                         references.selectedEntityCount = static_cast<uint32_t>(m_SelectedEntityIDs.size());
                         references.selectionMaskTextureIndex = 0xFFFFFFFF;
                         references.entityTextureIndex = context.Slot(entity);
                         cmd.pushData(&references, sizeof(shaderio::PushConstantOutline));
-                        cmd.drawMeshTasks(1, 1, 1);
+                        nri::drawMeshTasks(cmd, 1, 1, 1);
                         cmd.setColorBlendEnable(0, false);
                     });
             }
@@ -373,31 +373,31 @@ namespace Nox
             m_renderGraph.AddPass(kOverlayNames[index], RGPassFlags::Raster,
                 [&](RGBuilder& builder)
                 {
-                    builder.ColorTarget(output, NRI::LoadOP::load, NRI::StoreOP::store);
-                    builder.ColorTarget(entity, NRI::LoadOP::load, NRI::StoreOP::store);
-                    builder.DepthTarget(depth, NRI::LoadOP::load, NRI::StoreOP::store);
+                    builder.ColorTarget(output, NRI_LOAD_OP_LOAD, NRI_STORE_OP_STORE);
+                    builder.ColorTarget(entity, NRI_LOAD_OP_LOAD, NRI_STORE_OP_STORE);
+                    builder.DepthTarget(depth, NRI_LOAD_OP_LOAD, NRI_STORE_OP_STORE);
                     builder.SetRenderArea(extent);
                 },
                 [this, uniformBuffer, grid](RGPassContext& context)
                 {
-                    NRI::CommandBuffer& cmd = context.Cmd();
-                    const NRI::ColorBlendEquation blendEquation{
-                        .srcColorBlendFactor = NRI::BlendFactor::SrcAlpha,
-                        .dstColorBlendFactor = NRI::BlendFactor::OneMinusSrcAlpha,
-                        .colorBlendOp = NRI::BlendOp::Add,
-                        .srcAlphaBlendFactor = NRI::BlendFactor::Zero,
-                        .dstAlphaBlendFactor = NRI::BlendFactor::One,
-                        .alphaBlendOp = NRI::BlendOp::Add,
+                    nri::CommandBuffer& cmd = context.Cmd();
+                    const nri::ColorBlendEquation blendEquation{
+                        .srcColorBlendFactor = NRI_BLEND_FACTOR_SRC_ALPHA,
+                        .dstColorBlendFactor = NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+                        .colorBlendOp = NRI_BLEND_OP_ADD,
+                        .srcAlphaBlendFactor = NRI_BLEND_FACTOR_ZERO,
+                        .dstAlphaBlendFactor = NRI_BLEND_FACTOR_ONE,
+                        .alphaBlendOp = NRI_BLEND_OP_ADD,
                     };
-                    cmd.setCullMode(NRI::CullMode::None);
+                    cmd.setCullMode(NRI_CULL_MODE_NONE);
                     cmd.setDepthTestEnable(true);
                     cmd.setDepthWriteEnable(false);
-                    cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                    cmd.setDepthCompareOp(NRI_COMPARE_GREATER_OR_EQUAL);
                     cmd.setColorBlendEnable(0, true);
                     cmd.setColorBlendEquation(0, blendEquation);
-                    cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                    cmd.setColorWriteMask(0, nri::ColorComponent::All);
                     cmd.setColorBlendEnable(1, false);
-                    cmd.setColorWriteMask(1, NRI::ColorComponent::All);
+                    cmd.setColorWriteMask(1, nri::ColorComponent::All);
 
                     m_renderer2D->FlushWorld(cmd, *uniformBuffer, frameIndex, grid ? &*grid : nullptr);
                 });

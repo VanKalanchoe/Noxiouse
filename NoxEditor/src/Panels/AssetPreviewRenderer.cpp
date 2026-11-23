@@ -122,7 +122,7 @@ namespace Nox
         data.Width = width;
         data.Height = height;
         data.MipLevels = 1;
-        data.Format = NRI::ImageFormat::Surface;
+        data.Format = NRI_FORMAT_SURFACE;
         data.DirectFormat = UINT32_MAX;
         data.Data.Data = pixels.data();
         data.Data.Size = pixels.size();
@@ -557,6 +557,6 @@ namespace Nox
         camera.SetFocalPoint(placement.Center);
         camera.SetDistance(distance);
         camera.SetOrientation(glm::radians(22.0f), glm::radians(-35.0f));
-        renderer->SubmitExtraView(view, camera, NRI::Extent2D{ size, size }, nullptr, true);
+        renderer->SubmitExtraView(view, camera, nri::Extent2D{ size, size }, nullptr, true);
     }
 }

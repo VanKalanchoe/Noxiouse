@@ -3,8 +3,8 @@
 #include <vector>
 
 #include "Asset.h"
-#include "NoxCore/Audio/AudioTypes.h"
-#include "NRI/Texture.h"
+#include <NoxAudio/AudioTypes.h>
+#include "NoxCore/Renderer/Texture2D.h"
 
 namespace Nox
 {
@@ -32,7 +32,7 @@ namespace Nox
     {
         bool flip = false;
         bool generateMips = true;
-        NRI::ImageFormat format = NRI::ImageFormat::SRGBA8; // Default to sRGB
+        nri::ImageFormat format = NRI_FORMAT_SRGBA8; // Default to sRGB
         TextureCompression compression = TextureCompression::Default;
         VirtualTextureMode virtualTexture = VirtualTextureMode::Auto;
     };
@@ -73,11 +73,11 @@ namespace Nox
     // How a sound file is held while it plays (Audio/AudioTypes.h; Unity's Load Type).
     struct AudioImportSettings
     {
-        AudioLoadType LoadType = AudioLoadType::Auto;
+        NoxAudio::AudioLoadType LoadType = NoxAudio::AudioLoadType::Auto;
         // Material assets: what the surface does to sound (Steam Audio's acoustic scene; Audio/AudioTypes.h).
-        AcousticMaterial Acoustic = AcousticMaterial::Auto;
+        NoxAudio::AcousticMaterial Acoustic = NoxAudio::AcousticMaterial::Auto;
         // Audio clips and audio graphs: priority and concurrency (Content Browser > Sound Settings).
-        AudioSoundSettings Sound;
+        NoxAudio::AudioSoundSettings Sound;
     };
 
     struct AssetMetadata

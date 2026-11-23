@@ -37,7 +37,7 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/DynamicMesh.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 namespace Nox
 {
@@ -637,7 +637,7 @@ namespace Nox
                     ? AssetManager::FindLoadedAsset<NodeGraphAsset>(sound) : nullptr)
             {
                 std::vector<AssetHandle> clips;
-                AudioGraphProgram::CollectClips(graph->Graph, clips);
+                CollectAudioGraphClips(graph->Graph, clips);
                 outHandles.insert(clips.begin(), clips.end());
             }
         };
@@ -1366,6 +1366,7 @@ namespace Nox
 
     void Scene::RegisterSystems()
     {
+        using NoxTasks::ComponentAccess;
         // Game Update. Declared access orders them: Physics 2D/3D and Animation write transforms, propagation reads them.
         m_UpdateSystems.AddSystem("Physics 2D",
             ComponentAccess().Read<RigidBody2DComponent>().Write<TransformComponent, DirtyTransformComponent>(),
@@ -1689,7 +1690,7 @@ namespace Nox
         //    order.
         const uint32_t skinnedCount = static_cast<uint32_t>(m_SkinnedMeshEntities.size());
         m_SkinnedBones.resize(skinnedCount);
-        JobSystem::Get().ParallelFor("Skin Matrices", skinnedCount, SkinnedMeshesPerTask, [this](uint32_t, uint32_t begin, uint32_t end)
+        NoxTasks::JobSystem::Get().ParallelFor("Skin Matrices", skinnedCount, SkinnedMeshesPerTask, [this](uint32_t, uint32_t begin, uint32_t end)
         {
             for (uint32_t index = begin; index < end; ++index)
             {
@@ -1920,8 +1921,8 @@ namespace Nox
             return;
         m_AudioRunning = false;
         // Every game voice: the sources' and the scripts' one-shots alike.
-        AudioEngine::StopGroup(AudioVoiceGroup::Game);
-        AudioEngine::SetGroupPaused(AudioVoiceGroup::Game, false);
+        AudioEngine::StopGroup(NoxAudio::AudioVoiceGroup::Game);
+        AudioEngine::SetGroupPaused(NoxAudio::AudioVoiceGroup::Game, false);
         AudioMixer::ResetGameState(); // the snapshot and the bus volumes the game set: back to the mix
         SpatialAudio::ClearInstances(); // the acoustic scene goes with the running scene
         SpatialAudio::ClearProbeBatches();
@@ -1991,7 +1992,7 @@ namespace Nox
         desc.Pitch = source.Pitch;
         desc.Loop = source.Loop;
         desc.Bus = source.Bus;
-        desc.Group = AudioVoiceGroup::Game;
+        desc.Group = NoxAudio::AudioVoiceGroup::Game;
         desc.Spatial = source.Spatial;
         desc.Spatialization = source.Spatialization;
         if (const auto* world = m_Registry.try_get<WorldTransformComponent>(entity))
@@ -2040,7 +2041,7 @@ namespace Nox
         PendingOneShot shot;
         shot.Sound = sound;
         shot.Desc = desc;
-        shot.Desc.Group = AudioVoiceGroup::Game;
+        shot.Desc.Group = NoxAudio::AudioVoiceGroup::Game;
         ApplySoundSettings(shot.Desc, sound);
         if (!StartOneShot(shot))
             m_PendingOneShots.push_back(std::move(shot));
@@ -2066,7 +2067,7 @@ namespace Nox
         }
         if (shot.Desc.Spatial)
             shot.Desc.Environment = AudioEnvironmentAt(shot.Desc.Position).Target;
-        if (const AudioVoiceHandle voice = AudioEngine::Play(shot.Desc); voice && shot.Desc.Spatial)
+        if (const NoxAudio::AudioVoiceHandle voice = AudioEngine::Play(shot.Desc); voice && shot.Desc.Spatial)
             m_OneShotVoices.push_back({ voice, shot.Desc.Position, shot.Desc.Environment });
         return true;
     }
@@ -2297,7 +2298,7 @@ namespace Nox
             return;
         NOX_PROFILE_SCOPE("Update Audio");
         // Paused, the game's voices hold where they are (the UI bus plays on).
-        AudioEngine::SetGroupPaused(AudioVoiceGroup::Game, m_IsPaused);
+        AudioEngine::SetGroupPaused(NoxAudio::AudioVoiceGroup::Game, m_IsPaused);
 
         glm::dmat4 listener = cameraWorld;
         for (auto handle : m_Registry.view<AudioListenerComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>))
@@ -2374,7 +2375,7 @@ namespace Nox
         });
     }
 
-    bool Scene::ResolveAcousticMaterials(entt::entity entity, std::vector<AcousticMaterial>& outMaterials) const
+    bool Scene::ResolveAcousticMaterials(entt::entity entity, std::vector<NoxAudio::AcousticMaterial>& outMaterials) const
     {
         // Each submesh's material as the renderer picks it (the entity's override, else the mesh's .nmat, else the material cooked
         // into the mesh); its acoustic material from the material asset's registry entry, Auto resolved from how it looks.
@@ -2397,7 +2398,7 @@ namespace Nox
             if (asset == 0 && submesh < meshMaterials.size())
                 asset = meshMaterials[submesh];
             const MaterialData* data = staticMesh ? &staticMesh->GetMaterial(submesh) : &mesh->GetMaterial(submesh);
-            AcousticMaterial chosen = AcousticMaterial::Auto;
+            NoxAudio::AcousticMaterial chosen = NoxAudio::AcousticMaterial::Auto;
             if (asset != 0 && AssetManager::GetAssetType(asset) == AssetType::Material)
             {
                 chosen = AssetManager::GetMetadata(asset).AudioSettings.Acoustic;
@@ -2866,7 +2867,7 @@ namespace Nox
     }
 
     void Scene::SyncTimelineAudio(const std::vector<TimelineAudioSection>& wanted, std::unordered_map<uint64_t, TimelineAudioVoice>& sections,
-                                  AudioVoiceGroup group)
+                                  NoxAudio::AudioVoiceGroup group)
     {
         // Sections no longer wanted stop (a short fade); a wanted one whose sound time jumped (a loop, a seek) starts over.
         for (auto it = sections.begin(); it != sections.end();)
@@ -2939,7 +2940,7 @@ namespace Nox
         std::vector<TimelineAudioSection> wanted;
         if (player.Playing)
             CollectTimelineAudio(playerEntity, timeline, player.Time, wanted);
-        SyncTimelineAudio(wanted, player.AudioSections, AudioVoiceGroup::Game);
+        SyncTimelineAudio(wanted, player.AudioSections, NoxAudio::AudioVoiceGroup::Game);
     }
 
     void Scene::UpdateAnimators()
@@ -2985,7 +2986,7 @@ namespace Nox
 
         const float ts = m_FrameInput.Timestep;
         const uint32_t groupCount = static_cast<uint32_t>(m_AnimatorGroups.size() - 1);
-        JobSystem::Get().ParallelFor("Animators", groupCount, AnimatorGroupsPerTask, [&](uint32_t, uint32_t begin, uint32_t end)
+        NoxTasks::JobSystem::Get().ParallelFor("Animators", groupCount, AnimatorGroupsPerTask, [&](uint32_t, uint32_t begin, uint32_t end)
         {
             for (uint32_t group = begin; group < end; ++group)
             {

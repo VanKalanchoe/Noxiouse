@@ -8,7 +8,7 @@
 
 #include "Panels/AssetPreviewRenderer.h"
 #include "Panels/InspectorWidgetsV2.h"
-#include "NoxCore/UI/Core/UIContext.h"
+#include <NoxUI/Core/UIContext.h>
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Asset/PrefabImporter.h"
@@ -20,10 +20,10 @@
 #include "NoxCore/Scene/PrefabInstance.h"
 #include "NoxCore/Scene/SceneSerializer.h"
 #include "NoxCore/UI/Core/UILayer.h"
-#include "NoxCore/UI/Layout/UILayout.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UIImage.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UIImage.h>
+#include <NoxUI/Widgets/UILabel.h>
 
 namespace Nox
 {
@@ -58,23 +58,23 @@ namespace Nox
         }
     }
 
-    Ref<UI::UIElement> EditorV2Layer::BuildPrefabBar()
+    Ref<NoxUI::UIElement> EditorV2Layer::BuildPrefabBar()
     {
-        auto bar = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-        bar->VAlign = UI::UIAlignment::Center;
-        Ref<UI::UILabel> label(new UI::UILabel("", 14.0f));
-        label->VAlign = UI::UIAlignment::Center;
+        auto bar = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+        bar->VAlign = NoxUI::UIAlignment::Center;
+        Ref<NoxUI::UILabel> label(new NoxUI::UILabel("", 14.0f));
+        label->VAlign = NoxUI::UIAlignment::Center;
         label->UseColorOverride = true;
-        label->ColorOverride = UI::ThemeColor("PrefabText", { 0.45f, 0.70f, 1.0f, 1.0f });
+        label->ColorOverride = NoxUI::ThemeColor("PrefabText", { 0.45f, 0.70f, 1.0f, 1.0f });
         label->Tooltip = "Prefab Mode: the prefab's entities on their own. The level comes back on Exit.";
         m_PrefabBarLabel = label;
         bar->AddChild(label);
         const auto button = [&bar](const std::string& text, const std::string& tooltip, std::function<void()> onClick, bool primary = false)
         {
-            Ref<UI::UIButton> made(new UI::UIButton(text, std::move(onClick)));
+            Ref<NoxUI::UIButton> made(new NoxUI::UIButton(text, std::move(onClick)));
             made->Tooltip = tooltip;
-            made->Padding = UI::UIThickness::Symmetric(10.0f, 4.0f);
-            made->VAlign = UI::UIAlignment::Center;
+            made->Padding = NoxUI::UIThickness::Symmetric(10.0f, 4.0f);
+            made->VAlign = NoxUI::UIAlignment::Center;
             if (primary)
                 made->StyleVariant = "primary";
             bar->AddChild(made);
@@ -100,7 +100,7 @@ namespace Nox
         }
         if (m_SceneLoad)
         {
-            Notify(UI::UINotificationSeverity::Info, "Prefab not opened", "A scene is still loading: open the prefab when it is done.");
+            Notify(NoxUI::UINotificationSeverity::Info, "Prefab not opened", "A scene is still loading: open the prefab when it is done.");
             return;
         }
         CancelHLODBuild("prefab editing");
@@ -112,7 +112,7 @@ namespace Nox
         Ref<Prefab> prefab = PrefabImporter::ImportPrefab(handle, metadata);
         if (!prefab)
         {
-            Notify(UI::UINotificationSeverity::Error, "Prefab not opened", metadata.FilePath.filename().string() + " could not be read -- see the Output Log.");
+            Notify(NoxUI::UINotificationSeverity::Error, "Prefab not opened", metadata.FilePath.filename().string() + " could not be read -- see the Output Log.");
             return;
         }
 
@@ -122,7 +122,7 @@ namespace Nox
         Entity root = isVariant ? PrefabInstance::LoadVariantForEditing(*prefabScene, *prefab) : PrefabInstance::LoadForEditing(*prefabScene, *prefab);
         if (!root)
         {
-            Notify(UI::UINotificationSeverity::Error, "Prefab not opened",
+            Notify(NoxUI::UINotificationSeverity::Error, "Prefab not opened",
                    metadata.FilePath.filename().string() + (isVariant ? ": its base could not be loaded." : " has no root entity."));
             return;
         }
@@ -158,7 +158,7 @@ namespace Nox
         }
         if (m_ViewportImage)
         {
-            const UI::UIRect& bounds = m_ViewportImage->GetBounds();
+            const NoxUI::UIRect& bounds = m_ViewportImage->GetBounds();
             const uint32_t w = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Width())));
             const uint32_t h = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Height())));
             if (w > 0 && h > 0)
@@ -190,7 +190,7 @@ namespace Nox
         m_Selection.Set({ root });
         m_UnloadUnusedAssetsRequested = true;
         RefreshToolBar();
-        Notify(UI::UINotificationSeverity::Info, "Prefab Mode", m_PrefabMode.Name + (isVariant ? " (variant)" : "") + ": Save or Exit in the toolbar.");
+        Notify(NoxUI::UINotificationSeverity::Info, "Prefab Mode", m_PrefabMode.Name + (isVariant ? " (variant)" : "") + ": Save or Exit in the toolbar.");
     }
 
     bool EditorV2Layer::SavePrefabMode()
@@ -200,7 +200,7 @@ namespace Nox
         Entity root = m_EditorScene->GetEntityByUUID(m_PrefabMode.Root);
         if (!root)
         {
-            Notify(UI::UINotificationSeverity::Error, "Prefab not saved", "Its root entity was deleted: undo (Ctrl+Z) to get it back.");
+            Notify(NoxUI::UINotificationSeverity::Error, "Prefab not saved", "Its root entity was deleted: undo (Ctrl+Z) to get it back.");
             return false;
         }
         // Entities beside the root are not part of the prefab: said, not dropped silently.
@@ -222,13 +222,13 @@ namespace Nox
             Ref<Prefab> variantFile = PrefabImporter::ImportPrefab(m_PrefabMode.Prefab, metadata);
             if (!variantFile || !PrefabInstance::SaveVariant(*m_EditorScene, root, *variantFile, path))
             {
-                Notify(UI::UINotificationSeverity::Error, "Variant not saved", m_PrefabMode.Name + ": its base has to be loaded -- see the Output Log.");
+                Notify(NoxUI::UINotificationSeverity::Error, "Variant not saved", m_PrefabMode.Name + ": its base has to be loaded -- see the Output Log.");
                 return false;
             }
         }
         else if (!SceneSerializer::SerializePrefab(*m_EditorScene, { root }, m_PrefabMode.Name, path))
         {
-            Notify(UI::UINotificationSeverity::Error, "Prefab not saved", path.filename().string() + " could not be written -- see the Output Log.");
+            Notify(NoxUI::UINotificationSeverity::Error, "Prefab not saved", path.filename().string() + " could not be written -- see the Output Log.");
             return false;
         }
 
@@ -256,7 +256,7 @@ namespace Nox
         m_SceneDirty = false;
         m_HistoryPositionSeen = m_History.GetPosition();
         if (outside.empty())
-            Notify(UI::UINotificationSeverity::Success, "Prefab saved", m_PrefabMode.Name);
+            Notify(NoxUI::UINotificationSeverity::Success, "Prefab saved", m_PrefabMode.Name);
         else
         {
             std::string names;
@@ -264,7 +264,7 @@ namespace Nox
                 names += (i == 0 ? "" : ", ") + outside[i];
             if (outside.size() > 4)
                 names += " and " + std::to_string(outside.size() - 4) + " more";
-            Notify(UI::UINotificationSeverity::Warning, "Prefab saved without " + std::to_string(outside.size()) + (outside.size() == 1 ? " entity" : " entities"),
+            Notify(NoxUI::UINotificationSeverity::Warning, "Prefab saved without " + std::to_string(outside.size()) + (outside.size() == 1 ? " entity" : " entities"),
                    names + (outside.size() == 1 ? " is" : " are") + " not under " + root.GetName() + ": drag onto it in the Scene Hierarchy to make part of the prefab.");
         }
         return true;
@@ -380,17 +380,17 @@ namespace Nox
     {
         if (m_SceneState != SceneState::Edit)
         {
-            Notify(UI::UINotificationSeverity::Warning, "References not replaced", "Stop Play / Simulate first: the scene being played would keep the old asset.");
+            Notify(NoxUI::UINotificationSeverity::Warning, "References not replaced", "Stop Play / Simulate first: the scene being played would keep the old asset.");
             return;
         }
         if (m_PrefabMode.Active)
         {
-            Notify(UI::UINotificationSeverity::Warning, "References not replaced", "Leave Prefab Mode first: the level waiting behind it would keep the old asset.");
+            Notify(NoxUI::UINotificationSeverity::Warning, "References not replaced", "Leave Prefab Mode first: the level waiting behind it would keep the old asset.");
             return;
         }
         if (m_HLODBuild || m_SceneLoad)
         {
-            Notify(UI::UINotificationSeverity::Warning, "References not replaced", "Wait until the scene has loaded / the HLOD build is done (they read the files).");
+            Notify(NoxUI::UINotificationSeverity::Warning, "References not replaced", "Wait until the scene has loaded / the HLOD build is done (they read the files).");
             return;
         }
         // An open editor's unsaved edits would write the old asset back over the rewritten file: saved or dropped first.
@@ -456,7 +456,7 @@ namespace Nox
         m_HistoryExternalStep = "Replace References"; // (a step only if the scene's text changed: respawned instances or the replace)
         m_SceneHierarchyPanel.MarkDirty();
         m_ContentBrowserPanel.Refresh();
-        Notify(UI::UINotificationSeverity::Success, "References replaced",
+        Notify(NoxUI::UINotificationSeverity::Success, "References replaced",
                AssetDisplayName(from) + " -> " + AssetDisplayName(to) + ": " + std::to_string(files) + (files == 1 ? " file" : " files") + " rewritten" +
                (sceneChanged ? ", the open scene updated (Ctrl+Z undoes it there)." : "."));
     }

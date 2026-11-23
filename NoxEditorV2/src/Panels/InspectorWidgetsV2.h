@@ -9,18 +9,19 @@
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Renderer/DataTypes.h"
-#include "NoxCore/UI/Core/UIElement.h"
-#include "NoxCore/UI/Layout/UILayout.h"
+#include <NoxUI/Core/UIElement.h>
+#include <NoxUI/Layout/UILayout.h>
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIContext;
         class UIDragScalar;
         class UIScrollView;
         class UIStackBox;
     }
+
+namespace Nox
+{
 
     struct LengthUnitInfo
     {
@@ -45,8 +46,8 @@ namespace Nox
 
     // Opens a fast, searchable, viewport-clamped asset picker popup anchored to triggerBounds.
     void ShowSearchableAssetPicker(
-        UI::UIContext& context,
-        const UI::UIRect& triggerBounds,
+        NoxUI::UIContext& context,
+        const NoxUI::UIRect& triggerBounds,
         const std::string& emptyLabel,
         AssetHandle currentHandle,
         std::vector<AssetPickerOption> options,
@@ -54,7 +55,7 @@ namespace Nox
         bool alignRight = false);
 
     // Sleek pill switch used in the entity header for InactiveComponent toggling.
-    class EntityActiveSwitch final : public UI::UIElement
+    class EntityActiveSwitch final : public NoxUI::UIElement
     {
     public:
         explicit EntityActiveSwitch(bool active = true, std::function<void(bool)> onChanged = {});
@@ -62,17 +63,17 @@ namespace Nox
         bool Checked = true;
         std::function<void(bool)> OnChanged;
 
-        bool OnPointerUp(const UI::UIPointerEvent& e) override;
+        bool OnPointerUp(const NoxUI::UIPointerEvent& e) override;
 
     protected:
-        UI::UIVec2 ComputeDesiredSize() override;
-        void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override;
+        NoxUI::UIVec2 ComputeDesiredSize() override;
+        void OnPaint(NoxUI::UIDrawList& drawList, const NoxUI::UITheme& theme) override;
     };
 
     struct InspectorCardResult
     {
-        Ref<UI::UIStackBox> Card;
-        Ref<UI::UIStackBox> Body;
+        Ref<NoxUI::UIStackBox> Card;
+        Ref<NoxUI::UIStackBox> Body;
     };
 
     // Builds a sleek collapsible component card with a vector chevron and right-aligned three-dots menu.
@@ -87,11 +88,11 @@ namespace Nox
     // The small chevron that opens what is under a row (a material's properties under its slot): it flips its own state and
     // calls onToggle(expanded) -- the caller shows or hides the section, no rebuild of the panel. The three dots open a row's
     // menu (onOpen gets the button's bounds, to anchor the menu).
-    Ref<UI::UIElement> CreateExpandToggle(bool expanded, std::function<void(bool)> onToggle, const std::string& tooltip = {});
-    Ref<UI::UIElement> CreateMoreButton(std::function<void(const UI::UIRect&)> onOpen, const std::string& tooltip = "Options");
+    Ref<NoxUI::UIElement> CreateExpandToggle(bool expanded, std::function<void(bool)> onToggle, const std::string& tooltip = {});
+    Ref<NoxUI::UIElement> CreateMoreButton(std::function<void(const NoxUI::UIRect&)> onOpen, const std::string& tooltip = "Options");
 
     // A 0..1 (or min..max) value as one field: its fill bar is the slider (drag across it), a click types the exact value.
-    Ref<UI::UIDragScalar> CreateSliderField(float value, float minV, float maxV, std::function<void(float)> onChanged);
+    Ref<NoxUI::UIDragScalar> CreateSliderField(float value, float minV, float maxV, std::function<void(float)> onChanged);
 
     // Two-column property row builder with live two-way sync callbacks. The editors it makes keep copies of what they call
     // (OnMutate), never a pointer to the builder: builders are locals of the function that fills a card.
@@ -105,13 +106,13 @@ namespace Nox
 
     struct InspectorCardBuilder
     {
-        Ref<UI::UIStackBox> Body;
+        Ref<NoxUI::UIStackBox> Body;
         std::function<void(bool)> OnMutate;
-        UI::UIContext* Context = nullptr;
+        NoxUI::UIContext* Context = nullptr;
 
         static constexpr float kLabelRatio = 0.39f;
 
-        void AddRow(const std::string& labelText, const Ref<UI::UIElement>& editor, const std::string& tooltip = {});
+        void AddRow(const std::string& labelText, const Ref<NoxUI::UIElement>& editor, const std::string& tooltip = {});
         void AddSubheader(const std::string& title, const std::string& tooltip = {});
         void AddSeparator();
         void AddStatusNote(const std::string& text, const glm::vec4& color = { 0.60f, 0.66f, 0.76f, 1.0f });

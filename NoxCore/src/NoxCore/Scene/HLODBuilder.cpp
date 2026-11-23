@@ -63,14 +63,14 @@ namespace Nox
             }
             switch (texture.Format)
             {
-            case NRI::ImageFormat::RGBA8: case NRI::ImageFormat::SRGBA8: return BlockFormat::RGBA8;
-            case NRI::ImageFormat::BC1_UNorm: case NRI::ImageFormat::BC1_UNorm_SRGB: return BlockFormat::BC1;
-            case NRI::ImageFormat::BC2_UNorm: case NRI::ImageFormat::BC2_UNorm_SRGB: return BlockFormat::BC2;
-            case NRI::ImageFormat::BC3_UNorm: case NRI::ImageFormat::BC3_UNorm_SRGB: return BlockFormat::BC3;
-            case NRI::ImageFormat::BC4_UNorm: case NRI::ImageFormat::BC4_SNorm: return BlockFormat::BC4;
-            case NRI::ImageFormat::BC5_UNorm: case NRI::ImageFormat::BC5_SNorm: return BlockFormat::BC5;
-            case NRI::ImageFormat::BC6H_UF16: case NRI::ImageFormat::BC6H_SF16: return BlockFormat::BC6H;
-            case NRI::ImageFormat::BC7_UNorm: case NRI::ImageFormat::BC7_UNorm_SRGB: return BlockFormat::BC7;
+            case NRI_FORMAT_RGBA8: case NRI_FORMAT_SRGBA8: return BlockFormat::RGBA8;
+            case NRI_FORMAT_BC1_UNORM: case NRI_FORMAT_BC1_UNORM_SRGB: return BlockFormat::BC1;
+            case NRI_FORMAT_BC2_UNORM: case NRI_FORMAT_BC2_UNORM_SRGB: return BlockFormat::BC2;
+            case NRI_FORMAT_BC3_UNORM: case NRI_FORMAT_BC3_UNORM_SRGB: return BlockFormat::BC3;
+            case NRI_FORMAT_BC4_UNORM: case NRI_FORMAT_BC4_SNORM: return BlockFormat::BC4;
+            case NRI_FORMAT_BC5_UNORM: case NRI_FORMAT_BC5_SNORM: return BlockFormat::BC5;
+            case NRI_FORMAT_BC6H_UF16: case NRI_FORMAT_BC6H_SF16: return BlockFormat::BC6H;
+            case NRI_FORMAT_BC7_UNORM: case NRI_FORMAT_BC7_UNORM_SRGB: return BlockFormat::BC7;
             default: return BlockFormat::None;
             }
         }
@@ -164,7 +164,7 @@ namespace Nox
                         break;
                     case BlockFormat::BC6H:
                         // HDR (an emissive map): clamped to 0..1, the factor carries the rest.
-                        bcdec_bc6h_float(source, hdr, 4 * 3, texture.Format == NRI::ImageFormat::BC6H_SF16 ? 1 : 0);
+                        bcdec_bc6h_float(source, hdr, 4 * 3, texture.Format == NRI_FORMAT_BC6H_SF16 ? 1 : 0);
                         for (int i = 0; i < 16; ++i)
                         {
                             for (int k = 0; k < 3; ++k)
@@ -338,7 +338,7 @@ namespace Nox
         std::vector<Instance> Instances;
         std::map<AssetHandle, AssetMetadata> Meshes;                                  // the meshes to read
         std::shared_ptr<std::map<AssetHandle, std::optional<CookedMesh>>> Cooked;    // read on a worker
-        TaskFuture<void> Read;
+        NoxTasks::TaskFuture<void> Read;
 
         // Resolved on the main thread: per instance submesh its material, per material its textures (metadata to read on a worker).
         struct MaterialSource
@@ -359,7 +359,7 @@ namespace Nox
 
         std::shared_ptr<HLOD::Result> Result;
         std::shared_ptr<std::string> Error;
-        TaskFuture<void> Bake;
+        NoxTasks::TaskFuture<void> Bake;
         std::filesystem::path GltfPath; // relative to the asset directory
     };
 
@@ -492,8 +492,8 @@ namespace Nox
 
             // The cooked meshes, on a worker.
             work.Cooked = std::make_shared<std::map<AssetHandle, std::optional<CookedMesh>>>();
-            work.Read = JobSystem::Get().Async("HLOD Read Meshes", JobPriority::Normal,
-                [cooked = work.Cooked, meshes = work.Meshes, assetDirectory](const CancellationToken&)
+            work.Read = NoxTasks::JobSystem::Get().Async("HLOD Read Meshes", NoxTasks::JobPriority::Normal,
+                [cooked = work.Cooked, meshes = work.Meshes, assetDirectory](const NoxTasks::CancellationToken&)
                 {
                     for (const auto& [handle, metadata] : meshes)
                     {
@@ -573,7 +573,7 @@ namespace Nox
             bakeSettings.TexelsPerUnit = settings.HLODTexelsPerMeter / WorldUnits::FromMeters(1.0f);
             bakeSettings.ParallelFor = [](uint32_t count, const std::function<void(uint32_t)>& body)
             {
-                JobSystem::Get().ParallelFor("HLOD Bake", count, 4, [&](uint32_t, uint32_t begin, uint32_t end)
+                NoxTasks::JobSystem::Get().ParallelFor("HLOD Bake", count, 4, [&](uint32_t, uint32_t begin, uint32_t end)
                 {
                     for (uint32_t index = begin; index < end; ++index)
                         body(index);
@@ -582,9 +582,9 @@ namespace Nox
             work.GltfPath = m_World->GetWorldPartition().CellDirectory / "HLOD" / (cellName + ".gltf");
             work.Result = std::make_shared<HLOD::Result>();
             work.Error = std::make_shared<std::string>();
-            work.Bake = JobSystem::Get().Async("HLOD Bake", JobPriority::Normal,
+            work.Bake = NoxTasks::JobSystem::Get().Async("HLOD Bake", NoxTasks::JobPriority::Normal,
                 [cooked = work.Cooked, parts = work.Parts, materialSources = work.Materials, textures = work.Textures, bakeSettings, assetDirectory,
-                 gltf = assetDirectory / work.GltfPath, result = work.Result, error = work.Error, cellName](const CancellationToken&)
+                 gltf = assetDirectory / work.GltfPath, result = work.Result, error = work.Error, cellName](const NoxTasks::CancellationToken&)
                 {
                     // Textures, decoded once each.
                     std::map<AssetHandle, std::pair<std::shared_ptr<HLOD::Texture>, bool>> decoded;

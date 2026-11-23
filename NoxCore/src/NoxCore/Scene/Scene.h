@@ -19,8 +19,8 @@
 #include "NoxCore/Core/Timestep.h"
 #include "NoxCore/Renderer/EditorCamera.h"
 #include "NoxCore/Renderer/Renderer.h"
-#include "NoxCore/Tasks/SystemGraph.h"
-#include "NoxCore/Tasks/WorkerLocal.h"
+#include <NoxTasks/SystemGraph.h>
+#include <NoxTasks/WorkerLocal.h>
 
 namespace Nox
 {
@@ -129,7 +129,7 @@ namespace Nox
         };
         void CollectTimelineAudio(Entity player, const Timeline& timeline, float time, std::vector<TimelineAudioSection>& out);
         void SyncTimelineAudio(const std::vector<TimelineAudioSection>& wanted, std::unordered_map<uint64_t, TimelineAudioVoice>& sections,
-                               AudioVoiceGroup group);
+                               NoxAudio::AudioVoiceGroup group);
 
         // True once after entities were destroyed since the last call, i.e. assets may have become unused.
         bool ConsumeAssetReferencesChanged() { return std::exchange(m_AssetReferencesChanged, false); }
@@ -468,7 +468,7 @@ namespace Nox
         // 3D one-shots playing: Audio Volumes keep filtering them while they play.
         struct OneShotVoice
         {
-            AudioVoiceHandle Voice = 0;
+            NoxAudio::AudioVoiceHandle Voice = 0;
             glm::dvec3 Position{ 0.0 };
             AudioVoiceEnvironment Environment;
         };
@@ -489,7 +489,7 @@ namespace Nox
             uint32_t FirstSubmesh = 0;
             uint32_t SubmeshCount = 0;
             glm::dmat4 World{ 1.0 };
-            std::vector<AcousticMaterial> Materials;
+            std::vector<NoxAudio::AcousticMaterial> Materials;
             bool Placed = false;
             uint64_t Seen = 0;
         };
@@ -503,7 +503,7 @@ namespace Nox
         // left out because their mesh or materials are still loading.
         uint32_t GatherAcousticInstances(std::vector<AcousticInstance>& out);
     private:
-        bool ResolveAcousticMaterials(entt::entity entity, std::vector<AcousticMaterial>& outMaterials) const;
+        bool ResolveAcousticMaterials(entt::entity entity, std::vector<NoxAudio::AcousticMaterial>& outMaterials) const;
         std::chrono::steady_clock::time_point m_AudioLastUpdate{}; // (the volumes' blending runs on real time: also while paused)
         std::vector<UUID> m_PendingDestroy;
         std::vector<UUID> m_PendingScriptStart;
@@ -599,11 +599,11 @@ namespace Nox
         std::vector<StreamingSource> m_StreamingSources;
 
         // Frame graph
-        SystemGraph m_UpdateSystems{ "Scene Update" };
-        SystemGraph m_SubmitSystems{ "Scene Submit" };
+        NoxTasks::SystemGraph m_UpdateSystems{ "Scene Update" };
+        NoxTasks::SystemGraph m_SubmitSystems{ "Scene Submit" };
         SystemFrameInput m_FrameInput;
-        WorkerLocal<EntityCommandBuffer> m_CommandBuffers;
-        WorkerLocal<std::vector<AssetHandle>> m_MissingAssets;
+        NoxTasks::WorkerLocal<EntityCommandBuffer> m_CommandBuffers;
+        NoxTasks::WorkerLocal<std::vector<AssetHandle>> m_MissingAssets;
 
         // GPU scene registration: the renderer's instances of each mesh entity (one per drawn submesh).
         struct MeshRegistration
@@ -634,7 +634,7 @@ namespace Nox
         std::vector<entt::entity> m_PendingMeshEntities; // (re)registered at the next sync
         // Animated characters held back until their animation can pose them (AnimationGraphInstance::IsPoseReady): since when.
         std::unordered_map<entt::entity, std::chrono::steady_clock::time_point> m_AnimationWaits;
-        WorkerLocal<std::vector<entt::entity>> m_MovedEntities; // world transform changed (transform propagation)
+        NoxTasks::WorkerLocal<std::vector<entt::entity>> m_MovedEntities; // world transform changed (transform propagation)
 
         // Allow the Entity class to access m_Registry to add/get components
         friend class Entity;

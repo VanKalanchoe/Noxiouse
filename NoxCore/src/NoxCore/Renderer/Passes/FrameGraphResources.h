@@ -1,5 +1,5 @@
 #pragma once
-#include "NoxCore/RenderGraph/RenderGraph.h"
+#include <NRIRenderGraph/RenderGraph.h>
 
 // Internal to the renderer's pass files: handles of this frame's graph resources (blackboard entry added by
 // Renderer::prepareFrameGraph; features that own history or size-specific resources fill theirs in their add* function).

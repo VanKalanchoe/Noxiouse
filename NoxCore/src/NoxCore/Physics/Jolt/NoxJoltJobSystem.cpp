@@ -1,5 +1,5 @@
 #include "NoxJoltJobSystem.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 #include <thread>
 #include <chrono>
@@ -14,7 +14,7 @@ namespace Nox {
 
     int NoxJoltJobSystem::GetMaxConcurrency() const
     {
-        return static_cast<int>(::Nox::JobSystem::Get().GetWorkerCount()) + 1;
+        return static_cast<int>(::NoxTasks::JobSystem::Get().GetWorkerCount()) + 1;
     }
 
     JPH::JobSystem::JobHandle NoxJoltJobSystem::CreateJob(const char* inJobName, JPH::ColorArg inColor,
@@ -42,7 +42,7 @@ namespace Nox {
     void NoxJoltJobSystem::QueueJob(Job* inJob)
     {
         inJob->AddRef();
-        ::Nox::JobSystem::Get().Async("JoltPhysicsJob", ::Nox::JobPriority::High, [inJob](const CancellationToken&)
+        ::NoxTasks::JobSystem::Get().Async("JoltPhysicsJob", ::NoxTasks::JobPriority::High, [inJob](const NoxTasks::CancellationToken&)
         {
             inJob->Execute();
             inJob->Release();

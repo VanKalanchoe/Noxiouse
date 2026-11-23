@@ -56,7 +56,7 @@ namespace Nox
 
     void StatsOverlay::Draw(Renderer& renderer)
     {
-        const NRI::Extent2D outputExtent = renderer.getOutputSize();
+        const nri::Extent2D outputExtent = renderer.getOutputSize();
         if (outputExtent.width == 0 || outputExtent.height == 0)
             return;
 
@@ -96,7 +96,7 @@ namespace Nox
         const ProfileMemoryStats& memory = profiler.GetMemoryStats();
         uint64_t vramUsage = 0;
         uint64_t vramBudget = 0;
-        for (const NRI::MemoryHeapStats& heap : memory.Heaps)
+        for (const nri::MemoryHeapStats& heap : memory.Heaps)
         {
             if (!heap.deviceLocal)
                 continue;
@@ -135,7 +135,7 @@ namespace Nox
         m_Cursor.y += SectionGap;
         for (size_t heapIndex = 0; heapIndex < memory.Heaps.size(); ++heapIndex)
         {
-            const NRI::MemoryHeapStats& heap = memory.Heaps[heapIndex];
+            const nri::MemoryHeapStats& heap = memory.Heaps[heapIndex];
             DrawLabelLine(Format("{} heap {}: {:.0f} / {:.0f} MB, {} allocations ({:.0f} in {:.0f} MB of blocks)",
                                  heap.deviceLocal ? "VRAM" : "Host", heapIndex, ToMegabytes(heap.usage), ToMegabytes(heap.budget),
                                  heap.allocationCount, ToMegabytes(heap.allocationBytes), ToMegabytes(heap.blockBytes)), TextColor);

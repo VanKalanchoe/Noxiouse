@@ -47,29 +47,29 @@ namespace Nox
     void Renderer::createShadowMapPipelines(bool forceCompile)
     {
         // Depth only: the visibility pass's task and mesh stages (the cascade's view from its copy of the uniforms).
-        NRI::PipelineDesc depth{};
+        nri::PipelineDesc depth{};
         depth.forceCompile = forceCompile;
-        depth.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
-        depth.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/VisibilityBuffer.slang" });
-        depth.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "depthFragMain", .sourcePath = "assets/shaders/VisibilityBuffer.slang" });
-        m_shadowDepthPipeline = m_device->createPipeline(depth, *m_shaderCompiler);
+        depth.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
+        depth.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = "assets/shaders/VisibilityBuffer.slang" });
+        depth.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "depthFragMain", .sourcePath = "assets/shaders/VisibilityBuffer.slang" });
+        m_shadowDepthPipeline = m_device.createPipeline(depth, m_shaderCompiler.handle());
         depth.shaders.back().entryPoint = "depthMaskFragMain";
-        m_shadowDepthMaskPipeline = m_device->createPipeline(depth, *m_shaderCompiler);
+        m_shadowDepthMaskPipeline = m_device.createPipeline(depth, m_shaderCompiler.handle());
 
-        NRI::PipelineDesc resolve{};
+        nri::PipelineDesc resolve{};
         resolve.forceCompile = forceCompile;
-        resolve.colorFormats = { NRI::ImageFormat::R16G16_SFLOAT }; // RawShadowMask
-        resolve.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/ShadowMapResolve.slang" });
-        resolve.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/ShadowMapResolve.slang" });
-        resolve.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = "assets/shaders/ShadowMapResolve.slang" });
-        m_shadowMapResolvePipeline = m_device->createPipeline(resolve, *m_shaderCompiler);
+        resolve.colorFormats = { NRI_FORMAT_R16G16_SFLOAT }; // RawShadowMask
+        resolve.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/ShadowMapResolve.slang" });
+        resolve.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = "assets/shaders/ShadowMapResolve.slang" });
+        resolve.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = "assets/shaders/ShadowMapResolve.slang" });
+        m_shadowMapResolvePipeline = m_device.createPipeline(resolve, m_shaderCompiler.handle());
     }
 
     void Renderer::addShadowMapPasses()
     {
         const bool pathTracing = m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19;
         const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
-        const bool cullingReady = std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return pipeline != nullptr; });
+        const bool cullingReady = std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return static_cast<bool>(pipeline); });
         m_shadowCascadesDrawn = 0;
         // (Set to Ray Traced without ray traced shadows running: shadow maps all the same -- getSunShadowMapsActive.)
         if (!getSunShadowMapsActive() || pathTracing || m_shadowMaskLightIndex == ~0u ||
@@ -87,12 +87,12 @@ namespace Nox
         {
             for (uint32_t cascade = 0; cascade < shaderio::MaxShadowCascades; ++cascade)
             {
-                m_shadowCascadeUniforms[frameIndex][cascade] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI::BufferUsage::Uniform });
-                m_shadowCascadeUniformsMapped[frameIndex][cascade] = m_shadowCascadeUniforms[frameIndex][cascade]->map(0, sizeof(shaderio::UniformBufferObject));
-                m_shadowCascadeCullViews[frameIndex][cascade] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI::BufferUsage::Storage });
+                m_shadowCascadeUniforms[frameIndex][cascade] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI_BUFFER_USAGE_UNIFORM });
+                m_shadowCascadeUniformsMapped[frameIndex][cascade] = m_shadowCascadeUniforms[frameIndex][cascade].map(0, sizeof(shaderio::UniformBufferObject));
+                m_shadowCascadeCullViews[frameIndex][cascade] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_STORAGE });
             }
-            m_shadowCascadeBuffers[frameIndex] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::GpuShadowCascades), .usage = NRI::BufferUsage::Storage });
-            m_shadowCascadeBuffersMapped[frameIndex] = m_shadowCascadeBuffers[frameIndex]->map(0, sizeof(shaderio::GpuShadowCascades));
+            m_shadowCascadeBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::GpuShadowCascades), .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_shadowCascadeBuffersMapped[frameIndex] = m_shadowCascadeBuffers[frameIndex].map(0, sizeof(shaderio::GpuShadowCascades));
         }
 
         // The camera (render space): position and axes from its view (Nox views look down +z), its projection's extents.
@@ -209,8 +209,8 @@ namespace Nox
         mapDesc.Size = RGSize::Absolute;
         mapDesc.Width = resolution;
         mapDesc.Height = resolution;
-        mapDesc.Format = NRI::ImageFormat::None; // the device's depth format
-        mapDesc.Usage = NRI::TextureUsage::DepthStencilAttachment;
+        mapDesc.Format = NRI_FORMAT_NONE; // the device's depth format
+        mapDesc.Usage = NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
         const float slopeBias = m_shadowSlopeBias;
 
         // Which cascades draw this frame (see the top of the file). What the maps were drawn with besides their views: another value
@@ -295,7 +295,7 @@ namespace Nox
         {
             if (draw[cascade])
                 addSunDepthPasses(kCullNames[cascade], kDepthNames[cascade], maps[cascade], resolution, cascades.viewProj[cascade],
-                                  m_shadowCascadeUniforms[frameIndex][cascade].get(), m_shadowCascadeCullViews[frameIndex][cascade].get(),
+                                  &m_shadowCascadeUniforms[frameIndex][cascade], &m_shadowCascadeCullViews[frameIndex][cascade],
                                   slopeBiasClamp[cascade]);
         }
 
@@ -307,40 +307,40 @@ namespace Nox
                 builder.Read(resources.GBufferNormal);
                 builder.Read(resources.GBufferMaterial);
                 ReadShadowMaps(builder, resources);
-                builder.ColorTarget(resources.RawShadowMask, NRI::LoadOP::clear, NRI::StoreOP::store, { 65504.0f, 1.0f, 0.0f, 0.0f });
+                builder.ColorTarget(resources.RawShadowMask, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 65504.0f, 1.0f, 0.0f, 0.0f });
                 builder.SetRenderArea(m_frame.renderExtent);
             },
             [this, res = &resources](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *m_shadowMapResolvePipeline);
-                cmd.setCullMode(NRI::CullMode::None);
+                nri::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_shadowMapResolvePipeline);
+                cmd.setCullMode(NRI_CULL_MODE_NONE);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
                 cmd.setColorBlendEnable(0, false);
-                cmd.setColorWriteMask(0, NRI::ColorComponent::R | NRI::ColorComponent::G | NRI::ColorComponent::B | NRI::ColorComponent::A);
+                cmd.setColorWriteMask(0, nri::ColorComponent::R | nri::ColorComponent::G | nri::ColorComponent::B | nri::ColorComponent::A);
 
                 shaderio::PushConstantShadowMapResolve push{};
                 push.invViewProj = uniformData.invViewProj;
-                push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
-                push.cascadesReference = m_shadowCascadeBuffers[frameIndex]->getDeviceAddress();
+                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                push.cascadesReference = m_shadowCascadeBuffers[frameIndex].getDeviceAddress();
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.gbufferNormalIndex = context.Slot(res->GBufferNormal);
                 push.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
                 push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 push.viewportSize = glm::vec2(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
                 cmd.pushData(&push, sizeof(push));
-                cmd.drawMeshTasks(1, 1, 1);
+                nri::drawMeshTasks(cmd, 1, 1, 1);
             });
     }
 
     void Renderer::addSunDepthPasses(const char* cullName, const char* depthName, RGTexture map, uint32_t resolution, const glm::mat4& viewProj,
-                                     NRI::Buffer* uniformBuffer, NRI::Buffer* cullViewBuffer, float slopeBiasClamp)
+                                     nri::Buffer* uniformBuffer, nri::Buffer* cullViewBuffer, float slopeBiasClamp)
     {
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
         const uint32_t blockCount = (entryCount + shaderio::CULL_BLOCK_SIZE - 1) / shaderio::CULL_BLOCK_SIZE;
-        const NRI::Extent2D mapExtent{ resolution, resolution };
+        const nri::Extent2D mapExtent{ resolution, resolution };
         const float slopeBias = m_shadowSlopeBias;
 
         // What the view sees of the draw list: its side planes only (the culling has no near or far plane), so casters between it and
@@ -357,19 +357,19 @@ namespace Nox
         cullViewBuffer->unmap();
 
         ViewDrawResources draws;
-        draws.VisibleInstances = m_renderGraph.CreateBuffer("Sun Shadow Visible Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-        draws.Commands = m_renderGraph.CreateBuffer("Sun Shadow Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI::BufferUsage::Indirect });
-        draws.Counts = m_renderGraph.CreateBuffer("Sun Shadow Draw Counts", { sizeof(shaderio::CullCounts), NRI::BufferUsage::Indirect });
-        draws.LateInstances = m_renderGraph.CreateBuffer("Sun Shadow Late Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-        const RGBuffer flags = m_renderGraph.CreateBuffer("Sun Shadow Cull Flags", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-        const RGBuffer blocks = m_renderGraph.CreateBuffer("Sun Shadow Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI::BufferUsage::Storage });
+        draws.VisibleInstances = m_renderGraph.CreateBuffer("Sun Shadow Visible Instances", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+        draws.Commands = m_renderGraph.CreateBuffer("Sun Shadow Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI_BUFFER_USAGE_INDIRECT });
+        draws.Counts = m_renderGraph.CreateBuffer("Sun Shadow Draw Counts", { sizeof(shaderio::CullCounts), NRI_BUFFER_USAGE_INDIRECT });
+        draws.LateInstances = m_renderGraph.CreateBuffer("Sun Shadow Late Instances", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+        const RGBuffer flags = m_renderGraph.CreateBuffer("Sun Shadow Cull Flags", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+        const RGBuffer blocks = m_renderGraph.CreateBuffer("Sun Shadow Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI_BUFFER_USAGE_STORAGE });
         addCullingDispatchPass(cullName, draws, flags, blocks, entryCount, RGTexture{}, uniformBuffer, cullViewBuffer);
 
         // Never culled: the callers keep the map (cached) and count it as drawn.
         m_renderGraph.AddPass(depthName, RGPassFlags::Raster | RGPassFlags::NeverCull,
             [&](RGBuilder& builder)
             {
-                builder.DepthTarget(map, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 }); // reverse Z
+                builder.DepthTarget(map, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0 }); // reverse Z
                 builder.SetRenderArea(mapExtent);
                 ReadGpuScene(builder, resources);
                 ReadIfValid(builder, resources.SkinnedVertices);
@@ -377,26 +377,26 @@ namespace Nox
             },
             [this, draws, uniformBuffer, slopeBias, slopeBiasClamp](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
+                nri::CommandBuffer& cmd = context.Cmd();
                 MeshletDrawCursor cursor = beginMeshletDraws(context, draws);
                 cursor.references.matrixReference = uniformBuffer->getDeviceAddress();
                 // ClusterStats count the camera's clusters only.
                 cursor.taskFlags &= ~shaderio::MESHLET_COUNT_TRIANGLES;
 
                 cmd.setDepthTestEnable(true);
-                cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                cmd.setDepthCompareOp(NRI_COMPARE_GREATER_OR_EQUAL);
                 cmd.setDepthClampEnable(true);
                 // Away from the sun is towards depth 0: a negative slope bias, clamped.
                 cmd.setDepthBiasEnable(slopeBias > 0.0f);
                 cmd.setDepthBias(0.0f, slopeBiasClamp, -slopeBias);
 
                 // Both faces of everything the RT shadow rays hit (ShadowMask.slang): opaque, masked (alpha tested), unlit.
-                drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_shadowDepthPipeline, NRI::CullMode::None, true, false);
-                drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_shadowDepthPipeline, NRI::CullMode::None, true, false);
-                drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
-                drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
-                drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
-                drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, m_shadowDepthPipeline, NRI_CULL_MODE_NONE, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, m_shadowDepthPipeline, NRI_CULL_MODE_NONE, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *shadowDepthMaskPipeline(), NRI_CULL_MODE_NONE, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *shadowDepthMaskPipeline(), NRI_CULL_MODE_NONE, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *shadowDepthMaskPipeline(), NRI_CULL_MODE_NONE, true, false);
+                drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *shadowDepthMaskPipeline(), NRI_CULL_MODE_NONE, true, false);
 
                 cmd.setDepthBiasEnable(false);
                 cmd.setDepthClampEnable(false);
@@ -440,7 +440,7 @@ namespace Nox
                 return;
         }
         memcpy(m_shadowCascadeBuffersMapped[frameIndex], &m_shadowCascades, sizeof(shaderio::GpuShadowCascades));
-        uniformData.sunShadowCascadesReference = m_shadowCascadeBuffers[frameIndex]->getDeviceAddress();
+        uniformData.sunShadowCascadesReference = m_shadowCascadeBuffers[frameIndex].getDeviceAddress();
     }
     namespace
     {
@@ -482,7 +482,7 @@ namespace Nox
         m_localShadows.viewCount = 0;
         const bool pathTracing = m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19;
         const uint32_t entryCount = static_cast<uint32_t>(m_drawList.size());
-        const bool cullingReady = std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return pipeline != nullptr; });
+        const bool cullingReady = std::all_of(m_instanceCullingPipelines.begin(), m_instanceCullingPipelines.end(), [](const auto& pipeline) { return static_cast<bool>(pipeline); });
         if (!getLocalShadowMapsActive() || pathTracing || entryCount == 0 || !cullingReady ||
             !m_shadowDepthPipeline || !m_shadowDepthMaskPipeline)
             return;
@@ -589,10 +589,10 @@ namespace Nox
         // Per frame slot: the GpuLocalShadows buffer, the per-light view table, the culling views (each view's uniforms on demand).
         if (!m_localShadowBuffers[frameIndex])
         {
-            m_localShadowBuffers[frameIndex] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::GpuLocalShadows), .usage = NRI::BufferUsage::Storage });
-            m_localShadowBuffersMapped[frameIndex] = m_localShadowBuffers[frameIndex]->map(0, sizeof(shaderio::GpuLocalShadows));
+            m_localShadowBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::GpuLocalShadows), .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_localShadowBuffersMapped[frameIndex] = m_localShadowBuffers[frameIndex].map(0, sizeof(shaderio::GpuLocalShadows));
             for (uint32_t light = 0; light < MaxLocalShadowLights; ++light)
-                m_localShadowCullViews[frameIndex][light] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI::BufferUsage::Storage });
+                m_localShadowCullViews[frameIndex][light] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_STORAGE });
         }
         const uint32_t lightCount = static_cast<uint32_t>(m_lightBufferObjects.size());
         if (m_localShadowLightViewCapacity[frameIndex] < lightCount)
@@ -603,8 +603,8 @@ namespace Nox
                 m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(m_localShadowLightViewBuffers[frameIndex]) });
             }
             const uint32_t capacity = std::max(lightCount * 2, 16u);
-            m_localShadowLightViewBuffers[frameIndex] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(uint32_t) * capacity, .usage = NRI::BufferUsage::Storage });
-            m_localShadowLightViewBuffersMapped[frameIndex] = m_localShadowLightViewBuffers[frameIndex]->map(0, sizeof(uint32_t) * capacity);
+            m_localShadowLightViewBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * capacity, .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_localShadowLightViewBuffersMapped[frameIndex] = m_localShadowLightViewBuffers[frameIndex].map(0, sizeof(uint32_t) * capacity);
             m_localShadowLightViewCapacity[frameIndex] = capacity;
         }
 
@@ -720,32 +720,32 @@ namespace Nox
             std::copy(m_drawBucketStarts.begin(), m_drawBucketStarts.end(), cull.bucketStart);
             cull.entryCount = entryCount;
             cull.blockCount = blockCount;
-            NRI::Buffer* cullViewBuffer = m_localShadowCullViews[frameIndex][lightSlot].get();
+            nri::Buffer* cullViewBuffer = &m_localShadowCullViews[frameIndex][lightSlot];
             memcpy(cullViewBuffer->map(0, sizeof(cull)), &cull, sizeof(cull));
             cullViewBuffer->unmap();
 
             // The culling reads the first view's uniforms (the scene tables, the same in every view's copy).
             if (!m_localShadowViewUniforms[frameIndex][entry.FirstView])
             {
-                m_localShadowViewUniforms[frameIndex][entry.FirstView] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI::BufferUsage::Uniform });
-                m_localShadowViewUniformsMapped[frameIndex][entry.FirstView] = m_localShadowViewUniforms[frameIndex][entry.FirstView]->map(0, sizeof(shaderio::UniformBufferObject));
+                m_localShadowViewUniforms[frameIndex][entry.FirstView] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI_BUFFER_USAGE_UNIFORM });
+                m_localShadowViewUniformsMapped[frameIndex][entry.FirstView] = m_localShadowViewUniforms[frameIndex][entry.FirstView].map(0, sizeof(shaderio::UniformBufferObject));
             }
             ViewDrawResources& lightDraws = draws[lightSlot];
-            lightDraws.VisibleInstances = m_renderGraph.CreateBuffer("Local Shadow Visible Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-            lightDraws.Commands = m_renderGraph.CreateBuffer("Local Shadow Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI::BufferUsage::Indirect });
-            lightDraws.Counts = m_renderGraph.CreateBuffer("Local Shadow Draw Counts", { sizeof(shaderio::CullCounts), NRI::BufferUsage::Indirect });
-            lightDraws.LateInstances = m_renderGraph.CreateBuffer("Local Shadow Late Instances", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-            const RGBuffer flags = m_renderGraph.CreateBuffer("Local Shadow Cull Flags", { sizeof(uint32_t) * entryCount, NRI::BufferUsage::Storage });
-            const RGBuffer blocks = m_renderGraph.CreateBuffer("Local Shadow Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI::BufferUsage::Storage });
+            lightDraws.VisibleInstances = m_renderGraph.CreateBuffer("Local Shadow Visible Instances", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+            lightDraws.Commands = m_renderGraph.CreateBuffer("Local Shadow Draw Commands", { sizeof(shaderio::MeshTasksIndirectCommand) * entryCount, NRI_BUFFER_USAGE_INDIRECT });
+            lightDraws.Counts = m_renderGraph.CreateBuffer("Local Shadow Draw Counts", { sizeof(shaderio::CullCounts), NRI_BUFFER_USAGE_INDIRECT });
+            lightDraws.LateInstances = m_renderGraph.CreateBuffer("Local Shadow Late Instances", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+            const RGBuffer flags = m_renderGraph.CreateBuffer("Local Shadow Cull Flags", { sizeof(uint32_t) * entryCount, NRI_BUFFER_USAGE_STORAGE });
+            const RGBuffer blocks = m_renderGraph.CreateBuffer("Local Shadow Cull Blocks", { sizeof(shaderio::CullBlock) * blockCount, NRI_BUFFER_USAGE_STORAGE });
             addCullingDispatchPass(kLocalCullNames[lightSlot], lightDraws, flags, blocks, entryCount, RGTexture{},
-                                   m_localShadowViewUniforms[frameIndex][entry.FirstView].get(), cullViewBuffer);
+                                   &m_localShadowViewUniforms[frameIndex][entry.FirstView], cullViewBuffer);
         }
         for (uint32_t view = 0; view < shadows.viewCount; ++view)
         {
             if (!m_localShadowViewUniforms[frameIndex][view])
             {
-                m_localShadowViewUniforms[frameIndex][view] = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI::BufferUsage::Uniform });
-                m_localShadowViewUniformsMapped[frameIndex][view] = m_localShadowViewUniforms[frameIndex][view]->map(0, sizeof(shaderio::UniformBufferObject));
+                m_localShadowViewUniforms[frameIndex][view] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI_BUFFER_USAGE_UNIFORM });
+                m_localShadowViewUniformsMapped[frameIndex][view] = m_localShadowViewUniforms[frameIndex][view].map(0, sizeof(shaderio::UniformBufferObject));
             }
         }
 
@@ -754,15 +754,15 @@ namespace Nox
         atlasDesc.Size = RGSize::Absolute;
         atlasDesc.Width = atlasSize;
         atlasDesc.Height = atlasSize;
-        atlasDesc.Format = NRI::ImageFormat::None; // the device's depth format
-        atlasDesc.Usage = NRI::TextureUsage::DepthStencilAttachment;
+        atlasDesc.Format = NRI_FORMAT_NONE; // the device's depth format
+        atlasDesc.Usage = NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
         resources.LocalShadowAtlas = m_renderGraph.CreateTexture("Local Shadow Atlas", atlasDesc);
         const uint32_t shadowedLights = m_localShadowLightCount;
         const float slopeBias = m_shadowSlopeBias;
         m_renderGraph.AddPass("Local Light Shadows", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
-                builder.DepthTarget(resources.LocalShadowAtlas, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 }); // reverse Z
+                builder.DepthTarget(resources.LocalShadowAtlas, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0 }); // reverse Z
                 builder.SetRenderArea({ atlasSize, atlasSize });
                 ReadGpuScene(builder, resources);
                 ReadIfValid(builder, resources.SkinnedVertices);
@@ -771,9 +771,9 @@ namespace Nox
             },
             [this, draws, shadowedLights, atlasSize, slopeBias](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
+                nri::CommandBuffer& cmd = context.Cmd();
                 cmd.setDepthTestEnable(true);
-                cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                cmd.setDepthCompareOp(NRI_COMPARE_GREATER_OR_EQUAL);
                 cmd.setDepthClampEnable(true); // casters nearer than the near plane still cast (depth 1)
                 cmd.setDepthBiasEnable(slopeBias > 0.0f);
                 cmd.setDepthBias(0.0f, 0.0f, -slopeBias);
@@ -792,13 +792,13 @@ namespace Nox
                         // The graph's flipped viewport (RGViewport::FlippedY) on the tile.
                         cmd.setViewportWithCount({ rect.x, rect.y + rect.w, rect.z, -rect.w }, 0.0f, 1.0f);
                         cmd.setScissorRect(static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y), static_cast<uint32_t>(rect.z), static_cast<uint32_t>(rect.w));
-                        cursor.references.matrixReference = m_localShadowViewUniforms[frameIndex][view]->getDeviceAddress();
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, *m_shadowDepthPipeline, NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, *m_shadowDepthPipeline, NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
-                        drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *shadowDepthMaskPipeline(), NRI::CullMode::None, true, false);
+                        cursor.references.matrixReference = m_localShadowViewUniforms[frameIndex][view].getDeviceAddress();
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, m_shadowDepthPipeline, NRI_CULL_MODE_NONE, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, m_shadowDepthPipeline, NRI_CULL_MODE_NONE, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *shadowDepthMaskPipeline(), NRI_CULL_MODE_NONE, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::MaskDoubleSided, *shadowDepthMaskPipeline(), NRI_CULL_MODE_NONE, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::Unlit, *shadowDepthMaskPipeline(), NRI_CULL_MODE_NONE, true, false);
+                        drawMeshletBucket(cmd, cursor, RenderBucket::UnlitDoubleSided, *shadowDepthMaskPipeline(), NRI_CULL_MODE_NONE, true, false);
                     }
                 }
                 cmd.setDepthBiasEnable(false);
@@ -847,7 +847,7 @@ namespace Nox
             const LocalShadowLight& entry = m_localShadowLights[lightSlot];
             lightViews[entry.LightIndex] = entry.FirstView | (entry.ViewCount << 16);
         }
-        uniformData.localShadowsReference = m_localShadowBuffers[frameIndex]->getDeviceAddress();
-        uniformData.localShadowLightViewsReference = m_localShadowLightViewBuffers[frameIndex]->getDeviceAddress();
+        uniformData.localShadowsReference = m_localShadowBuffers[frameIndex].getDeviceAddress();
+        uniformData.localShadowLightViewsReference = m_localShadowLightViewBuffers[frameIndex].getDeviceAddress();
     }
 }

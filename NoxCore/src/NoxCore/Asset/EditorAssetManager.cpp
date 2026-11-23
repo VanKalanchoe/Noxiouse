@@ -45,57 +45,57 @@ namespace Nox
                type == AssetType::MaterialShader;
     }
 
-    static std::string_view ImageFormatToString(NRI::ImageFormat format)
+    static std::string_view ImageFormatToString(nri::ImageFormat format)
     {
         switch (format)
         {
-        case NRI::ImageFormat::RGBA8:              return "RGBA8";
-        case NRI::ImageFormat::SRGBA8:             return "SRGBA8";
-        case NRI::ImageFormat::RGB8:               return "RGB8";
-        case NRI::ImageFormat::SRGB8:              return "SRGB8";
-        case NRI::ImageFormat::R16G16_SFLOAT:      return "R16G16_SFLOAT";
-        case NRI::ImageFormat::R16G16B16A16_SFLOAT:return "R16G16B16A16_SFLOAT";
-        case NRI::ImageFormat::BC1_UNorm:          return "BC1_UNorm";
-        case NRI::ImageFormat::BC1_UNorm_SRGB:     return "BC1_UNorm_SRGB";
-        case NRI::ImageFormat::BC2_UNorm:          return "BC2_UNorm";
-        case NRI::ImageFormat::BC2_UNorm_SRGB:     return "BC2_UNorm_SRGB";
-        case NRI::ImageFormat::BC3_UNorm:          return "BC3_UNorm";
-        case NRI::ImageFormat::BC3_UNorm_SRGB:     return "BC3_UNorm_SRGB";
-        case NRI::ImageFormat::BC4_UNorm:          return "BC4_UNorm";
-        case NRI::ImageFormat::BC4_SNorm:          return "BC4_SNorm";
-        case NRI::ImageFormat::BC5_UNorm:          return "BC5_UNorm";
-        case NRI::ImageFormat::BC5_SNorm:          return "BC5_SNorm";
-        case NRI::ImageFormat::BC6H_UF16:          return "BC6H_UF16";
-        case NRI::ImageFormat::BC6H_SF16:          return "BC6H_SF16";
-        case NRI::ImageFormat::BC7_UNorm:          return "BC7_UNorm";
-        case NRI::ImageFormat::BC7_UNorm_SRGB:     return "BC7_UNorm_SRGB";
+        case NRI_FORMAT_RGBA8:              return "RGBA8";
+        case NRI_FORMAT_SRGBA8:             return "SRGBA8";
+        case NRI_FORMAT_RGB8:               return "RGB8";
+        case NRI_FORMAT_SRGB8:              return "SRGB8";
+        case NRI_FORMAT_R16G16_SFLOAT:      return "R16G16_SFLOAT";
+        case NRI_FORMAT_R16G16B16A16_SFLOAT:return "R16G16B16A16_SFLOAT";
+        case NRI_FORMAT_BC1_UNORM:          return "BC1_UNorm";
+        case NRI_FORMAT_BC1_UNORM_SRGB:     return "BC1_UNorm_SRGB";
+        case NRI_FORMAT_BC2_UNORM:          return "BC2_UNorm";
+        case NRI_FORMAT_BC2_UNORM_SRGB:     return "BC2_UNorm_SRGB";
+        case NRI_FORMAT_BC3_UNORM:          return "BC3_UNorm";
+        case NRI_FORMAT_BC3_UNORM_SRGB:     return "BC3_UNorm_SRGB";
+        case NRI_FORMAT_BC4_UNORM:          return "BC4_UNorm";
+        case NRI_FORMAT_BC4_SNORM:          return "BC4_SNorm";
+        case NRI_FORMAT_BC5_UNORM:          return "BC5_UNorm";
+        case NRI_FORMAT_BC5_SNORM:          return "BC5_SNorm";
+        case NRI_FORMAT_BC6H_UF16:          return "BC6H_UF16";
+        case NRI_FORMAT_BC6H_SF16:          return "BC6H_SF16";
+        case NRI_FORMAT_BC7_UNORM:          return "BC7_UNorm";
+        case NRI_FORMAT_BC7_UNORM_SRGB:     return "BC7_UNorm_SRGB";
         default:                                   return "RGBA8";
         }
     }
 
-    static NRI::ImageFormat ImageFormatFromString(std::string_view str)
+    static nri::ImageFormat ImageFormatFromString(std::string_view str)
     {
-        if (str == "SRGBA8")             return NRI::ImageFormat::SRGBA8;
-        if (str == "RGBA8")              return NRI::ImageFormat::RGBA8;
-        if (str == "SRGB8")              return NRI::ImageFormat::SRGB8;
-        if (str == "RGB8")               return NRI::ImageFormat::RGB8;
-        if (str == "R16G16_SFLOAT")      return NRI::ImageFormat::R16G16_SFLOAT;
-        if (str == "R16G16B16A16_SFLOAT")return NRI::ImageFormat::R16G16B16A16_SFLOAT;
-        if (str == "BC1_UNorm")          return NRI::ImageFormat::BC1_UNorm;
-        if (str == "BC1_UNorm_SRGB")     return NRI::ImageFormat::BC1_UNorm_SRGB;
-        if (str == "BC2_UNorm")          return NRI::ImageFormat::BC2_UNorm;
-        if (str == "BC2_UNorm_SRGB")     return NRI::ImageFormat::BC2_UNorm_SRGB;
-        if (str == "BC3_UNorm")          return NRI::ImageFormat::BC3_UNorm;
-        if (str == "BC3_UNorm_SRGB")     return NRI::ImageFormat::BC3_UNorm_SRGB;
-        if (str == "BC4_UNorm")          return NRI::ImageFormat::BC4_UNorm;
-        if (str == "BC4_SNorm")          return NRI::ImageFormat::BC4_SNorm;
-        if (str == "BC5_UNorm")          return NRI::ImageFormat::BC5_UNorm;
-        if (str == "BC5_SNorm")          return NRI::ImageFormat::BC5_SNorm;
-        if (str == "BC6H_UF16")          return NRI::ImageFormat::BC6H_UF16;
-        if (str == "BC6H_SF16")          return NRI::ImageFormat::BC6H_SF16;
-        if (str == "BC7_UNorm")          return NRI::ImageFormat::BC7_UNorm;
-        if (str == "BC7_UNorm_SRGB")     return NRI::ImageFormat::BC7_UNorm_SRGB;
-        return NRI::ImageFormat::RGBA8;
+        if (str == "SRGBA8")             return NRI_FORMAT_SRGBA8;
+        if (str == "RGBA8")              return NRI_FORMAT_RGBA8;
+        if (str == "SRGB8")              return NRI_FORMAT_SRGB8;
+        if (str == "RGB8")               return NRI_FORMAT_RGB8;
+        if (str == "R16G16_SFLOAT")      return NRI_FORMAT_R16G16_SFLOAT;
+        if (str == "R16G16B16A16_SFLOAT")return NRI_FORMAT_R16G16B16A16_SFLOAT;
+        if (str == "BC1_UNorm")          return NRI_FORMAT_BC1_UNORM;
+        if (str == "BC1_UNorm_SRGB")     return NRI_FORMAT_BC1_UNORM_SRGB;
+        if (str == "BC2_UNorm")          return NRI_FORMAT_BC2_UNORM;
+        if (str == "BC2_UNorm_SRGB")     return NRI_FORMAT_BC2_UNORM_SRGB;
+        if (str == "BC3_UNorm")          return NRI_FORMAT_BC3_UNORM;
+        if (str == "BC3_UNorm_SRGB")     return NRI_FORMAT_BC3_UNORM_SRGB;
+        if (str == "BC4_UNorm")          return NRI_FORMAT_BC4_UNORM;
+        if (str == "BC4_SNorm")          return NRI_FORMAT_BC4_SNORM;
+        if (str == "BC5_UNorm")          return NRI_FORMAT_BC5_UNORM;
+        if (str == "BC5_SNorm")          return NRI_FORMAT_BC5_SNORM;
+        if (str == "BC6H_UF16")          return NRI_FORMAT_BC6H_UF16;
+        if (str == "BC6H_SF16")          return NRI_FORMAT_BC6H_SF16;
+        if (str == "BC7_UNorm")          return NRI_FORMAT_BC7_UNORM;
+        if (str == "BC7_UNorm_SRGB")     return NRI_FORMAT_BC7_UNORM_SRGB;
+        return NRI_FORMAT_RGBA8;
     }
 
     static std::filesystem::path GeneratedAssetPath(
@@ -500,7 +500,7 @@ namespace Nox
         ReimportAsset(handle, true);
     }
 
-    void EditorAssetManager::SetSoundSettings(AssetHandle handle, const AudioSoundSettings& settings)
+    void EditorAssetManager::SetSoundSettings(AssetHandle handle, const NoxAudio::AudioSoundSettings& settings)
     {
         const auto found = m_AssetRegistry.find(handle);
         if (m_ReadOnly || found == m_AssetRegistry.end() || (found->second.Type != AssetType::AudioClip && found->second.Type != AssetType::AudioGraph) ||
@@ -510,7 +510,7 @@ namespace Nox
         SerializeAssetRegistry(); // (read when a sound starts: nothing to reload)
     }
 
-    void EditorAssetManager::SetAcousticMaterial(AssetHandle handle, AcousticMaterial material)
+    void EditorAssetManager::SetAcousticMaterial(AssetHandle handle, NoxAudio::AcousticMaterial material)
     {
         const auto found = m_AssetRegistry.find(handle);
         if (m_ReadOnly || found == m_AssetRegistry.end() || found->second.Type != AssetType::Material || found->second.AudioSettings.Acoustic == material)
@@ -726,8 +726,8 @@ namespace Nox
             if (levelGroup)
                 ++levelGroup->Remaining;
             PendingSplitImport pending;
-            pending.Job = JobSystem::Get().Async("Cook Split Meshes", JobPriority::Background,
-                [assetDirectory = Project::GetActiveAssetDirectory(), materialBase, directory, skinnedMeshes, total, done, level, placeInLevel](const CancellationToken&)
+            pending.Job = NoxTasks::JobSystem::Get().Async("Cook Split Meshes", NoxTasks::JobPriority::Background,
+                [assetDirectory = Project::GetActiveAssetDirectory(), materialBase, directory, skinnedMeshes, total, done, level, placeInLevel](const NoxTasks::CancellationToken&)
                 {
                     return MeshImporter::CookSplitMeshes(assetDirectory, materialBase, directory, skinnedMeshes, total.get(), done.get(),
                                                          placeInLevel ? level.get() : nullptr);
@@ -834,7 +834,7 @@ namespace Nox
             if (registered != 0)
             {
                 AssetMetadata& metadata = m_AssetRegistry.at(registered);
-                const NRI::ImageFormat expectedFormat = sRGB ? NRI::ImageFormat::SRGBA8 : NRI::ImageFormat::RGBA8;
+                const nri::ImageFormat expectedFormat = sRGB ? NRI_FORMAT_SRGBA8 : NRI_FORMAT_RGBA8;
                 // (Read-only: the cooked texture is taken as it is; correcting it means cooking again.) A normal map registered
                 // before compression settings existed becomes BC5 here, once; a compression chosen by hand otherwise stays.
                 const bool compressionChanges = compression == TextureCompression::Normalmap &&
@@ -870,7 +870,7 @@ namespace Nox
 
             // Registered only: it is cooked and loaded in the background when a material first requests it.
             TextureSpecification spec;
-            spec.format = sRGB ? NRI::ImageFormat::SRGBA8 : NRI::ImageFormat::RGBA8;
+            spec.format = sRGB ? NRI_FORMAT_SRGBA8 : NRI_FORMAT_RGBA8;
             spec.compression = compression;
             const AssetHandle newHandle = RegisterAsset(TextureMetadata(relativePath, spec, {}));
             registryChanged = true;
@@ -2228,27 +2228,27 @@ namespace Nox
 
         if (metadata.Type == AssetType::Material && !metadata.PhysicalSurface.empty())
             out << YAML::Key << "PhysicalSurface" << YAML::Value << metadata.PhysicalSurface;
-        if (metadata.Type == AssetType::Material && metadata.AudioSettings.Acoustic != AcousticMaterial::Auto)
+        if (metadata.Type == AssetType::Material && metadata.AudioSettings.Acoustic != NoxAudio::AcousticMaterial::Auto)
         {
             out << YAML::Key << "AudioSettings" << YAML::Value << YAML::BeginMap;
-            out << YAML::Key << "AcousticMaterial" << YAML::Value << std::string(AcousticMaterialToString(metadata.AudioSettings.Acoustic));
+            out << YAML::Key << "AcousticMaterial" << YAML::Value << std::string(NoxAudio::AcousticMaterialToString(metadata.AudioSettings.Acoustic));
             out << YAML::EndMap;
         }
 
         const bool soundAsset = metadata.Type == AssetType::AudioClip || metadata.Type == AssetType::AudioGraph;
-        const bool customLoad = metadata.Type == AssetType::AudioClip && metadata.AudioSettings.LoadType != AudioLoadType::Auto;
-        const bool customSound = soundAsset && !(metadata.AudioSettings.Sound == AudioSoundSettings{});
+        const bool customLoad = metadata.Type == AssetType::AudioClip && metadata.AudioSettings.LoadType != NoxAudio::AudioLoadType::Auto;
+        const bool customSound = soundAsset && !(metadata.AudioSettings.Sound == NoxAudio::AudioSoundSettings{});
         if (customLoad || customSound)
         {
             out << YAML::Key << "AudioSettings" << YAML::Value << YAML::BeginMap;
             if (customLoad)
-                out << YAML::Key << "LoadType" << YAML::Value << std::string(AudioLoadTypeToString(metadata.AudioSettings.LoadType));
+                out << YAML::Key << "LoadType" << YAML::Value << std::string(NoxAudio::AudioLoadTypeToString(metadata.AudioSettings.LoadType));
             if (customSound)
             {
-                const AudioSoundSettings& sound = metadata.AudioSettings.Sound;
+                const NoxAudio::AudioSoundSettings& sound = metadata.AudioSettings.Sound;
                 out << YAML::Key << "Priority" << YAML::Value << sound.Priority;
                 out << YAML::Key << "MaxCount" << YAML::Value << sound.MaxCount;
-                out << YAML::Key << "ConcurrencyRule" << YAML::Value << std::string(AudioConcurrencyRuleToString(sound.Rule));
+                out << YAML::Key << "ConcurrencyRule" << YAML::Value << std::string(NoxAudio::AudioConcurrencyRuleToString(sound.Rule));
                 out << YAML::Key << "RetriggerTime" << YAML::Value << sound.RetriggerTime;
             }
             out << YAML::EndMap;
@@ -2324,8 +2324,8 @@ namespace Nox
         // A copy of the entries here (a few ms for tens of thousands); the YAML and the file on a worker. Written on the main thread,
         // a large registry stalled the frame: the 6c test world's 20k entries took ~400 ms, every second cells registered assets.
         std::vector<std::pair<AssetHandle, AssetMetadata>> entries(m_AssetRegistry.begin(), m_AssetRegistry.end());
-        m_RegistryWrite = JobSystem::Get().Async("Write Asset Registry", JobPriority::Background,
-                                                 [entries = std::move(entries), path = Project::GetActiveAssetRegistryPath()](const CancellationToken&)
+        m_RegistryWrite = NoxTasks::JobSystem::Get().Async("Write Asset Registry", NoxTasks::JobPriority::Background,
+                                                 [entries = std::move(entries), path = Project::GetActiveAssetRegistryPath()](const NoxTasks::CancellationToken&)
         {
             YAML::Emitter out;
             out << YAML::BeginMap;
@@ -2520,14 +2520,14 @@ namespace Nox
             if (const YAML::Node audioNode = node["AudioSettings"])
             {
                 if (audioNode["LoadType"])
-                    metadata.AudioSettings.LoadType = AudioLoadTypeFromString(audioNode["LoadType"].as<std::string>());
+                    metadata.AudioSettings.LoadType = NoxAudio::AudioLoadTypeFromString(audioNode["LoadType"].as<std::string>());
                 if (audioNode["AcousticMaterial"])
-                    metadata.AudioSettings.Acoustic = AcousticMaterialFromString(audioNode["AcousticMaterial"].as<std::string>());
-                AudioSoundSettings& sound = metadata.AudioSettings.Sound;
+                    metadata.AudioSettings.Acoustic = NoxAudio::AcousticMaterialFromString(audioNode["AcousticMaterial"].as<std::string>());
+                NoxAudio::AudioSoundSettings& sound = metadata.AudioSettings.Sound;
                 sound.Priority = audioNode["Priority"].as<float>(sound.Priority);
                 sound.MaxCount = audioNode["MaxCount"].as<uint32_t>(sound.MaxCount);
                 if (audioNode["ConcurrencyRule"])
-                    sound.Rule = AudioConcurrencyRuleFromString(audioNode["ConcurrencyRule"].as<std::string>());
+                    sound.Rule = NoxAudio::AudioConcurrencyRuleFromString(audioNode["ConcurrencyRule"].as<std::string>());
                 sound.RetriggerTime = audioNode["RetriggerTime"].as<float>(sound.RetriggerTime);
             }
 

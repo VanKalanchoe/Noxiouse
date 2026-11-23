@@ -342,8 +342,8 @@ namespace Nox
         else if (!m_FolderTreeJob.IsValid() && ImGui::GetTime() - m_FolderTreeTime > 2.0)
         {
             m_FolderTreeTime = ImGui::GetTime();
-            m_FolderTreeJob = JobSystem::Get().AsyncIO("Scan Asset Folders", JobPriority::Normal,
-                [base = m_BaseDirectory](const CancellationToken&) { return ScanFolderTree(base); });
+            m_FolderTreeJob = NoxTasks::JobSystem::Get().AsyncIO("Scan Asset Folders", NoxTasks::JobPriority::Normal,
+                [base = m_BaseDirectory](const NoxTasks::CancellationToken&) { return ScanFolderTree(base); });
         }
         UpdateVisibleEntries();
 
@@ -778,15 +778,15 @@ namespace Nox
                                 ImGui::SetTooltip("%s\nAudio Graph: the play button hears it, a double-click edits it", browserEntry.Name.c_str());
                             else if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
                             {
-                                const AudioLoadType loadType = metadata.AudioSettings.LoadType;
+                                const NoxAudio::AudioLoadType loadType = metadata.AudioSettings.LoadType;
                                 if (const AudioClip* clip = AssetManager::FindLoadedAsset<AudioClip>(handle))
                                     ImGui::SetTooltip("%s\n%.2f s, %s, %u Hz\nLoad Type: %s%s", browserEntry.Name.c_str(), clip->GetDuration(),
                                                       clip->GetChannels() == 2 ? "stereo" : "mono", clip->GetSampleRate(),
-                                                      std::string(AudioLoadTypeToString(clip->GetLoadType())).c_str(),
-                                                      loadType == AudioLoadType::Auto ? " (Auto)" : "");
+                                                      std::string(NoxAudio::AudioLoadTypeToString(clip->GetLoadType())).c_str(),
+                                                      loadType == NoxAudio::AudioLoadType::Auto ? " (Auto)" : "");
                                 else
                                     ImGui::SetTooltip("%s\nLoad Type: %s\n(play it once to see its length and format)", browserEntry.Name.c_str(),
-                                                      std::string(AudioLoadTypeToString(loadType)).c_str());
+                                                      std::string(NoxAudio::AudioLoadTypeToString(loadType)).c_str());
                             }
                         }
 
@@ -1430,8 +1430,8 @@ namespace Nox
             m_PreviewPending = false;
             AudioPlayDesc desc;
             desc.Graph = program;
-            desc.Bus = kAudioBusMaster;
-            desc.Group = AudioVoiceGroup::Editor;
+            desc.Bus = NoxAudio::kAudioBusMaster;
+            desc.Group = NoxAudio::AudioVoiceGroup::Editor;
             m_PreviewVoice = AudioEngine::Play(desc);
             return;
         }
@@ -1446,8 +1446,8 @@ namespace Nox
         m_PreviewPending = false;
         AudioPlayDesc desc;
         desc.Clip = AssetManager::GetAsset<AudioClip>(m_PreviewClip);
-        desc.Bus = kAudioBusMaster;
-        desc.Group = AudioVoiceGroup::Editor;
+        desc.Bus = NoxAudio::kAudioBusMaster;
+        desc.Group = NoxAudio::AudioVoiceGroup::Editor;
         m_PreviewVoice = AudioEngine::Play(desc);
     }
 
@@ -1479,8 +1479,8 @@ namespace Nox
             // Unity's Load Type: how the selected sounds are held while they play.
             if (ImGui::BeginMenu("Load Type"))
             {
-                constexpr AudioLoadType kTypes[] = { AudioLoadType::Auto, AudioLoadType::DecompressOnLoad, AudioLoadType::CompressedInMemory,
-                                                     AudioLoadType::Streaming };
+                constexpr NoxAudio::AudioLoadType kTypes[] = { NoxAudio::AudioLoadType::Auto, NoxAudio::AudioLoadType::DecompressOnLoad, NoxAudio::AudioLoadType::CompressedInMemory,
+                                                     NoxAudio::AudioLoadType::Streaming };
                 constexpr const char* kNames[] = { "Auto (decompress up to 5 s, stream longer)", "Decompress On Load", "Compressed In Memory",
                                                    "Streaming" };
                 for (size_t i = 0; i < std::size(kTypes); ++i)
@@ -1711,7 +1711,7 @@ namespace Nox
             else
                 ImGui::Text("%s", assets->GetMetadata(m_SoundSettingsAsset).FilePath.filename().generic_string().c_str());
             ImGui::Separator();
-            AudioSoundSettings& sound = m_SoundSettings;
+            NoxAudio::AudioSoundSettings& sound = m_SoundSettings;
             ImGui::SetNextItemWidth(200.0f);
             ImGui::DragFloat("Priority", &sound.Priority, 0.05f, 0.0f, 100.0f, "%.2f");
             sound.Priority = std::max(sound.Priority, 0.0f);
@@ -1723,8 +1723,8 @@ namespace Nox
                 sound.MaxCount = static_cast<uint32_t>(std::max(maxCount, 0));
             ImGui::SetItemTooltip("How many of this sound may play at once (Unreal's Sound Concurrency). 0: no limit.");
             ImGui::BeginDisabled(sound.MaxCount == 0);
-            constexpr AudioConcurrencyRule kRules[] = { AudioConcurrencyRule::StopFarthest, AudioConcurrencyRule::StopOldest, AudioConcurrencyRule::StopQuietest,
-                                                        AudioConcurrencyRule::PreventNew };
+            constexpr NoxAudio::AudioConcurrencyRule kRules[] = { NoxAudio::AudioConcurrencyRule::StopFarthest, NoxAudio::AudioConcurrencyRule::StopOldest, NoxAudio::AudioConcurrencyRule::StopQuietest,
+                                                        NoxAudio::AudioConcurrencyRule::PreventNew };
             constexpr const char* kRuleNames[] = { "Stop Farthest", "Stop Oldest", "Stop Quietest", "Prevent New" };
             int rule = 0;
             for (int i = 0; i < 4; ++i)

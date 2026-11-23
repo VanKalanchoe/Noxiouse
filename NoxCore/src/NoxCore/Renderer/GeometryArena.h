@@ -3,7 +3,7 @@
 #include <optional>
 #include <vector>
 
-#include <NRI/NRI.h>
+#include <NRIHPP/NRIExtensions.hpp>
 #include <offsetAllocator.hpp>
 
 namespace Nox
@@ -21,7 +21,7 @@ namespace Nox
 
     // One geometry stream (§5.8.2): a single device buffer sub-allocated by element count.
     //
-    // With sparse buffers (decision D5, NRI::Device::supportsSparseBuffers) the buffer reserves the stream's whole element space
+    // With sparse buffers (decision D5, nri::Device::supportsSparseBuffers) the buffer reserves the stream's whole element space
     // as address space up front, and memory is bound to it page by page: a page is committed when the first live range touches it
     // and released when the last one is freed (ranges are freed once frames are done with them). The buffer never moves, nothing
     // is copied, and the stream holds the pages its live ranges touch.
@@ -33,36 +33,37 @@ namespace Nox
     class GeometryArena
     {
     public:
-        void Init(NRI::Device& device, uint32_t elementSize, uint32_t initialCapacity, uint32_t maxCapacity,
-                  NRI::BufferUsage usage = NRI::BufferUsage::StorageStatic);
+        void Init(nri::Device& device, uint32_t elementSize, uint32_t initialCapacity, uint32_t maxCapacity,
+                  nri::BufferUsage usage = NRI_BUFFER_USAGE_STORAGE_STATIC);
 
         // Invalid when the stream is out of space. Growing leaves the buffer it grew from in outGrownFrom: the caller
         // copies its contents into the new buffer and releases it once the frames in flight are done with it.
-        GeometryRange Allocate(uint32_t count, std::unique_ptr<NRI::Buffer>& outGrownFrom);
+        GeometryRange Allocate(uint32_t count, nri::Buffer& outGrownFrom);
         void Free(const GeometryRange& range);
         // A stream that mirrors another's element ranges (the skin stream mirrors the vertex stream for skinned meshes, §5.8.2): the
         // range is the other stream's, this one only gets memory for it (sparse pages, else growth like Allocate's). False when it
         // could not.
-        bool Reserve(uint32_t offset, uint32_t count, std::unique_ptr<NRI::Buffer>& outGrownFrom);
+        bool Reserve(uint32_t offset, uint32_t count, nri::Buffer& outGrownFrom);
         void Unreserve(uint32_t offset, uint32_t count);
 
-        NRI::Buffer& GetBuffer() const { return *m_buffer; }
-        uint64_t GetDeviceAddress() const { return m_buffer ? m_buffer->getDeviceAddress() : 0; }
+        nri::Buffer& GetBuffer() { return m_buffer; }
+        const nri::Buffer& GetBuffer() const { return m_buffer; }
+        uint64_t GetDeviceAddress() const { return m_buffer ? m_buffer.getDeviceAddress() : 0; }
         // What the stream holds in device memory: its committed pages (sparse), else its buffer.
         uint64_t GetCapacityBytes() const { return IsSparse() ? m_committedPages * m_pageSize : uint64_t(m_capacity) * m_elementSize; }
         uint64_t GetUsedBytes() const { return uint64_t(m_usedElements) * m_elementSize; }
         bool IsSparse() const { return m_pageSize != 0; }
 
     private:
-        std::unique_ptr<NRI::Buffer> createBuffer(uint32_t capacity, bool sparse) const;
+        nri::Buffer createBuffer(uint32_t capacity, bool sparse) const;
         // Sparse: the pages [offset, offset + count) touches gain (or lose) a range; pages whose count leaves 0 are committed (those that
         // reach 0 released). False when the memory could not be committed (nothing changed then).
         bool changePageUse(uint32_t offset, uint32_t count, bool add);
 
-        NRI::Device* m_device = nullptr;
+        nri::Device* m_device = nullptr;
         std::optional<OffsetAllocator::Allocator> m_allocator;
-        std::unique_ptr<NRI::Buffer> m_buffer;
-        NRI::BufferUsage m_usage = NRI::BufferUsage::StorageStatic;
+        nri::Buffer m_buffer;
+        nri::BufferUsage m_usage = NRI_BUFFER_USAGE_STORAGE_STATIC;
         uint32_t m_elementSize = 0;
         uint32_t m_capacity = 0;     // elements the buffer covers
         uint32_t m_maxCapacity = 0;  // elements the allocator hands out from
@@ -71,6 +72,6 @@ namespace Nox
         uint64_t m_pageSize = 0;
         std::vector<uint32_t> m_pageUse;
         uint64_t m_committedPages = 0;
-        std::vector<NRI::SparsePageRange> m_pageScratch;
+        std::vector<nri::SparsePageRange> m_pageScratch;
     };
 }

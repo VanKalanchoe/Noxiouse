@@ -10,7 +10,7 @@ namespace Nox
 {
     void Renderer::addDLSSPass()
     {
-        if (!m_dlssEnabled || m_dlssMode == NRI::UpscaleMode::Off || !m_device->isDLSSSupported())
+        if (!m_dlssEnabled || m_dlssMode == NRI_UPSCALER_MODE_OFF || !isDLSSSupported() || !m_dlssSR)
             return;
 
         const FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
@@ -21,7 +21,7 @@ namespace Nox
 
         // Ray Reconstruction divides the image by the albedo it was shaded with (diffuse and pre-integrated specular).
         // The path tracer writes these from its primary hit; raster/deferred paths derive them from the G-buffer.
-        const bool rayReconstruction = m_dlssRayReconstructionEnabled && m_device->isDLSSRayReconstructionSupported() && m_rrGuidesPipeline;
+        const bool rayReconstruction = m_dlssRayReconstructionEnabled && isDLSSRayReconstructionSupported() && m_dlssRR && m_rrGuidesPipeline;
         // The plain path tracer writes guides from its actual primary surface and the first specular/transmission segment.
         // Raster/deferred rendering still prepares guides from the G-buffer here.
         const bool pathTracerGuides = rayReconstruction && frame.pathTracerActive && !frame.restirPTActive;
@@ -49,7 +49,7 @@ namespace Nox
                 [this, res = &resources, reflectionDistance](RGPassContext& context)
                 {
                     shaderio::PushConstantRRGuides push{};
-                    push.matrixReference = m_uniformBuffers[frameIndex]->getDeviceAddress();
+                    push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
                     push.depthTextureIndex = context.Slot(res->Depth);
                     push.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);
                     push.gbufferNormalIndex = context.Slot(res->GBufferNormal);
@@ -62,8 +62,8 @@ namespace Nox
                     push.width = m_frame.renderExtent.width;
                     push.height = m_frame.renderExtent.height;
 
-                    NRI::CommandBuffer& cmd = context.Cmd();
-                    cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_rrGuidesPipeline);
+                    nri::CommandBuffer& cmd = context.Cmd();
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_rrGuidesPipeline);
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
                 });
@@ -92,7 +92,7 @@ namespace Nox
             m_dlssCameraWarned = bad != nullptr;
         }
 
-        m_renderGraph.AddPass("DLSS", RGPassFlags::None,
+        m_renderGraph.AddPass("DLSS", RGPassFlags::OwnCommandBuffer,
             [&](RGBuilder& builder)
             {
                 ReadLitScene(builder, resources, frame.restirPTActive, frame.pathTracerActive, frame.ptNRDAdded, frame.pathTracerWriteIndex);
@@ -122,7 +122,7 @@ namespace Nox
             },
             [this, res = &resources, rayReconstruction, pathTracerGuides](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
+                nri::CommandBuffer& cmd = context.Cmd();
                 const FrameGraphState& frame = m_frame;
 
                 // Path tracing feeds its noisy 1-SPP result - unless NRD denoises it this frame (mutually exclusive with
@@ -132,57 +132,53 @@ namespace Nox
                     input = frame.ptNRDAdded ? res->PathTracerDenoised : res->ReSTIRPTOutput;
                 else if (frame.pathTracerActive)
                     input = frame.ptNRDAdded ? res->PathTracerDenoised : res->PathTracerAccum[frame.pathTracerWriteIndex];
-                NRI::Texture2D& inputColor = context.Texture(input);
-                NRI::Texture2D& outputColor = context.Texture(res->DLSSOutput);
+                const NriTexture inputColor = context.Texture(input);
+                const NriTexture outputColor = context.Texture(res->DLSSOutput);
 
-                NRI::DLSSParams dlssParams{};
-                dlssParams.inputColor = &inputColor;
-                dlssParams.outputColor = &outputColor;
-                dlssParams.depth = &context.Texture(pathTracerGuides ? res->RRPathDepth : res->Depth);
-                dlssParams.motionVectors = &context.Texture(pathTracerGuides ? res->RRPathMotionVectors : res->GBufferVelocity);
+                nri::UpscalerEvaluateDesc dlssParams{};
+                dlssParams.inputColor = inputColor;
+                dlssParams.outputColor = outputColor;
+                dlssParams.depth = context.Texture(pathTracerGuides ? res->RRPathDepth : res->Depth);
+                dlssParams.motionVectors = context.Texture(pathTracerGuides ? res->RRPathMotionVectors : res->GBufferVelocity);
                 if (rayReconstruction)
                 {
-                    dlssParams.albedo = &context.Texture(res->RRDiffuseAlbedo);
-                    dlssParams.specularAlbedo = &context.Texture(res->RRSpecularAlbedo);
-                    dlssParams.specularMotionVectors = &context.Texture(res->RRSpecularMotionVectors);
+                    dlssParams.albedo = context.Texture(res->RRDiffuseAlbedo);
+                    dlssParams.specularAlbedo = context.Texture(res->RRSpecularAlbedo);
+                    dlssParams.specularMotionVectors = context.Texture(res->RRSpecularMotionVectors);
                     if (frame.rrColorBeforeTransparency)
-                        dlssParams.colorBeforeTransparency = &context.Texture(res->RRColorBeforeTransparency);
+                        dlssParams.colorBeforeTransparency = context.Texture(res->RRColorBeforeTransparency);
                     if (pathTracerGuides)
                     {
-                        dlssParams.normal = &context.Texture(res->RRNormalRoughness);
+                        dlssParams.normal = context.Texture(res->RRNormalRoughness);
                         dlssParams.normalRoughnessPacked = true;
                     }
                     else
                     {
-                        dlssParams.normal = &context.Texture(res->GBufferNormal);
-                        dlssParams.roughness = &context.Texture(res->GBufferMaterial);
+                        dlssParams.normal = context.Texture(res->GBufferNormal);
+                        dlssParams.roughness = context.Texture(res->GBufferMaterial);
                     }
                 }
-                dlssParams.rayReconstruction = rayReconstruction;
-                dlssParams.commandBuffer = &cmd;
 
-                dlssParams.nonJitteredProj = uniformData.nonJitteredProj;
-                dlssParams.view = uniformData.view;
-                dlssParams.prevNonJitteredProj = uniformData.prevProj;
-                dlssParams.prevView = uniformData.prevView;
+                std::memcpy(dlssParams.nonJitteredProj, glm::value_ptr(uniformData.nonJitteredProj), sizeof(float) * 16);
+                std::memcpy(dlssParams.view, glm::value_ptr(uniformData.view), sizeof(float) * 16);
+                std::memcpy(dlssParams.prevNonJitteredProj, glm::value_ptr(uniformData.prevProj), sizeof(float) * 16);
+                std::memcpy(dlssParams.prevView, glm::value_ptr(uniformData.prevView), sizeof(float) * 16);
 
-                dlssParams.jitterOffset = m_currentJitter;
-                dlssParams.cameraPos = m_cameraPosition;
-                dlssParams.cameraUp = m_cameraUp;
-                dlssParams.cameraRight = m_cameraRight;
-                dlssParams.cameraFwd = m_cameraForward;
+                dlssParams.jitterOffset[0] = m_currentJitter.x;
+                dlssParams.jitterOffset[1] = m_currentJitter.y;
+                dlssParams.cameraPos[0] = m_cameraPosition.x; dlssParams.cameraPos[1] = m_cameraPosition.y; dlssParams.cameraPos[2] = m_cameraPosition.z;
+                dlssParams.cameraUp[0] = m_cameraUp.x; dlssParams.cameraUp[1] = m_cameraUp.y; dlssParams.cameraUp[2] = m_cameraUp.z;
+                dlssParams.cameraRight[0] = m_cameraRight.x; dlssParams.cameraRight[1] = m_cameraRight.y; dlssParams.cameraRight[2] = m_cameraRight.z;
+                dlssParams.cameraFwd[0] = m_cameraForward.x; dlssParams.cameraFwd[1] = m_cameraForward.y; dlssParams.cameraFwd[2] = m_cameraForward.z;
                 dlssParams.cameraNear = m_cameraNear;
                 dlssParams.cameraFovRad = glm::radians(m_cameraFOV);
                 dlssParams.mode = m_dlssMode;
                 dlssParams.reset = frame.resetDLSS;
 
-                // Post Process always reads the DLSS output; when Streamline fails (logged), it holds the unscaled input
-                // instead of depending on a result another recording thread would have to publish.
-                if (!m_device->evaluateDLSS(dlssParams))
-                    inputColor.blitTo(cmd, outputColor);
-                // Streamline / NGX bound descriptor sets of their own (classic descriptors), which unbinds the engine's heaps for the
-                // passes recorded after this one in the same command buffer (Stable Entity/Depth, post, overlays).
-                cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+                const nri::Upscaler& upscaler = rayReconstruction ? m_dlssRR : m_dlssSR;
+                if (!upscaler || !upscaler.evaluate(cmd, dlssParams))
+                    nriTextureBlitTo(inputColor, cmd.handle(), outputColor);
+                cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
             });
     }
 
@@ -200,8 +196,8 @@ namespace Nox
 
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         RGTextureDesc desc;
-        desc.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
-        desc.Usage = NRI::TextureUsage::Storage;
+        desc.Format = NRI_FORMAT_R16G16B16A16_SFLOAT;
+        desc.Usage = NRI_TEXTURE_USAGE_STORAGE;
         const RGTextureHistory history = m_renderGraph.GetHistoryTexture("TAA History", desc, 2);
         resources.TAAHistory[0] = history.Textures[0];
         resources.TAAHistory[1] = history.Textures[1];
@@ -235,8 +231,8 @@ namespace Nox
                 push.reset = reset ? 1u : 0u;
                 push.blend = 0.1f;
 
-                NRI::CommandBuffer& cmd = context.Cmd();
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_taaPipeline);
+                nri::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_taaPipeline);
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
             });
@@ -267,11 +263,11 @@ namespace Nox
             },
             [this, res = &resources](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
+                nri::CommandBuffer& cmd = context.Cmd();
                 // DLSS / NGX may have bound its own descriptors.
-                cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
-                context.Texture(res->Entity).blitTo(cmd, context.Texture(res->EntityHi));
-                context.Texture(res->Depth).blitTo(cmd, context.Texture(res->DepthHi));
+                cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
+                nriTextureBlitTo(context.Texture(res->Entity), cmd.handle(), context.Texture(res->EntityHi));
+                nriTextureBlitTo(context.Texture(res->Depth), cmd.handle(), context.Texture(res->DepthHi));
             });
     }
 
@@ -285,8 +281,8 @@ namespace Nox
         m_renderGraph.AddPass("Stable Entity/Depth", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
-                builder.ColorTarget(resources.EntityHi, NRI::LoadOP::clear, NRI::StoreOP::store, { -1.0f, 0.0f, 0.0f, 0.0f }); // R32SINT
-                builder.DepthTarget(resources.DepthHi, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0 });                    // reverse Z
+                builder.ColorTarget(resources.EntityHi, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { -1.0f, 0.0f, 0.0f, 0.0f }); // R32SINT
+                builder.DepthTarget(resources.DepthHi, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0 });                    // reverse Z
                 builder.SetRenderArea(m_frame.outputExtent);
                 ReadGpuScene(builder, resources);
                 ReadIfValid(builder, resources.SkinnedVertices);
@@ -295,29 +291,29 @@ namespace Nox
             },
             [this, res = &resources](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
+                nri::CommandBuffer& cmd = context.Cmd();
                 // Right after DLSS (as the blit it replaces did): NGX may have bound its own descriptors.
-                cmd.bindDescriptorHeaps(m_resourceHeap.get(), m_samplerHeap.get());
+                cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
                 cmd.setDepthTestEnable(true);
-                cmd.setDepthCompareOp(NRI::CompareOp::GreaterOrEqual);
+                cmd.setDepthCompareOp(NRI_COMPARE_GREATER_OR_EQUAL);
                 cmd.setColorBlendEnable(0, false);
-                cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                cmd.setColorWriteMask(0, nri::ColorComponent::All);
 
-                NRI::Pipeline& pipeline = *stableEntityDepthPipeline(); // (with the material graphs' Opacity Mask while a material has a graph)
+                const nri::Pipeline& pipeline = *stableEntityDepthPipeline(); // (with the material graphs' Opacity Mask while a material has a graph)
                 struct BucketDraw
                 {
                     RenderBucket Bucket;
-                    NRI::CullMode Cull;
+                    nri::CullMode Cull;
                 };
                 constexpr BucketDraw solid[] = {
-                    { RenderBucket::Opaque, NRI::CullMode::Back }, { RenderBucket::OpaqueDoubleSided, NRI::CullMode::None },
-                    { RenderBucket::Mask, NRI::CullMode::Back }, { RenderBucket::MaskDoubleSided, NRI::CullMode::None },
-                    { RenderBucket::Unlit, NRI::CullMode::Back }, { RenderBucket::UnlitDoubleSided, NRI::CullMode::None } };
+                    { RenderBucket::Opaque, NRI_CULL_MODE_BACK }, { RenderBucket::OpaqueDoubleSided, NRI_CULL_MODE_NONE },
+                    { RenderBucket::Mask, NRI_CULL_MODE_BACK }, { RenderBucket::MaskDoubleSided, NRI_CULL_MODE_NONE },
+                    { RenderBucket::Unlit, NRI_CULL_MODE_BACK }, { RenderBucket::UnlitDoubleSided, NRI_CULL_MODE_NONE } };
                 constexpr BucketDraw transparent[] = {
-                    { RenderBucket::Transparent, NRI::CullMode::Back }, { RenderBucket::TransparentDoubleSided, NRI::CullMode::None },
-                    { RenderBucket::TransparentUnlit, NRI::CullMode::Back }, { RenderBucket::TransparentUnlitDoubleSided, NRI::CullMode::None } };
+                    { RenderBucket::Transparent, NRI_CULL_MODE_BACK }, { RenderBucket::TransparentDoubleSided, NRI_CULL_MODE_NONE },
+                    { RenderBucket::TransparentUnlit, NRI_CULL_MODE_BACK }, { RenderBucket::TransparentUnlitDoubleSided, NRI_CULL_MODE_NONE } };
 
-                NRI::Pipeline* bound = nullptr;
+                const nri::Pipeline* bound = nullptr;
                 auto drawBuckets = [&](std::span<const BucketDraw> buckets, bool depthWrite)
                 {
                     // Both culling phases: the instances found visible at once, then the ones phase 2 found behind the old depth.

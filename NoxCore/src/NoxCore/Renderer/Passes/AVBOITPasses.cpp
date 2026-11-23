@@ -19,35 +19,35 @@ namespace Nox
 {
     void Renderer::createAVBOITPipelines(bool forceCompile)
     {
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         // The prepasses draw at the volume's resolution into a placeholder target (nothing is written to it): their output is atomics.
-        desc.colorFormats = { NRI::ImageFormat::RGBA8 };
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Material_PBR_Mesh.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMainAVBOITOccupancy", .sourcePath = "assets/shaders/Material_TransparentLit_Mesh.slang" });
-        m_transparentLitAVBOITOccupancyPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.colorFormats = { NRI_FORMAT_RGBA8 };
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Material_PBR_Mesh.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMainAVBOITOccupancy", .sourcePath = "assets/shaders/Material_TransparentLit_Mesh.slang" });
+        m_transparentLitAVBOITOccupancyPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.back().entryPoint = "fragMainAVBOITSplat";
-        m_transparentLitAVBOITSplatPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
-        desc.shaders.back() = { .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMainAVBOITOccupancy", .sourcePath = "assets/shaders/Material_Unlit_Mesh.slang" };
-        m_unlitAVBOITOccupancyPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_transparentLitAVBOITSplatPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
+        desc.shaders.back() = { .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMainAVBOITOccupancy", .sourcePath = "assets/shaders/Material_Unlit_Mesh.slang" };
+        m_unlitAVBOITOccupancyPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.back().entryPoint = "fragMainAVBOITSplat";
-        m_unlitAVBOITSplatPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_unlitAVBOITSplatPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
 
         desc.shaders.clear();
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Particles.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMainAVBOITOccupancy", .sourcePath = "assets/shaders/Particles.slang" });
-        m_particleAVBOITOccupancyPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = "assets/shaders/Particles.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMainAVBOITOccupancy", .sourcePath = "assets/shaders/Particles.slang" });
+        m_particleAVBOITOccupancyPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
         desc.shaders.back().entryPoint = "fragMainAVBOITSplat";
-        m_particleAVBOITSplatPipeline = m_device->createPipeline(desc, *m_shaderCompiler);
+        m_particleAVBOITSplatPipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
 
-        NRI::PipelineDesc compute{};
-        compute.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc compute{};
+        compute.type = NRI_PIPELINE_COMPUTE;
         compute.forceCompile = forceCompile;
-        compute.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "lutMain", .sourcePath = "assets/shaders/AVBOITBuild.slang" });
-        m_avboitLutPipeline = m_device->createPipeline(compute, *m_shaderCompiler);
+        compute.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "lutMain", .sourcePath = "assets/shaders/AVBOITBuild.slang" });
+        m_avboitLutPipeline = m_device.createPipeline(compute, m_shaderCompiler.handle());
         compute.shaders.back().entryPoint = "integrateMain";
-        m_avboitIntegratePipeline = m_device->createPipeline(compute, *m_shaderCompiler);
+        m_avboitIntegratePipeline = m_device.createPipeline(compute, m_shaderCompiler.handle());
     }
 
     void Renderer::declareAVBOITPrepassInputs(RGBuilder& builder)
@@ -110,29 +110,29 @@ namespace Nox
         if (grid != m_avboitGrid || !m_avboitTransmittance)
         {
             if (m_avboitTransmittanceStorage != ~0u)
-                m_resourceHeap->unregisterTexture(m_avboitTransmittanceStorage);
+                m_resourceHeap.unregisterTexture(m_avboitTransmittanceStorage);
             m_avboitTransmittanceStorage = ~0u;
             if (m_avboitTransmittance)
                 deferAssetRelease(m_avboitTransmittance);
             // The buffers the last frames still use go once they are done with them (the GPU is waited for: a resize is rare).
-            m_device->waitIdle();
+            m_device.waitIdle();
             const uint64_t columns = static_cast<uint64_t>(grid.x) * grid.y;
-            m_avboitOccupancy = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(uint32_t) * (shaderio::AVBOIT_VIRTUAL_SLICES / 32), .usage = NRI::BufferUsage::Storage });
-            m_avboitDepthWarp = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(shaderio::AvboitDepthWarp), .usage = NRI::BufferUsage::Storage });
-            m_avboitExtinction = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(uint32_t) * columns * grid.z, .usage = NRI::BufferUsage::Storage });
-            m_avboitOverflow = m_device->createBuffer(NRI::BufferDesc{ .size = sizeof(uint32_t) * 3 * columns, .usage = NRI::BufferUsage::Storage });
-            m_avboitTransmittance = m_device->createTexture(NRI::TextureDesc{
+            m_avboitOccupancy = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * (shaderio::AVBOIT_VIRTUAL_SLICES / 32), .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_avboitDepthWarp = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::AvboitDepthWarp), .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_avboitExtinction = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * columns * grid.z, .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_avboitOverflow = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * 3 * columns, .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_avboitTransmittance = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc{
                 .width = grid.x,
                 .height = grid.y,
                 .arrayLayers = grid.z + 1,
                 .isCubeMap = false,
                 .mipLevels = 1,
                 .sampleCount = 1,
-                .usage = NRI::TextureUsage::Storage,
-                .format = NRI::ImageFormat::RGBA8
-            });
-            m_resourceHeap->registerTexture(*m_avboitTransmittance, NRI::TextureUsage::ShaderResource);
-            m_avboitTransmittanceStorage = m_resourceHeap->registerStorageTextureMip(*m_avboitTransmittance, 0);
+                .usage = NRI_TEXTURE_USAGE_STORAGE,
+                .format = NRI_FORMAT_RGBA8
+            }));
+            m_resourceHeap.registerTexture(*m_avboitTransmittance, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
+            m_avboitTransmittanceStorage = m_resourceHeap.registerStorageTextureMip(*m_avboitTransmittance, 0);
             m_avboitGrid = grid;
         }
 
@@ -143,25 +143,25 @@ namespace Nox
         uniformData.avboitDistance = WorldUnits::FromMeters(m_avboitDistanceMeters);
         uniformData.avboitLinearDistance = WorldUnits::FromMeters(m_avboitLinearMeters);
         uniformData.avboitTransmittanceTextureIndex = m_avboitTransmittance->GetDescriptorIndexSlot();
-        uniformData.avboitOccupancyReference = m_avboitOccupancy->getDeviceAddress();
-        uniformData.avboitLutReference = m_avboitDepthWarp->getDeviceAddress();
-        uniformData.avboitExtinctionReference = m_avboitExtinction->getDeviceAddress();
-        uniformData.avboitOverflowReference = m_avboitOverflow->getDeviceAddress();
+        uniformData.avboitOccupancyReference = m_avboitOccupancy.getDeviceAddress();
+        uniformData.avboitLutReference = m_avboitDepthWarp.getDeviceAddress();
+        uniformData.avboitExtinctionReference = m_avboitExtinction.getDeviceAddress();
+        uniformData.avboitOverflowReference = m_avboitOverflow.getDeviceAddress();
         // (avboitDepthTextureIndex: the depth's slot once the graph is compiled, resolveFrameUniforms)
 
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        const uint64_t uniforms = m_uniformBuffers[frameIndex]->getDeviceAddress();
-        const uint64_t particles = particleBuffer ? m_particleBuffers[frameIndex]->getDeviceAddress() : 0;
+        const uint64_t uniforms = m_uniformBuffers[frameIndex].getDeviceAddress();
+        const uint64_t particles = particleBuffer ? m_particleBuffers[frameIndex].getDeviceAddress() : 0;
         const uint64_t columns = static_cast<uint64_t>(grid.x) * grid.y;
-        NRI::Buffer* occupancy = m_avboitOccupancy.get();
-        NRI::Buffer* extinction = m_avboitExtinction.get();
-        NRI::Buffer* overflow = m_avboitOverflow.get();
+        nri::Buffer* occupancy = &m_avboitOccupancy;
+        nri::Buffer* extinction = &m_avboitExtinction;
+        nri::Buffer* overflow = &m_avboitOverflow;
 
         m_renderGraph.AddPass("AVBOIT Clear", RGPassFlags::NeverCull,
             [](RGBuilder&) {},
             [occupancy, extinction, overflow, columns, grid](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
+                nri::CommandBuffer& cmd = context.Cmd();
                 cmd.fillBuffer(*occupancy, 0, sizeof(uint32_t) * (shaderio::AVBOIT_VIRTUAL_SLICES / 32), 0);
                 cmd.fillBuffer(*extinction, 0, sizeof(uint32_t) * columns * grid.z, 0);
                 cmd.fillBuffer(*overflow, 0, sizeof(uint32_t) * 3 * columns, 0xFFFFFFFFu); // no slice overflowed yet
@@ -174,19 +174,19 @@ namespace Nox
         placeholderDesc.Size = RGSize::Absolute;
         placeholderDesc.Width = grid.x;
         placeholderDesc.Height = grid.y;
-        placeholderDesc.Format = NRI::ImageFormat::RGBA8;
-        auto addPrepass = [&](const char* name, NRI::Pipeline* litPipeline, NRI::Pipeline* unlitPipeline, NRI::Pipeline* particlePipeline)
+        placeholderDesc.Format = NRI_FORMAT_RGBA8;
+        auto addPrepass = [&](const char* name, nri::Pipeline* litPipeline, nri::Pipeline* unlitPipeline, nri::Pipeline* particlePipeline)
         {
             const RGTexture placeholder = m_renderGraph.CreateTexture(name, placeholderDesc);
             m_renderGraph.AddPass(name, RGPassFlags::Raster | RGPassFlags::NeverCull,
                 [&](RGBuilder& builder)
                 {
-                    builder.ColorTarget(placeholder, NRI::LoadOP::clear, NRI::StoreOP::store, { 0.0f, 0.0f, 0.0f, 0.0f });
+                    builder.ColorTarget(placeholder, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 0.0f });
                     declareAVBOITPrepassInputs(builder);
                 },
                 [this, res = &resources, meshes, litPipeline, unlitPipeline, particlePipeline, particleBatches, particles, uniforms](RGPassContext& context)
                 {
-                    NRI::CommandBuffer& cmd = context.Cmd();
+                    nri::CommandBuffer& cmd = context.Cmd();
                     cmd.setDepthTestEnable(false);
                     cmd.setDepthWriteEnable(false);
                     cmd.setColorBlendEnable(0, false);
@@ -201,10 +201,10 @@ namespace Nox
                         // the nearest got no weight and vanished.
                         auto drawBuckets = [&](MeshletDrawCursor& drawCursor)
                         {
-                            drawMeshletBucket(cmd, drawCursor, RenderBucket::Transparent, *litPipeline, NRI::CullMode::Back, false, false);
-                            drawMeshletBucket(cmd, drawCursor, RenderBucket::TransparentDoubleSided, *litPipeline, NRI::CullMode::None, false, false);
-                            drawMeshletBucket(cmd, drawCursor, RenderBucket::TransparentUnlit, *unlitPipeline, NRI::CullMode::Back, false, false);
-                            drawMeshletBucket(cmd, drawCursor, RenderBucket::TransparentUnlitDoubleSided, *unlitPipeline, NRI::CullMode::None, false, false);
+                            drawMeshletBucket(cmd, drawCursor, RenderBucket::Transparent, *litPipeline, NRI_CULL_MODE_BACK, false, false);
+                            drawMeshletBucket(cmd, drawCursor, RenderBucket::TransparentDoubleSided, *litPipeline, NRI_CULL_MODE_NONE, false, false);
+                            drawMeshletBucket(cmd, drawCursor, RenderBucket::TransparentUnlit, *unlitPipeline, NRI_CULL_MODE_BACK, false, false);
+                            drawMeshletBucket(cmd, drawCursor, RenderBucket::TransparentUnlitDoubleSided, *unlitPipeline, NRI_CULL_MODE_NONE, false, false);
                         };
                         drawBuckets(cursor);
                         MeshletDrawCursor lateCursor = beginMeshletDraws(context, res->CameraDraws, true);
@@ -217,8 +217,8 @@ namespace Nox
                     }
                     if (!particleBatches.empty())
                     {
-                        cmd.bindPipeline(NRI::PipelineBindPoint::Graphics, *particlePipeline);
-                        cmd.setCullMode(NRI::CullMode::None);
+                        cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, *particlePipeline);
+                        cmd.setCullMode(NRI_CULL_MODE_NONE);
                         const uint32_t depthSlot = context.Slot(res->Depth);
                         for (const ParticleBatch& batch : particleBatches)
                         {
@@ -234,43 +234,43 @@ namespace Nox
                             push.depthTextureIndex = depthSlot;
                             push.softDistance = batch.Settings.SoftDistance;
                             cmd.pushData(&push, sizeof(push));
-                            cmd.drawMeshTasks((batch.Count + 31) / 32, 1, 1);
+                            nri::drawMeshTasks(cmd, (batch.Count + 31) / 32, 1, 1);
                         }
                     }
-                    cmd.setColorWriteMask(0, NRI::ColorComponent::All);
+                    cmd.setColorWriteMask(0, nri::ColorComponent::All);
                     cmd.setDepthWriteEnable(true);
                 });
         };
 
-        addPrepass("AVBOIT Occupancy", m_transparentLitAVBOITOccupancyPipeline.get(), m_unlitAVBOITOccupancyPipeline.get(), m_particleAVBOITOccupancyPipeline.get());
+        addPrepass("AVBOIT Occupancy", &m_transparentLitAVBOITOccupancyPipeline, &m_unlitAVBOITOccupancyPipeline, &m_particleAVBOITOccupancyPipeline);
 
         m_renderGraph.AddPass("AVBOIT Depth Warp", RGPassFlags::NeverCull,
             [](RGBuilder&) {},
             [this, uniforms](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
+                nri::CommandBuffer& cmd = context.Cmd();
                 cmd.executionBarrier(); // the occupancy is complete
                 shaderio::PushConstantAVBOIT push{};
                 push.matrixReference = uniforms;
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_avboitLutPipeline);
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_avboitLutPipeline);
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch(1, 1, 1);
                 cmd.executionBarrier(); // the splat reads it
             });
 
-        addPrepass("AVBOIT Splat", m_transparentLitAVBOITSplatPipeline.get(), m_unlitAVBOITSplatPipeline.get(), m_particleAVBOITSplatPipeline.get());
+        addPrepass("AVBOIT Splat", &m_transparentLitAVBOITSplatPipeline, &m_unlitAVBOITSplatPipeline, &m_particleAVBOITSplatPipeline);
 
         const uint32_t storage = m_avboitTransmittanceStorage;
         m_renderGraph.AddPass("AVBOIT Integrate", RGPassFlags::NeverCull,
             [](RGBuilder&) {},
             [this, uniforms, storage, grid](RGPassContext& context)
             {
-                NRI::CommandBuffer& cmd = context.Cmd();
+                nri::CommandBuffer& cmd = context.Cmd();
                 cmd.executionBarrier(); // every splat is in
                 shaderio::PushConstantAVBOIT push{};
                 push.matrixReference = uniforms;
                 push.transmittanceStorageIndex = storage;
-                cmd.bindPipeline(NRI::PipelineBindPoint::Compute, *m_avboitIntegratePipeline);
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_avboitIntegratePipeline);
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch((grid.x + 7) / 8, (grid.y + 7) / 8, 1);
                 cmd.executionBarrier(); // the transparent shading samples the volume (through the uniforms)

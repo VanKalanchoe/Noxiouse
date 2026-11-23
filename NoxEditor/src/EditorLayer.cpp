@@ -32,7 +32,7 @@
 #include "NoxCore/Console/Console.h"
 #if NOX_WITH_MCP
 #include "Mcp/McpEditor.h"
-#include "McpClient.h"
+#include <NoxMcp/McpClient.h>
 #include "McpProjectFiles.h"
 #endif
 #include "NoxCore/Asset/MeshSerializer.h"
@@ -547,7 +547,7 @@ namespace Nox
                     endpoint.Player = runtime.Player;
                     endpoint.Port = runtime.McpPort;
                     endpoint.Running = runtime.Process < m_PlayProcesses.size() && m_PlayProcesses[runtime.Process]->IsRunning();
-                    endpoint.McpState = runtime.Probe ? Mcp::ToString(runtime.Probe->Get()) : "starting";
+                    endpoint.McpState = runtime.Probe ? NoxMcp::ToString(runtime.Probe->Get()) : "starting";
                     runtimes.push_back(std::move(endpoint));
                 }
                 return runtimes;
@@ -728,8 +728,8 @@ namespace Nox
             // the renderer's integer size was never equal, so the viewport "changed" every frame and the renderer rebuilt
             // its targets, dropped every history and flushed the GPU again and again (every ~120 ms), which showed up as
             // jitter while the camera moved -- timings looked fine because the profiler stats reset with each rebuild.
-            const NRI::Extent2D wantedSize{ static_cast<uint32_t>(m_ViewportSize.x), static_cast<uint32_t>(m_ViewportSize.y) };
-            NRI::Extent2D viewportSize = m_Renderer->getViewPortSize();
+            const nri::Extent2D wantedSize{ static_cast<uint32_t>(m_ViewportSize.x), static_cast<uint32_t>(m_ViewportSize.y) };
+            nri::Extent2D viewportSize = m_Renderer->getViewPortSize();
             if (wantedSize.width != viewportSize.width || wantedSize.height != viewportSize.height)
             {
                 m_Renderer->onViewportSizeChange(wantedSize);
@@ -1600,7 +1600,7 @@ namespace Nox
         // What the current mode makes these settings: the path tracer shades glass, blending and anti-aliasing itself; DLSS
         // anti-aliases (TAA and the jitter switch then do nothing). Settings that cannot apply are shown locked, with why.
         const bool pathTracing = m_Renderer->isPathTracingEnabled();
-        const bool dlssActive = m_Renderer->isDLSSSupported() && m_Renderer->isDLSSEnabled() && m_Renderer->getUpscaleMode() != NRI::UpscaleMode::Off;
+        const bool dlssActive = m_Renderer->isDLSSSupported() && m_Renderer->isDLSSEnabled() && m_Renderer->getUpscaleMode() != NRI_UPSCALER_MODE_OFF;
         auto lockedReason = [](const char* reason)
         {
             ImGui::SameLine();
@@ -1760,7 +1760,7 @@ namespace Nox
                 int currentUpscaleMode = static_cast<int>(m_Renderer->getUpscaleMode());
                 if (ImGui::Combo("Mode", &currentUpscaleMode, upscaleModeNames, IM_ARRAYSIZE(upscaleModeNames)))
                 {
-                    m_Renderer->setUpscaleMode(static_cast<NRI::UpscaleMode>(currentUpscaleMode));
+                    m_Renderer->setUpscaleMode(static_cast<nri::UpscalerMode>(currentUpscaleMode));
                 }
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("Also the ray tracing resolution: every ray traced effect (shadows, reflections, GI, AO, glass)\n"
@@ -1793,8 +1793,8 @@ namespace Nox
                     }
                 }
 
-                NRI::Extent2D renderSize = m_Renderer->getRenderSize();
-                NRI::Extent2D outputSize = m_Renderer->getViewPortSize();
+                nri::Extent2D renderSize = m_Renderer->getRenderSize();
+                nri::Extent2D outputSize = m_Renderer->getViewPortSize();
                 ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Rendering %ux%u -> %ux%u",
                     renderSize.width, renderSize.height, outputSize.width, outputSize.height);
             }
@@ -2120,7 +2120,7 @@ namespace Nox
             int currentPTDenoiser = static_cast<int>(m_Renderer->getNRDPTDenoiser());
             if (ImGui::Combo("PT Denoiser", &currentPTDenoiser, ptDenoiserNames, IM_ARRAYSIZE(ptDenoiserNames)))
             {
-                m_Renderer->setNRDPTDenoiser(static_cast<NRI::NRDDiffuseDenoiser>(currentPTDenoiser));
+                m_Renderer->setNRDPTDenoiser(static_cast<Nox::NRDDiffuseDenoiser>(currentPTDenoiser));
             }
             if (ImGui::IsItemHovered())
             {
@@ -2339,7 +2339,7 @@ namespace Nox
                 ImGui::Indent();
                 static const char* rtResolutionNames[] = { "Full (every pixel)", "Half (a quarter of the rays)" };
                 const bool rrActive = m_Renderer->isDLSSSupported() && m_Renderer->isDLSSEnabled() &&
-                                      m_Renderer->getUpscaleMode() != NRI::UpscaleMode::Off &&
+                                      m_Renderer->getUpscaleMode() != NRI_UPSCALER_MODE_OFF &&
                                       m_Renderer->isDLSSRayReconstructionSupported() && m_Renderer->isDLSSRayReconstructionEnabled();
                 // Ray Reconstruction wants its own per-pixel noise: the renderer traces at full resolution under it.
                 ImGui::BeginDisabled(rrActive);
@@ -2467,7 +2467,7 @@ namespace Nox
                 if (m_Renderer->getDiffuseGIMode() == 3)
                 {
                     ImGui::Indent();
-                    const NRI::Extent2D probes = m_Renderer->getScreenProbeCounts();
+                    const nri::Extent2D probes = m_Renderer->getScreenProbeCounts();
                     ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.8f, 1.0f), "Screen probes: %ux%u (%u probes, 64 rays each)", probes.width, probes.height,
                                        probes.width * probes.height);
 
@@ -2770,7 +2770,7 @@ namespace Nox
                 int currentReflDenoiser = static_cast<int>(m_Renderer->getNRDReflectionDenoiser());
                 if (ImGui::Combo("Reflection Denoiser", &currentReflDenoiser, reflDenoiserNames, IM_ARRAYSIZE(reflDenoiserNames)))
                 {
-                    m_Renderer->setNRDReflectionDenoiser(static_cast<NRI::NRDReflectionDenoiser>(currentReflDenoiser));
+                    m_Renderer->setNRDReflectionDenoiser(static_cast<Nox::NRDReflectionDenoiser>(currentReflDenoiser));
                 }
                 if (ImGui::IsItemHovered())
                 {
@@ -2789,7 +2789,7 @@ namespace Nox
                 int currentGIDenoiser = static_cast<int>(m_Renderer->getNRDGIDenoiser());
                 if (ImGui::Combo("GI Denoiser", &currentGIDenoiser, giDenoiserNames, IM_ARRAYSIZE(giDenoiserNames)))
                 {
-                    m_Renderer->setNRDGIDenoiser(static_cast<NRI::NRDDiffuseDenoiser>(currentGIDenoiser));
+                    m_Renderer->setNRDGIDenoiser(static_cast<Nox::NRDDiffuseDenoiser>(currentGIDenoiser));
                 }
                 if (ImGui::IsItemHovered())
                 {
@@ -2808,7 +2808,7 @@ namespace Nox
                 int currentDIDenoiser = static_cast<int>(m_Renderer->getNRDDIDenoiser());
                 if (ImGui::Combo("DI Denoiser", &currentDIDenoiser, diDenoiserNames, IM_ARRAYSIZE(diDenoiserNames)))
                 {
-                    m_Renderer->setNRDDIDenoiser(static_cast<NRI::NRDDiffuseDenoiser>(currentDIDenoiser));
+                    m_Renderer->setNRDDIDenoiser(static_cast<Nox::NRDDiffuseDenoiser>(currentDIDenoiser));
                 }
                 if (ImGui::IsItemHovered())
                 {
@@ -5184,7 +5184,7 @@ namespace Nox
             }
             if (m_SceneState == SceneState::Play)
                 flags &= ~Renderer::ExtraViewOutline;
-            m_Renderer->SubmitExtraView(static_cast<uint32_t>(index), slot.Camera, NRI::Extent2D{ drawSize.x, drawSize.y }, showGrid ? &grid : nullptr, false, flags);
+            m_Renderer->SubmitExtraView(static_cast<uint32_t>(index), slot.Camera, nri::Extent2D{ drawSize.x, drawSize.y }, showGrid ? &grid : nullptr, false, flags);
             slot.Submitted = true;
         }
     }
@@ -5828,7 +5828,7 @@ namespace Nox
     bool EditorLayer::PickWorldPoint(glm::dvec3& out) const
     {
         // The pixel -> NDC mapping uses the size the renderer draws at (what the shaders divide the pixel by), not the ImGui panel.
-        const NRI::Extent2D outputSize = m_Renderer->getViewPortSize();
+        const nri::Extent2D outputSize = m_Renderer->getViewPortSize();
         const glm::vec2 viewportSize(static_cast<float>(outputSize.width), static_cast<float>(outputSize.height));
         if (viewportSize.x <= 0.0f || viewportSize.y <= 0.0f)
             return false;
@@ -7154,7 +7154,7 @@ namespace Nox
 #if NOX_WITH_MCP
             // Asked for, not yet there: the probe says once the game's server answers (or that it never did -- an old NoxRuntime ignores
             // --mcp). 60 s: a game's start-up (shaders, scene) comes first.
-            runtime.Probe = Mcp::ServerProbe::Start(runtime.Name, mcpPort, mcpToken, 60.0);
+            runtime.Probe = NoxMcp::ServerProbe::Start(runtime.Name, mcpPort, mcpToken, 60.0);
 #endif
             NOX_CORE_INFO("Multiplayer Play: {} started with --mcp on port {} (its server answers once the game is up)", runtime.Name, mcpPort);
             m_PlayRuntimes.push_back(std::move(runtime));

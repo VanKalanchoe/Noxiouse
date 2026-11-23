@@ -10,7 +10,7 @@
 #include "misc/cpp/imgui_stdlib.h"
 
 #include "NoxCore/Asset/AssetManager.h"
-#include "NoxCore/Audio/AudioDSP.h"
+#include <NoxAudio/AudioDSP.h>
 #include "NoxCore/Audio/SpatialAudio.h"
 #include "NoxCore/Core/UUID.h"
 #include "NoxCore/Project/Project.h"
@@ -22,14 +22,14 @@ namespace Nox
         constexpr float kStripWidth = 132.0f;
         constexpr float kMinDb = -60.0f;  // the meters' floor
         constexpr float kMaxDb = 6.0f;
-        constexpr float kFaderMinDb = AudioDSP::kSilenceDb;
+        constexpr float kFaderMinDb = NoxAudio::AudioDSP::kSilenceDb;
         constexpr float kFaderMaxDb = 12.0f;
         const ImVec4 kOverrideColor(0.85f, 0.45f, 0.1f, 0.55f); // a value the edited snapshot changes
         const ImVec4 kOnColor(0.2f, 0.55f, 0.85f, 1.0f);
 
         float MeterFraction(float linear)
         {
-            const float db = AudioDSP::LinearToDb(linear);
+            const float db = NoxAudio::AudioDSP::LinearToDb(linear);
             return std::clamp((db - kMinDb) / (kMaxDb - kMinDb), 0.0f, 1.0f);
         }
 
@@ -70,8 +70,8 @@ namespace Nox
             ImGui::Dummy(size);
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
                 ImGui::SetTooltip("Peak L %.1f dB / R %.1f dB\nRMS L %.1f dB / R %.1f dB\nTicks every 12 dB from 0 dB down",
-                                  AudioDSP::LinearToDb(meter.PeakLeft), AudioDSP::LinearToDb(meter.PeakRight),
-                                  AudioDSP::LinearToDb(meter.RmsLeft), AudioDSP::LinearToDb(meter.RmsRight));
+                                  NoxAudio::AudioDSP::LinearToDb(meter.PeakLeft), NoxAudio::AudioDSP::LinearToDb(meter.PeakRight),
+                                  NoxAudio::AudioDSP::LinearToDb(meter.RmsLeft), NoxAudio::AudioDSP::LinearToDb(meter.RmsRight));
         }
 
         bool ToggleButton(const char* label, bool on, const char* tooltip)
@@ -186,10 +186,10 @@ namespace Nox
             m_UndoStack.clear();
             m_RedoStack.clear();
             m_HaveCommitted = false;
-            m_SelectedBus = kAudioBusMaster;
+            m_SelectedBus = NoxAudio::kAudioBusMaster;
         }
         if (!data.FindBus(m_SelectedBus))
-            m_SelectedBus = kAudioBusMaster;
+            m_SelectedBus = NoxAudio::kAudioBusMaster;
 
         // Shortcuts while the panel has focus.
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::IsAnyItemActive())
@@ -234,7 +234,7 @@ namespace Nox
             do
                 bus.Name = "Bus " + std::to_string(number++);
             while (AudioMixer::FindBus(bus.Name));
-            bus.Parent = kAudioBusMaster;
+            bus.Parent = NoxAudio::kAudioBusMaster;
             data.Buses.push_back(bus);
             m_SelectedBus = bus.Id;
             Changed(true);
@@ -304,7 +304,7 @@ namespace Nox
             int reverbMode = static_cast<int>(reflections.ListenerReverb);
             if (ImGui::Combo("Listener Reverb", &reverbMode, kReverbModes, IM_ARRAYSIZE(kReverbModes)))
             {
-                reflections.ListenerReverb = static_cast<AudioListenerReverb>(reverbMode);
+                reflections.ListenerReverb = static_cast<NoxAudio::AudioListenerReverb>(reverbMode);
                 changed = true;
             }
             ImGui::SetItemTooltip("The reverb an Acoustic Reverb effect applies (add one to a bus that sounds send to, like Reverb):\n"
@@ -456,7 +456,7 @@ namespace Nox
             m_SelectedBus = bus.Id;
         ImGui::SetItemTooltip("Select to edit its effects, sends and ducking below.");
         const AudioMixerBus* parent = data.FindBus(bus.Parent);
-        ImGui::TextDisabled("-> %s", bus.Id == kAudioBusMaster ? "Speakers" : (parent ? parent->Name.c_str() : "Master"));
+        ImGui::TextDisabled("-> %s", bus.Id == NoxAudio::kAudioBusMaster ? "Speakers" : (parent ? parent->Name.c_str() : "Master"));
 
         // Meter and fader side by side.
         const AudioBusMeter meter = AudioMixer::GetMeter(bus.Id);
@@ -534,7 +534,7 @@ namespace Nox
             ImGui::PushID(static_cast<int>(i));
             if (effect.Bypass || bus.Bypass)
                 ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-            if (ImGui::Selectable(GetAudioEffectInfo(effect.Type).Name.c_str(), false))
+            if (ImGui::Selectable(NoxAudio::GetAudioEffectInfo(effect.Type).Name.c_str(), false))
                 m_SelectedBus = bus.Id;
             if (effect.Bypass || bus.Bypass)
                 ImGui::PopStyleColor();
@@ -550,7 +550,7 @@ namespace Nox
         AudioMixerBus* bus = data.FindBus(m_SelectedBus);
         if (!bus)
             return;
-        const bool isMaster = bus->Id == kAudioBusMaster;
+        const bool isMaster = bus->Id == NoxAudio::kAudioBusMaster;
         ImGui::PushID(static_cast<int>(bus->Id & 0x7fffffff));
 
         ImGui::SeparatorText("Bus");
@@ -626,9 +626,9 @@ namespace Nox
         }
         if (ImGui::BeginCombo("##AddEffect", "Add Effect..."))
         {
-            for (uint32_t t = 0; t < static_cast<uint32_t>(AudioEffectType::Count); ++t)
+            for (uint32_t t = 0; t < static_cast<uint32_t>(NoxAudio::AudioEffectType::Count); ++t)
             {
-                const AudioEffectInfo& info = GetAudioEffectInfo(static_cast<AudioEffectType>(t));
+                const NoxAudio::AudioEffectInfo& info = NoxAudio::GetAudioEffectInfo(static_cast<NoxAudio::AudioEffectType>(t));
                 if (ImGui::Selectable(info.Name.c_str()))
                 {
                     AudioMixerEffect effect;
@@ -656,7 +656,7 @@ namespace Nox
     void MixerPanel::DrawEffect(AudioMixerData& data, AudioMixerBus& bus, size_t index, int& moveFrom, int& moveTo, int& removed)
     {
         AudioMixerEffect& effect = bus.Effects[index];
-        const AudioEffectInfo& info = GetAudioEffectInfo(effect.Type);
+        const NoxAudio::AudioEffectInfo& info = NoxAudio::GetAudioEffectInfo(effect.Type);
         ImGui::PushID(static_cast<int>(effect.Id & 0x7fffffff));
         const std::string header = std::to_string(index + 1) + ". " + info.Name + (effect.Bypass ? "  (bypassed)" : "") + "###Effect";
         const bool open = ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
@@ -749,7 +749,7 @@ namespace Nox
             }
             for (uint32_t p = 0; p < info.Parameters.size(); ++p)
             {
-                const AudioEffectParameterInfo& parameter = info.Parameters[p];
+                const NoxAudio::AudioEffectParameterInfo& parameter = info.Parameters[p];
                 ImGui::PushID(static_cast<int>(p));
                 if (!parameter.Options.empty())
                 {
@@ -864,7 +864,7 @@ namespace Nox
     void MixerPanel::DeleteBus(AudioMixerData& data, uint64_t id)
     {
         const AudioMixerBus* bus = data.FindBus(id);
-        if (!bus || id == kAudioBusMaster)
+        if (!bus || id == NoxAudio::kAudioBusMaster)
             return;
         const uint64_t parent = bus->Parent;
         for (AudioMixerBus& other : data.Buses)

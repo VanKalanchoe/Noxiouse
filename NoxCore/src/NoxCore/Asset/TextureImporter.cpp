@@ -21,7 +21,7 @@
 #include "NoxCore/Profiling/Profiler.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Utils/Utils.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 #include <bc7enc.h>
 #include <rgbcx.h>
@@ -113,10 +113,10 @@ namespace Nox
     }
 
     // The tiles of a virtual texture of this size and format (offsets in the file left out); false when it cannot be one.
-    static bool MakeVirtualTextureLayout(uint32_t width, uint32_t height, uint32_t mipLevels, NRI::ImageFormat format, VirtualTextureLayout& out)
+    static bool MakeVirtualTextureLayout(uint32_t width, uint32_t height, uint32_t mipLevels, nri::ImageFormat format, VirtualTextureLayout& out)
     {
         out = VirtualTextureLayout{};
-        if (!NRI::imageFormatBlock(format, out.BlockBytes, out.BlockSize) || out.TileSize % out.BlockSize != 0 || out.Border % out.BlockSize != 0)
+        if (!nri::imageFormatBlock(format, out.BlockBytes, out.BlockSize) || out.TileSize % out.BlockSize != 0 || out.Border % out.BlockSize != 0)
             return false;
         while (out.TiledMips < mipLevels && std::max(width >> out.TiledMips, height >> out.TiledMips) > out.TileSize)
             ++out.TiledMips;
@@ -182,7 +182,7 @@ namespace Nox
             const uint8_t* source = cpuData.Data.Data + cpuData.MipOffsets[mip];
             uint8_t* destination = encoded.Data + offsets[mip];
 
-            JobSystem::Get().ParallelFor(name, blocksY, 4, [&](uint32_t, uint32_t begin, uint32_t end)
+            NoxTasks::JobSystem::Get().ParallelFor(name, blocksY, 4, [&](uint32_t, uint32_t begin, uint32_t end)
             {
                 uint8_t block[16 * 4];
                 for (uint32_t blockY = begin; blockY < end; ++blockY)
@@ -213,7 +213,7 @@ namespace Nox
         static std::once_flag s_EncoderInit;
         std::call_once(s_EncoderInit, [] { bc7enc_compress_block_init(); });
 
-        const bool srgb = cpuData.Format == NRI::ImageFormat::SRGBA8;
+        const bool srgb = cpuData.Format == NRI_FORMAT_SRGBA8;
         bc7enc_compress_block_params params;
         bc7enc_compress_block_params_init(&params);
         if (!srgb)
@@ -223,7 +223,7 @@ namespace Nox
         {
             bc7enc_compress_block(destination, block, &params);
         });
-        cpuData.Format = srgb ? NRI::ImageFormat::BC7_UNorm_SRGB : NRI::ImageFormat::BC7_UNorm;
+        cpuData.Format = srgb ? NRI_FORMAT_BC7_UNORM_SRGB : NRI_FORMAT_BC7_UNORM;
     }
 
     // BC1 (half a byte per texel, no alpha) by rgbcx: generated content (CookGeneratedTexture) whose encode time matters more.
@@ -231,9 +231,9 @@ namespace Nox
     {
         static std::once_flag s_EncoderInit;
         std::call_once(s_EncoderInit, [] { rgbcx::init(); });
-        const bool srgb = cpuData.Format == NRI::ImageFormat::SRGBA8;
+        const bool srgb = cpuData.Format == NRI_FORMAT_SRGBA8;
         EncodeBlocks(cpuData, 8, "Encode BC1", [](uint8_t* destination, const uint8_t* block) { rgbcx::encode_bc1(5, destination, block, false, false); });
-        cpuData.Format = srgb ? NRI::ImageFormat::BC1_UNorm_SRGB : NRI::ImageFormat::BC1_UNorm;
+        cpuData.Format = srgb ? NRI_FORMAT_BC1_UNORM_SRGB : NRI_FORMAT_BC1_UNORM;
     }
 
     // BC5 (normal maps: red and green, 1 byte per texel) and BC4 (grayscale: red, half a byte per texel) by rgbcx, each channel
@@ -247,7 +247,7 @@ namespace Nox
             EncodeBlocks(cpuData, 16, "Encode BC5", [](uint8_t* destination, const uint8_t* block) { rgbcx::encode_bc5_hq(destination, block, 0, 1, 4); });
         else
             EncodeBlocks(cpuData, 8, "Encode BC4", [](uint8_t* destination, const uint8_t* block) { rgbcx::encode_bc4_hq(destination, block, 4); });
-        cpuData.Format = twoChannels ? NRI::ImageFormat::BC5_UNorm : NRI::ImageFormat::BC4_UNorm;
+        cpuData.Format = twoChannels ? NRI_FORMAT_BC5_UNORM : NRI_FORMAT_BC4_UNORM;
     }
 
     static void GenerateRGBA8MipChain(TextureData& cpuData)
@@ -474,7 +474,7 @@ namespace Nox
             return false;
         // PNG/JPG decode to RGBA8 with generated mips, compressed as the texture's settings say (BC7, normal maps BC5, grayscale
         // BC4: always linear), as do a Basis or RGBA8 KTX2; DDS and other KTX2 keep the format they ship in.
-        if (cpuData.DirectFormat == UINT32_MAX && (cpuData.Format == NRI::ImageFormat::SRGBA8 || cpuData.Format == NRI::ImageFormat::RGBA8))
+        if (cpuData.DirectFormat == UINT32_MAX && (cpuData.Format == NRI_FORMAT_SRGBA8 || cpuData.Format == NRI_FORMAT_RGBA8))
         {
             if (metadata.TextureSpec.compression == TextureCompression::Default)
                 EncodeBC7(cpuData);
@@ -500,7 +500,7 @@ namespace Nox
     bool TextureImporter::CookGeneratedTexture(TextureData& cpuData, const std::filesystem::path& cookedPath, bool fast)
     {
         if (cpuData.Width == 0 || cpuData.Height == 0 || cpuData.Data.Size < static_cast<uint64_t>(cpuData.Width) * cpuData.Height * 4 ||
-            (cpuData.Format != NRI::ImageFormat::SRGBA8 && cpuData.Format != NRI::ImageFormat::RGBA8))
+            (cpuData.Format != NRI_FORMAT_SRGBA8 && cpuData.Format != NRI_FORMAT_RGBA8))
             return false;
         cpuData.MipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(cpuData.Width, cpuData.Height)))) + 1;
         cpuData.MipOffsets = { 0 };
@@ -652,7 +652,7 @@ namespace Nox
         cpuData.MipLevels = mipLevels;
         cpuData.MipOffsets = { 0 };
         cpuData.Data = Buffer(fp16Data.data(), fp16SizeBytes);
-        cpuData.Format = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        cpuData.Format = NRI_FORMAT_R16G16B16A16_SFLOAT;
         
         Renderer* targetRenderer = renderer ? renderer : Application::Get().GetRenderer();
         
@@ -699,50 +699,50 @@ namespace Nox
         // color data. RTXPT/Donut creates an sRGB view from the material texture role instead of
         // trusting that legacy header. Do the same here. Hardware sRGB decoding affects RGB only,
         // leaving alpha linear for the glossiness channel in specular-glossiness textures.
-        const bool useSRGB = spec.format == NRI::ImageFormat::SRGBA8;
+        const bool useSRGB = spec.format == NRI_FORMAT_SRGBA8;
 
         switch (dds.GetFormat())
         {
         case tinyddsloader::DDSFile::DXGIFormat::BC1_Typeless:
         case tinyddsloader::DDSFile::DXGIFormat::BC1_UNorm:
         case tinyddsloader::DDSFile::DXGIFormat::BC1_UNorm_SRGB:
-            cpuData.Format = useSRGB ? NRI::ImageFormat::BC1_UNorm_SRGB : NRI::ImageFormat::BC1_UNorm;
+            cpuData.Format = useSRGB ? NRI_FORMAT_BC1_UNORM_SRGB : NRI_FORMAT_BC1_UNORM;
             break;
         case tinyddsloader::DDSFile::DXGIFormat::BC2_Typeless:
         case tinyddsloader::DDSFile::DXGIFormat::BC2_UNorm:
         case tinyddsloader::DDSFile::DXGIFormat::BC2_UNorm_SRGB:
-            cpuData.Format = useSRGB ? NRI::ImageFormat::BC2_UNorm_SRGB : NRI::ImageFormat::BC2_UNorm;
+            cpuData.Format = useSRGB ? NRI_FORMAT_BC2_UNORM_SRGB : NRI_FORMAT_BC2_UNORM;
             break;
         case tinyddsloader::DDSFile::DXGIFormat::BC3_Typeless:
         case tinyddsloader::DDSFile::DXGIFormat::BC3_UNorm:
         case tinyddsloader::DDSFile::DXGIFormat::BC3_UNorm_SRGB:
-            cpuData.Format = useSRGB ? NRI::ImageFormat::BC3_UNorm_SRGB : NRI::ImageFormat::BC3_UNorm;
+            cpuData.Format = useSRGB ? NRI_FORMAT_BC3_UNORM_SRGB : NRI_FORMAT_BC3_UNORM;
             break;
         case tinyddsloader::DDSFile::DXGIFormat::BC4_Typeless:
         case tinyddsloader::DDSFile::DXGIFormat::BC4_UNorm:
-            cpuData.Format = NRI::ImageFormat::BC4_UNorm;
+            cpuData.Format = NRI_FORMAT_BC4_UNORM;
             break;
         case tinyddsloader::DDSFile::DXGIFormat::BC4_SNorm:
-            cpuData.Format = NRI::ImageFormat::BC4_SNorm;
+            cpuData.Format = NRI_FORMAT_BC4_SNORM;
             break;
         case tinyddsloader::DDSFile::DXGIFormat::BC5_Typeless:
         case tinyddsloader::DDSFile::DXGIFormat::BC5_UNorm:
-            cpuData.Format = NRI::ImageFormat::BC5_UNorm;
+            cpuData.Format = NRI_FORMAT_BC5_UNORM;
             break;
         case tinyddsloader::DDSFile::DXGIFormat::BC5_SNorm:
-            cpuData.Format = NRI::ImageFormat::BC5_SNorm;
+            cpuData.Format = NRI_FORMAT_BC5_SNORM;
             break;
         case tinyddsloader::DDSFile::DXGIFormat::BC6H_Typeless:
         case tinyddsloader::DDSFile::DXGIFormat::BC6H_UF16:
-            cpuData.Format = NRI::ImageFormat::BC6H_UF16;
+            cpuData.Format = NRI_FORMAT_BC6H_UF16;
             break;
         case tinyddsloader::DDSFile::DXGIFormat::BC6H_SF16:
-            cpuData.Format = NRI::ImageFormat::BC6H_SF16;
+            cpuData.Format = NRI_FORMAT_BC6H_SF16;
             break;
         case tinyddsloader::DDSFile::DXGIFormat::BC7_Typeless:
         case tinyddsloader::DDSFile::DXGIFormat::BC7_UNorm:
         case tinyddsloader::DDSFile::DXGIFormat::BC7_UNorm_SRGB:
-            cpuData.Format = useSRGB ? NRI::ImageFormat::BC7_UNorm_SRGB : NRI::ImageFormat::BC7_UNorm;
+            cpuData.Format = useSRGB ? NRI_FORMAT_BC7_UNORM_SRGB : NRI_FORMAT_BC7_UNORM;
             break;
         default:
             NOX_CORE_ERROR("TextureImporter::DecodeDDS - Unsupported DDS format {} from: {}", static_cast<uint32_t>(dds.GetFormat()), path.string());
@@ -1116,8 +1116,8 @@ namespace Nox
             outData.Width = fields[1];
             outData.Height = fields[2];
             outData.MipLevels = fields[3];
-            outData.Usage = static_cast<NRI::TextureUsage>(fields[4]);
-            outData.Format = static_cast<NRI::ImageFormat>(fields[5]);
+            outData.Usage = static_cast<nri::TextureUsage>(fields[4]);
+            outData.Format = static_cast<nri::ImageFormat>(fields[5]);
             outData.ArrayLayers = 1;
             outData.IsCubeMap = false;
             outData.DirectFormat = UINT32_MAX;
@@ -1163,8 +1163,8 @@ namespace Nox
         stream.read(reinterpret_cast<char*>(&directFormat), sizeof(uint32_t));
         stream.read(reinterpret_cast<char*>(&mipOffsetCount), sizeof(uint32_t));
 
-        outData.Usage = static_cast<NRI::TextureUsage>(usage);
-        outData.Format = static_cast<NRI::ImageFormat>(format);
+        outData.Usage = static_cast<nri::TextureUsage>(usage);
+        outData.Format = static_cast<nri::ImageFormat>(format);
         outData.DirectFormat = directFormat;
         outData.MipOffsets.resize(mipOffsetCount);
 

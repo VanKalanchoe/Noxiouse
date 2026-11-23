@@ -212,10 +212,10 @@ namespace Nox
             const uint32_t size = std::max(settings.TextureSize, 4u);
             TextureData texture;
             texture.Width = texture.Height = size;
-            texture.Format = NRI::ImageFormat::SRGBA8;
+            texture.Format = NRI_FORMAT_SRGBA8;
             texture.Data.Allocate(static_cast<uint64_t>(size) * size * 4);
             uint8_t* texels = texture.Data.Data;
-            JobSystem::Get().ParallelFor("Streaming Test Texture", size, 16, [&](uint32_t, uint32_t begin, uint32_t end)
+            NoxTasks::JobSystem::Get().ParallelFor("Streaming Test Texture", size, 16, [&](uint32_t, uint32_t begin, uint32_t end)
             {
                 for (uint32_t y = begin; y < end; ++y)
                 {
@@ -255,7 +255,7 @@ namespace Nox
         : m_Settings(settings), m_AssetDirectory(Project::GetActiveAssetDirectory()), m_Error(std::make_shared<std::string>())
     {
         NOX_CORE_INFO("Streaming test world: {:.1f} GB of {} m tiles into '{}'", m_Settings.TargetGigabytes, m_Settings.CellSizeMeters, m_Settings.Folder);
-        m_Job = JobSystem::Get().Async("Generate Streaming Test World", JobPriority::Normal, [this](const CancellationToken& token)
+        m_Job = NoxTasks::JobSystem::Get().Async("Generate Streaming Test World", NoxTasks::JobPriority::Normal, [this](const NoxTasks::CancellationToken& token)
         {
             if (m_Settings.PropsPerCell > 0)
             {
@@ -356,9 +356,9 @@ namespace Nox
         if (!m_Cooking)
         {
             m_Cooking = true;
-            m_CookJob = JobSystem::Get().Async("Cook Streaming Test Cells", JobPriority::Normal, [this](const CancellationToken& token)
+            m_CookJob = NoxTasks::JobSystem::Get().Async("Cook Streaming Test Cells", NoxTasks::JobPriority::Normal, [this](const NoxTasks::CancellationToken& token)
             {
-                JobSystem::Get().ParallelFor("Cook Cells", static_cast<uint32_t>(m_CellFiles.size()), 1, [&](uint32_t, uint32_t begin, uint32_t end)
+                NoxTasks::JobSystem::Get().ParallelFor("Cook Cells", static_cast<uint32_t>(m_CellFiles.size()), 1, [&](uint32_t, uint32_t begin, uint32_t end)
                 {
                     for (uint32_t index = begin; index < end && !token.IsCancelled(); ++index)
                     {

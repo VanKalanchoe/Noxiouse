@@ -7,9 +7,9 @@
 
 #include <glm/gtc/quaternion.hpp>
 
-#include "NetClient.h"
-#include "NetQuantize.h"
-#include "NetServer.h"
+#include <NoxNet/NetClient.h>
+#include <NoxNet/NetQuantize.h>
+#include <NoxNet/NetServer.h>
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Physics/Physics3DScene.h"

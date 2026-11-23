@@ -10,24 +10,25 @@
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/NodeGraph/NodeGraphAsset.h"
-#include "NoxCore/UI/Core/UITypes.h"
+#include "NoxCore/Audio/AudioGraph.h"
+#include <NoxUI/Core/UITypes.h>
 #include <glm/glm.hpp>
 #include "Panels/AssetEditorV2.h"
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIButton;
         class UIContext;
         class UIElement;
         class UILabel;
         class UIStackBox;
     }
+
+namespace Nox
+{
     class NodeGraphCanvasV2;
     class StateMachineViewV2;
     class AnimationGraphInstance;
-    class AudioGraphProgram;
     struct GraphNode;
     struct InspectorCardBuilder;
 
@@ -43,7 +44,7 @@ namespace Nox
         explicit NodeGraphEditorV2(AssetHandle graph);
         ~NodeGraphEditorV2() override;
 
-        Ref<UI::UIElement> BuildUI() override;
+        Ref<NoxUI::UIElement> BuildUI() override;
         // Once a frame: finished edits become history steps, the window's labels follow.
         void Update() override;
         // Writes the file (nothing when nothing changed); IsDirty() says whether it worked.
@@ -58,7 +59,7 @@ namespace Nox
         const std::string& GetName() const override { return m_Title; }
         const char* GetKind() const override { return "graph"; }
         std::string GetWindowTitle() const override { return "Graph: " + m_Title; }
-        UI::UIVec2 GetDefaultSize() const override { return { 1180.0f, 700.0f }; }
+        NoxUI::UIVec2 GetDefaultSize() const override { return { 1180.0f, 700.0f }; }
         bool IsDirty() const override { return m_Dirty; }
         bool IsValid() const override { return m_Asset != nullptr; }
 
@@ -72,16 +73,16 @@ namespace Nox
         void RebuildDetails();
         void RebuildParameters();
         void RefreshToolbar();
-        bool HandleKey(const UI::UIKeyEvent& e);
+        bool HandleKey(const NoxUI::UIKeyEvent& e);
         void FollowDiskChanges();
         // One value's editor (a node property or an input's value), in Details or in the popup beside a node: by what it holds and
         // what the node type declares (range, choices, asset kind, bone, curve, parameter). `rebuild`: what to build again when the
         // editor's shape changes (a curve key added).
         void AddValueEditor(InspectorCardBuilder& builder, uint32_t nodeId, const std::string& key, const std::string& label, std::function<void()> rebuild);
         // A value on the canvas clicked: its editor in a popup beside it.
-        void ShowValuePopup(uint32_t nodeId, const std::string& key, const UI::UIRect& at);
+        void ShowValuePopup(uint32_t nodeId, const std::string& key, const NoxUI::UIRect& at);
         // A bone property: the preview skeleton's bones (searchable, by depth) or a name typed.
-        void ShowBonePicker(uint32_t nodeId, const std::string& key, const UI::UIRect& at);
+        void ShowBonePicker(uint32_t nodeId, const std::string& key, const NoxUI::UIRect& at);
         void ClosePopup();
         // Shows a popup again next frame (UIContext::Defer): unless ClosePopup ran meanwhile or the editor is gone.
         void DeferPopup(std::function<void()> show);
@@ -105,7 +106,7 @@ namespace Nox
         void UpdateAnimationPreview();
         void UpdateAudioPreview();
         void StopAudioPreview();
-        void ShowPreviewMeshMenu(const UI::UIRect& anchor);
+        void ShowPreviewMeshMenu(const NoxUI::UIRect& anchor);
 
         AssetHandle m_Handle = 0;
         Ref<NodeGraphAsset> m_Asset;
@@ -119,31 +120,31 @@ namespace Nox
         std::vector<NodeGraph> m_UndoStack;
         std::vector<NodeGraph> m_RedoStack;
 
-        Ref<UI::UIElement> m_Root;
+        Ref<NoxUI::UIElement> m_Root;
         Ref<NodeGraphCanvasV2> m_Canvas;
         Ref<StateMachineViewV2> m_StateView;
-        Ref<UI::UIStackBox> m_Breadcrumb;
+        Ref<NoxUI::UIStackBox> m_Breadcrumb;
         std::vector<uint32_t> m_Path, m_ShownPath;
         std::vector<std::string> m_PathLabels;
         GraphNode* m_ShownMachine = nullptr;
-        Ref<UI::UIStackBox> m_Details;
-        Ref<UI::UIStackBox> m_Parameters;
-        Ref<UI::UIButton> m_SaveButton;
-        Ref<UI::UIButton> m_UndoButton;
-        Ref<UI::UIButton> m_RedoButton;
-        Ref<UI::UILabel> m_Status;
-        Ref<UI::UILabel> m_CompileStatus;    // a material graph's compile status under the toolbar
+        Ref<NoxUI::UIStackBox> m_Details;
+        Ref<NoxUI::UIStackBox> m_Parameters;
+        Ref<NoxUI::UIButton> m_SaveButton;
+        Ref<NoxUI::UIButton> m_UndoButton;
+        Ref<NoxUI::UIButton> m_RedoButton;
+        Ref<NoxUI::UILabel> m_Status;
+        Ref<NoxUI::UILabel> m_CompileStatus;    // a material graph's compile status under the toolbar
         bool m_CompileStatusDirty = true;
         // An open popup's rows run while it is open (they point into the graph): dropped when it closes or the graph is replaced.
         std::shared_ptr<const bool> m_PopupOpen;                                    // our popup is the overlay (ClosePopup closes it)
-        UI::UIContext* m_PopupContext = nullptr;                                    // the context it is the overlay of
+        NoxUI::UIContext* m_PopupContext = nullptr;                                    // the context it is the overlay of
         std::shared_ptr<uint32_t> m_PopupGeneration = std::make_shared<uint32_t>(0); // bumped by ClosePopup; DeferPopup checks it
-        Ref<UI::UIStackBox> m_PreviewBox;
+        Ref<NoxUI::UIStackBox> m_PreviewBox;
         bool m_PreviewDirty = true;
         std::unique_ptr<AnimationGraphInstance> m_AnimPreview;
         bool m_AnimPlaying = true;
         std::vector<glm::mat4> m_PreviewBones;
-        Ref<UI::UIElement> m_PreviewImage;
+        Ref<NoxUI::UIElement> m_PreviewImage;
         std::string m_PreviewNotify;
         float m_PreviewNotifyAge = 10.0f;
         std::chrono::steady_clock::time_point m_PreviewTick{};

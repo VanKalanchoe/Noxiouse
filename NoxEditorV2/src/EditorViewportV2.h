@@ -12,18 +12,19 @@
 #include "NoxCore/Renderer/EditorCamera.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
-#include "NoxCore/UI/Widgets/UIIconButton.h"
-#include "NoxCore/UI/Core/UIElement.h"
+#include <NoxUI/Widgets/UIIconButton.h>
+#include <NoxUI/Core/UIElement.h>
+
+namespace NoxUI
+{
+        class UIButton;
+    }
 
 namespace Nox
 {
     class Renderer;
     class EditorSelection;
 
-    namespace UI
-    {
-        class UIButton;
-    }
 
     enum class ViewportGizmoMode : int
     {
@@ -55,7 +56,7 @@ namespace Nox
     };
 
     // An icon button (UI::UIIconButton) showing one of the editor's vector icons: the viewport's tools, the cogwheel menus.
-    class UIVectorIconButton : public UI::UIIconButton
+    class UIVectorIconButton : public NoxUI::UIIconButton
     {
     public:
         explicit UIVectorIconButton(EditorIconKind icon, std::string tooltip = {}, std::function<void()> onClick = {});
@@ -105,14 +106,14 @@ namespace Nox
         glm::mat4 GizmoDragStart{ 1.0f };
 
         bool IsBoxSelecting = false;
-        UI::UIVec2 BoxSelectStart{ 0.0f, 0.0f };
-        UI::UIVec2 BoxSelectEnd{ 0.0f, 0.0f };
+        NoxUI::UIVec2 BoxSelectStart{ 0.0f, 0.0f };
+        NoxUI::UIVec2 BoxSelectEnd{ 0.0f, 0.0f };
 
         float LocationSnapWorldUnits() const;
         glm::dvec3 SnapLocation(const glm::dvec3& point) const;
     };
 
-    class ViewportCanvas : public UI::UIElement
+    class ViewportCanvas : public NoxUI::UIElement
     {
     public:
         struct Context
@@ -138,14 +139,14 @@ namespace Nox
         void MeasureClick();
         bool GizmoTakesMouse() const;
 
-        bool OnPointerMove(const UI::UIPointerEvent& e) override;
-        bool OnPointerLeave(const UI::UIPointerEvent& e) override;
-        bool OnPointerDown(const UI::UIPointerEvent& e) override;
-        bool OnPointerUp(const UI::UIPointerEvent& e) override;
+        bool OnPointerMove(const NoxUI::UIPointerEvent& e) override;
+        bool OnPointerLeave(const NoxUI::UIPointerEvent& e) override;
+        bool OnPointerDown(const NoxUI::UIPointerEvent& e) override;
+        bool OnPointerUp(const NoxUI::UIPointerEvent& e) override;
 
     protected:
         void OnUpdate(float dt) override;
-        void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override;
+        void OnPaint(NoxUI::UIDrawList& drawList, const NoxUI::UITheme& theme) override;
 
     private:
         enum class GizmoPart : uint8_t
@@ -157,20 +158,20 @@ namespace Nox
         };
 
         bool ComputeGizmoTransform(Entity selected, glm::mat4& outWorldRender) const;
-        bool ClosestPointOnRotateRing(const UI::UIVec2& mousePos, const glm::vec3& origin,
+        bool ClosestPointOnRotateRing(const NoxUI::UIVec2& mousePos, const glm::vec3& origin,
                                       const glm::vec3& u, const glm::vec3& v, float radius,
                                       const glm::mat4& viewProj, glm::vec3& outWorldPoint, float& inOutBestDistSq) const;
-        bool RayFromScreen(const UI::UIVec2& screenPos, glm::vec3& outOrigin, glm::vec3& outDir) const;
-        bool ProjectPoint(const glm::vec3& renderPoint, const glm::mat4& viewProj, UI::UIVec2& outScreen, float* outClipW = nullptr) const;
+        bool RayFromScreen(const NoxUI::UIVec2& screenPos, glm::vec3& outOrigin, glm::vec3& outDir) const;
+        bool ProjectPoint(const glm::vec3& renderPoint, const glm::mat4& viewProj, NoxUI::UIVec2& outScreen, float* outClipW = nullptr) const;
         float ComputeGizmoWorldScale(const glm::vec3& pivotRender, const glm::mat4& viewProj) const;
-        GizmoPart HitTestGizmo(const UI::UIVec2& mousePos, const glm::mat4& worldTransform) const;
-        int HitTestAxisIndicator(const UI::UIVec2& mousePos) const;
-        void UpdateGizmoDrag(const UI::UIVec2& mousePos);
+        GizmoPart HitTestGizmo(const NoxUI::UIVec2& mousePos, const glm::mat4& worldTransform) const;
+        int HitTestAxisIndicator(const NoxUI::UIVec2& mousePos) const;
+        void UpdateGizmoDrag(const NoxUI::UIVec2& mousePos);
         void ApplyEntityDelta(const glm::mat4& deltaRender, const glm::mat4& primaryWorldRender);
-        void DrawTransformGizmo(UI::UIDrawList& drawList) const;
-        void DrawAxisIndicator(UI::UIDrawList& drawList) const;
-        void DrawMeasureOverlay(UI::UIDrawList& drawList) const;
-        void DrawMeasureLine(UI::UIDrawList& drawList, const glm::mat4& view, const glm::mat4& projection,
+        void DrawTransformGizmo(NoxUI::UIDrawList& drawList) const;
+        void DrawAxisIndicator(NoxUI::UIDrawList& drawList) const;
+        void DrawMeasureOverlay(NoxUI::UIDrawList& drawList) const;
+        void DrawMeasureLine(NoxUI::UIDrawList& drawList, const glm::mat4& view, const glm::mat4& projection,
                              const glm::vec3& startRender, const glm::vec3& endRender, float minimumLength) const;
         void CommitClickSelection(bool shift, bool ctrl);
         void CommitBoxSelection(bool shift, bool ctrl);
@@ -181,7 +182,7 @@ namespace Nox
         GizmoPart m_ActiveGizmo = GizmoPart::None;
 
         bool m_LeftTracking = false;
-        UI::UIVec2 m_LeftDownPos{ 0.0f, 0.0f };
+        NoxUI::UIVec2 m_LeftDownPos{ 0.0f, 0.0f };
 
         glm::mat4 m_DragInitialWorldRender{ 1.0f };
         glm::mat4 m_DragInitialEntityWorldRender{ 1.0f };
@@ -203,7 +204,7 @@ namespace Nox
     };
 
     // Overlay for non-active extra viewports (axis indicator, mini gizmo axes, status badge, click-to-activate).
-    class ExtraViewportCanvas : public UI::UIElement
+    class ExtraViewportCanvas : public NoxUI::UIElement
     {
     public:
         struct Context
@@ -224,11 +225,11 @@ namespace Nox
 
         void Bind(const Context& ctx) { m_Ctx = ctx; }
 
-        bool OnPointerDown(const UI::UIPointerEvent& e) override;
-        bool OnMouseWheel(const UI::UIPointerEvent& e) override;
+        bool OnPointerDown(const NoxUI::UIPointerEvent& e) override;
+        bool OnMouseWheel(const NoxUI::UIPointerEvent& e) override;
 
     protected:
-        void OnPaint(UI::UIDrawList& drawList, const UI::UITheme& theme) override;
+        void OnPaint(NoxUI::UIDrawList& drawList, const NoxUI::UITheme& theme) override;
 
     private:
         Context m_Ctx{};
@@ -246,7 +247,7 @@ namespace Nox
             std::function<void(bool)> SetShowCameraPosition;
         };
 
-        Ref<UI::UIElement> Build(Renderer* renderer, EditorCamera* camera, ViewportToolState* tools, Callbacks callbacks);
+        Ref<NoxUI::UIElement> Build(Renderer* renderer, EditorCamera* camera, ViewportToolState* tools, Callbacks callbacks);
         void Sync();
 
     private:
@@ -260,8 +261,8 @@ namespace Nox
         Ref<UIVectorIconButton> m_MeasureBtn;
         Ref<UIVectorIconButton> m_GridBtn;
         Ref<UIVectorIconButton> m_WireframeBtn;
-        Ref<UI::UIButton> m_ViewModeBtn;
+        Ref<NoxUI::UIButton> m_ViewModeBtn;
         Ref<UIVectorIconButton> m_SettingsCogBtn;
-        Ref<UI::UIButton> m_UnfreezeBtn;
+        Ref<NoxUI::UIButton> m_UnfreezeBtn;
     };
 }

@@ -11,14 +11,15 @@
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Scene/WorldPartition.h"
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIContext;
         class UIElement;
         class UIStackBox;
     }
+
+namespace Nox
+{
     class HLODBuilder;
     class Scene;
     class WorldPartitionMap;
@@ -43,8 +44,8 @@ namespace Nox
         };
 
         void SetHooks(Hooks hooks) { m_Hooks = std::move(hooks); }
-        const Ref<UI::UIElement>& BuildUI(UI::UIContext* context);
-        const Ref<UI::UIElement>& GetRoot() const { return m_Root; }
+        const Ref<NoxUI::UIElement>& BuildUI(NoxUI::UIContext* context);
+        const Ref<NoxUI::UIElement>& GetRoot() const { return m_Root; }
         void Update();
         // The loaded cells' content bounds drawn in the viewports (while the window is open and Show in Viewport is on).
         bool ShowCellsInViewport() const { return m_ShowInViewport; }
@@ -57,10 +58,10 @@ namespace Nox
         void Changed() const;
 
         Hooks m_Hooks;
-        UI::UIContext* m_Context = nullptr;
-        Ref<UI::UIElement> m_Root;
-        Ref<UI::UIStackBox> m_Body;
-        Ref<UI::UIElement> m_Map; // (a WorldPartitionMap, defined in the .cpp)
+        NoxUI::UIContext* m_Context = nullptr;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UIStackBox> m_Body;
+        Ref<NoxUI::UIElement> m_Map; // (a WorldPartitionMap, defined in the .cpp)
         std::unordered_map<std::string, bool> m_Expanded;
         uint64_t m_Signature = 0;
         bool m_Rebuild = true;

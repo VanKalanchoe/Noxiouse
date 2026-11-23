@@ -30,84 +30,84 @@ namespace Nox
         };
     }
 
-    std::unique_ptr<NRI::Pipeline> Renderer::buildCustomLitDeferredPipeline(bool forceCompile)
+    nri::Pipeline Renderer::buildCustomLitDeferredPipeline(bool forceCompile)
     {
-        // Built on the calling thread, a compile error thrown at once (NRI::PipelineDesc::buildNow): a Material Shader is the project's
+        // Built on the calling thread, a compile error thrown at once (nri::PipelineDesc::buildNow): a Material Shader is the project's
         // code and may not compile, and nothing may bind a pipeline that failed.
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.buildNow = true;
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT };
+        desc.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT };
         const std::string source = CustomLitShaders::DeferredSourcePath().generic_string();
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = source });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = source });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = source });
-        return m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = source });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = source });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = source });
+        return m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
-    std::unique_ptr<NRI::Pipeline> Renderer::buildCustomLitForwardPipeline(bool forceCompile, bool withGraphs)
+    nri::Pipeline Renderer::buildCustomLitForwardPipeline(bool forceCompile, bool withGraphs)
     {
         // The forward shader's variant: as createTransparentLitPipeline's plain one (the meshlet stages are the same files).
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.buildNow = true;
-        desc.colorFormats = { NRI::ImageFormat::R16G16B16A16_SFLOAT, NRI::ImageFormat::R32SINT };
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
+        desc.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT, NRI_FORMAT_R32_SINT };
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
         // With graphs, the mesh stage moves the vertices by a graph's World Position Offset (a game packaged before it has no such file: the
         // plain mesh stage).
         const std::filesystem::path graphMesh = CustomLitShaders::ForwardMeshSourcePath();
         const std::string meshSource = withGraphs && std::filesystem::exists(graphMesh) ? graphMesh.generic_string() : std::string("assets/shaders/Material_PBR_Mesh.slang");
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = meshSource });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = CustomLitShaders::ForwardSourcePath().generic_string() });
-        return m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = meshSource });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = CustomLitShaders::ForwardSourcePath().generic_string() });
+        return m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
-    std::unique_ptr<NRI::Pipeline> Renderer::buildMaterialGraphGBufferPipeline(bool forceCompile, bool writeVelocity)
+    nri::Pipeline Renderer::buildMaterialGraphGBufferPipeline(bool forceCompile, bool writeVelocity)
     {
-        NRI::PipelineDesc desc = gbufferPipelineDesc(CustomLitShaders::GBufferSourcePath().generic_string(), writeVelocity);
+        nri::PipelineDesc desc = gbufferPipelineDesc(CustomLitShaders::GBufferSourcePath().generic_string(), writeVelocity);
         desc.forceCompile = forceCompile;
         desc.buildNow = true;
-        return m_device->createPipeline(desc, *m_shaderCompiler);
+        return m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
-    std::unique_ptr<NRI::Pipeline> Renderer::buildMaterialGraphVisibilityPipeline(bool forceCompile, bool shadowDepth)
+    nri::Pipeline Renderer::buildMaterialGraphVisibilityPipeline(bool forceCompile, bool shadowDepth)
     {
         // As createVisibilityPipeline / createShadowMapPipelines' mask pipeline, from the generated source with the graphs.
         const std::string source = CustomLitShaders::VisibilitySourcePath().generic_string();
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         desc.buildNow = true;
         if (!shadowDepth)
-            desc.colorFormats = { NRI::ImageFormat::R32G32_UINT };
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = source });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = shadowDepth ? "depthMaskFragMain" : "fragMain", .sourcePath = source });
-        return m_device->createPipeline(desc, *m_shaderCompiler);
+            desc.colorFormats = { NRI_FORMAT_R32G32_UINT };
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = source });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = shadowDepth ? "depthMaskFragMain" : "fragMain", .sourcePath = source });
+        return m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
-    std::unique_ptr<NRI::Pipeline> Renderer::buildMaterialGraphRayTracingOffsetPipeline(bool forceCompile)
+    nri::Pipeline Renderer::buildMaterialGraphRayTracingOffsetPipeline(bool forceCompile)
     {
         // The ray tracing scene's World Position Offset (RayTracingOffset.slang with the graphs): built now, as the others.
-        NRI::PipelineDesc desc{};
-        desc.type = NRI::PipelineType::Compute;
+        nri::PipelineDesc desc{};
+        desc.type = NRI_PIPELINE_COMPUTE;
         desc.forceCompile = forceCompile;
         desc.buildNow = true;
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain",
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "computeMain",
                                  .sourcePath = CustomLitShaders::RayTracingOffsetSourcePath().generic_string() });
-        return m_device->createPipeline(desc, *m_shaderCompiler);
+        return m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
-    std::unique_ptr<NRI::Pipeline> Renderer::buildMaterialGraphEditorPipeline(bool selection)
+    nri::Pipeline Renderer::buildMaterialGraphEditorPipeline(bool selection)
     {
         // As createStableEntityDepthPipeline / createSelectionMaskPipeline, from the generated sources with the graphs.
         const std::string source = (selection ? CustomLitShaders::SelectionMaskSourcePath() : CustomLitShaders::StableDepthSourcePath()).generic_string();
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.buildNow = true;
-        desc.colorFormats = { selection ? NRI::ImageFormat::R16_SFLOAT : NRI::ImageFormat::R32SINT };
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = source });
-        desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = source });
-        return m_device->createPipeline(desc, *m_shaderCompiler);
+        desc.colorFormats = { selection ? NRI_FORMAT_R16_SFLOAT : NRI_FORMAT_R32_SINT };
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = "assets/shaders/Material_PBR_MeshTask.slang" });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = source });
+        desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = source });
+        return m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
     bool Renderer::createCustomLitPipelines(bool forceCompile)
@@ -120,15 +120,15 @@ namespace Nox
         const bool graphs = m_customLitStatus.GraphCount > 0;
         try
         {
-            std::unique_ptr<NRI::Pipeline> deferred = shaders ? buildCustomLitDeferredPipeline(forceCompile) : nullptr;
-            std::unique_ptr<NRI::Pipeline> gbuffer = graphs ? buildMaterialGraphGBufferPipeline(forceCompile, true) : nullptr;
-            std::unique_ptr<NRI::Pipeline> gbufferNoVelocity = graphs ? buildMaterialGraphGBufferPipeline(forceCompile, false) : nullptr;
-            std::unique_ptr<NRI::Pipeline> visibility = graphs ? buildMaterialGraphVisibilityPipeline(forceCompile, false) : nullptr;
-            std::unique_ptr<NRI::Pipeline> shadowDepthMask = graphs ? buildMaterialGraphVisibilityPipeline(forceCompile, true) : nullptr;
-            std::unique_ptr<NRI::Pipeline> stableDepth = graphs && m_isEditor ? buildMaterialGraphEditorPipeline(false) : nullptr;
-            std::unique_ptr<NRI::Pipeline> selectionMask = graphs && m_isEditor ? buildMaterialGraphEditorPipeline(true) : nullptr;
-            std::unique_ptr<NRI::Pipeline> rayTracingOffset = graphs ? buildMaterialGraphRayTracingOffsetPipeline(forceCompile) : nullptr;
-            std::unique_ptr<NRI::Pipeline> forward = shaders || graphs ? buildCustomLitForwardPipeline(forceCompile, graphs) : nullptr;
+            nri::Pipeline deferred = shaders ? buildCustomLitDeferredPipeline(forceCompile) : nri::Pipeline{};
+            nri::Pipeline gbuffer = graphs ? buildMaterialGraphGBufferPipeline(forceCompile, true) : nri::Pipeline{};
+            nri::Pipeline gbufferNoVelocity = graphs ? buildMaterialGraphGBufferPipeline(forceCompile, false) : nri::Pipeline{};
+            nri::Pipeline visibility = graphs ? buildMaterialGraphVisibilityPipeline(forceCompile, false) : nri::Pipeline{};
+            nri::Pipeline shadowDepthMask = graphs ? buildMaterialGraphVisibilityPipeline(forceCompile, true) : nri::Pipeline{};
+            nri::Pipeline stableDepth = graphs && m_isEditor ? buildMaterialGraphEditorPipeline(false) : nri::Pipeline{};
+            nri::Pipeline selectionMask = graphs && m_isEditor ? buildMaterialGraphEditorPipeline(true) : nri::Pipeline{};
+            nri::Pipeline rayTracingOffset = graphs ? buildMaterialGraphRayTracingOffsetPipeline(forceCompile) : nri::Pipeline{};
+            nri::Pipeline forward = shaders || graphs ? buildCustomLitForwardPipeline(forceCompile, graphs) : nri::Pipeline{};
             m_customLitPipeline = std::move(deferred);
             m_gbufferGraphPipeline = std::move(gbuffer);
             m_gbufferGraphPipelineNoVelocity = std::move(gbufferNoVelocity);
@@ -221,7 +221,7 @@ namespace Nox
             // naming one are Default Lit / keep their own values.
             if (m_customLitPipeline || m_transparentLitCustomPipeline || m_gbufferGraphPipeline)
             {
-                m_device->waitIdle();
+                m_device.waitIdle();
                 m_customLitPipeline.reset();
                 m_transparentLitCustomPipeline.reset();
                 m_gbufferGraphPipeline.reset();
@@ -266,7 +266,7 @@ namespace Nox
         // includes, so a graph's edit compiles the G-buffer resolve's variant and the forward variant and loads the Custom Lit pass's
         // binary, a Material Shader's edit the other way round (every pipeline used to be compiled again: the user's test). With
         // material graphs, the G-buffer resolve's variant comes first (opaque surfaces: most of what a graph is on).
-        const bool compile = written && m_shaderCompiler->canCompile();
+        const bool compile = written && m_shaderCompiler.canCompile();
         auto build = std::make_shared<CustomLitBuild>();
         build->Paths = paths;
         build->ShaderCount = shaderCount;
@@ -296,7 +296,7 @@ namespace Nox
             std::future<bool> rayMaskTask;
             auto phase = [&]() -> bool
             {
-                std::future<std::unique_ptr<NRI::Pipeline>> forwardTask = std::async(std::launch::async, [this, graphCount]()
+                std::future<nri::Pipeline> forwardTask = std::async(std::launch::async, [this, graphCount]()
                 {
                     const BuildThreadPriority priority;
                     return buildCustomLitForwardPipeline(false, graphCount > 0);
@@ -313,7 +313,8 @@ namespace Nox
                         graphVariants.push_back(CustomLitShaders::SelectionMaskSourcePath().generic_string());
                     }
                     graphVariants.push_back(CustomLitShaders::RayTracingOffsetSourcePath().generic_string());
-                    m_device->compileShaderModules(graphVariants, *m_shaderCompiler); // (an error is thrown again by the pipeline below)
+                    std::vector<std::string_view> graphViews(graphVariants.begin(), graphVariants.end());
+                    m_device.compileShaderModules(graphViews, m_shaderCompiler.handle()); // (an error is thrown again by the pipeline below)
                 }
                 // The ray tracing passes' variants with the graphs' masks: compiled beside the forward variant once the graph variants
                 // (what makes the graph visible) are done (those whose binary is not cached: only after a mask changed), then their
@@ -325,7 +326,8 @@ namespace Nox
                         std::vector<std::string> variants;
                         for (const CustomLitShaders::RayTracingMaskVariant& variant : CustomLitShaders::RayTracingMaskVariants())
                             variants.push_back(variant.Variant);
-                        if (!m_device->compileShaderModules(variants, *m_shaderCompiler))
+                        std::vector<std::string_view> variantViews(variants.begin(), variants.end());
+                        if (!m_device.compileShaderModules(variantViews, m_shaderCompiler.handle()))
                             return false;
                         try
                         {
@@ -343,16 +345,16 @@ namespace Nox
                     });
                 if (graphCount > 0 && !cancelled())
                 {
-                    std::unique_ptr<NRI::Pipeline> gbuffer = buildMaterialGraphGBufferPipeline(false, true);
-                    std::unique_ptr<NRI::Pipeline> gbufferNoVelocity = buildMaterialGraphGBufferPipeline(false, false);
+                    nri::Pipeline gbuffer = buildMaterialGraphGBufferPipeline(false, true);
+                    nri::Pipeline gbufferNoVelocity = buildMaterialGraphGBufferPipeline(false, false);
                     // The Masked pipelines with the graphs' Opacity Mask, swapped in with the G-buffer resolve's (one set of slots).
-                    std::unique_ptr<NRI::Pipeline> visibility = buildMaterialGraphVisibilityPipeline(false, false);
-                    std::unique_ptr<NRI::Pipeline> shadowDepthMask = buildMaterialGraphVisibilityPipeline(false, true);
+                    nri::Pipeline visibility = buildMaterialGraphVisibilityPipeline(false, false);
+                    nri::Pipeline shadowDepthMask = buildMaterialGraphVisibilityPipeline(false, true);
                     // The editor's overlays (entity IDs / depth, selection outline) cut the mask too.
-                    std::unique_ptr<NRI::Pipeline> stableDepth = m_isEditor ? buildMaterialGraphEditorPipeline(false) : nullptr;
-                    std::unique_ptr<NRI::Pipeline> selectionMask = m_isEditor ? buildMaterialGraphEditorPipeline(true) : nullptr;
+                    nri::Pipeline stableDepth = m_isEditor ? buildMaterialGraphEditorPipeline(false) : nri::Pipeline{};
+                    nri::Pipeline selectionMask = m_isEditor ? buildMaterialGraphEditorPipeline(true) : nri::Pipeline{};
                     // The ray tracing scene's World Position Offset (its moved vertices), with the same slots.
-                    std::unique_ptr<NRI::Pipeline> rayTracingOffset = buildMaterialGraphRayTracingOffsetPipeline(false);
+                    nri::Pipeline rayTracingOffset = buildMaterialGraphRayTracingOffsetPipeline(false);
                     std::lock_guard lock(build->Mutex);
                     build->RayTracingOffset = std::move(rayTracingOffset);
                     build->StableDepth = std::move(stableDepth);
@@ -365,12 +367,12 @@ namespace Nox
                 }
                 if (shaderCount > 0 && !cancelled())
                 {
-                    std::unique_ptr<NRI::Pipeline> deferred = buildCustomLitDeferredPipeline(false);
+                    nri::Pipeline deferred = buildCustomLitDeferredPipeline(false);
                     std::lock_guard lock(build->Mutex);
                     build->Deferred = std::move(deferred);
                     build->DeferredDone = true;
                 }
-                std::unique_ptr<NRI::Pipeline> forward = forwardTask.get(); // (rethrows its compile error)
+                nri::Pipeline forward = forwardTask.get(); // (rethrows its compile error)
                 if (cancelled())
                     return false;
                 std::lock_guard lock(build->Mutex);
@@ -380,7 +382,7 @@ namespace Nox
             try
             {
                 if (compile)
-                    m_shaderCompiler->compile(CustomLitShaders::CheckSourcePath().generic_string());
+                    m_shaderCompiler.compile(CustomLitShaders::CheckSourcePath().generic_string());
                 const bool phaseDone = phase();
                 bool rayMasks = false;
                 if (rayMaskTask.valid())
@@ -412,7 +414,7 @@ namespace Nox
         if (!m_customLitBuild)
             return;
         CustomLitBuild& build = *m_customLitBuild;
-        std::unique_ptr<NRI::Pipeline> deferred, forward, gbuffer, gbufferNoVelocity, visibility, shadowDepthMask, stableDepth, selectionMask, rayTracingOffset;
+        nri::Pipeline deferred, forward, gbuffer, gbufferNoVelocity, visibility, shadowDepthMask, stableDepth, selectionMask, rayTracingOffset;
         bool failed, finished;
         std::string error;
         {
@@ -432,7 +434,7 @@ namespace Nox
         }
         if (deferred || forward || gbuffer)
         {
-            m_device->waitIdle(); // (the pipelines replaced may still be in flight)
+            m_device.waitIdle(); // (the pipelines replaced may still be in flight)
             if (gbuffer)
             {
                 // The slots and parameter layouts go with the G-buffer resolve's variant (the forward variant still running the old one
@@ -501,7 +503,7 @@ namespace Nox
             // What this build has none of: its pipelines dropped (a project whose last Material Shader or graph was removed).
             if (build.ShaderCount == 0 && m_customLitPipeline)
             {
-                m_device->waitIdle();
+                m_device.waitIdle();
                 m_customLitPipeline.reset();
                 m_customLitPaths = build.Paths;
                 m_customLitStatus.ShaderCount = 0;
@@ -515,7 +517,7 @@ namespace Nox
                 updateRayTracingGraphMasks(false);
             if (build.GraphCount == 0 && m_gbufferGraphPipeline)
             {
-                m_device->waitIdle();
+                m_device.waitIdle();
                 m_gbufferGraphPipeline.reset();
                 m_gbufferGraphPipelineNoVelocity.reset();
                 m_visibilityGraphPipeline.reset();
@@ -566,12 +568,12 @@ namespace Nox
     uint64_t Renderer::rayTracingGraphsHash() const
     {
         // What the variants compile from: the masks (every variant) and the surfaces (those that shade their hits) with what they include.
-        const uint64_t masks = m_shaderCompiler->sourceHash(CustomLitShaders::GraphMasksSourcePath().generic_string());
-        const uint64_t surfaces = m_shaderCompiler->sourceHash(CustomLitShaders::GraphSurfacesSourcePath().generic_string());
+        const uint64_t masks = m_shaderCompiler.sourceHash(CustomLitShaders::GraphMasksSourcePath().generic_string());
+        const uint64_t surfaces = m_shaderCompiler.sourceHash(CustomLitShaders::GraphSurfacesSourcePath().generic_string());
         return masks ^ (surfaces + 0x9E3779B97F4A7C15ull + (masks << 6) + (masks >> 2));
     }
 
-    NRI::PipelineDesc Renderer::rayTracingPassDesc(RayTracingPass pass, bool graphMasks, bool forceCompile)
+    nri::PipelineDesc Renderer::rayTracingPassDesc(RayTracingPass pass, bool graphMasks, bool forceCompile)
     {
         auto shader = [graphMasks](const char* source) -> std::string
         {
@@ -581,36 +583,36 @@ namespace Nox
                         return variant.Variant;
             return source;
         };
-        NRI::PipelineDesc desc{};
+        nri::PipelineDesc desc{};
         desc.forceCompile = forceCompile;
         // A full-screen pass: task, mesh and fragment stages of one file, its targets' formats.
-        auto screenPass = [&](const char* source, std::initializer_list<NRI::ImageFormat> formats)
+        auto screenPass = [&](const char* source, std::initializer_list<nri::ImageFormat> formats)
         {
             desc.colorFormats = formats;
             const std::string path = shader(source);
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Task, .entryPoint = "taskMain", .sourcePath = path });
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Mesh, .entryPoint = "meshMain", .sourcePath = path });
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Fragment, .entryPoint = "fragMain", .sourcePath = path });
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_TASK, .entryPoint = "taskMain", .sourcePath = path });
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MESH, .entryPoint = "meshMain", .sourcePath = path });
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_FRAGMENT, .entryPoint = "fragMain", .sourcePath = path });
         };
-        constexpr NRI::ImageFormat RGBA16F = NRI::ImageFormat::R16G16B16A16_SFLOAT;
+        constexpr nri::ImageFormat RGBA16F = NRI_FORMAT_R16G16B16A16_SFLOAT;
         switch (pass)
         {
         case RayTracingPass::ShadowMask:
-            screenPass("assets/shaders/ShadowMask.slang", { NRI::ImageFormat::R16G16_SFLOAT });
+            screenPass("assets/shaders/ShadowMask.slang", { NRI_FORMAT_R16G16_SFLOAT });
             break;
         case RayTracingPass::DeferredLighting:
             screenPass("assets/shaders/DeferredLighting.slang", { RGBA16F });
             break;
         case RayTracingPass::RTAO:
-            screenPass("assets/shaders/RTAO.slang", { NRI::ImageFormat::R16_SFLOAT });
+            screenPass("assets/shaders/RTAO.slang", { NRI_FORMAT_R16_SFLOAT });
             break;
         case RayTracingPass::Reflection:
             screenPass("assets/shaders/Reflection.slang", { RGBA16F }); // raw reflection: radiance RGB + hit distance A
             break;
         case RayTracingPass::ScreenProbeTrace:
             // (compute over its own targets: ScreenProbeCommon.slang, so it can run on the async compute queue)
-            desc.type = NRI::PipelineType::Compute;
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Compute, .entryPoint = "computeMain", .sourcePath = shader("assets/shaders/ScreenProbeTrace.slang") });
+            desc.type = NRI_PIPELINE_COMPUTE;
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "computeMain", .sourcePath = shader("assets/shaders/ScreenProbeTrace.slang") });
             break;
         case RayTracingPass::DDGIRadiance:
             screenPass("assets/shaders/DDGIRadiance.slang", { RGBA16F });
@@ -630,12 +632,12 @@ namespace Nox
             screenPass("assets/shaders/RTXDI/PT/ReSTIRPTTemporal.slang", { RGBA16F });
             break;
         case RayTracingPass::PathTracer:
-            desc.type = NRI::PipelineType::RayTracing;
+            desc.type = NRI_PIPELINE_RAY_TRACING;
             desc.maxRecursionDepth = 1;
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::RayGen, .entryPoint = "rayGenMain", .sourcePath = "assets/shaders/PathTracer/PathTracerRayGen.slang" });   // 0
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::Miss, .entryPoint = "missMain", .sourcePath = "assets/shaders/PathTracer/PathTracerMiss.slang" });         // 1
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::ClosestHit, .entryPoint = "closestHitMain", .sourcePath = shader("assets/shaders/PathTracer/PathTracerHit.slang") }); // 2
-            desc.shaders.push_back({ .stage = NRI::ShaderStage::AnyHit, .entryPoint = "anyHitMain", .sourcePath = shader("assets/shaders/PathTracer/PathTracerAnyHit.slang") });     // 3
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_RAY_GEN, .entryPoint = "rayGenMain", .sourcePath = "assets/shaders/PathTracer/PathTracerRayGen.slang" });   // 0
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MISS, .entryPoint = "missMain", .sourcePath = "assets/shaders/PathTracer/PathTracerMiss.slang" });         // 1
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_CLOSEST_HIT, .entryPoint = "closestHitMain", .sourcePath = shader("assets/shaders/PathTracer/PathTracerHit.slang") }); // 2
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_ANY_HIT, .entryPoint = "anyHitMain", .sourcePath = shader("assets/shaders/PathTracer/PathTracerAnyHit.slang") });     // 3
             desc.hitGroups.push_back({ .closestHitShaderIndex = 2, .anyHitShaderIndex = ~0u, .intersectionShaderIndex = ~0u }); // hit group 0: opaque
             desc.hitGroups.push_back({ .closestHitShaderIndex = 2, .anyHitShaderIndex = 3, .intersectionShaderIndex = ~0u });   // hit group 1: alpha tested
             break;
@@ -645,7 +647,7 @@ namespace Nox
         return desc;
     }
 
-    std::unique_ptr<NRI::Pipeline>& Renderer::rayTracingPassPipeline(RayTracingPass pass)
+    nri::Pipeline& Renderer::rayTracingPassPipeline(RayTracingPass pass)
     {
         switch (pass)
         {
@@ -667,16 +669,16 @@ namespace Nox
 
     Renderer::RayTracingPassPipelines Renderer::buildRayTracingPassPipelines(bool graphMasks)
     {
-        // One thread each (the GPU driver compiles each variant for 0.5 - 2.5 s: the user's log), built now (NRI::PipelineDesc::buildNow:
+        // One thread each (the GPU driver compiles each variant for 0.5 - 2.5 s: the user's log), built now (nri::PipelineDesc::buildNow:
         // a pipeline built later on the pool would make the first frame that binds it wait).
-        std::array<std::future<std::unique_ptr<NRI::Pipeline>>, static_cast<size_t>(RayTracingPass::Count)> builds;
+        std::array<std::future<nri::Pipeline>, static_cast<size_t>(RayTracingPass::Count)> builds;
         for (size_t i = 0; i < builds.size(); ++i)
             builds[i] = std::async(std::launch::async, [this, i, graphMasks]()
             {
                 const BuildThreadPriority priority;
-                NRI::PipelineDesc desc = rayTracingPassDesc(static_cast<RayTracingPass>(i), graphMasks, false);
+                nri::PipelineDesc desc = rayTracingPassDesc(static_cast<RayTracingPass>(i), graphMasks, false);
                 desc.buildNow = true;
-                return m_device->createPipeline(desc, *m_shaderCompiler);
+                return m_device.createPipeline(desc, m_shaderCompiler.handle());
             });
         RayTracingPassPipelines pipelines;
         std::exception_ptr error;
@@ -699,7 +701,7 @@ namespace Nox
 
     void Renderer::installRayTracingPassPipelines(RayTracingPassPipelines pipelines, bool graphMasks, uint64_t masksHash)
     {
-        m_device->waitIdle(); // (the pipelines replaced may still be in flight)
+        m_device.waitIdle(); // (the pipelines replaced may still be in flight)
         for (size_t i = 0; i < pipelines.size(); ++i)
             rayTracingPassPipeline(static_cast<RayTracingPass>(i)) = std::move(pipelines[i]);
         bakePathTracerShaderTable();
@@ -762,7 +764,7 @@ namespace Nox
                                                                            std::filesystem::exists(CustomLitShaders::VisibilitySourcePath())));
         if ((shaderCount > 0 || m_customLitStatus.GraphCount > 0) && sourcesShipped)
         {
-            m_device->waitIdle();
+            m_device.waitIdle();
             createCustomLitPipelines(false);
             // (the ray tracing passes' mask variants shipped with their binaries when the editor had built them)
             const bool variantsShipped = std::all_of(CustomLitShaders::RayTracingMaskVariants().begin(), CustomLitShaders::RayTracingMaskVariants().end(),
@@ -783,7 +785,7 @@ namespace Nox
         // pack holds no Material Shader to compile, and its registry may list none. Else (the editor, a development run with the
         // project's files) every Material Shader readable on disk and a compiler here: generated from the sources.
         const bool packaged = VFS::HasMounts();
-        if (!packaged && complete && graphsComplete && m_shaderCompiler->canCompile())
+        if (!packaged && complete && graphsComplete && m_shaderCompiler.canCompile())
         {
             waitForCustomLitBuild(); // (another project's build)
             m_customLitRequestedPaths.clear(); // (a project opened: its own slots)

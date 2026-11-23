@@ -1,7 +1,7 @@
 #pragma once
 #include "NoxCore/Console/Console.h"
-#include "NetProtocol.h"
-#include "NetTransport.h"
+#include <NoxNet/NetProtocol.h>
+#include <NoxNet/NetTransport.h>
 
 #include <functional>
 #include <memory>
@@ -13,10 +13,14 @@
 // client, with the scene's replication -- what NoxRuntime and the editor's multiplayer Play both run. The host owns the scene; the
 // session tells it which scene to play (a client travels to the server's on join, and back when the session ends) and is called around
 // the host's frame: Receive (joins, leaves, snapshots; others interpolated) -> the scene's update -> AfterScene (snapshots) -> Send.
-namespace Nox::Net
+namespace NoxNet
 {
     class NetServer;
     class NetClient;
+}
+
+namespace Nox::Net
+{
     class NetReplication;
 
     enum class SessionRole : uint8_t { DedicatedServer, ListenServer, Client };

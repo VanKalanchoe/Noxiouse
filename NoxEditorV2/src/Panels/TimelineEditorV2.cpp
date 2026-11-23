@@ -10,8 +10,8 @@
 #include <SDL3/SDL_scancode.h>
 
 #include "Panels/InspectorWidgetsV2.h"
-#include "NoxCore/UI/Widgets/UIChannelCurves.h"
-#include "NoxCore/UI/Widgets/UIPropertyRows.h"
+#include <NoxUI/Widgets/UIChannelCurves.h>
+#include <NoxUI/Widgets/UIPropertyRows.h>
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/TimelineImporter.h"
@@ -23,18 +23,18 @@
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/Scene/Scene.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
-#include "NoxCore/UI/Core/UIContext.h"
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Core/UIContext.h>
 #include "NoxCore/UI/Core/UILayer.h"
-#include "NoxCore/UI/Layout/UILayout.h"
-#include "NoxCore/UI/Rendering/UIDrawList.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UICheckBox.h"
-#include "NoxCore/UI/Widgets/UIDragScalar.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
-#include "NoxCore/UI/Widgets/UITextInput.h"
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UICheckBox.h>
+#include <NoxUI/Widgets/UIDragScalar.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIMenu.h>
+#include <NoxUI/Widgets/UIScrollView.h>
+#include <NoxUI/Widgets/UITextInput.h>
 
 namespace Nox
 {
@@ -44,7 +44,7 @@ namespace Nox
         constexpr float kRuler = 22.0f;
         constexpr float kLane = 24.0f;
 
-        UI::UIContext* Context()
+        NoxUI::UIContext* Context()
         {
             UILayer* uiLayer = Application::Get().GetUILayer();
             return uiLayer ? &uiLayer->GetContext() : nullptr;
@@ -66,7 +66,7 @@ namespace Nox
         // Hundredths of a second (Ctrl: free).
         float SnapTime(float time)
         {
-            return (UI::UIContext::GetCurrentModifiers() & UI::UIMod::Ctrl) ? time : std::round(time * 100.0f) / 100.0f;
+            return (NoxUI::UIContext::GetCurrentModifiers() & NoxUI::UIMod::Ctrl) ? time : std::round(time * 100.0f) / 100.0f;
         }
 
         std::string TrackName(const TimelineTrack& track, Entity player)
@@ -83,35 +83,35 @@ namespace Nox
 
         // The tracks: a label column (mute box, name, Key, X) and a lane each, the ruler, the playhead. Wheel: scroll sideways
         // (Shift: up / down).
-        class TracksView final : public UI::UIElement
+        class TracksView final : public NoxUI::UIElement
         {
         public:
             explicit TracksView(TimelineEditorV2* editor) : m_Editor(editor)
             {
-                HitTestMode = UI::UIHitTestMode::Self;
-                WidthMode = UI::UISizeMode::Fill;
-                HeightMode = UI::UISizeMode::Fill;
+                HitTestMode = NoxUI::UIHitTestMode::Self;
+                WidthMode = NoxUI::UISizeMode::Fill;
+                HeightMode = NoxUI::UISizeMode::Fill;
                 Focusable = true; // (Delete removes the selected key while this view has the keyboard)
             }
 
-            bool OnMouseWheel(const UI::UIPointerEvent& e) override
+            bool OnMouseWheel(const NoxUI::UIPointerEvent& e) override
             {
-                if (e.Modifiers & UI::UIMod::Shift)
+                if (e.Modifiers & NoxUI::UIMod::Shift)
                     m_ScrollY = std::max(0.0f, m_ScrollY - e.ScrollDelta.y * kLane * 2.0f);
                 else
                     m_ScrollX = std::max(0.0f, m_ScrollX - (e.ScrollDelta.y + e.ScrollDelta.x) * 60.0f);
                 return true;
             }
-            bool OnKeyDown(const UI::UIKeyEvent& e) override { return m_Editor->HandleKey(e); }
+            bool OnKeyDown(const NoxUI::UIKeyEvent& e) override { return m_Editor->HandleKey(e); }
 
-            bool OnPointerDown(const UI::UIPointerEvent& e) override
+            bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
             {
                 if (e.Button != 1)
                     return false;
                 Timeline* timeline = m_Editor->GetTimeline();
                 if (!timeline)
                     return true;
-                const UI::UIRect b = GetBounds();
+                const NoxUI::UIRect b = GetBounds();
                 m_Drag = Drag::None;
                 if (e.Position.y < b.Min.y + kRuler && e.Position.x >= LaneLeft())
                 {
@@ -156,7 +156,7 @@ namespace Nox
                     }
                 return true;
             }
-            bool OnPointerMove(const UI::UIPointerEvent& e) override
+            bool OnPointerMove(const NoxUI::UIPointerEvent& e) override
             {
                 Timeline* timeline = m_Editor->GetTimeline();
                 if (!timeline)
@@ -176,7 +176,7 @@ namespace Nox
                 UpdateTooltip(e.Position);
                 return true;
             }
-            bool OnPointerUp(const UI::UIPointerEvent& e) override
+            bool OnPointerUp(const NoxUI::UIPointerEvent& e) override
             {
                 if (e.Button != 1)
                     return false;
@@ -199,35 +199,35 @@ namespace Nox
             }
 
         protected:
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme&) override
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme&) override
             {
-                const UI::UIRect b = GetBounds();
-                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, UI::ThemeColor("TimelineBackground", { 0.09f, 0.09f, 0.11f, 1.0f }));
+                const NoxUI::UIRect b = GetBounds();
+                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, NoxUI::ThemeColor("TimelineBackground", { 0.09f, 0.09f, 0.11f, 1.0f }));
                 Timeline* timeline = m_Editor->GetTimeline();
                 if (!timeline)
                 {
-                    d.AddText("Loading...", nullptr, { b.Min.x + 8.0f, b.Min.y + 8.0f }, 13.0f, UI::ThemeColor("TextMuted", { 0.6f, 0.6f, 0.65f, 1.0f }));
+                    d.AddText("Loading...", nullptr, { b.Min.x + 8.0f, b.Min.y + 8.0f }, 13.0f, NoxUI::ThemeColor("TextMuted", { 0.6f, 0.6f, 0.65f, 1.0f }));
                     return;
                 }
                 const float duration = std::max(timeline->Duration, 0.01f);
                 const float laneLeft = LaneLeft(), laneRight = TimeToX(duration);
                 const Entity player = m_Editor->GetPlayer();
-                const glm::vec4 text = UI::ThemeColor("TimelineText", { 0.86f, 0.88f, 0.92f, 1.0f });
-                const glm::vec4 dim = UI::ThemeColor("TextMuted", { 0.55f, 0.57f, 0.62f, 1.0f });
+                const glm::vec4 text = NoxUI::ThemeColor("TimelineText", { 0.86f, 0.88f, 0.92f, 1.0f });
+                const glm::vec4 dim = NoxUI::ThemeColor("TextMuted", { 0.55f, 0.57f, 0.62f, 1.0f });
                 m_ScrollY = std::clamp(m_ScrollY, 0.0f, std::max(0.0f, static_cast<float>(timeline->Tracks.size()) * kLane - (b.Height() - kRuler)));
                 d.PushClipRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y });
 
                 // Ruler.
                 d.PushClipRect({ b.Min.x + kLabelWidth, b.Min.y }, { b.Max.x, b.Max.y });
-                d.AddRoundedRect({ laneLeft, b.Min.y }, { laneRight, b.Min.y + kRuler }, UI::ThemeColor("TimelineRuler", { 0.16f, 0.16f, 0.18f, 1.0f }));
+                d.AddRoundedRect({ laneLeft, b.Min.y }, { laneRight, b.Min.y + kRuler }, NoxUI::ThemeColor("TimelineRuler", { 0.16f, 0.16f, 0.18f, 1.0f }));
                 const float step = PixelsPerSecond() >= 200.0f ? 0.1f : (PixelsPerSecond() >= 60.0f ? 0.5f : 1.0f);
                 for (float time = 0.0f; time <= duration + 1e-4f; time += step)
                 {
                     const float x = TimeToX(time);
                     const bool major = std::fmod(time + 1e-4f, 1.0f) < 2e-4f;
-                    d.AddRoundedRect({ x, b.Min.y + (major ? 4.0f : 12.0f) }, { x + 1.0f, b.Min.y + kRuler }, UI::ThemeColor("TimelineTick", { 0.59f, 0.59f, 0.59f, 1.0f }));
+                    d.AddRoundedRect({ x, b.Min.y + (major ? 4.0f : 12.0f) }, { x + 1.0f, b.Min.y + kRuler }, NoxUI::ThemeColor("TimelineTick", { 0.59f, 0.59f, 0.59f, 1.0f }));
                     if (major)
-                        d.AddText(std::format("{:.0f}", time), nullptr, { x + 2.0f, b.Min.y + 1.0f }, 11.5f, UI::ThemeColor("TimelineTickText", { 0.78f, 0.78f, 0.78f, 1.0f }));
+                        d.AddText(std::format("{:.0f}", time), nullptr, { x + 2.0f, b.Min.y + 1.0f }, 11.5f, NoxUI::ThemeColor("TimelineTickText", { 0.78f, 0.78f, 0.78f, 1.0f }));
                 }
                 d.PopClipRect();
 
@@ -241,18 +241,18 @@ namespace Nox
                     const bool selected = static_cast<int>(t) == m_Editor->SelectedTrack;
                     // Label column.
                     d.PushClipRect({ b.Min.x, std::max(top, b.Min.y + kRuler) }, { b.Min.x + kLabelWidth, top + kLane });
-                    d.AddRoundedRect({ b.Min.x + 4.0f, top + 5.0f }, { b.Min.x + 18.0f, top + 19.0f }, track.Muted ? UI::ThemeColor("TimelineMuted", { 0.25f, 0.25f, 0.28f, 1.0f }) : UI::ThemeColor("TimelineMuteBox", { 0.35f, 0.62f, 0.95f, 1.0f }),
+                    d.AddRoundedRect({ b.Min.x + 4.0f, top + 5.0f }, { b.Min.x + 18.0f, top + 19.0f }, track.Muted ? NoxUI::ThemeColor("TimelineMuted", { 0.25f, 0.25f, 0.28f, 1.0f }) : NoxUI::ThemeColor("TimelineMuteBox", { 0.35f, 0.62f, 0.95f, 1.0f }),
                                      glm::vec4(3.0f));
                     d.AddText(TrackName(track, player), nullptr, { b.Min.x + 24.0f, top + 5.0f }, 12.5f,
-                              selected ? UI::ThemeColor("TimelineTrackSelected", { 1.0f, 0.8f, 0.4f, 1.0f }) : (track.Muted ? dim : text));
-                    d.AddRoundedRect({ b.Min.x + kLabelWidth - 70.0f, top + 3.0f }, { b.Min.x + kLabelWidth - 34.0f, top + kLane - 3.0f }, UI::ThemeColor("TimelineKeyButton", { 0.24f, 0.26f, 0.32f, 1.0f }), glm::vec4(3.0f));
+                              selected ? NoxUI::ThemeColor("TimelineTrackSelected", { 1.0f, 0.8f, 0.4f, 1.0f }) : (track.Muted ? dim : text));
+                    d.AddRoundedRect({ b.Min.x + kLabelWidth - 70.0f, top + 3.0f }, { b.Min.x + kLabelWidth - 34.0f, top + kLane - 3.0f }, NoxUI::ThemeColor("TimelineKeyButton", { 0.24f, 0.26f, 0.32f, 1.0f }), glm::vec4(3.0f));
                     d.AddText("Key", nullptr, { b.Min.x + kLabelWidth - 64.0f, top + 5.0f }, 12.0f, text);
-                    d.AddRoundedRect({ b.Min.x + kLabelWidth - 30.0f, top + 3.0f }, { b.Min.x + kLabelWidth - 6.0f, top + kLane - 3.0f }, UI::ThemeColor("TimelineRemoveButton", { 0.32f, 0.20f, 0.20f, 1.0f }), glm::vec4(3.0f));
+                    d.AddRoundedRect({ b.Min.x + kLabelWidth - 30.0f, top + 3.0f }, { b.Min.x + kLabelWidth - 6.0f, top + kLane - 3.0f }, NoxUI::ThemeColor("TimelineRemoveButton", { 0.32f, 0.20f, 0.20f, 1.0f }), glm::vec4(3.0f));
                     d.AddText("X", nullptr, { b.Min.x + kLabelWidth - 22.0f, top + 5.0f }, 12.0f, text);
                     d.PopClipRect();
 
                     d.PushClipRect({ b.Min.x + kLabelWidth, std::max(top, b.Min.y + kRuler) }, { b.Max.x, top + kLane });
-                    d.AddRoundedRect({ laneLeft, top + 1.0f }, { laneRight, top + kLane - 1.0f }, selected ? UI::ThemeColor("TimelineLaneSelected", { 0.20f, 0.20f, 0.25f, 1.0f }) : UI::ThemeColor("TimelineLane", { 0.14f, 0.14f, 0.16f, 1.0f }));
+                    d.AddRoundedRect({ laneLeft, top + 1.0f }, { laneRight, top + kLane - 1.0f }, selected ? NoxUI::ThemeColor("TimelineLaneSelected", { 0.20f, 0.20f, 0.25f, 1.0f }) : NoxUI::ThemeColor("TimelineLane", { 0.14f, 0.14f, 0.16f, 1.0f }));
                     if (track.Property == TimelineProperty::Audio)
                         for (size_t k = 0; k < track.Keys.size(); ++k)
                         {
@@ -271,7 +271,7 @@ namespace Nox
                             if (k + 1 < track.Keys.size())
                                 end = std::min(end, track.Keys[k + 1].Time);
                             const float x0 = TimeToX(section.Time), x1 = TimeToX(end);
-                            d.AddRoundedRect({ x0, top + 3.0f }, { x1, top + kLane - 4.0f }, section.Asset != 0 ? UI::ThemeColor("TimelineAudioSection", { 0.24f, 0.47f, 0.35f, 0.8f }) : UI::ThemeColor("TimelineAudioSectionMissing", { 0.43f, 0.24f, 0.24f, 0.8f }), glm::vec4(3.0f));
+                            d.AddRoundedRect({ x0, top + 3.0f }, { x1, top + kLane - 4.0f }, section.Asset != 0 ? NoxUI::ThemeColor("TimelineAudioSection", { 0.24f, 0.47f, 0.35f, 0.8f }) : NoxUI::ThemeColor("TimelineAudioSectionMissing", { 0.43f, 0.24f, 0.24f, 0.8f }), glm::vec4(3.0f));
                             d.PushClipRect({ x0, top }, { x1, top + kLane });
                             d.AddText(section.Asset != 0 ? AssetManager::GetMetadata(section.Asset).FilePath.stem().string() : std::string("(no sound)"), nullptr, { x0 + 9.0f, top + 5.0f }, 11.5f, text);
                             d.PopClipRect();
@@ -280,10 +280,10 @@ namespace Nox
                     {
                         const float x = TimeToX(track.Keys[k].Time), y = top + kLane * 0.5f;
                         const bool keySelected = selected && static_cast<int>(k) == m_Editor->SelectedKey;
-                        const glm::vec4 color = keySelected ? UI::ThemeColor("TimelineKeySelected", { 1.0f, 0.78f, 0.27f, 1.0f })
-                                              : track.Property == TimelineProperty::Event ? UI::ThemeColor("TimelineKeyEvent", { 0.47f, 0.78f, 1.0f, 1.0f })
-                                              : track.Property == TimelineProperty::CameraCut ? UI::ThemeColor("TimelineKeyCameraCut", { 0.78f, 0.55f, 1.0f, 1.0f }) : UI::ThemeColor("TimelineKey", { 0.86f, 0.86f, 0.86f, 1.0f });
-                        d.AddRoundedRect({ x - 5.0f, y - 5.0f }, { x + 5.0f, y + 5.0f }, color, glm::vec4(2.0f), 1.0f, UI::ThemeColor("TimelineKeyBorder", { 0.08f, 0.08f, 0.08f, 1.0f }));
+                        const glm::vec4 color = keySelected ? NoxUI::ThemeColor("TimelineKeySelected", { 1.0f, 0.78f, 0.27f, 1.0f })
+                                              : track.Property == TimelineProperty::Event ? NoxUI::ThemeColor("TimelineKeyEvent", { 0.47f, 0.78f, 1.0f, 1.0f })
+                                              : track.Property == TimelineProperty::CameraCut ? NoxUI::ThemeColor("TimelineKeyCameraCut", { 0.78f, 0.55f, 1.0f, 1.0f }) : NoxUI::ThemeColor("TimelineKey", { 0.86f, 0.86f, 0.86f, 1.0f });
+                        d.AddRoundedRect({ x - 5.0f, y - 5.0f }, { x + 5.0f, y + 5.0f }, color, glm::vec4(2.0f), 1.0f, NoxUI::ThemeColor("TimelineKeyBorder", { 0.08f, 0.08f, 0.08f, 1.0f }));
                     }
                     d.PopClipRect();
                 }
@@ -293,8 +293,8 @@ namespace Nox
                 // Playhead.
                 d.PushClipRect({ b.Min.x + kLabelWidth, b.Min.y }, { b.Max.x, b.Max.y });
                 const float playhead = TimeToX(std::clamp(m_Editor->Time, 0.0f, duration));
-                d.AddRoundedRect({ playhead - 1.0f, b.Min.y }, { playhead + 1.0f, b.Max.y }, UI::ThemeColor("TimelinePlayhead", { 1.0f, 0.31f, 0.24f, 1.0f }));
-                d.AddRoundedRect({ playhead - 5.0f, b.Min.y }, { playhead + 5.0f, b.Min.y + 8.0f }, UI::ThemeColor("TimelinePlayhead", { 1.0f, 0.31f, 0.24f, 1.0f }), glm::vec4(0.0f, 0.0f, 5.0f, 5.0f));
+                d.AddRoundedRect({ playhead - 1.0f, b.Min.y }, { playhead + 1.0f, b.Max.y }, NoxUI::ThemeColor("TimelinePlayhead", { 1.0f, 0.31f, 0.24f, 1.0f }));
+                d.AddRoundedRect({ playhead - 5.0f, b.Min.y }, { playhead + 5.0f, b.Min.y + 8.0f }, NoxUI::ThemeColor("TimelinePlayhead", { 1.0f, 0.31f, 0.24f, 1.0f }), glm::vec4(0.0f, 0.0f, 5.0f, 5.0f));
                 d.PopClipRect();
                 d.PopClipRect();
             }
@@ -319,7 +319,7 @@ namespace Nox
                     m_Editor->Playing = false;
                 }
             }
-            void UpdateTooltip(const UI::UIVec2& p)
+            void UpdateTooltip(const NoxUI::UIVec2& p)
             {
                 const Timeline* timeline = m_Editor->GetTimeline();
                 const int track = TrackAt(p.y);
@@ -443,11 +443,11 @@ namespace Nox
         m_Committed = Capture();
     }
 
-    bool TimelineEditorV2::HandleKey(const UI::UIKeyEvent& e)
+    bool TimelineEditorV2::HandleKey(const NoxUI::UIKeyEvent& e)
     {
         const int keyCode = e.KeyCode;
         const uint16_t mods = e.Modifiers;
-        if (keyCode == SDL_SCANCODE_DELETE && !(mods & UI::UIMod::Ctrl))
+        if (keyCode == SDL_SCANCODE_DELETE && !(mods & NoxUI::UIMod::Ctrl))
         {
             Timeline* timeline = GetTimeline();
             if (!timeline || SelectedTrack < 0 || SelectedTrack >= static_cast<int>(timeline->Tracks.size()))
@@ -460,12 +460,12 @@ namespace Nox
             Edited();
             return true;
         }
-        if (!(mods & UI::UIMod::Ctrl))
+        if (!(mods & NoxUI::UIMod::Ctrl))
             return false;
         switch (keyCode)
         {
         case SDL_SCANCODE_S: Save(); return true;
-        case SDL_SCANCODE_Z: if (mods & UI::UIMod::Shift) Redo(); else Undo(); return true;
+        case SDL_SCANCODE_Z: if (mods & NoxUI::UIMod::Shift) Redo(); else Undo(); return true;
         case SDL_SCANCODE_Y: Redo(); return true;
         default: return false;
         }
@@ -483,14 +483,14 @@ namespace Nox
         {
             NOX_CORE_WARN("Could not save the timeline {}", path.string());
             if (Notify)
-                Notify({ UI::UINotificationSeverity::Error, "Timeline not saved", path.filename().string() + " could not be written." });
+                Notify({ NoxUI::UINotificationSeverity::Error, "Timeline not saved", path.filename().string() + " could not be written." });
             return;
         }
         if (auto assets = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr)
             assets->NoteSourceWritten(m_Handle);
         m_Dirty = false;
         if (Notify)
-            Notify({ UI::UINotificationSeverity::Success, "Timeline saved", m_Name });
+            Notify({ NoxUI::UINotificationSeverity::Success, "Timeline saved", m_Name });
     }
 
     bool TimelineEditorV2::RevertToDisk()
@@ -503,7 +503,7 @@ namespace Nox
         if (!TimelineImporter::Deserialize(path, fromFile))
         {
             if (Notify)
-                Notify({ UI::UINotificationSeverity::Error, "Changes not discarded", m_Name + ": the file could not be read back. The edits stay." });
+                Notify({ NoxUI::UINotificationSeverity::Error, "Changes not discarded", m_Name + ": the file could not be read back. The edits stay." });
             return false;
         }
         EndPreview();
@@ -727,7 +727,7 @@ namespace Nox
             if (!value)
             {
                 if (Notify)
-                    Notify({ UI::UINotificationSeverity::Warning, "No key added", "The track's target is missing, or has no such component." });
+                    Notify({ NoxUI::UINotificationSeverity::Warning, "No key added", "The track's target is missing, or has no such component." });
                 return;
             }
             key.Value = *value;
@@ -760,7 +760,7 @@ namespace Nox
     void TimelineEditorV2::AutoKey(Timeline& timeline, Scene& scene, Entity player)
     {
         // Not while a mouse button is held (a gizmo drag): the key goes in once the move is done.
-        if (UI::UIContext::IsMouseButtonHeld())
+        if (NoxUI::UIContext::IsMouseButtonHeld())
             return;
         bool keyed = false;
         for (TimelineTrack& track : timeline.Tracks)
@@ -794,18 +794,18 @@ namespace Nox
             Edited();
     }
 
-    void TimelineEditorV2::ShowAddTrackMenu(const UI::UIRect& anchor)
+    void TimelineEditorV2::ShowAddTrackMenu(const NoxUI::UIRect& anchor)
     {
-        UI::UIContext* context = Context();
+        NoxUI::UIContext* context = Context();
         Ref<Scene> scene = m_Hooks.ActiveScene ? m_Hooks.ActiveScene() : nullptr;
         if (!context || !scene || !m_PlayerEntity)
             return;
         Entity player = m_PlayerEntity;
         // The player and every entity below it, each with the properties its components have.
-        std::function<UI::UIMenuItem(Entity)> entityMenu = [&](Entity entity) -> UI::UIMenuItem
+        std::function<NoxUI::UIMenuItem(Entity)> entityMenu = [&](Entity entity) -> NoxUI::UIMenuItem
         {
             const std::string path = PathFrom(player, entity);
-            std::vector<UI::UIMenuItem> properties;
+            std::vector<NoxUI::UIMenuItem> properties;
             const auto property = [this, &properties, path](TimelineProperty kind, const std::string& parameter = {})
             {
                 properties.push_back({ parameter.empty() ? TimelineEvaluation::GetPropertyName(kind) : parameter, "", [this, path, kind, parameter]()
@@ -836,10 +836,10 @@ namespace Nox
                 property(TimelineProperty::CameraFOV);
             if (entity.HasComponent<MeshComponent>())
             {
-                std::vector<UI::UIMenuItem> morphs;
+                std::vector<NoxUI::UIMenuItem> morphs;
                 for (const auto& [target, defaultWeight] : GetMeshMorphTargets(entity.GetComponent<MeshComponent>().Mesh))
                 {
-                    std::vector<UI::UIMenuItem> holder;
+                    std::vector<NoxUI::UIMenuItem> holder;
                     std::swap(holder, properties);
                     property(TimelineProperty::MorphWeight, target);
                     morphs.push_back(properties.back());
@@ -847,10 +847,10 @@ namespace Nox
                 }
                 if (!morphs.empty())
                     properties.push_back({ TimelineEvaluation::GetPropertyName(TimelineProperty::MorphWeight), "", {}, false, true, false, false, "", std::move(morphs) });
-                std::vector<UI::UIMenuItem> parameters;
+                std::vector<NoxUI::UIMenuItem> parameters;
                 for (uint8_t index = 0; index < static_cast<uint8_t>(MaterialParameter::Count); ++index)
                 {
-                    std::vector<UI::UIMenuItem> holder;
+                    std::vector<NoxUI::UIMenuItem> holder;
                     std::swap(holder, properties);
                     property(TimelineProperty::MaterialParameter, MaterialParameters::Name(static_cast<MaterialParameter>(index)));
                     parameters.push_back(properties.back());
@@ -872,72 +872,72 @@ namespace Nox
                         properties.push_back(entityMenu(child));
             return { path.empty() ? player.GetName() + " (player)" : path, "", {}, false, true, false, false, "", std::move(properties) };
         };
-        UI::UIMenuPopup::ShowPopupMenu(*context, anchor, { entityMenu(player) });
+        NoxUI::UIMenuPopup::ShowPopupMenu(*context, anchor, { entityMenu(player) });
     }
 
-    Ref<UI::UIElement> TimelineEditorV2::BuildUI()
+    Ref<NoxUI::UIElement> TimelineEditorV2::BuildUI()
     {
-        UI::UIContext* context = Context();
+        NoxUI::UIContext* context = Context();
         // The window's root: keys typed in it that its children leave (Ctrl+S, Ctrl+Z, Ctrl+Y, Delete) come here.
-        auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-        root->OnKey = [this](const UI::UIKeyEvent& e) { return HandleKey(e); };
-        root->WidthMode = UI::UISizeMode::Fill;
-        root->HeightMode = UI::UISizeMode::Fill;
+        auto root = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 6.0f);
+        root->OnKey = [this](const NoxUI::UIKeyEvent& e) { return HandleKey(e); };
+        root->WidthMode = NoxUI::UISizeMode::Fill;
+        root->HeightMode = NoxUI::UISizeMode::Fill;
         root->StyleClass = "Surface";
         root->DrawBackground = true;
-        root->Padding = UI::UIThickness::All(8.0f);
+        root->Padding = NoxUI::UIThickness::All(8.0f);
         root->Focusable = true;
         m_Root = root;
 
-        auto bar = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-        bar->WidthMode = UI::UISizeMode::Fill;
-        Ref<UI::UIButton> save(new UI::UIButton("Save", [this]() { Save(); }));
-        Ref<UI::UIButton> undo(new UI::UIButton("Undo", [this]() { Undo(); }));
-        Ref<UI::UIButton> redo(new UI::UIButton("Redo", [this]() { Redo(); }));
-        Ref<UI::UIButton> play(new UI::UIButton("Play", [this]()
+        auto bar = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+        bar->WidthMode = NoxUI::UISizeMode::Fill;
+        Ref<NoxUI::UIButton> save(new NoxUI::UIButton("Save", [this]() { Save(); }));
+        Ref<NoxUI::UIButton> undo(new NoxUI::UIButton("Undo", [this]() { Undo(); }));
+        Ref<NoxUI::UIButton> redo(new NoxUI::UIButton("Redo", [this]() { Redo(); }));
+        Ref<NoxUI::UIButton> play(new NoxUI::UIButton("Play", [this]()
         {
             const Timeline* timeline = GetTimeline();
             if (!Playing && timeline && Time >= timeline->Duration)
                 Time = 0.0f;
             Playing = !Playing;
         }));
-        Ref<UI::UIButton> start(new UI::UIButton("|<", [this]() { Time = 0.0f; Playing = false; }));
+        Ref<NoxUI::UIButton> start(new NoxUI::UIButton("|<", [this]() { Time = 0.0f; Playing = false; }));
         start->Tooltip = "Back to the start";
-        auto timeLabel = UI::Label("", 13.5f);
-        Ref<UI::UILabel> timeRef = timeLabel;
-        timeRef->VAlign = UI::UIAlignment::Center;
-        auto duration = UI::MakeUI<UI::UIDragScalar>(5.0f, 0.05f, [this](float v) { if (Timeline* t = GetTimeline()) { t->Duration = std::max(v, 0.1f); Changing(); } });
+        auto timeLabel = NoxUI::Label("", 13.5f);
+        Ref<NoxUI::UILabel> timeRef = timeLabel;
+        timeRef->VAlign = NoxUI::UIAlignment::Center;
+        auto duration = NoxUI::MakeUI<NoxUI::UIDragScalar>(5.0f, 0.05f, [this](float v) { if (Timeline* t = GetTimeline()) { t->Duration = std::max(v, 0.1f); Changing(); } });
         duration->OnCommitted = [this](float) { Edited(); };
         duration->Min = 0.1f;
         duration->Max = 3600.0f;
         duration->Prefix = "Duration ";
         duration->Format = "{:.2f} s";
-        duration->WidthMode = UI::UISizeMode::Fixed;
+        duration->WidthMode = NoxUI::UISizeMode::Fixed;
         duration->FixedSize = { 140.0f, 24.0f };
-        Ref<UI::UICheckBox> loop(new UI::UICheckBox("Loop", false, [this](bool v) { if (Timeline* t = GetTimeline()) { t->Loop = v; Edited(); } }));
-        Ref<UI::UICheckBox> preview(new UI::UICheckBox("Preview", m_PreviewWanted, [this](bool v) { m_PreviewWanted = v; }));
+        Ref<NoxUI::UICheckBox> loop(new NoxUI::UICheckBox("Loop", false, [this](bool v) { if (Timeline* t = GetTimeline()) { t->Loop = v; Edited(); } }));
+        Ref<NoxUI::UICheckBox> preview(new NoxUI::UICheckBox("Preview", m_PreviewWanted, [this](bool v) { m_PreviewWanted = v; }));
         preview->Tooltip = "Poses the targets at the playhead while editing; what they had comes back when it is off, the window closes, the scene is saved or Play starts.";
-        Ref<UI::UICheckBox> autoKey(new UI::UICheckBox("Auto-Key", m_AutoKey, [this](bool v) { m_AutoKey = v; }));
+        Ref<NoxUI::UICheckBox> autoKey(new NoxUI::UICheckBox("Auto-Key", m_AutoKey, [this](bool v) { m_AutoKey = v; }));
         autoKey->Tooltip = "While previewing: moving a track's target (gizmo, Inspector) keys its new value at the playhead.";
-        Ref<UI::UICheckBox> curves(new UI::UICheckBox("Curves", m_ShowCurves, [this](bool v) { m_ShowCurves = v; }));
+        Ref<NoxUI::UICheckBox> curves(new NoxUI::UICheckBox("Curves", m_ShowCurves, [this](bool v) { m_ShowCurves = v; }));
         curves->Tooltip = "The selected track's values over time; drag a key up or down to change it.";
-        Ref<UI::UIDragScalar> zoom = CreateSliderField(PixelsPerSecond, 20.0f, 600.0f, [this](float v) { PixelsPerSecond = v; });
+        Ref<NoxUI::UIDragScalar> zoom = CreateSliderField(PixelsPerSecond, 20.0f, 600.0f, [this](float v) { PixelsPerSecond = v; });
         zoom->Format = "Zoom {:.0f} px/s";
-        zoom->WidthMode = UI::UISizeMode::Fixed;
+        zoom->WidthMode = NoxUI::UISizeMode::Fixed;
         zoom->FixedSize = { 150.0f, 24.0f };
-        Ref<UI::UIButton> addTrack(new UI::UIButton("+ Track"));
-        UI::UIButton* addRaw = addTrack.get();
+        Ref<NoxUI::UIButton> addTrack(new NoxUI::UIButton("+ Track"));
+        NoxUI::UIButton* addRaw = addTrack.get();
         addTrack->OnClick = [this, addRaw]() { ShowAddTrackMenu(addRaw->GetBounds()); };
         addTrack->Tooltip = "A property of the player or an entity under it";
-        for (const Ref<UI::UIElement>& element : std::initializer_list<Ref<UI::UIElement>>{ save, undo, redo, play, start, timeRef, duration, loop, preview, autoKey, curves, zoom, addTrack })
+        for (const Ref<NoxUI::UIElement>& element : std::initializer_list<Ref<NoxUI::UIElement>>{ save, undo, redo, play, start, timeRef, duration, loop, preview, autoKey, curves, zoom, addTrack })
             bar->AddChild(element);
         root->AddChild(bar);
-        auto status = UI::Label("", 13.0f);
-        Ref<UI::UILabel> statusRef = status;
+        auto status = NoxUI::Label("", 13.0f);
+        Ref<NoxUI::UILabel> statusRef = status;
         statusRef->WordWrap = true;
-        statusRef->WidthMode = UI::UISizeMode::Fill;
+        statusRef->WidthMode = NoxUI::UISizeMode::Fill;
         root->AddChild(statusRef);
-        UI::AppendSync(*root, [this, save, undo, redo, play, timeRef, duration, loop, preview, autoKey, curves, zoom, addTrack, statusRef]()
+        NoxUI::AppendSync(*root, [this, save, undo, redo, play, timeRef, duration, loop, preview, autoKey, curves, zoom, addTrack, statusRef]()
         {
             const Timeline* timeline = GetTimeline();
             save->SetEnabled(m_Dirty);
@@ -965,7 +965,7 @@ namespace Nox
 
         root->AddChild(Ref<TracksView>(new TracksView(this)));
         // The selected track's values over time (UI::UIChannelCurves): drag a key's dot up or down (Shift: also its time).
-        Ref<UI::UIChannelCurves> curvesView(new UI::UIChannelCurves());
+        Ref<NoxUI::UIChannelCurves> curvesView(new NoxUI::UIChannelCurves());
         curvesView->Tooltip = "The selected track's values. Drag a key's dot up / down to change its value (Shift: also its time).";
         const auto selectedTrack = [this]() -> TimelineTrack*
         {
@@ -1002,10 +1002,10 @@ namespace Nox
         curvesView->NoValuesText = "This track has no values.";
         m_Curves = curvesView;
         root->AddChild(curvesView);
-        UI::AppendSync(*root, [this]() { m_Curves->Visible = m_ShowCurves; });
+        NoxUI::AppendSync(*root, [this]() { m_Curves->Visible = m_ShowCurves; });
 
-        m_Details = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
-        m_Details->WidthMode = UI::UISizeMode::Fill;
+        m_Details = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 4.0f);
+        m_Details->WidthMode = NoxUI::UISizeMode::Fill;
         root->AddChild(m_Details);
         m_DetailsTrack = m_DetailsKey = -2;
         (void)context;
@@ -1019,7 +1019,7 @@ namespace Nox
         m_DetailsTrack = SelectedTrack;
         m_DetailsKey = SelectedKey;
         m_DetailsKeyCount = timeline && SelectedTrack >= 0 && SelectedTrack < static_cast<int>(timeline->Tracks.size()) ? timeline->Tracks[static_cast<size_t>(SelectedTrack)].Keys.size() : 0;
-        UI::UIPropertyRows rows(m_Details, Context());
+        NoxUI::UIPropertyRows rows(m_Details, Context());
         if (!timeline || SelectedTrack < 0 || SelectedTrack >= static_cast<int>(timeline->Tracks.size()))
         {
             rows.Note("Select a key to edit it.");
@@ -1210,13 +1210,13 @@ namespace Nox
             std::vector<Scene::TimelineAudioSection> sections;
             if (Playing)
                 sceneRef->CollectTimelineAudio(m_PlayerEntity, *timeline, Time, sections);
-            sceneRef->SyncTimelineAudio(sections, m_PreviewAudio, AudioVoiceGroup::Editor);
+            sceneRef->SyncTimelineAudio(sections, m_PreviewAudio, NoxAudio::AudioVoiceGroup::Editor);
         }
         else
             StopPreviewAudio();
 
         // A finished change is one history step: taken when no mouse button is held.
-        if (m_ChangePending && !UI::UIContext::IsMouseButtonHeld())
+        if (m_ChangePending && !NoxUI::UIContext::IsMouseButtonHeld())
             CommitHistory();
 
         const size_t keyCount = SelectedTrack >= 0 && SelectedTrack < static_cast<int>(timeline->Tracks.size()) ? timeline->Tracks[static_cast<size_t>(SelectedTrack)].Keys.size() : 0;

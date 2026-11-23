@@ -76,7 +76,7 @@ namespace Nox
         }
         const ProfileMemoryStats& memory = profiler.GetMemoryStats();
         uint64_t vramUsage = 0, vramBudget = 0;
-        for (const NRI::MemoryHeapStats& heap : memory.Heaps)
+        for (const nri::MemoryHeapStats& heap : memory.Heaps)
         {
             if (!heap.deviceLocal)
                 continue;
@@ -134,7 +134,7 @@ namespace Nox
         {
             for (size_t index = 0; index < memory.Heaps.size(); ++index)
             {
-                const NRI::MemoryHeapStats& heap = memory.Heaps[index];
+                const nri::MemoryHeapStats& heap = memory.Heaps[index];
                 ImGui::Text("%s heap %zu: %.0f / %.0f MB, %llu allocations (%.0f in %.0f MB of blocks)", heap.deviceLocal ? "VRAM" : "Host", index,
                             ToMegabytes(heap.usage), ToMegabytes(heap.budget), static_cast<unsigned long long>(heap.allocationCount),
                             ToMegabytes(heap.allocationBytes), ToMegabytes(heap.blockBytes));

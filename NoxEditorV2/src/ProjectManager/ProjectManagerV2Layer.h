@@ -8,18 +8,19 @@
 
 #include "NoxCore/Core/Layer.h"
 #include "NoxCore/Core/Ref.h"
-#include "NRI/Texture.h"
+#include "NoxCore/Renderer/Texture2D.h"
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIButton;
         class UILabel;
         class UIScrollView;
         class UIStackBox;
         class UITextInput;
     }
+
+namespace Nox
+{
 
     class ProjectManagerV2Layer : public Layer
     {
@@ -62,14 +63,14 @@ namespace Nox
         bool m_OpenLast = false;
 
         Ref<Texture2D> m_TemplatePictures[2];
-        Ref<UI::UIScrollView> m_ProjectList;
-        Ref<UI::UIStackBox> m_TemplateTiles[2];
-        Ref<UI::UILabel> m_OpenErrorLabel;
-        Ref<UI::UITextInput> m_NameInput;
-        Ref<UI::UITextInput> m_LocationInput;
-        Ref<UI::UILabel> m_CreatesLabel;
-        Ref<UI::UILabel> m_CreatesDetailsLabel;
-        Ref<UI::UILabel> m_ErrorLabel;
-        Ref<UI::UIButton> m_CreateButton;
+        Ref<NoxUI::UIScrollView> m_ProjectList;
+        Ref<NoxUI::UIStackBox> m_TemplateTiles[2];
+        Ref<NoxUI::UILabel> m_OpenErrorLabel;
+        Ref<NoxUI::UITextInput> m_NameInput;
+        Ref<NoxUI::UITextInput> m_LocationInput;
+        Ref<NoxUI::UILabel> m_CreatesLabel;
+        Ref<NoxUI::UILabel> m_CreatesDetailsLabel;
+        Ref<NoxUI::UILabel> m_ErrorLabel;
+        Ref<NoxUI::UIButton> m_CreateButton;
     };
 }

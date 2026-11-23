@@ -11,19 +11,19 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneSerializer.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
-#include "NoxCore/UI/Core/UIContext.h"
-#include "NoxCore/UI/Layout/UILayout.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UICheckBox.h"
-#include "NoxCore/UI/Widgets/UIDragScalar.h"
-#include "NoxCore/UI/Widgets/UIDropdown.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
-#include "NoxCore/UI/Widgets/UIModal.h"
-#include "NoxCore/UI/Widgets/UIPopup.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
-#include "NoxCore/UI/Widgets/UITextInput.h"
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Core/UIContext.h>
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UICheckBox.h>
+#include <NoxUI/Widgets/UIDragScalar.h>
+#include <NoxUI/Widgets/UIDropdown.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIMenu.h>
+#include <NoxUI/Widgets/UIModal.h>
+#include <NoxUI/Widgets/UIPopup.h>
+#include <NoxUI/Widgets/UIScrollView.h>
+#include <NoxUI/Widgets/UITextInput.h>
 
 namespace Nox
 {
@@ -41,20 +41,20 @@ namespace Nox
             return state == Scene::LevelState::Loaded ? "loaded" : state == Scene::LevelState::Loading ? "loading" : "unloaded";
         }
 
-        Ref<UI::UILabel> Muted(const std::string& text, float size = 13.0f)
+        Ref<NoxUI::UILabel> Muted(const std::string& text, float size = 13.0f)
         {
-            Ref<UI::UILabel> label(new UI::UILabel(text, size));
+            Ref<NoxUI::UILabel> label(new NoxUI::UILabel(text, size));
             label->UseColorOverride = true;
-            label->ColorOverride = UI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
-            label->VAlign = UI::UIAlignment::Center;
+            label->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
+            label->VAlign = NoxUI::UIAlignment::Center;
             return label;
         }
 
-        Ref<UI::UIElement> FixedWidth(Ref<UI::UIElement> element, float width)
+        Ref<NoxUI::UIElement> FixedWidth(Ref<NoxUI::UIElement> element, float width)
         {
-            element->WidthMode = UI::UISizeMode::Fixed;
+            element->WidthMode = NoxUI::UISizeMode::Fixed;
             element->FixedSize = { width, element->FixedSize.y > 0.0f ? element->FixedSize.y : 24.0f };
-            element->VAlign = UI::UIAlignment::Center;
+            element->VAlign = NoxUI::UIAlignment::Center;
             return element;
         }
     }
@@ -65,21 +65,21 @@ namespace Nox
             m_Hooks.SceneChanged();
     }
 
-    const Ref<UI::UIElement>& LevelsV2Panel::BuildUI(UI::UIContext* context)
+    const Ref<NoxUI::UIElement>& LevelsV2Panel::BuildUI(NoxUI::UIContext* context)
     {
         m_Context = context;
-        auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 0.0f);
-        root->WidthMode = UI::UISizeMode::Fill;
-        root->HeightMode = UI::UISizeMode::Fill;
+        auto root = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 0.0f);
+        root->WidthMode = NoxUI::UISizeMode::Fill;
+        root->HeightMode = NoxUI::UISizeMode::Fill;
         root->StyleClass = "Surface";
         root->DrawBackground = true;
-        auto scroll = UI::MakeUI<UI::UIScrollView>();
-        scroll->WidthMode = UI::UISizeMode::Fill;
-        scroll->HeightMode = UI::UISizeMode::Fill;
+        auto scroll = NoxUI::MakeUI<NoxUI::UIScrollView>();
+        scroll->WidthMode = NoxUI::UISizeMode::Fill;
+        scroll->HeightMode = NoxUI::UISizeMode::Fill;
         root->AddChild(scroll);
-        m_Body = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
-        m_Body->WidthMode = UI::UISizeMode::Fill;
-        m_Body->Padding = UI::UIThickness::All(8.0f);
+        m_Body = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 4.0f);
+        m_Body->WidthMode = NoxUI::UISizeMode::Fill;
+        m_Body->Padding = NoxUI::UIThickness::All(8.0f);
         scroll->AddChild(m_Body);
         m_Root = root;
         m_Rebuild = true;
@@ -127,7 +127,7 @@ namespace Nox
         {
             auto note = Muted("The scene is a world: it has no sub-levels (its cells are loaded in Window > World Partition).");
             note->WordWrap = true;
-            note->WidthMode = UI::UISizeMode::Fill;
+            note->WidthMode = NoxUI::UISizeMode::Fill;
             m_Body->AddChild(note);
             return;
         }
@@ -136,13 +136,13 @@ namespace Nox
 
         // Header row.
         {
-            auto header = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-            header->WidthMode = UI::UISizeMode::Fill;
+            auto header = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+            header->WidthMode = NoxUI::UISizeMode::Fill;
             header->AddChild(FixedWidth(Muted("Current"), 54.0f));
             header->AddChild(FixedWidth(Muted("Visible"), 46.0f));
             header->AddChild(FixedWidth(Muted("Locked"), 46.0f));
             auto level = Muted("Level");
-            level->WidthMode = UI::UISizeMode::Fill;
+            level->WidthMode = NoxUI::UISizeMode::Fill;
             header->AddChild(level);
             header->AddChild(FixedWidth(Muted("Loading"), 130.0f));
             header->AddChild(FixedWidth(Muted("Placement"), 150.0f));
@@ -152,9 +152,9 @@ namespace Nox
 
         // The persistent level: the scene itself.
         {
-            auto row = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-            row->WidthMode = UI::UISizeMode::Fill;
-            Ref<UI::UICheckBox> current(new UI::UICheckBox("", scene->GetCurrentLevel() == 0, [this, getScene](bool)
+            auto row = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+            row->WidthMode = NoxUI::UISizeMode::Fill;
+            Ref<NoxUI::UICheckBox> current(new NoxUI::UICheckBox("", scene->GetCurrentLevel() == 0, [this, getScene](bool)
             {
                 if (Ref<Scene> s = getScene())
                 {
@@ -168,15 +168,15 @@ namespace Nox
             row->AddChild(FixedWidth(Muted(""), 46.0f));
             row->AddChild(FixedWidth(Muted(""), 46.0f));
             const AssetHandle openScene = m_Hooks.OpenScene ? m_Hooks.OpenScene() : AssetHandle(0);
-            auto name = UI::Label("Persistent Level (" + (openScene != 0 ? LevelName(openScene) : std::string("unsaved scene")) + ")", 14.0f);
-            name->WidthMode = UI::UISizeMode::Fill;
-            name->VAlign = UI::UIAlignment::Center;
+            auto name = NoxUI::Label("Persistent Level (" + (openScene != 0 ? LevelName(openScene) : std::string("unsaved scene")) + ")", 14.0f);
+            name->WidthMode = NoxUI::UISizeMode::Fill;
+            name->VAlign = NoxUI::UIAlignment::Center;
             row->AddChild(name);
             row->AddChild(FixedWidth(Muted("always"), 130.0f));
             row->AddChild(FixedWidth(Muted(""), 150.0f));
             row->AddChild(FixedWidth(Muted(""), 70.0f));
             m_Body->AddChild(row);
-            UI::AppendSync(*row, [current, getScene]() { if (Ref<Scene> s = getScene()) current->Checked = s->GetCurrentLevel() == 0; });
+            NoxUI::AppendSync(*row, [current, getScene]() { if (Ref<Scene> s = getScene()) current->Checked = s->GetCurrentLevel() == 0; });
         }
 
         for (const Scene::SubLevel& subLevel : scene->GetSubLevels())
@@ -188,10 +188,10 @@ namespace Nox
                 const Ref<Scene> s = getScene();
                 return s ? s->FindSubLevel(level) : nullptr;
             };
-            auto row = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-            row->WidthMode = UI::UISizeMode::Fill;
+            auto row = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+            row->WidthMode = NoxUI::UISizeMode::Fill;
 
-            Ref<UI::UICheckBox> current(new UI::UICheckBox("", false, [this, getScene, level](bool)
+            Ref<NoxUI::UICheckBox> current(new NoxUI::UICheckBox("", false, [this, getScene, level](bool)
             {
                 if (Ref<Scene> s = getScene())
                 {
@@ -202,7 +202,7 @@ namespace Nox
             current->Tooltip = "The current level: new entities go into it (a level must be loaded, visible and unlocked)";
             row->AddChild(FixedWidth(current, 54.0f));
 
-            Ref<UI::UICheckBox> visible(new UI::UICheckBox("", subLevel.Visible, [this, getScene, level](bool v)
+            Ref<NoxUI::UICheckBox> visible(new NoxUI::UICheckBox("", subLevel.Visible, [this, getScene, level](bool v)
             {
                 if (Ref<Scene> s = getScene())
                 {
@@ -215,7 +215,7 @@ namespace Nox
             visible->SetEnabled(editing);
             row->AddChild(FixedWidth(visible, 46.0f));
 
-            Ref<UI::UICheckBox> locked(new UI::UICheckBox("", subLevel.Locked, [this, getScene, level](bool v)
+            Ref<NoxUI::UICheckBox> locked(new NoxUI::UICheckBox("", subLevel.Locked, [this, getScene, level](bool v)
             {
                 if (Ref<Scene> s = getScene())
                 {
@@ -227,14 +227,14 @@ namespace Nox
             locked->SetEnabled(editing);
             row->AddChild(FixedWidth(locked, 46.0f));
 
-            auto name = UI::Label(LevelName(level), 14.0f);
-            Ref<UI::UILabel> nameRef = name;
-            nameRef->WidthMode = UI::UISizeMode::Fill;
-            nameRef->VAlign = UI::UIAlignment::Center;
+            auto name = NoxUI::Label(LevelName(level), 14.0f);
+            Ref<NoxUI::UILabel> nameRef = name;
+            nameRef->WidthMode = NoxUI::UISizeMode::Fill;
+            nameRef->VAlign = NoxUI::UIAlignment::Center;
             nameRef->Tooltip = AssetManager::IsAssetHandleValid(level) ? AssetManager::GetMetadata(level).FilePath.generic_string() : std::string();
             row->AddChild(nameRef);
 
-            auto loading = UI::MakeUI<UI::UIDropdown>(m_Context, std::vector<std::string>{ "Always Loaded", "Streamed" }, subLevel.AlwaysLoaded ? 0 : 1,
+            auto loading = NoxUI::MakeUI<NoxUI::UIDropdown>(m_Context, std::vector<std::string>{ "Always Loaded", "Streamed" }, subLevel.AlwaysLoaded ? 0 : 1,
                 [this, getScene, level](int index)
                 {
                     if (Ref<Scene> s = getScene())
@@ -248,14 +248,14 @@ namespace Nox
             loading->SetEnabled(editing);
             row->AddChild(FixedWidth(loading, 130.0f));
 
-            Ref<UI::UIButton> placement(new UI::UIButton("as built"));
-            UI::UIButton* placementRaw = placement.get();
+            Ref<NoxUI::UIButton> placement(new NoxUI::UIButton("as built"));
+            NoxUI::UIButton* placementRaw = placement.get();
             placement->OnClick = [this, level, placementRaw]() { ShowPlacement(level, placementRaw->GetBounds()); };
             placement->Tooltip = "The level transform: moves and turns the whole level (all its entities) at once. Its file keeps it where "
                                  "it was built; the offset is applied when it is read and taken out when it is saved.";
             row->AddChild(FixedWidth(placement, 150.0f));
 
-            Ref<UI::UIButton> remove(new UI::UIButton("Remove", [this, getScene, level]()
+            Ref<NoxUI::UIButton> remove(new NoxUI::UIButton("Remove", [this, getScene, level]()
             {
                 const auto removeLevel = [this, getScene, level]()
                 {
@@ -280,7 +280,7 @@ namespace Nox
             row->AddChild(FixedWidth(remove, 70.0f));
             m_Body->AddChild(row);
 
-            UI::AppendSync(*row, [=]() // (on the row: what it updates is inside it)
+            NoxUI::AppendSync(*row, [=]() // (on the row: what it updates is inside it)
             {
                 const Scene::SubLevel* now = find();
                 if (!now)
@@ -288,9 +288,9 @@ namespace Nox
                 const Ref<Scene> s = getScene();
                 current->Checked = s && s->GetCurrentLevel() == level;
                 current->SetEnabled(editing && now->Loaded && now->Visible && !now->Locked);
-                if (!UI::HasState(visible->GetState(), UI::UIState::Pressed))
+                if (!NoxUI::HasState(visible->GetState(), NoxUI::UIState::Pressed))
                     visible->Checked = now->Visible;
-                if (!UI::HasState(locked->GetState(), UI::UIState::Pressed))
+                if (!NoxUI::HasState(locked->GetState(), NoxUI::UIState::Pressed))
                     locked->Checked = now->Locked;
                 if (loading->GetSelectedIndex() != (now->AlwaysLoaded ? 0 : 1))
                     loading->SetSelectedIndex(now->AlwaysLoaded ? 0 : 1, false);
@@ -315,17 +315,17 @@ namespace Nox
         {
             auto note = Muted("Play / Simulate: Always Loaded levels are in from the start, the others follow their volumes and scripts.");
             note->WordWrap = true;
-            note->WidthMode = UI::UISizeMode::Fill;
+            note->WidthMode = NoxUI::UISizeMode::Fill;
             m_Body->AddChild(note);
             return;
         }
 
         // Actions.
-        auto actions = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-        actions->WidthMode = UI::UISizeMode::Fill;
-        actions->Margin = UI::UIThickness{ 0.0f, 8.0f, 0.0f, 0.0f };
-        Ref<UI::UIButton> addExisting(new UI::UIButton("Add Existing Level..."));
-        UI::UIButton* addRaw = addExisting.get();
+        auto actions = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+        actions->WidthMode = NoxUI::UISizeMode::Fill;
+        actions->Margin = NoxUI::UIThickness{ 0.0f, 8.0f, 0.0f, 0.0f };
+        Ref<NoxUI::UIButton> addExisting(new NoxUI::UIButton("Add Existing Level..."));
+        NoxUI::UIButton* addRaw = addExisting.get();
         addExisting->OnClick = [this, getScene, addRaw]()
         {
             const Ref<Scene> s = getScene();
@@ -333,7 +333,7 @@ namespace Nox
             if (!s || !assets || !m_Context)
                 return;
             const AssetHandle openScene = m_Hooks.OpenScene ? m_Hooks.OpenScene() : AssetHandle(0);
-            std::vector<UI::UIMenuItem> items;
+            std::vector<NoxUI::UIMenuItem> items;
             for (const auto& [handle, metadata] : assets->GetAssetRegistry())
             {
                 if (metadata.Type != AssetType::Scene || handle == openScene || s->FindSubLevel(handle))
@@ -352,16 +352,16 @@ namespace Nox
             }
             if (items.empty())
                 items.push_back({ "No other scenes in the project", "", {}, false, false, false, true });
-            UI::UIMenuPopup::ShowPopupMenu(*m_Context, addRaw->GetBounds(), std::move(items));
+            NoxUI::UIMenuPopup::ShowPopupMenu(*m_Context, addRaw->GetBounds(), std::move(items));
         };
         addExisting->Tooltip = "A scene made on its own, edited here together with this one (it keeps its own file)";
         actions->AddChild(addExisting);
 
-        Ref<UI::UIButton> newLevel(new UI::UIButton("New Level...", [this]() { ShowNewLevelDialog(); }));
+        Ref<NoxUI::UIButton> newLevel(new NoxUI::UIButton("New Level...", [this]() { ShowNewLevelDialog(); }));
         newLevel->Tooltip = "Makes an empty scene file next to the open scene, adds it as a sub-level and makes it the current level";
         actions->AddChild(newLevel);
 
-        Ref<UI::UIButton> move(new UI::UIButton("Move Selection to Current", [this, getScene]()
+        Ref<NoxUI::UIButton> move(new NoxUI::UIButton("Move Selection to Current", [this, getScene]()
         {
             const Ref<Scene> s = getScene();
             const std::vector<Entity> selection = m_Hooks.Selection ? m_Hooks.Selection() : std::vector<Entity>{};
@@ -371,7 +371,7 @@ namespace Nox
             Changed();
         }));
         actions->AddChild(move);
-        UI::AppendSync(*actions, [this, move, getScene]()
+        NoxUI::AppendSync(*actions, [this, move, getScene]()
         {
             const bool any = m_Hooks.Selection && !m_Hooks.Selection().empty();
             move->SetEnabled(any);
@@ -383,11 +383,11 @@ namespace Nox
         m_Body->AddChild(actions);
 
         auto unsaved = Muted("");
-        Ref<UI::UILabel> unsavedRef = unsaved;
+        Ref<NoxUI::UILabel> unsavedRef = unsaved;
         unsavedRef->UseColorOverride = true;
-        unsavedRef->ColorOverride = UI::ThemeColor("StatusWarning", { 1.0f, 0.75f, 0.3f, 1.0f });
+        unsavedRef->ColorOverride = NoxUI::ThemeColor("StatusWarning", { 1.0f, 0.75f, 0.3f, 1.0f });
         m_Body->AddChild(unsavedRef);
-        UI::AppendSync(*unsavedRef, [this, unsavedRef = unsavedRef.get(), getScene]()
+        NoxUI::AppendSync(*unsavedRef, [this, unsavedRef = unsavedRef.get(), getScene]()
         {
             const Ref<Scene> s = getScene();
             const bool warn = s && !s->GetSubLevels().empty() && (!m_Hooks.OpenScene || m_Hooks.OpenScene() == 0);
@@ -398,17 +398,17 @@ namespace Nox
         m_Body->AddChild(m_Message);
     }
 
-    void LevelsV2Panel::ShowPlacement(AssetHandle level, const UI::UIRect& anchor)
+    void LevelsV2Panel::ShowPlacement(AssetHandle level, const NoxUI::UIRect& anchor)
     {
         const Ref<Scene> scene = m_Hooks.ActiveScene ? m_Hooks.ActiveScene() : nullptr;
         const Scene::SubLevel* subLevel = scene ? scene->FindSubLevel(level) : nullptr;
         if (!subLevel || !m_Context)
             return;
         std::function<Ref<Scene>()> getScene = m_Hooks.ActiveScene;
-        auto box = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
-        box->Padding = UI::UIThickness::All(10.0f);
+        auto box = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 4.0f);
+        box->Padding = NoxUI::UIThickness::All(10.0f);
         box->FixedSize = { 300.0f, 0.0f };
-        box->AddChild(UI::Label(LevelName(level), 14.0f));
+        box->AddChild(NoxUI::Label(LevelName(level), 14.0f));
         const double meter = static_cast<double>(WorldUnits::FromMeters(1.0f));
         // Each field writes its part of the transform, reading the others from the scene (so the three axes and the yaw stay one).
         const auto apply = [this, getScene, level, meter](int axis, float value)
@@ -429,12 +429,12 @@ namespace Nox
         const char* labels[] = { "Offset X (m)", "Offset Y (m)", "Offset Z (m)", "Yaw (deg)" };
         for (int axis = 0; axis < 4; ++axis)
         {
-            auto row = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-            row->WidthMode = UI::UISizeMode::Fill;
+            auto row = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+            row->WidthMode = NoxUI::UISizeMode::Fill;
             row->AddChild(FixedWidth(Muted(labels[axis]), 100.0f));
             const float value = axis < 3 ? static_cast<float>(subLevel->Offset[axis] / meter) : subLevel->Yaw * kRadiansToDegrees;
-            auto field = UI::MakeUI<UI::UIDragScalar>(value, axis < 3 ? 0.05f : 0.5f, [apply, axis](float v) { apply(axis, v); });
-            field->WidthMode = UI::UISizeMode::Fill;
+            auto field = NoxUI::MakeUI<NoxUI::UIDragScalar>(value, axis < 3 ? 0.05f : 0.5f, [apply, axis](float v) { apply(axis, v); });
+            field->WidthMode = NoxUI::UISizeMode::Fill;
             field->Format = axis < 3 ? "{:.2f}" : "{:.1f}";
             if (axis == 3)
             {
@@ -444,7 +444,7 @@ namespace Nox
             row->AddChild(field);
             box->AddChild(row);
         }
-        Ref<UI::UIButton> reset(new UI::UIButton("Reset", [this, getScene, level]()
+        Ref<NoxUI::UIButton> reset(new NoxUI::UIButton("Reset", [this, getScene, level]()
         {
             if (Ref<Scene> s = getScene())
             {
@@ -455,9 +455,9 @@ namespace Nox
                 m_Context->ClearOverlay();
         }));
         reset->Tooltip = "Back to where it was built";
-        reset->HAlign = UI::UIAlignment::Start;
+        reset->HAlign = NoxUI::UIAlignment::Start;
         box->AddChild(reset);
-        UI::UIPopup::Show(*m_Context, anchor, box);
+        NoxUI::UIPopup::Show(*m_Context, anchor, box);
     }
 
     void LevelsV2Panel::ShowNewLevelDialog()
@@ -466,21 +466,21 @@ namespace Nox
             return;
         const AssetHandle openScene = m_Hooks.OpenScene ? m_Hooks.OpenScene() : AssetHandle(0);
         const std::filesystem::path folder = openScene != 0 ? AssetManager::GetMetadata(openScene).FilePath.parent_path() : std::filesystem::path();
-        auto content = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-        content->WidthMode = UI::UISizeMode::Fill;
-        content->AddChild(UI::Label("A new empty level in " + (folder.empty() ? std::string("the assets folder") : "Assets/" + folder.generic_string()), 14.0f));
-        auto name = UI::MakeUI<UI::UITextInput>();
+        auto content = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 6.0f);
+        content->WidthMode = NoxUI::UISizeMode::Fill;
+        content->AddChild(NoxUI::Label("A new empty level in " + (folder.empty() ? std::string("the assets folder") : "Assets/" + folder.generic_string()), 14.0f));
+        auto name = NoxUI::MakeUI<NoxUI::UITextInput>();
         name->Text = "NewLevel";
-        name->WidthMode = UI::UISizeMode::Fill;
+        name->WidthMode = NoxUI::UISizeMode::Fill;
         content->AddChild(name);
         auto error = Muted("");
-        Ref<UI::UILabel> errorRef = error;
+        Ref<NoxUI::UILabel> errorRef = error;
         errorRef->UseColorOverride = true;
-        errorRef->ColorOverride = UI::ThemeColor("StatusError", { 1.0f, 0.6f, 0.3f, 1.0f });
+        errorRef->ColorOverride = NoxUI::ThemeColor("StatusError", { 1.0f, 0.6f, 0.3f, 1.0f });
         errorRef->WordWrap = true;
-        errorRef->WidthMode = UI::UISizeMode::Fill;
+        errorRef->WidthMode = NoxUI::UISizeMode::Fill;
         content->AddChild(errorRef);
-        UI::UITextInput* nameRaw = name.get();
+        NoxUI::UITextInput* nameRaw = name.get();
         const auto create = [this, nameRaw, errorRef]()
         {
             const Ref<Scene> s = m_Hooks.ActiveScene ? m_Hooks.ActiveScene() : nullptr;
@@ -498,11 +498,11 @@ namespace Nox
         };
         name->OnSubmit = [create](const std::string&) { create(); };
         // Create keeps the dialog open on an error (a modal button closes it): the field's Enter and this button run the same check.
-        Ref<UI::UIButton> createButton(new UI::UIButton("Create", create));
+        Ref<NoxUI::UIButton> createButton(new NoxUI::UIButton("Create", create));
         createButton->StyleVariant = "primary";
-        createButton->HAlign = UI::UIAlignment::Start;
+        createButton->HAlign = NoxUI::UIAlignment::Start;
         content->AddChild(createButton);
-        UI::UIModal::ShowCustom(*m_Context, "New Level", content, { { "Cancel", {} } }, 440.0f);
+        NoxUI::UIModal::ShowCustom(*m_Context, "New Level", content, { { "Cancel", {} } }, 440.0f);
         m_Context->SetFocus(nameRaw);
     }
 

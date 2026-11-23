@@ -14,6 +14,7 @@
 
 namespace Nox::Mcp
 {
+    using namespace ::NoxMcp;
     namespace
     {
         constexpr const char* Instructions =
@@ -59,7 +60,7 @@ namespace Nox::Mcp
         for (ConsoleVariable* variable : { static_cast<ConsoleVariable*>(m_Enabled), static_cast<ConsoleVariable*>(m_Port),
                                            static_cast<ConsoleVariable*>(m_Access) })
         {
-            variable->SetRequiredAccess(ConsoleAccess::User);
+            variable->SetRequiredAccess(::Nox::ConsoleAccess::User);
             variable->OnChanged([this](ConsoleVariable&)
             {
                 if (m_Loading || !m_Initialized)
@@ -69,7 +70,7 @@ namespace Nox::Mcp
             });
         }
         m_Commands.push_back(console.RegisterCommand({ "mcp.Status", "mcp.Status", "The MCP server: address, access, calls so far, token file",
-            ConsoleAccess::Read,
+            ::Nox::ConsoleAccess::Read,
             [this](const std::vector<std::string>&, ConsoleOutput& output)
             {
                 if (m_Server.IsRunning())
@@ -80,7 +81,7 @@ namespace Nox::Mcp
                                                   : std::format("MCP server off: {}", m_Problem));
             } }));
         m_Commands.push_back(console.RegisterCommand({ "mcp.RotateToken", "mcp.RotateToken",
-            "A new MCP token (connected clients must reconnect with it)", ConsoleAccess::User,
+            "A new MCP token (connected clients must reconnect with it)", ::Nox::ConsoleAccess::User,
             [this](const std::vector<std::string>&, ConsoleOutput& output)
             {
                 if (!EnsureToken(true))
@@ -114,9 +115,9 @@ namespace Nox::Mcp
         return std::format("http://127.0.0.1:{}/mcp", m_Server.IsRunning() ? m_RunningPort : static_cast<uint16_t>(m_Port->Get()));
     }
 
-    ConsoleAccess McpEditor::Granted() const
+    NoxMcp::ToolAccess McpEditor::Granted() const
     {
-        return static_cast<ConsoleAccess>(std::clamp(m_Access->Get(), 0, 2));
+        return static_cast<NoxMcp::ToolAccess>(std::clamp(m_Access->Get(), 0, 2));
     }
 
     void McpEditor::Initialize()

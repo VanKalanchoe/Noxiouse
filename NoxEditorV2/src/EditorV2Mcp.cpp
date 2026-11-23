@@ -18,7 +18,7 @@
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/Scene/SceneSerializer.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
+#include <NoxUI/Widgets/UIMenu.h>
 
 namespace Nox
 {
@@ -248,12 +248,12 @@ namespace Nox
             m_Mcp->Update();
     }
 
-    std::vector<UI::UIMenuItem> EditorV2Layer::BuildMcpMenu()
+    std::vector<NoxUI::UIMenuItem> EditorV2Layer::BuildMcpMenu()
     {
         if (!m_Mcp)
             return { { "MCP server not running in this build", "", {}, false, false, false, true } };
         const Mcp::McpEditor::MenuState state = m_Mcp->GetMenuState();
-        std::vector<UI::UIMenuItem> items;
+        std::vector<NoxUI::UIMenuItem> items;
         items.push_back({ "Enabled", "", [this, enabled = state.Enabled]() { m_Mcp->SetEnabled(!enabled); }, false, true, state.Enabled, false,
                           "Lets AI tools (Claude Code, Codex, Gemini CLI, Cursor ...) read and use this editor over MCP, from this machine only" });
         items.push_back({ state.Running ? "Listening on " + state.Url + " -- " + std::to_string(state.Calls) + " calls"
@@ -267,13 +267,13 @@ namespace Nox
         {
             const std::string text = m_Mcp->ConnectCommand();
             if (!text.empty() && SDL_SetClipboardText(text.c_str()))
-                Notify(UI::UINotificationSeverity::Info, "Connect command copied", "Paste it into a terminal in the project folder (it holds the token: do not share it).");
+                Notify(NoxUI::UINotificationSeverity::Info, "Connect command copied", "Paste it into a terminal in the project folder (it holds the token: do not share it).");
         }, false, state.Ready, false, false, "Paste it into a terminal in the project folder; then start Claude Code there" });
         items.push_back({ "Copy JSON config (other MCP clients)", "", [this]()
         {
             const std::string text = m_Mcp->JsonConfig();
             if (!text.empty() && SDL_SetClipboardText(text.c_str()))
-                Notify(UI::UINotificationSeverity::Info, "JSON config copied", "It holds the token: do not share it.");
+                Notify(NoxUI::UINotificationSeverity::Info, "JSON config copied", "It holds the token: do not share it.");
         }, false, state.Ready });
         items.push_back({ "Rotate token", "", [this]() { m_Mcp->RotateToken(); }, false, state.Initialized, false, false,
                           "A new token: connected clients stop working until they get the new connect command" });

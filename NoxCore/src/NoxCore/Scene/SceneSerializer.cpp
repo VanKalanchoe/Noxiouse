@@ -333,9 +333,9 @@ namespace Nox
     {
         out << YAML::Key << "MinDistance" << YAML::Value << spatial.MinDistance;
         out << YAML::Key << "MaxDistance" << YAML::Value << spatial.MaxDistance;
-        out << YAML::Key << "Attenuation" << YAML::Value << std::string(AudioAttenuationToString(spatial.Attenuation));
+        out << YAML::Key << "Attenuation" << YAML::Value << std::string(NoxAudio::AudioAttenuationToString(spatial.Attenuation));
         out << YAML::Key << "DopplerLevel" << YAML::Value << spatial.DopplerLevel;
-        out << YAML::Key << "Spatialization" << YAML::Value << std::string(AudioSpatializationToString(spatial.Spatialization));
+        out << YAML::Key << "Spatialization" << YAML::Value << std::string(NoxAudio::AudioSpatializationToString(spatial.Spatialization));
         out << YAML::Key << "AirAbsorption" << YAML::Value << spatial.AirAbsorption;
         out << YAML::Key << "Occlusion" << YAML::Value << spatial.Occlusion;
         out << YAML::Key << "SourceRadius" << YAML::Value << spatial.SourceRadius;
@@ -350,11 +350,11 @@ namespace Nox
         if (node["MaxDistance"])
             spatial.MaxDistance = node["MaxDistance"].as<float>();
         if (node["Attenuation"])
-            spatial.Attenuation = AudioAttenuationFromString(node["Attenuation"].as<std::string>());
+            spatial.Attenuation = NoxAudio::AudioAttenuationFromString(node["Attenuation"].as<std::string>());
         if (node["DopplerLevel"])
             spatial.DopplerLevel = node["DopplerLevel"].as<float>();
         if (node["Spatialization"])
-            spatial.Spatialization = AudioSpatializationFromString(node["Spatialization"].as<std::string>());
+            spatial.Spatialization = NoxAudio::AudioSpatializationFromString(node["Spatialization"].as<std::string>());
         spatial.AirAbsorption = node["AirAbsorption"].as<bool>(true);
         spatial.Occlusion = node["Occlusion"].as<bool>(true);
         spatial.SourceRadius = node["SourceRadius"].as<float>(0.5f);
@@ -2509,7 +2509,7 @@ namespace Nox
             if (audioSource["PlayOnStart"])
                 source.PlayOnStart = audioSource["PlayOnStart"].as<bool>();
             if (audioSource["Bus"])
-                source.Bus = audioSource["Bus"].as<uint64_t>(kAudioBusSFX); // the mixer bus's id
+                source.Bus = audioSource["Bus"].as<uint64_t>(NoxAudio::kAudioBusSFX); // the mixer bus's id
             if (audioSource["Spatial"])
                 source.Spatial = audioSource["Spatial"].as<bool>();
             ReadSpatialSettings(audioSource, source.Spatialization);

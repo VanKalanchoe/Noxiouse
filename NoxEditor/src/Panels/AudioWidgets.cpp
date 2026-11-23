@@ -78,8 +78,8 @@ namespace Nox
             return;
         AudioPlayDesc desc;
         desc.Volume = volume;
-        desc.Bus = kAudioBusMaster;
-        desc.Group = AudioVoiceGroup::Editor;
+        desc.Bus = NoxAudio::kAudioBusMaster;
+        desc.Group = NoxAudio::AudioVoiceGroup::Editor;
         if (AssetManager::GetAssetType(sound) == AssetType::AudioGraph)
         {
             desc.Graph = GetAudioGraphProgram(sound);

@@ -19,13 +19,15 @@
 #include "NoxCore/Renderer/Renderer.h"
 #include "NoxCore/ImGui/ImGuiLayer.h"
 #include "NoxCore/UI/Core/UILayer.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/NoxTasks.h>
+#include <NoxNet/NetLog.h>
+#include <NoxUI/Backends/noxui_impl_sdl3.h>
 #include "NoxCore/Animation/AnimationGraphNodes.h"
 #include "NoxCore/Audio/AudioEngine.h"
 #include "NoxCore/Audio/AudioGraph.h"
 #include "NoxCore/Renderer/MaterialGraph.h"
 #include "NoxCore/Audio/AudioMixer.h"
-#include "NoxCore/UI/Core/UIViewportManager.h"
+#include <NoxUI/Core/UIViewportManager.h>
 
 #ifdef _WIN32
 // Last: its macros (near, far, min, max...) must not reach the engine's headers.
@@ -52,7 +54,55 @@ namespace Nox
 
         s_Application = this;
 
-        m_JobSystem = std::make_unique<JobSystem>();
+        NoxTasks::SetLogCallback([](NoxTasks::LogLevel level, std::string_view message)
+        {
+            switch (level)
+            {
+            case NoxTasks::LogLevel::Info:  NOX_CORE_INFO("{}", message); break;
+            case NoxTasks::LogLevel::Warn:  NOX_CORE_WARN("{}", message); break;
+            case NoxTasks::LogLevel::Error: NOX_CORE_ERROR("{}", message); break;
+            }
+        });
+#if NOX_PROFILING_ENABLED
+        auto getTaskScopeId = [](std::string_view taskName) -> uint32_t
+        {
+            thread_local std::unordered_map<std::string, uint32_t> t_ScopeIds;
+            const std::string name = taskName.empty() ? std::string("Unnamed Task") : std::string(taskName);
+            if (auto found = t_ScopeIds.find(name); found != t_ScopeIds.end())
+                return found->second;
+            const uint32_t scopeId = Profiler::Get().RegisterNamedScope(name);
+            t_ScopeIds.emplace(name, scopeId);
+            return scopeId;
+        };
+        NoxTasks::SetProfilerCallbacks({
+            .OnWorkerThreadStart = [](const char* threadName)
+            {
+                Profiler::Get().SetThreadName(threadName);
+            },
+            .OnTaskBegin = [getTaskScopeId](std::string_view taskName)
+            {
+                Profiler::Get().BeginCpuScope(getTaskScopeId(taskName));
+            },
+            .OnTaskEnd = [getTaskScopeId](std::string_view taskName)
+            {
+                Profiler::Get().EndCpuScope(getTaskScopeId(taskName));
+            }
+        });
+#endif
+        m_JobSystem = std::make_unique<NoxTasks::JobSystem>();
+        NoxNet::SetLogCallback([](NoxNet::LogLevel level, std::string_view message)
+        {
+            switch (level)
+            {
+            case NoxNet::LogLevel::Info:  NOX_CORE_INFO("{}", message); break;
+            case NoxNet::LogLevel::Warn:  NOX_CORE_WARN("{}", message); break;
+            case NoxNet::LogLevel::Error: NOX_CORE_ERROR("{}", message); break;
+            }
+        });
+        NoxNet::SetParallelForCallback([](uint32_t count, const std::function<void(uint32_t index)>& body)
+        {
+            NoxTasks::JobSystem::Get().Dispatch("NoxNet", count, 1, body);
+        });
         // Its own mixer and stream threads, apart from the JobSystem (docs/Audio_Architecture_Plan_2026.md §8). A headless server opens
         // no output device: the engine runs as on a machine without one (sound off, every call a no-op).
         AudioEngine::Init(!m_Specification.Headless);
@@ -172,7 +222,7 @@ namespace Nox
             if (renderer)
                 renderer->drawFrame();
 
-            if (auto* vpMgr = UI::UIViewportManager::GetActive())
+            if (auto* vpMgr = NoxUI::UIViewportManager::GetActive())
                 vpMgr->UpdateAndRender(timestep.GetSeconds());
 
             // Frame sync point (§5.3): no frame graph task runs past this.
@@ -333,9 +383,9 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
     if (applicationState->app->GetSpecification().isEditor && applicationState->app->GetSpecification().UseImGui && ImGuiTakesEvent(*currentEvent))
         ImGui_ImplSDL3_ProcessEvent(currentEvent);
 
-    if (auto* vpMgr = Nox::UI::UIViewportManager::GetActive())
+    if (Nox::UILayer* uiLayer = applicationState->app->GetUILayer())
     {
-        if (vpMgr->ProcessSDLEvent(*currentEvent))
+        if (NoxUI_ImplSDL3_ProcessEvent(currentEvent, uiLayer->GetContext(), uiLayer->GetViewportManager()))
             return SDL_APP_CONTINUE;
     }
 

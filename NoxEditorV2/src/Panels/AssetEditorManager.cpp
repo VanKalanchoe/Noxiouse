@@ -6,36 +6,36 @@
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/UI/Core/UILayer.h"
-#include "NoxCore/UI/Core/UIViewportManager.h"
-#include "NoxCore/UI/Layout/UIDockSpace.h"
-#include "NoxCore/UI/Layout/UITabPanel.h"
-#include "NoxCore/UI/Layout/UIWindow.h"
+#include <NoxUI/Core/UIViewportManager.h>
+#include <NoxUI/Layout/UIDockSpace.h>
+#include <NoxUI/Layout/UITabPanel.h>
+#include <NoxUI/Layout/UIWindow.h>
 
 namespace Nox
 {
     namespace
     {
-        UI::UIDockSpace* Dock()
+        NoxUI::UIDockSpace* Dock()
         {
             UILayer* uiLayer = Application::Get().GetUILayer();
             return uiLayer ? uiLayer->GetDockSpaceRef().get() : nullptr;
         }
 
-        void Raise(UI::UIDockSpace& dock, const std::string& title)
+        void Raise(NoxUI::UIDockSpace& dock, const std::string& title)
         {
-            if (const Ref<UI::UIWindow> window = dock.FindFloatingWindow(title); window && window->OnActivate)
+            if (const Ref<NoxUI::UIWindow> window = dock.FindFloatingWindow(title); window && window->OnActivate)
             {
                 window->OnActivate();
                 return;
             }
-            if (Ref<UI::UIDockNode> node = dock.FindNodeByPanelTitle(title); node && node->TabPanel)
+            if (Ref<NoxUI::UIDockNode> node = dock.FindNodeByPanelTitle(title); node && node->TabPanel)
                 for (size_t i = 0; i < node->TabPanel->GetTabCount(); ++i)
                     if (node->TabPanel->GetTabTitle(i) == title)
                         node->TabPanel->SetActiveTab(i);
         }
     }
 
-    void AssetEditorManager::Say(UI::UINotificationSeverity severity, std::string title, std::string message) const
+    void AssetEditorManager::Say(NoxUI::UINotificationSeverity severity, std::string title, std::string message) const
     {
         if (m_Hooks.Notify)
             m_Hooks.Notify({ severity, std::move(title), std::move(message) });
@@ -54,7 +54,7 @@ namespace Nox
 
     bool AssetEditorManager::Open(AssetHandle handle)
     {
-        UI::UIDockSpace* dock = Dock();
+        NoxUI::UIDockSpace* dock = Dock();
         if (!dock || handle == 0 || !AssetManager::IsAssetHandleValid(handle))
             return false;
         for (OpenEditor& open : m_Open)
@@ -71,13 +71,13 @@ namespace Nox
         std::unique_ptr<AssetEditorV2> editor = (*factory)(handle);
         if (!editor || !editor->IsValid())
         {
-            Say(UI::UINotificationSeverity::Error, AssetDisplayName(handle) + " not opened", "It could not be loaded -- see the Output Log.");
+            Say(NoxUI::UINotificationSeverity::Error, AssetDisplayName(handle) + " not opened", "It could not be loaded -- see the Output Log.");
             return false;
         }
         editor->Notify = m_Hooks.Notify;
         editor->OpenAsset = m_Hooks.OpenAsset;
         std::string title = editor->GetWindowTitle();
-        const Ref<UI::UIElement> root = editor->BuildUI();
+        const Ref<NoxUI::UIElement> root = editor->BuildUI();
         const float offset = static_cast<float>((m_Open.size() % 5) * 28);
         dock->FloatPanel(title, root, { 220.0f + offset, 90.0f + offset }, editor->GetDefaultSize(), false);
         m_Open.push_back({ std::move(editor), std::move(title), root });
@@ -88,7 +88,7 @@ namespace Nox
     {
         if (m_Open.empty())
             return;
-        UI::UIDockSpace* dock = Dock();
+        NoxUI::UIDockSpace* dock = Dock();
         // A window open nowhere (not docked, floating or torn off) ends its editor. Closing asked about unsaved edits
         // (CanClosePanel); a window gone another way drops them (the asset is the file's again) and says so. An asset deleted
         // while open ends its editor too.
@@ -104,7 +104,7 @@ namespace Nox
             if (open.Root)
                 open.Root->ClearSyncsRecursive();
             if (open.Editor->IsDirty() && !assetGone)
-                Say(UI::UINotificationSeverity::Warning, open.Editor->GetName() + ": unsaved changes dropped",
+                Say(NoxUI::UINotificationSeverity::Warning, open.Editor->GetName() + ": unsaved changes dropped",
                     "Its window closed without the Save question; the asset is the file's version again.");
             return true;
         });
@@ -121,7 +121,7 @@ namespace Nox
         if (const auto& dock = uiLayer->GetDockSpaceRef())
             closed = dock->RemovePanel(title);
         if (!closed)
-            if (UI::UIViewportManager* windows = uiLayer->GetViewportManager())
+            if (NoxUI::UIViewportManager* windows = uiLayer->GetViewportManager())
                 windows->ClosePanel(title);
     }
 

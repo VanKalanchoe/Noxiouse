@@ -10,7 +10,7 @@
 #include "NoxCore/Core/WorldUnits.h"
 
 #include "NoxCore/Asset/Asset.h"
-#include "NoxCore/Tasks/JobSystem.h"
+#include <NoxTasks/JobSystem.h>
 
 namespace Nox
 {
@@ -75,7 +75,7 @@ namespace Nox
 
         Settings m_Settings;
         std::filesystem::path m_AssetDirectory;
-        TaskFuture<void> m_Job;
+        NoxTasks::TaskFuture<void> m_Job;
         std::atomic<uint32_t> m_Grid{ 0 };    // N, once the first tile's size is known
         std::atomic<uint32_t> m_Done{ 0 };    // tiles written
         std::atomic<uint64_t> m_Bytes{ 0 };   // written so far
@@ -94,7 +94,7 @@ namespace Nox
         // Then the cells' cooked files, on the workers.
         std::vector<std::filesystem::path> m_CellFiles;
         bool m_Cooking = false;
-        TaskFuture<void> m_CookJob;
+        NoxTasks::TaskFuture<void> m_CookJob;
         std::atomic<uint32_t> m_CellsCooked{ 0 };
         std::atomic<uint64_t> m_CookedBytes{ 0 }, m_BinaryEntities{ 0 }, m_CookedEntities{ 0 };
         glm::dvec3 m_Middle{ 0.0 }; // world (double precision)

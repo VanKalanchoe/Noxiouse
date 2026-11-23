@@ -12,11 +12,11 @@
 #include <glm/glm.hpp>
 
 #include "DataTypes.h"
-#include "NRI/AccelerationStructure.h"
-#include "NRI/Buffer.h"
-#include "NRI/CommandBuffer.h"
+#include <NRIHPP/NRIExtensions.hpp>
+#include <NRIHPP/NRI.hpp>
+#include <NRIHPP/NRI.hpp>
 
-namespace NRI
+namespace nri
 {
     class Device;
 }
@@ -65,7 +65,7 @@ namespace Nox
     class GpuSceneTable
     {
     public:
-        void Initialize(NRI::Device& device, uint32_t framesInFlight);
+        void Initialize(nri::Device& device, uint32_t framesInFlight);
 
         uint32_t Allocate();
         void Free(uint32_t slot);
@@ -75,31 +75,31 @@ namespace Nox
         // Marks the slot for upload.
         Record& Edit(uint32_t slot);
 
-        uint64_t GetDeviceAddress() const { return m_Buffer ? m_Buffer->getDeviceAddress() : 0; }
-        NRI::Buffer* GetBuffer() const { return m_Buffer.get(); }
-        NRI::Buffer* GetStagingBuffer(uint32_t frameSlot) const { return m_Staging[frameSlot].Buffer.get(); }
+        uint64_t GetDeviceAddress() const { return m_Buffer ? m_Buffer.getDeviceAddress() : 0; }
+        const nri::Buffer* GetBuffer() const { return m_Buffer ? &m_Buffer : nullptr; }
+        const nri::Buffer* GetStagingBuffer(uint32_t frameSlot) const { return m_Staging[frameSlot].Buffer ? &m_Staging[frameSlot].Buffer : nullptr; }
 
         // Main thread before recording. Grows the device buffer when needed (the old one is handed back for deferred
         // release and every record is uploaded again), then stages this frame's edited records.
-        void PrepareUpload(uint32_t frameSlot, std::vector<std::unique_ptr<NRI::Buffer>>& outReleased);
+        void PrepareUpload(uint32_t frameSlot, std::vector<nri::Buffer>& outReleased);
         bool HasUpload(uint32_t frameSlot) const { return !m_Staging[frameSlot].Regions.empty(); }
-        void RecordUpload(NRI::CommandBuffer& cmd, uint32_t frameSlot) const;
+        void RecordUpload(nri::CommandBuffer& cmd, uint32_t frameSlot) const;
 
     private:
         struct Staging
         {
-            std::unique_ptr<NRI::Buffer> Buffer;
+            nri::Buffer Buffer;
             uint64_t Capacity = 0; // records
-            std::vector<NRI::BufferCopyRegion> Regions;
+            std::vector<nri::BufferCopyRegion> Regions;
         };
 
     private:
-        NRI::Device* m_Device = nullptr;
+        nri::Device* m_Device = nullptr;
         std::vector<Record> m_Records;
         std::vector<uint8_t> m_Dirty;
         std::vector<uint32_t> m_DirtySlots;
         std::vector<uint32_t> m_FreeSlots;
-        std::unique_ptr<NRI::Buffer> m_Buffer;
+        nri::Buffer m_Buffer;
         uint64_t m_Capacity = 0; // records
         std::vector<Staging> m_Staging;
     };
@@ -125,7 +125,7 @@ namespace Nox
         static constexpr uint32_t InvalidSlot = ~0u;
         static constexpr uint32_t NoBoneMatrices = 0xFFFFFFFF;
 
-        void Initialize(NRI::Device& device, uint32_t framesInFlight);
+        void Initialize(nri::Device& device, uint32_t framesInFlight);
 
         // Meshes: one per uploaded submesh. blasAddress 0: not ray traced.
         uint32_t AddMesh(const shaderio::GpuMesh& mesh, uint64_t blasAddress);
@@ -208,9 +208,9 @@ namespace Nox
         // re-sorted. Returns whether the list changed.
         bool UpdateDrawList(const glm::vec3& cameraPosition, std::vector<uint32_t>& drawList, std::array<uint32_t, RenderBucketCount + 1>& outBucketStarts);
         // Settles the previous transforms of instances that stopped moving, then stages every table's changes.
-        void PrepareUploads(uint32_t frameSlot, std::vector<std::unique_ptr<NRI::Buffer>>& outReleased);
+        void PrepareUploads(uint32_t frameSlot, std::vector<nri::Buffer>& outReleased);
         bool HasUploads(uint32_t frameSlot) const;
-        void RecordUploads(NRI::CommandBuffer& cmd, uint32_t frameSlot) const;
+        void RecordUploads(nri::CommandBuffer& cmd, uint32_t frameSlot) const;
 
         const GpuSceneTable<shaderio::GpuInstance>& GetInstances() const { return m_Instances; }
         const GpuSceneTable<shaderio::GpuTransform>& GetTransforms() const { return m_Transforms; }
@@ -234,7 +234,7 @@ namespace Nox
         uint64_t GetMeshLastTracedFrame(uint32_t meshSlot) const { return meshSlot < m_MeshLastTraced.size() ? m_MeshLastTraced[meshSlot] : 0; }
         uint64_t GetCullingFrame() const { return m_CullingFrame; }
         // The build's instances: GetTlasBuildCount of them.
-        void WriteTlasInstances(std::span<NRI::AccelerationStructureInstance> outInstances) const;
+        void WriteTlasInstances(std::span<nri::AccelerationStructureInstance> outInstances) const;
         // Whether any ray traced instance was added, removed, moved or re-flagged since the last call (the TLAS is rebuilt,
         // not refitted: NVIDIA RT best practices).
         bool ConsumeTlasChanged() { return std::exchange(m_TlasChanged, false); }
@@ -304,7 +304,7 @@ namespace Nox
         uint64_t m_GeometryColorBase = 0;
         uint64_t m_GeometryIndexBase = 0;
 
-        std::vector<NRI::AccelerationStructureInstance> m_TlasInstances; // by instance slot, inactive: no BLAS reference
+        std::vector<nri::AccelerationStructureInstance> m_TlasInstances; // by instance slot, inactive: no BLAS reference
         uint32_t m_TlasInstanceCount = 0;
         bool m_TlasChanged = false;
         std::vector<uint8_t> m_TlasCulled; // by instance slot

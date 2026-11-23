@@ -7,21 +7,21 @@
 
 #include <SDL3/SDL_keyboard.h>
 
-#include "NoxCore/UI/Widgets/UIPanZoom.h"
-#include "NoxCore/UI/Widgets/UIPropertyRows.h"
+#include <NoxUI/Widgets/UIPanZoom.h>
+#include <NoxUI/Widgets/UIPropertyRows.h>
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Scene/HLODBuilder.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Renderer/Font.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
-#include "NoxCore/UI/Core/UIContext.h"
-#include "NoxCore/UI/Core/UITheme.h"
-#include "NoxCore/UI/Layout/UILayout.h"
-#include "NoxCore/UI/Rendering/UIDrawList.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UICheckBox.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Core/UIContext.h>
+#include <NoxUI/Core/UITheme.h>
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UICheckBox.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIScrollView.h>
 
 namespace Nox
 {
@@ -53,16 +53,16 @@ namespace Nox
             return ordered;
         }
 
-        glm::vec4 Token(const UI::UITheme& theme, const char* name, const UI::UIColor& fallback)
+        glm::vec4 Token(const NoxUI::UITheme& theme, const char* name, const NoxUI::UIColor& fallback)
         {
-            const UI::UIColor c = theme.GetToken(name, fallback);
+            const NoxUI::UIColor c = theme.GetToken(name, fallback);
             return { c.r, c.g, c.b, c.a };
         }
     }
 
     // The top-down map of a world's cells: pan with the right or middle button, zoom with the wheel, click a cell (Ctrl adds), drag
     // a box, double-click loads the cell under the pointer. Colours are theme tokens (WorldCell*), with these defaults.
-    class WorldPartitionMap final : public UI::UIElement
+    class WorldPartitionMap final : public NoxUI::UIElement
     {
     public:
         std::function<Ref<Scene>()> GetScene;
@@ -73,14 +73,14 @@ namespace Nox
 
         WorldPartitionMap()
         {
-            WidthMode = UI::UISizeMode::Fill;
-            HeightMode = UI::UISizeMode::Fill;
-            HitTestMode = UI::UIHitTestMode::Self;
+            WidthMode = NoxUI::UISizeMode::Fill;
+            HeightMode = NoxUI::UISizeMode::Fill;
+            HitTestMode = NoxUI::UIHitTestMode::Self;
             ClipChildren = true;
         }
         void FitNextPaint() { m_NeedsFit = true; }
 
-        bool OnPointerDown(const UI::UIPointerEvent& e) override
+        bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
         {
             m_Pointer = e.Position;
             if (e.Button == 1)
@@ -110,9 +110,9 @@ namespace Nox
             return UIElement::OnPointerDown(e);
         }
 
-        bool OnPointerMove(const UI::UIPointerEvent& e) override
+        bool OnPointerMove(const NoxUI::UIPointerEvent& e) override
         {
-            const UI::UIVec2 delta = e.Position - m_Pointer;
+            const NoxUI::UIVec2 delta = e.Position - m_Pointer;
             m_Pointer = e.Position;
             if (m_Panning)
             {
@@ -124,7 +124,7 @@ namespace Nox
             return true;
         }
 
-        bool OnPointerUp(const UI::UIPointerEvent& e) override
+        bool OnPointerUp(const NoxUI::UIPointerEvent& e) override
         {
             if (e.Button == 2 || e.Button == 3)
             {
@@ -137,7 +137,7 @@ namespace Nox
             Ref<Scene> scene = GetScene ? GetScene() : nullptr;
             if (!scene)
                 return true;
-            const bool ctrl = (e.Modifiers & UI::UIMod::Ctrl) != 0;
+            const bool ctrl = (e.Modifiers & NoxUI::UIMod::Ctrl) != 0;
             if (!ctrl)
                 Selection->clear();
             const glm::vec2 end = ToWorld(e.Position);
@@ -159,7 +159,7 @@ namespace Nox
             return true;
         }
 
-        bool OnMouseWheel(const UI::UIPointerEvent& e) override
+        bool OnMouseWheel(const NoxUI::UIPointerEvent& e) override
         {
             if (m_NeedsFit)
                 return true;
@@ -170,11 +170,11 @@ namespace Nox
         }
 
     protected:
-        UI::UIVec2 ComputeDesiredSize() override { return { 300.0f, 320.0f }; }
+        NoxUI::UIVec2 ComputeDesiredSize() override { return { 300.0f, 320.0f }; }
 
-        void OnPaint(UI::UIDrawList& d, const UI::UITheme& theme) override
+        void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
         {
-            const UI::UIRect b = GetBounds();
+            const NoxUI::UIRect b = GetBounds();
             d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, Token(theme, "WorldMapBackground", { 0.094f, 0.094f, 0.11f, 1.0f }));
             Ref<Scene> scene = GetScene ? GetScene() : nullptr;
             if (!scene || b.Width() < 8.0f || b.Height() < 8.0f)
@@ -210,12 +210,12 @@ namespace Nox
                 const glm::vec2 low = ToWorld(b.Min), high = ToWorld(b.Max);
                 for (float x = std::floor(low.x / cellSize) * cellSize; x <= high.x; x += cellSize)
                 {
-                    const UI::UIVec2 p = ToScreen({ x, 0.0f });
+                    const NoxUI::UIVec2 p = ToScreen({ x, 0.0f });
                     d.AddRoundedRect({ p.x, b.Min.y }, { p.x + 1.0f, b.Max.y }, gridColor);
                 }
                 for (float z = std::floor(low.y / cellSize) * cellSize; z <= high.y; z += cellSize)
                 {
-                    const UI::UIVec2 p = ToScreen({ 0.0f, z });
+                    const NoxUI::UIVec2 p = ToScreen({ 0.0f, z });
                     d.AddRoundedRect({ b.Min.x, p.y }, { b.Max.x, p.y + 1.0f }, gridColor);
                 }
             }
@@ -236,45 +236,45 @@ namespace Nox
                                      : stage == Scene::WorldCellStage::Loaded    ? staged
                                      : stage == Scene::WorldCellStage::Unloaded  ? unloaded
                                                                                  : loading;
-                const UI::UIVec2 a = ToScreen(rectMin), c = ToScreen(rectMax);
+                const NoxUI::UIVec2 a = ToScreen(rectMin), c = ToScreen(rectMax);
                 const bool isSelected = Selection && Selection->contains(cell);
                 d.AddRoundedRect({ a.x, a.y }, { c.x, c.y }, fill, glm::vec4(0.0f), isSelected ? 2.0f : 1.0f, isSelected ? selected : border);
                 if (auto info = world.Cells.find(cell); info != world.Cells.end())
                 {
-                    const UI::UIVec2 ba = ToScreen({ static_cast<float>(info->second.BoundsMin.x), static_cast<float>(info->second.BoundsMin.z) });
-                    const UI::UIVec2 bb = ToScreen({ static_cast<float>(info->second.BoundsMax.x), static_cast<float>(info->second.BoundsMax.z) });
+                    const NoxUI::UIVec2 ba = ToScreen({ static_cast<float>(info->second.BoundsMin.x), static_cast<float>(info->second.BoundsMin.z) });
+                    const NoxUI::UIVec2 bb = ToScreen({ static_cast<float>(info->second.BoundsMax.x), static_cast<float>(info->second.BoundsMax.z) });
                     d.AddRoundedRect({ ba.x, ba.y }, { std::max(bb.x, ba.x + 1.0f), std::max(bb.y, ba.y + 1.0f) }, glm::vec4(0.0f), glm::vec4(0.0f), 1.0f, bounds);
                     if (c.x - a.x > 70.0f && c.y - a.y > 34.0f)
                     {
-                        d.AddText(WorldGrid::CellName(cell), nullptr, { a.x + 4.0f, a.y + 3.0f }, 12.0f, UI::ThemeColor("WorldCellName", { 0.9f, 0.9f, 0.92f, 0.86f }));
-                        d.AddText(std::to_string(info->second.Entities) + " entities", nullptr, { a.x + 4.0f, a.y + 17.0f }, 12.0f, UI::ThemeColor("WorldCellCount", { 0.9f, 0.9f, 0.92f, 0.7f }));
+                        d.AddText(WorldGrid::CellName(cell), nullptr, { a.x + 4.0f, a.y + 3.0f }, 12.0f, NoxUI::ThemeColor("WorldCellName", { 0.9f, 0.9f, 0.92f, 0.86f }));
+                        d.AddText(std::to_string(info->second.Entities) + " entities", nullptr, { a.x + 4.0f, a.y + 17.0f }, 12.0f, NoxUI::ThemeColor("WorldCellCount", { 0.9f, 0.9f, 0.92f, 0.7f }));
                     }
                 }
             }
 
             // The camera and its loading range (a circle: a rounded rect as round as it is wide).
             const glm::vec4 cameraColor = Token(theme, "WorldMapCamera", { 1.0f, 0.43f, 0.24f, 1.0f });
-            const UI::UIVec2 cam = ToScreen({ static_cast<float>(camera.x), static_cast<float>(camera.z) });
+            const NoxUI::UIVec2 cam = ToScreen({ static_cast<float>(camera.x), static_cast<float>(camera.z) });
             const float radius = range * m_View.Zoom;
             d.AddRoundedRect({ cam.x - radius, cam.y - radius }, { cam.x + radius, cam.y + radius }, glm::vec4(0.0f), glm::vec4(radius), 1.5f, cameraColor);
             d.AddRoundedRect({ cam.x - 4.0f, cam.y - 4.0f }, { cam.x + 4.0f, cam.y + 4.0f }, cameraColor, glm::vec4(4.0f));
 
             if (m_Boxing)
             {
-                const UI::UIVec2 a = ToScreen(m_BoxStart);
+                const NoxUI::UIVec2 a = ToScreen(m_BoxStart);
                 d.AddRoundedRect({ std::min(a.x, m_Pointer.x), std::min(a.y, m_Pointer.y) }, { std::max(a.x, m_Pointer.x), std::max(a.y, m_Pointer.y) },
-                                 UI::ThemeColor("WorldMapBoxFill", { 1.0f, 1.0f, 1.0f, 0.06f }), glm::vec4(0.0f), 1.0f, UI::ThemeColor("WorldMapBoxBorder", { 1.0f, 1.0f, 1.0f, 0.7f }));
+                                 NoxUI::ThemeColor("WorldMapBoxFill", { 1.0f, 1.0f, 1.0f, 0.06f }), glm::vec4(0.0f), 1.0f, NoxUI::ThemeColor("WorldMapBoxBorder", { 1.0f, 1.0f, 1.0f, 0.7f }));
             }
             d.PopClipRect();
         }
 
     private:
         // World x / z to the map and back (UI::UIPanZoom: zoom is pixels per world unit).
-        UI::UIVec2 ToScreen(const glm::vec2& world) const { return m_View.ToScreen(GetBounds(), world); }
-        glm::vec2 ToWorld(const UI::UIVec2& screen) const { return m_View.ToGraph(GetBounds(), screen); }
+        NoxUI::UIVec2 ToScreen(const glm::vec2& world) const { return m_View.ToScreen(GetBounds(), world); }
+        glm::vec2 ToWorld(const NoxUI::UIVec2& screen) const { return m_View.ToGraph(GetBounds(), screen); }
 
         // The smallest cell under the point.
-        const WorldCellCoord* CellAt(const UI::UIVec2& screen)
+        const WorldCellCoord* CellAt(const NoxUI::UIVec2& screen)
         {
             Ref<Scene> scene = GetScene ? GetScene() : nullptr;
             if (!scene || m_NeedsFit)
@@ -316,12 +316,12 @@ namespace Nox
             Tooltip = std::move(text);
         }
 
-        UI::UIPanZoom m_View{ {}, 1.0f, 1e-7f, 1e3f }; // pixels per world unit within 1e-7 .. 1000 (the wheel: 1/0.85 a notch)
+        NoxUI::UIPanZoom m_View{ {}, 1.0f, 1e-7f, 1e3f }; // pixels per world unit within 1e-7 .. 1000 (the wheel: 1/0.85 a notch)
         bool m_NeedsFit = true;                         // fitted to the cells and the camera on the next paint
         bool m_Panning = false;
         bool m_Boxing = false;
         glm::vec2 m_BoxStart{ 0.0f };
-        UI::UIVec2 m_Pointer{ 0.0f };
+        NoxUI::UIVec2 m_Pointer{ 0.0f };
         std::chrono::steady_clock::time_point m_LastClick{};
         std::vector<WorldCellCoord> m_HitCells;
     };
@@ -332,15 +332,15 @@ namespace Nox
             m_Hooks.SceneChanged();
     }
 
-    const Ref<UI::UIElement>& WorldPartitionV2Panel::BuildUI(UI::UIContext* context)
+    const Ref<NoxUI::UIElement>& WorldPartitionV2Panel::BuildUI(NoxUI::UIContext* context)
     {
         m_Context = context;
-        auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 0.0f);
-        root->WidthMode = UI::UISizeMode::Fill;
-        root->HeightMode = UI::UISizeMode::Fill;
+        auto root = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 0.0f);
+        root->WidthMode = NoxUI::UISizeMode::Fill;
+        root->HeightMode = NoxUI::UISizeMode::Fill;
         root->StyleClass = "Surface";
         root->DrawBackground = true;
-        root->Padding = UI::UIThickness::All(8.0f);
+        root->Padding = NoxUI::UIThickness::All(8.0f);
         m_Body = root;
         m_Root = root;
         m_Rebuild = true;
@@ -377,7 +377,7 @@ namespace Nox
         m_Body->ClearChildren();
         m_Map = nullptr;
         const Ref<Scene> scene = m_Hooks.ActiveScene ? m_Hooks.ActiveScene() : nullptr;
-        UI::UIPropertyRows rows(m_Body, m_Context);
+        NoxUI::UIPropertyRows rows(m_Body, m_Context);
         if (!scene)
         {
             rows.Note("No scene");
@@ -402,7 +402,7 @@ namespace Nox
                       "next save.");
             rows.Note("Each root entity goes into one cell. A model placed as one instance would stream as one piece: split it first "
                       "(Inspector > Model Instance > Split Into Separate Entities).");
-            UI::UIPropertyRows convert = rows.Group();
+            NoxUI::UIPropertyRows convert = rows.Group();
             convert.Drag("Cell Size (m)", [fields]() { return fields->CellSize; }, [fields](float v) { fields->CellSize = v; }, 1.0f, 8.0f, 4096.0f, "{:.0f}");
             convert.Drag("Loading Range (m)", [fields]() { return fields->LoadingRange; }, [fields](float v) { fields->LoadingRange = v; }, 1.0f, 8.0f, 16384.0f, "{:.0f}");
             convert.Button("Convert to World Partition", [this, getScene, fields]()
@@ -420,7 +420,7 @@ namespace Nox
 
         // ---- Settings ----
         {
-            UI::UIPropertyRows settings = rows.Section("Settings", false, &m_Expanded);
+            NoxUI::UIPropertyRows settings = rows.Section("Settings", false, &m_Expanded);
             settings.Drag("Loading Range (m)", [getScene]() { Ref<Scene> s = getScene(); return s ? s->GetWorldPartition().Settings.LoadingRange : 0.0f; },
                 [this, getScene, fields](float v)
                 {
@@ -442,7 +442,7 @@ namespace Nox
                         return false;
                 return true;
             };
-            UI::UIPropertyRows size = settings.Group();
+            NoxUI::UIPropertyRows size = settings.Group();
             size.Drag("Cell Size (m)", [fields]() { return fields->CellSize; }, [fields](float v) { fields->CellSize = v; }, 1.0f, 8.0f, 4096.0f, "{:.0f}");
             size.Button("Apply Cell Size", [this, getScene, fields]()
             {
@@ -481,11 +481,11 @@ namespace Nox
                 char text[256];
                 std::snprintf(text, sizeof(text), "Building HLODs: %.0f %%  %s", build->GetProgress() * 100.0f, build->GetStage().c_str());
                 return std::string(text);
-            }, UI::ThemeColor("StatusInfo", { 0.45f, 0.78f, 1.0f, 1.0f }));
+            }, NoxUI::ThemeColor("StatusInfo", { 0.45f, 0.78f, 1.0f, 1.0f }));
         }
         else
         {
-            UI::UIPropertyRows hlod = rows.Section("HLOD", false, &m_Expanded,
+            NoxUI::UIPropertyRows hlod = rows.Section("HLOD", false, &m_Expanded,
                 "Unreal's World Partition HLODs: every cell's static meshes merged, simplified and baked into one mesh, shown while the cell is out.");
             hlod.Check("Show HLODs", [getScene]() { Ref<Scene> s = getScene(); return s && s->GetShowHLODs(); },
                        [getScene](bool v) { if (Ref<Scene> s = getScene()) s->SetShowHLODs(v); },
@@ -503,7 +503,7 @@ namespace Nox
                         }
                 return hlods ? std::to_string(hlods) + " HLODs in " + std::to_string(cells) + " HLOD cells" : std::string("No HLODs built yet");
             });
-            UI::UIPropertyRows build = hlod.Group();
+            NoxUI::UIPropertyRows build = hlod.Group();
             const auto settingRow = [&build, getScene, this](const std::string& label, float WorldPartitionSettings::*field, float speed, float min, float max,
                                                             const char* format, const std::string& tooltip)
             {
@@ -558,16 +558,16 @@ namespace Nox
             else
                 std::snprintf(text, sizeof(text), "%zu cells, %zu loaded, %zu loading, %zu entities in cells", cells, activated, loading, entities);
             return std::string(text);
-        }, UI::ThemeColor("WorldPartitionSummary", { 0.85f, 0.88f, 0.94f, 1.0f }));
+        }, NoxUI::ThemeColor("WorldPartitionSummary", { 0.85f, 0.88f, 0.94f, 1.0f }));
         if (!editing)
             rows.Note("Play / Simulate: cells stream around the camera and streaming sources.");
 
-        auto toolbar = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-        toolbar->WidthMode = UI::UISizeMode::Fill;
+        auto toolbar = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+        toolbar->WidthMode = NoxUI::UISizeMode::Fill;
         std::function<glm::dvec3()> camera = m_Hooks.StreamingSource;
         const auto addButton = [&toolbar](const char* label, std::function<void()> click, const std::string& tooltip = {})
         {
-            Ref<UI::UIButton> button(new UI::UIButton(label, std::move(click)));
+            Ref<NoxUI::UIButton> button(new NoxUI::UIButton(label, std::move(click)));
             button->Tooltip = tooltip;
             toolbar->AddChild(button);
             return button;
@@ -589,13 +589,13 @@ namespace Nox
             s->LoadWorldCells(all);
         });
         addButton("Unload All", [this, getScene]() { if (Ref<Scene> s = getScene()) RequestUnload(s->GetLoadedWorldCells(true)); });
-        Ref<UI::UIButton> loadSelected = addButton("Load Selected", [this, getScene]()
+        Ref<NoxUI::UIButton> loadSelected = addButton("Load Selected", [this, getScene]()
         {
             if (Ref<Scene> s = getScene())
                 s->LoadWorldCells(std::vector<WorldCellCoord>(m_Selection.begin(), m_Selection.end()));
         });
-        Ref<UI::UIButton> unloadSelected = addButton("Unload Selected", [this]() { RequestUnload(std::vector<WorldCellCoord>(m_Selection.begin(), m_Selection.end())); });
-        UI::AppendSync(*toolbar, [this, loadSelected, unloadSelected]() // (on their row: it holds them anyway)
+        Ref<NoxUI::UIButton> unloadSelected = addButton("Unload Selected", [this]() { RequestUnload(std::vector<WorldCellCoord>(m_Selection.begin(), m_Selection.end())); });
+        NoxUI::AppendSync(*toolbar, [this, loadSelected, unloadSelected]() // (on their row: it holds them anyway)
         {
             loadSelected->SetEnabled(!m_Selection.empty());
             unloadSelected->SetEnabled(!m_Selection.empty());
@@ -604,14 +604,14 @@ namespace Nox
         toolbar->SetEnabled(editing);
         m_Body->AddChild(toolbar);
 
-        auto options = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 12.0f);
-        Ref<UI::UICheckBox> follow(new UI::UICheckBox("Follow Camera", m_FollowCamera, [this](bool v) { m_FollowCamera = v; }));
-        Ref<UI::UICheckBox> show(new UI::UICheckBox("Show in Viewport", m_ShowInViewport, [this](bool v) { m_ShowInViewport = v; }));
+        auto options = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 12.0f);
+        Ref<NoxUI::UICheckBox> follow(new NoxUI::UICheckBox("Follow Camera", m_FollowCamera, [this](bool v) { m_FollowCamera = v; }));
+        Ref<NoxUI::UICheckBox> show(new NoxUI::UICheckBox("Show in Viewport", m_ShowInViewport, [this](bool v) { m_ShowInViewport = v; }));
         show->Tooltip = "The loaded cells' content bounds, in green, in the viewports.";
         options->AddChild(follow);
         options->AddChild(show);
         m_Body->AddChild(options);
-        UI::AppendSync(*options, [this, follow]() { follow->Checked = m_FollowCamera; }); // (panning the map turns it off)
+        NoxUI::AppendSync(*options, [this, follow]() { follow->Checked = m_FollowCamera; }); // (panning the map turns it off)
 
         Ref<WorldPartitionMap> map(new WorldPartitionMap());
         map->GetScene = getScene;

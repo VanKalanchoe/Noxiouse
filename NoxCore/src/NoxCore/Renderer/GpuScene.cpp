@@ -9,7 +9,7 @@
 
 #include <glm/gtc/constants.hpp>
 
-#include "NRI/Device.h"
+#include <NRIHPP/NRIExtensions.hpp>
 #include "NoxCore/Core/Log.h"
 
 namespace Nox
@@ -120,7 +120,7 @@ namespace Nox
     }
 
     template <typename Record>
-    void GpuSceneTable<Record>::Initialize(NRI::Device& device, uint32_t framesInFlight)
+    void GpuSceneTable<Record>::Initialize(nri::Device& device, uint32_t framesInFlight)
     {
         m_Device = &device;
         m_Staging.resize(framesInFlight);
@@ -168,7 +168,7 @@ namespace Nox
     }
 
     template <typename Record>
-    void GpuSceneTable<Record>::PrepareUpload(uint32_t frameSlot, std::vector<std::unique_ptr<NRI::Buffer>>& outReleased)
+    void GpuSceneTable<Record>::PrepareUpload(uint32_t frameSlot, std::vector<nri::Buffer>& outReleased)
     {
         Staging& staging = m_Staging[frameSlot];
         staging.Regions.clear();
@@ -179,9 +179,9 @@ namespace Nox
             if (m_Buffer)
                 outReleased.push_back(std::move(m_Buffer));
             m_Capacity = std::max<uint64_t>({ MinimumTableCapacity, m_Records.size(), m_Capacity * 2 });
-            m_Buffer = m_Device->createBuffer(NRI::BufferDesc{
+            m_Buffer = m_Device->createBuffer(nri::BufferDesc{
                 .size = sizeof(Record) * m_Capacity,
-                .usage = NRI::BufferUsage::Storage
+                .usage = NRI_BUFFER_USAGE_STORAGE
             });
 
             m_DirtySlots.clear();
@@ -199,9 +199,9 @@ namespace Nox
         if (staging.Capacity < m_DirtySlots.size())
         {
             staging.Capacity = std::max<uint64_t>({ MinimumTableCapacity, m_DirtySlots.size(), staging.Capacity * 2 });
-            staging.Buffer = m_Device->createBuffer(NRI::BufferDesc{
+            staging.Buffer = m_Device->createBuffer(nri::BufferDesc{
                 .size = sizeof(Record) * staging.Capacity,
-                .usage = NRI::BufferUsage::Staging
+                .usage = NRI_BUFFER_USAGE_STAGING
             });
         }
 
@@ -209,7 +209,7 @@ namespace Nox
         std::sort(m_DirtySlots.begin(), m_DirtySlots.end());
 
         const uint64_t byteCount = sizeof(Record) * m_DirtySlots.size();
-        auto* mapped = static_cast<Record*>(staging.Buffer->map(0, byteCount));
+        auto* mapped = static_cast<Record*>(staging.Buffer.map(0, byteCount));
         for (size_t index = 0; index < m_DirtySlots.size(); ++index)
         {
             const uint32_t slot = m_DirtySlots[index];
@@ -227,16 +227,16 @@ namespace Nox
                 .size = sizeof(Record)
             });
         }
-        staging.Buffer->unmap();
+        staging.Buffer.unmap();
         m_DirtySlots.clear();
     }
 
     template <typename Record>
-    void GpuSceneTable<Record>::RecordUpload(NRI::CommandBuffer& cmd, uint32_t frameSlot) const
+    void GpuSceneTable<Record>::RecordUpload(nri::CommandBuffer& cmd, uint32_t frameSlot) const
     {
         const Staging& staging = m_Staging[frameSlot];
         if (!staging.Regions.empty())
-            cmd.copyBuffer(*staging.Buffer, *m_Buffer, std::span<const NRI::BufferCopyRegion>(staging.Regions));
+            cmd.copyBuffer(staging.Buffer, m_Buffer, std::span<const nri::BufferCopyRegion>(staging.Regions));
     }
 
     template class GpuSceneTable<shaderio::GpuInstance>;
@@ -245,7 +245,7 @@ namespace Nox
     template class GpuSceneTable<shaderio::GpuMesh>;
     template class GpuSceneTable<shaderio::GpuRayTracingInstance>;
 
-    void GpuScene::Initialize(NRI::Device& device, uint32_t framesInFlight)
+    void GpuScene::Initialize(nri::Device& device, uint32_t framesInFlight)
     {
         m_Instances.Initialize(device, framesInFlight);
         m_Transforms.Initialize(device, framesInFlight);
@@ -293,7 +293,7 @@ namespace Nox
     uint64_t GpuScene::GetDeviceBytes() const
     {
         uint64_t bytes = 0;
-        for (const NRI::Buffer* buffer : { m_Instances.GetBuffer(), m_Transforms.GetBuffer(), m_Materials.GetBuffer(),
+        for (const nri::Buffer* buffer : { m_Instances.GetBuffer(), m_Transforms.GetBuffer(), m_Materials.GetBuffer(),
                                            m_Meshes.GetBuffer(), m_RayTracingInstances.GetBuffer() })
         {
             if (buffer)
@@ -722,7 +722,7 @@ namespace Nox
         return changed;
     }
 
-    void GpuScene::PrepareUploads(uint32_t frameSlot, std::vector<std::unique_ptr<NRI::Buffer>>& outReleased)
+    void GpuScene::PrepareUploads(uint32_t frameSlot, std::vector<nri::Buffer>& outReleased)
     {
         // Instances that did not move this frame: their previous transform becomes their world.
         std::erase_if(m_MovedInstances, [this](uint32_t instanceSlot)
@@ -755,7 +755,7 @@ namespace Nox
                m_Materials.HasUpload(frameSlot) || m_Meshes.HasUpload(frameSlot) || m_RayTracingInstances.HasUpload(frameSlot);
     }
 
-    void GpuScene::RecordUploads(NRI::CommandBuffer& cmd, uint32_t frameSlot) const
+    void GpuScene::RecordUploads(nri::CommandBuffer& cmd, uint32_t frameSlot) const
     {
         m_Instances.RecordUpload(cmd, frameSlot);
         m_Transforms.RecordUpload(cmd, frameSlot);
@@ -796,7 +796,7 @@ namespace Nox
             return;
 
         const InstanceState& state = m_InstanceStates[instanceSlot];
-        NRI::AccelerationStructureInstance record{};
+        nri::AccelerationStructureInstance record{};
         const uint64_t blasAddress = state.Mesh != InvalidSlot
                                          ? (state.BlasAddressOverride != 0 ? state.BlasAddressOverride : m_MeshBlasAddresses[state.Mesh])
                                          : 0;
@@ -832,7 +832,7 @@ namespace Nox
             record.accelerationStructureReference = blasAddress;
         }
 
-        NRI::AccelerationStructureInstance& current = m_TlasInstances[instanceSlot];
+        nri::AccelerationStructureInstance& current = m_TlasInstances[instanceSlot];
         if (std::memcmp(&current, &record, sizeof(record)) == 0)
             return;
 
@@ -845,14 +845,14 @@ namespace Nox
         current = record;
     }
 
-    void GpuScene::WriteTlasInstances(std::span<NRI::AccelerationStructureInstance> outInstances) const
+    void GpuScene::WriteTlasInstances(std::span<nri::AccelerationStructureInstance> outInstances) const
     {
         size_t written = 0;
         for (size_t bucketIndex = 0; bucketIndex < static_cast<size_t>(RenderBucket::Count); ++bucketIndex)
         {
             for (uint32_t instanceSlot : m_Buckets[bucketIndex])
             {
-                const NRI::AccelerationStructureInstance& record = m_TlasInstances[instanceSlot];
+                const nri::AccelerationStructureInstance& record = m_TlasInstances[instanceSlot];
                 if (record.accelerationStructureReference == 0 || (instanceSlot < m_TlasCulled.size() && m_TlasCulled[instanceSlot] != 0))
                     continue;
 

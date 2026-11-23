@@ -12,7 +12,7 @@ file(GLOB_RECURSE NOXEDITOR_FILES
 # entirely with NOX_WITH_MCP=OFF.
 if(NOX_WITH_MCP)
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOX_WITH_MCP=1)
-    target_link_libraries(${PROJECT_NAME} PRIVATE NoxMcp)
+    target_link_libraries(${PROJECT_NAME} PRIVATE NoxEngineMcp)
 else()
     list(FILTER NOXEDITOR_FILES EXCLUDE REGEX ".*/src/Mcp/.*")
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOX_WITH_MCP=0)

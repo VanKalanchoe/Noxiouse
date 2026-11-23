@@ -6,7 +6,7 @@
 #include <fstream>
 #include <limits>
 
-#include "NRI/GpuProfiler.h"
+#include <NRIHPP/NRIExtensions.hpp>
 #include "NoxCore/Core/Log.h"
 #include "TracyBackend.h"
 
@@ -208,7 +208,7 @@ namespace Nox
             if (!m_MemoryStats.Heaps.empty())
             {
                 uint64_t deviceLocalUsage = 0;
-                for (const NRI::MemoryHeapStats& heap : m_MemoryStats.Heaps)
+                for (const nri::MemoryHeapStats& heap : m_MemoryStats.Heaps)
                 {
                     if (heap.deviceLocal)
                         deviceLocalUsage += heap.usage;
@@ -232,7 +232,7 @@ namespace Nox
         ++m_FrameNumber;
     }
 
-    void Profiler::SetGpuProfiler(NRI::GpuProfiler* gpuProfiler)
+    void Profiler::SetGpuProfiler(nri::GpuProfiler* gpuProfiler)
     {
         m_GpuProfiler = gpuProfiler;
         m_GpuFrames.clear();
@@ -285,13 +285,13 @@ namespace Nox
         // is opened and closed here on the main thread.
         const uint32_t query = m_GpuProfiler->allocateQueryPair();
         frame.Scopes.push_back({ m_GpuFrameScopeId, InvalidScopeId, query, 0, 0 });
-        if (frame.TracyZonesEmitted && query != NRI::GpuProfiler::InvalidQueryId)
+        if (frame.TracyZonesEmitted && query != nri::GpuProfiler::InvalidQueryId)
             TracyBackend::BeginGpuZone(m_GpuFrameScopeId, query);
 
         m_GpuCurrentSlot = frameSlot;
     }
 
-    void Profiler::RecordGpuFrameBegin(NRI::CommandBuffer& cmd)
+    void Profiler::RecordGpuFrameBegin(nri::CommandBuffer& cmd)
     {
         if (m_GpuCurrentSlot == NoGpuSlot)
             return;
@@ -300,17 +300,17 @@ namespace Nox
         m_GpuProfiler->writeTimestamp(cmd, m_GpuFrames[m_GpuCurrentSlot].Scopes.front().BeginQuery);
     }
 
-    void Profiler::RecordGpuFrameEnd(NRI::CommandBuffer& cmd)
+    void Profiler::RecordGpuFrameEnd(nri::CommandBuffer& cmd)
     {
         if (m_GpuCurrentSlot == NoGpuSlot)
             return;
 
         const uint32_t beginQuery = m_GpuFrames[m_GpuCurrentSlot].Scopes.front().BeginQuery;
-        if (beginQuery != NRI::GpuProfiler::InvalidQueryId)
+        if (beginQuery != nri::GpuProfiler::InvalidQueryId)
             m_GpuProfiler->writeTimestamp(cmd, beginQuery + 1);
     }
 
-    void Profiler::BeginGpuScope(GpuScopeContext& context, NRI::CommandBuffer& cmd, uint32_t scopeId)
+    void Profiler::BeginGpuScope(GpuScopeContext& context, nri::CommandBuffer& cmd, uint32_t scopeId)
     {
         if (m_GpuCurrentSlot == NoGpuSlot)
             return;
@@ -319,7 +319,7 @@ namespace Nox
 
         // Unregistered scopes (and async compute scopes on a queue without timestamps) still get a record so the matching
         // EndGpuScope stays balanced.
-        uint32_t beginQuery = NRI::GpuProfiler::InvalidQueryId;
+        uint32_t beginQuery = nri::GpuProfiler::InvalidQueryId;
         if (scopeId != InvalidScopeId && (!context.m_AsyncCompute || m_GpuProfiler->isComputeQueueSupported()))
         {
             beginQuery = m_GpuProfiler->allocateQueryPair();
@@ -330,11 +330,11 @@ namespace Nox
         context.m_OpenScopes.push_back(static_cast<uint32_t>(context.m_Scopes.size()));
         context.m_Scopes.push_back({ scopeId, parentId, beginQuery, depth, context.m_AsyncCompute ? 1u : 0u });
 
-        if (m_GpuFrames[m_GpuCurrentSlot].TracyZonesEmitted && !context.m_AsyncCompute && beginQuery != NRI::GpuProfiler::InvalidQueryId)
+        if (m_GpuFrames[m_GpuCurrentSlot].TracyZonesEmitted && !context.m_AsyncCompute && beginQuery != nri::GpuProfiler::InvalidQueryId)
             TracyBackend::BeginGpuZone(scopeId, beginQuery);
     }
 
-    void Profiler::EndGpuScope(GpuScopeContext& context, NRI::CommandBuffer& cmd)
+    void Profiler::EndGpuScope(GpuScopeContext& context, nri::CommandBuffer& cmd)
     {
         if (m_GpuCurrentSlot == NoGpuSlot || context.m_OpenScopes.empty())
             return;
@@ -344,7 +344,7 @@ namespace Nox
         if (scope.ScopeId == InvalidScopeId)
             return;
 
-        if (scope.BeginQuery != NRI::GpuProfiler::InvalidQueryId)
+        if (scope.BeginQuery != nri::GpuProfiler::InvalidQueryId)
         {
             m_GpuProfiler->writeTimestamp(cmd, scope.BeginQuery + 1);
             if (m_GpuFrames[m_GpuCurrentSlot].TracyZonesEmitted && !context.m_AsyncCompute)
@@ -357,13 +357,13 @@ namespace Nox
         return m_GpuProfiler && m_GpuProfiler->isPipelineStatisticsSupported();
     }
 
-    void Profiler::BeginGpuStatistics(GpuScopeContext& context, NRI::CommandBuffer& cmd, uint32_t scopeId)
+    void Profiler::BeginGpuStatistics(GpuScopeContext& context, nri::CommandBuffer& cmd, uint32_t scopeId)
     {
         if (m_GpuCurrentSlot == NoGpuSlot || scopeId == InvalidScopeId || context.m_OpenStatistics != ~0u || !IsPipelineStatisticsEnabled())
             return;
 
         const uint32_t query = m_GpuProfiler->allocateStatisticsQuery();
-        if (query == NRI::GpuProfiler::InvalidQueryId)
+        if (query == nri::GpuProfiler::InvalidQueryId)
             return;
 
         m_GpuProfiler->beginStatistics(cmd, query);
@@ -371,7 +371,7 @@ namespace Nox
         context.m_Statistics.push_back({ scopeId, query });
     }
 
-    void Profiler::EndGpuStatistics(GpuScopeContext& context, NRI::CommandBuffer& cmd)
+    void Profiler::EndGpuStatistics(GpuScopeContext& context, nri::CommandBuffer& cmd)
     {
         if (context.m_OpenStatistics == ~0u)
             return;
@@ -404,7 +404,7 @@ namespace Nox
             }
 
             const uint32_t frameQuery = frame.Scopes.front().BeginQuery;
-            if (frame.TracyZonesEmitted && frameQuery != NRI::GpuProfiler::InvalidQueryId)
+            if (frame.TracyZonesEmitted && frameQuery != nri::GpuProfiler::InvalidQueryId)
                 TracyBackend::EndGpuZone(frameQuery + 1);
         }
 
@@ -431,11 +431,11 @@ namespace Nox
 #endif
     }
 
-    void Profiler::SubmitMemoryStats(std::span<const NRI::MemoryHeapStats> heaps, bool budgetFromDriver, const Platform::ProcessMemory& process,
+    void Profiler::SubmitMemoryStats(std::span<const nri::MemoryHeapStats> heaps, bool budgetFromDriver, const Platform::ProcessMemory& process,
                                      std::span<const MemoryCategoryStats> categories)
     {
         uint64_t deviceLocalUsage = 0;
-        for (const NRI::MemoryHeapStats& heap : heaps)
+        for (const nri::MemoryHeapStats& heap : heaps)
         {
             if (heap.deviceLocal)
                 deviceLocalUsage += heap.usage;
@@ -518,19 +518,19 @@ namespace Nox
 
     void Profiler::ProcessGpuReadback(GpuFrameRecord& frame)
     {
-        const std::span<const NRI::GpuTimestamp> timestamps = m_GpuProfiler->getReadbackTimestamps();
+        const std::span<const nri::GpuTimestamp> timestamps = m_GpuProfiler->getReadbackTimestamps();
 
         if (frame.TracyZonesEmitted)
         {
             // The graphics queue's scopes only: async compute scopes opened no Tracy zone.
             for (const GpuScopeContext::Scope& record : frame.Scopes)
             {
-                if (record.Queue != 0 || record.BeginQuery == NRI::GpuProfiler::InvalidQueryId)
+                if (record.Queue != 0 || record.BeginQuery == nri::GpuProfiler::InvalidQueryId)
                     continue;
                 for (const uint32_t query : { record.BeginQuery, record.BeginQuery + 1 })
                 {
                     const auto it = std::lower_bound(timestamps.begin(), timestamps.end(), query,
-                                                     [](const NRI::GpuTimestamp& timestamp, uint32_t id) { return timestamp.queryId < id; });
+                                                     [](const nri::GpuTimestamp& timestamp, uint32_t id) { return timestamp.queryId < id; });
                     if (it != timestamps.end() && it->queryId == query)
                         TracyBackend::SetGpuTime(query, static_cast<int64_t>(it->ticks));
                 }
@@ -547,7 +547,7 @@ namespace Nox
 
 #if NOX_PROFILE_STATS
         // Pipeline statistics: a scope measured several times in the frame sums its queries.
-        const std::span<const NRI::GpuPipelineStatistics> statistics = m_GpuProfiler->getReadbackStatistics();
+        const std::span<const nri::GpuPipelineStatistics> statistics = m_GpuProfiler->getReadbackStatistics();
         if (!frame.Statistics.empty() && !statistics.empty())
         {
             const uint32_t scopeCount = m_ScopeCount.load(std::memory_order_relaxed);
@@ -558,7 +558,7 @@ namespace Nox
             for (const GpuScopeContext::Statistics& record : frame.Statistics)
             {
                 const auto it = std::find_if(statistics.begin(), statistics.end(),
-                                             [&record](const NRI::GpuPipelineStatistics& result) { return result.queryId == record.Query; });
+                                             [&record](const nri::GpuPipelineStatistics& result) { return result.queryId == record.Query; });
                 if (it == statistics.end())
                     continue;
                 ProfilePipelineStatistics& values = m_GpuStatistics[record.ScopeId].Values;
@@ -583,7 +583,7 @@ namespace Nox
         auto findTicks = [&timestamps](uint32_t queryId, uint64_t& outTicks)
         {
             const auto it = std::lower_bound(timestamps.begin(), timestamps.end(), queryId,
-                                             [](const NRI::GpuTimestamp& timestamp, uint32_t id) { return timestamp.queryId < id; });
+                                             [](const nri::GpuTimestamp& timestamp, uint32_t id) { return timestamp.queryId < id; });
             if (it == timestamps.end() || it->queryId != queryId)
                 return false;
             outTicks = it->ticks;
@@ -599,7 +599,7 @@ namespace Nox
         uint64_t frameBeginTicks = 0;
         const GpuScopeContext::Scope& frameScope = frame.Scopes.front();
         if (timelineFrame && !m_GpuCalibrated &&
-            (frameScope.BeginQuery == NRI::GpuProfiler::InvalidQueryId || !findTicks(frameScope.BeginQuery, frameBeginTicks)))
+            (frameScope.BeginQuery == nri::GpuProfiler::InvalidQueryId || !findTicks(frameScope.BeginQuery, frameBeginTicks)))
             timelineFrame = nullptr;
         if (timelineFrame)
         {
@@ -619,7 +619,7 @@ namespace Nox
         {
             uint64_t beginTicks = 0;
             uint64_t endTicks = 0;
-            if (record.ScopeId == InvalidScopeId || record.BeginQuery == NRI::GpuProfiler::InvalidQueryId ||
+            if (record.ScopeId == InvalidScopeId || record.BeginQuery == nri::GpuProfiler::InvalidQueryId ||
                 !findTicks(record.BeginQuery, beginTicks) || !findTicks(record.BeginQuery + 1, endTicks))
                 continue;
 
@@ -660,7 +660,7 @@ namespace Nox
         return m_GpuCalibrationHostNs + std::llround(static_cast<double>(signedDifference) * static_cast<double>(m_GpuProfiler->getTimestampPeriod()));
     }
 
-    uint32_t Profiler::BeginTransferSubmission(NRI::CommandBuffer& cmd)
+    uint32_t Profiler::BeginTransferSubmission(nri::CommandBuffer& cmd)
     {
 #if NOX_PROFILE_STATS
         // Placed only on the CPU clock: a transfer submission belongs to no GPU frame to be drawn from.
@@ -668,12 +668,12 @@ namespace Nox
             return m_GpuProfiler->beginTransferQuery(cmd);
 #endif
         (void)cmd;
-        return NRI::GpuProfiler::InvalidQueryId;
+        return nri::GpuProfiler::InvalidQueryId;
     }
 
-    void Profiler::EndTransferSubmission(NRI::CommandBuffer& cmd, uint32_t query)
+    void Profiler::EndTransferSubmission(nri::CommandBuffer& cmd, uint32_t query)
     {
-        if (query == NRI::GpuProfiler::InvalidQueryId || !m_GpuProfiler)
+        if (query == nri::GpuProfiler::InvalidQueryId || !m_GpuProfiler)
             return;
         m_GpuProfiler->endTransferQuery(cmd, query);
         m_PendingTransfers.push_back({ query, m_FrameNumber });
@@ -681,7 +681,7 @@ namespace Nox
 
     void Profiler::CompleteTransferSubmission(uint32_t query)
     {
-        if (query == NRI::GpuProfiler::InvalidQueryId || !m_GpuProfiler)
+        if (query == nri::GpuProfiler::InvalidQueryId || !m_GpuProfiler)
             return;
         const auto pending = std::find_if(m_PendingTransfers.begin(), m_PendingTransfers.end(),
                                           [query](const PendingTransfer& entry) { return entry.Query == query; });

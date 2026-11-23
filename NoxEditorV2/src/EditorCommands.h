@@ -2,12 +2,12 @@
 
 #include <cstdint>
 
-#include "NoxCore/UI/Core/UICommandList.h"
+#include <NoxUI/Core/UICommandList.h>
 
 namespace Nox
 {
-    using KeyChord = UI::UIKeyChord;
-    using EditorCommand = UI::UICommand;
+    using KeyChord = NoxUI::UIKeyChord;
+    using EditorCommand = NoxUI::UICommand;
 
     // Where a command's key works (UICommand::Scope; Unreal's command lists bound per editor):
     //  - Global: anywhere in the editor's main window, also while a text field is being typed in (with Ctrl or Alt only).
@@ -18,7 +18,7 @@ namespace Nox
 
     // The editor's commands (UI::UICommandList: menus run them and show their keys, keys can be rebound -- Edit > Keyboard
     // Shortcuts... -- and are saved per project, per user in Saved/Config), with the editor's scopes for key presses.
-    class EditorCommandList : public UI::UICommandList
+    class EditorCommandList : public NoxUI::UICommandList
     {
     public:
         // What the editor knows when a key is pressed.
@@ -31,6 +31,6 @@ namespace Nox
         // The command bound to `chord` that may run here and can run now (in the order added); null: none.
         const EditorCommand* FindForKey(const KeyChord& chord, const KeyContext& context) const;
         bool Save(const std::filesystem::path& path) const;
-        using UI::UICommandList::Load;
+        using NoxUI::UICommandList::Load;
     };
 }

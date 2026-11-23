@@ -1,11 +1,11 @@
 #pragma once
-#include "NetAnimation.h"
-#include "NetBuffer.h"
-#include "NetLagCompensation.h"
-#include "NetPrediction.h"
-#include "NetProtocol.h"
-#include "NetRelevancy.h"
-#include "NetSnapshot.h"
+#include <NoxNet/NetAnimation.h>
+#include <NoxNet/NetBuffer.h>
+#include <NoxNet/NetLagCompensation.h>
+#include <NoxNet/NetPrediction.h>
+#include <NoxNet/NetProtocol.h>
+#include <NoxNet/NetRelevancy.h>
+#include <NoxNet/NetSnapshot.h>
 
 #include <glm/glm.hpp>
 
@@ -44,11 +44,15 @@ namespace Nox
     class Entity;
 }
 
-namespace Nox::Net
+namespace NoxNet
 {
     class NetServer;
     class NetClient;
     struct NetClientInfo;
+}
+
+namespace Nox::Net
+{
 
     enum class RpcKind : uint8_t { Server = 0, Client = 1, Multicast = 2 };
 

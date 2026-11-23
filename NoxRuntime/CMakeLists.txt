@@ -13,7 +13,7 @@ file(GLOB_RECURSE NOXRUNTIME_FILES
 # (NOX_DIST): a packaged game has no MCP server at all.
 if(NOX_WITH_MCP AND NOT NOX_DIST)
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOX_RUNTIME_MCP=1)
-    target_link_libraries(${PROJECT_NAME} PRIVATE NoxMcp)
+    target_link_libraries(${PROJECT_NAME} PRIVATE NoxEngineMcp)
 else()
     list(FILTER NOXRUNTIME_FILES EXCLUDE REGEX ".*/src/McpRuntime\\..*")
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOX_RUNTIME_MCP=0)

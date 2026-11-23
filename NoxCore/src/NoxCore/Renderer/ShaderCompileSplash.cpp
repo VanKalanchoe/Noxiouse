@@ -17,16 +17,29 @@ namespace Nox
             if (file >> expected && expected > 0)
                 m_Expected = expected;
         }
-        m_Progress.OnCompile = [this](const std::string& source) { OnCompile(source); };
-        m_Progress.OnPipelineCreated = [this]() { OnPipelineCreated(); };
-        m_Progress.OnIdle = [this]() { OnIdle(); };
+        m_Progress.onCompile = [](const char* source, void* userData)
+        {
+            if (userData && source)
+                static_cast<ShaderCompileSplash*>(userData)->OnCompile(source);
+        };
+        m_Progress.onPipelineCreated = [](void* userData)
+        {
+            if (userData)
+                static_cast<ShaderCompileSplash*>(userData)->OnPipelineCreated();
+        };
+        m_Progress.onIdle = [](void* userData)
+        {
+            if (userData)
+                static_cast<ShaderCompileSplash*>(userData)->OnIdle();
+        };
+        m_Progress.userData = this;
         m_MainThread = std::this_thread::get_id();
-        NRI::SetShaderProgress(&m_Progress);
+        nriSetShaderProgressCallbacks(&m_Progress);
     }
 
     ShaderCompileSplash::~ShaderCompileSplash()
     {
-        NRI::SetShaderProgress(nullptr);
+        nriSetShaderProgressCallbacks(nullptr);
         // How many pipelines this start created: the next start's 100 %.
         if (m_Pipelines > 0)
         {

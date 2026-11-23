@@ -6,7 +6,7 @@
 #include <vector>
 #include "Components.h"
 #include "EntityCommandBuffer.h"
-#include "NoxCore/Tasks/WorkerLocal.h"
+#include <NoxTasks/WorkerLocal.h>
 
 namespace Nox
 {
@@ -19,15 +19,15 @@ namespace Nox
         // WorldTransformComponent) is deferred into the command buffers. Mesh entities whose world transform changed are
         // appended to movedEntities.
         static void UpdateWorldTransforms(entt::registry& registry, const std::unordered_map<UUID, entt::entity>& entityMap,
-                                          WorkerLocal<EntityCommandBuffer>& commandBuffers, WorkerLocal<std::vector<entt::entity>>& movedEntities);
+                                          NoxTasks::WorkerLocal<EntityCommandBuffer>& commandBuffers, NoxTasks::WorkerLocal<std::vector<entt::entity>>& movedEntities);
 
     private:
         // Updates one entity's world transform; returns it (null if the entity has no WorldTransformComponent yet).
-        static const glm::dmat4* UpdateNode(entt::registry& registry, WorkerLocal<EntityCommandBuffer>& commandBuffers,
-                                           WorkerLocal<std::vector<entt::entity>>& movedEntities, entt::entity entity,
+        static const glm::dmat4* UpdateNode(entt::registry& registry, NoxTasks::WorkerLocal<EntityCommandBuffer>& commandBuffers,
+                                           NoxTasks::WorkerLocal<std::vector<entt::entity>>& movedEntities, entt::entity entity,
                                            const glm::dmat4& parentWorldMatrix, bool parentWasDirty, bool& outWasDirty);
         static void UpdateSubtree(entt::registry& registry, const std::unordered_map<UUID, entt::entity>& entityMap,
-                                  WorkerLocal<EntityCommandBuffer>& commandBuffers, WorkerLocal<std::vector<entt::entity>>& movedEntities,
+                                  NoxTasks::WorkerLocal<EntityCommandBuffer>& commandBuffers, NoxTasks::WorkerLocal<std::vector<entt::entity>>& movedEntities,
                                   entt::entity entity, const glm::dmat4& parentWorldMatrix, bool parentWasDirty);
     };
 }

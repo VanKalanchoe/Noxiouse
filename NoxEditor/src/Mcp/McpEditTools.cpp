@@ -1,6 +1,6 @@
 #include "McpEditorTools.h"
 #include "McpToolHelpers.h"
-#include "McpValidation.h"
+#include <NoxMcp/McpValidation.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -19,6 +19,7 @@
 // and recorded as one undo step. Edit mode only: Play and Simulate change a copy that Stop throws away.
 namespace Nox::Mcp
 {
+    using namespace ::NoxMcp;
     namespace
     {
         // ------------------------------------------------------------------------------------------------- components by name
@@ -315,7 +316,7 @@ namespace Nox::Mcp
                 tool.Definition.Title = title;
                 tool.Definition.Description = description;
                 tool.Definition.InputSchema = std::move(schema);
-                tool.Definition.Access = ConsoleAccess::Write;
+                tool.Definition.Access = NoxMcp::ToolAccess::Write;
                 tool.Definition.Destructive = destructive;
                 tool.Edit = std::move(edit);
                 tools.push_back(std::move(tool));
@@ -803,7 +804,7 @@ namespace Nox::Mcp
             tool.InputSchema = Schema().String("name", "The undo step's name (optional)").Build();
             tool.InputSchema["properties"]["edits"] = Json{ { "type", "array" }, { "description", "[{ tool, arguments }]" }, { "minItems", 1 }, { "maxItems", 200 } };
             tool.InputSchema["required"] = Json::array({ "edits" });
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Destructive = true;
             tool.Handler = [context, edits](const Json& arguments, ToolDone done)
             {
@@ -832,7 +833,7 @@ namespace Nox::Mcp
                         problem = "each edit needs a 'tool'";
                     else
                     {
-                        auto found = std::find_if(edits->begin(), edits->end(), [&](const EditTool& candidate) { return candidate.Definition.Name == item["tool"]; });
+                        auto found = std::find_if(edits->begin(), edits->end(), [&](const EditTool& candidate) { return candidate.Definition.Name == item["tool"].get<std::string>(); });
                         if (found == edits->end())
                             problem = std::format("{} is not an edit tool", item["tool"].dump());
                         else
@@ -934,7 +935,7 @@ namespace Nox::Mcp
             tool.InputSchema = Schema().Build();
             tool.InputSchema["properties"]["uuids"] = Json{ { "type", "array" }, { "items", Json{ { "type", "string" } } } };
             tool.InputSchema["required"] = Json::array({ "uuids" });
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
                 Ref<Scene> scene = RequireScene(context, done);
@@ -967,7 +968,7 @@ namespace Nox::Mcp
             tool.Description = "Saves the open scene (and its sub-levels) to its file, as Ctrl+S does. A scene never saved needs a name from "
                                "the user first.";
             tool.InputSchema = Schema();
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json&, ToolDone done)
             {
                 std::string error;
@@ -994,7 +995,7 @@ namespace Nox::Mcp
             tool.Title = redo ? "Redo" : "Undo";
             tool.Description = redo ? "Redoes the last undone step (Ctrl+Y)." : "Undoes the last step in the editor's history (Ctrl+Z), whoever made it.";
             tool.InputSchema = Schema();
-            tool.Access = ConsoleAccess::Write;
+            tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context, redo](const Json&, ToolDone done)
             {
                 std::string error;

@@ -6,7 +6,8 @@
 
 #include "Panels/AssetPreviewRenderer.h"
 #include "Panels/InspectorWidgetsV2.h"
-#include "NoxCore/UI/Widgets/UIPropertyRows.h"
+#include <NoxUI/Rendering/UIFont.h>
+#include <NoxUI/Widgets/UIPropertyRows.h>
 #include "NoxCore/Animation/AnimPose.h"
 #include "NoxCore/Animation/AnimationSequence.h"
 #include "NoxCore/Animation/Skeleton.h"
@@ -21,26 +22,26 @@
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
-#include "NoxCore/UI/Core/UIBuilder.h"
-#include "NoxCore/UI/Core/UIContext.h"
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Core/UIContext.h>
 #include "NoxCore/UI/Core/UILayer.h"
-#include "NoxCore/UI/Layout/UILayout.h"
-#include "NoxCore/UI/Rendering/UIDrawList.h"
-#include "NoxCore/UI/Widgets/UIButton.h"
-#include "NoxCore/UI/Widgets/UICheckBox.h"
-#include "NoxCore/UI/Widgets/UIDragScalar.h"
-#include "NoxCore/UI/Widgets/UIImage.h"
-#include "NoxCore/UI/Widgets/UILabel.h"
-#include "NoxCore/UI/Widgets/UIMenu.h"
-#include "NoxCore/UI/Widgets/UIPopup.h"
-#include "NoxCore/UI/Widgets/UIScrollView.h"
-#include "NoxCore/UI/Widgets/UITextInput.h"
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UICheckBox.h>
+#include <NoxUI/Widgets/UIDragScalar.h>
+#include <NoxUI/Widgets/UIImage.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIMenu.h>
+#include <NoxUI/Widgets/UIPopup.h>
+#include <NoxUI/Widgets/UIScrollView.h>
+#include <NoxUI/Widgets/UITextInput.h>
 
 namespace Nox
 {
     namespace
     {
-        UI::UIContext* Context()
+        NoxUI::UIContext* Context()
         {
             UILayer* uiLayer = Application::Get().GetUILayer();
             return uiLayer ? &uiLayer->GetContext() : nullptr;
@@ -55,8 +56,8 @@ namespace Nox
                 return;
             AudioPlayDesc desc;
             desc.Volume = volume;
-            desc.Bus = kAudioBusMaster;
-            desc.Group = AudioVoiceGroup::Editor;
+            desc.Bus = NoxAudio::kAudioBusMaster;
+            desc.Group = NoxAudio::AudioVoiceGroup::Editor;
             if (AssetManager::GetAssetType(sound) == AssetType::AudioGraph)
             {
                 desc.Graph = GetAudioGraphProgram(sound);
@@ -72,28 +73,28 @@ namespace Nox
             AudioEngine::Play(desc);
         }
 
-        Ref<UI::UILabel> Muted(const std::string& text, float size = 13.0f)
+        Ref<NoxUI::UILabel> Muted(const std::string& text, float size = 13.0f)
         {
-            Ref<UI::UILabel> label(new UI::UILabel(text, size));
+            Ref<NoxUI::UILabel> label(new NoxUI::UILabel(text, size));
             label->UseColorOverride = true;
-            label->ColorOverride = UI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
-            label->VAlign = UI::UIAlignment::Center;
+            label->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.60f, 0.64f, 0.72f, 1.0f });
+            label->VAlign = NoxUI::UIAlignment::Center;
             return label;
         }
 
         // The clip's timeline: the playhead (click or drag moves it, and pauses), the loop range shaded, a marker per notify.
-        class ClipTimeline final : public UI::UIElement
+        class ClipTimeline final : public NoxUI::UIElement
         {
         public:
             ClipTimeline(AnimationClipEditorV2* editor, AssetHandle clip) : m_Editor(editor), m_Clip(clip)
             {
-                HitTestMode = UI::UIHitTestMode::Self;
-                WidthMode = UI::UISizeMode::Fill;
-                HeightMode = UI::UISizeMode::Fixed;
+                HitTestMode = NoxUI::UIHitTestMode::Self;
+                WidthMode = NoxUI::UISizeMode::Fill;
+                HeightMode = NoxUI::UISizeMode::Fixed;
                 FixedSize = { 0.0f, 36.0f };
                 Tooltip = "Click or drag: move the playhead. Orange: notifies (events), green: sync markers, blue: the loop range.";
             }
-            bool OnPointerDown(const UI::UIPointerEvent& e) override
+            bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
             {
                 if (e.Button != 1)
                     return false;
@@ -101,19 +102,19 @@ namespace Nox
                 Seek(e.Position.x);
                 return true;
             }
-            bool OnPointerMove(const UI::UIPointerEvent& e) override
+            bool OnPointerMove(const NoxUI::UIPointerEvent& e) override
             {
                 if (m_Dragging)
                     Seek(e.Position.x);
                 return true;
             }
-            bool OnPointerUp(const UI::UIPointerEvent&) override { m_Dragging = false; return true; }
+            bool OnPointerUp(const NoxUI::UIPointerEvent&) override { m_Dragging = false; return true; }
 
         protected:
-            void OnPaint(UI::UIDrawList& d, const UI::UITheme&) override
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme&) override
             {
-                const UI::UIRect b = GetBounds();
-                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, UI::ThemeColor("ClipTimelineBackground", { 0.10f, 0.10f, 0.12f, 1.0f }), glm::vec4(3.0f));
+                const NoxUI::UIRect b = GetBounds();
+                d.AddRoundedRect({ b.Min.x, b.Min.y }, { b.Max.x, b.Max.y }, NoxUI::ThemeColor("ClipTimelineBackground", { 0.10f, 0.10f, 0.12f, 1.0f }), glm::vec4(3.0f));
                 const AnimationSequence* clip = Clip(m_Clip);
                 if (!clip)
                     return;
@@ -123,19 +124,19 @@ namespace Nox
                 const float rangeEnd = m_Editor->RangeEnd > rangeStart ? std::min(m_Editor->RangeEnd, duration) : duration;
                 if (rangeStart > 0.0f || rangeEnd < duration)
                 {
-                    d.AddRoundedRect({ toX(rangeStart), b.Min.y }, { toX(rangeEnd), b.Max.y }, UI::ThemeColor("ClipRange", { 0.31f, 0.63f, 1.0f, 0.2f }));
-                    d.AddRoundedRect({ toX(rangeStart) - 1.0f, b.Min.y }, { toX(rangeStart) + 1.0f, b.Max.y }, UI::ThemeColor("ClipRangeEdge", { 0.31f, 0.63f, 1.0f, 1.0f }));
-                    d.AddRoundedRect({ toX(rangeEnd) - 1.0f, b.Min.y }, { toX(rangeEnd) + 1.0f, b.Max.y }, UI::ThemeColor("ClipRangeEdge", { 0.31f, 0.63f, 1.0f, 1.0f }));
+                    d.AddRoundedRect({ toX(rangeStart), b.Min.y }, { toX(rangeEnd), b.Max.y }, NoxUI::ThemeColor("ClipRange", { 0.31f, 0.63f, 1.0f, 0.2f }));
+                    d.AddRoundedRect({ toX(rangeStart) - 1.0f, b.Min.y }, { toX(rangeStart) + 1.0f, b.Max.y }, NoxUI::ThemeColor("ClipRangeEdge", { 0.31f, 0.63f, 1.0f, 1.0f }));
+                    d.AddRoundedRect({ toX(rangeEnd) - 1.0f, b.Min.y }, { toX(rangeEnd) + 1.0f, b.Max.y }, NoxUI::ThemeColor("ClipRangeEdge", { 0.31f, 0.63f, 1.0f, 1.0f }));
                 }
                 for (const AnimationNotify& notify : clip->Notifies)
                 {
                     const float x = toX(notify.Time);
                     d.AddRoundedRect({ x - 1.0f, b.Min.y + 4.0f }, { x + 1.0f, b.Max.y - 4.0f },
-                                     notify.SyncMarker ? UI::ThemeColor("NotifySyncMarker", { 0.35f, 0.86f, 0.55f, 1.0f }) : UI::ThemeColor("Notify", { 1.0f, 0.75f, 0.24f, 1.0f }));
+                                     notify.SyncMarker ? NoxUI::ThemeColor("NotifySyncMarker", { 0.35f, 0.86f, 0.55f, 1.0f }) : NoxUI::ThemeColor("Notify", { 1.0f, 0.75f, 0.24f, 1.0f }));
                 }
                 const float x = toX(m_Editor->Cursor);
-                d.AddRoundedRect({ x - 1.5f, b.Min.y }, { x + 1.5f, b.Max.y }, UI::ThemeColor("ClipCursor", { 1.0f, 1.0f, 1.0f, 0.95f }));
-                d.AddText(std::format("{:.3f} s", m_Editor->Cursor), nullptr, { b.Min.x + 6.0f, b.Min.y + 10.0f }, 12.0f, UI::ThemeColor("ClipCursorText", { 0.85f, 0.87f, 0.92f, 0.8f }));
+                d.AddRoundedRect({ x - 1.5f, b.Min.y }, { x + 1.5f, b.Max.y }, NoxUI::ThemeColor("ClipCursor", { 1.0f, 1.0f, 1.0f, 0.95f }));
+                d.AddText(std::format("{:.3f} s", m_Editor->Cursor), nullptr, { b.Min.x + 6.0f, b.Min.y + 10.0f }, 12.0f, NoxUI::ThemeColor("ClipCursorText", { 0.85f, 0.87f, 0.92f, 0.8f }));
             }
 
         private:
@@ -144,7 +145,7 @@ namespace Nox
                 const AnimationSequence* clip = Clip(m_Clip);
                 if (!clip)
                     return;
-                const UI::UIRect b = GetBounds();
+                const NoxUI::UIRect b = GetBounds();
                 m_Editor->Cursor = std::clamp((x - b.Min.x) / std::max(b.Width(), 1.0f), 0.0f, 1.0f) * std::max(clip->Duration, 1e-3f);
                 m_Editor->Playing = false; // (scrubbing)
             }
@@ -177,13 +178,13 @@ namespace Nox
         {
             NOX_CORE_WARN("Could not save the notifies of {}", path.string());
             if (Notify)
-                Notify({ UI::UINotificationSeverity::Error, "Notifies not saved", path.filename().string() + " could not be written." });
+                Notify({ NoxUI::UINotificationSeverity::Error, "Notifies not saved", path.filename().string() + " could not be written." });
             return;
         }
         m_Dirty = false;
         m_NotifyCount = ~size_t(0); // (rows in the new order)
         if (Notify)
-            Notify({ UI::UINotificationSeverity::Success, "Animation clip saved", m_Name });
+            Notify({ NoxUI::UINotificationSeverity::Success, "Animation clip saved", m_Name });
     }
 
     bool AnimationClipEditorV2::RevertToDisk()
@@ -228,25 +229,25 @@ namespace Nox
                 m_PreviewSkeleton = assets->FindSkeletonOf(mesh);
     }
 
-    Ref<UI::UIElement> AnimationClipEditorV2::BuildUI()
+    Ref<NoxUI::UIElement> AnimationClipEditorV2::BuildUI()
     {
-        auto root = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-        root->WidthMode = UI::UISizeMode::Fill;
-        root->HeightMode = UI::UISizeMode::Fill;
+        auto root = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 6.0f);
+        root->WidthMode = NoxUI::UISizeMode::Fill;
+        root->HeightMode = NoxUI::UISizeMode::Fill;
         root->StyleClass = "Surface";
         root->DrawBackground = true;
-        root->Padding = UI::UIThickness::All(10.0f);
+        root->Padding = NoxUI::UIThickness::All(10.0f);
         m_Root = root;
 
         // Toolbar: Save, the clip's file and figures.
-        auto bar = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 8.0f);
-        bar->WidthMode = UI::UISizeMode::Fill;
-        Ref<UI::UIButton> save(new UI::UIButton("Save", [this]() { Save(); }));
+        auto bar = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 8.0f);
+        bar->WidthMode = NoxUI::UISizeMode::Fill;
+        Ref<NoxUI::UIButton> save(new NoxUI::UIButton("Save", [this]() { Save(); }));
         bar->AddChild(save);
         auto info = Muted("");
         bar->AddChild(info);
         root->AddChild(bar);
-        UI::AppendSync(*bar, [this, save, info]()
+        NoxUI::AppendSync(*bar, [this, save, info]()
         {
             save->SetEnabled(m_Dirty);
             save->StyleVariant = m_Dirty ? "primary" : "";
@@ -257,15 +258,15 @@ namespace Nox
         });
 
         // Preview and its controls.
-        auto previewRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 10.0f);
-        previewRow->WidthMode = UI::UISizeMode::Fill;
-        Ref<UI::UIImage> image(new UI::UIImage(~0u, { 256.0f, 256.0f }));
-        image->WidthMode = UI::UISizeMode::Fixed;
-        image->HeightMode = UI::UISizeMode::Fixed;
+        auto previewRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 10.0f);
+        previewRow->WidthMode = NoxUI::UISizeMode::Fill;
+        Ref<NoxUI::UIImage> image(new NoxUI::UIImage(~0u, { 256.0f, 256.0f }));
+        image->WidthMode = NoxUI::UISizeMode::Fixed;
+        image->HeightMode = NoxUI::UISizeMode::Fixed;
         image->FixedSize = { 256.0f, 256.0f };
         previewRow->AddChild(image);
-        auto controls = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 6.0f);
-        Ref<UI::UIButton> play(new UI::UIButton("Pause", [this]()
+        auto controls = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 6.0f);
+        Ref<NoxUI::UIButton> play(new NoxUI::UIButton("Pause", [this]()
         {
             const AnimationSequence* clip = Clip(m_Clip);
             const float duration = clip ? std::max(clip->Duration, 1e-3f) : 1.0f;
@@ -275,24 +276,24 @@ namespace Nox
             Playing = !Playing;
         }));
         controls->AddChild(play);
-        Ref<UI::UICheckBox> loop(new UI::UICheckBox("Loop", m_Loop, [this](bool v) { m_Loop = v; }));
+        Ref<NoxUI::UICheckBox> loop(new NoxUI::UICheckBox("Loop", m_Loop, [this](bool v) { m_Loop = v; }));
         controls->AddChild(loop);
         controls->AddChild(Muted("Speed"));
-        Ref<UI::UIDragScalar> speed = CreateSliderField(m_Speed, -2.0f, 2.0f, [this](float v) { m_Speed = v; });
+        Ref<NoxUI::UIDragScalar> speed = CreateSliderField(m_Speed, -2.0f, 2.0f, [this](float v) { m_Speed = v; });
         speed->Format = "{:.2f}x";
-        speed->WidthMode = UI::UISizeMode::Fixed;
+        speed->WidthMode = NoxUI::UISizeMode::Fixed;
         speed->FixedSize = { 160.0f, 24.0f };
         controls->AddChild(speed);
         controls->AddChild(Muted("Preview Mesh"));
-        Ref<UI::UIButton> mesh(new UI::UIButton("(none)"));
-        UI::UIButton* meshRaw = mesh.get();
+        Ref<NoxUI::UIButton> mesh(new NoxUI::UIButton("(none)"));
+        NoxUI::UIButton* meshRaw = mesh.get();
         mesh->OnClick = [this, meshRaw]()
         {
-            UI::UIContext* context = Context();
+            NoxUI::UIContext* context = Context();
             auto assets = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr;
             if (!context || !assets)
                 return;
-            std::vector<UI::UIMenuItem> items;
+            std::vector<NoxUI::UIMenuItem> items;
             for (const auto& [handle, metadata] : assets->GetAssetRegistry())
                 if (metadata.Type == AssetType::Mesh)
                 {
@@ -302,21 +303,21 @@ namespace Nox
                 }
             if (items.empty())
                 items.push_back({ "No skeletal meshes in the project", "", {}, false, false, false, true });
-            UI::UIMenuPopup::ShowPopupMenu(*context, meshRaw->GetBounds(), std::move(items));
+            NoxUI::UIMenuPopup::ShowPopupMenu(*context, meshRaw->GetBounds(), std::move(items));
         };
-        mesh->WidthMode = UI::UISizeMode::Fixed;
+        mesh->WidthMode = NoxUI::UISizeMode::Fixed;
         mesh->FixedSize = { 200.0f, 24.0f };
         controls->AddChild(mesh);
         auto meshNote = Muted("", 12.5f);
         meshNote->UseColorOverride = true;
-        meshNote->ColorOverride = UI::ThemeColor("StatusWarning", { 1.0f, 0.7f, 0.3f, 1.0f });
+        meshNote->ColorOverride = NoxUI::ThemeColor("StatusWarning", { 1.0f, 0.7f, 0.3f, 1.0f });
         controls->AddChild(meshNote);
         previewRow->AddChild(controls);
         root->AddChild(previewRow);
-        UI::AppendSync(*previewRow, [this, image, play, loop, speed, mesh, meshNote]()
+        NoxUI::AppendSync(*previewRow, [this, image, play, loop, speed, mesh, meshNote]()
         {
             Texture2D* frame = m_PreviewMesh != 0 ? AssetPreviewRenderer::Get().GetAnimationPreview(m_PreviewMesh, m_PreviewSkeleton, m_Clip, Cursor, 256) : nullptr;
-            image->TextureDescriptorSlot = frame ? frame->GetDescriptorIndexSlot() : ~0u;
+            image->TextureId = frame ? frame->GetDescriptorIndexSlot() : ~0u;
             image->Tooltip = frame ? (m_LastNotifyAge < 0.6f && !m_LastNotify.empty() ? "Notify: " + m_LastNotify : std::string())
                                    : (m_PreviewMesh != 0 ? "Loading..." : "No skeletal mesh to preview with");
             play->SetText(Playing ? "Pause" : "Play");
@@ -329,15 +330,15 @@ namespace Nox
 
         // Timeline and the loop range.
         root->AddChild(Ref<ClipTimeline>(new ClipTimeline(this, m_Clip)));
-        auto rangeRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-        rangeRow->WidthMode = UI::UISizeMode::Fill;
-        rangeRow->AddChild(Ref<UI::UIButton>(new UI::UIButton("Range Start Here", [this]() { RangeStart = Cursor; })));
-        rangeRow->AddChild(Ref<UI::UIButton>(new UI::UIButton("Range End Here", [this]() { RangeEnd = Cursor; })));
-        rangeRow->AddChild(Ref<UI::UIButton>(new UI::UIButton("Whole Clip", [this]() { RangeStart = RangeEnd = 0.0f; })));
+        auto rangeRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+        rangeRow->WidthMode = NoxUI::UISizeMode::Fill;
+        rangeRow->AddChild(Ref<NoxUI::UIButton>(new NoxUI::UIButton("Range Start Here", [this]() { RangeStart = Cursor; })));
+        rangeRow->AddChild(Ref<NoxUI::UIButton>(new NoxUI::UIButton("Range End Here", [this]() { RangeEnd = Cursor; })));
+        rangeRow->AddChild(Ref<NoxUI::UIButton>(new NoxUI::UIButton("Whole Clip", [this]() { RangeStart = RangeEnd = 0.0f; })));
         auto rangeText = Muted("");
         rangeRow->AddChild(rangeText);
         root->AddChild(rangeRow);
-        UI::AppendSync(*rangeRow, [this, rangeText]()
+        NoxUI::AppendSync(*rangeRow, [this, rangeText]()
         {
             const AnimationSequence* clip = Clip(m_Clip);
             const float duration = clip ? clip->Duration : 0.0f;
@@ -345,16 +346,16 @@ namespace Nox
         });
 
         // Notifies.
-        auto addRow = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-        addRow->WidthMode = UI::UISizeMode::Fill;
+        auto addRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+        addRow->WidthMode = NoxUI::UISizeMode::Fill;
         addRow->AddChild(Muted("Notifies"));
-        auto newName = UI::MakeUI<UI::UITextInput>();
+        auto newName = NoxUI::MakeUI<NoxUI::UITextInput>();
         newName->Text = m_NewName;
-        newName->WidthMode = UI::UISizeMode::Fixed;
+        newName->WidthMode = NoxUI::UISizeMode::Fixed;
         newName->FixedSize = { 180.0f, 24.0f };
         newName->OnChanged = [this](const std::string& text) { m_NewName = text; };
         addRow->AddChild(newName);
-        Ref<UI::UIButton> add(new UI::UIButton("Add at Playhead", [this]()
+        Ref<NoxUI::UIButton> add(new NoxUI::UIButton("Add at Playhead", [this]()
         {
             AnimationSequence* clip = Clip(m_Clip);
             if (!clip || m_NewName.empty())
@@ -368,11 +369,11 @@ namespace Nox
         add->Tooltip = "Scripts on the animated entity receive OnAnimationEvent(name) when a playhead crosses it.";
         addRow->AddChild(add);
         root->AddChild(addRow);
-        auto scroll = UI::MakeUI<UI::UIScrollView>();
-        scroll->WidthMode = UI::UISizeMode::Fill;
-        scroll->HeightMode = UI::UISizeMode::Fill;
-        m_Notifies = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 3.0f);
-        m_Notifies->WidthMode = UI::UISizeMode::Fill;
+        auto scroll = NoxUI::MakeUI<NoxUI::UIScrollView>();
+        scroll->WidthMode = NoxUI::UISizeMode::Fill;
+        scroll->HeightMode = NoxUI::UISizeMode::Fill;
+        m_Notifies = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 3.0f);
+        m_Notifies->WidthMode = NoxUI::UISizeMode::Fill;
         scroll->AddChild(m_Notifies);
         root->AddChild(scroll);
         m_NotifyCount = ~size_t(0);
@@ -387,33 +388,33 @@ namespace Nox
             return;
         m_NotifyCount = clip->Notifies.size();
         const float duration = std::max(clip->Duration, 1e-3f);
-        auto header = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
+        auto header = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
         for (const auto& [title, width] : std::initializer_list<std::pair<const char*, float>>{ { "Time", 110.0f }, { "Name", 200.0f }, { "Sync", 44.0f }, { "Sound", 160.0f } })
         {
             auto label = Muted(title, 12.5f);
-            label->WidthMode = UI::UISizeMode::Fixed;
+            label->WidthMode = NoxUI::UISizeMode::Fixed;
             label->FixedSize = { width, 18.0f };
             header->AddChild(label);
         }
         m_Notifies->AddChild(header);
         for (size_t i = 0; i < clip->Notifies.size(); ++i)
         {
-            auto row = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Horizontal, 6.0f);
-            row->WidthMode = UI::UISizeMode::Fill;
+            auto row = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+            row->WidthMode = NoxUI::UISizeMode::Fill;
             const auto notify = [this, i]() -> AnimationNotify* { AnimationSequence* c = Clip(m_Clip); return c && i < c->Notifies.size() ? &c->Notifies[i] : nullptr; };
-            auto time = UI::MakeUI<UI::UIDragScalar>(clip->Notifies[i].Time, 0.005f, [this, notify](float v) { if (AnimationNotify* n = notify()) { n->Time = v; Edited(); } });
+            auto time = NoxUI::MakeUI<NoxUI::UIDragScalar>(clip->Notifies[i].Time, 0.005f, [this, notify](float v) { if (AnimationNotify* n = notify()) { n->Time = v; Edited(); } });
             time->Min = 0.0f;
             time->Max = duration;
             time->Format = "{:.3f} s";
-            time->WidthMode = UI::UISizeMode::Fixed;
+            time->WidthMode = NoxUI::UISizeMode::Fixed;
             time->FixedSize = { 110.0f, 24.0f };
             row->AddChild(time);
-            auto name = UI::MakeUI<UI::UITextInput>();
+            auto name = NoxUI::MakeUI<NoxUI::UITextInput>();
             name->Text = clip->Notifies[i].Name;
-            name->WidthMode = UI::UISizeMode::Fixed;
+            name->WidthMode = NoxUI::UISizeMode::Fixed;
             name->FixedSize = { 200.0f, 24.0f };
             // Renamed when the edit ends (Enter or click away); an empty name puts the old one back.
-            UI::UITextInput* nameRaw = name.get();
+            NoxUI::UITextInput* nameRaw = name.get();
             const auto applyName = [this, notify, nameRaw]()
             {
                 AnimationNotify* n = notify();
@@ -429,20 +430,20 @@ namespace Nox
             };
             name->OnSubmit = [applyName](const std::string&) { applyName(); };
             row->AddChild(name);
-            Ref<UI::UICheckBox> sync(new UI::UICheckBox("", clip->Notifies[i].SyncMarker, [this, notify](bool v) { if (AnimationNotify* n = notify()) { n->SyncMarker = v; Edited(); } }));
+            Ref<NoxUI::UICheckBox> sync(new NoxUI::UICheckBox("", clip->Notifies[i].SyncMarker, [this, notify](bool v) { if (AnimationNotify* n = notify()) { n->SyncMarker = v; Edited(); } }));
             sync->Tooltip = "Sync marker: not raised as an event; blend spaces line their clips up at markers of the same name (e.g. L and R where each foot plants)";
-            sync->WidthMode = UI::UISizeMode::Fixed;
+            sync->WidthMode = NoxUI::UISizeMode::Fixed;
             sync->FixedSize = { 44.0f, 24.0f };
             row->AddChild(sync);
-            Ref<UI::UIButton> sound(new UI::UIButton("Add Sound..."));
-            UI::UIButton* soundRaw = sound.get();
+            Ref<NoxUI::UIButton> sound(new NoxUI::UIButton("Add Sound..."));
+            NoxUI::UIButton* soundRaw = sound.get();
             sound->OnClick = [this, i, soundRaw]() { ShowSoundSettings(i, soundRaw->GetBounds()); };
             sound->Tooltip = "Play Sound: a sound this notify plays where the character is (or at a bone), optionally picked by the physical surface under it.";
-            sound->WidthMode = UI::UISizeMode::Fixed;
+            sound->WidthMode = NoxUI::UISizeMode::Fixed;
             sound->FixedSize = { 160.0f, 24.0f };
             row->AddChild(sound);
-            row->AddChild(Ref<UI::UIButton>(new UI::UIButton("Go to", [this, notify]() { if (AnimationNotify* n = notify()) { Cursor = n->Time; Playing = false; } })));
-            row->AddChild(Ref<UI::UIButton>(new UI::UIButton("Delete", [this, i]()
+            row->AddChild(Ref<NoxUI::UIButton>(new NoxUI::UIButton("Go to", [this, notify]() { if (AnimationNotify* n = notify()) { Cursor = n->Time; Playing = false; } })));
+            row->AddChild(Ref<NoxUI::UIButton>(new NoxUI::UIButton("Delete", [this, i]()
             {
                 AnimationSequence* c = Clip(m_Clip);
                 if (c && i < c->Notifies.size())
@@ -452,14 +453,14 @@ namespace Nox
                 }
             })));
             m_Notifies->AddChild(row);
-            UI::AppendSync(*row, [notify, time, name, applyName, sync, sound]()
+            NoxUI::AppendSync(*row, [notify, time, name, applyName, sync, sound]()
             {
                 AnimationNotify* n = notify();
                 if (!n)
                     return;
                 if (!time->IsInteracting())
                     time->Value = n->Time;
-                if (!UI::HasState(name->GetState(), UI::UIState::Focused))
+                if (!NoxUI::HasState(name->GetState(), NoxUI::UIState::Focused))
                     applyName();
                 sync->Checked = n->SyncMarker;
                 std::string label = "Add Sound...";
@@ -475,17 +476,17 @@ namespace Nox
         }
     }
 
-    void AnimationClipEditorV2::ShowSoundSettings(size_t index, const UI::UIRect& anchor)
+    void AnimationClipEditorV2::ShowSoundSettings(size_t index, const NoxUI::UIRect& anchor)
     {
-        UI::UIContext* context = Context();
+        NoxUI::UIContext* context = Context();
         AnimationSequence* clip = Clip(m_Clip);
         if (!context || !clip || index >= clip->Notifies.size())
             return;
         AnimationNotify* n = &clip->Notifies[index];
-        auto box = UI::MakeUI<UI::UIStackBox>(UI::UIOrientation::Vertical, 4.0f);
-        box->Padding = UI::UIThickness::All(10.0f);
+        auto box = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 4.0f);
+        box->Padding = NoxUI::UIThickness::All(10.0f);
         box->FixedSize = { 460.0f, 0.0f };
-        UI::UIPropertyRows rows(box, context);
+        NoxUI::UIPropertyRows rows(box, context);
         rows.Header("Play Sound: " + n->Name);
         const auto changed = [this]() { Edited(); };
         InspectorCardBuilder slots{ box, {}, context };
@@ -509,7 +510,7 @@ namespace Nox
             rows.String("Bone", &n->Bone, "(the entity)", changed, "No preview skeleton: type the bone's name.");
         rows.Check("Trace Surface", [n]() { return n->TraceSurface; }, [n, changed](bool v) { n->TraceSurface = v; changed(); },
                    "A ray goes down from the bone; the physical surface it hits picks the sound from the list below. No hit, or no sound for that surface: Sound.");
-        UI::UIPropertyRows trace = rows.Group();
+        NoxUI::UIPropertyRows trace = rows.Group();
         rows.ShowWhen(trace.GetBody(), [n]() { return n->TraceSurface; });
         trace.Drag("Trace Distance (m)", [n]() { return n->TraceDistance; }, [n, changed](float v) { n->TraceDistance = v; changed(); }, 0.01f, 0.0f, 10.0f, "{:.2f}",
                    "How far below the bone the ground may be (the ray is this + 0.2 m long).");
@@ -529,7 +530,7 @@ namespace Nox
                   "Each play's pitch is random within this (0.05: +/- 5 %): no two footsteps alike.");
         rows.Button("Remove Sound", [n, changed, context]() { n->Sound = 0; n->SurfaceSounds.clear(); changed(); context->ClearOverlay(); });
         // (its rows follow the notify while the popup is up, and stop with it: their syncs are part of the overlay)
-        UI::UIPopup::Show(*context, anchor, box);
+        NoxUI::UIPopup::Show(*context, anchor, box);
     }
 
     void AnimationClipEditorV2::Update()

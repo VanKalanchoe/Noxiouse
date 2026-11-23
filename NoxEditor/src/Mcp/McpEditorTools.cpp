@@ -12,6 +12,7 @@
 
 namespace Nox::Mcp
 {
+    using namespace ::NoxMcp;
     std::vector<Tool> CreateEditorTools(const EditorContext& context)
     {
         std::vector<Tool> tools;
@@ -41,7 +42,7 @@ namespace Nox::Mcp
                              { "framesPerSecond", context.FramesPerSecond ? context.FramesPerSecond() : 0.0f },
                              { "multiplayer", context.NetStatus ? context.NetStatus() : std::string() },
                              { "newestLogSequence", LogBuffer::Get().GetLatestSequence() },
-                             { "grantedAccess", ToString(context.GrantedAccess ? context.GrantedAccess() : ConsoleAccess::Read) } };
+                             { "grantedAccess", ToString(context.GrantedAccess ? context.GrantedAccess() : NoxMcp::ToolAccess::Read) } };
                 // MCP5: the games multiplayer Play started with MCP servers (runtime_call reaches them).
                 if (context.Runtimes)
                 {

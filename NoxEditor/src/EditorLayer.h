@@ -32,10 +32,14 @@
 #include "NoxCore/Network/NetSession.h"
 #include "ProjectManager/ProcessLauncher.h"
 
+namespace NoxMcp
+{
+    class ServerProbe;
+}
+
 namespace Nox::Mcp
 {
     class McpEditor;
-    class ServerProbe;
 }
 
 namespace Nox
@@ -165,7 +169,7 @@ namespace Nox
             int Player = 0;       // 0: the dedicated server
             uint16_t McpPort = 0;
             size_t Process = 0;   // its index in m_PlayProcesses
-            std::shared_ptr<Mcp::ServerProbe> Probe; // whether its server really answers (an old NoxRuntime ignores --mcp)
+            std::shared_ptr<NoxMcp::ServerProbe> Probe; // whether its server really answers (an old NoxRuntime ignores --mcp)
         };
         std::vector<PlayRuntime> m_PlayRuntimes;
         // The edited scene's path under the asset directory and its handle (m_EditorScenePath is absolute after Save As / the file dialog,

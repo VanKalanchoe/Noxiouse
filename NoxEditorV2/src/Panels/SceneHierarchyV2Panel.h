@@ -12,19 +12,20 @@
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
-#include "NoxCore/UI/Core/UITypes.h"
+#include <NoxUI/Core/UITypes.h>
 #include "EditorSelection.h"
 
-namespace Nox
+namespace NoxUI
 {
-    namespace UI
-    {
         class UIElement;
         class UILabel;
         class UISearchBar;
         class UITreeView;
         struct UITreeNode;
     }
+
+namespace Nox
+{
 
     class SceneHierarchyV2Panel
     {
@@ -33,8 +34,8 @@ namespace Nox
         explicit SceneHierarchyV2Panel(const Ref<Scene>& context);
         ~SceneHierarchyV2Panel();
 
-        const Ref<UI::UIElement>& BuildUI();
-        const Ref<UI::UIElement>& GetRoot() const { return m_Root; }
+        const Ref<NoxUI::UIElement>& BuildUI();
+        const Ref<NoxUI::UIElement>& GetRoot() const { return m_Root; }
 
         void SetContext(const Ref<Scene>& context);
         void Update();
@@ -76,9 +77,9 @@ namespace Nox
         void ReparentEntities(const std::vector<Entity>& entities, Entity parent);
         bool MoveFolder(const std::string& sourcePath, const std::string& targetParentFolder);
 
-        void ShowContextMenuForNode(uint64_t nodeId, const UI::UIVec2& screenPos);
-        void ShowBlankContextMenu(const UI::UIVec2& screenPos);
-        void ShowAddMenu(const UI::UIVec2& screenPos);
+        void ShowContextMenuForNode(uint64_t nodeId, const NoxUI::UIVec2& screenPos);
+        void ShowBlankContextMenu(const NoxUI::UIVec2& screenPos);
+        void ShowAddMenu(const NoxUI::UIVec2& screenPos);
 
         void SyncTreeSelection();
         void UpdateCountLabel();
@@ -104,10 +105,10 @@ namespace Nox
         std::unordered_map<uint64_t, NodeMapping> m_NodeMap;
         std::unordered_map<std::string, uint64_t> m_FolderIdCache;
 
-        Ref<UI::UIElement> m_Root;
-        Ref<UI::UISearchBar> m_SearchBar;
-        Ref<UI::UITreeView> m_TreeView;
-        Ref<UI::UILabel> m_CountLabel;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UISearchBar> m_SearchBar;
+        Ref<NoxUI::UITreeView> m_TreeView;
+        Ref<NoxUI::UILabel> m_CountLabel;
 
         std::function<void(Entity)> m_FocusEntity;
         std::function<void(PrimitiveShape, const std::string&)> m_CreateShape;
