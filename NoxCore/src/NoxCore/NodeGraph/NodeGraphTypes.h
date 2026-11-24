@@ -80,6 +80,9 @@ namespace Nox
     {
         std::string Name;
         std::string Type;
+        // What the graph editor shows when the pin is hovered, above its type (empty: the type alone) -- e.g. a material graph pin's
+        // shader stage: per vertex, per pixel, per light.
+        std::string Tooltip;
     };
 
     // True for exactly the alternatives NodeGraphValue holds. GraphEvalContext uses this to guard std::get_if

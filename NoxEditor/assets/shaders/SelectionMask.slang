@@ -17,6 +17,8 @@
         float3 worldPos : TEXCOORD3;    // (a material graph's Opacity Mask: MaterialGraph.slang's material_graph_mask_cuts)
         float3 normal : TEXCOORD4;
         float4 vertexColor : TEXCOORD5;
+        float3 localPos : TEXCOORD7;    // (Local Position: before skinning and morphs)
+        float4 tangent : TEXCOORD8;     // (Vertex Tangent / Bitangent: world, w the handedness)
 #endif
         nointerpolation uint drawID : TEXCOORD6;
     };
@@ -92,6 +94,8 @@
             vertices[i].worldPos = worldPos.xyz;
             vertices[i].normal = material_graph_vertex_normal(instance, vert, localVertexIndex, pushConstant);
             vertices[i].vertexColor = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors);
+            vertices[i].localPos = vert.pos;
+            vertices[i].tangent = material_graph_vertex_tangent(instance, vert, localVertexIndex, pushConstant);
 #endif
             vertices[i].drawID = sharedPayload.drawID;
         }
@@ -120,7 +124,7 @@
 #ifdef NOX_MATERIAL_GRAPH
         bool graphMask;
         if (material_graph_mask_cuts(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace, mul(ubo.nonJitteredProj, ubo.view),
-                                     ubo, instances.material(inVert.drawID), instance, graphMask))
+                                     ubo, instances.material(inVert.drawID), instance, graphMask, inVert.localPos, inVert.tangent))
             discard;
         if (!graphMask)
 #endif

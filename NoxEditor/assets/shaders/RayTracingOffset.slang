@@ -25,6 +25,7 @@ void computeMain(uint3 groupID : SV_GroupID, uint3 groupThreadID : SV_GroupThrea
     {
         const uint vertexIndex = work.firstVertex + v;
         Vertex vertex = unpackVertex(packedVertices[vertexIndex]);
+        const float3 bindPosition = vertex.pos; // (a graph's Local Position: before skinning and morphs)
         if (work.skinnedVertexOffset != NoSkinnedVertices && pushConstant.skinnedVerticesReference != 0)
         {
             const SkinnedVertex skinned = skinnedVertices[work.skinnedVertexOffset + vertexIndex];
@@ -35,7 +36,8 @@ void computeMain(uint3 groupID : SV_GroupID, uint3 groupThreadID : SV_GroupThrea
         const float3 renderPos = mul(world, float4(vertex.pos, 1.0)).xyz;
         const float3 worldNormal = mul((float3x3)instance.normalMatrix, vertex.normal);
         const float4 color = instance.colorBufferAddress != 0 ? unpackVertexColor(vertexColors[vertexIndex]) : float4(1.0);
-        const float3 offset = material_graph_offset(material, renderPos, worldNormal, vertex.uv0, vertex.uv1, color, ubo.timeSeconds, ubo);
+        const float3 offset = material_graph_offset(material, renderPos, worldNormal, vertex.uv0, vertex.uv1, color, ubo.timeSeconds, ubo,
+                                                    bindPosition, float4(mul((float3x3)world, vertex.tangent.xyz), vertex.tangent.w));
         // World units into the mesh's own space (the BLAS's): the inverse of the instance's 3x3 is the transpose of its normal matrix
         // (transpose(inverse(world))).
         const float3 localOffset = mul(transpose((float3x3)instance.normalMatrix), offset);

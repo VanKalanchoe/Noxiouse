@@ -18,6 +18,8 @@
         float3 worldPos : TEXCOORD5;    // render space (camera-relative origin: UniformBufferObject::renderOrigin)
         float3 normal : TEXCOORD6;      // world
         float4 vertexColor : TEXCOORD7; // glTF COLOR_0 (white without)
+        float3 localPos : TEXCOORD8;    // before skinning and morphs, the mesh's space (a graph's Local Position)
+        float4 tangent : TEXCOORD9;     // world, skinned; w the bitangent's handedness (Vertex Tangent / Bitangent)
 #endif
     };
 
@@ -100,6 +102,8 @@
             vertices[i].worldPos = worldPos.xyz;
             vertices[i].normal = material_graph_vertex_normal(instance, vert, localVertexIndex, pushConstant);
             vertices[i].vertexColor = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors);
+            vertices[i].localPos = vert.pos;
+            vertices[i].tangent = material_graph_vertex_tangent(instance, vert, localVertexIndex, pushConstant);
 #endif
             // The material's depth bias (depth_bias_clip): decals and overlays over the surface they lie on.
             float4 clipPos = depth_bias_clip(mul(viewProj, worldPos), worldPos.xyz, ubo.cameraWorldPos.xyz, instance.depthBias);
@@ -154,7 +158,7 @@
 #ifdef NOX_MATERIAL_GRAPH
         bool graphMask;
         if (material_graph_mask_cuts(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace, mul(ubo.proj, ubo.view), ubo,
-                                     instances.material(inVert.drawID), instance, graphMask))
+                                     instances.material(inVert.drawID), instance, graphMask, inVert.localPos, inVert.tangent))
             discard;
         if (!graphMask)
 #endif
@@ -201,7 +205,7 @@
         // (the graph's view inputs -- Camera Vector, Screen Position -- are the shadow view's here, as in Unreal's shadow depths)
         bool graphMask;
         if (material_graph_mask_cuts(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace, mul(ubo.proj, ubo.view), ubo,
-                                     instances.material(inVert.drawID), instance, graphMask))
+                                     instances.material(inVert.drawID), instance, graphMask, inVert.localPos, inVert.tangent))
             discard;
         if (!graphMask)
 #endif

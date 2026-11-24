@@ -318,15 +318,26 @@
                 const float4 offsetColor0 = loadMeshVertexColor(ubo, vertexBase + vIdx0, instance.vertexColors);
                 const float4 offsetColor1 = loadMeshVertexColor(ubo, vertexBase + vIdx1, instance.vertexColors);
                 const float4 offsetColor2 = loadMeshVertexColor(ubo, vertexBase + vIdx2, instance.vertexColors);
+                // Local Position (before skinning and morphs) and the vertex tangent, as the mesh stage gives them (last frame's corners
+                // reuse this frame's tangent: the pose's tangent is not kept a frame).
+                const float4 offsetTangent0 = float4(mul((float3x3)instance.modelMatrix, localTangent0.xyz), localTangent0.w);
+                const float4 offsetTangent1 = float4(mul((float3x3)instance.modelMatrix, localTangent1.xyz), localTangent1.w);
+                const float4 offsetTangent2 = float4(mul((float3x3)instance.modelMatrix, localTangent2.xyz), localTangent2.w);
                 const float3 previousCorner0 = mul(instance.previousModelMatrix, previousLocalPos0).xyz;
                 const float3 previousCorner1 = mul(instance.previousModelMatrix, previousLocalPos1).xyz;
                 const float3 previousCorner2 = mul(instance.previousModelMatrix, previousLocalPos2).xyz;
-                previousOffset0 = material_graph_offset(offsetMaterial, previousCorner0, offsetNormal0, v0.uv0, v0.uv1, offsetColor0, ubo.previousTimeSeconds, ubo);
-                previousOffset1 = material_graph_offset(offsetMaterial, previousCorner1, offsetNormal1, v1.uv0, v1.uv1, offsetColor1, ubo.previousTimeSeconds, ubo);
-                previousOffset2 = material_graph_offset(offsetMaterial, previousCorner2, offsetNormal2, v2.uv0, v2.uv1, offsetColor2, ubo.previousTimeSeconds, ubo);
-                worldPos0.xyz += material_graph_offset(offsetMaterial, worldPos0.xyz, offsetNormal0, v0.uv0, v0.uv1, offsetColor0, ubo.timeSeconds, ubo);
-                worldPos1.xyz += material_graph_offset(offsetMaterial, worldPos1.xyz, offsetNormal1, v1.uv0, v1.uv1, offsetColor1, ubo.timeSeconds, ubo);
-                worldPos2.xyz += material_graph_offset(offsetMaterial, worldPos2.xyz, offsetNormal2, v2.uv0, v2.uv1, offsetColor2, ubo.timeSeconds, ubo);
+                previousOffset0 = material_graph_offset(offsetMaterial, previousCorner0, offsetNormal0, v0.uv0, v0.uv1, offsetColor0, ubo.previousTimeSeconds, ubo,
+                                                       v0.pos, offsetTangent0);
+                previousOffset1 = material_graph_offset(offsetMaterial, previousCorner1, offsetNormal1, v1.uv0, v1.uv1, offsetColor1, ubo.previousTimeSeconds, ubo,
+                                                       v1.pos, offsetTangent1);
+                previousOffset2 = material_graph_offset(offsetMaterial, previousCorner2, offsetNormal2, v2.uv0, v2.uv1, offsetColor2, ubo.previousTimeSeconds, ubo,
+                                                       v2.pos, offsetTangent2);
+                worldPos0.xyz += material_graph_offset(offsetMaterial, worldPos0.xyz, offsetNormal0, v0.uv0, v0.uv1, offsetColor0, ubo.timeSeconds, ubo,
+                                                       v0.pos, offsetTangent0);
+                worldPos1.xyz += material_graph_offset(offsetMaterial, worldPos1.xyz, offsetNormal1, v1.uv0, v1.uv1, offsetColor1, ubo.timeSeconds, ubo,
+                                                       v1.pos, offsetTangent1);
+                worldPos2.xyz += material_graph_offset(offsetMaterial, worldPos2.xyz, offsetNormal2, v2.uv0, v2.uv1, offsetColor2, ubo.timeSeconds, ubo,
+                                                       v2.pos, offsetTangent2);
             }
 #endif
 
@@ -700,6 +711,10 @@
             graphIn.positionDx = ddx_pos;
             graphIn.positionDy = ddy_pos;
             graphIn.normal = backFace ? -geomNormal : geomNormal;
+            graphIn.localPosition = v0.pos * w0 + v1.pos * w1 + v2.pos * w2; // (before skinning and morphs: the mesh's own vertices)
+            graphIn.localPositionDx = v0.pos * dbary_dx.x + v1.pos * dbary_dx.y + v2.pos * dbary_dx.z;
+            graphIn.localPositionDy = v0.pos * dbary_dy.x + v1.pos * dbary_dy.y + v2.pos * dbary_dy.z;
+            graphIn.tangent = float4(rawGeomTangent, tangentHandedness);
             graphIn.vertexColor = float4(1.0);
             if (instance.vertexColors != 0)
                 graphIn.vertexColor = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + vIdx0, 1u) * w0 +

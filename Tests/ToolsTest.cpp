@@ -437,6 +437,30 @@ static void TestMaterialGraph()
     CHECK(litDispatcher.find("MaterialGraphInputs material_graph_lit_inputs(CustomLitSurface s)") != std::string::npos &&
               litDispatcher.find("case 0u: return CustomLit0::light(s, l);") != std::string::npos,
           "a graph's lighting takes a slot of the Material Shaders' dispatcher, with the graph inputs' helper");
+    // Vertex-stage inputs (step 4e part 1): Local Position (before skinning: a dissolve that stays on an animated character), Vertex
+    // Tangent / Bitangent -- in the surface, the mask and World Position Offset; refused in the lighting (the G-buffer keeps none of them).
+    NodeGraph localGraph = CreateEmptyMaterialGraph();
+    const uint32_t localNoise = node(localGraph, "Noise", { { "Scale", 0.05f } });
+    link(localGraph, node(localGraph, "Local Position"), 0, localNoise, 0);
+    link(localGraph, localNoise, 0, localGraph.OutputNode, 7); // Opacity Mask
+    link(localGraph, node(localGraph, "Vertex Tangent"), 0, localGraph.OutputNode, 0); // Base Color
+    const uint32_t localWave = node(localGraph, "Multiply", { { "B", 2.0f } });
+    link(localGraph, node(localGraph, "Vertex Bitangent"), 0, localWave, 0);
+    link(localGraph, localWave, 0, localGraph.OutputNode, 8); // World Position Offset
+    const MaterialGraphProgram localProgram = CompileMaterialGraph(localGraph);
+    CHECK(localProgram.Valid && localProgram.MaskCode.find("i.localPosition") != std::string::npos &&
+              localProgram.SurfaceCode.find("i.tangent") != std::string::npos && localProgram.Code.find("cross(i.normal, i.tangent.xyz)") != std::string::npos,
+          "Local Position into the mask, Vertex Tangent into the surface, Vertex Bitangent into World Position Offset: '{}'", localProgram.Error);
+    NodeGraph localLit = CreateEmptyMaterialGraph();
+    link(localLit, node(localLit, "Local Position"), 0, localLit.OutputNode, 9);
+    const MaterialGraphProgram localLitProgram = CompileMaterialGraph(localLit);
+    CHECK(!localLitProgram.Valid && localLitProgram.Error.find("Local Position cannot feed Custom Light") != std::string::npos,
+          "Local Position into Custom Light is refused (the lighting runs from the G-buffer): '{}'", localLitProgram.Error);
+    // The stage of every Material Output pin in its tooltip (step 4d).
+    const NodeTypeDesc* stageOutput = NodeTypeRegistry::Find(kMaterialGraphDomain, "Material Output");
+    CHECK(stageOutput && stageOutput->Inputs[0].Tooltip.starts_with("Per pixel") && stageOutput->Inputs[8].Tooltip.starts_with("Per vertex") &&
+              stageOutput->Inputs[9].Tooltip.starts_with("Per light"),
+          "the Material Output's pins say their stage: Base Color per pixel, World Position Offset per vertex, Custom Light per light");
     const auto& rayVariants = CustomLitShaders::RayTracingMaskVariants();
     CHECK(std::count_if(rayVariants.begin(), rayVariants.end(), [](const CustomLitShaders::RayTracingMaskVariant& v) { return v.Surface; }) == 7 &&
           std::any_of(rayVariants.begin(), rayVariants.end(), [](const CustomLitShaders::RayTracingMaskVariant& v)
@@ -493,18 +517,25 @@ static void TestMaterialGraph()
         maskFile << CustomLitShaders::GenerateGraphDispatcher({ "Graphs/Leaves.nmatgraph" }, { { "Graphs/Leaves.nmatgraph", maskProgram.Code } });
         // Every function in use: a surface graph, a masked one and a waving one (compile every graph variant with it).
         std::ofstream masksOut(std::string(dump) + "/MaterialGraphMasks.slang");
-        masksOut << CustomLitShaders::GenerateGraphMaskDispatcher({ "Graphs/Panned.nmatgraph", "Graphs/Leaves.nmatgraph", "Graphs/Waving.nmatgraph" },
+        masksOut << CustomLitShaders::GenerateGraphMaskDispatcher({ "Graphs/Panned.nmatgraph", "Graphs/Leaves.nmatgraph", "Graphs/Waving.nmatgraph",
+                                                                    "Graphs/Local.nmatgraph" },
                                                                   { { "Graphs/Panned.nmatgraph", program.Code, program.MaskCode },
                                                                     { "Graphs/Leaves.nmatgraph", maskProgram.Code, maskProgram.MaskCode },
-                                                                    { "Graphs/Waving.nmatgraph", waveProgram.Code, waveProgram.MaskCode } });
+                                                                    { "Graphs/Waving.nmatgraph", waveProgram.Code, waveProgram.MaskCode },
+                                                                    { "Graphs/Local.nmatgraph", localProgram.Code, localProgram.MaskCode } });
         std::ofstream litOut(std::string(dump) + "/CustomLitShadersGraph.slang");
         litOut << litDispatcher;
         std::ofstream surfacesOut(std::string(dump) + "/MaterialGraphSurfaces.slang");
-        surfacesOut << surfacesFile;
+        surfacesOut << CustomLitShaders::GenerateGraphSurfaceDispatcher(
+            { "Graphs/Panned.nmatgraph", "Graphs/Leaves.nmatgraph", "Graphs/Waving.nmatgraph", "Graphs/Local.nmatgraph" },
+            { { "Graphs/Panned.nmatgraph", program.Code, program.MaskCode, program.SurfaceCode },
+              { "Graphs/Leaves.nmatgraph", maskProgram.Code, maskProgram.MaskCode, maskProgram.SurfaceCode },
+              { "Graphs/Waving.nmatgraph", waveProgram.Code, waveProgram.MaskCode, waveProgram.SurfaceCode },
+              { "Graphs/Local.nmatgraph", localProgram.Code, localProgram.MaskCode, localProgram.SurfaceCode } });
         std::ofstream allFile(std::string(dump) + "/MaterialGraphsAll.slang");
-        allFile << CustomLitShaders::GenerateGraphDispatcher({ "Graphs/Panned.nmatgraph", "Graphs/Leaves.nmatgraph", "Graphs/Waving.nmatgraph" },
+        allFile << CustomLitShaders::GenerateGraphDispatcher({ "Graphs/Panned.nmatgraph", "Graphs/Leaves.nmatgraph", "Graphs/Waving.nmatgraph", "Graphs/Local.nmatgraph" },
                                                              { { "Graphs/Panned.nmatgraph", program.Code }, { "Graphs/Leaves.nmatgraph", maskProgram.Code },
-                                                               { "Graphs/Waving.nmatgraph", waveProgram.Code } });
+                                                               { "Graphs/Waving.nmatgraph", waveProgram.Code }, { "Graphs/Local.nmatgraph", localProgram.Code } });
     }
 }
 

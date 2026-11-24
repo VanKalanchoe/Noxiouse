@@ -204,6 +204,8 @@ namespace Nox
         }
 
         NodePinDesc V(const std::string& name) { return { name, "Value" }; }
+        // A pin with the editor's tooltip (its shader stage: what runs per vertex, per pixel or per light -- plan step 4d).
+        NodePinDesc V(const std::string& name, const std::string& tooltip) { return { name, "Value", tooltip }; }
 
         void Register(const std::string& name, const std::string& category, std::vector<NodePinDesc> inputs, std::vector<NodePinDesc> outputs,
                       std::vector<std::pair<std::string, NodeGraphValue>> properties, EmitFn emit,
@@ -492,7 +494,7 @@ namespace Nox
 
         void RegisterInputs()
         {
-            Register("Texture Coordinate", "Inputs", {}, { V("UV") }, { { "Index", int32_t(0) }, { "Tiling", glm::vec2(1.0f) } },
+            Register("Texture Coordinate", "Inputs", {}, { V("UV", "The mesh's UV set (per vertex; interpolated per pixel; in Custom Light the first set)") }, { { "Index", int32_t(0) }, { "Tiling", glm::vec2(1.0f) } },
                      [](EmitArgs& args)
                      {
                          const NodeGraphValue* indexValue = Property(args.Node, "Index");
@@ -504,13 +506,48 @@ namespace Nox
                          args.Out[0] = Value{ "(" + uv + " * " + scale + ")", "(" + uv + "Dx * " + scale + ")", "(" + uv + "Dy * " + scale + ")", 2 };
                          return true;
                      });
-            Register("World Position", "Inputs", {}, { V("Position") }, {},
+            Register("World Position", "Inputs", {}, { V("Position", "World position, after skinning and World Position Offset (per vertex; per pixel the pixel's)") }, {},
                      [](EmitArgs& args)
                      {
                          args.Out[0] = Value{ "i.position", "i.positionDx", "i.positionDy", 3 };
                          return true;
                      });
-            Register("Screen Position", "Inputs", {}, { V("UV") }, {},
+            // The mesh's own data per vertex (stage: vertex; interpolated across the triangle in the pixel stage). The Custom Lit pass lights
+            // from the G-buffer, which keeps none of them: refused in Custom Light / Custom Ambient.
+            auto meshDataOnly = [](EmitArgs& args, const char* node)
+            {
+                if (args.Ctx.Pass != Context::Function::CustomLight && args.Ctx.Pass != Context::Function::CustomAmbient)
+                    return true;
+                args.Ctx.Error = std::format("{} cannot feed Custom Light or Custom Ambient (the lighting runs from the G-buffer, which does not keep it)", node);
+                return false;
+            };
+            Register("Local Position", "Inputs", {}, { V("Position", "The vertex in the mesh's own space before skinning and morph targets (per vertex; interpolated per pixel). Not in Custom Light / Custom Ambient") }, {},
+                     [meshDataOnly](EmitArgs& args)
+                     {
+                         if (!meshDataOnly(args, "Local Position"))
+                             return false;
+                         // (Unreal's Pre-Skinned Local Position: the mesh's vertex before skinning and morph targets)
+                         args.Out[0] = Value{ "i.localPosition", "i.localPositionDx", "i.localPositionDy", 3 };
+                         return true;
+                     });
+            Register("Vertex Tangent", "Inputs", {}, { V("Tangent", "The mesh's tangent in world space, skinned (per vertex; interpolated per pixel). Not in Custom Light / Custom Ambient") }, {},
+                     [meshDataOnly](EmitArgs& args)
+                     {
+                         if (!meshDataOnly(args, "Vertex Tangent"))
+                             return false;
+                         args.Out[0] = Constant("(dot(i.tangent.xyz, i.tangent.xyz) > 1e-12 ? normalize(i.tangent.xyz) : float3(0.0))", 3);
+                         return true;
+                     });
+            Register("Vertex Bitangent", "Inputs", {}, { V("Bitangent", "Across the surface, perpendicular to the normal and the tangent (per vertex; interpolated per pixel). Not in Custom Light / Custom Ambient") }, {},
+                     [meshDataOnly](EmitArgs& args)
+                     {
+                         if (!meshDataOnly(args, "Vertex Bitangent"))
+                             return false;
+                         // (the binormal: across the surface, perpendicular to the normal and the tangent, its sign the tangent's handedness)
+                         args.Out[0] = Constant("(dot(i.tangent.xyz, i.tangent.xyz) > 1e-12 ? normalize(cross(i.normal, i.tangent.xyz)) * (i.tangent.w < 0.0 ? -1.0 : 1.0) : float3(0.0))", 3);
+                         return true;
+                     });
+            Register("Screen Position", "Inputs", {}, { V("UV", "Where the pixel is on the screen, 0..1 (per pixel only: not in World Position Offset)") }, {},
                      [](EmitArgs& args)
                      {
                          if (args.Ctx.Pass == Context::Function::WorldPositionOffset)
@@ -522,20 +559,20 @@ namespace Nox
                          args.Out[0] = Value{ "i.screenUV", "i.screenUVDx", "i.screenUVDy", 2 };
                          return true;
                      });
-            auto simple = [](const char* name, const char* code, int components)
+            auto simple = [](const char* name, const char* code, int components, const char* tooltip)
             {
-                Register(name, "Inputs", {}, { V(name == std::string("Vertex Color") ? "Color" : "Value") }, {},
+                Register(name, "Inputs", {}, { V(name == std::string("Vertex Color") ? "Color" : "Value", tooltip) }, {},
                          [code, components](EmitArgs& args)
                          {
                              args.Out[0] = Constant(code, components);
                              return true;
                          });
             };
-            simple("Vertex Normal", "i.normal", 3);
-            simple("Vertex Color", "i.vertexColor", 4);
-            simple("Camera Vector", "i.view", 3);
-            simple("Camera Position", "i.cameraPosition", 3);
-            simple("Time", "i.time", 1);
+            simple("Vertex Normal", "i.normal", 3, "The mesh's normal in world space, skinned (per vertex; interpolated per pixel; in Custom Light the shading normal)");
+            simple("Vertex Color", "i.vertexColor", 4, "The mesh's vertex colour, white without (per vertex; interpolated per pixel; white in Custom Light)");
+            simple("Camera Vector", "i.view", 3, "From the surface towards the camera (every stage)");
+            simple("Camera Position", "i.cameraPosition", 3, "The camera's world position (every stage)");
+            simple("Time", "i.time", 1, "Seconds (every stage; World Position Offset's motion vectors use last frame's too)");
 
             // Custom Lit lighting (Custom Light / Custom Ambient): the surface the lighting sees (the G-buffer's, after the graph's own
             // surface pins), the light being added, the light from all around -- CustomLit.slang's CustomLitSurface, CustomLitLight and
@@ -547,7 +584,8 @@ namespace Nox
                     args.Ctx.Error = std::format("{} can only feed {}", node, light && ambient ? "Custom Light or Custom Ambient" : light ? "Custom Light" : "Custom Ambient");
                 return allowed;
             };
-            Register("Lit Surface", "Lighting", {}, { V("Base Color"), V("Normal"), V("View"), V("Metallic"), V("Roughness"), V("Occlusion") }, {},
+            Register("Lit Surface", "Lighting", {}, { V("Base Color", "Per light: the surface as the lighting sees it (after the graph's own pins)"), V("Normal", "Per light: the shading normal"),
+                                                     V("View", "Per light: towards the camera"), V("Metallic", "Per light"), V("Roughness", "Per light"), V("Occlusion", "Per light: the material's AO times SSAO / GTAO / RTAO") }, {},
                      [lightingOnly](EmitArgs& args)
                      {
                          if (!lightingOnly(args, "Lit Surface", true, true))
@@ -560,7 +598,8 @@ namespace Nox
                          args.Out[5] = Constant("s.occlusion", 1);
                          return true;
                      });
-            Register("Light", "Lighting", {}, { V("Direction"), V("Color"), V("Shadow"), V("Distance") }, {},
+            Register("Light", "Lighting", {}, { V("Direction", "Per light: towards the light"), V("Color", "Per light: its colour x intensity x distance and cone falloff"),
+                                                V("Shadow", "Per light: 1 lit .. 0 in shadow"), V("Distance", "Per light: world units to the light") }, {},
                      [lightingOnly](EmitArgs& args)
                      {
                          if (!lightingOnly(args, "Light", true, false))
@@ -571,7 +610,8 @@ namespace Nox
                          args.Out[3] = Constant("l.distance", 1);
                          return true;
                      });
-            Register("Ambient Light", "Lighting", {}, { V("Diffuse"), V("Reflection") }, {},
+            Register("Ambient Light", "Lighting", {}, { V("Diffuse", "Custom Ambient: what a white matte surface here gets from all around"),
+                                                        V("Reflection", "Custom Ambient: the surroundings in the mirror direction, blurred by the roughness") }, {},
                      [lightingOnly](EmitArgs& args)
                      {
                          if (!lightingOnly(args, "Ambient Light", false, true))
@@ -719,8 +759,17 @@ namespace Nox
         void RegisterOutput()
         {
             Register("Material Output", "Output",
-                     { V("Base Color"), V("Metallic"), V("Roughness"), V("Normal"), V("Emissive"), V("Ambient Occlusion"), V("Opacity"),
-                       V("Opacity Mask"), V("World Position Offset"), V("Custom Light"), V("Custom Ambient") }, {},
+                     { V("Base Color", "Per pixel: the surface's colour (metals: their reflection colour)"),
+                       V("Metallic", "Per pixel: 0 non-metal .. 1 metal"),
+                       V("Roughness", "Per pixel: 0 mirror .. 1 matte"),
+                       V("Normal", "Per pixel: the surface direction in tangent space (+Z out of the surface), e.g. from a normal map"),
+                       V("Emissive", "Per pixel: light the surface gives off itself"),
+                       V("Ambient Occlusion", "Per pixel: 1 open .. 0 enclosed (darkens the ambient light)"),
+                       V("Opacity", "Per pixel: Translucent materials only, 1 solid .. 0 clear"),
+                       V("Opacity Mask", "Per pixel: Masked materials only -- below the Opacity Mask Clip Value the pixel is cut away (shadows and ray tracing too)"),
+                       V("World Position Offset", "Per vertex: moves each vertex (world units), before the triangle is drawn -- every pass and the ray tracing scene"),
+                       V("Custom Light", "Per light (Custom Lit materials only): what one light adds to the pixel, summed over the lights"),
+                       V("Custom Ambient", "Per light pass, once (Custom Lit materials only): the light from all around -- sky, GI, reflections") }, {},
                      // (appended after the pins: links name pins by index, so graphs saved before World Position Offset keep theirs)
                      { { "Max World Position Offset Displacement", 0.0f } },
                      [](EmitArgs& args)

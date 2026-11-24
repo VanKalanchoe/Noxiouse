@@ -882,9 +882,21 @@ namespace Nox
             m_HoveredPin = PinAt(e.Position);
             m_HoveredNode = m_HoveredPin.Valid() ? 0 : NodeAt(e.Position);
             m_HoveredLink = (m_HoveredPin.Valid() || m_HoveredNode) ? -1 : LinkAt(e.Position);
-            // What a value on a node does, while the pointer is on it.
+            // What a pin or value on a node does, while the pointer is on it.
             Tooltip.clear();
-            if (const ValueHit* hit = m_HoveredPin.Valid() ? nullptr : ValueAt(e.Position))
+            if (m_HoveredPin.Valid())
+            {
+                if (const NodeLayout* layout = LayoutOf(m_HoveredPin.Node))
+                {
+                    const auto& pins = m_HoveredPin.Output ? layout->Outputs : layout->Inputs;
+                    if (m_HoveredPin.Pin < pins.size())
+                    {
+                        const NodePinDesc& pin = pins[m_HoveredPin.Pin];
+                        Tooltip = pin.Tooltip.empty() ? pin.Type : (pin.Tooltip + "\n(" + pin.Type + ")");
+                    }
+                }
+            }
+            else if (const ValueHit* hit = ValueAt(e.Position))
                 if (const GraphNode* node = FindNode(hit->Node))
                     if (const auto value = node->Properties.find(hit->Property); value != node->Properties.end())
                         Tooltip = std::holds_alternative<bool>(value->second) ? hit->Property + ": click to switch"
